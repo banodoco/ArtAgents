@@ -1,0 +1,18 @@
+# Sub-repos (cloned separately, have their own git history)
+ados/
+artcompute/
+brain-of-bndc/
+arca-gidan/
+banodoco-website/
+
+# Sensitive files
+.env
+.env.*
+*.key
+*.pem
+
+# macOS
+.DS_Store
+
+# Supabase CLI local state
+.supabase/
