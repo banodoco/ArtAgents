@@ -95,3 +95,4 @@ The app repos (`brain-of-bndc/`, `arca-gidan/`, `banodoco-website/`, and `ados/`
 | [structure.md](structure.md) | How the five repos fit together — architecture, data flow, shared database |
 | [docs/debugging.md](docs/debugging.md) | When something breaks — decision table, blast radius, gotchas |
 | [docs/credentials.md](docs/credentials.md) | Where to get every API key and credential |
+| [arca-gidan/README.md](arca-gidan/README.md#scoring--results-system) | Arca Gidan scoring methodology — how final scores, confidence weighting, and judge multipliers work |

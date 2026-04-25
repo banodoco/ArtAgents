@@ -16,3 +16,20 @@ banodoco-website/
 
 # Supabase CLI local state
 .supabase/
+
+# Tool artifacts (not source)
+.megaplan/
+.megaplan-worktrees/
+.hypothesis/
+.claude/
+.baseline/
+node_modules/
+
+# Megaplan output dumps
+critique_output*.json
+
+# Large binaries / per-project work (not infra)
+equity-review/
+hackathon-video/
+docs/videos/
+banodoco-dns-zone.txt

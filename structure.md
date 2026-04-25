@@ -98,7 +98,8 @@ All projects except artcompute share one Supabase instance. brain-of-bndc is the
 | `competitions` | arca-gidan (admin) | arca-gidan | Prize competitions for Arca Gidan |
 | `discord_competitions` | brain-of-bndc (admin) | brain-of-bndc | Discord-native community competitions run by the bot |
 | `competition_entries` | arca-gidan (users), brain-of-bndc | arca-gidan, brain-of-bndc | Unified prize submissions + Discord competition entries |
-| `votes` | arca-gidan (users) | arca-gidan | Voting + fraud detection |
+| `scores` | arca-gidan (users) | arca-gidan | 1-10 scoring with confidence weighting + fraud detection. See arca-gidan README for full scoring methodology. |
+| `votes` | (legacy, Edition 1) | arca-gidan | Binary votes from Edition 1, migrated into `scores` as score=10. Kept for historical reference. |
 | `server_config` | brain-of-bndc (admin) | brain-of-bndc | Per-guild settings, `write_enabled` flag |
 | `grant_applications` | brain-of-bndc | artcompute (display) | Grant tracking |
 

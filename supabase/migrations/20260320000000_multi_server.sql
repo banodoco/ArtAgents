@@ -106,6 +106,7 @@ ALTER TABLE discord_channels
     ADD COLUMN IF NOT EXISTS guild_id            BIGINT,
     ADD COLUMN IF NOT EXISTS channel_type        TEXT,
     ADD COLUMN IF NOT EXISTS parent_id           BIGINT,
+    ADD COLUMN IF NOT EXISTS speaker_mode        BOOLEAN DEFAULT FALSE,
     ADD COLUMN IF NOT EXISTS logging_enabled     BOOLEAN,
     ADD COLUMN IF NOT EXISTS archiving_enabled   BOOLEAN,
     ADD COLUMN IF NOT EXISTS summarising_enabled BOOLEAN,

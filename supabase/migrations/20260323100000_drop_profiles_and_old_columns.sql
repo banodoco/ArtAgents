@@ -155,7 +155,9 @@ $$;
 DO $$
 BEGIN
     -- Drop cross-table RLS policies that reference media.user_id FIRST
-    EXECUTE 'DROP POLICY IF EXISTS "Users can update their own asset media status" ON public.asset_media';
+    IF to_regclass('public.asset_media') IS NOT NULL THEN
+        EXECUTE 'DROP POLICY IF EXISTS "Users can update their own asset media status" ON public.asset_media';
+    END IF;
 
     IF to_regclass('public.media') IS NOT NULL THEN
         EXECUTE 'DROP TRIGGER IF EXISTS trg_media_sync_member_id ON public.media';

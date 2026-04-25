@@ -479,7 +479,7 @@ SELECT
     dm.real_name,
     dm.website_url,
     dm.instagram_url,
-    dm.twitter_url,
+    dm.twitter_handle AS twitter_url,
     dm.discord_created_at AS discord_account_created_at,
     COALESCE(dm.banodoco_owner, FALSE) AS banodoco_owner,
     aui.created_at,
@@ -521,9 +521,9 @@ BEGIN
             WHEN p_profile ? 'instagram_url' THEN NULLIF(BTRIM(p_profile->>'instagram_url'), '')
             ELSE dm.instagram_url
         END,
-        twitter_url = CASE
+        twitter_handle = CASE
             WHEN p_profile ? 'twitter_url' THEN NULLIF(BTRIM(p_profile->>'twitter_url'), '')
-            ELSE dm.twitter_url
+            ELSE dm.twitter_handle
         END,
         stored_avatar_url = CASE
             WHEN p_profile ? 'avatar_url' THEN NULLIF(BTRIM(p_profile->>'avatar_url'), '')
@@ -1375,7 +1375,7 @@ SELECT
         'real_name', dm.real_name,
         'website_url', dm.website_url,
         'instagram_url', dm.instagram_url,
-        'twitter_url', dm.twitter_url,
+        'twitter_url', dm.twitter_handle,
         'discord_account_created_at', dm.discord_created_at,
         'banodoco_owner', COALESCE(dm.banodoco_owner, FALSE)
     ) AS profile
