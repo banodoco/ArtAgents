@@ -1,22 +1,14 @@
 /**
- * Stable public theme API (Sprint 4).
+ * Stable public theme API (Sprint 4 surface; Sprint 5 physically lifted).
  *
- * Re-exports the theme-component-facing surface from the in-tree
- * `tools/remotion/src/` location so theme components can import from
- * `@banodoco/timeline-composition/theme-api` instead of the deep relative
- * `../../../../tools/remotion/src/...` paths.
- *
- * Sprint 5 will move the source itself into this package; until then the
- * re-export is a thin wrapper. The codemod at
- * `tools/scripts/codemod-theme-api-imports.ts` is what migrates theme
- * components onto this surface.
- *
- * The relative imports below intentionally reach outside the package
- * directory — that's the whole point of the wrapper. `rootDir` is left
- * unset in tsconfig.json so tsc accepts the cross-package imports.
+ * Sprint 4 introduced this re-export to give theme components a stable import
+ * sub-path (`@banodoco/timeline-composition/theme-api`) instead of deep
+ * relative paths. Sprint 5 physically moved the source modules into this
+ * package; the re-export shape is unchanged so theme packages migrated under
+ * Sprint 4 keep compiling without churn.
  */
 
-// effects.types — type surface for EffectProps, AnimationReferenceList,
+// effects-types — type surface for EffectProps, AnimationReferenceList,
 // transition types, animation kinds, etc.
 export type {
   EffectProps,
@@ -41,7 +33,7 @@ export type {
   TransitionProps,
   TransitionComponentResult,
   TransitionComponent,
-} from "../../../../tools/remotion/src/effects.types";
+} from "./effects-types";
 
 // lib/animations — runtime helpers that compose animation references for
 // effect components. composeAnimations is the primary one used by
@@ -50,12 +42,12 @@ export {
   composeAnimations,
   normalizeAnimationReferences,
   resolveAnimationReferences,
-} from "../../../../tools/remotion/src/lib/animations";
+} from "./lib/animations";
 export type {
   NormalizedAnimationReference,
   ResolvedAnimation,
   ComposeAnimationsInput,
-} from "../../../../tools/remotion/src/lib/animations";
+} from "./lib/animations";
 
 // ThemeContext — useTheme hook + types theme components use to read
 // resolved theme values at render time.
@@ -63,5 +55,5 @@ export {
   ThemeProvider,
   useTheme,
   DEFAULT_THEME,
-} from "../../../../tools/remotion/src/ThemeContext";
-export type { Theme, RuntimeTheme } from "../../../../tools/remotion/src/ThemeContext";
+} from "./ThemeContext";
+export type { Theme, RuntimeTheme } from "./ThemeContext";

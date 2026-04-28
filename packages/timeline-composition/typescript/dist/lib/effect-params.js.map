@@ -1,0 +1,1 @@
+{"version":3,"file":"effect-params.js","sourceRoot":"","sources":["../../src/lib/effect-params.ts"],"names":[],"mappings":"AAEA,MAAM,CAAC,MAAM,aAAa,GAAG,CAAC,IAAkB,EAAW,EAAE;IAC3D,IAAI,IAAI,CAAC,QAAQ,KAAK,MAAM,EAAE,CAAC;QAC7B,OAAO,IAAI,CAAC,IAAI,CAAC;IACnB,CAAC;IACD,OAAO,IAAI,CAAC,MAAM,CAAC;AACrB,CAAC,CAAC"}

@@ -353,12 +353,12 @@ def _normalize_clip_for_validation(clip: dict[str, Any]) -> dict[str, Any]:
         normalized["from"] = normalized.pop("from_")
     return normalized
 
-def _effect_ids() -> set[str]:
+def _effect_ids(theme: str | None = None) -> set[str]:
     try:
         import effects_catalog
     except ImportError:
         return set()
-    return set(effects_catalog.list_effect_ids())
+    return set(effects_catalog.list_effect_ids(theme=theme))
 
 def _animation_ids() -> set[str]:
     try:
@@ -442,7 +442,7 @@ def _schema_params_for_animation_refs(schema: dict[str, Any], params: dict[str, 
             next_params[phase] = "none"
     return next_params
 
-def _validate_effect_params(effect_id: str, params: Any, path: str) -> None:
+def _validate_effect_params(effect_id: str, params: Any, path: str, theme: str | None = None) -> None:
     if params is None:
         return
     if not isinstance(params, dict):
@@ -456,7 +456,7 @@ def _validate_effect_params(effect_id: str, params: Any, path: str) -> None:
         import jsonschema  # type: ignore[import-not-found]
     except ImportError:
         return
-    schema = effects_catalog.read_effect_schema(effect_id)
+    schema = effects_catalog.read_effect_schema(effect_id, theme=theme)
     jsonschema.validate(_schema_params_for_animation_refs(schema, params), schema)
 
 def _transition_reference(value: Any, path: str) -> tuple[str, float | None]:
@@ -738,7 +738,21 @@ def validate_registry(registry: Any) -> None:
         if etag is not None and (not isinstance(etag, str) or not etag):
             raise ValueError(f"Asset {key!r}.etag must be a non-empty string")
 
-def validate_timeline(config: Any) -> None:
+def validate_timeline(config: Any, *, strict: bool = True) -> None:
+    """Validate a Banodoco timeline.
+
+    Sprint 5 (SD-015): `strict` defaults to True. The strict path requires
+    every clip's `clipType` to be in the registered effect set (workspace
+    effects + active-theme effects discovered via
+    tools/effects_catalog.py:139-155). This catches authoring of unknown
+    clipTypes at validate-time; the loud-placeholder Sprint-3 fallback in
+    Reigh's TimelineRenderer is the runtime safety net for the
+    "installed but unrenderable" case.
+
+    Callers that need to accept legacy/under-construction timelines (e.g.
+    in-flight pipeline outputs that reference theme content not yet on
+    disk) can opt into `strict=False`.
+    """
     if not isinstance(config, dict):
         raise ValueError("Timeline must be a JSON object")
     # Shape-check against the shared JSON Schema first; then run the
@@ -749,7 +763,7 @@ def validate_timeline(config: Any) -> None:
             _normalize_clip_for_validation(c) if isinstance(c, dict) else c
             for c in normalized_for_shared["clips"]
         ]
-    _shared_validate_timeline(normalized_for_shared, strict=False)
+    _shared_validate_timeline(normalized_for_shared, strict=strict)
     _raise_unknown_keys("Timeline", config, _TIMELINE_TOP_ALLOWED)
     theme = config.get("theme")
     if not isinstance(theme, str) or not theme:
@@ -788,11 +802,17 @@ def validate_timeline(config: Any) -> None:
         clip_type = clip.get("clipType", "media")
         if not isinstance(clip_type, str):
             raise ValueError(f"clips[{index}].clipType must be a string")
-        effect_ids = _effect_ids()
+        # Sprint 5 strict mode: active theme slug from the timeline so the
+        # effect-id scan picks up theme-scoped clipTypes (e.g. 2rp's
+        # section-hook). When strict=False, an unknown clipType still
+        # raises this same error (the registry scan is mandatory) — the
+        # `strict` flag controls the upstream JSON-Schema check.
+        active_theme = theme if isinstance(theme, str) else None
+        effect_ids = _effect_ids(active_theme)
         if clip_type not in set(BUILTIN_CLIP_TYPES) | effect_ids:
             raise ValueError(f"clips[{index}].clipType {clip_type!r} is not a built-in clip type or effect id")
         if clip_type in effect_ids:
-            _validate_effect_params(clip_type, clip.get("params"), f"clips[{index}].params")
+            _validate_effect_params(clip_type, clip.get("params"), f"clips[{index}].params", theme=active_theme)
         if "pool_id" in clip and not isinstance(clip["pool_id"], str):
             raise ValueError(f"clips[{index}].pool_id must be a string")
         if "clip_order" in clip:

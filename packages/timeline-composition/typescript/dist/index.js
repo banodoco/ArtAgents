@@ -1,12 +1,20 @@
 /**
- * @banodoco/timeline-composition (Sprint 4 scaffold)
+ * @banodoco/timeline-composition
  *
- * Real Remotion composition extraction lands in Sprint 5. For now this
- * file exports a tagged placeholder so consumers (and the package's own
- * smoke test) can confirm the package resolves.
- *
- * The functional surface this sprint adds is `@banodoco/timeline-composition/theme-api`.
- * See `./theme-api.ts` for the re-export shape.
+ * Sprint 5: real composition + theme-api + plugin registry. The Banodoco
+ * CLI render path imports `TimelineComposition` from here; Reigh's
+ * TimelineRenderer imports the EFFECT_REGISTRY-style dispatch entries
+ * via the codegenned `registry.generated.ts`.
  */
-export const TIMELINE_COMPOSITION_SCAFFOLD = "sprint-4";
+export const TIMELINE_COMPOSITION_SCAFFOLD = "sprint-5";
+// Composition surface (renamed Sprint 5: HypeComposition → TimelineComposition).
+export { TimelineComposition, HypeComposition } from "./TimelineComposition";
+// Theme api re-exports (the Sprint 4 stable sub-path also still works).
+export { composeAnimations, normalizeAnimationReferences, resolveAnimationReferences, } from "./lib/animations";
+export { ThemeProvider, useTheme, DEFAULT_THEME, } from "./ThemeContext";
+// Duration helper used by the bundle root for calculateMetadata.
+export { getTimelineDurationInFrames } from "./lib/duration";
+// Plugin registry — codegenned from installed `@banodoco/timeline-theme-*`
+// packages (Reigh-side) and from `themes/<id>/effects/` (Banodoco-side).
+export { THEME_PACKAGE_REGISTRY, THEME_PACKAGE_CLIP_TYPES, } from "./registry.generated";
 //# sourceMappingURL=index.js.map
