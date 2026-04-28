@@ -3,7 +3,7 @@ import type {TransitionComponent} from './effects-types';
 import CrossFade from '@workspace-transitions/cross-fade/component';
 import Fade from '@workspace-transitions/fade/component';
 
-export const ACTIVE_THEME_ID = "2rp" as const;
+export const ACTIVE_THEME_ID = null;
 export const TRANSITION_IDS = ['cross-fade', 'fade'] as const;
 export type TransitionId = typeof TRANSITION_IDS[number];
 export const TRANSITION_REGISTRY: Record<TransitionId, TransitionComponent> = {

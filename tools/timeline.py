@@ -254,7 +254,7 @@ class PipelineMetadata(TypedDict):
 # `from` is a Python keyword, so TimelineClip stores it as `from_` in memory and
 # swaps to/from `"from"` at the JSON boundary. Every other field is 1:1 with TS.
 _FROM_ALIAS = ("from_", "from")
-_TIMELINE_TOP_ALLOWED = frozenset({"theme", "theme_overrides", "clips", "tracks", "pinnedShotGroups"})
+_TIMELINE_TOP_ALLOWED = frozenset({"theme", "theme_overrides", "clips", "tracks", "pinnedShotGroups", "output"})
 _THEME_OVERRIDES_ALLOWED = frozenset({"visual", "generation", "voice", "audio", "pacing"})
 _CLIP_ALLOWED = frozenset(
     {

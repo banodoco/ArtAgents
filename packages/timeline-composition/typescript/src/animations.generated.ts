@@ -7,7 +7,7 @@ import SlideLeft from '@workspace-animations/slide-left/component';
 import SlideUp from '@workspace-animations/slide-up/component';
 import TypeOn from '@workspace-animations/type-on/component';
 
-export const ACTIVE_THEME_ID = "2rp" as const;
+export const ACTIVE_THEME_ID = null;
 export const ANIMATION_IDS = ['fade', 'fade-up', 'scale-in', 'slide-left', 'slide-up', 'type-on'] as const;
 export type AnimationId = typeof ANIMATION_IDS[number];
 export const ANIMATION_REGISTRY: Record<AnimationId, AnimationComponent> = {
