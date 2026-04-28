@@ -68,5 +68,35 @@ export declare function isMutableTimelineProperty(name: string): name is Mutable
  * for that.
  */
 export declare function setTimelineProperty(timeline: TimelineConfigT, propertyName: string, value: unknown): OpResult;
+/**
+ * Sprint 4 (SD-018): themed-clip params editor.
+ *
+ * Shallow-merges `paramsPatch` into `clip.params`. Keys present in the
+ * patch with `null` are deleted from the merged params. Keys absent from
+ * the patch are preserved. Adds new keys when not already set.
+ *
+ * Edge cases:
+ *   - clipId missing → `not_found`, unchanged.
+ *   - paramsPatch not an object → `invalid_value`, unchanged.
+ *   - empty patch → unchanged: false.
+ */
+export declare function setClipParams(timeline: TimelineConfigT, clipId: string, paramsPatch: Record<string, unknown>): OpResult;
+/**
+ * Sprint 4 (SD-018): set the active theme slug on a timeline.
+ *
+ * Edge cases:
+ *   - empty / non-string themeId → `invalid_value`, unchanged.
+ */
+export declare function setTimelineTheme(timeline: TimelineConfigT, themeId: string): OpResult;
+/**
+ * Sprint 4 (SD-018): deep-merge a `theme_overrides` patch onto the
+ * timeline. `null` patch values clear that key (at any nesting depth).
+ *
+ * Edge cases:
+ *   - non-object patch → `invalid_value`, unchanged.
+ *   - empty patch → changed: false.
+ *   - merging onto undefined `theme_overrides` initializes it.
+ */
+export declare function setThemeOverrides(timeline: TimelineConfigT, overridesPatch: Record<string, unknown>): OpResult;
 export {};
 //# sourceMappingURL=ops.d.ts.map

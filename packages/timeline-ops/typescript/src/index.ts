@@ -5,6 +5,9 @@ export {
   setClipProperty,
   setClipTime,
   setTimelineProperty,
+  setClipParams,
+  setTimelineTheme,
+  setThemeOverrides,
   isMutableClipProperty,
   isMutableTimelineProperty,
 } from "./ops.js";

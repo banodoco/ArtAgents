@@ -1,0 +1,46 @@
+{
+  "name": "@banodoco/timeline-composition",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Scaffold for the Banodoco timeline Remotion composition. Sprint 4 ships a placeholder + a stable theme-api sub-path; Sprint 5 will extract HypeComposition.tsx and the effect/transition registries.",
+  "type": "module",
+  "main": "./typescript/dist/index.js",
+  "types": "./typescript/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./typescript/dist/index.d.ts",
+      "import": "./typescript/dist/index.js"
+    },
+    "./theme-api": {
+      "types": "./typescript/src/theme-api.ts",
+      "remotion": "./typescript/src/theme-api.ts",
+      "default": "./typescript/src/theme-api.ts"
+    }
+  },
+  "files": [
+    "typescript/dist",
+    "typescript/src"
+  ],
+  "scripts": {
+    "build": "tsc -p typescript/tsconfig.json",
+    "build:ts": "tsc -p typescript/tsconfig.json",
+    "build:test": "tsc -p typescript/tsconfig.test.json",
+    "test": "npm run build:test && node --test typescript/dist/tests/*.test.js"
+  },
+  "dependencies": {
+    "@banodoco/timeline-schema": "file:../timeline-schema"
+  },
+  "peerDependencies": {
+    "react": ">=18",
+    "remotion": ">=4"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "4.0.448",
+    "@remotion/layout-utils": "4.0.448"
+  }
+}

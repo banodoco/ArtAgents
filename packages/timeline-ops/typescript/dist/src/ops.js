@@ -197,4 +197,120 @@ export function setTimelineProperty(timeline, propertyName, value) {
         detail: { previousValue, propertyName },
     };
 }
+/**
+ * Sprint 4 (SD-018): themed-clip params editor.
+ *
+ * Shallow-merges `paramsPatch` into `clip.params`. Keys present in the
+ * patch with `null` are deleted from the merged params. Keys absent from
+ * the patch are preserved. Adds new keys when not already set.
+ *
+ * Edge cases:
+ *   - clipId missing → `not_found`, unchanged.
+ *   - paramsPatch not an object → `invalid_value`, unchanged.
+ *   - empty patch → unchanged: false.
+ */
+export function setClipParams(timeline, clipId, paramsPatch) {
+    const idx = findClipIndex(timeline, clipId);
+    if (idx < 0) {
+        return { config: clone(timeline), changed: false, detail: { reason: "not_found" } };
+    }
+    if (paramsPatch === null || typeof paramsPatch !== "object" || Array.isArray(paramsPatch)) {
+        return { config: clone(timeline), changed: false, detail: { reason: "invalid_value" } };
+    }
+    const patchKeys = Object.keys(paramsPatch);
+    if (patchKeys.length === 0) {
+        return { config: clone(timeline), changed: false, detail: { reason: "empty_patch" } };
+    }
+    const next = clone(timeline);
+    const clip = next.clips[idx];
+    const existing = (clip.params && typeof clip.params === "object" && !Array.isArray(clip.params))
+        ? clip.params
+        : {};
+    const merged = { ...existing };
+    const previousValues = {};
+    const appliedKeys = [];
+    for (const key of patchKeys) {
+        previousValues[key] = existing[key];
+        const value = paramsPatch[key];
+        if (value === null) {
+            delete merged[key];
+        }
+        else {
+            merged[key] = clone(value);
+        }
+        appliedKeys.push(key);
+    }
+    clip.params = merged;
+    return {
+        config: next,
+        changed: true,
+        detail: { previousValues, appliedKeys },
+    };
+}
+/**
+ * Sprint 4 (SD-018): set the active theme slug on a timeline.
+ *
+ * Edge cases:
+ *   - empty / non-string themeId → `invalid_value`, unchanged.
+ */
+export function setTimelineTheme(timeline, themeId) {
+    if (typeof themeId !== "string" || themeId.trim() === "") {
+        return { config: clone(timeline), changed: false, detail: { reason: "invalid_value" } };
+    }
+    const next = clone(timeline);
+    const previousTheme = next.theme;
+    next.theme = themeId;
+    return {
+        config: next,
+        changed: previousTheme !== themeId,
+        detail: { previousTheme, nextTheme: themeId },
+    };
+}
+function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function deepMergeOverrides(base, patch) {
+    const out = { ...base };
+    for (const key of Object.keys(patch)) {
+        const patchValue = patch[key];
+        if (patchValue === null) {
+            delete out[key];
+            continue;
+        }
+        const baseValue = out[key];
+        if (isPlainObject(patchValue) && isPlainObject(baseValue)) {
+            out[key] = deepMergeOverrides(baseValue, patchValue);
+        }
+        else {
+            out[key] = isPlainObject(patchValue) ? clone(patchValue) : patchValue;
+        }
+    }
+    return out;
+}
+/**
+ * Sprint 4 (SD-018): deep-merge a `theme_overrides` patch onto the
+ * timeline. `null` patch values clear that key (at any nesting depth).
+ *
+ * Edge cases:
+ *   - non-object patch → `invalid_value`, unchanged.
+ *   - empty patch → changed: false.
+ *   - merging onto undefined `theme_overrides` initializes it.
+ */
+export function setThemeOverrides(timeline, overridesPatch) {
+    if (!isPlainObject(overridesPatch)) {
+        return { config: clone(timeline), changed: false, detail: { reason: "invalid_value" } };
+    }
+    const patchKeys = Object.keys(overridesPatch);
+    if (patchKeys.length === 0) {
+        return { config: clone(timeline), changed: false, detail: { reason: "empty_patch" } };
+    }
+    const next = clone(timeline);
+    const previous = isPlainObject(next.theme_overrides) ? next.theme_overrides : {};
+    next.theme_overrides = deepMergeOverrides(previous, overridesPatch);
+    return {
+        config: next,
+        changed: true,
+        detail: { appliedKeys: patchKeys },
+    };
+}
 //# sourceMappingURL=ops.js.map
