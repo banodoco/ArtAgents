@@ -1,0 +1,26 @@
+# banodoco-worker (Sprint 7) Python deps.
+#
+# Worker-only deps; the existing tools/requirements.txt is layered
+# separately in the Dockerfile and contributes the pipeline's deps
+# (openai, anthropic, scenedetect, etc.).
+
+# JWKS-aware JWT verification (SD-022 + SD-034 identity surface).
+python-jose[cryptography]>=3.3,<4
+
+# HTTP client for orchestrator polling and Reigh service-role calls.
+httpx>=0.27,<1
+requests>=2.31,<3
+
+# Supabase client for the service-role write on update_timeline_config_versioned.
+supabase>=2.7,<3
+
+# Schema validation (uses tools/timeline.py, which imports
+# banodoco_timeline_schema). The wheel itself is installed from the
+# workspace path in the Dockerfile.
+jsonschema>=4.0
+
+# Health endpoint — keep dependencies minimal; aiohttp is enough.
+aiohttp>=3.9,<4
+
+# .env loading for local development.
+python-dotenv>=1.0
