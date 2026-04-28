@@ -52,6 +52,7 @@ from worker_health import (
 )
 from worker_jwt import JwtVerificationError, verify_user_jwt
 from worker_pipeline import PipelineError, run_pipeline, validate_timeline_strict
+from worker_render import execute_render_task
 from worker_writes import (
     SupabaseTimelineRpc,
     WriteResult,
@@ -93,7 +94,13 @@ async def _claim_next_task(client: httpx.AsyncClient) -> Optional[Dict[str, Any]
         "worker_id": WORKER_ID,
         "run_type": RUN_TYPE,
         "worker_pool": WORKER_POOL,
-        "task_types": ["banodoco_timeline_generate"],
+        # Sprint 7 = generate. Sprint 8 added render. Same image, same pool,
+        # both task types claimable. The dispatch in _execute_task picks
+        # the right entry-point function based on `task_type`.
+        "task_types": [
+            "banodoco_timeline_generate",
+            "banodoco_render_timeline",
+        ],
     }
     try:
         resp = await client.post(
@@ -125,9 +132,18 @@ async def _post_task_status(
     *,
     correlation_id: str,
     new_version: Optional[int] = None,
+    result: Optional[Dict[str, Any]] = None,
     failure_code: Optional[str] = None,
     message: Optional[str] = None,
 ) -> None:
+    """Post task status to the orchestrator.
+
+    Sprint 7 only ever set ``result = {"config_version": new_version}``.
+    Sprint 8 also needs to surface ``{"artifact_url": ..., "content_sha256": ...}``
+    for render tasks, so the helper now accepts an explicit ``result``
+    dict; ``new_version`` is kept as a convenience for the generate path
+    so call sites don't change.
+    """
     headers = {
         "Authorization": f"Bearer {os.getenv('REIGH_SUPABASE_SERVICE_ROLE_KEY', '')}",
         "Content-Type": "application/json",
@@ -137,7 +153,9 @@ async def _post_task_status(
         "status": status,
         "correlation_id": correlation_id,
     }
-    if new_version is not None:
+    if result is not None:
+        body["result"] = result
+    elif new_version is not None:
         body["result"] = {"config_version": new_version}
     if failure_code:
         body["failure_code"] = failure_code
@@ -157,6 +175,34 @@ async def _post_task_status(
 
 
 async def _execute_task(client: httpx.AsyncClient, task: Dict[str, Any]) -> None:
+    """Dispatch a claimed task to the right entry point based on task_type.
+
+    Sprint 7: only `banodoco_timeline_generate` was supported.
+    Sprint 8: `banodoco_render_timeline` runs through `worker_render`.
+    Unknown task_type → log + post invalid_payload (the orchestrator
+    shouldn't ever hand the worker a type it didn't claim, but defend
+    in depth).
+    """
+    task_type = task.get("task_type") or "banodoco_timeline_generate"
+    if task_type == "banodoco_render_timeline":
+        await execute_render_task(client, task, post_status=_post_task_status)
+        return
+    if task_type != "banodoco_timeline_generate":
+        task_id = task.get("task_id") or task.get("id") or "unknown"
+        logger.error("[EXEC %s] unsupported task_type=%s", task_id, task_type)
+        await _post_task_status(
+            client,
+            task_id,
+            "Failed",
+            correlation_id="",
+            failure_code="invalid_payload",
+            message=f"unsupported task_type {task_type!r}",
+        )
+        return
+    await _execute_generate_task(client, task)
+
+
+async def _execute_generate_task(client: httpx.AsyncClient, task: Dict[str, Any]) -> None:
     task_id = task.get("task_id") or task.get("id") or "unknown"
     params = task.get("params") or {}
     if isinstance(params, str):

@@ -128,6 +128,10 @@ COPY banodoco-worker/worker_health.py     ./worker_health.py
 COPY banodoco-worker/worker_jwt.py        ./worker_jwt.py
 COPY banodoco-worker/worker_pipeline.py   ./worker_pipeline.py
 COPY banodoco-worker/worker_writes.py     ./worker_writes.py
+# Sprint 8 — render task type modules.
+COPY banodoco-worker/worker_assets.py     ./worker_assets.py
+COPY banodoco-worker/worker_remotion.py   ./worker_remotion.py
+COPY banodoco-worker/worker_render.py     ./worker_render.py
 
 ENV PYTHONPATH=/app:/app/tools
 
