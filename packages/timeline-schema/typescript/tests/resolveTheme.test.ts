@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { TimelineConfig } from "../src/schemas.js";
 import { deepMergeTheme, mergeGeneration, resolveTheme } from "../src/resolveTheme.js";
 
 test("deepMergeTheme merges nested visual.canvas key-by-key", () => {
@@ -41,4 +42,40 @@ test("resolveTheme deep-merges overrides", () => {
 
 test("resolveTheme throws when theme missing", () => {
   assert.throws(() => resolveTheme({ theme: "missing" }, {}));
+});
+
+test("TimelineConfig accepts persisted no-theme timelines", () => {
+  const out = TimelineConfig.parse({ clips: [] });
+  assert.deepEqual(out, { clips: [] });
+});
+
+test("TimelineConfig preserves open generation_defaults objects", () => {
+  const payload = {
+    theme: "2rp",
+    clips: [],
+    generation_defaults: {
+      model: "sequence-v1",
+      image: { quality: "high", provider: "reigh" },
+      provider_settings: { seed: 1234, flags: ["keep", "open"] },
+    },
+  };
+  const out = TimelineConfig.parse(payload);
+  assert.deepEqual(out.generation_defaults, payload.generation_defaults);
+});
+
+test("TimelineConfig rejects non-object generation_defaults", () => {
+  assert.throws(() => TimelineConfig.parse({ clips: [], generation_defaults: [] }));
+  assert.throws(() => TimelineConfig.parse({ clips: [], generation_defaults: "model" }));
+  assert.throws(() => TimelineConfig.parse({ clips: [], generation_defaults: null }));
+});
+
+test("resolveTheme throws when theme is absent or empty", () => {
+  assert.throws(
+    () => resolveTheme({} as any, {}),
+    /Timeline\.theme must be a non-empty slug/,
+  );
+  assert.throws(
+    () => resolveTheme({ theme: "" }, {}),
+    /Timeline\.theme must be a non-empty slug/,
+  );
 });

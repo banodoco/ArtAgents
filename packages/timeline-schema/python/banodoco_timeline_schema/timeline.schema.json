@@ -377,6 +377,10 @@
           },
           "additionalProperties": false
         },
+        "generation_defaults": {
+          "type": "object",
+          "additionalProperties": {}
+        },
         "output": {
           "type": "object",
           "properties": {
@@ -405,7 +409,6 @@
         }
       },
       "required": [
-        "theme",
         "clips"
       ],
       "additionalProperties": false

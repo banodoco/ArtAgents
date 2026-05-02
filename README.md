@@ -33,6 +33,8 @@ banodoco-workspace/
   arca-gidan/         Arca Gidan Prize site (React/Vite) — open source AI art award
   artcompute/         ArtCompute (React/Vite)
   banodoco-website/   Banodoco main site (React/Vite) — banodoco.ai
+  effects/            Shared Remotion render effects discovered by folder id
+  themes/             Shared Remotion render themes and design tokens
   structure.md        Cross-project architecture overview
   docs/               Debugging guide and credentials reference
 ```

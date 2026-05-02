@@ -144,11 +144,12 @@ class Output(TypedDict, closed=True):
 
 
 class TimelineConfig(TypedDict, closed=True):
-    theme: str
+    theme: NotRequired[str]
     clips: list[Clip]
     tracks: NotRequired[list[Track]]
     pinnedShotGroups: NotRequired[list[PinnedShotGroup]]
     theme_overrides: NotRequired[ThemeOverrides]
+    generation_defaults: NotRequired[dict[str, Any]]
     output: NotRequired[Output]
 
 

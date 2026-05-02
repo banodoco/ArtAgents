@@ -1,1 +1,0 @@
-{"version":3,"file":"scaffold.test.js","sourceRoot":"","sources":["../../tests/scaffold.test.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,IAAI,EAAE,MAAM,WAAW,CAAC;AACjC,OAAO,MAAM,MAAM,oBAAoB,CAAC;AACxC,OAAO,EAAE,6BAA6B,EAAE,MAAM,iBAAiB,CAAC;AAEhE,IAAI,CAAC,iCAAiC,EAAE,GAAG,EAAE;IAC3C,MAAM,CAAC,KAAK,CAAC,6BAA6B,EAAE,UAAU,CAAC,CAAC;AAC1D,CAAC,CAAC,CAAC"}

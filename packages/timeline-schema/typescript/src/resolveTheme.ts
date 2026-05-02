@@ -1,6 +1,7 @@
 import type { TimelineConfigT, ThemeT } from "./schemas.js";
 
 export type ThemeRegistry = Record<string, ThemeT>;
+export type ThemeResolvableTimeline = Pick<TimelineConfigT, "theme_overrides"> & { theme: string };
 
 /**
  * Deep-merge `overlay` onto `base` for theme blocks.
@@ -60,7 +61,7 @@ export function mergeGeneration(
  * Node (fs-loaded) and browser (bundled) contexts.
  */
 export function resolveTheme(
-  timeline: Pick<TimelineConfigT, "theme" | "theme_overrides">,
+  timeline: ThemeResolvableTimeline,
   registry: ThemeRegistry,
 ): Record<string, unknown> {
   const slug = timeline.theme;

@@ -1,1 +1,0 @@
-{"version":3,"file":"effects.generated.js","sourceRoot":"","sources":["../src/effects.generated.ts"],"names":[],"mappings":"AAEA,OAAO,QAAQ,MAAM,wCAAwC,CAAC;AAE9D,MAAM,CAAC,MAAM,eAAe,GAAG,IAAI,CAAC;AACpC,MAAM,CAAC,MAAM,UAAU,GAAG,CAAC,WAAW,CAAU,CAAC;AAEjD,MAAM,CAAC,MAAM,eAAe,GAAsC;IAChE,WAAW,EAAE,QAAQ;CACtB,CAAC;AACF,MAAM,CAAC,MAAM,iBAAiB,GAA6B;IACzD,IAAI,EAAE,WAAW;CAClB,CAAC"}

@@ -4,8 +4,8 @@ const HTML_HEADERS = {
   "Content-Type": "text/html; charset=utf-8",
 };
 
-const FALLBACK_IMAGE_PATH = "/banodoco.png";
-const DEFAULT_SITE_ORIGIN = "https://banodoco.com";
+const FALLBACK_IMAGE_PATH = "/2rp-social-card.jpg";
+const DEFAULT_SITE_ORIGIN = "https://banodoco.ai";
 
 interface AssetRow {
   slug: string;
@@ -118,7 +118,7 @@ Deno.serve(async (req) => {
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
-  const serviceRoleKey = Deno.env.get("SB_SECRET_KEY");
+  const serviceRoleKey = Deno.env.get("SB_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
   if (!supabaseUrl || !serviceRoleKey) {
     return new Response("Missing Supabase environment", { status: 500, headers: HTML_HEADERS });
@@ -171,7 +171,6 @@ Deno.serve(async (req) => {
   const imageUrl =
     primaryMedia?.cloudflare_thumbnail_url
     ?? primaryMedia?.backup_thumbnail_url
-    ?? primaryMedia?.url
     ?? fallbackImage;
 
   let creatorName = "";

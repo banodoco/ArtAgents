@@ -140,11 +140,12 @@ export const AssetEntry = z.object({
 }).partial();
 
 export const TimelineConfig = z.object({
-  theme: z.string(),
+  theme: z.string().optional(),
   clips: z.array(TimelineClip),
   tracks: z.array(TrackDefinition).optional(),
   pinnedShotGroups: z.array(PinnedShotGroup).optional(),
   theme_overrides: ThemeOverrides.optional(),
+  generation_defaults: z.record(z.unknown()).optional(),
   output: TimelineOutput.optional(),
 });
 

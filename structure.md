@@ -76,6 +76,12 @@ Grant fund display. Reads Solana wallet balance and SOL/USD price from public AP
 ### banodoco-website — Banodoco Main Site
 The official website at banodoco.ai. Presents the organization's mission, projects, and community. Pulls live community topics from Supabase `daily_summaries` (gracefully degrades if Supabase is unavailable).
 
+### effects — Shared Render Effects
+Workspace-level Remotion visual effects. Each direct child directory is an effect id and contains the effect component plus schema, defaults, and metadata used by the tools render-time catalog.
+
+### themes — Shared Render Themes
+Workspace-level Remotion design tokens. Themes provide color, type, and motion values to render effects so source-cut and generative videos share one visual system.
+
 ---
 
 ## Shared Infrastructure

@@ -83,8 +83,35 @@ class ResolveThemeTests(unittest.TestCase):
         self.assertEqual(out["visual"]["canvas"]["fps"], 60)
         self.assertEqual(out["visual"]["canvas"]["width"], 1920)
 
+    def test_resolve_theme_rejects_missing_theme(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Timeline.theme must be a non-empty slug"):
+            resolve_theme({}, THEMES_ROOT)
+
+    def test_resolve_theme_rejects_empty_theme(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Timeline.theme must be a non-empty slug"):
+            resolve_theme({"theme": ""}, THEMES_ROOT)
+
 
 class ValidateTimelineTests(unittest.TestCase):
+    def test_validate_timeline_accepts_no_theme_persisted_shape(self) -> None:
+        validate_timeline({"clips": []}, strict=False)
+
+    def test_validate_timeline_accepts_open_generation_defaults(self) -> None:
+        payload = {
+            "theme": "2rp",
+            "clips": [],
+            "generation_defaults": {
+                "model": "sequence-v1",
+                "image": {"quality": "high", "provider": "reigh"},
+                "provider_settings": {"seed": 1234, "flags": ["keep", "open"]},
+            },
+        }
+        validate_timeline(payload, strict=False)
+
+    def test_validate_timeline_rejects_non_object_generation_defaults(self) -> None:
+        with self.assertRaises(Exception):
+            validate_timeline({"clips": [], "generation_defaults": []}, strict=False)
+
     @unittest.skipUnless(
         HYPE_TIMELINE.is_file(),
         f"fixture missing: {HYPE_TIMELINE}",
