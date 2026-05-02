@@ -120,8 +120,8 @@ export const TimelineOutput = z.object({
   resolution: z.string(),
   fps: z.number(),
   file: z.string(),
-  background: z.string().optional(),
-  background_scale: z.number().optional(),
+  background: z.string().nullable().optional(),
+  background_scale: z.number().nullable().optional(),
 });
 
 export const AssetEntry = z.object({

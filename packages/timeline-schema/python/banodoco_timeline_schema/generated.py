@@ -139,8 +139,8 @@ class Output(TypedDict, closed=True):
     resolution: str
     fps: float
     file: str
-    background: NotRequired[str]
-    background_scale: NotRequired[float]
+    background: NotRequired[str | None]
+    background_scale: NotRequired[float | None]
 
 
 class TimelineConfig(TypedDict, closed=True):
@@ -217,8 +217,8 @@ class TimelineOutput(TypedDict, closed=True):
     resolution: str
     fps: float
     file: str
-    background: NotRequired[str]
-    background_scale: NotRequired[float]
+    background: NotRequired[str | None]
+    background_scale: NotRequired[float | None]
 
 
 class AssetEntry(TypedDict, closed=True):

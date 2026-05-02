@@ -394,10 +394,16 @@
               "type": "string"
             },
             "background": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "background_scale": {
-              "type": "number"
+              "type": [
+                "number",
+                "null"
+              ]
             }
           },
           "required": [
@@ -726,10 +732,16 @@
           "type": "string"
         },
         "background": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "background_scale": {
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "required": [
