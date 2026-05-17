@@ -648,14 +648,40 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
         return False
 
     # Map step path -> latest event kind for terminal checks.
+    # ``step_attested`` events carry the legacy ``plan_step_id`` string instead of
+    # a ``plan_step_path`` list (see make_step_attested_event), so accept both.
+    #
+    # Only "step lifecycle" events count. Advisory events like
+    # ``produces_check_passed`` / ``produces_check_failed`` are appended by
+    # ``_run_inline_checks`` immediately AFTER a step has already transitioned
+    # to ``step_attested``/``step_completed``, and shadowing the lifecycle
+    # event with the advisory one was the root cause of the C2 bug surfaced by
+    # the 12-DeepSeek regression probe: every run hit 6/6 attested but
+    # ``_run_is_complete`` returned False because the per-leaf latest_kind was
+    # ``produces_check_passed``, not ``step_attested``.
+    _LIFECYCLE_KINDS = {
+        "step_dispatched",
+        "step_completed",
+        "step_failed",
+        "step_skipped",
+        "step_attested",
+        "step_awaiting_fetch",
+    }
     latest_by_path: dict[str, str] = {}
     for event in events:
+        kind = event.get("kind")
+        if not isinstance(kind, str):
+            continue
+        if kind not in _LIFECYCLE_KINDS:
+            continue
         path_list = event.get("plan_step_path")
         if isinstance(path_list, list) and path_list:
             path_str = "/".join(str(p) for p in path_list)
-            kind = event.get("kind")
-            if isinstance(kind, str):
-                latest_by_path[path_str] = kind
+            latest_by_path[path_str] = kind
+            continue
+        legacy_id = event.get("plan_step_id")
+        if isinstance(legacy_id, str) and legacy_id:
+            latest_by_path[legacy_id] = kind
 
     for leaf_id in leaf_ids:
         # Find latest event whose path matches this leaf id.
@@ -674,7 +700,10 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
             return False
         if latest_kind == "step_dispatched":
             return False
-        if latest_kind not in {"step_completed", "step_failed", "step_skipped"}:
+        # ``step_attested`` is the terminal event for attested steps (the gate
+        # at gate.py:275 already treats it as advance-eligible alongside the
+        # other terminal kinds), so completion must accept it too.
+        if latest_kind not in {"step_completed", "step_failed", "step_skipped", "step_attested"}:
             return False
 
     return True
