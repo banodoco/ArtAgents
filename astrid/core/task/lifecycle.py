@@ -14,6 +14,7 @@ import json
 import shlex
 import secrets
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Optional, Sequence
@@ -65,6 +66,8 @@ from astrid.core.task.plan import (
     is_attested_kind,
     is_code_kind,
     is_group_step,
+    is_leaf_step,
+    iter_steps_with_path,
     compute_plan_hash,
     load_plan,
     step_dir_for_path,
@@ -291,7 +294,8 @@ def cmd_start(
 
     session_id_for_lease = "legacy"
     try:
-        bound = resolve_current_session()
+        # T9 / FLAG-S1-003: pass slug for file-bound .astrid-session fallback.
+        bound = resolve_current_session(slug=slug)
         if bound is not None:
             session_id_for_lease = bound.id
     except SessionBindingError:
@@ -374,6 +378,88 @@ def cmd_abort(
 # ---------------------------------------------------------------------------
 
 
+def _leaf_progress(plan, events: Sequence[dict]) -> tuple[int, int]:
+    """Return (completed_leaves, total_leaves) for a quick progress line.
+
+    Total counts every leaf path in the plan tree (repeat expansion ignored —
+    a for_each host contributes 1, not N). Completed counts distinct leaf
+    paths with a terminal event: step_completed, step_attested, or step_skipped.
+    """
+    total_paths: set[tuple[str, ...]] = set()
+    for path_tuple, step in iter_steps_with_path(plan):
+        if is_leaf_step(step):
+            total_paths.add(path_tuple)
+    terminal_kinds = {"step_completed", "step_attested", "step_skipped"}
+    done_paths: set[tuple[str, ...]] = set()
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("kind") not in terminal_kinds:
+            continue
+        raw_path = ev.get("plan_step_path")
+        if isinstance(raw_path, list) and raw_path:
+            done_paths.add(tuple(raw_path))
+            continue
+        plan_step_id = ev.get("plan_step_id")
+        if isinstance(plan_step_id, str) and plan_step_id:
+            done_paths.add(tuple(plan_step_id.split(STEP_PATH_SEP)))
+    # Clamp to plan paths in case an event references a stale path.
+    done_paths &= total_paths
+    return len(done_paths), len(total_paths)
+
+
+def _emit_for_each_autoclose_audit(plan, events: Sequence[dict]) -> None:
+    """Observational audit (T10 / scope-2): for every ``repeat.for_each`` host
+    whose items are all attested, warn on stderr if no host ``step_attested``
+    is present. Pure observation — never appends an event, never changes the
+    exit code. Surfaces Phase-1 autoclose regressions without depending on the
+    full regression-audit harness.
+    """
+    expected: dict[tuple[str, ...], int | None] = {}
+    for path_tuple, step in iter_steps_with_path(plan):
+        repeat = getattr(step, "repeat", None)
+        if isinstance(repeat, RepeatForEach):
+            if repeat.items_source == "static":
+                expected[path_tuple] = len(repeat.items)
+            else:
+                expected[path_tuple] = None  # resolved via for_each_expanded
+    if not expected:
+        return
+    item_attested_counts: dict[tuple[str, ...], int] = {p: 0 for p in expected}
+    host_step_attested: set[tuple[str, ...]] = set()
+    for_each_expanded_total: dict[tuple[str, ...], int] = {}
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = ev.get("kind")
+        raw_path = ev.get("plan_step_path")
+        path_tuple = tuple(raw_path) if isinstance(raw_path, list) else None
+        if kind == "item_attested" and path_tuple in item_attested_counts:
+            item_attested_counts[path_tuple] += 1
+        elif kind == "for_each_expanded" and path_tuple in expected:
+            ids = ev.get("item_ids")
+            if isinstance(ids, list):
+                for_each_expanded_total[path_tuple] = len(ids)
+        elif kind == "step_attested":
+            plan_step_id = ev.get("plan_step_id")
+            if isinstance(plan_step_id, str):
+                host_step_attested.add(tuple(plan_step_id.split(STEP_PATH_SEP)))
+    for path_tuple, static_total in expected.items():
+        total = for_each_expanded_total.get(path_tuple, static_total)
+        if total is None or total <= 0:
+            continue
+        if item_attested_counts.get(path_tuple, 0) != total:
+            continue
+        if path_tuple in host_step_attested:
+            continue
+        host_path = STEP_PATH_SEP.join(path_tuple)
+        print(
+            f"status: host {host_path} appears closed at item level but lacks "
+            f"step_attested — possible autoclose regression",
+            file=sys.stderr,
+        )
+
+
 def cmd_status(
     argv: Sequence[str],
     *,
@@ -414,6 +500,9 @@ def cmd_status(
 
     print(f"run-id:    {run_id}")
     print(f"plan-hash: {plan_hash}")
+    completed, total = _leaf_progress(plan, events)
+    print(f"progress:  {completed} of {total} steps complete")
+    _emit_for_each_autoclose_audit(plan, events)
     if peek.exhausted or peek.step is None:
         print("current:   <run exhausted>")
     else:
@@ -450,6 +539,109 @@ def cmd_status(
 # ---------------------------------------------------------------------------
 # cmd_next
 # ---------------------------------------------------------------------------
+
+
+_ASTRID_PLACEHOLDER_RE = __import__("re").compile(r"\$\{?(ASTRID_[A-Z_]+)\}?")
+
+
+def _default_projects_root() -> Path:
+    import os as _os
+    return Path(_os.path.expanduser("~/Documents/reigh-workspace/astrid-projects"))
+
+
+def render_step_instructions(
+    text: str | None,
+    *,
+    projects_root: Path | None,
+    slug: str,
+    run_id: str,
+    plan_step_path: tuple[str, ...] | None,
+    item_id: str | None,
+    iteration: int | None,
+) -> str:
+    """Canonical instruction renderer (FLAG-S1-001 / issue_hints-2 / all_locations-1).
+
+    Substitutes the full ``$ASTRID_TASK_*`` surface — including the ``${VAR}``
+    form — against the resolved run/item context. ``projects_root`` resolution
+    order: function param > ``ASTRID_PROJECTS_ROOT`` env > default
+    ``~/Documents/reigh-workspace/astrid-projects``.
+
+    Under ``is_author_test_mode()`` OR ``ASTRID_STRICT_INSTRUCTION_SUBST=1``,
+    an unknown ``$ASTRID_*`` token raises ``AssertionError`` and the result is
+    post-checked to contain zero ``$ASTRID_`` substrings. In production an
+    unknown token is left literal (best-effort, never crashes the CLI).
+    """
+    import os as _os
+    from astrid.core.task.env import is_author_test_mode as _is_author_test_mode
+
+    if text is None:
+        return ""
+    if projects_root is None:
+        env_root = _os.environ.get("ASTRID_PROJECTS_ROOT")
+        projects_root = Path(env_root) if env_root else _default_projects_root()
+    step_path_str = STEP_PATH_SEP.join(plan_step_path) if plan_step_path else ""
+    allow = {
+        "ASTRID_PROJECTS_ROOT": str(projects_root),
+        "ASTRID_TASK_PROJECT": slug,
+        "ASTRID_TASK_RUN_ID": run_id,
+        "ASTRID_TASK_ITEM_ID": item_id or "",
+        "ASTRID_TASK_ITERATION": str(iteration) if iteration is not None else "",
+        "ASTRID_TASK_STEP_PATH": step_path_str,
+    }
+    strict = _is_author_test_mode() or _os.environ.get("ASTRID_STRICT_INSTRUCTION_SUBST") == "1"
+
+    def _sub(match):
+        token = match.group(1)
+        if token in allow:
+            return allow[token]
+        if strict:
+            raise AssertionError(
+                f"render_step_instructions: unknown $ASTRID_* token {token!r}"
+            )
+        return match.group(0)
+
+    result = _ASTRID_PLACEHOLDER_RE.sub(_sub, text)
+    if strict:
+        assert "$ASTRID_" not in result, (
+            f"render_step_instructions: unresolved $ASTRID_ tokens remain in {result!r}"
+        )
+    return result
+
+
+def _format_schema_requirements(step) -> str:
+    """Extract required keys from a step's json_schema produces and format
+    a single human-readable line. Returns empty string when no produces or
+    no schema-typed checks.
+
+    Polish #29 — flagged by every v3/v4/v5/v6 probe agent on the
+    schema_strict step: the printed instructions listed only some of the
+    required keys, the verifier rejected for missing ones, and the agent
+    had to dig into plan.json to discover the actual schema. Now the
+    instruction printer auto-surfaces required keys per produces entry so
+    the instructions and the verifier can't drift.
+    """
+    produces = getattr(step, "produces", ())
+    if not produces:
+        return ""
+    lines: list[str] = []
+    for entry in produces:
+        check = getattr(entry, "check", None)
+        if check is None or check.check_id != "json_schema":
+            continue
+        params = getattr(check, "params", {}) or {}
+        schema = params.get("schema") if isinstance(params, dict) else None
+        # canonical_check_params may have nested the schema under "schema"
+        # OR inlined the params. Handle both shapes defensively.
+        if not isinstance(schema, dict):
+            schema = params if isinstance(params, dict) else {}
+        required = schema.get("required") if isinstance(schema, dict) else None
+        if not isinstance(required, list) or not required:
+            continue
+        keys = ", ".join(str(k) for k in required)
+        lines.append(f"required keys for {entry.name}: {keys}")
+    if not lines:
+        return ""
+    return "\n".join(lines)
 
 
 def _format_ack_template(
@@ -490,6 +682,171 @@ def _command_has_project_arg(command: str | None) -> bool:
     return any(part == "--project" or part.startswith("--project=") for part in parts)
 
 
+@dataclass(frozen=True)
+class _RewindRetry:
+    reason: str
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _HostCloseHint:
+    host_path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _RunComplete:
+    pass
+
+
+def _has_host_step_attested(events, host_path_tuple) -> bool:
+    path_str = STEP_PATH_SEP.join(host_path_tuple)
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("kind") == "step_attested" and ev.get("plan_step_id") == path_str:
+            return True
+    return False
+
+
+def _expected_for_each_total(plan, events, host_path_tuple) -> int | None:
+    """Expected total items for a for_each host. Prefers ``for_each_expanded``
+    event (covers items_source='from'); falls back to static repeat.items.
+    """
+    path_list = list(host_path_tuple)
+    for ev in events:
+        if (
+            isinstance(ev, dict)
+            and ev.get("kind") == "for_each_expanded"
+            and ev.get("plan_step_path") == path_list
+        ):
+            raw = ev.get("item_ids") or []
+            if isinstance(raw, list):
+                return len(raw)
+            break
+    host = _find_step_by_path(plan, host_path_tuple)
+    host_repeat = getattr(host, "repeat", None) if host is not None else None
+    if isinstance(host_repeat, RepeatForEach) and host_repeat.items_source == "static":
+        return len(host_repeat.items)
+    return None
+
+
+def _dispatch_from_tail(
+    plan,
+    events,
+    peek,
+    *,
+    slug: str,
+    run_id: str,
+    events_path: Path,
+    projects_root: Optional[Path],
+):
+    """Tail-dispatch in ``cmd_next``: derive the next operator-facing action
+    from ``events.jsonl``'s tail rather than from ``plan[cursor]`` alone.
+
+    Read-only contract: this helper MUST NOT mutate events EXCEPT for the
+    single allowed ``run_completed`` append routed through
+    ``_emit_run_completed_if_needed`` (FLAG-S1-007 / correctness-4). Per
+    SD-002 (FLAG-S1-002 / correctness-3): we key the rewind branch on
+    ``cursor_rewind`` alone — a separate ``produces_check_failed`` branch
+    would be dead code because ``_run_inline_checks`` always emits
+    ``produces_check_failed`` then ``cursor_rewind`` back-to-back; we read
+    the reason from ``events[-2]`` when applicable.
+    """
+    if not events:
+        return None
+    last = events[-1] if isinstance(events[-1], dict) else None
+    if last is None:
+        return None
+    last_kind = last.get("kind")
+
+    # (1) Rewind retry — single collapsed branch keyed on cursor_rewind.
+    if last_kind == "cursor_rewind":
+        reason = "previous attempt rewound"
+        if len(events) >= 2 and isinstance(events[-2], dict):
+            prior = events[-2]
+            if prior.get("kind") == "produces_check_failed":
+                reason = str(prior.get("reason") or reason)
+            else:
+                reason = str(last.get("reason") or reason)
+        path_raw = last.get("plan_step_path")
+        if isinstance(path_raw, list):
+            path_tuple = tuple(str(p) for p in path_raw)
+        else:
+            path_tuple = peek.path_tuple if peek.path_tuple else ()
+        return _RewindRetry(reason=reason, path=path_tuple)
+
+    # (2) Host-close hint — defensive belt for replays missing Phase-1
+    # autoclose. Only fires when items are exhausted at the item level but
+    # the host step_attested is absent.
+    if last_kind == "item_attested":
+        path_raw = last.get("plan_step_path")
+        if isinstance(path_raw, list):
+            host_path = tuple(str(p) for p in path_raw)
+            expected = _expected_for_each_total(plan, events, host_path)
+            host_path_str = STEP_PATH_SEP.join(host_path)
+            completed = _completed_items_from_events(events, host_path_str)
+            if (
+                expected is not None
+                and len(completed) >= expected
+                and not _has_host_step_attested(events, host_path)
+            ):
+                return _HostCloseHint(host_path=host_path)
+
+    # (3) Run-complete — emit run_completed via the centralized helper.
+    if peek.exhausted and _run_is_complete(plan, events):
+        _emit_run_completed_if_needed(
+            plan, events, events_path, run_id,
+            slug=slug, projects_root=projects_root,
+        )
+        return _RunComplete()
+
+    return None
+
+
+def _emit_run_completed_if_needed(
+    plan,
+    events,
+    events_path: Path,
+    run_id: str,
+    *,
+    slug: str | None = None,
+    projects_root: Optional[Path] = None,
+) -> bool:
+    """Single source of truth for appending ``run_completed`` (FLAG-S1-007 /
+    correctness-4). Idempotent: returns True iff the run is complete AND a
+    ``run_completed`` event is present after the call (whether emitted now or
+    already on disk). All ``cmd_next`` emit sites MUST route through this
+    helper; any new ``make_run_completed_event`` append outside this helper
+    half-closes FLAG-S1-007.
+
+    Side effect when ``slug`` is provided (#25): on the first ``run_completed``
+    emission (not on idempotent re-entry), also clears the project's
+    ``current_run.json`` pointer so a follow-up ``astrid start <next-orch>``
+    is unblocked. The lease and run files stay on disk; only the "active
+    run" pointer is released. Without this, agents must `astrid abort` to
+    switch orchestrators even though the run completed normally — flagged
+    by the v4 seq probe.
+    """
+    for ev in events:
+        if isinstance(ev, dict) and ev.get("kind") == "run_completed":
+            return True
+    if not _run_is_complete(plan, events):
+        return False
+    append_event(events_path, make_run_completed_event(run_id))
+    # Release the active-run pointer so the project is free for the next
+    # orchestrator. Idempotent guard: only the first call gets past the
+    # early-return above, so this fires exactly once per run.
+    if slug:
+        try:
+            clear_current_run(slug, root=projects_root)
+        except Exception:
+            # Never let pointer cleanup block the run-completed signal.
+            # Worst case: agent has to `astrid abort` once before starting
+            # the next orchestrator — same as pre-fix behavior.
+            pass
+    return True
+
+
 def _completed_items_from_events(events, host_path):
     """Return the set of item ids that have a completed/attested event under
     ``host_path``. ``host_path`` is the STEP_PATH_SEP-joined string form.
@@ -510,13 +867,254 @@ def _completed_items_from_events(events, host_path):
     return completed
 
 
+def _list_project_slugs(projects_root: Optional[Path]) -> list[str]:
+    """List on-disk project slugs at the projects_root (sorted, never raises)."""
+    try:
+        root = Path(projects_root) if projects_root is not None else resolve_projects_root()
+    except Exception:
+        return []
+    if not root.is_dir():
+        return []
+    slugs: list[str] = []
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not (entry / "project.json").is_file():
+            continue
+        slugs.append(entry.name)
+    return slugs
+
+
+def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str], str | None]:
+    """List installable orchestrators as qualified ids.
+
+    Returns ``(ids, error_summary)``. On registry-load failure the ids list
+    is empty AND ``error_summary`` is a one-line hint pointing at the
+    underlying issue so the next-hint can say "registry is broken" instead
+    of "nothing installed".
+
+    Two-source union: YAML-manifested orchestrators (via the registry) AND
+    DSL-authored orchestrators that have a compiled ``build/<name>.json``
+    (which is enough for ``astrid start`` to work but doesn't show up in
+    the registry today). The v6 probe found that DSL-compiled orchestrators
+    were invisible to `astrid next`'s suggestions even though they ran
+    fine — the agent could start them only by knowing their id externally.
+
+    Sort order (polish #30): orchestrators with a recently-modified
+    ``build/<name>.json`` first (most recently compiled / used), then
+    alphabetical. The v6 probe found ``mini_research`` and ``agent_probe``
+    were buried below alphabetically-earlier orchestrators the agent didn't
+    want; recency surfaces what the operator just touched.
+    """
+    ids: set[str] = set()
+    registry_err: str | None = None
+    try:
+        from astrid.core.orchestrator.registry import load_default_registry
+        registry = load_default_registry()
+        ids.update(o.id for o in registry.list())
+    except Exception as exc:
+        registry_err = f"{type(exc).__name__}: {exc}"
+
+    # Add DSL-compiled orchestrators discovered from build/*.json files.
+    # Each `<pack>/build/<name>.json` corresponds to qualified id
+    # `<pack>.<name>`. Defensive — never raises if a pack dir is missing.
+    try:
+        from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT
+        if DEFAULT_PACKS_ROOT.is_dir():
+            for pack_dir in DEFAULT_PACKS_ROOT.iterdir():
+                if not pack_dir.is_dir():
+                    continue
+                build_dir = pack_dir / "build"
+                if not build_dir.is_dir():
+                    continue
+                for build_file in build_dir.glob("*.json"):
+                    ids.add(f"{pack_dir.name}.{build_file.stem}")
+    except Exception:
+        pass
+
+    if not ids:
+        return [], registry_err
+
+    def _build_mtime(qualified_id: str) -> float:
+        if "." not in qualified_id:
+            return 0.0
+        pack, _, name = qualified_id.partition(".")
+        try:
+            from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT
+            build_path = DEFAULT_PACKS_ROOT / pack / "build" / f"{name}.json"
+            return build_path.stat().st_mtime if build_path.is_file() else 0.0
+        except Exception:
+            return 0.0
+
+    id_list = sorted(ids, key=lambda qid: (-_build_mtime(qid), qid))
+    return id_list, registry_err
+
+
+def _print_next_unbound_hint(
+    projects_root: Optional[Path],
+    *,
+    target_slug: str | None = None,
+) -> None:
+    """Universal port-of-call (#13): no session bound. Print exactly the
+    single legal next command, plus a short discovery list. Mirrors the
+    style of `astrid status` (no args) so an agent who knows only
+    `astrid next` lands here cleanly.
+
+    When ``target_slug`` is set (caller passed ``--project <slug>``), the
+    hint targets that specific slug instead of listing discovered projects.
+    Output deliberately matches the old gate's error wording (``no session
+    bound``, ``astrid status``, ``astrid attach``) so existing tests +
+    automation that grep stderr keep matching.
+    """
+    if target_slug:
+        print(
+            f"no session bound — run `astrid status` to confirm, then "
+            f"`astrid attach {target_slug}` to bind this tab."
+        )
+        print()
+        print(f"  astrid attach {target_slug}")
+        print()
+        print("after attach, `astrid next` will tell you the next legal action.")
+        return
+
+    slugs = _list_project_slugs(projects_root)
+    print("no session bound — run `astrid status` to list projects, "
+          "then `astrid attach <project>` to bind this tab.")
+    print()
+    if slugs:
+        print("attach an existing project:")
+        for s in slugs[:6]:
+            print(f"  astrid attach {s}")
+        if len(slugs) > 6:
+            print(f"  ({len(slugs) - 6} more — `astrid projects ls` for the full list)")
+    else:
+        print("no projects exist yet — create one:")
+        print("  astrid projects create <slug>")
+        print("then:")
+        print("  astrid attach <slug>")
+    print()
+    print("after attach, `astrid next` will tell you the next legal action.")
+
+
+def _print_next_no_run_hint(slug: str, projects_root: Optional[Path]) -> None:
+    """Universal port-of-call (#13): session bound, project attached, but
+    no active run. Print the `astrid start` template plus a top-N
+    orchestrator suggestion list.
+    """
+    orchs, registry_err = _list_orchestrator_ids()
+    print(f"session bound to {slug!r}, but no active task run.")
+    print()
+    print("start a new run:")
+    print(f"  astrid start <orchestrator-id> --project {slug}")
+    print()
+    if orchs:
+        print("available orchestrators (top 6):")
+        for oid in orchs[:6]:
+            print(f"  astrid start {oid} --project {slug}")
+        if len(orchs) > 6:
+            print(f"  ({len(orchs) - 6} more — `astrid orchestrators list` for the full set)")
+    elif registry_err is not None:
+        print("orchestrator registry failed to load:")
+        print(f"  {registry_err}")
+        print("fix the broken manifest then re-run, or browse with "
+              "`astrid orchestrators list`.")
+    else:
+        print("no orchestrators are registered for this checkout; "
+              "see `astrid orchestrators list` or `astrid author new <pack>.<name>` "
+              "to author one.")
+
+
+def _os_environ_has_session() -> bool:
+    """True iff ASTRID_SESSION_ID is set and non-empty in os.environ."""
+    import os as _os
+    return bool(_os.environ.get("ASTRID_SESSION_ID", "").strip())
+
+
+def _most_recent_session_slug(projects_root: Optional[Path]) -> str | None:
+    """Find the slug whose .astrid-session file was most recently written.
+
+    Cross-shell session resolution (#24): when an agent has done `astrid
+    attach <slug>` in a prior shell but the current shell doesn't have
+    ASTRID_SESSION_ID set, scanning projects-root for the freshest
+    .astrid-session is a cheap way to recover the same binding.
+
+    Concurrency disambiguation (polish #32): the v7 probe surfaced a real
+    failure mode — when multiple agents share one projects-root and each
+    writes its own ``.astrid-session``, "the freshest" can be ANY of them,
+    not necessarily the one this caller actually attached. v7_min explicitly
+    reported the session "kept resolving to different project slugs" because
+    the auto-resolve picked a sibling agent's binding.
+
+    Fix: if the top-two most-recent files were written within
+    AMBIGUITY_WINDOW_SEC of each other, return None. Better to print the
+    "no session bound" discovery hint and force the agent to be explicit
+    than to silently bind to a stranger's session. This is the "fail
+    closed, never silently wrong" principle.
+
+    This is a deliberate UX fallback in `cmd_next`, distinct from
+    `resolve_current_session` itself (which by FLAG-S1-003 invariant
+    never walks the filesystem to discover the slug). Returns None when
+    no .astrid-session file exists under any project root OR multiple
+    files are concurrently fresh.
+    """
+    AMBIGUITY_WINDOW_SEC = 60.0
+    try:
+        root = Path(projects_root) if projects_root is not None else resolve_projects_root()
+    except Exception:
+        return None
+    if not root.is_dir():
+        return None
+    candidates: list[tuple[float, str]] = []
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if not (entry / "project.json").is_file():
+            continue
+        session_file = entry / ".astrid-session"
+        if not session_file.is_file():
+            continue
+        try:
+            candidates.append((session_file.stat().st_mtime, entry.name))
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    if len(candidates) >= 2:
+        top_mtime = candidates[0][0]
+        second_mtime = candidates[1][0]
+        if top_mtime - second_mtime < AMBIGUITY_WINDOW_SEC:
+            # Ambiguous — multiple sessions are concurrently fresh; refuse
+            # to guess. Caller will print the discovery hint and force an
+            # explicit attach or --project.
+            return None
+    return candidates[0][1]
+
+
 def cmd_next(
     argv: Sequence[str],
     *,
     projects_root: Optional[Path] = None,
 ) -> int:
-    parser = argparse.ArgumentParser(prog="astrid next", add_help=True)
-    parser.add_argument("--project", required=True, help="project slug")
+    parser = argparse.ArgumentParser(
+        prog="astrid next",
+        add_help=True,
+        description=(
+            "Universal port-of-call. Prints the single legal action to take, "
+            "regardless of where you are: cold (no session), in-session but "
+            "no active run, mid-run, or run complete."
+        ),
+    )
+    parser.add_argument(
+        "--project",
+        required=False,
+        default=None,
+        help=(
+            "project slug; if omitted, derived from the bound session "
+            "(ASTRID_SESSION_ID). Without a bound session, prints the "
+            "attach/create discovery hint."
+        ),
+    )
     parser.add_argument(
         "--skip",
         action="store_true",
@@ -532,33 +1130,117 @@ def cmd_next(
     except SystemExit as exc:
         return _system_exit_code(exc)
 
-    try:
-        slug = validate_project_slug(args.project)
-    except Exception as exc:
-        # Preamble must precede every operator-facing message (SD-023).
-        print(PROHIBITION_PREAMBLE)
-        print()
-        _print_err(f"next: {exc}")
-        return 1
-
     # Always print preamble first, verbatim, every call (SD-023) — even on
     # error / exhausted paths so Stop-hook context re-injection is consistent.
     print(PROHIBITION_PREAMBLE)
     print()
 
+    # Universal port-of-call (#13): derive slug from --project OR the bound
+    # session OR fall through to the unbound discovery hint. The agent-UX
+    # principle: `astrid next` ALWAYS prints exactly one legal action — never
+    # an error that requires the agent to remember which other verb to run.
+    slug: str | None = args.project
+    explicit_project = slug is not None
+    try:
+        from astrid.core.session.binding import (
+            SessionBindingError,
+            resolve_current_session,
+        )
+        # Cross-shell session resolution (#24/#32): when no slug + no env var,
+        # find the most-recently-modified .astrid-session file across the
+        # projects-root and use that slug. 4/4 v4 probes flagged "had to
+        # manually export ASTRID_SESSION_ID after attach"; the file-bound
+        # fallback already exists in resolve_current_session but only fires
+        # when a slug is passed. This makes the no-flag astrid next path
+        # actually work across shell invocations.
+        #
+        # When auto-resolve fires we print the source on stderr so the
+        # agent can verify the picked slug is what they meant. v7_min
+        # surfaced that an agent could silently bind to a stranger's
+        # session without realising it; explicit attribution + the
+        # ambiguity guard in _most_recent_session_slug together close
+        # that gap. Note: stderr so it doesn't pollute the main output
+        # that agents parse for action commands.
+        auto_resolved_slug: str | None = None
+        if slug is None and not _os_environ_has_session():
+            auto_resolved_slug = _most_recent_session_slug(projects_root)
+            slug = auto_resolved_slug
+        session = resolve_current_session(slug=slug)
+        if auto_resolved_slug is not None and session is not None:
+            _print_err(
+                f"(auto-resolved session for project {auto_resolved_slug!r} "
+                f"via .astrid-session; pass --project explicitly to override)"
+            )
+    except SessionBindingError as exc:
+        _print_err(f"next: {exc}")
+        return 1
+    # Only print the unbound discovery hint when truly unbound:
+    # neither a session resolved (env or file-fallback) NOR an explicit
+    # --project. With --project but no session, fall through — an active
+    # run may still exist on disk and the agent can proceed without a
+    # session (e.g. test harnesses, scripted recovery).
+    if session is None and not explicit_project and slug is None:
+        _print_next_unbound_hint(projects_root, target_slug=None)
+        return 0
+    if session is None and slug is None:
+        # explicit_project was False AND no slug auto-discovered: print hint.
+        _print_next_unbound_hint(projects_root, target_slug=None)
+        return 0
+    if slug is None and session is not None:
+        slug = session.project
+
+    try:
+        slug = validate_project_slug(slug)
+    except Exception as exc:
+        _print_err(f"next: {exc}")
+        return 1
+
     active_run = read_active_run(slug, root=projects_root)
     if active_run is None:
-        _print_err(
-            f"next: no active run for project {slug!r}; "
-            f"recovery: astrid start <orchestrator-id> --project {slug}"
-        )
-        return 1
+        # SESSION BOUND, NO RUN: print orchestrator suggestions + the
+        # exact `astrid start` template the agent should type next.
+        _print_next_no_run_hint(slug, projects_root)
+        return 0
 
     run_id = active_run["run_id"]
     proj_root = project_dir(slug, root=projects_root)
     plan_path = proj_root / "plan.json"
     events_path = proj_root / "runs" / run_id / "events.jsonl"
     run_dir = proj_root / "runs" / run_id
+
+    # Universal port-of-call (#18): reader-state detection. The dominant
+    # friction in the v3 DS probe (4/5 reports) was agents discovering they
+    # were attached as readers via a downstream gate rejection on `ack`.
+    # When `astrid next` is the agent's port-of-call, it should surface
+    # writer-mismatch BEFORE printing step instructions the agent will then
+    # be unable to ack.
+    try:
+        from astrid.core.session.binding import (
+            SessionBindingError as _SBErr,
+            is_writer_for,
+            resolve_current_session,
+        )
+        _session = resolve_current_session(slug=slug)
+    except _SBErr as exc:
+        _print_err(f"next: {exc}")
+        return 1
+    # The reader-state hint only makes sense if the bound session is
+    # actually for THIS project. A session bound to a different project
+    # (e.g. the autouse-seed in tests, or an agent mid-context-switch)
+    # doesn't make us a "reader" of this project's run — we just don't
+    # have any binding to it at all. Skip the warning in that case.
+    if (
+        _session is not None
+        and _session.project == slug
+        and not is_writer_for(_session, run_dir)
+    ):
+        print(f"attached to {slug!r} as reader — another session holds the writer lease.")
+        print()
+        print("take over the run to advance:")
+        print(f"  astrid sessions takeover {run_id}")
+        print()
+        print("after takeover, run `astrid next` again for the current step.")
+        return 0
 
     # FLAG-P8-005: cmd_next becomes state-mutating when inbox/ contains valid
     # files. Each entry is consumed best-effort so a single bad file cannot
@@ -576,6 +1258,55 @@ def cmd_next(
     peek = peek_current_step(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
+
+    # Tail-dispatch (FLAG-S1-002 / correctness-3): derive operator-facing
+    # action from events.jsonl's tail. Runs BEFORE --skip handling so a
+    # rewind or completed-run signal takes precedence over a skip request.
+    # Every return path below has the PROHIBITION_PREAMBLE already printed
+    # (line ~723) — SD-023 invariant preserved.
+    _tail_render_kwargs = dict(
+        projects_root=projects_root,
+        slug=slug,
+        run_id=run_id,
+        plan_step_path=peek.path_tuple if peek.path_tuple else None,
+        item_id=peek.item_id,
+        iteration=peek.iteration,
+    )
+    tail_action = _dispatch_from_tail(
+        plan,
+        events,
+        peek,
+        slug=slug,
+        run_id=run_id,
+        events_path=events_path,
+        projects_root=projects_root,
+    )
+    if isinstance(tail_action, _RewindRetry):
+        path_str = STEP_PATH_SEP.join(tail_action.path) if tail_action.path else ""
+        msg = (
+            f"Previous attempt rejected: {tail_action.reason}. "
+            f"Re-write the artifact for {path_str!r} and re-ack."
+        )
+        print(render_step_instructions(msg, **{**_tail_render_kwargs, "plan_step_path": tail_action.path or None}))
+        return 0
+    if isinstance(tail_action, _HostCloseHint):
+        host_path_str = STEP_PATH_SEP.join(tail_action.host_path)
+        msg = (
+            f"All items complete. Close the host with `astrid ack "
+            f"{host_path_str} --project {slug} --decision approve "
+            f"--agent <id> --evidence ...` (omit --item)."
+        )
+        print(render_step_instructions(
+            msg,
+            **{**_tail_render_kwargs, "plan_step_path": tail_action.host_path, "item_id": None, "iteration": None},
+        ))
+        return 0
+    if isinstance(tail_action, _RunComplete):
+        print(render_step_instructions(
+            "Run complete. Nothing to do.",
+            **{**_tail_render_kwargs, "plan_step_path": None, "item_id": None, "iteration": None},
+        ))
+        return 0
 
     # --skip: emit step_skipped events for optional leaves until either the
     # next leaf is non-optional or the cursor exhausts. The very first
@@ -612,25 +1343,57 @@ def cmd_next(
                 plan, events, slug, project_root=proj_root, run_id=run_id
             )
         if peek.exhausted or peek.step is None:
-            if _run_is_complete(plan, events):
-                append_event(events_path, make_run_completed_event(run_id))
+            _emit_run_completed_if_needed(
+                plan, events, events_path, run_id,
+                slug=slug, projects_root=projects_root,
+            )
             return 0
         # Fall through into normal print of the now-non-optional step.
 
     if peek.exhausted or peek.step is None:
-        if _run_is_complete(plan, events):
-            append_event(events_path, make_run_completed_event(run_id))
+        if _emit_run_completed_if_needed(
+            plan, events, events_path, run_id,
+            slug=slug, projects_root=projects_root,
+        ):
+            print(render_step_instructions(
+                "Run complete. Nothing to do.",
+                projects_root=projects_root,
+                slug=slug,
+                run_id=run_id,
+                plan_step_path=None,
+                item_id=None,
+                iteration=None,
+            ))
+            # Post-completion handoff (#27): seq probe found agents had to
+            # know to abort + start the next orchestrator manually. Now
+            # that current_run.json was just cleared by _emit_run_completed_if_needed,
+            # print the start-next hint inline so the agent sees the
+            # whole sequential flow as one continuous instruction stream.
+            print()
+            print(f"start another orchestrator on this project:")
+            print(f"  astrid start <orchestrator-id> --project {slug}")
+            print("(or just run `astrid next` for a fresh suggestion list)")
         else:
+            parked = STEP_PATH_SEP.join(peek.path_tuple) if peek.path_tuple else "<root>"
             print(
-                "run not complete: some steps still awaiting_fetch or in-flight",
+                f"run not complete: cursor parked at {parked} with no legal action",
                 file=sys.stderr,
             )
         return 0
 
     path_str = STEP_PATH_SEP.join(peek.path_tuple)
 
+    _render_kwargs = dict(
+        projects_root=projects_root,
+        slug=slug,
+        run_id=run_id,
+        plan_step_path=peek.path_tuple,
+        item_id=peek.item_id,
+        iteration=peek.iteration,
+    )
+
     if is_code_kind(peek.step):
-        print(f"run: {peek.step.command}")
+        print(f"run: {render_step_instructions(peek.step.command, **_render_kwargs)}")
         if not _command_has_project_arg(peek.step.command):
             print(
                 "warning: this code-step command has no --project argument, so running it "
@@ -643,7 +1406,19 @@ def cmd_next(
             "and skips a duplicate step_dispatched event.)"
         )
     elif is_attested_kind(peek.step):
-        print(peek.step.instructions or peek.step.command or "")
+        print(render_step_instructions(
+            peek.step.instructions or peek.step.command or "",
+            **_render_kwargs,
+        ))
+        # Polish #29: surface json_schema required keys inline so the
+        # instructions and the verifier can't drift (4/4 v3+v6 probes
+        # hit this on schema_strict). Emits "required keys for X: a, b, c"
+        # per produces entry when the check is json_schema with required
+        # fields; silent for non-schema produces.
+        schema_reqs = _format_schema_requirements(peek.step)
+        if schema_reqs:
+            print()
+            print(schema_reqs)
         print()
         # peek.step.repeat is None when the leaf is the body of a repeat
         # frame (the body is a clone with repeat stripped) — peek.item_id
@@ -708,10 +1483,9 @@ def cmd_next(
         host_path = STEP_PATH_SEP.join(peek.path_tuple)
         host_step = _find_step_by_path(plan, peek.path_tuple)
         items: list[str] = []
-        if host_step is not None and isinstance(
-            getattr(host_step, "repeat", None), RepeatForEach
-        ):
-            host_for_each: RepeatForEach = host_step.repeat  # type: ignore[assignment]
+        host_repeat = getattr(host_step, "repeat", None) if host_step is not None else None
+        if isinstance(host_repeat, RepeatForEach):
+            host_for_each: RepeatForEach = host_repeat
             if host_for_each.items_source == "static":
                 items = list(host_for_each.items)
             # Dynamic items source — items are resolved at gate dispatch from
@@ -751,9 +1525,17 @@ def _summarize_run_dir(run_dir: Path) -> tuple[str, str, str]:
     """Return (status, last_event_kind, last_ts) for a run directory.
 
     Status:
-    - ``completed`` — terminal ``run_completed`` event present (S5a contract).
-    - ``aborted`` — terminal ``run_aborted`` event present (S1 contract).
-    - ``in-flight`` — neither terminal event yet; the run is still being driven.
+    - ``completed`` — terminal ``run_completed`` event present anywhere
+      in the chain (not just the tail; advisory events like a late
+      ``takeover`` can land after it).
+    - ``aborted`` — terminal ``run_aborted`` event present.
+    - ``in-flight`` — neither terminal event seen yet; the run is still
+      being driven.
+
+    Fix #26: pre-#26 the check looked only at ``events[-1]`` which missed
+    runs where ``run_completed`` was followed by ``takeover`` or other
+    advisory tails — `astrid runs ls` showed "in-flight" for runs the
+    v4 probes had clearly finished. Now scans the full event list.
     """
     events_path = run_dir / "events.jsonl"
     if not events_path.is_file():
@@ -764,13 +1546,20 @@ def _summarize_run_dir(run_dir: Path) -> tuple[str, str, str]:
     last = events[-1]
     last_kind = str(last.get("kind", ""))
     last_ts = str(last.get("ts", ""))
-    if last_kind == "run_aborted":
-        status = "aborted"
-    elif last_kind == "run_completed":
-        status = "completed"
-    else:
-        status = "in-flight"
-    return status, last_kind, last_ts
+    # Scan the whole chain for a terminal event; aborted wins over completed
+    # if both somehow land (only the most-recent terminal is meaningful).
+    terminal_kind: str | None = None
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = ev.get("kind")
+        if kind in ("run_completed", "run_aborted"):
+            terminal_kind = str(kind)
+    if terminal_kind == "run_aborted":
+        return "aborted", last_kind, last_ts
+    if terminal_kind == "run_completed":
+        return "completed", last_kind, last_ts
+    return "in-flight", last_kind, last_ts
 
 
 _RUNS_LS_STATUSES = ("completed", "in-flight", "aborted")

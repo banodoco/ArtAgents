@@ -41,6 +41,11 @@ _UNBOUND_TOP_LEVEL = {
     "sessions",  # sub-verbs handled below
     "init",
     "packs",  # packs validate / packs new are builder-facing and sessionless
+    "models",  # `astrid models list` is discoverability-only, no session needed
+    # Universal port-of-call (#13): `astrid next` always prints exactly one
+    # legal action regardless of bound/unbound state. From cold it dispatches
+    # to the attach/create discovery hint inside cmd_next itself.
+    "next",
     "-h",
     "--help",
 }
@@ -74,7 +79,11 @@ def main(argv: list[str] | None = None) -> int:
         )
 
         try:
-            session = resolve_current_session()
+            # T9 / FLAG-S1-003: pass slug from argv when available so
+            # file-bound .astrid-session fallback can resolve in a fresh
+            # terminal that lost ASTRID_SESSION_ID.
+            _slug_hint = _extract_project_slug(raw)
+            session = resolve_current_session(slug=_slug_hint)
         except SessionBindingError as exc:
             print(f"session: {exc}", file=sys.stderr)
             return 2
@@ -158,7 +167,13 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
     if "-h" in raw or "--help" in raw:
         return True
     # 'packs' is builder-facing and sessionless (T5).
-    if top in {"attach", "init", "status", "packs"}:
+    # 'models' is discoverability-only, no session needed.
+    if top in {"attach", "init", "status", "packs", "models"}:
+        return True
+    # Universal port-of-call (#13): `astrid next` is the agent's one-stop
+    # discovery verb. When unbound, cmd_next itself dispatches to the
+    # attach/create hint — no early gate rejection.
+    if top == "next":
         return True
     # FLAG-S1-002: executors new / orchestrators new are builder-facing
     # scaffold commands that short-circuit before registry loading (T6).
@@ -281,6 +296,10 @@ def _dispatch(raw: list[str]) -> int:
         from .orchestrate import cli as author_cli
 
         return author_cli.main(raw[1:])
+    if raw and raw[0] == "models":
+        from .core.model_catalog import cli as models_cli
+
+        return models_cli.main(raw[1:])
     if raw and raw[0] == "elements":
         from .core.element import cli as elements_cli
 
@@ -480,10 +499,12 @@ def _dispatch_runpod(args: list[str]) -> int:
 
     sub = args[0]
     if sub == "sweep":
+        from typing import Literal
+
         from .core.runpod.sweeper import sweep as run_sweep
 
         # Parse --hard and --dry-run from remaining args
-        mode: str = "default"
+        mode: Literal["default", "hard"] = "default"
         dry_run = False
         projects_root_arg: str | None = None
         i = 1
@@ -505,7 +526,7 @@ def _dispatch_runpod(args: list[str]) -> int:
         from .core.project.paths import resolve_projects_root
 
         projects_root = Path(projects_root_arg) if projects_root_arg else resolve_projects_root()
-        summary = run_sweep(projects_root, mode=mode, dry_run=dry_run)  # type: ignore[arg-type]
+        summary = run_sweep(projects_root, mode=mode, dry_run=dry_run)
         print(json.dumps(summary, indent=2, default=str))
         return 0
 
