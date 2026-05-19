@@ -11,7 +11,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m1-schema.md
     branch: epic/timeline/m1-schema
     profile: premium                # tier 4 — schema/protocol invariants; default-lower rule prefers premium over apex
-    robustness: robust
+    robustness: thorough
     depth: high
     vendor: codex
     notes: "Foundation. Lock event envelope, canonical schema package, identity, actor model, EventLogBackend protocol, LocalFsBackend, SupabaseBackend stub, and one LocalFs rename proof. Premium end-to-end with high depth on author phases."
@@ -20,7 +20,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m2-clip-primitives.md
     branch: epic/timeline/m2-clip-primitives
     profile: partnered              # tier 3 — cross-cutting but mechanical once schema/protocol is locked
-    robustness: standard
+    robustness: full
     depth: medium
     vendor: codex
     notes: "Most-edited surface: add/remove/move/retime/swap/replace clips. CLI + Python API call EventLogBackend, tested on LocalFsBackend while SupabaseBackend remains a stub."
@@ -29,7 +29,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m3-secondary-primitives.md
     branch: epic/timeline/m3-secondary-primitives
     profile: partnered              # tier 3 — broad mutation surface across many domains
-    robustness: standard
+    robustness: full
     depth: medium
     vendor: codex
     notes: "Transitions, effects, themes, tracks, audio, pool, and arrangement primitives. Same protocol path as m2; no backend-specific branching in verbs."
@@ -38,7 +38,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m3p5-pack-and-worker-migration.md
     branch: epic/timeline/m3p5-pack-and-worker-migration
     profile: partnered
-    robustness: standard
+    robustness: full
     depth: medium
     vendor: codex
     notes: "Close pack and worker write-path bypasses before projection becomes authoritative. Every pack/worker timeline write emits events through the backend."
@@ -47,7 +47,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m4-replay-projection.md
     branch: epic/timeline/m4-replay-projection
     profile: partnered              # projection determinism plus golden fixtures become cross-backend contract
-    robustness: standard
+    robustness: full
     depth: high
     vendor: codex
     notes: "Make assembly/config blobs derived from events returned by any backend. One deterministic projection function plus shared golden fixtures and snapshot anchors/checkpoints; storage-specific work stays in backends."
@@ -56,7 +56,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m5-concurrency.md
     branch: epic/timeline/m5-concurrency
     profile: premium                # tier 4 — CAS semantics become a cross-backend protocol contract
-    robustness: robust
+    robustness: thorough
     depth: high
     vendor: codex
     notes: "Turn on expected_version as the protocol contract: LocalFs enforces file-version + fcntl guarded CAS, and SupabaseBackend keeps the same append_event signature while remaining a stub until m6. Stale-version errors become typed so m6 can enforce the same contract server-side."
@@ -65,7 +65,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m6-reigh-sync.md
     branch: epic/timeline/m6-reigh-sync
     profile: premium                # tier 4 — dual-backend + reigh-app integration; default-lower rule prefers premium over apex
-    robustness: robust
+    robustness: thorough
     depth: high
     vendor: codex
     notes: "Implement SupabaseBackend for real and migrate canonical reigh-app write paths in two phases: isolated RPC/projection parity, then app event writes/realtime/UI history. Premium with high depth on author phases."
@@ -83,7 +83,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m8-migration-tests.md
     branch: epic/timeline/m8-migration-tests
     profile: partnered              # tier 3 — both-backend migration + agentic/collision coverage
-    robustness: standard
+    robustness: full
     depth: medium
     vendor: codex
     notes: "Import existing LocalFs timelines and Supabase timelines via timeline.imported events. Add round-trip parity, migration idempotence, and multi-agent collision tests for both backends."
@@ -92,7 +92,7 @@ milestones:
     idea: docs/megaplan/epics/timeline-event-sourcing/m9-recovery-and-cross-backend-ops.md
     branch: epic/timeline/m9-recovery-and-cross-backend-ops
     profile: partnered
-    robustness: standard
+    robustness: full
     depth: medium
     vendor: codex
     notes: "Add push/pull, recover, branch listing, undo, mass-undo, and GDPR erasure on top of the m8 test infrastructure."
@@ -104,7 +104,7 @@ on_escalate:
 merge_policy: review                # we want to review each milestone's PR before it merges
 
 driver:
-  robustness: standard
+  robustness: full
   auto_approve: true
   max_iterations: 90
   poll_sleep: 8.0
