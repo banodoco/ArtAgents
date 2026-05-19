@@ -9,6 +9,9 @@ import pytest
 from astrid.core.project.paths import ProjectPathError
 from astrid.core.timeline.paths import (
     _TIMELINE_SLUG_RE,
+    assembly_head_path,
+    assembly_identity_path,
+    assembly_log_path,
     assembly_path,
     display_path,
     find_timeline_by_slug,
@@ -147,6 +150,27 @@ class TestPathConstructors:
         ulid = generate_ulid()
         mp = manifest_path("demo", ulid, root=str(tmp_projects_root))
         assert mp.name == "manifest.json"
+
+    def test_assembly_log_path(self, tmp_projects_root: Path) -> None:
+        from astrid.threads.ids import generate_ulid
+
+        ulid = generate_ulid()
+        path = assembly_log_path("demo", ulid, root=str(tmp_projects_root))
+        assert path.name == "assembly.jsonl"
+
+    def test_assembly_head_path(self, tmp_projects_root: Path) -> None:
+        from astrid.threads.ids import generate_ulid
+
+        ulid = generate_ulid()
+        path = assembly_head_path("demo", ulid, root=str(tmp_projects_root))
+        assert path.name == "assembly.head.json"
+
+    def test_assembly_identity_path(self, tmp_projects_root: Path) -> None:
+        from astrid.threads.ids import generate_ulid
+
+        ulid = generate_ulid()
+        path = assembly_identity_path("demo", ulid, root=str(tmp_projects_root))
+        assert path.name == "assembly.identity.json"
 
     def test_display_path(self, tmp_projects_root: Path) -> None:
         from astrid.threads.ids import generate_ulid

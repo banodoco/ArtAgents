@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
+from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.crud import (
     TimelineCrudError,
     create_timeline,
@@ -18,7 +21,7 @@ from astrid.core.timeline.crud import (
     show_timeline,
     tombstone_timeline,
 )
-from astrid.core.timeline.paths import timelines_dir
+from astrid.core.timeline.paths import assembly_identity_path, timelines_dir
 from astrid.threads.ids import generate_ulid, is_ulid
 
 
@@ -75,6 +78,22 @@ class TestCreateTimeline:
         display = Display.from_json(tdir / "display.json")
         assert display.slug == "primary"
         assert display.name == "Primary Timeline"
+
+    def test_writes_eventlog_identity_sidecar_for_new_timelines(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "primary", name="Primary Timeline")
+        ulid = result["ulid"]
+
+        identity_path = assembly_identity_path("demo", ulid, root=project_tree)
+        assert identity_path.is_file()
+
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        assert identity["schema_version"] == 1
+        assert identity["timeline_ulid"] == ulid
+        assert identity["backend"] == "local_fs"
+        assert identity["provenance"] == "created"
+        assert isinstance(identity["created_at"], str)
+        assert identity["created_at"]
+        assert str(UUID(identity["timeline_id"])) == identity["timeline_id"]
 
     def test_refuses_duplicate_slug(self, project_tree: Path) -> None:
         create_timeline("demo", "primary")
@@ -179,6 +198,64 @@ class TestRenameTimeline:
     def test_refuses_missing_slug(self, project_tree: Path) -> None:
         with pytest.raises(TimelineCrudError, match="not found"):
             rename_timeline("demo", "nonexistent", "new")
+
+    def test_appends_rename_event_before_legacy_rewrite(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        rename_timeline(
+            "demo",
+            "alpha",
+            "beta",
+            actor=TimelineActor(type="agent", id="codex:test"),
+        )
+
+        backend = LocalFsBackend(
+            timeline_id=identity["timeline_id"],
+            timeline_home=project_tree / "demo" / "timelines" / ulid,
+        )
+        events = backend.read_events()
+        assert events[-1].kind == "timeline.renamed"
+        assert events[-1].payload.old_slug == "alpha"
+        assert events[-1].payload.new_slug == "beta"
+        assert events[-1].actor.id == "codex:test"
+
+    def test_append_failure_leaves_legacy_display_untouched(self, project_tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        create_timeline("demo", "alpha")
+        before = show_timeline("demo", "alpha")
+        assert before is not None
+
+        def _boom(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("append failed")
+
+        monkeypatch.setattr(LocalFsBackend, "append_event", _boom)
+
+        with pytest.raises(RuntimeError, match="append failed"):
+            rename_timeline("demo", "alpha", "beta")
+
+        after = show_timeline("demo", "alpha")
+        assert after is not None
+        assert after["display"].slug == "alpha"
+
+    def test_rename_uses_system_actor_fallback(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        rename_timeline("demo", "alpha", "beta")
+
+        backend = LocalFsBackend(
+            timeline_id=identity["timeline_id"],
+            timeline_home=project_tree / "demo" / "timelines" / ulid,
+        )
+        event = backend.read_events()[-1]
+        assert event.actor.type == "system"
+        assert event.actor.id == "timeline-crud:rename"
 
 
 # ---------------------------------------------------------------------------

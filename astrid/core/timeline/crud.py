@@ -6,9 +6,11 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
+from astrid.core.project.schema import utc_now_iso
 from astrid.threads.ids import generate_ulid
 
 from .integrity import compute_sha256, file_size
@@ -20,10 +22,14 @@ from .model import (
     Manifest,
     TimelineValidationError,
 )
+from .eventlog import LocalFsBackend, select_timeline_stream
+from .events.schema import TimelineActor
 from .paths import (
+    assembly_identity_path,
     display_path,
     find_timeline_by_slug,
     find_timeline_slug_for_ulid,
+    load_display_json_with_repair,
     timeline_dir,
     timelines_dir,
     validate_timeline_slug,
@@ -96,6 +102,18 @@ def create_timeline(
     assembly.write(tdir / "assembly.json")
     manifest.write(tdir / "manifest.json")
     display.write(tdir / "display.json")
+    write_json_atomic(
+        assembly_identity_path(project_slug, ulid, root=root),
+        {
+            "schema_version": 1,
+            "timeline_id": str(uuid4()),
+            "timeline_ulid": ulid,
+            "backend": "local_fs",
+            "provenance": "created",
+            "created_at": utc_now_iso(),
+            "display": display.to_json_obj(),
+        },
+    )
 
     if is_default:
         _set_project_default(project_slug, ulid, root=root)
@@ -132,14 +150,14 @@ def list_timelines(
         if not child.is_dir():
             continue
         ulid = child.name
-        dp = child / "display.json"
         mp = child / "manifest.json"
-        if not dp.is_file():
-            continue
 
         try:
-            display = Display.from_json(dp)
-        except (TimelineValidationError, OSError):
+            raw_display = load_display_json_with_repair(child)
+            if raw_display is None:
+                continue
+            display = Display.from_dict(raw_display)
+        except (TimelineValidationError, OSError, ValueError):
             continue
 
         run_count = 0
@@ -191,7 +209,10 @@ def show_timeline(
     ulid, tdir = found
     assembly = Assembly.from_json(tdir / "assembly.json")
     manifest = Manifest.from_json(tdir / "manifest.json")
-    display = Display.from_json(tdir / "display.json")
+    raw_display = load_display_json_with_repair(tdir)
+    if raw_display is None:
+        return None
+    display = Display.from_dict(raw_display)
     return {
         "ulid": ulid,
         "display": display,
@@ -210,6 +231,7 @@ def rename_timeline(
     old_slug: str,
     new_slug: str,
     *,
+    actor: TimelineActor | None = None,
     root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Rewrite ``display.json`` so *old_slug* becomes *new_slug*.
@@ -230,8 +252,34 @@ def rename_timeline(
             f"timeline slug '{new_slug}' already exists in project '{project_slug}'"
         )
 
+    identity = read_json(assembly_identity_path(project_slug, ulid, root=root))
+    if not isinstance(identity, dict):
+        raise TimelineCrudError("timeline identity sidecar is malformed")
+    timeline_id = identity.get("timeline_id")
+    if not isinstance(timeline_id, str) or not timeline_id:
+        raise TimelineCrudError("timeline identity sidecar is missing timeline_id")
+
+    stream = select_timeline_stream(timeline_id=timeline_id, timeline_home=tdir)
+    if stream.backend != "local_fs" or stream.home is None:
+        raise TimelineCrudError(f"timeline backend {stream.backend!r} is not available for rename")
+
+    rename_actor = actor or TimelineActor(
+        type="system",
+        id="timeline-crud:rename",
+        display="timeline-crud",
+    )
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=stream.home)
+    backend.append_event(
+        "timeline.renamed",
+        {"old_slug": old_slug, "new_slug": new_slug},
+        actor=rename_actor,
+    )
+
     dp = tdir / "display.json"
-    display = Display.from_json(dp)
+    raw_display = load_display_json_with_repair(tdir)
+    if raw_display is None:
+        raise TimelineCrudError(f"timeline '{old_slug}' could not materialize display state")
+    display = Display.from_dict(raw_display)
     updated = Display(
         schema_version=TIMELINE_SCHEMA_VERSION,
         slug=new_slug,

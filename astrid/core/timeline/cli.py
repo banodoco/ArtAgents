@@ -24,6 +24,7 @@ from astrid.core.task.run_audit import _cost_by_source, _run_status
 
 from . import crud
 from .defaults import read_project_default, write_project_default
+from .events.schema import TimelineActor
 from .integrity import verify
 
 _SESSION_GATE_HINT = (
@@ -319,7 +320,12 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 def cmd_rename(args: argparse.Namespace) -> int:
     session = _require_session()
-    result = crud.rename_timeline(session.project, args.old_slug, args.new_slug)
+    result = crud.rename_timeline(
+        session.project,
+        args.old_slug,
+        args.new_slug,
+        actor=_timeline_actor_from_session(session),
+    )
     print(f"renamed timeline '{args.old_slug}' -> '{result['slug']}'")
     return 0
 
@@ -594,3 +600,13 @@ def _require_session(slug: str | None = None) -> Any:
     if session is None:
         raise SessionBindingError(_SESSION_GATE_HINT)
     return session
+
+
+def _timeline_actor_from_session(session: Any) -> TimelineActor:
+    agent_id = getattr(session, "agent_id", "") or "unknown-agent"
+    session_id = getattr(session, "id", "") or "unknown-session"
+    return TimelineActor(
+        type="agent",
+        id=f"{agent_id}:{session_id}",
+        display=agent_id,
+    )
