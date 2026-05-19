@@ -165,7 +165,16 @@ _BYPASS_PATTERNS = (
     re.compile(r"python[0-9]*\s+-m\s+astrid\.packs\.[A-Za-z0-9_.]+(?:\.run)?\b"),
     re.compile(r"from\s+astrid\.packs\.[A-Za-z0-9_.]+\s+import\b"),
     re.compile(r"import\s+astrid\.packs\.[A-Za-z0-9_.]+\b"),
-    re.compile(r"astrid/packs/[A-Za-z0-9_./-]+/run\.py\b"),
+    # Direct path invocation MUST have an execution prefix
+    # (python/python3, ./, bash/sh, exec). Bare path mentions in
+    # narrative reports ("the pipeline lives at astrid/packs/.../run.py")
+    # or read operations like `cat astrid/packs/.../run.py` are NOT a
+    # bypass — they're documentation or inspection. Bare matching was
+    # producing false positives across v10–v12 dogfoods.
+    re.compile(
+        r"(?:python[0-9]*\s+|\./|\bbash\s+|\bsh\s+|\bexec\s+)"
+        r"astrid/packs/[A-Za-z0-9_./-]+/run\.py\b"
+    ),
 )
 
 
