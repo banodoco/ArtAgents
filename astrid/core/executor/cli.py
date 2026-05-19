@@ -420,7 +420,8 @@ def _cmd_list(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
             print(f"{executor.id}\t{executor.kind}\t{executor.name}")
         else:
             short = short_description_or_truncated(executor.short_description, executor.description)
-            print(f"{executor.id}\t{executor.kind}\t{executor.name}\t{short}")
+            invoke = _format_invocation_hint("executors", executor.id, executor.inputs)
+            print(f"{executor.id}\t{executor.kind}\t{executor.name}\t{short}\t{invoke}")
     return 0
 
 
@@ -714,6 +715,17 @@ def _example_path_for_port(port: Any) -> str:
     port_type = getattr(port, "type", None) or ""
     suffix = type_to_ext.get(str(port_type).lower(), "")
     return f"/path/to/{port.name}{suffix}"
+
+
+def _format_invocation_hint(verb: str, qid: str, inputs: tuple[Any, ...]) -> str:
+    parts = [f"astrid {verb} run {qid}"]
+    required = [port for port in inputs if getattr(port, "required", False)]
+    for port in required[:3]:
+        flag = str(getattr(port, "name", "input")).replace("_", "-")
+        parts.append(f"--{flag} <path>")
+    if len(required) > 3:
+        parts.append("...")
+    return " ".join(parts)
 
 
 def _print_invocation_example(verb: str, qid: str, inputs: tuple[Any, ...]) -> None:

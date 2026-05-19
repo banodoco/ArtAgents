@@ -67,8 +67,6 @@ The output must be a JSON object with this structure:
   "observations": {
     "shell_calls_median": <int or null>,
     "shell_calls_p90": <int or null>,
-    "report_lines_median": <int or null>,
-    "report_lines_range": [<int>, <int>] or null,
     "canonical_bypass_forms": ["<string>", ...],
     "other": ["<short bullet>", ...]
   },
@@ -89,9 +87,9 @@ Rules:
    when `contract_eligible=true` and their outcome was failed_contract
    or rejected.
 3. Items from `graded` go in Quality patterns.
-4. Items from `observed` go in Observations regardless of value. Report
-   line counts, shell call counts, and canonical-bypass form strings are
-   telemetry, never contract failures.
+4. Items from `observed` go in Observations regardless of value. Shell
+   call counts and canonical-bypass form strings are telemetry, never
+   contract failures.
 5. `canonical_bypass: "resolved_after_reprompt"` means the first
    attempt bypassed but recovered. Mention it in Observations, not
    Contract failures, and mark that scenario passed unless another
@@ -247,7 +245,6 @@ def _trim_universal(universal: Any) -> dict[str, Any] | None:
             "synthesis_section": "observations",
             "contract_eligible": False,
             "ok": ds.get("ok"),
-            "line_count": ds.get("line_count"),
             "reason": ds.get("reason"),
             "missing_sections": ds.get("missing_sections"),
         }
@@ -434,11 +431,6 @@ def _format_run_md(synth: dict[str, Any]) -> str:
         sp = observations.get("shell_calls_p90")
         if sm is not None or sp is not None:
             lines.append(f"- Shell calls — median: {sm}, p90: {sp}")
-        rm = observations.get("report_lines_median")
-        rr = observations.get("report_lines_range")
-        if rm is not None or rr:
-            rr_str = f" (range {rr[0]}–{rr[1]})" if isinstance(rr, list) and len(rr) == 2 else ""
-            lines.append(f"- Report lines — median: {rm}{rr_str}")
         bf = observations.get("canonical_bypass_forms") or []
         if bf:
             lines.append("- Canonical-bypass forms seen:")
@@ -526,11 +518,6 @@ def _pattern_text(p: dict[str, Any]) -> str:
     ).lower()
 
 
-def _is_report_line_pattern(p: dict[str, Any]) -> bool:
-    text = _pattern_text(p)
-    return "report" in text and ("line" in text or "minimum" in text)
-
-
 def _is_canonical_bypass_pattern(p: dict[str, Any]) -> bool:
     text = _pattern_text(p)
     return "canonical" in text and "bypass" in text
@@ -588,7 +575,6 @@ def _fallback_synthesis_from_payload(
     same ones used by the normal synthesis guardrails.
     """
     contract_map: dict[str, dict[str, Any]] = {}
-    report_lines: list[int] = []
     shell_counts: list[int] = []
     canonical_forms: set[str] = set()
     observations: dict[str, Any] = {"other": []}
@@ -613,14 +599,11 @@ def _fallback_synthesis_from_payload(
         if isinstance(universal, dict):
             ds = universal.get("deliverable_shape") or {}
             if isinstance(ds, dict):
-                line_count = ds.get("line_count")
-                if isinstance(line_count, int):
-                    report_lines.append(line_count)
                 reason_text = ds.get("reason")
                 if reason_text:
                     _append_observation(
                         observations,
-                        f"report_below_minimum_lines in {scenario}: {reason_text}.",
+                        f"deliverable_shape in {scenario}: {reason_text}.",
                     )
 
         rv = agent.get("rubric_verdicts") or {}
@@ -653,8 +636,6 @@ def _fallback_synthesis_from_payload(
 
     observations["shell_calls_median"] = _median_int(shell_counts)
     observations["shell_calls_p90"] = _p90_int(shell_counts)
-    observations["report_lines_median"] = _median_int(report_lines)
-    observations["report_lines_range"] = [min(report_lines), max(report_lines)] if report_lines else None
     observations["canonical_bypass_forms"] = sorted(canonical_forms)
     if reason:
         _append_observation(observations, f"LLM synthesis unavailable: {reason}")
@@ -701,15 +682,6 @@ def _enforce_three_tier_synthesis_rules(
         if not isinstance(raw, dict):
             continue
         p = dict(raw)
-        if _is_report_line_pattern(p):
-            scenarios = p.get("scenarios_affected") or []
-            if scenarios:
-                _append_observation(
-                    observations,
-                    "report_below_minimum_lines is observed telemetry, not a contract failure; "
-                    f"seen in {', '.join(str(s) for s in scenarios)}.",
-                )
-            continue
 
         if _is_canonical_bypass_pattern(p):
             scenarios = [str(s) for s in (p.get("scenarios_affected") or [])]

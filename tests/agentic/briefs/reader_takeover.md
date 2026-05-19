@@ -26,7 +26,7 @@ You're testing the reader-state warning path. Project `$SLUG` already has an act
 
 ## Report (under 350 words, markdown, numbered sections)
 
-The report MUST be at least 30 non-blank lines. Each numbered section MUST have at least 2 substantive sentences.
+Each numbered section MUST have at least 2 substantive sentences.
 
 
 1. **Did the run reach "Run complete"?**

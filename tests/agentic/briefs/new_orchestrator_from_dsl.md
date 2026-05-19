@@ -18,7 +18,7 @@ You pick the orchestrator's qualified id, the pack it lives in, and the step kin
 
 ## Report (under 400 words, markdown with sections labeled 1, 2, 3, ...)
 
-The report MUST be at least 30 non-blank lines. Each numbered section MUST have at least 2 substantive sentences.
+Each numbered section MUST have at least 2 substantive sentences.
 
 
 1. **What did you build?** Qualified id, pack, file path, step shape (kind of each step).

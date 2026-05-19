@@ -21,7 +21,7 @@ You pick the pack and the qualified id (`<pack>.<name>`).
 
 ## Report (under 400 words, markdown with sections labeled 1, 2, 3, ...)
 
-The report MUST be at least 30 non-blank lines. Each numbered section MUST have at least 2 substantive sentences.
+Each numbered section MUST have at least 2 substantive sentences.
 
 
 1. **What did you build?** Qualified id, pack, file paths, args your executor accepts.

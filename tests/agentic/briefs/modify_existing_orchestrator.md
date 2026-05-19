@@ -18,7 +18,7 @@ Constraints:
 
 ## Report (under 400 words, markdown with sections labeled 1, 2, 3, ...)
 
-The report MUST be at least 30 non-blank lines. Each numbered section MUST have at least 2 substantive sentences.
+Each numbered section MUST have at least 2 substantive sentences.
 
 
 1. **Which file did you edit?** Absolute path. How did you decide it was the right one (vs any sibling file with a similar name)?

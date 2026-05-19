@@ -38,7 +38,7 @@ run.
 
 ## Report back
 
-The report MUST be at least 30 non-blank lines. Each numbered section MUST have at least 2 substantive sentences.
+Each numbered section MUST have at least 2 substantive sentences.
 
 When done, write a narrative report with these four numbered sections:
 

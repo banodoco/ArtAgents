@@ -196,8 +196,11 @@ def _cmd_list(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
         if no_describe:
             print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}")
         else:
+            from astrid.core.executor.cli import _format_invocation_hint
+
             short = short_description_or_truncated(orchestrator.short_description, orchestrator.description)
-            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}")
+            invoke = _format_invocation_hint("orchestrators", orchestrator.id, orchestrator.inputs)
+            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}\t{invoke}")
     return 0
 
 

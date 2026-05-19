@@ -81,7 +81,7 @@ tags:
 #               discovery_path_was_efficient.
 #
 #   observed  — telemetry / metadata (integer or string, never gates).
-#               Examples: report_line_count, shell_calls_count,
+#               Examples: shell_calls_count,
 #               canonical_bypass_form.
 #
 # The principle: a measurement is only as strict as its job demands.
@@ -118,11 +118,6 @@ assessment:
     - id: shell_calls_count
       question: "How many shell calls did the agent make? (integer, metadata only)"
       evidence: [stderr]
-      grading: numeric
-      weight: 0
-    - id: report_line_count
-      question: "How many non-blank lines in the agent's report? (integer, metadata only)"
-      evidence: [report]
       grading: numeric
       weight: 0
     # Authoring scenarios also include:

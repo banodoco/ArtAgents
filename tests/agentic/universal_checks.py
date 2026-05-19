@@ -296,13 +296,6 @@ def deliverable_shape(evidence_pack: Path, brief_text: str) -> dict[str, Any]:
     text = _read_text(report_path)
     non_blank = [ln for ln in text.splitlines() if ln.strip()]
     line_count = len(non_blank)
-    if line_count < 30:
-        return {
-            "ok": False,
-            "missing_sections": [],
-            "line_count": line_count,
-            "reason": f"report has only {line_count} non-blank lines (<30)",
-        }
 
     required = _expected_section_numbers(brief_text or "")
     missing: list[int] = [n for n in required if not _has_numbered_section(text, n)]

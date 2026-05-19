@@ -104,8 +104,3 @@ assessment:
       evidence: [stderr]
       grading: numeric
       weight: 0
-    - id: report_line_count
-      question: "How many non-blank lines in the agent's report? (integer, metadata only)"
-      evidence: [report]
-      grading: numeric
-      weight: 0

@@ -156,10 +156,11 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         moirae_line = next(
             line for line in stdout.splitlines() if line.startswith("external.moirae\t")
         )
-        # id, kind, name, short_description = 4 tab-separated columns
-        self.assertEqual(moirae_line.count("\t"), 3)
+        # id, kind, name, short_description, invocation = 5 tab-separated columns
+        self.assertEqual(moirae_line.count("\t"), 4)
         self.assertIn("Moirae", moirae_line)
         self.assertIn("terminal", moirae_line.lower())
+        self.assertIn("astrid executors run external.moirae", moirae_line)
 
     def test_executors_list_no_describe_drops_column(self) -> None:
         result, stdout, stderr = self.capture(executors_cli.main, ["list", "--no-describe"])
