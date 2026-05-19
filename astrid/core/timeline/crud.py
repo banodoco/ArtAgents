@@ -28,7 +28,6 @@ from .paths import (
     assembly_identity_path,
     display_path,
     find_timeline_by_slug,
-    find_timeline_slug_for_ulid,
     load_display_json_with_repair,
     timeline_dir,
     timelines_dir,

@@ -21,8 +21,8 @@ from astrid.core.timeline.crud import (
     show_timeline,
     tombstone_timeline,
 )
-from astrid.core.timeline.paths import assembly_identity_path, timelines_dir
-from astrid.threads.ids import generate_ulid, is_ulid
+from astrid.core.timeline.paths import assembly_identity_path
+from astrid.threads.ids import is_ulid
 
 
 # ---------------------------------------------------------------------------

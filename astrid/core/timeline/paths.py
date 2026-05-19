@@ -83,8 +83,6 @@ def find_timeline_by_slug(
 
     Returns (ulid, timeline_dir) or None if not found.
     """
-    import json
-
     target = validate_timeline_slug(slug)
     td = timelines_dir(project_slug, root=root)
     if not td.is_dir():

@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import sys
 import tarfile
@@ -14,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.project.current_run import read_current_run
-from astrid.core.project.paths import project_dir, resolve_projects_root, validate_project_slug
+from astrid.core.project.paths import project_dir
 from astrid.core.session.binding import (
     SessionBindingError,
     resolve_current_session,
@@ -23,7 +22,6 @@ from astrid.core.task.events import read_events
 from astrid.core.task.run_audit import _cost_by_source, _run_status
 
 from . import crud
-from .defaults import read_project_default, write_project_default
 from .events.schema import TimelineActor
 from .integrity import verify
 
