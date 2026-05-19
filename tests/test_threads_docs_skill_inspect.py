@@ -11,10 +11,13 @@ from astrid.threads.schema import make_thread_record
 
 THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FW0"
 # Sprint 1 / T15 rewrite: the SKILL.md status-first paragraph replaced the
-# old `thread show @active` mandate.
+# old `thread show @active` mandate. As of #13/#14 the universal port-of-call
+# is `astrid next` — it always prints one legal action regardless of bound /
+# unbound state, including unbound discovery hints. ``status`` is the
+# read-side breadcrumb (detail when needed). What we assert is the durable
+# contract: agents who don't know what to do can always run `astrid next`.
 SKILL_PARAGRAPH = (
-    "At the start of any session that will produce runs, run "
-    "`python3 -m astrid status` FIRST."
+    "When in doubt, run `astrid next`"
 )
 
 

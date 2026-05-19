@@ -7,26 +7,40 @@ import keyword
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from astrid.contracts.schema import (
     CACHE_MODES,
     ISOLATION_MODES,
     OUTPUT_MODES,
     PORT_REQUIRED_TYPES,
+    CacheMode,
     CachePolicy,
     CommandSpec,
     IsolationMetadata,
+    IsolationMode,
     Output as ExecutorOutput,
+    OutputMode,
     Port as ExecutorPort,
+    PortType,
 )
 from astrid.timeline import ClipClassifiedKind
 
-EXECUTOR_KINDS = {"built_in", "external"}
-EXTERNAL_RUNTIME_MODES = {"api", "package"}
-EXTERNAL_RUNTIME_SOURCE_KINDS = {"git", "path", "pypi"}
-EXTERNAL_RUNTIME_INSTALL_STRATEGIES = {"pip_args", "pyproject", "requirements"}
-CONDITION_KINDS = {"requires_input", "requires_file", "skip_if_input", "always"}
+from typing import Literal as _Literal, get_args as _get_args
+
+ExecutorKind = _Literal["built_in", "external"]
+ExternalRuntimeMode = _Literal["api", "package"]
+ExternalRuntimeSourceKind = _Literal["git", "path", "pypi"]
+ExternalRuntimeInstallStrategy = _Literal["pip_args", "pyproject", "requirements"]
+ConditionKind = _Literal["requires_input", "requires_file", "skip_if_input", "always"]
+
+# Runtime allowlists derived from the Literal aliases (single source of truth).
+EXECUTOR_KINDS: frozenset[str] = frozenset(_get_args(ExecutorKind))
+EXTERNAL_RUNTIME_MODES: frozenset[str] = frozenset(_get_args(ExternalRuntimeMode))
+EXTERNAL_RUNTIME_SOURCE_KINDS: frozenset[str] = frozenset(_get_args(ExternalRuntimeSourceKind))
+EXTERNAL_RUNTIME_INSTALL_STRATEGIES: frozenset[str] = frozenset(_get_args(ExternalRuntimeInstallStrategy))
+CONDITION_KINDS: frozenset[str] = frozenset(_get_args(ConditionKind))
+
 CLIP_KIND_VALUES = tuple(kind.value for kind in ClipClassifiedKind)
 PIPELINE_REQUIREMENT_FACTS = {
     "arrangement",
@@ -86,9 +100,30 @@ class ExecutorValidationError(ValueError):
     """Raised when a executor manifest or definition is structurally invalid."""
 
 
+def _validate_in_allowed(value: str, allowed: frozenset[str], path: str) -> None:
+    """Raise ``ExecutorValidationError`` if ``value`` is not in ``allowed``."""
+
+    if value not in allowed:
+        raise ExecutorValidationError(f"{path} must be one of {sorted(allowed)}")
+
+
+from typing import TypeVar as _TypeVar
+
+_LiteralT = _TypeVar("_LiteralT")
+
+
+def _require_literal(value: Any, allowed: frozenset[str], path: str, literal_type: type[_LiteralT]) -> _LiteralT:
+    """Validate ``value`` is a string in ``allowed`` and return it typed as the Literal alias."""
+    if not isinstance(value, str):
+        raise ExecutorValidationError(f"{path} must be a string")
+    if value not in allowed:
+        raise ExecutorValidationError(f"{path} must be one of {sorted(allowed)} (got {value!r})")
+    return cast(literal_type, value)
+
+
 @dataclass(frozen=True)
 class ConditionSpec:
-    kind: str
+    kind: ConditionKind
     input: str | None = None
     path: str | None = None
     value: Any = None
@@ -103,7 +138,7 @@ class GraphMetadata:
 
 @dataclass(frozen=True)
 class ExternalRuntimeSource:
-    kind: str
+    kind: ExternalRuntimeSourceKind
     url: str | None = None
     ref: str | None = None
     path: str | None = None
@@ -112,13 +147,13 @@ class ExternalRuntimeSource:
 
 @dataclass(frozen=True)
 class ExternalRuntimeInstall:
-    strategy: str
+    strategy: ExternalRuntimeInstallStrategy
     target: str
 
 
 @dataclass(frozen=True)
 class ExternalRuntimeMetadata:
-    mode: str = "package"
+    mode: ExternalRuntimeMode = "package"
     source: ExternalRuntimeSource | None = None
     install: ExternalRuntimeInstall | None = None
     import_check: str | None = None
@@ -129,7 +164,7 @@ class ExternalRuntimeMetadata:
 class ExecutorDefinition:
     id: str
     name: str
-    kind: str
+    kind: ExecutorKind
     version: str
     description: str = ""
     short_description: str = ""
@@ -229,7 +264,7 @@ def _parse_executor(raw: Any) -> ExecutorDefinition:
     return ExecutorDefinition(
         id=data["id"],
         name=data["name"],
-        kind=data["kind"],
+        kind=_require_literal(data.get("kind"), EXECUTOR_KINDS, "executor.kind", ExecutorKind),
         version=data["version"],
         description=_optional_string(data, "description", "executor.description"),
         short_description=_optional_string(data, "short_description", "executor.short_description"),
@@ -253,7 +288,9 @@ def _parse_port(raw: Any, path: str) -> ExecutorPort:
     name = _require_string(data, "name", f"{path}.name")
     return ExecutorPort(
         name=name,
-        type=_optional_string(data, "type", f"{path}.type", default="path"),
+        type=_require_literal(
+            data.get("type", "path"), PORT_REQUIRED_TYPES, f"{path}.type", PortType
+        ),
         required=_optional_bool(data, "required", f"{path}.required", default=True),
         description=_optional_string(data, "description", f"{path}.description"),
         default=data.get("default"),
@@ -266,8 +303,12 @@ def _parse_output(raw: Any, path: str) -> ExecutorOutput:
     name = _require_string(data, "name", f"{path}.name")
     return ExecutorOutput(
         name=name,
-        type=_optional_string(data, "type", f"{path}.type", default="path"),
-        mode=_optional_string(data, "mode", f"{path}.mode", default="create_or_replace"),
+        type=_require_literal(
+            data.get("type", "path"), PORT_REQUIRED_TYPES, f"{path}.type", PortType
+        ),
+        mode=_require_literal(
+            data.get("mode", "create_or_replace"), OUTPUT_MODES, f"{path}.mode", OutputMode
+        ),
         description=_optional_string(data, "description", f"{path}.description"),
         placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
         path_template=_optional_nullable_string(data, "path_template", f"{path}.path_template"),
@@ -286,8 +327,14 @@ def _parse_external_runtime(raw: Any, path: str) -> ExternalRuntimeMetadata | No
         binary_check: tuple[str, ...] = ()
     else:
         binary_check = tuple(_string_list(binary_check_raw, f"{path}.binary_check"))
+    mode = _require_literal(
+        data.get("mode", "package"),
+        EXTERNAL_RUNTIME_MODES,
+        f"{path}.mode",
+        ExternalRuntimeMode,
+    )
     return ExternalRuntimeMetadata(
-        mode=_optional_string(data, "mode", f"{path}.mode", default="package"),
+        mode=mode,
         source=source,
         install=install,
         import_check=_optional_nullable_string(data, "import_check", f"{path}.import_check"),
@@ -299,7 +346,12 @@ def _parse_external_runtime_source(raw: Any, path: str) -> ExternalRuntimeSource
     if raw is None:
         return None
     data = _require_mapping(raw, path)
-    kind = _require_string(data, "kind", f"{path}.kind")
+    kind = _require_literal(
+        data.get("kind"),
+        EXTERNAL_RUNTIME_SOURCE_KINDS,
+        f"{path}.kind",
+        ExternalRuntimeSourceKind,
+    )
     ref = _optional_nullable_string(data, "ref", f"{path}.ref")
     return ExternalRuntimeSource(
         kind=kind,
@@ -314,8 +366,14 @@ def _parse_external_runtime_install(raw: Any, path: str) -> ExternalRuntimeInsta
     if raw is None:
         return None
     data = _require_mapping(raw, path)
+    strategy = _require_literal(
+        data.get("strategy"),
+        EXTERNAL_RUNTIME_INSTALL_STRATEGIES,
+        f"{path}.strategy",
+        ExternalRuntimeInstallStrategy,
+    )
     return ExternalRuntimeInstall(
-        strategy=_require_string(data, "strategy", f"{path}.strategy"),
+        strategy=strategy,
         target=_require_string(data, "target", f"{path}.target"),
     )
 
@@ -343,7 +401,9 @@ def _parse_command(raw: Any, path: str) -> CommandSpec | None:
 def _parse_cache(raw: Any, path: str) -> CachePolicy:
     data = _require_mapping(raw, path)
     return CachePolicy(
-        mode=_optional_string(data, "mode", f"{path}.mode", default="sentinel"),
+        mode=_require_literal(
+            data.get("mode", "sentinel"), CACHE_MODES, f"{path}.mode", CacheMode
+        ),
         sentinels=tuple(_optional_string_list(data, "sentinels", f"{path}.sentinels")),
         always_run=_optional_bool(data, "always_run", f"{path}.always_run", default=False),
         per_brief=_optional_bool(data, "per_brief", f"{path}.per_brief", default=False),
@@ -352,8 +412,14 @@ def _parse_cache(raw: Any, path: str) -> CachePolicy:
 
 def _parse_condition(raw: Any, path: str) -> ConditionSpec:
     data = _require_mapping(raw, path)
+    kind = _require_literal(
+        data.get("kind"),
+        CONDITION_KINDS,
+        f"{path}.kind",
+        ConditionKind,
+    )
     return ConditionSpec(
-        kind=_require_string(data, "kind", f"{path}.kind"),
+        kind=kind,
         input=_optional_nullable_string(data, "input", f"{path}.input"),
         path=_optional_nullable_string(data, "path", f"{path}.path"),
         value=data.get("value"),
@@ -372,7 +438,9 @@ def _parse_graph(raw: Any, path: str) -> GraphMetadata:
 def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
     data = _require_mapping(raw, path)
     return IsolationMetadata(
-        mode=_optional_string(data, "mode", f"{path}.mode", default="subprocess"),
+        mode=_require_literal(
+            data.get("mode", "subprocess"), ISOLATION_MODES, f"{path}.mode", IsolationMode
+        ),
         requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
         binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
         network=_optional_bool(data, "network", f"{path}.network", default=False),

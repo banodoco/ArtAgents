@@ -265,6 +265,30 @@ def test_attach_as_agent_rejects_malformed(env: dict[str, Path]) -> None:
     assert rc == 2
 
 
+def test_status_honors_attach_as_override(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fix 2: `attach --as agent:<slug>` must win over the on-disk
+    identity record when ``status`` reports the actor. The identity
+    fixture seeds ``agent_id=claude-1``; we attach as ``foo`` and assert
+    ``status`` prints ``agent: foo``, not the seeded identity."""
+    _seed_project(env["projects"], "demo")
+    attach_buf = StringIO()
+    rc = cli.cmd_attach(_args(as_agent="agent:foo"), out=attach_buf)
+    assert rc == 0
+    # Pull the new session id from the file so we can bind the env var.
+    sess_file = next(iter((env["home"] / "sessions").iterdir()))
+    payload = json.loads(sess_file.read_text())
+    assert payload["agent_id"] == "foo"
+    monkeypatch.setenv("ASTRID_SESSION_ID", payload["id"])
+
+    status_buf = StringIO()
+    rc = cli.cmd_status(argparse.Namespace(), out=status_buf)
+    assert rc == 0
+    assert "agent: foo" in status_buf.getvalue()
+    assert "agent: claude-1" not in status_buf.getvalue()
+
+
 # ----- cmd_sessions_ls --------------------------------------------------
 
 

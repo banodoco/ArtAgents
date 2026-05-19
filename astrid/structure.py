@@ -12,7 +12,7 @@ from astrid.core.orchestrator.folder import load_folder_orchestrators
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
-INTERNAL_PACK_DIRS = {"__pycache__"}
+INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
 TOP_LEVEL_ASTRID_FILES = {
     "__init__.py",
     "__main__.py",
@@ -29,6 +29,7 @@ TOP_LEVEL_ASTRID_DIRS = {
     "audit",
     "contracts",
     "core",
+    "docs",
     "domains",
     "elements",
     "modalities",
@@ -155,7 +156,7 @@ def _validate_pack_orchestrator_folders(packs_root: Path) -> list[str]:
     return errors
 
 
-_ELEMENT_KINDS = ("effects", "animations", "transitions")
+from astrid.core.pack import ELEMENT_KINDS as _ELEMENT_KINDS
 
 
 def _validate_pack_element_folders(packs_root: Path) -> list[str]:
@@ -180,7 +181,16 @@ def _validate_pack_element_folders(packs_root: Path) -> list[str]:
 
 
 def _public_child_dirs(root: Path, skipped: set[str]) -> tuple[Path, ...]:
-    return tuple(sorted(path for path in root.iterdir() if path.is_dir() and path.name not in skipped and not path.name.startswith(".")))
+    return tuple(
+        sorted(
+            path
+            for path in root.iterdir()
+            if path.is_dir()
+            and path.name not in skipped
+            and not path.name.startswith(".")
+            and not path.name.startswith("_")
+        )
+    )
 
 
 def _require_files(folder: Path, filenames: tuple[str, ...], *, root: Path) -> list[str]:

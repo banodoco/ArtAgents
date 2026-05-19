@@ -247,15 +247,35 @@ def cmd_start(
         from astrid.core.timeline.crud import list_timelines
         available = list_timelines(slug, root=projects_root)
         if available:
-            _print_err("No default timeline; pass --timeline <slug>. Available:")
-            for ts in available:
-                _print_err(f"  {ts.slug}  ({ts.name})")
-            return 1
-        _print_err(
-            f"start: no timelines exist for project {slug!r}; "
-            "starting without a timeline. "
-            f"Create one later with `astrid timelines create <slug>`."
-        )
+            # Fix 5 (v6 dogfood): when exactly one timeline exists, auto-
+            # select it instead of bailing — the previous behaviour forced
+            # agents to re-issue the command with the obvious flag value.
+            # Multi-timeline projects still require explicit selection.
+            if len(available) == 1:
+                only = available[0]
+                found = find_timeline_by_slug(slug, only.slug, root=projects_root)
+                if found is None:
+                    _print_err(
+                        f"start: timeline {only.slug!r} not found in project {slug!r}"
+                    )
+                    return 1
+                timeline_id = found[0]
+                timeline_slug = only.slug
+                _print_err(
+                    f"(auto-selected only timeline {timeline_slug!r}; "
+                    f"pass --timeline explicitly to override)"
+                )
+            else:
+                _print_err("No default timeline; pass --timeline <slug>. Available:")
+                for ts in available:
+                    _print_err(f"  {ts.slug}  ({ts.name})")
+                return 1
+        else:
+            _print_err(
+                f"start: no timelines exist for project {slug!r}; "
+                "starting without a timeline. "
+                f"Create one later with `astrid timelines create <slug>`."
+            )
 
     proj_root = project_dir(slug, root=projects_root)
     proj_root.mkdir(parents=True, exist_ok=True)
@@ -545,8 +565,7 @@ _ASTRID_PLACEHOLDER_RE = __import__("re").compile(r"\$\{?(ASTRID_[A-Z_]+)\}?")
 
 
 def _default_projects_root() -> Path:
-    import os as _os
-    return Path(_os.path.expanduser("~/Documents/reigh-workspace/astrid-projects"))
+    return resolve_projects_root()
 
 
 def render_step_instructions(
@@ -563,8 +582,7 @@ def render_step_instructions(
 
     Substitutes the full ``$ASTRID_TASK_*`` surface — including the ``${VAR}``
     form — against the resolved run/item context. ``projects_root`` resolution
-    order: function param > ``ASTRID_PROJECTS_ROOT`` env > default
-    ``~/Documents/reigh-workspace/astrid-projects``.
+    order: function param > ``ASTRID_PROJECTS_ROOT`` env > ``resolve_projects_root()``.
 
     Under ``is_author_test_mode()`` OR ``ASTRID_STRICT_INSTRUCTION_SUBST=1``,
     an unknown ``$ASTRID_*`` token raises ``AssertionError`` and the result is
@@ -577,8 +595,7 @@ def render_step_instructions(
     if text is None:
         return ""
     if projects_root is None:
-        env_root = _os.environ.get("ASTRID_PROJECTS_ROOT")
-        projects_root = Path(env_root) if env_root else _default_projects_root()
+        projects_root = _default_projects_root()
     step_path_str = STEP_PATH_SEP.join(plan_step_path) if plan_step_path else ""
     allow = {
         "ASTRID_PROJECTS_ROOT": str(projects_root),
@@ -867,6 +884,38 @@ def _completed_items_from_events(events, host_path):
     return completed
 
 
+def _print_post_completion_handoff(
+    slug: str,
+    *,
+    just_finished_plan_id: str | None,
+    packs_root: Optional[Path] = None,
+) -> None:
+    """Fix 3 (v6 dogfood): after a run completes, print the next concrete
+    orchestrator the agent should start.
+
+    Lists available orchestrators on the checkout, filters out the one that
+    just completed (so we don't suggest "do the same thing again"), and
+    surfaces the freshest remaining id with the canonical ``astrid start``
+    invocation. When nothing else is registered, falls back to a generic
+    template plus the ``astrid next`` suggestion shell so the agent still
+    has a single legal command to type.
+    """
+    orchs, _ = _list_orchestrator_ids(packs_root=packs_root)
+    others = [oid for oid in orchs if oid != just_finished_plan_id]
+    print()
+    print("start another orchestrator on this project:")
+    if others:
+        top = others[0]
+        print(f"  astrid start {top} --project {slug}")
+        if len(others) > 1:
+            print(
+                f"  # other candidates: {', '.join(others[1:])}"
+            )
+    else:
+        print(f"  astrid start <orchestrator-id> --project {slug}")
+    print("(or just run `astrid next` for a fresh suggestion list)")
+
+
 def _list_project_slugs(projects_root: Optional[Path]) -> list[str]:
     """List on-disk project slugs at the projects_root (sorted, never raises)."""
     try:
@@ -1008,11 +1057,9 @@ def _print_next_no_run_hint(slug: str, projects_root: Optional[Path]) -> None:
     print(f"  astrid start <orchestrator-id> --project {slug}")
     print()
     if orchs:
-        print("available orchestrators (top 6):")
-        for oid in orchs[:6]:
+        print("available orchestrators:")
+        for oid in orchs:
             print(f"  astrid start {oid} --project {slug}")
-        if len(orchs) > 6:
-            print(f"  ({len(orchs) - 6} more — `astrid orchestrators list` for the full set)")
     elif registry_err is not None:
         print("orchestrator registry failed to load:")
         print(f"  {registry_err}")
@@ -1038,26 +1085,33 @@ def _most_recent_session_slug(projects_root: Optional[Path]) -> str | None:
     ASTRID_SESSION_ID set, scanning projects-root for the freshest
     .astrid-session is a cheap way to recover the same binding.
 
-    Concurrency disambiguation (polish #32): the v7 probe surfaced a real
-    failure mode — when multiple agents share one projects-root and each
+    Concurrency disambiguation (polish #32, hardened by agentic dogfood
+    finding #DD): when multiple agents share one projects-root and each
     writes its own ``.astrid-session``, "the freshest" can be ANY of them,
-    not necessarily the one this caller actually attached. v7_min explicitly
-    reported the session "kept resolving to different project slugs" because
-    the auto-resolve picked a sibling agent's binding.
+    not necessarily the one this caller actually attached.
 
-    Fix: if the top-two most-recent files were written within
-    AMBIGUITY_WINDOW_SEC of each other, return None. Better to print the
-    "no session bound" discovery hint and force the agent to be explicit
-    than to silently bind to a stranger's session. This is the "fail
-    closed, never silently wrong" principle.
+    The original fix (60s ambiguity window) was insufficient. A real
+    Claude agent doing the agentic test concurrency probe reported the
+    failure mode the 60s window misses: agent A attaches at T+0, agent
+    B attaches at T+120 (outside the window), then agent A re-touches
+    its ``.astrid-session`` at T+200 (re-attach, status read, whatever).
+    Now A's file is fresher than B's, B's bare ``astrid next`` resolves
+    to A's project — silently wrong binding. Window-based heuristics
+    cannot catch mtime-crossings; they're a fundamental global race.
+
+    Hardened policy: refuse auto-resolve when MORE THAN ONE
+    ``.astrid-session`` exists in the projects-root, regardless of
+    mtimes. The agent must be explicit (`--project`, `attach`, or
+    `ASTRID_SESSION_ID`). Fail closed — the cost of a silently wrong
+    binding is much higher than the cost of one extra `--project` flag.
+
+    Single-project case still works: one ``.astrid-session`` → resolve
+    it. Multi-project case forces explicit selection.
 
     This is a deliberate UX fallback in `cmd_next`, distinct from
     `resolve_current_session` itself (which by FLAG-S1-003 invariant
-    never walks the filesystem to discover the slug). Returns None when
-    no .astrid-session file exists under any project root OR multiple
-    files are concurrently fresh.
+    never walks the filesystem to discover the slug).
     """
-    AMBIGUITY_WINDOW_SEC = 60.0
     try:
         root = Path(projects_root) if projects_root is not None else resolve_projects_root()
     except Exception:
@@ -1079,15 +1133,19 @@ def _most_recent_session_slug(projects_root: Optional[Path]) -> str | None:
             continue
     if not candidates:
         return None
-    candidates.sort(reverse=True)
-    if len(candidates) >= 2:
-        top_mtime = candidates[0][0]
-        second_mtime = candidates[1][0]
-        if top_mtime - second_mtime < AMBIGUITY_WINDOW_SEC:
-            # Ambiguous — multiple sessions are concurrently fresh; refuse
-            # to guess. Caller will print the discovery hint and force an
-            # explicit attach or --project.
-            return None
+    if len(candidates) > 1:
+        # Ambiguous: more than one bound project on disk. Print an
+        # enumerated stderr nudge so the caller (often an agent reading
+        # stderr) can pick the right project explicitly.
+        candidates.sort(key=lambda t: t[0], reverse=True)  # freshest first
+        print(
+            f"_most_recent_session_slug: {len(candidates)} projects have a"
+            f" bound session on disk — refusing to guess.",
+            file=sys.stderr,
+        )
+        for mtime, pslug in candidates:
+            print(f"  --project {pslug}", file=sys.stderr)
+        return None
     return candidates[0][1]
 
 
@@ -1306,6 +1364,13 @@ def cmd_next(
             "Run complete. Nothing to do.",
             **{**_tail_render_kwargs, "plan_step_path": None, "item_id": None, "iteration": None},
         ))
+        # Fix 3 (v6 dogfood): post-completion handoff was missing on this
+        # tail-derived RunComplete path. Mirror the other RunComplete path
+        # (~line 1376) so sequential_orchestrators no longer dead-ends.
+        _print_post_completion_handoff(
+            slug,
+            just_finished_plan_id=getattr(plan, "plan_id", None),
+        )
         return 0
 
     # --skip: emit step_skipped events for optional leaves until either the
@@ -1364,15 +1429,16 @@ def cmd_next(
                 item_id=None,
                 iteration=None,
             ))
-            # Post-completion handoff (#27): seq probe found agents had to
-            # know to abort + start the next orchestrator manually. Now
-            # that current_run.json was just cleared by _emit_run_completed_if_needed,
-            # print the start-next hint inline so the agent sees the
-            # whole sequential flow as one continuous instruction stream.
-            print()
-            print(f"start another orchestrator on this project:")
-            print(f"  astrid start <orchestrator-id> --project {slug}")
-            print("(or just run `astrid next` for a fresh suggestion list)")
+            # Post-completion handoff (#27 + Fix 3): seq probe found agents
+            # had to know to abort + start the next orchestrator manually.
+            # Now that current_run.json was just cleared by
+            # _emit_run_completed_if_needed, print the start-next hint with
+            # a concrete next orchestrator id (not just a placeholder), so
+            # the sequential flow reads as one continuous instruction stream.
+            _print_post_completion_handoff(
+                slug,
+                just_finished_plan_id=getattr(plan, "plan_id", None),
+            )
         else:
             parked = STEP_PATH_SEP.join(peek.path_tuple) if peek.path_tuple else "<root>"
             print(

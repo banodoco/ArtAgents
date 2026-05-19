@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Query OpenAI vision models against one image or a numbered frame sheet."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.visual_understand')
 import argparse
 import base64
 import json
@@ -16,7 +20,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.packs.builtin.generate_image.run import load_api_key
+from astrid.core.util.secrets import load_api_key
 
 
 API_URL = "https://api.openai.com/v1/responses"

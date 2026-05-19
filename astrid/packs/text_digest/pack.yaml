@@ -1,0 +1,11 @@
+schema_version: 1
+id: text_digest
+name: Text Digest
+version: 0.1.0
+description: A pack for Text Digest.
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+agent:
+  purpose: "TODO: describe what this pack is for"

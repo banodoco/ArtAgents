@@ -3,19 +3,28 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal, get_args
 
 
-PORT_REQUIRED_TYPES = {"string", "path", "file", "directory", "json", "boolean", "number", "integer"}
-OUTPUT_MODES = {"mutate", "create", "create_or_replace"}
-CACHE_MODES = {"none", "sentinel", "always_run"}
-ISOLATION_MODES = {"in_process", "subprocess"}
+PortType = Literal[
+    "string", "path", "file", "directory", "json", "boolean", "number", "integer"
+]
+OutputMode = Literal["mutate", "create", "create_or_replace"]
+CacheMode = Literal["none", "sentinel", "always_run"]
+IsolationMode = Literal["in_process", "subprocess"]
+
+# Runtime-validation allowlists, derived from the Literal aliases so the two
+# can never drift out of sync.
+PORT_REQUIRED_TYPES: frozenset[str] = frozenset(get_args(PortType))
+OUTPUT_MODES: frozenset[str] = frozenset(get_args(OutputMode))
+CACHE_MODES: frozenset[str] = frozenset(get_args(CacheMode))
+ISOLATION_MODES: frozenset[str] = frozenset(get_args(IsolationMode))
 
 
 @dataclass(frozen=True)
 class Port:
     name: str
-    type: str = "path"
+    type: PortType = "path"
     required: bool = True
     description: str = ""
     default: Any = None
@@ -25,8 +34,8 @@ class Port:
 @dataclass(frozen=True)
 class Output:
     name: str
-    type: str = "path"
-    mode: str = "create_or_replace"
+    type: PortType = "path"
+    mode: OutputMode = "create_or_replace"
     description: str = ""
     placeholder: str | None = None
     path_template: str | None = None
@@ -46,7 +55,7 @@ class CommandSpec:
 
 @dataclass(frozen=True)
 class CachePolicy:
-    mode: str = "sentinel"
+    mode: CacheMode = "sentinel"
     sentinels: tuple[str, ...] = ()
     always_run: bool = False
     per_brief: bool = False
@@ -54,7 +63,7 @@ class CachePolicy:
 
 @dataclass(frozen=True)
 class IsolationMetadata:
-    mode: str = "subprocess"
+    mode: IsolationMode = "subprocess"
     requirements: tuple[str, ...] = ()
     binaries: tuple[str, ...] = ()
     network: bool = False
@@ -62,9 +71,13 @@ class IsolationMetadata:
 
 __all__ = [
     "CACHE_MODES",
+    "CacheMode",
     "ISOLATION_MODES",
+    "IsolationMode",
     "OUTPUT_MODES",
+    "OutputMode",
     "PORT_REQUIRED_TYPES",
+    "PortType",
     "CachePolicy",
     "CommandSpec",
     "IsolationMetadata",

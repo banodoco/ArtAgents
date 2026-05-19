@@ -30,18 +30,21 @@ from .supabase_client import Auth, SupabaseHTTPError, post_json, rpc
 logger = logging.getLogger(__name__)
 
 
-TimelineConfig = dict[str, Any]
-Mutator = Callable[[TimelineConfig, int], TimelineConfig]
+# Local raw-payload alias for in-flight mutation. The rich TypedDict for
+# fully-validated timelines lives in astrid.timeline; this module operates on
+# the unvalidated POST/PATCH body before it has been schema-checked.
+RawTimelinePayload = dict[str, Any]
+Mutator = Callable[[RawTimelinePayload, int], RawTimelinePayload]
 
 
 @dataclass(frozen=True)
 class SaveResult:
-    timeline: TimelineConfig
+    timeline: RawTimelinePayload
     new_version: int
     attempts: int
 
 
-def _round_trip(payload: Mapping[str, Any]) -> TimelineConfig:
+def _round_trip(payload: Mapping[str, Any]) -> RawTimelinePayload:
     """Round-trip a fetched timeline through astrid.timeline so byte-equivalent
     allowlist parity stays intact."""
 
@@ -76,7 +79,7 @@ def fetch_timeline(
     timeline_id: str,
     auth: Auth,
     timeout: float = 60.0,
-) -> tuple[TimelineConfig, int]:
+) -> tuple[RawTimelinePayload, int]:
     """Call ``reigh-data-fetch`` and return ``(timeline_config, config_version)``."""
 
     payload = post_json(
@@ -139,7 +142,7 @@ def save_timeline(
     """Apply ``mutator`` to the timeline and persist via the versioned RPC.
 
     The mutator receives ``(current_config, current_version)`` and must return
-    a new ``TimelineConfig`` dict. On version-mismatch responses (HTTP 409 or
+    a new ``RawTimelinePayload`` dict. On version-mismatch responses (HTTP 409 or
     body markers like ``version_conflict`` / ``expected_version``), the helper
     re-fetches and re-applies the mutator. ``retries`` is the total attempt
     count (including the first one).
@@ -189,7 +192,7 @@ def save_timeline(
 
         new_config = mutator(config, current_version)
         if not isinstance(new_config, dict):
-            raise TypeError("save_timeline mutator must return a TimelineConfig dict")
+            raise TypeError("save_timeline mutator must return a RawTimelinePayload dict")
 
         storage_payload = _to_storage_payload(new_config)
         try:

@@ -670,7 +670,8 @@ _SESSION_GATE_HINT = (
 
 
 def _require_project_session(project_slug: str) -> None:
-    session = resolve_current_session()
+    # T9 / FLAG-S1-003: plumb slug for file-bound .astrid-session fallback.
+    session = resolve_current_session(slug=project_slug)
     if session is None:
         raise SessionBindingError(_SESSION_GATE_HINT)
 

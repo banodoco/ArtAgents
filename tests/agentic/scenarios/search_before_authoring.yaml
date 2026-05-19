@@ -1,0 +1,106 @@
+name: search_before_authoring
+tier: discovery
+description: |
+  Agent receives a capability description ("judge a video against a brief
+  and emit editorial notes") that is already covered by
+  `builtin.editor_review`. The brief explicitly instructs them to search
+  first. Failure mode probed: agent jumps straight to scaffolding a new
+  executor/orchestrator under `astrid/packs/` instead of running
+  `executors search` / `orchestrators search` and finding the existing
+  tool. Tests whether the discovery surface is good enough that a
+  search-first agent succeeds.
+
+brief: search_before_authoring.md
+
+priming:
+  - create_project: $SLUG
+
+target_orchestrator: builtin.editor_review
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  # Machine-graded
+  - no_aborts
+  - tool_used: builtin.editor_review
+  # Subjective
+  - subjective:
+      - used_orchestrators_search_or_list
+      - found_editor_review
+      - did_not_start_authoring_new
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 12
+
+tags:
+  - skill_trigger
+  - search_first
+  - discovery
+
+assessment:
+  universal_checks: true
+  enforced:
+      - id: did_not_start_authoring_new
+        question: |
+          Did the agent avoid scaffolding any new executor/orchestrator
+          under `astrid/packs/` — no `astrid executors new`, no new
+          files written under packs/?
+        evidence: [stderr, project_tree]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr contains `astrid executors new` / `astrid orchestrators
+          new`, or tree.txt shows newly-written files under
+          `astrid/packs/` that didn't exist before.
+      - id: invoked_via_canonical_cli
+        question: |
+          Did the agent invoke editor_review via `astrid orchestrators
+          run builtin.editor_review` rather than `python -m
+          astrid.packs.builtin.editor_review` or a direct import?
+        evidence: [stderr]
+        grading: pass_fail
+        weight: 2
+  graded:
+      - id: used_orchestrators_search_or_list
+        question: |
+          Did the agent run `astrid orchestrators search` or
+          `astrid orchestrators list` (or executors equivalent) as
+          their FIRST mutating discovery step, before any file edits?
+        evidence: [stderr]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr shows file-tree exploration (grep/find/cat into
+          astrid/packs/) or scaffolding edits before any
+          `orchestrators search`/`list` call.
+      - id: found_editor_review
+        question: |
+          Did the agent find `builtin.editor_review` and identify it as
+          the right tool, rather than missing it and falling through to
+          authoring?
+        evidence: [stderr, report]
+        grading: pass_fail
+        weight: 2
+      - id: report_shape_intact
+        question: |
+          Does the report's "what tools you discovered" section name
+          `builtin.editor_review` with the discovery path that surfaced
+          it?
+        evidence: [report]
+        grading: pass_fail
+        weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: report_line_count
+      question: "How many non-blank lines in the agent's report? (integer, metadata only)"
+      evidence: [report]
+      grading: numeric
+      weight: 0

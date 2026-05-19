@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Iterable
+from typing import Iterable, cast
 
 from astrid._paths import REPO_ROOT
 from astrid.core.pack import discover_packs, iter_element_roots, validate_element_pack_id
@@ -51,14 +51,14 @@ class ElementRegistry:
         self._all[key].sort(key=lambda item: (item.priority, item.source, str(item.root)))
         return element
 
-    def get(self, kind: str, element_id: str) -> ElementDefinition:
+    def get(self, kind: ElementKind, element_id: str) -> ElementDefinition:
         key = (kind, element_id)
         try:
             return self._all[key][0]
         except KeyError as exc:
             raise KeyError(f"unknown {kind} element {element_id!r}") from exc
 
-    def list(self, kind: str | None = None) -> tuple[ElementDefinition, ...]:
+    def list(self, kind: ElementKind | None = None) -> tuple[ElementDefinition, ...]:
         if kind is not None and kind not in ELEMENT_KINDS:
             raise ElementRegistryError(f"kind must be one of {list(ELEMENT_KINDS)}")
         winners = [definitions[0] for (item_kind, _), definitions in self._all.items() if kind is None or item_kind == kind]
@@ -70,7 +70,7 @@ class ElementRegistry:
             if len(definitions) > 1:
                 conflicts.append(
                     ElementConflict(
-                        kind=kind,  # type: ignore[arg-type]
+                        kind=cast(ElementKind, kind),
                         id=element_id,
                         winner=definitions[0],
                         shadowed=tuple(definitions[1:]),
@@ -81,11 +81,11 @@ class ElementRegistry:
     def as_mapping(self) -> MappingProxyType[tuple[str, str], ElementDefinition]:
         return MappingProxyType({key: definitions[0] for key, definitions in self._all.items()})
 
-    def fork_target(self, kind: str, element_id: str, *, project_root: str | Path = REPO_ROOT) -> Path:
+    def fork_target(self, kind: ElementKind, element_id: str, *, project_root: str | Path = REPO_ROOT) -> Path:
         element = self.get(kind, element_id)
         return Path(project_root) / element.fork_target
 
-    def fork(self, kind: str, element_id: str, *, project_root: str | Path = REPO_ROOT, overwrite: bool = False) -> Path:
+    def fork(self, kind: ElementKind, element_id: str, *, project_root: str | Path = REPO_ROOT, overwrite: bool = False) -> Path:
         element = self.get(kind, element_id)
         target = self.fork_target(kind, element_id, project_root=project_root)
         if target.exists() and not overwrite:
@@ -106,7 +106,7 @@ def load_default_registry(
     include_missing_roots: bool = False,
 ) -> ElementRegistry:
     registry = ElementRegistry()
-    for element in load_pack_elements():
+    for element in load_pack_elements(project_root=project_root):
         registry.register(element)
     for source in default_sources(active_theme=active_theme, project_root=project_root):
         if not source.root.exists():
@@ -132,11 +132,32 @@ def default_sources(*, active_theme: str | Path | None = None, project_root: str
     return tuple(sources)
 
 
-def load_pack_elements() -> tuple[ElementDefinition, ...]:
-    elements: list[ElementDefinition] = []
+def load_pack_elements(*, project_root: str | Path = REPO_ROOT) -> tuple[ElementDefinition, ...]:
+    from .schema import ELEMENT_MANIFEST_NAMES
+
+    # The `local` scratch pack is project-scoped (gitignored) — load it from
+    # <project_root>/astrid/packs/local only when project_root is distinct
+    # from the source-tree REPO_ROOT, so the workspace scratch pack never
+    # leaks into discovery for code that did not opt into a project.
+    repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
+    project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
+
+    packs: list = []
     for pack in discover_packs():
+        if pack.id == "local":
+            continue
+        packs.append(pack)
+    if project_pack_root != repo_pack_root and project_pack_root.is_dir():
+        for pack in discover_packs(project_pack_root):
+            if pack.id == "local":
+                packs.append(pack)
+
+    elements: list[ElementDefinition] = []
+    for pack in packs:
         priority = 10 if pack.id == "local" else 30
         for kind, root in iter_element_roots(pack):
+            if not any((root / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
+                continue
             element = load_element_definition(
                 root,
                 kind=kind,

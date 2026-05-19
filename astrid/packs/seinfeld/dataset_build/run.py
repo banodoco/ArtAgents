@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Seinfeld dataset_build orchestrator — bucket-fill loop.
 
+
 Searches YouTube, downloads candidate videos, segments scenes, judges each
 scene against the locked vocabulary, captions the accepted ones, and writes
 a training manifest.
@@ -8,6 +9,9 @@ a training manifest.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.dataset_build')
 import argparse
 import json
 import os

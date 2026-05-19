@@ -72,9 +72,11 @@ def test_inbox_approve_consumed_into_step_attested(tmp_path: Path) -> None:
     consumed_files = list(consumed_dir.iterdir())
     assert len(consumed_files) == 1
 
-    # Follow-up cmd_next: run is exhausted.
+    # Follow-up cmd_next: run is exhausted. Completion is recorded by appending a
+    # ``run_completed`` event to events.jsonl (cmd_next no longer prints a banner).
     buf = io.StringIO()
     with redirect_stdout(buf), redirect_stderr(io.StringIO()):
         rc2 = cmd_next(["--project", "p"], projects_root=projects)
     assert rc2 == 0
-    assert "run complete" in buf.getvalue()
+    final_events = read_events(events_path)
+    assert any(e.get("kind") == "run_completed" for e in final_events)

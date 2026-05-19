@@ -1,7 +1,11 @@
 """Generic human-gate HTTP server — see STAGE.md for the full contract."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.human_review')
 import argparse
 import json
 import mimetypes

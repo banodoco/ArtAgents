@@ -178,7 +178,7 @@ def test_k_iterate_cumulative_feedback(tmp_path: Path) -> None:
         "--actor", "alice", "--feedback", "even shorter",
     )
     assert rc2 == 0
-    fb2 = projects / "p" / "runs" / "rk" / "steps" / "review" / "iterations" / "002" / "feedback.json"
+    fb2 = projects / "p" / "runs" / "rk" / "steps" / "review" / "v1" / "iterations" / "002" / "feedback.json"
     assert fb2.is_file()
     assert json.loads(fb2.read_text()) == ["less verbose", "even shorter"]
     events = [json.loads(line) for line in (projects/"p"/"runs"/"rk"/"events.jsonl").read_text().splitlines()]

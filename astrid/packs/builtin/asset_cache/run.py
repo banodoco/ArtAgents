@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """URL-backed asset cache for the hype pipeline.
 
+
 Assets are cached under ${HYPE_CACHE_DIR:-~/.cache/banodoco-hype}/assets.
 Delete that directory manually if you need to clear all cached bytes. Run
 `python -m asset_cache --prune-older-than N` to reclaim space from entries
@@ -9,6 +10,9 @@ that have not been accessed recently.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.asset_cache')
 import argparse
 import contextlib
 import datetime as dt

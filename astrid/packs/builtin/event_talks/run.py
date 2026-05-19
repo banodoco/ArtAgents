@@ -1,7 +1,11 @@
 """Sprint 5b: event_talks orchestrator — plan v2 emission + task gate loop."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.event_talks')
 import argparse
 import hashlib
 import json

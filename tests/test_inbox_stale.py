@@ -71,8 +71,13 @@ def test_step_id_mismatch_leaves_file_in_place(tmp_path: Path) -> None:
 
     # No new event — cursor unchanged.
     assert len(read_events(events_path)) == initial_count
-    # File still in inbox/ (not in .consumed or .rejected).
-    assert inbox_file.exists()
+    # Sprint-5b contract change (STOP-LINE in astrid/core/task/inbox.py): stale
+    # entries — including step_id mismatches against tombstoned/missing steps —
+    # are now quarantined to inbox/.rejected/ rather than left in inbox/.
+    assert not inbox_file.exists()
+    rejected_dir = run_dir / "inbox" / ".rejected"
+    assert rejected_dir.is_dir()
+    assert len(list(rejected_dir.iterdir())) == 1
 
 
 def test_approve_on_actor_step_quarantined_to_rejected(
@@ -132,5 +137,10 @@ def test_malformed_json_skipped_and_logged(tmp_path: Path, caplog) -> None:
     assert rc == 0
 
     assert len(read_events(events_path)) == initial_count
-    assert inbox_file.exists()
+    # Sprint-5b STOP-LINE: malformed JSON is quarantined to inbox/.rejected/ so it
+    # does not loop on subsequent cmd_next invocations.
+    assert not inbox_file.exists()
+    rejected_dir = run_dir / "inbox" / ".rejected"
+    assert rejected_dir.is_dir()
+    assert len(list(rejected_dir.iterdir())) == 1
     assert any("broken.json" in record.message for record in caplog.records)

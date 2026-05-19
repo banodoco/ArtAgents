@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """seinfeld.script_pipeline - generate short Seinfeld-style script scenes."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.script_pipeline')
 import argparse
 import json
 import os

@@ -12,23 +12,45 @@ from astrid.contracts.schema import (
     CACHE_MODES,
     ISOLATION_MODES,
     OUTPUT_MODES,
+    PORT_REQUIRED_TYPES,
+    CacheMode,
     CachePolicy,
     CommandSpec,
     IsolationMetadata,
+    IsolationMode,
     Output,
+    OutputMode,
     Port,
+    PortType,
 )
-ORCHESTRATOR_KINDS = {"built_in", "external"}
-RUNTIME_KINDS = {"python", "command"}
+from typing import Literal as _Literal, TypeVar as _TypeVar, cast as _cast, get_args as _get_args
+
+OrchestratorKind = _Literal["built_in", "external"]
+RuntimeKind = _Literal["python", "command"]
+
+ORCHESTRATOR_KINDS: frozenset[str] = frozenset(_get_args(OrchestratorKind))
+RUNTIME_KINDS: frozenset[str] = frozenset(_get_args(RuntimeKind))
 
 
 class OrchestratorValidationError(ValueError):
     """Raised when a orchestrator manifest or definition is structurally invalid."""
 
 
+_LiteralT = _TypeVar("_LiteralT")
+
+
+def _require_literal(value: Any, allowed: frozenset[str], path: str, literal_type: type[_LiteralT]) -> _LiteralT:
+    """Validate ``value`` is a string in ``allowed`` and return it typed as the Literal alias."""
+    if not isinstance(value, str):
+        raise OrchestratorValidationError(f"{path} must be a string")
+    if value not in allowed:
+        raise OrchestratorValidationError(f"{path} must be one of {sorted(allowed)} (got {value!r})")
+    return _cast(literal_type, value)
+
+
 @dataclass(frozen=True)
 class RuntimeSpec:
-    kind: str
+    kind: RuntimeKind
     module: str | None = None
     function: str | None = None
     command: CommandSpec | None = None
@@ -38,7 +60,7 @@ class RuntimeSpec:
 class OrchestratorDefinition:
     id: str
     name: str
-    kind: str
+    kind: OrchestratorKind
     version: str
     runtime: RuntimeSpec
     description: str = ""
@@ -108,7 +130,7 @@ def _parse_orchestrator(raw: Any) -> OrchestratorDefinition:
     return OrchestratorDefinition(
         id=data["id"],
         name=data["name"],
-        kind=data["kind"],
+        kind=_require_literal(data.get("kind"), ORCHESTRATOR_KINDS, "orchestrator.kind", OrchestratorKind),
         version=data["version"],
         runtime=_parse_runtime(data["runtime"], "orchestrator.runtime"),
         description=_optional_string(data, "description", "orchestrator.description"),
@@ -138,28 +160,26 @@ def _canonical_child_list(data: dict[str, Any], *, legacy_key: str, canonical_ke
 
 def _parse_runtime(raw: Any, path: str) -> RuntimeSpec:
     data = _require_mapping(raw, path)
-    kind = _require_string(data, "kind", f"{path}.kind")
+    kind = _require_literal(
+        _require_string(data, "kind", f"{path}.kind"),
+        RUNTIME_KINDS, f"{path}.kind", RuntimeKind,
+    )
     if kind == "python":
         return RuntimeSpec(
             kind=kind,
             module=_optional_nullable_string(data, "module", f"{path}.module"),
             function=_optional_nullable_string(data, "function", f"{path}.function"),
         )
-    if kind == "command":
-        return RuntimeSpec(kind=kind, command=_parse_command(data.get("command"), f"{path}.command"))
-    return RuntimeSpec(
-        kind=kind,
-        module=_optional_nullable_string(data, "module", f"{path}.module"),
-        function=_optional_nullable_string(data, "function", f"{path}.function"),
-        command=_parse_command(data.get("command"), f"{path}.command") if "command" in data else None,
-    )
+    return RuntimeSpec(kind=kind, command=_parse_command(data.get("command"), f"{path}.command"))
 
 
 def _parse_port(raw: Any, path: str) -> Port:
     data = _require_mapping(raw, path)
     return Port(
         name=_require_string(data, "name", f"{path}.name"),
-        type=_optional_string(data, "type", f"{path}.type", default="path"),
+        type=_require_literal(
+            data.get("type", "path"), PORT_REQUIRED_TYPES, f"{path}.type", PortType
+        ),
         required=_optional_bool(data, "required", f"{path}.required", default=True),
         description=_optional_string(data, "description", f"{path}.description"),
         default=data.get("default"),
@@ -171,8 +191,12 @@ def _parse_output(raw: Any, path: str) -> Output:
     data = _require_mapping(raw, path)
     return Output(
         name=_require_string(data, "name", f"{path}.name"),
-        type=_optional_string(data, "type", f"{path}.type", default="path"),
-        mode=_optional_string(data, "mode", f"{path}.mode", default="create_or_replace"),
+        type=_require_literal(
+            data.get("type", "path"), PORT_REQUIRED_TYPES, f"{path}.type", PortType
+        ),
+        mode=_require_literal(
+            data.get("mode", "create_or_replace"), OUTPUT_MODES, f"{path}.mode", OutputMode
+        ),
         description=_optional_string(data, "description", f"{path}.description"),
         placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
         path_template=_optional_nullable_string(data, "path_template", f"{path}.path_template"),
@@ -203,7 +227,9 @@ def _parse_command(raw: Any, path: str) -> CommandSpec | None:
 def _parse_cache(raw: Any, path: str) -> CachePolicy:
     data = _require_mapping(raw, path)
     return CachePolicy(
-        mode=_optional_string(data, "mode", f"{path}.mode", default="sentinel"),
+        mode=_require_literal(
+            data.get("mode", "sentinel"), CACHE_MODES, f"{path}.mode", CacheMode
+        ),
         sentinels=tuple(_optional_string_list(data, "sentinels", f"{path}.sentinels")),
         always_run=_optional_bool(data, "always_run", f"{path}.always_run", default=False),
         per_brief=_optional_bool(data, "per_brief", f"{path}.per_brief", default=False),
@@ -213,7 +239,9 @@ def _parse_cache(raw: Any, path: str) -> CachePolicy:
 def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
     data = _require_mapping(raw, path)
     return IsolationMetadata(
-        mode=_optional_string(data, "mode", f"{path}.mode", default="subprocess"),
+        mode=_require_literal(
+            data.get("mode", "subprocess"), ISOLATION_MODES, f"{path}.mode", IsolationMode
+        ),
         requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
         binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
         network=_optional_bool(data, "network", f"{path}.network", default=False),

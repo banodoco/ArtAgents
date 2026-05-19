@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """seinfeld.lora_eval_grid — baseline + per-checkpoint inference + index.html viewer."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.lora_eval_grid')
 import argparse
 import html
 import json
@@ -15,24 +19,55 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
-TRIGGER = "seinfeld scene"
-
-
 def _build_prompts(vocab: dict, smoke: bool) -> list[str]:
+    configured = vocab.get("eval_prompts") or vocab.get("sample_prompts")
+    n = 3 if smoke else 6
+    if isinstance(configured, list) and configured:
+        return [str(prompt) for prompt in configured[:n]]
+
+    trigger = str(vocab.get("trigger_word") or vocab.get("trigger") or "seinfeld scene").strip()
     scenes = list((vocab.get("scenes") or {}).keys())
     chars = list((vocab.get("characters") or {}).keys())
-    shots = list((vocab.get("shot_types") or {}).keys()) or ["medium"]
-    out: list[str] = []
-    n = 3 if smoke else 6
-    for i in range(n):
-        scene = scenes[i % max(len(scenes), 1)] if scenes else "jerrys_apt"
-        char = chars[i % max(len(chars), 1)] if chars else "jerry"
-        shot = shots[i % len(shots)]
-        out.append(
-            f"{TRIGGER}, A {shot} shot in {scene}. {char.capitalize()} talking. "
-            f"Seinfeld sitcom style, 90s NBC lighting, multi-cam look."
-        )
-    return out
+    scene = scenes[0] if scenes else "jerrys_apt"
+    first_char = chars[0].capitalize() if chars else "Jerry"
+    prompts = [
+        (
+            f"{trigger}, Scene: A medium two-shot in {scene}, near the kitchen counter. "
+            "Jerry stands beside a cereal shelf while George gestures anxiously with both hands. "
+            "Speech: \"You alphabetized the cereal?\" -- Jerry, dry. "
+            "\"It is not alphabetized, it is emotionally indexed.\" -- George, defensive. "
+            "Sounds: quiet apartment room tone and a short studio audience laugh. Style: 90s NBC sitcom lighting."
+        ),
+        (
+            f"{trigger}, Scene: A wide living-room shot in {scene}, facing the couch and doorway. "
+            "Elaine enters with a shopping bag as Kramer slides through the door and Jerry turns from the kitchen. "
+            "Speech: \"You brought the bag back?\" -- Jerry, suspicious. \"The bag has history.\" -- Elaine, firm. "
+            "\"I know a bag guy.\" -- Kramer, confident. Sounds: door movement, apartment ambience, audience laughter."
+        ),
+        (
+            f"{trigger}, Scene: A wide shot in {scene}. Jerry sits on the couch with a TV remote, "
+            "George stands near the coffee table, Elaine leans on the couch, and Kramer hovers near the door. "
+            "Speech: \"Nobody touched the remote?\" -- Jerry, skeptical. \"I respected the remote.\" -- George, nervous. "
+            "\"You feared the remote.\" -- Elaine, amused. Sounds: room tone and studio audience laugh."
+        ),
+        (
+            f"{trigger}, Scene: A medium shot in {scene} by the stereo and bookshelves. "
+            "Kramer taps along to tinny music while George winces and Jerry reaches for the volume knob. "
+            "Speech: \"That is not music, that is a drawer opening.\" -- Jerry, deadpan. "
+            "\"It has movement.\" -- Kramer, excited. \"So does panic.\" -- George, irritated."
+        ),
+        (
+            f"{trigger}, Scene: A medium-wide shot in {scene}. A small orange cat sits on the coffee table "
+            "while Jerry, Elaine, George, and Kramer argue around it. Speech: \"Why is there a cat on my table?\" "
+            "-- Jerry, annoyed. \"It chose you.\" -- Kramer, reverent. Sounds: soft meow and audience laugh."
+        ),
+        (
+            f"{trigger}, Scene: A medium shot in {scene}. {first_char} pauses mid-argument, "
+            "then points toward the kitchen with a suspicious look. Speech: \"This is how it starts.\" "
+            "Sounds: apartment room tone and a small laugh from the audience. Style: 90s multi-camera sitcom."
+        ),
+    ]
+    return prompts[:n]
 
 
 def _render_index_html(prompts: list[str], buckets: list[str], grid_dir: Path) -> str:

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """seinfeld.aitoolkit_train — start training on pod, mirror logs, emit checkpoint manifest."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.aitoolkit_train')
 import argparse
 import json
 import re

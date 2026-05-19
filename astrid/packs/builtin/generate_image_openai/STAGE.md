@@ -1,23 +1,31 @@
-# Generate Image Executor
+# Generate Image (OpenAI) Executor
 
-Use `builtin.generate_image` when an agent needs bitmap image assets for timelines,
-collages, pitch frames, visual treatments, or fallback art packs.
+Use `builtin.generate_image_openai` when an agent needs bitmap image assets from
+OpenAI GPT Image models for timelines, collages, pitch frames, visual treatments,
+or fallback art packs.
 
-This executor wraps `astrid.packs.builtin.generate_image.run` and expects a prompt file. Put one
-prompt per line, or provide a JSON/JSONL list accepted by the underlying CLI.
+> **Sprint 01 note:** This is the original OpenAI-only executor, renamed from
+> its previous ID.  The new multi-backend image generation executor (which
+> reclaimed the `builtin.generate_image` executor ID) supports both local
+> (vibecomfy) and cloud (fal) execution.  Prefer the new multi-backend
+> executor for new work unless you specifically need OpenAI GPT Image models.
+
+This executor wraps `astrid.packs.builtin.generate_image_openai.run` and expects a
+prompt file. Put one prompt per line, or provide a JSON/JSONL list accepted by the
+underlying CLI.
 
 ## Commands
 
 Inspect:
 
 ```bash
-python3 -m astrid executors inspect builtin.generate_image
+python3 -m astrid executors inspect builtin.generate_image_openai
 ```
 
 Dry-run:
 
 ```bash
-python3 -m astrid executors run builtin.generate_image \
+python3 -m astrid executors run builtin.generate_image_openai \
   --out runs/example-images \
   --input prompts_file=runs/example-images/prompts.txt \
   --dry-run
@@ -26,7 +34,7 @@ python3 -m astrid executors run builtin.generate_image \
 Run:
 
 ```bash
-python3 -m astrid executors run builtin.generate_image \
+python3 -m astrid executors run builtin.generate_image_openai \
   --out runs/example-images \
   --input prompts_file=runs/example-images/prompts.txt
 ```
@@ -46,7 +54,7 @@ Pass `--preset <name>` to use a canned prompt and behaviour bundle. Currently:
   command pipes a prompt file rather than a preset:
 
   ```bash
-  python3 -m astrid.packs.builtin.generate_image.run \
+  python3 -m astrid.packs.builtin.generate_image_openai.run \
     --preset saint-peter-of-banodoco \
     --out-dir runs/first-rite/images \
     --manifest runs/first-rite/manifest.json \

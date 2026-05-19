@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Query a video-native Gemini model against source video windows."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.video_understand')
 import argparse
 import json
 import subprocess

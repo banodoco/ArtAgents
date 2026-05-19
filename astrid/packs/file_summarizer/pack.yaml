@@ -1,0 +1,11 @@
+schema_version: 1
+id: file_summarizer
+name: File Summarizer
+version: 0.1.0
+description: A pack for File Summarizer.
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+agent:
+  purpose: "TODO: describe what this pack is for"

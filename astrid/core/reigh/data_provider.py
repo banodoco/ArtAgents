@@ -38,7 +38,7 @@ from . import env as reigh_env
 from . import timeline_io
 from .errors import TimelineNotFoundError
 from .supabase_client import Auth, SupabaseHTTPError, post_json
-from .timeline_io import Mutator, SaveResult, TimelineConfig
+from .timeline_io import Mutator, RawTimelinePayload as TimelineConfig, SaveResult
 
 logger = logging.getLogger(__name__)
 

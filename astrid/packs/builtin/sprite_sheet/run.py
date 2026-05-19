@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Generate a GPT Image sprite sheet, slice frames, and assemble previews."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.sprite_sheet')
 import argparse
 import base64
 import json
@@ -19,7 +23,7 @@ from urllib.request import Request, urlopen
 import uuid
 import zlib
 
-from astrid.packs.builtin.generate_image.run import (
+from astrid.packs.builtin.generate_image_openai.run import (
     API_URL,
     DEFAULT_MODEL,
     GPT_IMAGE_2_MAX_EDGE,
@@ -31,8 +35,8 @@ from astrid.packs.builtin.generate_image.run import (
     _die,
     _read_env_value,
     _validate_payload,
-    load_api_key,
 )
+from astrid.core.util.secrets import load_api_key
 
 EDIT_API_URL = "https://api.openai.com/v1/images/edits"
 DEFAULT_KEY_COLOR = "#ff00ff"
@@ -688,7 +692,7 @@ def write_layout_guide(
     }
 
 
-def _sprite_prompt(args: argparse.Namespace, layout: dict[str, Any]) -> str:
+def _sprite_prompt(args: argparse.Namespace, layout: dict[str, Any], *, has_reference_image: bool = False) -> str:
     frame_count = int(layout["frame_count"])
     capacity = int(layout["capacity"])
     extra = ""
@@ -704,27 +708,40 @@ def _sprite_prompt(args: argparse.Namespace, layout: dict[str, Any]) -> str:
         )
     else:
         background = args.background.strip() if args.background else "plain white background"
-    return "\n".join(
-        [
-            "Create one complete animation sprite sheet.",
-            f"Animation: {args.animation.strip()}",
-            f"Subject: {args.subject.strip()}",
-            f"Style: {style}",
-            f"Canvas: {layout['sheet_width']}x{layout['sheet_height']} pixels.",
-            f"Grid: {layout['cols']} columns by {layout['rows']} rows, {capacity} cells total.",
-            f"Animation frames: exactly {frame_count} sequential frames.{extra}",
-            f"Each frame cell is exactly {layout['frame_width']}x{layout['frame_height']} pixels.",
-            f"Safe area: keep the entire character, all limbs, cape, backpack, motion arcs, and effects at least {safe_margin} pixels inside each cell boundary.",
-            "Never let any body part cross, touch, or continue through a cell boundary. No partial heads, feet, hands, capes, or limbs at any cell edge.",
-            "Frame order is left-to-right across each row, then top-to-bottom.",
-            "Each cell must contain one sequential pose from the animation.",
-            "Keep the subject centered inside each cell with consistent scale, camera, lighting, and proportions.",
-            f"Background for every cell: {background}.",
-            "Do not include text, labels, numbers, watermarks, UI, borders, grid lines, gutters, or frame separators in the final artwork.",
-            "Do not merge frames together. Do not create a collage. Do not vary art style between frames.",
-            "The provided guide image is only a layout template showing cell placement and safe areas; remove all guide lines from the final sprite sheet.",
-        ]
-    )
+    lines = [
+        "Create one complete animation sprite sheet.",
+        f"Animation: {args.animation.strip()}",
+        f"Subject: {args.subject.strip()}",
+        f"Style: {style}",
+        f"Canvas: {layout['sheet_width']}x{layout['sheet_height']} pixels.",
+        f"Grid: {layout['cols']} columns by {layout['rows']} rows, {capacity} cells total.",
+        f"Animation frames: exactly {frame_count} sequential frames.{extra}",
+        f"Each frame cell is exactly {layout['frame_width']}x{layout['frame_height']} pixels.",
+        f"Safe area: keep the entire character, all limbs, cape, backpack, motion arcs, and effects at least {safe_margin} pixels inside each cell boundary.",
+        "Never let any body part cross, touch, or continue through a cell boundary. No partial heads, feet, hands, capes, or limbs at any cell edge.",
+        "Frame order is left-to-right across each row, then top-to-bottom.",
+        "Each cell must contain one sequential pose from the animation.",
+        "Keep the subject centered inside each cell with consistent scale, camera, lighting, and proportions.",
+        "Unless the animation explicitly requires locomotion or repositioning, keep the subject's base, feet, body anchor, or contact point pixel-registered in the same place across every frame. The torso/core/base must not bob, drift, float, shrink, grow, or shift up and down; only the parts named by the animation should move.",
+        "Make the motion read like a usable sprite animation: frame-to-frame changes should be coherent increments of the requested action, with consistent spacing and no accidental camera movement. Use small controlled movements for subtle actions, and only use larger pose changes when the animation description clearly calls for them.",
+        f"Background for every cell: {background}.",
+        "Do not include text, labels, numbers, watermarks, UI, borders, grid lines, gutters, or frame separators in the final artwork.",
+        "Do not merge frames together. Do not create a collage. Do not vary art style between frames.",
+        "The provided guide image is only a layout template showing cell placement and safe areas; remove all guide lines from the final sprite sheet.",
+    ]
+    if has_reference_image:
+        lines.insert(
+            3,
+            (
+                "Use the provided reference image as the source of truth for the character identity, silhouette, "
+                "palette, rendering style, markings, proportions, and distinctive details. Animate that exact "
+                "character; do not redesign it, replace it, or invent a different character."
+            ),
+        )
+        lines.append(
+            "If multiple images are provided, the character reference controls identity and the layout guide controls only grid placement."
+        )
+    return "\n".join(lines)
 
 
 def _multipart_field(name: str, value: str, boundary: str) -> bytes:
@@ -735,7 +752,17 @@ def _multipart_field(name: str, value: str, boundary: str) -> bytes:
     ).encode("utf-8")
 
 
-def _multipart_file(name: str, path: Path, boundary: str, content_type: str = "image/png") -> bytes:
+def _image_content_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        return "image/jpeg"
+    if suffix == ".webp":
+        return "image/webp"
+    return "image/png"
+
+
+def _multipart_file(name: str, path: Path, boundary: str, content_type: str | None = None) -> bytes:
+    content_type = content_type or _image_content_type(path)
     header = (
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="{name}"; filename="{path.name}"\r\n'
@@ -744,13 +771,17 @@ def _multipart_file(name: str, path: Path, boundary: str, content_type: str = "i
     return header + path.read_bytes() + b"\r\n"
 
 
-def _call_image_edit_api(payload: dict[str, Any], image_path: Path, api_key: str, timeout: int) -> dict[str, Any]:
+def _call_image_edit_api(payload: dict[str, Any], image_paths: Path | list[Path], api_key: str, timeout: int) -> dict[str, Any]:
+    paths = [image_paths] if isinstance(image_paths, Path) else list(image_paths)
+    if not paths:
+        _die("At least one image is required for the image edit API")
     boundary = f"astrid-{uuid.uuid4().hex}"
     parts: list[bytes] = []
     for key, value in payload.items():
         if value is not None:
             parts.append(_multipart_field(key, str(value), boundary))
-    parts.append(_multipart_file("image", image_path, boundary))
+    for image_path in paths:
+        parts.append(_multipart_file("image[]", image_path, boundary))
     parts.append(f"--{boundary}--\r\n".encode("utf-8"))
     body = b"".join(parts)
     request = Request(
@@ -771,6 +802,20 @@ def _call_image_edit_api(payload: dict[str, Any], image_path: Path, api_key: str
     except URLError as exc:
         _die(f"Network error: {exc}")
     return {}
+
+
+def _request_payload_for_image_model(args: argparse.Namespace, prompt: str, size: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": args.model,
+        "prompt": prompt,
+        "size": size,
+        "quality": args.quality,
+        "n": 1,
+    }
+    if args.model != DEFAULT_MODEL:
+        payload["output_format"] = "png"
+        payload["background"] = "opaque"
+    return payload
 
 
 def _write_first_image(response: dict[str, Any], out_path: Path, force: bool) -> None:
@@ -1124,6 +1169,11 @@ def build_web_outputs(
 
 def build(args: argparse.Namespace) -> int:
     input_sheet = args.input_sheet.expanduser().resolve() if args.input_sheet is not None else None
+    reference_image = Path(args.reference_image).expanduser().resolve() if args.reference_image else None
+    if reference_image is not None and not reference_image.is_file():
+        _die(f"--reference-image not found: {reference_image}")
+    if input_sheet is not None and reference_image is not None:
+        _die("--reference-image generates a new sheet and cannot be combined with --input-sheet post-processing")
     inferred_cols = args.cols
     inferred_rows = args.rows
     if input_sheet is not None:
@@ -1147,17 +1197,9 @@ def build(args: argparse.Namespace) -> int:
     sheet_width = cols * args.frame_width
     sheet_height = rows * args.frame_height
     size = f"{sheet_width}x{sheet_height}"
-    _validate_payload(
-        {
-            "model": args.model,
-            "prompt": "validation",
-            "n": 1,
-            "size": size,
-            "quality": args.quality,
-            "output_format": "png",
-            "background": "opaque",
-        }
-    )
+    validation_payload = dict(_request_payload_for_image_model(args, "validation", size))
+    validation_payload.setdefault("n", 1)
+    _validate_payload(validation_payload)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     guide_path = args.out_dir / "layout_guide.png"
@@ -1184,23 +1226,18 @@ def build(args: argparse.Namespace) -> int:
         safe_margin=args.safe_margin,
         background_color=guide_background,
     )
-    prompt = _sprite_prompt(args, layout)
-    request_payload = {
-        "model": args.model,
-        "prompt": prompt,
-        "n": 1,
-        "size": size,
-        "quality": args.quality,
-        "output_format": "png",
-        "background": "opaque",
-    }
+    prompt = _sprite_prompt(args, layout, has_reference_image=reference_image is not None)
+    request_payload = _request_payload_for_image_model(args, prompt, size)
 
     if args.dry_run:
         print(
             json.dumps(
                 {
-                    "endpoint": "postprocess" if input_sheet is not None else (EDIT_API_URL if args.use_layout_guide else API_URL),
+                    "endpoint": "postprocess"
+                    if input_sheet is not None
+                    else (EDIT_API_URL if reference_image is not None or (args.use_layout_guide and args.model != DEFAULT_MODEL) else API_URL),
                     "input_sheet": str(input_sheet) if input_sheet is not None else None,
+                    "reference_image": str(reference_image) if reference_image is not None else None,
                     "layout_guide": str(guide_path),
                     "sprite_sheet": str(input_sheet or sheet_path),
                     "alpha_sprite_sheet": str(alpha_sheet_path) if args.transparent else None,
@@ -1224,7 +1261,9 @@ def build(args: argparse.Namespace) -> int:
         api_key = load_api_key(args.env_file)
         print(f"Calling {args.model} for {size} sprite sheet", file=sys.stderr)
         started = time.time()
-        if args.use_layout_guide:
+        if reference_image is not None:
+            response = _call_image_edit_api(request_payload, reference_image, api_key, args.timeout)
+        elif args.use_layout_guide and args.model != DEFAULT_MODEL:
             response = _call_image_edit_api(request_payload, guide_path, api_key, args.timeout)
         else:
             response = _call_image_api(request_payload, api_key, args.timeout)
@@ -1312,6 +1351,8 @@ def build(args: argparse.Namespace) -> int:
         "animation": args.animation,
         "subject": args.subject,
         "style": args.style,
+        "model": args.model,
+        "reference_image": str(reference_image) if reference_image is not None else None,
         "layout": layout,
         "prompt": prompt,
         "layout_guide": str(guide_path),
@@ -1398,6 +1439,12 @@ def build_parser() -> argparse.ArgumentParser:
     add("--quality", default="medium")
     add("--out-dir", type=Path, default=Path("runs/sprite-sheet"))
     add("--input-sheet", type=Path, help="Existing PNG sprite sheet to post-process instead of generating a new sheet.")
+    add(
+        "--reference-image",
+        "--input-image",
+        default="",
+        help="Reference image for the character/object to preserve while generating a new sprite sheet.",
+    )
     add("--env-file", type=Path)
     add("--timeout", type=int, default=240)
     add("--force", action="store_true")

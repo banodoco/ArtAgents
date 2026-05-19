@@ -63,7 +63,7 @@ def test_two_step_plan_drives_kernel_end_to_end(tmp_projects_root: Path) -> None
     events = read_events(events_path)
     completed_events = [event for event in events if event.get("kind") == "step_completed"]
     assert len(completed_events) == 2
-    assert [event["plan_step_id"] for event in completed_events] == ["step-1", "step-2"]
+    assert [event["plan_step_path"] for event in completed_events] == [["step-1"], ["step-2"]]
     assert all(event["returncode"] == 0 for event in completed_events)
 
     with pytest.raises(TaskRunGateError) as exc_info:

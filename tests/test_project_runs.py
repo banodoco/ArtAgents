@@ -65,6 +65,7 @@ def test_executor_legacy_out_still_writes_thread_record(tmp_path: Path, monkeypa
 def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
     create_project("demo")
     registry = OrchestratorRegistry([_writer_orchestrator("test.orch")])
 
@@ -94,6 +95,7 @@ def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_p
 def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
     create_project("demo")
 
     code = hype.main(["--project", "demo", "--target-duration", "1"])
@@ -259,5 +261,10 @@ def _clear_thread_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ASTRID_RUN_ID",
         "ASTRID_PARENT_RUN_ID",
         "ASTRID_PROJECT_RUN",
+        "ASTRID_TASK_RUN_ID",
+        "ASTRID_TASK_PROJECT",
+        "ASTRID_TASK_STEP_ID",
+        "ASTRID_TASK_ITEM_ID",
+        "ASTRID_TASK_ITERATION",
     ):
         monkeypatch.delenv(name, raising=False)

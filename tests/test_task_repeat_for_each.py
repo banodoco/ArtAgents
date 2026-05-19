@@ -124,8 +124,9 @@ def test_for_each_from_ref_resolves_at_runtime_from_prior_step_produces(tmp_proj
     # Run list_videos
     d1 = task_gate.gate_command("demo", "echo list", ["echo", "list"], root=tmp_projects_root)
     sd = step_dir_for_path("demo", "run-1", d1.plan_step_path, root=tmp_projects_root)
-    sd.mkdir(parents=True, exist_ok=True)
-    (sd / "videos.json").write_text(json.dumps(["v1", "v2"]), encoding="utf-8")
+    produces_dir = sd / "produces"
+    produces_dir.mkdir(parents=True, exist_ok=True)
+    (produces_dir / "videos.json").write_text(json.dumps(["v1", "v2"]), encoding="utf-8")
     task_gate.record_dispatch_complete(d1, 0)
 
     # Now hit host — should resolve from disk and emit for_each_expanded

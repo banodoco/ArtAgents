@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Search Hugging Face Hub for LoRA adapters by base model."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.search_loras')
 import argparse
 import json
 import os

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Publish a Banodoco-authored timeline into a Reigh project.
 
+
 Sprint 6 (Phase 6): hashes-and-uploads each non-HTTP asset to the
 `timeline-assets` Supabase Storage bucket under
 `<user_id>/<timeline_id>/<sha256>.<ext>`, rewrites the asset registry to
@@ -25,6 +26,9 @@ Idempotency (SD-011):
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.publish')
 import argparse
 import base64
 import hashlib

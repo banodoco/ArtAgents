@@ -54,7 +54,7 @@ from astrid.core.reigh.task_client import (
     claim_next_task,
     update_task_status,
 )
-from astrid.core.reigh.timeline_io import Mutator, SaveResult, TimelineConfig
+from astrid.core.reigh.timeline_io import Mutator, RawTimelinePayload as TimelineConfig, SaveResult
 from astrid.core.reigh.worker_jwt import JwtVerificationError, VerifiedJwt, verify_user_jwt
 
 logger = logging.getLogger(__name__)

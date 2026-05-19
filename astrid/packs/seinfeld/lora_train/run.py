@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """seinfeld.lora_train — orchestrator: provision → stage → train → eval → human gate → resume → teardown → register.
 
+
 Subcommands:
   default (no subcommand): run pipeline up through human gate, exit 0 with last_run.json status=PAUSED.
   resume: read last_run.json + --pick <step>, write chosen_checkpoint.json, teardown pod, register LoRA.
@@ -10,6 +11,9 @@ See ./STAGE.md for the full step list.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.lora_train')
 import argparse
 import json
 import os
@@ -39,7 +43,8 @@ def _abs(p: str | Path) -> str:
 
 def _run(argv: list[str], cwd: Path | None = None) -> int:
     print(f"$ {' '.join(argv)}", flush=True)
-    return subprocess.run(argv, cwd=cwd or REPO_ROOT).returncode
+    env = {**os.environ, "ASTRID_INTERNAL_INVOCATION": "1"}
+    return subprocess.run(argv, cwd=cwd or REPO_ROOT, env=env).returncode
 
 
 def _preflight(args: argparse.Namespace) -> int:

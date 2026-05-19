@@ -78,9 +78,19 @@ class ElementRegistryTest(unittest.TestCase):
         self.assertTrue(str(transition_fade.root).endswith("astrid/packs/builtin/elements/transitions/fade"))
 
     def test_builtin_pack_defaults_are_discovered_with_pack_source(self) -> None:
+        from unittest import mock
+
+        from astrid.core.element import registry as registry_module
+        from astrid.core.pack import discover_packs as real_discover_packs
+
         with tempfile.TemporaryDirectory() as tmp:
             project = Path(tmp) / "project"
-            registry = load_default_registry(project_root=project)
+            with mock.patch.object(
+                registry_module,
+                "discover_packs",
+                side_effect=lambda root=None: tuple(p for p in real_discover_packs() if p.id != "local"),
+            ):
+                registry = load_default_registry(project_root=project)
 
             by_key = registry.as_mapping()
 
@@ -98,11 +108,21 @@ class ElementRegistryTest(unittest.TestCase):
             )
 
     def test_active_theme_overrides_builtin_pack(self) -> None:
+        from unittest import mock
+
+        from astrid.core.element import registry as registry_module
+        from astrid.core.pack import discover_packs as real_discover_packs
+
         with tempfile.TemporaryDirectory() as tmp:
             theme = Path(tmp) / "theme"
             write_theme_element(theme, "effects", "text-card", label="Theme")
 
-            registry = load_default_registry(active_theme=theme)
+            with mock.patch.object(
+                registry_module,
+                "discover_packs",
+                side_effect=lambda root=None: tuple(p for p in real_discover_packs() if p.id != "local"),
+            ):
+                registry = load_default_registry(active_theme=theme)
 
         winner = registry.get("effects", "text-card")
         self.assertEqual(winner.source, "active_theme")

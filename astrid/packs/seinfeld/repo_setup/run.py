@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """seinfeld.repo_setup — idempotent ai-toolkit submodule initializer.
 
+
 If ``astrid/packs/seinfeld/ai_toolkit/upstream/.git`` already exists,
 exits 0 with ``{status: "already_initialized"}``.  Otherwise runs
 ``git submodule add`` + ``git checkout <PINNED_SHA>`` and exits 0.
@@ -8,6 +9,9 @@ exits 0 with ``{status: "already_initialized"}``.  Otherwise runs
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.repo_setup')
 import argparse
 import json
 import subprocess

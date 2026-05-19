@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """seinfeld.aitoolkit_stage — generate ai-toolkit config, bootstrap.sh, and (live) stage onto a pod."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.aitoolkit_stage')
 import argparse
 import json
 import shutil
@@ -20,7 +24,7 @@ HIVEMIND_DEFAULTS = {
     "resolution_buckets": [512, 768],
     "num_frames": 121,
     "fps": 24,
-    "lr": 2.0e-5,
+    "lr": 1.0e-4,
     "steps_default": 2000,
     "steps_smoke": 100,
     "rank": 32,
@@ -49,21 +53,66 @@ def _dump_yaml(obj: dict, path: Path) -> None:
         yaml.safe_dump(obj, f, sort_keys=False, default_flow_style=False)
 
 
-def _build_sample_prompts(vocab: dict, n: int = 4) -> list[str]:
-    """Build a small list of inference prompts from the vocabulary."""
+def _trigger_word(vocab: dict, manifest: dict | None = None) -> str:
+    for source in (vocab, manifest or {}):
+        value = source.get("trigger_word") or source.get("trigger")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return HIVEMIND_DEFAULTS["trigger_word"]
+
+
+def _build_sample_prompts(vocab: dict, manifest: dict | None = None, n: int = 4) -> list[str]:
+    """Build aligned, non-dataset eval prompts.
+
+    LTX 2.3 responds better to the structured caption distribution we train on.
+    Generic "<character> talking" prompts make a weak eval because they do not
+    exercise scene, blocking, dialogue, and sound cues together.
+    """
+    configured = vocab.get("sample_prompts") or vocab.get("eval_prompts")
+    if isinstance(configured, list) and configured:
+        return [str(prompt) for prompt in configured[:n]]
+
     scenes = list((vocab.get("scenes") or {}).items())
     chars = list((vocab.get("characters") or {}).keys())
-    shots = list((vocab.get("shot_types") or {}).keys())
-    prompts: list[str] = []
-    for i in range(n):
-        scene_id = scenes[i % max(len(scenes), 1)][0] if scenes else "jerrys_apt"
-        char = chars[i % max(len(chars), 1)] if chars else "jerry"
-        shot = shots[i % max(len(shots), 1)] if shots else "medium"
-        prompts.append(
-            f"{HIVEMIND_DEFAULTS['trigger_word']}, A {shot} shot in {scene_id}. "
-            f"{char.capitalize()} talking. Seinfeld sitcom style, 90s NBC lighting."
+    scene_id = scenes[0][0] if scenes else "jerrys_apt"
+    trigger = _trigger_word(vocab, manifest)
+    prompt_bank = [
+        (
+            f"{trigger}, Scene: A medium two-shot in {scene_id}, near the kitchen counter. "
+            "Jerry stands beside a cereal shelf while George gestures anxiously with both hands. "
+            "Static multi-camera sitcom framing. Speech: \"You alphabetized the cereal?\" -- Jerry, dry. "
+            "\"It is not alphabetized, it is emotionally indexed.\" -- George, defensive. "
+            "Sounds: quiet apartment room tone and a short studio audience laugh. Style: 90s NBC sitcom lighting."
+        ),
+        (
+            f"{trigger}, Scene: A wide living-room shot in {scene_id}, facing the couch and doorway. "
+            "Elaine enters with a shopping bag as Kramer slides through the door and Jerry turns from the kitchen. "
+            "Speech: \"You brought the bag back?\" -- Jerry, suspicious. \"The bag has history.\" -- Elaine, firm. "
+            "\"I know a bag guy.\" -- Kramer, confident. Sounds: door movement, apartment ambience, audience laughter. "
+            "Style: locked-off Seinfeld-style multi-cam set."
+        ),
+        (
+            f"{trigger}, Scene: A wide shot in {scene_id}. Jerry sits on the couch with a TV remote, "
+            "George stands near the coffee table, Elaine leans on the couch, and Kramer hovers near the door. "
+            "Speech: \"Nobody touched the remote?\" -- Jerry, skeptical. \"I respected the remote.\" -- George, nervous. "
+            "\"You feared the remote.\" -- Elaine, amused. Sounds: room tone and studio audience laugh. "
+            "Style: 90s apartment sitcom, warm practical lighting."
+        ),
+        (
+            f"{trigger}, Scene: A medium shot in {scene_id} by the stereo and bookshelves. "
+            "Kramer taps along to tinny music while George winces and Jerry reaches for the volume knob. "
+            "Speech: \"That is not music, that is a drawer opening.\" -- Jerry, deadpan. "
+            "\"It has movement.\" -- Kramer, excited. \"So does panic.\" -- George, irritated. "
+            "Sounds: faint upbeat music, audience laugh. Style: Seinfeld apartment set, static camera."
+        ),
+    ]
+    if chars:
+        prompt_bank.append(
+            f"{trigger}, Scene: A medium shot in {scene_id}. {chars[0].capitalize()} pauses mid-argument, "
+            "then points toward the kitchen with a suspicious look. Speech: \"This is how it starts.\" "
+            "Sounds: apartment room tone and a small laugh from the audience. Style: 90s multi-camera sitcom."
         )
-    return prompts
+    return prompt_bank[:n]
 
 
 def build_config(
@@ -86,11 +135,16 @@ def build_config(
     final_steps = steps if steps is not None else (
         HIVEMIND_DEFAULTS["steps_smoke"] if smoke else HIVEMIND_DEFAULTS["steps_default"]
     )
-    prompts = _build_sample_prompts(vocabulary, n=3 if smoke else 4)
+    prompts = _build_sample_prompts(vocabulary, manifest, n=3 if smoke else 4)
+    trigger = _trigger_word(vocabulary, manifest)
+    training_overrides = vocabulary.get("training") or {}
+    model_overrides = vocabulary.get("model") or {}
+    use_low_vram = bool(model_overrides.get("low_vram", True))
+    use_layer_offloading = bool(model_overrides.get("layer_offloading", True))
 
     process = cfg["config"]["process"][0]
     process["training_folder"] = output_dir
-    process["trigger_word"] = HIVEMIND_DEFAULTS["trigger_word"]
+    process["trigger_word"] = trigger
     process["network"]["linear"] = HIVEMIND_DEFAULTS["rank"]
     process["network"]["linear_alpha"] = HIVEMIND_DEFAULTS["rank"]
     process["save"]["save_every"] = HIVEMIND_DEFAULTS["save_every"]
@@ -100,18 +154,41 @@ def build_config(
     process["datasets"][0]["resolution"] = list(HIVEMIND_DEFAULTS["resolution_buckets"])
     process["datasets"][0]["bucketing"] = True
     process["datasets"][0]["cache_latents_to_disk"] = True
-    process["train"]["batch_size"] = HIVEMIND_DEFAULTS["batch_size"]
+    process["datasets"][0]["cache_latents"] = False
+    process["datasets"][0]["cache_text_embeddings"] = True
+    process["datasets"][0]["auto_frame_count"] = True
+    process["datasets"][0]["do_audio"] = True
+    process["datasets"][0]["audio_preserve_pitch"] = True
+    process["train"]["batch_size"] = int(training_overrides.get("batch_size", HIVEMIND_DEFAULTS["batch_size"]))
     process["train"]["steps"] = final_steps
-    process["train"]["gradient_accumulation_steps"] = HIVEMIND_DEFAULTS["grad_accum"]
-    process["train"]["lr"] = HIVEMIND_DEFAULTS["lr"]
+    process["train"]["gradient_accumulation"] = int(
+        training_overrides.get("gradient_accumulation", HIVEMIND_DEFAULTS["grad_accum"])
+    )
+    process["train"].pop("gradient_accumulation_steps", None)
+    process["train"]["lr"] = float(training_overrides.get("lr", HIVEMIND_DEFAULTS["lr"]))
     process["train"]["seed"] = seed
     # Baseline/in-loop LTX video sampling has repeatedly killed otherwise healthy
     # RunPod training runs. Train first; generate review samples as a separate
     # post-training step after checkpoints are durable.
     process["train"]["skip_first_sample"] = True
     process["train"]["disable_sampling"] = True
+    process["train"]["cache_text_embeddings"] = True
+    process["train"]["content_or_style"] = "balanced"
+    process["train"]["timestep_type"] = "shift"
     process["model"]["name_or_path"] = base_model
     process["model"]["is_ltx"] = True
+    process["model"]["qtype"] = "qfloat8"
+    process["model"]["quantize_te"] = True
+    process["model"]["qtype_te"] = "qfloat8"
+    process["model"]["low_vram"] = use_low_vram
+    process["model"]["layer_offloading"] = use_layer_offloading
+    process["model"]["layer_offloading_transformer_percent"] = float(
+        model_overrides.get("layer_offloading_transformer_percent", 1.0 if use_layer_offloading else 0.0)
+    )
+    process["model"]["layer_offloading_text_encoder_percent"] = float(
+        model_overrides.get("layer_offloading_text_encoder_percent", 1.0 if use_layer_offloading else 0.0)
+    )
+    process["network"]["layer_offloading"] = use_layer_offloading
     process["sample"]["sample_every"] = HIVEMIND_DEFAULTS["sample_every"]
     process["sample"]["width"] = HIVEMIND_DEFAULTS["resolution"]
     process["sample"]["height"] = 768

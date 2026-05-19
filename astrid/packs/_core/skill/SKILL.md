@@ -9,17 +9,40 @@ description: "Use for the Astrid repo: a file-based toolkit for agents to make a
 Astrid is a file-based toolkit for making video, image, and audio art alongside
 a human. `python3 -m astrid` is the only executable gateway.
 
+## When in doubt, run `astrid next`
+
+`astrid next` is the universal port-of-call. **It always prints exactly one
+legal action to take, regardless of where you are.** Type it whenever you're
+lost, when you forget what you were doing, or when you need to know what
+to do *first*:
+
+| Where you are | What `astrid next` tells you |
+|---|---|
+| No session bound | `astrid attach <slug>` (lists projects on disk) or `astrid projects create <slug>` |
+| Session bound, no active run | `astrid start <orchestrator-id> --project <slug>` (suggests top orchestrators) |
+| In a run, mid-step | The exact `run: …` command or `astrid ack …` template to type |
+| Run rejected by verifier | The rejection reason + the retry command |
+| Run complete | "Run complete. Nothing to do." |
+
+Run it without flags. It derives the project from the bound session; if
+nothing is bound, it dispatches to discovery. **You don't need to remember
+which other verb to run** — `astrid next` is always the answer.
+
+For deeper context (recent events, run state, inbox count) `astrid status`
+remains the read-side breadcrumb; `next` is the action verb.
+
 ## Start Here
 
-Astrid is session-gated. From the repository root, make `status` the first
-port of call at the start of a session and whenever project, timeline, run, or
-writer state is unclear. It also prints the key discovery commands for skills,
-orchestrators, executors, and elements.
+Astrid is session-gated. From the repository root, the canonical entry is
+`astrid next` (see above). When you need detail beyond the next action,
+`astrid status` prints the session breadcrumb and the key discovery commands
+for skills, orchestrators, executors, and elements.
 
 ```bash
 git status --short
 python3 -m astrid --help
-python3 -m astrid status
+python3 -m astrid next     # always-correct next action
+python3 -m astrid status   # detail breadcrumb when you need it
 ```
 
 If status says `no session bound`, attach before running doctor, list, inspect,
@@ -239,7 +262,7 @@ Built-in orchestrators: `builtin.hype`, `builtin.event_talks`,
 
 Built-in executors include `builtin.transcribe`, `builtin.cut`,
 `builtin.render`, `builtin.validate`, `builtin.understand` (audio/visual/video
-dispatcher; pass `--mode {audio,visual,video}`), `builtin.generate_image`, and
+dispatcher; pass `--mode {audio,visual,video}`), `builtin.generate_image_openai`, and
 the rest of the pipeline. External executors include `external.moirae` and
 `external.vibecomfy.run` (executor only, not an orchestrator).
 
@@ -265,10 +288,12 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `builtin.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
 | `builtin.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
+| `builtin.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `builtin.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
 | `builtin.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
 | `builtin.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
-| `builtin.generate_image` | Generate image files with OpenAI GPT Image models from a prompt file. |
+| `builtin.generate_image` | Generate images from text prompts via local or cloud backends. v2: model→mode→backend. |
+| `builtin.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
 | `builtin.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
 | `builtin.human_notes` | Convert human editorial notes into structured pipeline inputs. |
 | `builtin.human_review` | Serve a small HTML page locally, collect human decisions as JSON, block until submit. |
@@ -296,6 +321,8 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
 | `builtin.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
 | `builtin.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
+| `external.comfy_prompt_image` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
+| `external.example_comfy_image` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
 | `external.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
 | `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
 | `external.runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
@@ -313,6 +340,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `seinfeld.repo_setup` | Idempotent git submodule add + checkout of ostris/ai-toolkit for config-schema reference. |
 | `seinfeld.script_pipeline` | Generate Seinfeld-style short scene scripts through ideation, synthesis, and voice passes. |
 | `upload.youtube` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
+| `video_tools.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 
 ### Orchestrators
 
@@ -339,9 +367,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `animations/slide-left` | Slide left entrance animation. |
 | `animations/slide-up` | Slide up exit animation. |
 | `animations/type-on` | Typewriter-style text reveal animation. |
-| `effects/model-trends` | Animated stacked-area chart of model-family share-of-conversation, driven by Remotion frame. |
-| `effects/neon-orbit-card` | DOM-to-canvas Remotion effect for post-processed cards. |
-| `effects/text-card` | Anchored text card overlay with built-in fade in/out. |
+| `effects/text-card` | Default text card effect for captions and titles. |
 | `transitions/cross-fade` | Cross fade transition. |
 | `transitions/fade` | Fade-through-black transition. |
 

@@ -238,7 +238,15 @@ def _step_to_dict(
                 f"nested step {step.id!r} plan must be _PlanBuilder or "
                 f"qualified id string, got {type(nested_plan).__name__}"
             )
-        out = {"id": step.id, "kind": "nested", "plan": child_payload}
+        # Flatten the nested sub-plan into ``children`` so the compiled plan
+        # satisfies the v2 validator (which requires either ``command`` or
+        # ``children``). The ``plan`` field is preserved for audit/debug.
+        out = {
+            "id": step.id,
+            "kind": "nested",
+            "plan": child_payload,
+            "children": list(child_payload.get("steps", [])),
+        }
     else:
         raise OrchestrateDefinitionError(
             f"step {step.id!r} has unknown kind {step.kind!r}"

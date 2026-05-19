@@ -22,7 +22,7 @@ import logging
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Literal, Mapping, Optional, get_args
 
 from . import env as reigh_env
 
@@ -33,9 +33,8 @@ RUN_TYPE = "banodoco-worker"
 WORKER_POOL = "banodoco"
 SUPPORTED_TASK_TYPES: tuple[str, ...] = ("banodoco_timeline_generate",)
 
-ALLOWED_STATUSES: frozenset[str] = frozenset(
-    {"Queued", "In Progress", "Complete", "Failed", "Cancelled"}
-)
+TaskStatus = Literal["Queued", "In Progress", "Complete", "Failed", "Cancelled"]
+ALLOWED_STATUSES: frozenset[str] = frozenset(get_args(TaskStatus))
 
 
 @dataclass(frozen=True)
@@ -145,7 +144,7 @@ def claim_next_task(
 def update_task_status(
     task_id: str,
     *,
-    status: str,
+    status: TaskStatus,
     service_role_key: str,
     result_data: Mapping[str, Any] | None = None,
     error: str | None = None,

@@ -11,6 +11,8 @@
       "{animation}",
       "--subject",
       "{subject}",
+      "--reference-image",
+      "{reference_image}",
       "--out-dir",
       "{out}"
     ]
@@ -27,6 +29,13 @@
       "description": "Character or object being animated.",
       "name": "subject",
       "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Optional reference image for preserving the character/object identity while generating the sprite sheet.",
+      "name": "reference_image",
+      "required": false,
+      "type": "path"
     }
   ],
   "isolation": {

@@ -8,6 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from astrid import pipeline
+from astrid.core.adapter import DispatchResult
+from astrid.core.adapter import local as local_adapter_module
 from astrid.core.executor import cli as executor_cli
 from astrid.core.executor import runner as executor_runner
 from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunResult, ExecutorRunnerError
@@ -34,6 +36,19 @@ def test_pipeline_dispatch_calls_top_gate_and_executor_reentry(
         "_run_executor_inner",
         lambda request, executor: ExecutorRunResult(executor_id=executor.id, kind="external", returncode=0),
     )
+
+    # Sprint 3 (T14) routes local-adapter dispatch through LocalAdapter.dispatch,
+    # which Popens the step command. The test exercises the gate+reentry flow,
+    # not subprocess spawn behavior, so stub the adapter to invoke the executor
+    # CLI in-process (this is what produces the reentry gate_command call
+    # asserted below). _wait_local_subprocess is stubbed because there is no
+    # real PID to wait on.
+    def _fake_dispatch(self, step, run_ctx):  # noqa: ARG001
+        executor_cli.main(["run", "builtin.noop", "--project", "demo"])
+        return DispatchResult(status="dispatched", pid=None, started_at="1970-01-01T00:00:00.000Z")
+
+    monkeypatch.setattr(local_adapter_module.LocalAdapter, "dispatch", _fake_dispatch)
+    monkeypatch.setattr(pipeline, "_wait_local_subprocess", lambda decision: 0)
 
     with patch("astrid.core.task.gate.gate_command", wraps=task_gate.gate_command) as gate_spy:
         assert pipeline.main(["executors", "run", "builtin.noop", "--project", "demo"]) == 0

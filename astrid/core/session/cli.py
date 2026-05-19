@@ -670,8 +670,17 @@ def _print_discovery_hints(*, out: Any) -> None:
 
 
 def _render_bound_status(session: Session, *, out: Any) -> int:
-    identity = read_identity()
-    agent_id = identity.agent_id if identity else session.agent_id
+    # Fix 2 (v6 dogfood): the per-tab `--as agent:<slug>` override is
+    # written to ``session.agent_id`` at attach time and IS the per-tab
+    # identity. Previously this preferred the on-disk identity record
+    # (e.g., ``codex-1``), which silently masked the override — an agent
+    # that ran ``attach --as agent:foo`` would see ``status`` report
+    # ``agent: codex-1``. Trust the session record; fall back to the
+    # on-disk identity only when the session has no agent_id pinned.
+    agent_id = session.agent_id
+    if not agent_id:
+        identity = read_identity()
+        agent_id = identity.agent_id if identity else session.agent_id
     # Try to pick up an on-disk run_id update (auto-rebind preview without
     # actually mutating the session file — that's WriterContext's job).
     on_disk_run_id = read_current_run(session.project)

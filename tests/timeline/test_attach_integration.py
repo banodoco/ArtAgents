@@ -189,10 +189,16 @@ class TestDefaultTimeline:
 
 class TestNoDefaultTimeline:
     def test_non_interactive_errors_clearly(self, env: dict[str, Path]) -> None:
-        """When no --timeline and no default, timelines exist, and stdin is not a tty, error with hint."""
+        """When no --timeline and no default and multiple timelines exist and
+        stdin is not a tty, error with hint.
+
+        Sprint-N contract update: a single non-default timeline is now
+        auto-selected (with an informational stderr note), so we seed *two*
+        non-default timelines to force the disambiguation error path.
+        """
         projects = env["projects"]
-        # Seed a timeline so timelines *exist* but none is the default.
         _seed_timeline(projects, "demo", slug="alpha", is_default=False)
+        _seed_timeline(projects, "demo", slug="beta", is_default=False)
         _write_project_json(projects, "demo")
 
         buf = StringIO()

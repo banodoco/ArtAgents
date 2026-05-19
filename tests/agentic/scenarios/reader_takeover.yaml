@@ -1,0 +1,99 @@
+name: reader_takeover
+tier: core
+description: |
+  Another actor has already started `builtin.agent_probe` and holds the writer
+  lease. The agent attaches under a distinct identity so idempotent re-attach
+  does NOT auto-promote them to writer. They must (a) notice the reader-state
+  warning from `astrid next`, (b) run takeover, (c) complete the run. Failure
+  mode probed: agents that try to `ack` blindly from reader state, get a lease
+  epoch mismatch, and only THEN discover takeover — instead of being warned by
+  `astrid next` on the first call.
+
+brief: reader_takeover.md
+
+priming:
+  - create_project: $SLUG
+  - start: builtin.agent_probe
+
+target_orchestrator: builtin.agent_probe
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  # Machine-graded
+  - events_contain: takeover
+  - events_contain: run_completed
+  - leaf_count_complete: 6
+
+  # Subjective (graded from the agent's narrative report)
+  - subjective:
+      - reader_warning_appeared_before_failed_ack
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+  - reader_state
+  - takeover
+  - lease
+
+assessment:
+  universal_checks: true
+  enforced:
+      - id: reader_warning_appeared_before_failed_ack
+        question: |
+          Did `astrid next` warn the agent about reader-state BEFORE
+          the agent attempted any `ack` that would have failed on
+          lease epoch mismatch?
+        evidence: [stderr, events]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr shows a failed `ack` (lease epoch mismatch) appearing
+          BEFORE the reader-state warning from `astrid next`.
+      - id: ran_takeover_after_warning
+        question: |
+          Did the agent run `astrid sessions takeover` (or equivalent
+          promotion) AFTER seeing the reader-state warning, and complete
+          the takeover successfully (events show a `takeover` event)?
+        evidence: [stderr, events]
+        grading: pass_fail
+        weight: 2
+      - id: completed_remaining_steps
+        question: |
+          Did the run reach `run_completed` with all six leaf steps
+          attested after the takeover?
+        evidence: [events]
+        grading: pass_fail
+        weight: 2
+      - id: invoked_via_canonical_cli
+        question: |
+          Did the agent operate exclusively via the astrid CLI
+          (attach/next/ack/takeover) rather than `python -m
+          astrid.packs.builtin.agent_probe.run` or direct imports?
+        evidence: [stderr]
+        grading: pass_fail
+        weight: 2
+  graded:
+      - id: report_describes_reader_takeover_flow
+        question: |
+          Does the report describe the reader-state discovery + takeover
+          as a distinct flow, not just "I ran agent_probe"?
+        evidence: [report]
+        grading: pass_fail
+        weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: report_line_count
+      question: "How many non-blank lines in the agent's report? (integer, metadata only)"
+      evidence: [report]
+      grading: numeric
+      weight: 0

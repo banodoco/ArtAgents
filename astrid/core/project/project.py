@@ -43,6 +43,11 @@ def create_project(
     project_root.mkdir(parents=True, exist_ok=True)
     (project_root / "sources").mkdir(exist_ok=True)
     (project_root / "runs").mkdir(exist_ok=True)
+    # T9 / FLAG-S1-003 / all_locations-2: defensive double-coverage gitignore
+    # for the file-bound session pointer so it never lands in git.
+    _project_gitignore = project_root / ".gitignore"
+    if not _project_gitignore.exists():
+        _project_gitignore.write_text(".astrid-session\n", encoding="utf-8")
     payload = build_project(slug, name=name, project_id=project_id)
     if exist_ok and project_path.exists():
         payload = validate_project(read_json(project_path))

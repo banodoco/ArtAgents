@@ -7,7 +7,7 @@ import json
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Literal, Union
+from typing import Any, Iterator, Literal, Union, cast
 
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.task.events import canonical_event_json
@@ -280,7 +280,7 @@ def _parse_assignee(assignee: str, *, step_id: str) -> tuple[AssigneeForm, str |
     if not isinstance(assignee, str) or not assignee:
         raise TaskPlanError(f"step {step_id!r}: assignee must be a non-empty string")
     if assignee in ("system", "any-agent", "any-human"):
-        return assignee, None  # type: ignore[return-value]
+        return cast(AssigneeForm, assignee), None
     for prefix, kind in (("agent:", "agent"), ("human:", "actor")):
         if assignee.startswith(prefix):
             ident = assignee[len(prefix):]
@@ -288,7 +288,7 @@ def _parse_assignee(assignee: str, *, step_id: str) -> tuple[AssigneeForm, str |
                 raise TaskPlanError(
                     f"step {step_id!r}: assignee {assignee!r} missing identity after {prefix!r}"
                 )
-            return kind, ident  # type: ignore[return-value]
+            return cast(AssigneeForm, kind), ident
     raise TaskPlanError(
         f"step {step_id!r}: assignee must be one of 'system'|'any-agent'|'any-human'|'agent:<id>'|'human:<name>', got {assignee!r}"
     )

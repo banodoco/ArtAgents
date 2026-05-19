@@ -45,6 +45,10 @@ cache/
 *.jpeg
 *.png
 
+# Agentic test artifacts (regenerated per-run, not source)
+tests/agentic/reports/
+tests/agentic/__pycache__/
+
 # Local workspace/tool state
 .DS_Store
 .tmp/
@@ -61,3 +65,7 @@ astrid/packs/*/build/
 
 # Megaplan working state
 plan_revision.json
+
+# Astrid file-bound session pointer (T9 / FLAG-S1-003)
+.astrid-session
+

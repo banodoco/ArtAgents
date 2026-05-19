@@ -1,0 +1,29 @@
+{
+  "scenario": "sequential_orchestrators",
+  "evidence_pack": "reports/20260518-115105-sequential_orchestrators/evidence/agentic-sequential-orchestrators-ds-1/",
+  "verdicts": {
+    "astrid_next_suggested_starting_new_orchestrator": {
+      "passed": null,
+      "note": "Report is empty (zero bytes). Stderr alone doesn't capture the `astrid next` output enough to grade this. Without the narrative, we cannot tell whether `astrid next` proactively suggested the second orchestrator or whether the agent had to guess."
+    },
+    "no_manual_abort_required_between_runs": {
+      "passed": true,
+      "note": "No `astrid abort` in stderr; no `run_aborted` events under either run dir. Two distinct runs were started cleanly."
+    },
+    "two_distinct_runs_completed": {
+      "passed": true,
+      "note": "Evidence pack has two run directories (run-20260518T104450Z-273ee0da, run-20260518T104743Z-a95a465f); each events.jsonl contains `run_completed`. Machine criterion `events_contain_count.run_completed.min2` would pass."
+    },
+    "invoked_both_via_canonical_cli": {
+      "passed": null,
+      "note": "Stderr is truncated/summary-only and the report is empty, so we cannot directly observe the invocation form for either orchestrator. No bypass markers in what is visible."
+    },
+    "report_describes_handoff": {
+      "passed": false,
+      "note": "The report file is zero bytes. By definition the handoff is not described. Deliverable shape FAIL is the dominant signal here."
+    }
+  },
+  "overall_passed": false,
+  "graded_by": "POM",
+  "graded_at": "2026-05-18"
+}

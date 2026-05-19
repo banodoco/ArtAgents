@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Cache-aware subprocess orchestrator for the hype pipeline, including refine between cut and render in pool flow."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.hype')
 import argparse
 import datetime as dt
 import hashlib
@@ -985,23 +989,6 @@ def select_steps(args: argparse.Namespace) -> list[Step]:
     return selected
 
 
-def _redact_command(cmd: list[str]) -> list[str]:
-    """Strip env-file values from logged argv (paths can contain secrets)."""
-    out: list[str] = []
-    skip_next = False
-    for token in cmd:
-        if skip_next:
-            out.append("<redacted>")
-            skip_next = False
-            continue
-        if token in ("--env-file",):
-            out.append(token)
-            skip_next = True
-            continue
-        out.append(token)
-    return out
-
-
 def _write_dry_run_plan(args: argparse.Namespace) -> int:
     """Write hype.plan.json with the computed step set + redacted commands."""
     facts = sorted(_initial_facts(args))
@@ -1199,14 +1186,14 @@ def _register_step_outputs(step: Step, cmd: list[str], args: argparse.Namespace,
         stage=step.name,
         label=f"Pipeline step: {step.name}",
         parents=parent_ids,
-        metadata={"command": cmd_safe(cmd)},
+        metadata={"command": _redact_command(cmd)},
         outputs=[*output_ids, log_id],
         registration_source="pipeline_fallback",
     )
     return output_ids or [log_id]
 
 
-def cmd_safe(cmd: list[str]) -> list[str]:
+def _redact_command(cmd: list[str]) -> list[str]:
     safe: list[str] = []
     skip_next = False
     for token in cmd:
@@ -1551,7 +1538,6 @@ def _register_run_inputs(args: argparse.Namespace) -> None:
         },
     )
     args.audit_parent_ids = parents
-
 
 
 def main(argv: list[str] | None = None) -> int:

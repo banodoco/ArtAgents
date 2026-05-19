@@ -6,7 +6,7 @@
     "argv": [
       "{python_exec}",
       "-m",
-      "astrid.packs.builtin.generate_image.run",
+      "astrid.packs.builtin.generate_image_openai.run",
       "--prompts-file",
       "{prompts_file}",
       "--out-dir",
@@ -31,10 +31,10 @@
       "image_manifest"
     ]
   },
-  "id": "builtin.generate_image",
+  "id": "builtin.generate_image_openai",
   "inputs": [
     {
-      "description": "Text, JSON, or JSONL prompt list consumed by astrid.packs.builtin.generate_image.run.",
+      "description": "Text, JSON, or JSONL prompt list consumed by astrid.packs.builtin.generate_image_openai.run.",
       "name": "prompts_file",
       "required": true,
       "type": "file"
@@ -60,9 +60,9 @@
     ],
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.builtin.generate_image.run"
+    "runtime_module": "astrid.packs.builtin.generate_image_openai.run"
   },
-  "name": "Generate Image",
+  "name": "Generate Image (OpenAI)",
   "outputs": [
     {
       "description": "Manifest of generated images and API usage.",

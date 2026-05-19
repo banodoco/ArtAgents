@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unified dispatcher for Astrid understanding executors.
 
+
 `builtin.understand` selects an underlying modality executor (audio, visual,
 or video) via `--mode` and forwards the remaining argv unchanged. This is
 deliberately a thin executor — not an orchestrator — because it wraps exactly
@@ -9,6 +10,9 @@ one executor call with a switch.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.understand')
 import argparse
 from collections.abc import Callable
 from importlib import import_module

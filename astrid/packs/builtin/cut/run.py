@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Assemble selected source-video ranges into hype-cut planning files and optional rendered outputs using transcript, scene, and shot inputs."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.cut')
 import argparse
 import csv
 import hashlib

@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 
 from __future__ import annotations
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.render')
+
 
 import argparse
 import json

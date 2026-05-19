@@ -26,7 +26,7 @@ from astrid.threads import wrapper as thread_wrapper
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry
-from .schema import ConditionSpec, ExecutorDefinition, ExecutorOutput, ExecutorValidationError
+from .schema import ConditionSpec, ExecutorDefinition, ExecutorKind, ExecutorOutput, ExecutorValidationError
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -71,7 +71,7 @@ class ExecutorRunRequest:
 @dataclass(frozen=True)
 class ExecutorRunResult:
     executor_id: str
-    kind: str
+    kind: ExecutorKind
     command: tuple[str, ...] = ()
     cwd: str | None = None
     env: Mapping[str, str] = field(default_factory=dict)
@@ -308,7 +308,13 @@ def _run_external_executor(executor: ExecutorDefinition, request: ExecutorRunReq
     completed = subprocess.run(
         list(command),
         cwd=cwd,
-        env={**os.environ, **env, **_project_subprocess_env(request), **thread_wrapper.subprocess_env()},
+        env={
+            **os.environ,
+            **env,
+            **_project_subprocess_env(request),
+            **thread_wrapper.subprocess_env(),
+            "ASTRID_INTERNAL_INVOCATION": "1",
+        },
         check=False,
     )
     return ExecutorRunResult(

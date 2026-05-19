@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Gemini-powered deep scene descriptions for triage survivors."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.scene_describe')
 import argparse
 import json
 import subprocess

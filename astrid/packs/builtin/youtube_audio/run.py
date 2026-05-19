@@ -1,7 +1,11 @@
 """Download a YouTube video's audio (MP3) or video (MP4) — via search or direct URL."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.youtube_audio')
 import argparse
 import shutil
 import subprocess

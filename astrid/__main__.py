@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
+
 from .pipeline import main
 
 

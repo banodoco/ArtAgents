@@ -1,5 +1,6 @@
 """Runtime entrypoint for external.runpod.* executors.
 
+
 Four subcommands — provision, exec, teardown, session — all adapter:local.
 Each writes produces files to a ``--produces-dir`` directory passed by the
 framework via the ``{out}/produces`` template placeholder.
@@ -7,6 +8,9 @@ framework via the ``{out}/produces`` template placeholder.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('external.runpod')
 import argparse
 import asyncio
 import json
@@ -16,7 +20,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 # ---------------------------------------------------------------------------
 # Pinned GPU pricing fallback (USD/hr).
@@ -253,7 +257,9 @@ def cmd_exec(args: argparse.Namespace, produces_dir: Path) -> int:
     local_root = Path(args.local_root) if args.local_root else Path.cwd()
     timeout = args.timeout or 3600
     upload_mode: Literal["sftp_walk", "tarball"] = (
-        args.upload_mode if args.upload_mode in ("sftp_walk", "tarball") else "sftp_walk"  # type: ignore[assignment]
+        cast(Literal["sftp_walk", "tarball"], args.upload_mode)
+        if args.upload_mode in ("sftp_walk", "tarball")
+        else "sftp_walk"
     )
     excludes = set(args.excludes.split(",")) if args.excludes else set()
 
@@ -434,7 +440,9 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
     local_root = Path(args.local_root) if args.local_root else Path.cwd()
     timeout = args.timeout or 3600
     upload_mode: Literal["sftp_walk", "tarball"] = (
-        args.upload_mode if args.upload_mode in ("sftp_walk", "tarball") else "sftp_walk"  # type: ignore[assignment]
+        cast(Literal["sftp_walk", "tarball"], args.upload_mode)
+        if args.upload_mode in ("sftp_walk", "tarball")
+        else "sftp_walk"
     )
     excludes = set(args.excludes.split(",")) if args.excludes else set()
 

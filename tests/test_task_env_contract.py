@@ -23,7 +23,7 @@ def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
 
     context = prepare_project_run("demo", root=tmp_projects_root)
 
-    assert context.run_root == tmp_projects_root / "demo" / "runs" / "task-run-1" / "steps" / "step-1"
+    assert context.run_root == tmp_projects_root / "demo" / "runs" / "task-run-1" / "steps" / "step-1" / "v1"
     assert context.run_id == "task-run-1"
     assert not context.run_json_path.exists()
     assert context.record["status"] == "attached"
@@ -39,8 +39,9 @@ def test_task_env_second_step_reuses_same_parent_run_dir(tmp_projects_root: Path
 
     second = prepare_project_run("demo", root=tmp_projects_root)
 
-    assert first.run_root.parent == second.run_root.parent
-    assert second.run_root == tmp_projects_root / "demo" / "runs" / "task-run-1" / "steps" / "step-2"
+    # Sibling step dirs share the same /steps/ parent (each step lives at steps/<id>/v1/).
+    assert first.run_root.parent.parent == second.run_root.parent.parent
+    assert second.run_root == tmp_projects_root / "demo" / "runs" / "task-run-1" / "steps" / "step-2" / "v1"
 
 
 def test_task_env_project_mismatch_rejects(tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

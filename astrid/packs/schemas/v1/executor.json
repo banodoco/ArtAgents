@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "executor.json",
+  "type": "object",
+  "description": "Pack-author schema for executor manifests. Updated to match what the runtime registry (astrid/core/executor/schema.py) actually consumes — the prior schema required a `runtime` block that nothing read and rejected the `command`/`inputs`/`outputs` fields every real executor uses.",
+  "required": ["id", "name", "version"],
+  "properties": {
+    "schema_version": {"type": "integer"},
+    "id": {"$ref": "_defs.json#/definitions/qualified_id"},
+    "name": {"type": "string"},
+    "version": {"$ref": "_defs.json#/definitions/version_string"},
+    "description": {"type": "string"},
+    "short_description": {"type": "string"},
+    "keywords": {"type": "array", "items": {"type": "string"}},
+    "kind": {"type": "string", "enum": ["built_in", "external"]},
+    "runtime": {
+      "oneOf": [
+        {"$ref": "_defs.json#/definitions/runtime_python_cli"},
+        {"$ref": "_defs.json#/definitions/runtime_command"}
+      ]
+    },
+    "command": {
+      "type": "object",
+      "properties": {
+        "argv": {"type": "array", "items": {"type": "string"}},
+        "cwd": {"type": "string"},
+        "env": {"type": "object"}
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "type": {"type": "string"},
+          "required": {"type": "boolean"},
+          "default": {},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "type": {"type": "string"},
+          "path_template": {"type": "string"},
+          "description": {"type": "string"}
+        }
+      }
+    },
+    "cache": {"type": "object"},
+    "conditions": {"type": "array"},
+    "graph": {"type": "object"},
+    "clip_kinds_supported": {"type": "array"},
+    "pipeline_requirements": {"type": "array"},
+    "isolation": {"type": "object"},
+    "external_runtime": {"type": "object"},
+    "docs": {
+      "type": "object",
+      "properties": {
+        "stage": {"type": "string"}
+      }
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false
+}

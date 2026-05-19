@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Refine arrangement dialogue trims before render by re-transcribing clip snippets."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.refine')
 import argparse
 import hashlib
 import json

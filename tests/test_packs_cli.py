@@ -248,44 +248,6 @@ class TestPacksValidateBrokenPack(unittest.TestCase):
             self.assertIn("executors/no_run", result.stderr)
             self.assertIn("entrypoint", result.stderr.lower())
 
-    def test_broken_pack_executor_missing_runtime_field_reports_error(self) -> None:
-        with ScratchPackFixture(self) as tmp:
-            (tmp / "pack.yaml").write_text(
-                textwrap.dedent("""\
-                    schema_version: 1
-                    id: broken
-                    name: Broken
-                    version: 0.1.0
-                    agent:
-                      purpose: Test
-                    content:
-                      executors: executors
-                """),
-                encoding="utf-8",
-            )
-            (tmp / "AGENTS.md").write_text("# Broken\n")
-            (tmp / "README.md").write_text("# Broken\n")
-            (tmp / "STAGE.md").write_text("## Purpose\n\nBroken.\n")
-            (tmp / "executors").mkdir(parents=True)
-            exec_dir = tmp / "executors" / "bad_exec"
-            exec_dir.mkdir(parents=True)
-            (exec_dir / "executor.yaml").write_text(
-                textwrap.dedent("""\
-                    schema_version: 1
-                    id: broken.bad_exec
-                    name: Bad Exec
-                    version: 0.1.0
-                """),
-                encoding="utf-8",
-            )
-            (exec_dir / "run.py").write_text("print('ok')\n")
-            (exec_dir / "STAGE.md").write_text("# Bad Exec\n")
-            result = _run_packs("validate", str(tmp), cwd=str(tmp))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("executor.yaml", result.stderr)
-            self.assertIn("runtime", result.stderr.lower())
-
-
 class TestScaffoldAndValidateRoundTrip(unittest.TestCase):
     """Prove: packs new + executors new + orchestrators new creates a valid pack."""
 

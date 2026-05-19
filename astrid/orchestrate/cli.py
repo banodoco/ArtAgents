@@ -124,6 +124,7 @@ def _cmd_compile(qid: str, packs_root: Optional[Path]) -> int:
         _print_err(f"author compile {qid}: {exc}")
         return 1
     print(f"wrote {out_path}")
+    print(f"recommended next: astrid author check {qid}", file=sys.stderr)
     return 0
 
 
@@ -179,7 +180,13 @@ def _describe_plan(plan: TaskPlan, builder_costs: dict[str, float]) -> tuple[lis
     for path, step in iter_steps_with_path(plan):
         depth = len(path) - 1
         indent = "  " * depth
-        out.append(f"{indent}{step.id} [{step.kind}]")
+        if is_group_step(step):
+            kind_label = "nested"
+        elif is_attested_kind(step):
+            kind_label = "attested"
+        else:
+            kind_label = "code"
+        out.append(f"{indent}{step.id} [{kind_label}]")
         # produces (sorted by name for determinism)
         for entry in sorted(step.produces, key=lambda e: e.name):
             out.append(
@@ -286,6 +293,7 @@ def _cmd_new(qid: str, packs_root: Optional[Path]) -> int:
         except ValueError:
             rel = created
         print(f"created {rel}")
+    print(f"recommended next: astrid author check {qid}", file=sys.stderr)
     return 0
 
 
@@ -456,6 +464,31 @@ def _cmd_explain(qid: str, packs_root: Optional[Path]) -> int:
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
         _print_err(f"author explain {qid}: {exc}")
         return 1
+    # Disambiguation (#38): `author explain` reads the DSL-authored file at
+    # <pack>/<name>.py. Some packs also ship a folder-orchestrator at
+    # <pack>/<name>/ with its own orchestrator.yaml + run.py (the production
+    # runtime). When both exist the DSL file is typically a smoke-test
+    # fixture, NOT the real pipeline. The cross_pack_composition agent
+    # flagged `astrid author explain builtin.hype` as "actively misleading"
+    # because it printed the trivial fixture instead of the real
+    # transcribe → cut → render → validate pipeline.
+    try:
+        pack, name = _qualified_split(qid)
+        root = Path(packs_root) if packs_root is not None else DEFAULT_PACKS_ROOT
+        sibling_folder = root / pack / name
+        sibling_yaml = sibling_folder / "orchestrator.yaml"
+        if sibling_yaml.is_file():
+            print(
+                f"NOTE: {qid} also has a folder-based orchestrator at "
+                f"{sibling_folder.relative_to(root)}/ — that's the production "
+                "runtime. The DSL plan below is a smoke-test fixture and "
+                "does NOT reflect the folder-orchestrator's stage graph. "
+                "Use `astrid orchestrators inspect "
+                f"{qid}` for the runtime view."
+            )
+            print()
+    except Exception:
+        pass
     print(f"plan {plan.plan_id} (version {plan.version})")
     print("Steps execute top-to-bottom. Each step waits for the previous one "
           "to complete before the gate advances the cursor.")

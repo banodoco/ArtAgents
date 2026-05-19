@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Orchestrate prepare, assemble, render, and finalization for iteration videos."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.iteration_video')
 import argparse
 import json
 import shutil

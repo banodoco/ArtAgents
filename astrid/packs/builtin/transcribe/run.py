@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Transcribe source audio into transcript JSON, SRT, and text files with silence-aware chunking, optional diarization, and minimal CLI glue."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.transcribe')
 import argparse
 import json
 import os
@@ -11,7 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.packs.builtin.generate_image.run import _candidate_env_files, _read_env_value
+from astrid.packs.builtin.generate_image_openai.run import _candidate_env_files, _read_env_value
 from astrid.audit import AuditContext
 
 SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")

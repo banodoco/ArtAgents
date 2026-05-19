@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Push a locally-materialized hype timeline into a reigh-app row.
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.open_in_reigh')
+
 
 Default flow: load ``hype.timeline.json`` + ``hype.assets.json`` from ``--out``,
 then call ``SupabaseDataProvider.save_timeline`` to upsert the row identified

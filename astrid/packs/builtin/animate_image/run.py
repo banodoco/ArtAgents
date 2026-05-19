@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Animate Image: restyle the video's first frame in the style of a reference image, then drive wan-animate."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.animate_image')
 import argparse
 import base64
 import json
@@ -16,7 +20,7 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 
-from astrid.packs.builtin.generate_image.run import _candidate_env_files, _read_env_value
+from astrid.packs.builtin.generate_image_openai.run import _candidate_env_files, _read_env_value
 from astrid.packs.builtin.logo_ideas.run import (
     FAL_QUEUE_URL,
     _http_get_bytes,

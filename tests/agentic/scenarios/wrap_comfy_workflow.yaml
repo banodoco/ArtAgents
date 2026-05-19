@@ -1,0 +1,172 @@
+name: wrap_comfy_workflow
+tier: authoring
+description: |
+  Agent is handed a ComfyUI workflow JSON at `/tmp/example_comfy.json`
+  and asked to wrap it as an Astrid executor. The agent must discover
+  the existing comfy-wrapping path (`external.vibecomfy.run` /
+  `external.vibecomfy.validate`) rather than rolling their own ComfyUI
+  HTTP client. The end state is an executor that, given a prompt,
+  routes through VibeComfy to run the workflow and emits the resulting
+  image as an output artifact.
+
+  Failure modes this probes:
+    - Agent invents an ad-hoc ComfyUI HTTP client instead of finding
+      `external.vibecomfy`.
+    - Agent builds an orchestrator when an executor (or pair: executor
+      wrapping `external.vibecomfy.run`) is the right tool.
+    - Agent doesn't parameterize the prompt — they hard-code the example
+      from the JSON and call it done.
+    - Agent ships a non-runnable scaffold that doesn't actually load
+      `example_comfy.json`.
+
+# Minimal ComfyUI workflow JSON pre-staged at /tmp/example_comfy.json.
+# Takes a `prompt` string input and emits an image via standard nodes.
+# (Requires runner support for the `write` priming verb described in
+# scenarios/_schema.yaml; if running before that lands, copy the JSON
+# manually before invoking the runner.)
+priming:
+  - write:
+      path: /tmp/example_comfy.json
+      content: |
+        {
+          "3": {
+            "inputs": {
+              "seed": 42,
+              "steps": 20,
+              "cfg": 7.0,
+              "sampler_name": "euler",
+              "scheduler": "normal",
+              "denoise": 1.0,
+              "model": ["4", 0],
+              "positive": ["6", 0],
+              "negative": ["7", 0],
+              "latent_image": ["5", 0]
+            },
+            "class_type": "KSampler"
+          },
+          "4": {
+            "inputs": {"ckpt_name": "sd_xl_base_1.0.safetensors"},
+            "class_type": "CheckpointLoaderSimple"
+          },
+          "5": {
+            "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
+            "class_type": "EmptyLatentImage"
+          },
+          "6": {
+            "inputs": {"text": "a serene mountain lake at dawn", "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode"
+          },
+          "7": {
+            "inputs": {"text": "blurry, low quality", "clip": ["4", 1]},
+            "class_type": "CLIPTextEncode"
+          },
+          "8": {
+            "inputs": {"samples": ["3", 0], "vae": ["4", 2]},
+            "class_type": "VAEDecode"
+          },
+          "9": {
+            "inputs": {"filename_prefix": "ComfyUI", "images": ["8", 0]},
+            "class_type": "SaveImage"
+          }
+        }
+
+brief: wrap_comfy_workflow.md
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  - no_aborts
+
+  - subjective:
+      - discovered_comfy_wrapping_path
+      - built_runnable_executor
+      - parameterized_the_prompt
+      - qualified_id_correctly
+      - did_not_roll_own_comfy_client
+
+budget:
+  max_tokens_per_agent: 65536
+  max_wall_clock_min: 25
+
+tags:
+  - authoring
+  - executor
+  - comfy
+  - external_wrap
+
+assessment:
+  universal_checks: true
+  enforced:
+      - id: built_runnable_executor
+        question: |
+          Did the agent ship an executor (folder + executor.yaml +
+          run.py) that loads `/tmp/example_comfy.json` and routes
+          through `external.vibecomfy.run`, producing an image
+          artifact when run end-to-end (or at least under --dry-run)?
+        evidence: [project_tree, stderr, report]
+        grading: pass_fail
+        weight: 2
+      - id: parameterized_the_prompt
+        question: |
+          Does the new executor declare a `prompt` input and substitute
+          it into the workflow JSON at run time, rather than hard-coding
+          the example prompt from the source JSON ("a serene mountain
+          lake at dawn")?
+        evidence: [project_tree, report]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          executor.yaml has no `prompt` input, OR run.py contains the
+          literal "a serene mountain lake at dawn" with no substitution.
+      - id: did_not_roll_own_comfy_client
+        question: |
+          Did the agent avoid writing their own ComfyUI HTTP client
+          (no `requests.post(... '/prompt')` or `comfy_client.py` from
+          scratch), and instead delegate to `external.vibecomfy.run`?
+        evidence: [project_tree, stderr]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          run.py / new files contain a hand-written `POST /prompt` to a
+          ComfyUI host, websocket polling code, etc., without
+          delegating to `external.vibecomfy`.
+  graded:
+      - id: discovered_comfy_wrapping_path
+        question: |
+          Did the agent discover `external.vibecomfy.run` /
+          `external.vibecomfy.validate` (via `astrid executors search
+          comfy` or browsing external packs) BEFORE writing any ad-hoc
+          HTTP code?
+        evidence: [stderr, report]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr shows the agent writing a new HTTP client to talk to
+          a ComfyUI server before any `executors search`/`list`
+          invocation that would surface `external.vibecomfy`.
+      - id: qualified_id_correctly
+        question: |
+          Is the new executor id qualified as `<pack>.<name>` (not a
+          bare name)?
+        evidence: [project_tree]
+        grading: pass_fail
+        weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: report_line_count
+      question: "How many non-blank lines in the agent's report? (integer, metadata only)"
+      evidence: [report]
+      grading: numeric
+      weight: 0
+    - id: canonical_bypass_form
+      question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
+      evidence: [stderr]
+      grading: text
+      weight: 0

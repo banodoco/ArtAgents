@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """seinfeld.lora_register — copy chosen LoRA and emit registered_lora.json."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.lora_register')
 import argparse
 import datetime as _dt
 import hashlib

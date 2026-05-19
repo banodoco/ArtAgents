@@ -36,14 +36,14 @@ def test_dry_run_writes_parseable_yaml_with_hivemind_keys(tmp_path: Path) -> Non
     assert proc["network"]["linear_alpha"] == 32
     assert proc["save"]["save_every"] == 250
     assert proc["sample"]["sample_every"] == 250
-    assert proc["datasets"][0]["resolution"] == [512]
-    assert proc["datasets"][0]["num_frames"] == 97
+    assert proc["datasets"][0]["resolution"] == [512, 768]
+    assert proc["datasets"][0]["num_frames"] == 121
     assert proc["datasets"][0]["fps"] == 24
     assert proc["datasets"][0]["bucketing"] is True
     assert proc["train"]["steps"] == 2000
     assert proc["train"]["batch_size"] == 1
-    assert proc["train"]["gradient_accumulation_steps"] == 4
-    assert proc["train"]["lr"] == 2.0e-5
+    assert proc["train"]["gradient_accumulation"] == 4
+    assert proc["train"]["lr"] == 1.0e-4
     assert proc["train"]["seed"] == 42
     assert proc["model"]["arch"] == "ltx2.3"
     assert proc["model"]["quantize"] is True

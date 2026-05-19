@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Download ai-toolkit training samples + optionally run video_understand, build an HTML collage.
 
+
 This is a `lora_train` orchestrator step: it runs after training finishes,
 between `aitoolkit_train` and `lora_eval_grid` / `human_gate`. Goals:
 
@@ -15,6 +16,9 @@ The HTML is what the human gate operator looks at when picking a checkpoint.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('seinfeld.samples_collage')
 import argparse
 import html
 import json

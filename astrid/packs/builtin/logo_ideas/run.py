@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
 """Logo Ideas orchestrator: Kimi K2 (Fireworks) drafts prompts, fal renders them."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.logo_ideas')
 import argparse
 import hashlib
 import json
 import math
 import os
 import re
-import time
 from pathlib import Path
 from typing import Any, Sequence
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
-from astrid.packs.builtin.generate_image.run import _candidate_env_files, _read_env_value
+from astrid.core.util.http import (
+    FAL_QUEUE_URL,
+    HttpClient,
+    default_client,
+    fal_submit_and_poll,
+)
+from astrid.core.util.secrets import load_api_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
 
 
 FIREWORKS_CHAT_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
-FAL_QUEUE_URL = "https://queue.fal.run"
 
 DEFAULT_COUNT = 9
 DEFAULT_FIREWORKS_MODEL = "accounts/fireworks/models/kimi-k2p5"
@@ -43,20 +49,6 @@ FAL_PRESETS = {
     "landscape_4_3",
     "landscape_16_9",
 }
-
-
-def _load_env_var(name: str, env_file: Path | None) -> str:
-    import os
-
-    value = os.environ.get(name, "").strip()
-    if value:
-        return value
-    tried: list[str] = [f"{name} environment variable"]
-    for candidate in _candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if value := _read_env_value(candidate, name):
-            return value
-    raise SystemExit(f"{name} not found. Tried: {', '.join(tried)}")
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -126,31 +118,6 @@ def build_layout(out_dir: Path) -> dict[str, Path]:
     return layout
 
 
-def _http_post_json(url: str, headers: dict[str, str], payload: dict[str, Any], *, timeout: int = 120) -> dict[str, Any]:
-    body = json.dumps(payload).encode("utf-8")
-    request = Request(url, data=body, method="POST")
-    request.add_header("content-type", "application/json")
-    for key, value in headers.items():
-        request.add_header(key, value)
-    with urlopen(request, timeout=timeout) as response:
-        raw = response.read()
-    return json.loads(raw.decode("utf-8")) if raw else {}
-
-
-def _http_get_json(url: str, headers: dict[str, str], *, timeout: int = 60) -> dict[str, Any]:
-    request = Request(url, method="GET")
-    for key, value in headers.items():
-        request.add_header(key, value)
-    with urlopen(request, timeout=timeout) as response:
-        raw = response.read()
-    return json.loads(raw.decode("utf-8")) if raw else {}
-
-
-def _http_get_bytes(url: str, *, timeout: int = 120) -> bytes:
-    with urlopen(Request(url, method="GET"), timeout=timeout) as response:
-        return response.read()
-
-
 def _system_prompt() -> str:
     return (
         "You are a senior brand designer. Given a logo brief, propose distinct, "
@@ -166,7 +133,7 @@ def _user_prompt(ideas: str, count: int) -> str:
         '{"concepts":[{"name":"short title","rationale":"1 sentence why",'
         '"prompt":"single self-contained image-gen prompt, ~40 words, '
         "describing style, layout, palette, typography hints, no negative prompts, "
-        'no text like \\"logo:\\""}]}\n'
+        'no text like \\"logo:\\"\"}]}\n'
         "The 'prompt' field is fed verbatim to a text-to-image model — make it "
         "concrete and visual. Avoid trademarked references unless the brief asks."
     )
@@ -178,6 +145,7 @@ def call_fireworks_concepts(
     count: int,
     model: str,
     api_key: str,
+    client: HttpClient,
 ) -> dict[str, Any]:
     payload = {
         "model": model,
@@ -190,14 +158,7 @@ def call_fireworks_concepts(
         "response_format": {"type": "json_object"},
     }
     headers = {"authorization": f"Bearer {api_key}"}
-    try:
-        response = _http_post_json(FIREWORKS_CHAT_URL, headers, payload, timeout=180)
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-        raise SystemExit(f"Fireworks chat call failed ({exc.code}): {detail}") from exc
-    except URLError as exc:
-        raise SystemExit(f"Fireworks chat call failed: {exc}") from exc
-    return response
+    return client.post_json(FIREWORKS_CHAT_URL, payload, headers=headers, timeout=180)
 
 
 def parse_concepts(response: dict[str, Any], *, count: int) -> list[dict[str, Any]]:
@@ -270,48 +231,11 @@ def _fal_payload(provider: str, prompt: str, image_size: str | dict[str, int], o
     raise SystemExit(f"unknown provider {provider!r}")
 
 
-def submit_fal_job(provider: str, payload: dict[str, Any], api_key: str) -> dict[str, Any]:
-    model_id = PROVIDER_MODEL_IDS[provider]
-    url = f"{FAL_QUEUE_URL}/{model_id}"
-    headers = {"authorization": f"Key {api_key}"}
-    try:
-        return _http_post_json(url, headers, payload, timeout=120)
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-        raise SystemExit(f"fal submit failed ({exc.code}) for {model_id}: {detail}") from exc
-    except URLError as exc:
-        raise SystemExit(f"fal submit failed for {model_id}: {exc}") from exc
-
-
-def poll_fal_result(submission: dict[str, Any], api_key: str, *, max_wait_sec: int = 300) -> dict[str, Any]:
-    status_url = submission.get("status_url")
-    response_url = submission.get("response_url")
-    if not status_url or not response_url:
-        raise SystemExit(f"fal submission missing status_url/response_url: {submission}")
-    headers = {"authorization": f"Key {api_key}"}
-    deadline = time.monotonic() + max_wait_sec
-    delay = 2.0
-    while time.monotonic() < deadline:
-        try:
-            status = _http_get_json(status_url, headers, timeout=30)
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-            raise SystemExit(f"fal status poll failed ({exc.code}): {detail}") from exc
-        state = str(status.get("status") or "").upper()
-        if state in {"COMPLETED", "OK"}:
-            return _http_get_json(response_url, headers, timeout=60)
-        if state in {"FAILED", "ERROR", "CANCELLED"}:
-            raise SystemExit(f"fal job {state}: {status}")
-        time.sleep(delay)
-        delay = min(delay * 1.4, 8.0)
-    raise SystemExit(f"fal job timed out after {max_wait_sec}s; last status_url={status_url}")
-
-
 def _ext_for_format(output_format: str) -> str:
     return "jpg" if output_format in ("jpeg", "jpg") else output_format
 
 
-def _save_first_image(result: dict[str, Any], dest: Path) -> dict[str, Any]:
+def _save_first_image(result: dict[str, Any], dest: Path, client: HttpClient) -> dict[str, Any]:
     images = result.get("images") or []
     if not images:
         raise SystemExit(f"fal result had no images: {result}")
@@ -319,7 +243,7 @@ def _save_first_image(result: dict[str, Any], dest: Path) -> dict[str, Any]:
     url = first.get("url")
     if not url:
         raise SystemExit(f"fal image entry missing url: {first}")
-    data = _http_get_bytes(url, timeout=180)
+    data = client.get_bytes(url, timeout=180)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
     return {
@@ -359,10 +283,12 @@ def render_concepts(
     image_size: str | dict[str, int],
     output_format: str,
     fal_key: str | None,
+    client: HttpClient,
     dry_run: bool,
 ) -> list[dict[str, Any]]:
     ext = _ext_for_format(output_format)
     results: list[dict[str, Any]] = []
+    model_id = PROVIDER_MODEL_IDS[provider]
     for concept in concepts:
         candidate_id = concept["candidate_id"]
         dest = layout["images"] / f"{candidate_id}.{ext}"
@@ -370,10 +296,9 @@ def render_concepts(
             generated = _placeholder_image(dest, concept["name"])
         else:
             payload = _fal_payload(provider, concept["prompt"], image_size, output_format)
-            submission = submit_fal_job(provider, payload, fal_key)
-            result = poll_fal_result(submission, fal_key)
-            generated = _save_first_image(result, dest)
-            generated["request_id"] = submission.get("request_id")
+            result = fal_submit_and_poll(client, model_id, payload, fal_key)
+            generated = _save_first_image(result, dest, client)
+            generated["request_id"] = result.get("request_id")
         results.append({**concept, "generated": generated})
     return results
 
@@ -404,20 +329,21 @@ def render_grid_image(
     image_size: str | dict[str, int],
     output_format: str,
     fal_key: str | None,
+    client: HttpClient,
     dry_run: bool,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], str]:
     ext = _ext_for_format(output_format)
     grid_path = layout["root"] / f"grid.{ext}"
     grid_prompt = build_grid_prompt(ideas, concepts)
+    model_id = PROVIDER_MODEL_IDS[provider]
 
     if dry_run or not fal_key:
         generated = _placeholder_image(grid_path, "grid (dry-run)")
     else:
         payload = _fal_payload(provider, grid_prompt, image_size, output_format)
-        submission = submit_fal_job(provider, payload, fal_key)
-        result = poll_fal_result(submission, fal_key)
-        generated = _save_first_image(result, grid_path)
-        generated["request_id"] = submission.get("request_id")
+        result = fal_submit_and_poll(client, model_id, payload, fal_key)
+        generated = _save_first_image(result, grid_path, client)
+        generated["request_id"] = result.get("request_id")
 
     generated["grid_prompt"] = grid_prompt
     results = [{**c, "generated": dict(generated)} for c in concepts]
@@ -490,16 +416,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     write_json(layout["root"] / "logo-plan.json", plan)
 
+    client = default_client()
+
     if args.dry_run:
         concepts = _planned_concepts(args.ideas, args.count)
         concepts_payload = {"mode": "dry-run", "raw_response": None, "concepts": concepts}
     else:
-        fireworks_key = _load_env_var("FIREWORKS_API_KEY", args.env_file)
+        fireworks_key = load_api_key("FIREWORKS_API_KEY", args.env_file)
+        client.register_secret(fireworks_key)
         response = call_fireworks_concepts(
             ideas=args.ideas,
             count=args.count,
             model=args.model,
             api_key=fireworks_key,
+            client=client,
         )
         concepts = parse_concepts(response, count=args.count)
         concepts_payload = {
@@ -523,7 +453,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
     )
 
-    fal_key = None if args.dry_run else _load_env_var("FAL_KEY", args.env_file)
+    fal_key = None if args.dry_run else load_api_key("FAL_KEY", args.env_file)
+    if fal_key:
+        client.register_secret(fal_key)
     grid_mode = args.provider in GRID_PROVIDERS
     if grid_mode:
         results, grid_generated, grid_prompt = render_grid_image(
@@ -534,6 +466,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_size=image_size_payload,
             output_format=args.output_format,
             fal_key=fal_key,
+            client=client,
             dry_run=args.dry_run,
         )
         grid = {
@@ -551,6 +484,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             image_size=image_size_payload,
             output_format=args.output_format,
             fal_key=fal_key,
+            client=client,
             dry_run=args.dry_run,
         )
         grid = write_grid(results, layout["root"] / "grid.jpg")

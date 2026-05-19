@@ -5,6 +5,11 @@ import {
   getTimelineDurationInFrames,
 } from '@banodoco/timeline-composition';
 import type {TimelineCompositionProps} from '@banodoco/timeline-composition';
+import type {
+  CanvasOverride,
+  TimelineThemeOverrides,
+  VisualOverrides,
+} from './types.augmentations';
 import './fonts';
 
 const DEFAULT_PROPS: TimelineCompositionProps = {
@@ -26,15 +31,16 @@ const DEFAULT_PROPS: TimelineCompositionProps = {
   },
 };
 
-const DEFAULT_CANVAS = {width: 1920, height: 1080, fps: 30};
+const DEFAULT_CANVAS: CanvasOverride = {width: 1920, height: 1080, fps: 30};
 
-const getCanvas = (props: TimelineCompositionProps) => {
-  const overrides = (props.timeline.theme_overrides ?? {}) as {
-    visual?: {canvas?: {width?: number; height?: number; fps?: number}};
-  };
+const getCanvas = (props: TimelineCompositionProps): CanvasOverride => {
+  const overrides = props.timeline.theme_overrides as
+    | TimelineThemeOverrides
+    | undefined;
+  const visual = overrides?.visual as VisualOverrides | undefined;
   return (
-    overrides.visual?.canvas ??
-    props.theme?.visual?.canvas ??
+    visual?.canvas ??
+    (props.theme?.visual?.canvas as CanvasOverride | undefined) ??
     DEFAULT_CANVAS
   );
 };

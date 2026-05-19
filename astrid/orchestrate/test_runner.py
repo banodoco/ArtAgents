@@ -33,6 +33,7 @@ from astrid.core.task.gate import (
     peek_current_step,
     record_dispatch_complete,
 )
+from astrid.core.project.project import create_project
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.lifecycle_ack import cmd_ack
 from astrid.core.task.plan import (
@@ -95,6 +96,10 @@ def run_fixture(
         if fixture_dir is not None and Path(fixture_dir).exists():
             shutil.copytree(fixture_dir, project_root, dirs_exist_ok=True)
         project_root.mkdir(parents=True, exist_ok=True)
+        # cmd_start now requires the project to be registered (via project.json)
+        # before it will accept --project. Idempotent so a fixture-supplied
+        # project.json is preserved.
+        create_project(project_slug, root=projects_root, exist_ok=True)
 
         rc = cmd_start(
             [qualified_id, "--project", project_slug, "--name", run_id],

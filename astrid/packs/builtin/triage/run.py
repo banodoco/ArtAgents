@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Claude-powered first-pass scene triage over keyframe batches."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.triage')
 import argparse
 import json
 from datetime import datetime, timezone

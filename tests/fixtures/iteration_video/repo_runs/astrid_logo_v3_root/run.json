@@ -3,7 +3,7 @@
   "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FX1",
   "thread_id": "01ARZ3NDEKTSV4RRFFQ69G5FX0",
   "parent_run_ids": [],
-  "executor_id": "builtin.generate_image",
+  "executor_id": "builtin.generate_image_openai",
   "orchestrator_id": null,
   "kind": "executor",
   "status": "succeeded",
@@ -25,4 +25,3 @@
   },
   "external_service_calls": []
 }
-

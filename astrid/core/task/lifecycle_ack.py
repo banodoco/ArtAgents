@@ -58,6 +58,7 @@ from astrid.core.task.plan import (
     is_code_kind,
     is_group_step,
     load_plan,
+    step_dir_for_path,
 )
 
 
@@ -274,6 +275,46 @@ def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
     # is a no-op for attested steps but we call it for symmetry with code
     # dispatch and to keep the post-dispatch surface consistent.
     record_dispatch_complete(decision, 0)
+
+    # FLAG-S1-005: surface inline produces-check rejection through cmd_ack's
+    # exit code (2 = inline-check rejected, distinct from generic 1) and
+    # print the rejection reason to stderr. The decision field is populated
+    # ONLY in gate._dispatch_attested (never in record_dispatch_complete), so
+    # code-step rewinds never reach this branch by design.
+    if decision.inline_check_result is not None:
+        from astrid.core.task.lifecycle import render_step_instructions
+        name, reason = decision.inline_check_result
+        decision_run_id = decision.run_id or ""
+        produces_entry = next(
+            (p for p in peek.step.produces if p.name == name),
+            None,
+        )
+        if produces_entry is not None and decision_run_id:
+            step_dir = step_dir_for_path(
+                slug,
+                decision_run_id,
+                peek.path_tuple,
+                step_version=peek.step.version,
+                iteration=peek.iteration,
+                item_id=peek.item_id,
+                root=projects_root,
+            )
+            artifact_path = step_dir / "produces" / produces_entry.path
+        else:
+            artifact_path = Path("<unknown>")
+        msg = render_step_instructions(
+            f"ack accepted, but produces check failed for {name}: {reason}. "
+            f"Retry: re-write {artifact_path} and re-ack.",
+            projects_root=projects_root,
+            slug=slug,
+            run_id=decision_run_id,
+            plan_step_path=peek.path_tuple,
+            item_id=peek.item_id,
+            iteration=peek.iteration,
+        )
+        _print_err(msg)
+        return 2
+
     print(f"acknowledged {STEP_PATH_SEP.join(peek.path_tuple)}")
     return 0
 
@@ -351,14 +392,15 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
     # it is the body of an iteration frame). peek.path_tuple == host path
     # because _make_iteration_frame uses path_prefix = parent_prefix.
     host = _find_step_by_path(plan, peek.path_tuple)
+    host_repeat = getattr(host, "repeat", None) if host is not None else None
     if (
         host is None
-        or not isinstance(getattr(host, "repeat", None), RepeatUntil)
-        or host.repeat.condition != "user_approves"  # type: ignore[union-attr]
+        or not isinstance(host_repeat, RepeatUntil)
+        or host_repeat.condition != "user_approves"
     ):
         condition = (
-            host.repeat.condition  # type: ignore[union-attr]
-            if host is not None and isinstance(getattr(host, "repeat", None), RepeatUntil)
+            host_repeat.condition
+            if isinstance(host_repeat, RepeatUntil)
             else "<no repeat>"
         )
         _print_err(

@@ -8,7 +8,7 @@
       "kind": "causal"
     }
   ],
-  "executor_id": "builtin.generate_image",
+  "executor_id": "builtin.generate_image_openai",
   "orchestrator_id": null,
   "kind": "executor",
   "status": "succeeded",
@@ -44,4 +44,3 @@
   },
   "external_service_calls": []
 }
-

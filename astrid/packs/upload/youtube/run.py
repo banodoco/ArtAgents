@@ -1,7 +1,11 @@
 """CLI for publishing rendered videos to YouTube through banodoco-social."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('upload.youtube')
 import argparse
 import json
 import sys

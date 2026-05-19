@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Generate image files with OpenAI GPT Image models."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.generate_image_openai')
 import argparse
 import base64
 import hashlib
@@ -18,6 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.audit import AuditContext
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key as _resolve_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
 
 API_URL = "https://api.openai.com/v1/images/generations"
@@ -59,72 +64,7 @@ def _warn(message: str) -> None:
     print(f"Warning: {message}", file=sys.stderr)
 
 
-def _read_env_value(env_path: Path, key: str) -> str:
-    if not env_path.is_file():
-        return ""
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        env_key, env_value = line.split("=", 1)
-        if env_key.strip() == key:
-            return env_value.strip().strip('"').strip("'")
-    return ""
-
-
-def _candidate_env_files(env_file: Path | None) -> list[Path]:
-    candidates: list[Path] = []
-    if env_file is not None:
-        candidates.append(env_file)
-    repo_root = Path(__file__).resolve().parents[3]
-    workspace = repo_root.parent
-    candidates.extend(
-        [
-            Path.cwd() / "this.env",
-            Path.cwd() / ".env",
-            Path(__file__).resolve().parent / "this.env",
-            Path(__file__).resolve().parent / ".env",
-            repo_root / "this.env",
-            repo_root / ".env",
-            workspace / "this.env",
-            workspace / ".env",
-            workspace / "reigh-app" / "this.env",
-            workspace / "reigh-app" / ".env",
-            workspace / "reigh-worker" / "this.env",
-            workspace / "reigh-worker" / ".env",
-            workspace / "reigh-worker-orchestrator" / "this.env",
-            workspace / "reigh-worker-orchestrator" / ".env",
-            Path.home() / "this.env",
-            Path.home() / ".env",
-            Path.home() / ".codex" / "this.env",
-            Path.home() / ".codex" / ".env",
-            Path.home() / ".claude" / "this.env",
-            Path.home() / ".claude" / ".env",
-            Path.home() / ".hermes" / "this.env",
-            Path.home() / ".hermes" / ".env",
-        ]
-    )
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(resolved)
-    return unique
-
-
-def load_api_key(env_file: Path | None = None) -> str:
-    if key := os.environ.get("OPENAI_API_KEY", "").strip():
-        return key
-    tried: list[str] = ["OPENAI_API_KEY environment variable"]
-    for candidate in _candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if key := _read_env_value(candidate, "OPENAI_API_KEY"):
-            return key
-    raise SystemExit(f"OPENAI_API_KEY not found. Tried: {', '.join(tried)}")
+# Secrets resolution delegated to astrid.core.util.secrets (Sprint 01 ecosystem reconciliation).
 
 
 def _normalize_format(value: str) -> str:
@@ -301,7 +241,7 @@ def _open_first_rendered(out_dir: Path) -> None:
 
 def generate(args: argparse.Namespace) -> int:
     jobs = _jobs_from_args(args)
-    api_key = "" if args.dry_run else load_api_key(args.env_file)
+    api_key = None if args.dry_run else _resolve_key("OPENAI_API_KEY", args.env_file)
     out_dir = args.out_dir
     default_format = _normalize_format(args.output_format)
     manifest: list[dict[str, Any]] = []

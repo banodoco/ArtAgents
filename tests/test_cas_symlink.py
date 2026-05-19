@@ -61,9 +61,10 @@ def test_produces_pass_interns_into_cas_and_links(tmp_projects_root: Path) -> No
     try:
         decision = task_gate.gate_command(slug, "echo go", ["echo", "go"], root=tmp_projects_root)
         step_dir = step_dir_for_path(slug, run_id, ("step-1",), root=tmp_projects_root)
-        step_dir.mkdir(parents=True, exist_ok=True)
+        produces_dir = step_dir / "produces"
+        produces_dir.mkdir(parents=True, exist_ok=True)
         payload = b'{"ok": 1}'
-        artifact = step_dir / "out.json"
+        artifact = produces_dir / "out.json"
         artifact.write_bytes(payload)
         expected_sha = hashlib.sha256(payload).hexdigest()
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Validate that a rendered hype.mp4 matches the captions in hype.metadata.json.
 
+
 Runs a fresh Whisper transcription on the output video, then for each clip in
 hype.timeline.json, compares the audio transcript in that clip's timeline range
 against the `source_transcript_text` recorded in hype.metadata.json.
@@ -14,6 +15,9 @@ Exits non-zero when any non-skipped clip fails the similarity threshold.
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.validate')
 import argparse
 import json
 import subprocess

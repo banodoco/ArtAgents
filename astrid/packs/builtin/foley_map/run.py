@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Foley Map orchestrator: tile → VLM → Foley → review → spatial-audio page."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.foley_map')
 import argparse
 import json
 import re

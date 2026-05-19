@@ -172,7 +172,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def cmd_ls(args: argparse.Namespace) -> int:
-    session = resolve_current_session()
+    # T9 / FLAG-S1-003: plumb slug only when --project provided; else env-only.
+    session = resolve_current_session(slug=getattr(args, "project", None) or None)
     project_slug = args.project
 
     if session is not None:
@@ -586,8 +587,10 @@ def cmd_cost(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _require_session() -> Any:
-    session = resolve_current_session()
+def _require_session(slug: str | None = None) -> Any:
+    # T9 / FLAG-S1-003: optional slug for file-bound fallback; env-only when
+    # caller has no --project context to plumb.
+    session = resolve_current_session(slug=slug)
     if session is None:
         raise SessionBindingError(_SESSION_GATE_HINT)
     return session
