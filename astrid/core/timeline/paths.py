@@ -7,7 +7,8 @@ from pathlib import Path
 
 from astrid.threads.ids import is_ulid
 
-from ..project.paths import ProjectPathError, project_dir, resolve_projects_root
+from ..project.jsonio import ProjectJsonError, read_json
+from ..project.paths import ProjectPathError, project_dir
 
 _TIMELINE_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 
@@ -45,6 +46,24 @@ def assembly_path(
     return timeline_dir(project_slug, ulid, root=root) / "assembly.json"
 
 
+def assembly_log_path(
+    project_slug: str, ulid: str, *, root: str | Path | None = None
+) -> Path:
+    return timeline_dir(project_slug, ulid, root=root) / "assembly.jsonl"
+
+
+def assembly_head_path(
+    project_slug: str, ulid: str, *, root: str | Path | None = None
+) -> Path:
+    return timeline_dir(project_slug, ulid, root=root) / "assembly.head.json"
+
+
+def assembly_identity_path(
+    project_slug: str, ulid: str, *, root: str | Path | None = None
+) -> Path:
+    return timeline_dir(project_slug, ulid, root=root) / "assembly.identity.json"
+
+
 def manifest_path(
     project_slug: str, ulid: str, *, root: str | Path | None = None
 ) -> Path:
@@ -64,8 +83,6 @@ def find_timeline_by_slug(
 
     Returns (ulid, timeline_dir) or None if not found.
     """
-    import json
-
     target = validate_timeline_slug(slug)
     td = timelines_dir(project_slug, root=root)
     if not td.is_dir():
@@ -73,12 +90,9 @@ def find_timeline_by_slug(
     for child in sorted(td.iterdir()):
         if not child.is_dir():
             continue
-        dp = child / "display.json"
-        if not dp.is_file():
-            continue
         try:
-            data = json.loads(dp.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            data = load_display_json_with_repair(child)
+        except (ProjectJsonError, OSError, ValueError):
             continue
         if isinstance(data, dict) and data.get("slug") == target:
             # The directory name is the ULID.
@@ -90,17 +104,67 @@ def find_timeline_slug_for_ulid(
     project_slug: str, ulid: str, *, root: str | Path | None = None
 ) -> str | None:
     """Reverse-lookup: read display.json for the given ULID and return the slug."""
-    import json
-
-    dp = display_path(project_slug, ulid, root=root)
-    if not dp.is_file():
+    tdir = timeline_dir(project_slug, ulid, root=root)
+    if not tdir.is_dir():
         return None
     try:
-        data = json.loads(dp.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        data = load_display_json_with_repair(tdir)
+    except (ProjectJsonError, OSError, ValueError):
         return None
     if isinstance(data, dict):
         slug = data.get("slug")
         if isinstance(slug, str):
             return slug
     return None
+
+
+def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object] | None:
+    from .eventlog import LocalFsBackend, project_display
+    from .model import Display, TimelineValidationError
+
+    timeline_dir_path = Path(timeline_home)
+    display_file = timeline_dir_path / "display.json"
+    events_file = timeline_dir_path / "assembly.jsonl"
+    identity_file = timeline_dir_path / "assembly.identity.json"
+
+    if not events_file.is_file():
+        if not display_file.is_file():
+            return None
+        raw = read_json(display_file)
+        return raw if isinstance(raw, dict) else None
+
+    if not identity_file.is_file():
+        return None
+
+    identity = read_json(identity_file)
+    if not isinstance(identity, dict):
+        return None
+    timeline_id = identity.get("timeline_id")
+    if not isinstance(timeline_id, str):
+        return None
+    fallback_display = None
+    raw_identity_display = identity.get("display")
+    if isinstance(raw_identity_display, dict):
+        try:
+            fallback_display = Display.from_dict(raw_identity_display)
+        except TimelineValidationError:
+            fallback_display = None
+
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
+    projection = project_display(backend.read_events(), fallback_display=fallback_display)
+    if projection.deleted:
+        return None
+    if projection.display is None:
+        return None
+
+    projected = projection.display.to_json_obj()
+    needs_write = True
+    if display_file.is_file():
+        try:
+            current = read_json(display_file)
+        except (ProjectJsonError, FileNotFoundError):
+            current = None
+        needs_write = current != projected
+    if needs_write:
+        projection.display.write(display_file)
+    return projected
