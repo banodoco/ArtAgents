@@ -215,7 +215,7 @@ class TestAddClip:
         def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
             return (SimpleNamespace(backend="spy"), SpyBackend())
 
-        monkeypatch.setattr("astrid.core.timeline.clip_edits.select_timeline_backend", fake_select)
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
 
         # Need to patch lower-level helpers that _resolve_backend calls.
         # We use a real timeline from demo_timeline to bypass path validation issues.
@@ -223,9 +223,9 @@ class TestAddClip:
         identity = demo_timeline["identity"]
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
 
-        monkeypatch.setattr("astrid.core.timeline.clip_edits.find_timeline_by_slug",
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.find_timeline_by_slug",
                             lambda ps, s, root=None: (ulid, tdir))
-        monkeypatch.setattr("astrid.core.timeline.clip_edits.read_json",
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.read_json",
                             lambda p: identity)
         monkeypatch.setattr("astrid.core.timeline.clip_edits._materialize",
                             lambda tdir, event: None)
@@ -583,7 +583,7 @@ class TestSupabaseSelectedPaths:
                 SupabaseBackend(timeline_id=timeline_id),
             )
 
-        monkeypatch.setattr("astrid.core.timeline.clip_edits.select_timeline_backend", fake_select)
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
 
         # find_timeline_by_slug and read_json still work normally for resolution
         with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
@@ -621,7 +621,7 @@ class TestSupabaseSelectedPaths:
                 TrackingSupabaseBackend(timeline_id=timeline_id),
             )
 
-        monkeypatch.setattr("astrid.core.timeline.clip_edits.select_timeline_backend", fake_select)
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
 
         with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
             add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
@@ -640,7 +640,7 @@ class TestSupabaseSelectedPaths:
                 SupabaseBackend(timeline_id=timeline_id),
             )
 
-        monkeypatch.setattr("astrid.core.timeline.clip_edits.select_timeline_backend", fake_select)
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
 
         # First add a clip on local_fs so we have something to operate on for remove/move/etc.
         # We need to bypass the monkeypatch for setup
@@ -672,12 +672,12 @@ class TestDefaultActor:
     ) -> None:
         event = add_clip("demo", "primary", kind="visual", asset_id="v1", root=demo_timeline["root"])
         assert event.actor.type == "system"
-        assert event.actor.id == "timeline-clip-edits:add_clip"
+        assert event.actor.id == "timeline-edits:add_clip"
 
     def test_remove_clip_uses_default_actor(self, demo_timeline: dict) -> None:
         add_clip("demo", "primary", kind="visual", asset_id="x", root=demo_timeline["root"])
         event = remove_clip("demo", "primary", clip_id="x", root=demo_timeline["root"])
-        assert event.actor.id == "timeline-clip-edits:remove_clip"
+        assert event.actor.id == "timeline-edits:remove_clip"
 
 
 # ── hash chain integrity across multiple operations ─────────────────────────

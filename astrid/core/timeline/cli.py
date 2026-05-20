@@ -22,7 +22,18 @@ from astrid.core.session.binding import (
 from astrid.core.task.events import read_events
 from astrid.core.task.run_audit import _cost_by_source, _run_status
 
-from . import clip_edits, crud
+from . import (
+    arrangement_edits,
+    audio_edits,
+    clip_edits,
+    crud,
+    effect_edits,
+    pool_edits,
+    theme_edits,
+    track_edits,
+    transition_edits,
+)
+from ._edit_helpers import TimelineEditError
 from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
 from .paths import assembly_identity_path, find_timeline_by_slug
@@ -38,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
-    except (crud.TimelineCrudError, clip_edits.ClipEditError, SessionBindingError) as exc:
+    except (crud.TimelineCrudError, TimelineEditError, SessionBindingError) as exc:
         print(f"timelines: {exc}", file=sys.stderr)
         return 2
     except ValueError as exc:
@@ -227,6 +238,152 @@ def build_parser() -> argparse.ArgumentParser:
     clip_annotate.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_annotate.add_argument("--note", required=True, help="Annotation note text.")
     clip_annotate.set_defaults(handler=cmd_clip_annotate)
+
+    # --- transition ---
+    trans_parser = subparsers.add_parser("transition", help="Manage transitions between clips.")
+    trans_subs = trans_parser.add_subparsers(dest="transition_command", required=True)
+
+    # transition set
+    trans_set = trans_subs.add_parser("set", help="Set a transition between two clips.")
+    trans_set.add_argument("slug", help="Timeline slug.")
+    trans_set.add_argument("--between", required=True, metavar="LEFT,RIGHT",
+                           help="Two clip ids separated by comma (left clip, right clip).")
+    trans_set.add_argument("--kind", default="cross-fade", help="Transition kind (default: cross-fade).")
+    trans_set.add_argument("--duration", type=float, default=0.5, dest="duration_seconds",
+                           help="Transition duration in seconds (default: 0.5).")
+    trans_set.set_defaults(handler=cmd_transition_set)
+
+    # transition remove
+    trans_remove = trans_subs.add_parser("remove", help="Remove a transition between two clips.")
+    trans_remove.add_argument("slug", help="Timeline slug.")
+    trans_remove.add_argument("--between", required=True, metavar="LEFT,RIGHT",
+                              help="Two clip ids separated by comma (left clip, right clip).")
+    trans_remove.set_defaults(handler=cmd_transition_remove)
+
+    # --- effect ---
+    effect_parser = subparsers.add_parser("effect", help="Manage clip effects.")
+    effect_subs = effect_parser.add_subparsers(dest="effect_command", required=True)
+
+    # effect add
+    effect_add_p = effect_subs.add_parser("add", help="Add an effect to a clip.")
+    effect_add_p.add_argument("slug", help="Timeline slug.")
+    effect_add_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
+    effect_add_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
+    effect_add_p.add_argument("--params", action="append", dest="params_raw", metavar="k=v",
+                              help="Effect parameter as k=v (repeatable).")
+    effect_add_p.set_defaults(handler=cmd_effect_add)
+
+    # effect remove
+    effect_remove_p = effect_subs.add_parser("remove", help="Remove an effect from a clip.")
+    effect_remove_p.add_argument("slug", help="Timeline slug.")
+    effect_remove_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
+    effect_remove_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
+    effect_remove_p.set_defaults(handler=cmd_effect_remove)
+
+    # effect tune
+    effect_tune_p = effect_subs.add_parser("tune", help="Tune an effect parameter.")
+    effect_tune_p.add_argument("slug", help="Timeline slug.")
+    effect_tune_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
+    effect_tune_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
+    effect_tune_p.add_argument("--param", required=True, help="Parameter name (k).")
+    effect_tune_p.add_argument("--value", required=True, help="Parameter value (parsed as JSON).")
+    effect_tune_p.set_defaults(handler=cmd_effect_tune)
+
+    # --- theme ---
+    theme_parser = subparsers.add_parser("theme", help="Manage timeline theme.")
+    theme_subs = theme_parser.add_subparsers(dest="theme_command", required=True)
+
+    # theme set
+    theme_set_p = theme_subs.add_parser("set", help="Set the active theme.")
+    theme_set_p.add_argument("slug", help="Timeline slug.")
+    theme_set_p.add_argument("--theme", required=True, dest="theme_id", help="Theme identifier.")
+    theme_set_p.set_defaults(handler=cmd_theme_set)
+
+    # theme override
+    theme_override_p = theme_subs.add_parser("override", help="Override a theme namespace value.")
+    theme_override_p.add_argument("slug", help="Timeline slug.")
+    theme_override_p.add_argument("--override-id", required=True, dest="override_id",
+                                  help="Override namespace (visual|generation|voice|audio|pacing).")
+    theme_override_p.add_argument("--value", required=True, help="Override value (parsed as JSON).")
+    theme_override_p.set_defaults(handler=cmd_theme_override)
+
+    # --- track ---
+    track_parser = subparsers.add_parser("track", help="Manage timeline tracks.")
+    track_subs = track_parser.add_subparsers(dest="track_command", required=True)
+
+    # track add
+    track_add_p = track_subs.add_parser("add", help="Add a track.")
+    track_add_p.add_argument("slug", help="Timeline slug.")
+    track_add_p.add_argument("--kind", required=True, choices=["visual", "audio"],
+                             help="Track kind: visual or audio.")
+    track_add_p.add_argument("--label", default=None, help="Optional human-readable label.")
+    track_add_p.add_argument("--track-id", default=None, dest="track_id",
+                             help="Track identifier (auto-generated UUID if omitted).")
+    track_add_p.set_defaults(handler=cmd_track_add)
+
+    # track remove
+    track_remove_p = track_subs.add_parser("remove", help="Remove a track.")
+    track_remove_p.add_argument("slug", help="Timeline slug.")
+    track_remove_p.add_argument("--track-id", required=True, dest="track_id", help="Track identifier.")
+    track_remove_p.set_defaults(handler=cmd_track_remove)
+
+    # --- audio ---
+    audio_parser = subparsers.add_parser("audio", help="Manage clip audio bindings.")
+    audio_subs = audio_parser.add_subparsers(dest="audio_command", required=True)
+
+    # audio bind
+    audio_bind_p = audio_subs.add_parser("bind", help="Bind audio asset to a clip.")
+    audio_bind_p.add_argument("slug", help="Timeline slug.")
+    audio_bind_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
+    audio_bind_p.add_argument("--asset", required=True, dest="asset_id", help="Audio asset identifier.")
+    audio_bind_p.set_defaults(handler=cmd_audio_bind)
+
+    # audio unbind
+    audio_unbind_p = audio_subs.add_parser("unbind", help="Unbind audio from a clip.")
+    audio_unbind_p.add_argument("slug", help="Timeline slug.")
+    audio_unbind_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
+    audio_unbind_p.set_defaults(handler=cmd_audio_unbind)
+
+    # --- pool ---
+    pool_parser = subparsers.add_parser("pool", help="Manage asset pool.")
+    pool_subs = pool_parser.add_subparsers(dest="pool_command", required=True)
+
+    # pool add
+    pool_add_p = pool_subs.add_parser("add", help="Add an asset to the pool.")
+    pool_add_p.add_argument("slug", help="Timeline slug.")
+    pool_add_p.add_argument("--asset", required=True, dest="asset_id", help="Asset identifier.")
+    pool_add_p.set_defaults(handler=cmd_pool_add)
+
+    # pool remove
+    pool_remove_p = pool_subs.add_parser("remove", help="Remove an asset from the pool.")
+    pool_remove_p.add_argument("slug", help="Timeline slug.")
+    pool_remove_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
+    pool_remove_p.set_defaults(handler=cmd_pool_remove)
+
+    # pool score
+    pool_score_p = pool_subs.add_parser("score", help="Score a pool asset.")
+    pool_score_p.add_argument("slug", help="Timeline slug.")
+    pool_score_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
+    pool_score_p.add_argument("--score", type=float, required=True, help="Score between 0 and 1.")
+    pool_score_p.set_defaults(handler=cmd_pool_score)
+
+    # --- arrangement ---
+    arr_parser = subparsers.add_parser("arrangement", help="Manage arrangement.")
+    arr_subs = arr_parser.add_subparsers(dest="arrangement_command", required=True)
+
+    # arrangement set
+    arr_set_p = arr_subs.add_parser("set", help="Replace the timeline arrangement from a JSON file.")
+    arr_set_p.add_argument("slug", help="Timeline slug.")
+    arr_set_p.add_argument("--from-json", required=True, dest="from_json",
+                           help="Path to a JSON file containing the new arrangement.")
+    arr_set_p.set_defaults(handler=cmd_arrangement_set)
+
+    # arrangement show
+    arr_show_p = arr_subs.add_parser("show", help="Show the current arrangement.")
+    arr_show_p.add_argument("slug", help="Timeline slug.")
+    arr_show_p.add_argument("--json", dest="json_out", action="store_true",
+                            help="Emit structured JSON.")
+    arr_show_p.set_defaults(handler=cmd_arrangement_show)
 
     return parser
 
@@ -835,6 +992,330 @@ def cmd_clip_annotate(args: argparse.Namespace) -> int:
         actor=_timeline_actor_from_session(session),
     )
     print(_clip_success(event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: transition (2 verbs)
+# ---------------------------------------------------------------------------
+
+
+def _parse_between(raw: str) -> tuple[str, str]:
+    """Parse ``--between LEFT,RIGHT`` into ``(left_clip_id, right_clip_id)``."""
+    parts = [part.strip() for part in raw.split(",")]
+    if len(parts) != 2:
+        raise TimelineEditError(
+            f"--between must be LEFT,RIGHT (comma-separated), got {raw!r}"
+        )
+    left, right = parts
+    if not left or not right:
+        raise TimelineEditError("--between clip ids must be non-empty")
+    return left, right
+
+
+def cmd_transition_set(args: argparse.Namespace) -> int:
+    session = _require_session()
+    left, right = _parse_between(args.between)
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = transition_edits.transition_set(
+        session.project,
+        args.slug,
+        left_clip_id=left,
+        right_clip_id=right,
+        kind=args.kind,
+        duration_seconds=args.duration_seconds,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("transition", event, backend_name))
+    return 0
+
+
+def cmd_transition_remove(args: argparse.Namespace) -> int:
+    session = _require_session()
+    left, right = _parse_between(args.between)
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = transition_edits.transition_remove(
+        session.project,
+        args.slug,
+        left_clip_id=left,
+        right_clip_id=right,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("transition", event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: effect (3 verbs)
+# ---------------------------------------------------------------------------
+
+
+def _parse_kv(raw: str) -> tuple[str, str]:
+    """Parse ``k=v`` into ``(k, v)``."""
+    parts = raw.split("=", 1)
+    if len(parts) != 2:
+        raise TimelineEditError(f"--params must be k=v, got {raw!r}")
+    return parts[0].strip(), parts[1].strip()
+
+
+def _parse_params(raw_list: list[str] | None) -> dict[str, Any] | None:
+    """Convert repeated ``k=v`` args into a dict."""
+    if not raw_list:
+        return None
+    result: dict[str, Any] = {}
+    for item in raw_list:
+        k, v = _parse_kv(item)
+        result[k] = v
+    return result
+
+
+def _parse_json_value(raw: str, *, flag: str) -> Any:
+    """Parse a CLI JSON value, surfacing a user-facing error on invalid JSON."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise TimelineEditError(f"{flag} must be valid JSON: {exc.msg}") from exc
+
+
+def _edit_success(domain: str, event: "TimelineEvent", backend_name: str) -> str:
+    """Format a one-line success message for non-clip timeline edit commands."""
+    return (
+        f"{domain}: event {event.event_id}, kind={event.kind}, "
+        f"timeline={event.timeline_id}, backend={backend_name}"
+    )
+
+
+def cmd_effect_add(args: argparse.Namespace) -> int:
+    session = _require_session()
+    params = _parse_params(args.params_raw)
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = effect_edits.effect_add(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        effect_id=args.effect_id,
+        params=params,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("effect", event, backend_name))
+    return 0
+
+
+def cmd_effect_remove(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = effect_edits.effect_remove(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        effect_id=args.effect_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("effect", event, backend_name))
+    return 0
+
+
+def cmd_effect_tune(args: argparse.Namespace) -> int:
+    session = _require_session()
+    value = _parse_json_value(args.value, flag="--value")
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = effect_edits.effect_tune(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        effect_id=args.effect_id,
+        param=args.param,
+        value=value,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("effect", event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: theme (2 verbs)
+# ---------------------------------------------------------------------------
+
+
+def cmd_theme_set(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = theme_edits.theme_set(
+        session.project,
+        args.slug,
+        theme_id=args.theme_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("theme", event, backend_name))
+    return 0
+
+
+def cmd_theme_override(args: argparse.Namespace) -> int:
+    session = _require_session()
+    value = _parse_json_value(args.value, flag="--value")
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = theme_edits.theme_override(
+        session.project,
+        args.slug,
+        override_id=args.override_id,
+        value=value,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("theme", event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: track (2 verbs)
+# ---------------------------------------------------------------------------
+
+
+def cmd_track_add(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    from uuid import uuid4 as _uuid4
+
+    track_id = args.track_id or str(_uuid4())
+    event = track_edits.track_add(
+        session.project,
+        args.slug,
+        track_id=track_id,
+        kind=args.kind,
+        label=args.label,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("track", event, backend_name))
+    return 0
+
+
+def cmd_track_remove(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = track_edits.track_remove(
+        session.project,
+        args.slug,
+        track_id=args.track_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("track", event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: audio (2 verbs)
+# ---------------------------------------------------------------------------
+
+
+def cmd_audio_bind(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = audio_edits.audio_bind(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        asset_id=args.asset_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("audio", event, backend_name))
+    return 0
+
+
+def cmd_audio_unbind(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = audio_edits.audio_unbind(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("audio", event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: pool (3 verbs)
+# ---------------------------------------------------------------------------
+
+
+def cmd_pool_add(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = pool_edits.pool_asset_add(
+        session.project,
+        args.slug,
+        asset_id=args.asset_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("pool", event, backend_name))
+    return 0
+
+
+def cmd_pool_remove(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = pool_edits.pool_asset_remove(
+        session.project,
+        args.slug,
+        asset_id=args.asset_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("pool", event, backend_name))
+    return 0
+
+
+def cmd_pool_score(args: argparse.Namespace) -> int:
+    session = _require_session()
+    if args.score < 0 or args.score > 1:
+        raise TimelineEditError("score must be between 0 and 1")
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = pool_edits.pool_asset_score(
+        session.project,
+        args.slug,
+        asset_id=args.asset_id,
+        score=args.score,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("pool", event, backend_name))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: arrangement (2 verbs)
+# ---------------------------------------------------------------------------
+
+
+def cmd_arrangement_set(args: argparse.Namespace) -> int:
+    session = _require_session()
+    from_json_path = Path(args.from_json).expanduser().resolve()
+    if not from_json_path.is_file():
+        raise TimelineEditError(f"arrangement JSON file not found: {from_json_path}")
+    try:
+        arrangement_data = json.loads(from_json_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise TimelineEditError(f"--from-json must contain valid JSON: {exc.msg}") from exc
+    if not isinstance(arrangement_data, dict):
+        raise TimelineEditError("arrangement JSON file must contain a JSON object")
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = arrangement_edits.arrangement_replace(
+        session.project,
+        args.slug,
+        arrangement=arrangement_data,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_edit_success("arrangement", event, backend_name))
+    return 0
+
+
+def cmd_arrangement_show(args: argparse.Namespace) -> int:
+    session = _require_session()
+    arrangement = crud.get_arrangement(session.project, args.slug)
+    if arrangement is None:
+        data = crud.show_timeline(session.project, args.slug)
+        if data is None:
+            print(f"timeline '{args.slug}' not found", file=sys.stderr)
+            return 1
+    print(json.dumps(arrangement, indent=2, default=str))
     return 0
 
 
