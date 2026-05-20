@@ -9,6 +9,8 @@ this.env
 *.pfx
 *credentials*
 *secret*
+# Real source files whose names trip the broad credential globs above.
+!astrid/core/util/secrets.py
 
 # Python
 __pycache__/
