@@ -3,6 +3,16 @@
 from .serialize import canonical_json_bytes, canonical_json_text, sha256_hex, with_event_hash
 from .types import (
     EVENT_SCHEMA_VERSION,
+    ClipAddedPayload,
+    ClipAnnotatedPayload,
+    ClipKind,
+    ClipMovedPayload,
+    ClipPosition,
+    ClipRemovedPayload,
+    ClipReplacedPayload,
+    ClipRetimedPayload,
+    ClipSwappedPayload,
+    ClipTextSetPayload,
     TimelineActor,
     TimelineCreatedPayload,
     TimelineDefaultSetPayload,
@@ -20,6 +30,16 @@ from .types import (
 
 __all__ = [
     "EVENT_SCHEMA_VERSION",
+    "ClipAddedPayload",
+    "ClipAnnotatedPayload",
+    "ClipKind",
+    "ClipMovedPayload",
+    "ClipPosition",
+    "ClipRemovedPayload",
+    "ClipReplacedPayload",
+    "ClipRetimedPayload",
+    "ClipSwappedPayload",
+    "ClipTextSetPayload",
     "TimelineActor",
     "TimelineCreatedPayload",
     "TimelineDefaultSetPayload",

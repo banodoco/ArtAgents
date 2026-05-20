@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Assemble selected source-video ranges into hype-cut planning files and optional rendered outputs using transcript, scene, and shot inputs."""
+"""Assemble selected source-video ranges into hype-cut planning files and optional rendered outputs using transcript, scene, and shot inputs.
+
+.. note::
+
+    This module produces **standalone** ``hype.timeline.json`` artifacts for
+    the Remotion renderer.  These are NOT project-timeline containers
+    (``assembly.json`` / ``assembly.jsonl``).  Migrating cut/hype clip assembly
+    to emit ``clip.*`` events through the project-timeline ``EventLogBackend``
+    is deferred to **m3.5** (pack/worker write-path sweep)."""
 
 
 from __future__ import annotations
@@ -490,6 +498,13 @@ def build_multitrack_timeline(
     theme_dir: Path | None = None,
     theme_slug: str | None = None,
 ) -> TimelineConfig:
+    """Build a standalone Remotion timeline from arrangement + pool data.
+
+    Returns a ``TimelineConfig`` that is serialized as ``hype.timeline.json`` — a
+    **standalone** render artefact, not a project-timeline container.  Migration
+    to emit ``clip.*`` events through the project-timeline ``EventLogBackend`` is
+    deferred to **m3.5**.
+    """
     clips: list[dict[str, Any]] = []
     if primary_asset is None and "rant" in registry["assets"]:
         clips.append(

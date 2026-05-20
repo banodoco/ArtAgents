@@ -204,11 +204,22 @@ def show_timeline(
     *,
     root: str | Path | None = None,
 ) -> dict[str, Any] | None:
-    """Return the full timeline record (assembly + manifest + display)."""
+    """Return the full timeline record (assembly + manifest + display).
+
+    .. note::
+
+        ``assembly.json`` is maintained by the **compatibility materializer**
+        that runs after each clip event append (see ``assembly_helper.py``).
+        In m4 this file will become a projection-rebuild target and the
+        synchronous materializer will be removed.  Until then, direct reads
+        like this one are the authoritative source for assembly state.
+    """
     found = find_timeline_by_slug(project_slug, slug, root=root)
     if found is None:
         return None
     ulid, tdir = found
+    # assembly.json is maintained by the compatibility materializer;
+    # it will become a projection-rebuild target in m4.
     assembly = Assembly.from_json(tdir / "assembly.json")
     manifest = Manifest.from_json(tdir / "manifest.json")
     raw_display = load_display_json_with_repair(tdir)
@@ -269,15 +280,13 @@ def rename_timeline(
         timeline_home=tdir,
         preferred_backend=preferred_backend,
     )
-    if stream.backend != "local_fs":
-        raise TimelineCrudError(f"timeline backend {stream.backend!r} is not available for rename")
-
     rename_actor = actor or TimelineActor(
         type="system",
         id="timeline-crud:rename",
         display="timeline-crud",
     )
     backend.append_event(
+        timeline_id,
         "timeline.renamed",
         {"old_slug": old_slug, "new_slug": new_slug},
         actor=rename_actor,

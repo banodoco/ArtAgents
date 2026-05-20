@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.project.current_run import read_current_run
+from astrid.core.project.jsonio import read_json
 from astrid.core.project.paths import project_dir
 from astrid.core.session.binding import (
     SessionBindingError,
@@ -21,9 +22,10 @@ from astrid.core.session.binding import (
 from astrid.core.task.events import read_events
 from astrid.core.task.run_audit import _cost_by_source, _run_status
 
-from . import crud
-from .events.schema import TimelineActor
+from . import clip_edits, crud
+from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
+from .paths import assembly_identity_path, find_timeline_by_slug
 
 _SESSION_GATE_HINT = (
     "A timeline command requires a bound session. "
@@ -36,7 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
-    except (crud.TimelineCrudError, SessionBindingError) as exc:
+    except (crud.TimelineCrudError, clip_edits.ClipEditError, SessionBindingError) as exc:
         print(f"timelines: {exc}", file=sys.stderr)
         return 2
     except ValueError as exc:
@@ -161,6 +163,70 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include aborted runs in the cost rollup.",
     )
     cost_parser.set_defaults(handler=cmd_cost)
+
+    # --- clip ---
+    clip_parser = subparsers.add_parser("clip", help="Edit clips in a timeline.")
+    clip_subs = clip_parser.add_subparsers(dest="clip_command", required=True)
+
+    # clip add
+    clip_add = clip_subs.add_parser("add", help="Add a clip to a timeline.")
+    clip_add.add_argument("slug", help="Timeline slug.")
+    clip_add.add_argument("--kind", required=True, choices=["visual", "audio", "text"], help="Clip kind.")
+    clip_add.add_argument("--asset", required=True, help="Asset identifier.")
+    pos_group = clip_add.add_mutually_exclusive_group()
+    pos_group.add_argument("--at", type=int, dest="at_index", help="Insert at 0-based index.")
+    pos_group.add_argument("--after", dest="after_id", help="Insert after clip id.")
+    pos_group.add_argument("--before", dest="before_id", help="Insert before clip id.")
+    clip_add.set_defaults(handler=cmd_clip_add)
+
+    # clip remove
+    clip_remove = clip_subs.add_parser("remove", help="Remove a clip from a timeline.")
+    clip_remove.add_argument("slug", help="Timeline slug.")
+    clip_remove.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_remove.set_defaults(handler=cmd_clip_remove)
+
+    # clip move
+    clip_move = clip_subs.add_parser("move", help="Move a clip to a new position.")
+    clip_move.add_argument("slug", help="Timeline slug.")
+    clip_move.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_move.add_argument("--to", required=True, dest="to_position", help="Target position: index, after:<id>, or before:<id>.")
+    clip_move.set_defaults(handler=cmd_clip_move)
+
+    # clip retime
+    clip_retime = clip_subs.add_parser("retime", help="Change a clip's start time and duration.")
+    clip_retime.add_argument("slug", help="Timeline slug.")
+    clip_retime.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_retime.add_argument("--start", required=True, type=float, help="Start time in seconds (>= 0).")
+    clip_retime.add_argument("--duration", required=True, type=float, help="Duration in seconds (> 0).")
+    clip_retime.set_defaults(handler=cmd_clip_retime)
+
+    # clip swap
+    clip_swap = clip_subs.add_parser("swap", help="Swap the positions of two clips.")
+    clip_swap.add_argument("slug", help="Timeline slug.")
+    clip_swap.add_argument("--a", required=True, dest="clip_a", help="First clip identifier.")
+    clip_swap.add_argument("--b", required=True, dest="clip_b", help="Second clip identifier.")
+    clip_swap.set_defaults(handler=cmd_clip_swap)
+
+    # clip replace
+    clip_replace = clip_subs.add_parser("replace", help="Replace a clip with a different asset.")
+    clip_replace.add_argument("slug", help="Timeline slug.")
+    clip_replace.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_replace.add_argument("--with", required=True, dest="with_asset_id", metavar="ASSET_ID", help="Replacement asset identifier.")
+    clip_replace.set_defaults(handler=cmd_clip_replace)
+
+    # clip set-text
+    clip_set_text = clip_subs.add_parser("set-text", help="Set the text content of a text clip.")
+    clip_set_text.add_argument("slug", help="Timeline slug.")
+    clip_set_text.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_set_text.add_argument("--text", required=True, help="Text content.")
+    clip_set_text.set_defaults(handler=cmd_clip_set_text)
+
+    # clip annotate
+    clip_annotate = clip_subs.add_parser("annotate", help="Add a note annotation to a clip.")
+    clip_annotate.add_argument("slug", help="Timeline slug.")
+    clip_annotate.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_annotate.add_argument("--note", required=True, help="Annotation note text.")
+    clip_annotate.set_defaults(handler=cmd_clip_annotate)
 
     return parser
 
@@ -583,6 +649,192 @@ def cmd_cost(args: argparse.Namespace) -> int:
             print(f"  {source:<20} ${amt:>10.4f}")
     print(f"  {'─' * 32}")
     print(f"  {'TOTAL':<20} ${grand_total:>10.4f}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: clip (8 verbs)
+# ---------------------------------------------------------------------------
+
+
+def _parse_clip_position(args: argparse.Namespace) -> ClipPosition | None:
+    """Normalise CLI position flags into a :class:`ClipPosition`."""
+    at_index = getattr(args, "at_index", None)
+    after_id = getattr(args, "after_id", None)
+    before_id = getattr(args, "before_id", None)
+
+    if at_index is not None:
+        return ClipPosition(mode="index", index=at_index)
+    if after_id is not None:
+        return ClipPosition(mode="after", ref_clip_id=after_id)
+    if before_id is not None:
+        return ClipPosition(mode="before", ref_clip_id=before_id)
+    return None
+
+
+def _parse_move_position(raw: str) -> ClipPosition:
+    """Parse ``--to`` syntax: bare integer → index, ``after:<id>``, ``before:<id>``."""
+    raw = raw.strip()
+    if raw.startswith("after:"):
+        ref = raw[len("after:"):]
+        if not ref:
+            raise clip_edits.ClipEditError("--to after:<id> requires a non-empty clip id")
+        return ClipPosition(mode="after", ref_clip_id=ref)
+    if raw.startswith("before:"):
+        ref = raw[len("before:"):]
+        if not ref:
+            raise clip_edits.ClipEditError("--to before:<id> requires a non-empty clip id")
+        return ClipPosition(mode="before", ref_clip_id=ref)
+    try:
+        idx = int(raw)
+    except ValueError:
+        raise clip_edits.ClipEditError(
+            f"--to must be an index, after:<id>, or before:<id>; got {raw!r}"
+        )
+    return ClipPosition(mode="index", index=idx)
+
+
+def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
+    """Read the identity sidecar to determine the backend name for a timeline.
+
+    Returns ``\"local_fs\"`` when no explicit backend preference is set,
+    or ``\"supabase\"`` when the sidecar requests it.
+    """
+    found = find_timeline_by_slug(project_slug, slug)
+    if found is None:
+        raise clip_edits.ClipEditError(
+            f"timeline '{slug}' not found in project '{project_slug}'"
+        )
+    ulid, _ = found
+    identity = read_json(assembly_identity_path(project_slug, ulid))
+    if not isinstance(identity, dict):
+        raise clip_edits.ClipEditError("timeline identity sidecar is malformed")
+    preferred = identity.get("backend")
+    if isinstance(preferred, str) and preferred.strip().lower() == "supabase":
+        return "supabase"
+    return "local_fs"
+
+
+def _clip_success(event: "TimelineEvent", backend_name: str) -> str:
+    """Format a one-line success message for clip commands."""
+    return (
+        f"clip: event {event.event_id}, kind={event.kind}, "
+        f"timeline={event.timeline_id}, backend={backend_name}"
+    )
+
+
+def cmd_clip_add(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    pos = _parse_clip_position(args)
+    event = clip_edits.add_clip(
+        session.project,
+        args.slug,
+        kind=args.kind,
+        asset_id=args.asset,
+        position=pos,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_remove(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = clip_edits.remove_clip(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_move(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    pos = _parse_move_position(args.to_position)
+    event = clip_edits.move_clip(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        position=pos,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_retime(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = clip_edits.retime_clip(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        start=args.start,
+        duration=args.duration,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_swap(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = clip_edits.swap_clips(
+        session.project,
+        args.slug,
+        clip_a_id=args.clip_a,
+        clip_b_id=args.clip_b,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_replace(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = clip_edits.replace_clip(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        with_asset_id=args.with_asset_id,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_set_text(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = clip_edits.set_clip_text(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        text=args.text,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_annotate(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    event = clip_edits.annotate_clip(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        note=args.note,
+        actor=_timeline_actor_from_session(session),
+    )
+    print(_clip_success(event, backend_name))
     return 0
 
 
