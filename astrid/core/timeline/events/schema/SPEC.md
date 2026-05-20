@@ -21,6 +21,9 @@ these rules exactly.
   before the requested lifecycle event.
 - Local read repair is intentionally fail-closed when an eventlog exists but
   the identity sidecar or projection cannot materialize a valid display state.
+- Display read repair only projects `timeline.imported`, `timeline.created`,
+  `timeline.renamed`, `timeline.default_set`, and `timeline.deleted`.
+  `timeline.tombstoned` is schema-defined only in m1.
 - Backend selection is per timeline: a known local `timeline_home` resolves to
   `LocalFsBackend`, while explicit `preferred_backend="supabase"` resolves to
   the inert `SupabaseBackend` stub.
@@ -29,3 +32,29 @@ these rules exactly.
 - Actor compatibility is intentionally broad in Python m1: `actor.id` is a
   non-empty string and current producers such as `maker`, `codex:test`,
   `migration:m1`, and `claude-code:session-123` remain valid.
+
+## Current lifecycle matrix
+
+This spec documents the implementation actually shipped in Python m1.
+
+| kind | schema-defined | projected today | backend-enforced today | emitted by CRUD/CLI today |
+| --- | --- | --- | --- | --- |
+| `timeline.imported` | yes | yes | yes, via `LocalFsBackend` bootstrap on first append for true legacy timelines | no |
+| `timeline.created` | yes | yes | no | no |
+| `timeline.renamed` | yes | yes | no special backend rule | yes, `rename_timeline()` only |
+| `timeline.default_set` | yes | yes | no | no |
+| `timeline.deleted` | yes | yes | yes, `LocalFsBackend` rejects later appends when it is already present as the tail event | no |
+| `timeline.tombstoned` | yes | no | no | no |
+
+The deferred lifecycle behaviors are load-bearing for milestone close-out:
+
+- `create_timeline()` writes legacy files plus `assembly.identity.json`, but it
+  does not emit `timeline.created`.
+- `set_default()` rewrites `display.json` and `project.json`, but it does not
+  emit `timeline.default_set`.
+- `tombstone_timeline()` is legacy-only and stamps
+  `manifest.json.tombstoned_at`; it does not emit `timeline.tombstoned`.
+- `purge_timeline()` hard-deletes the timeline directory and does not emit
+  `timeline.deleted`.
+- `timeline.deleted` only affects projection/enforcement when it is already
+  present in an event stream from some other producer or fixture.

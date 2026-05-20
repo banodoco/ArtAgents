@@ -81,8 +81,47 @@ projection for `display.json`.
   an eventlog exists
 - reads stay fail-closed when an eventlog exists but identity/projection
   materialization is unusable
-- deleted timelines refuse display materialization
+- `timeline.deleted` refuses display materialization when that event is already
+  present in the stream
 - `assembly.json` and `manifest.json` are explicitly out of scope for m1
+
+Current read-side lifecycle handling is intentionally narrower than the schema
+surface. `project_display(...)` only branches on:
+
+- `timeline.imported`
+- `timeline.created`
+- `timeline.renamed`
+- `timeline.default_set`
+- `timeline.deleted`
+
+There is no `timeline.tombstoned` projector branch in m1.
+
+## Current lifecycle matrix
+
+This is the repository contract today across `crud.py`, `projector.py`,
+`paths.py`, and `cli.py`.
+
+| kind | schema-defined | projected by `project_display()` | backend-enforced today | emitted by CRUD/CLI today |
+| --- | --- | --- | --- | --- |
+| `timeline.imported` | yes | yes | yes, `LocalFsBackend` bootstraps it on first append for true legacy timelines | no |
+| `timeline.created` | yes | yes | no | no |
+| `timeline.renamed` | yes | yes | no special backend rule | yes, `rename_timeline()` only |
+| `timeline.default_set` | yes | yes | no | no |
+| `timeline.deleted` | yes | yes | yes, later appends are rejected when it is already the tail event | no |
+| `timeline.tombstoned` | yes | no | no | no |
+
+The CLI mirrors that same boundary:
+
+- `cmd_rename()` is the only timeline CLI path that routes through the eventlog
+  write path
+- `cmd_create()` still delegates to legacy `create_timeline()` with no event
+  emission
+- `cmd_set_default()` still delegates to legacy `set_default()` with no event
+  emission
+- `cmd_tombstone()` still delegates to legacy `tombstone_timeline()` and only
+  stamps `manifest.json.tombstoned_at`
+- `cmd_purge()` still delegates to legacy `purge_timeline()` and hard-deletes
+  the directory tree without emitting `timeline.deleted`
 
 ## Actor compatibility in m1
 
