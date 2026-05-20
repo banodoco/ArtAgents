@@ -32,6 +32,7 @@ class SupabaseBackend:
 
     def append_event(
         self,
+        timeline_id: str,
         kind: str,
         payload: dict[str, object],
         *,

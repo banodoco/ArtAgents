@@ -20,8 +20,17 @@ TimelineEventKind = Literal[
     "timeline.tombstoned",
     "timeline.deleted",
     "timeline.imported",
+    "clip.added",
+    "clip.removed",
+    "clip.moved",
+    "clip.retimed",
+    "clip.swapped",
+    "clip.replaced",
+    "clip.text_set",
+    "clip.annotated",
 ]
 TimelineImportSource = Literal["legacy_local", "supabase_config", "other"]
+ClipKind = Literal["visual", "audio", "text"]
 
 
 class TimelineEventSchemaError(ValueError):
@@ -101,6 +110,68 @@ def _validate_jsonable(value: Any, field: str) -> None:
             _validate_jsonable(nested, f"{field}[{index}]")
         return
     raise TimelineEventSchemaError(f"{field} must be JSON-serializable")
+
+
+def _coerce_clip_position(value: object, field: str) -> "ClipPosition | None":
+    if value is None:
+        return None
+    if isinstance(value, ClipPosition):
+        return value
+    if isinstance(value, dict):
+        return ClipPosition.from_dict(value)
+    raise TimelineEventSchemaError(f"{field} must be a ClipPosition or dict")
+
+
+@dataclass(frozen=True)
+class ClipPosition:
+    """Normalized clip position within a timeline.
+
+    clip 'id' strings are the canonical m2 identity.
+    Migration to UUID entity_id/external_id is deferred to a later milestone.
+    """
+
+    mode: Literal["index", "after", "before"]
+    index: int | None = None
+    ref_clip_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"index", "after", "before"}:
+            raise TimelineEventSchemaError(
+                "position.mode must be 'index', 'after', or 'before'"
+            )
+        if self.mode == "index":
+            if self.index is None:
+                raise TimelineEventSchemaError(
+                    "position.index is required when mode is 'index'"
+                )
+            if not isinstance(self.index, int) or isinstance(self.index, bool):
+                raise TimelineEventSchemaError("position.index must be an integer")
+        else:
+            if self.ref_clip_id is None:
+                raise TimelineEventSchemaError(
+                    "position.ref_clip_id is required when mode is 'after' or 'before'"
+                )
+            _require_nonempty_str(self.ref_clip_id, "position.ref_clip_id")
+        if self.index is not None and self.mode != "index":
+            object.__setattr__(self, "index", None)
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"mode": self.mode}
+        if self.index is not None:
+            result["index"] = self.index
+        if self.ref_clip_id is not None:
+            result["ref_clip_id"] = self.ref_clip_id
+        return result
+
+    @classmethod
+    def from_dict(cls, raw: object) -> "ClipPosition":
+        if not isinstance(raw, dict):
+            raise TimelineEventSchemaError("position must be an object")
+        return cls(
+            mode=raw.get("mode"),
+            index=raw.get("index"),
+            ref_clip_id=raw.get("ref_clip_id"),
+        )
 
 
 @dataclass(frozen=True)
@@ -219,6 +290,155 @@ class TimelineImportedPayload:
         return {"snapshot": dict(self.snapshot), "source": self.source}
 
 
+# ---------------------------------------------------------------------------
+# clip.* payload models
+#
+# clip 'id' strings are the canonical m2 identity.
+# Migration to UUID entity_id/external_id is deferred to a later milestone.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ClipAddedPayload:
+    clip_id: str
+    kind: ClipKind
+    asset_id: str
+    position: ClipPosition | dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        if self.kind not in {"visual", "audio", "text"}:
+            raise TimelineEventSchemaError(
+                "payload.kind must be 'visual', 'audio', or 'text'"
+            )
+        _require_nonempty_str(self.asset_id, "payload.asset_id")
+        coerced = _coerce_clip_position(self.position, "payload.position")
+        if coerced is not self.position:
+            object.__setattr__(self, "position", coerced)
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "clip_id": self.clip_id,
+            "kind": self.kind,
+            "asset_id": self.asset_id,
+        }
+        if self.position is not None:
+            result["position"] = self.position.to_json_obj()
+        return result
+
+
+@dataclass(frozen=True)
+class ClipRemovedPayload:
+    clip_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id}
+
+
+@dataclass(frozen=True)
+class ClipMovedPayload:
+    clip_id: str
+    position: ClipPosition | dict[str, Any]
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        coerced = _coerce_clip_position(self.position, "payload.position")
+        if coerced is None:
+            raise TimelineEventSchemaError("payload.position is required for clip.moved")
+        if coerced is not self.position:
+            object.__setattr__(self, "position", coerced)
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {
+            "clip_id": self.clip_id,
+            "position": self.position.to_json_obj(),
+        }
+
+
+@dataclass(frozen=True)
+class ClipRetimedPayload:
+    clip_id: str
+    start: float
+    duration: float
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        if not isinstance(self.start, (int, float)) or isinstance(self.start, bool):
+            raise TimelineEventSchemaError("payload.start must be a number")
+        if self.start < 0:
+            raise TimelineEventSchemaError("payload.start must be >= 0")
+        object.__setattr__(self, "start", float(self.start))
+        if not isinstance(self.duration, (int, float)) or isinstance(self.duration, bool):
+            raise TimelineEventSchemaError("payload.duration must be a number")
+        if self.duration <= 0:
+            raise TimelineEventSchemaError("payload.duration must be > 0")
+        object.__setattr__(self, "duration", float(self.duration))
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {
+            "clip_id": self.clip_id,
+            "start": self.start,
+            "duration": self.duration,
+        }
+
+
+@dataclass(frozen=True)
+class ClipSwappedPayload:
+    clip_a_id: str
+    clip_b_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_a_id, "payload.clip_a_id")
+        _require_nonempty_str(self.clip_b_id, "payload.clip_b_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_a_id": self.clip_a_id, "clip_b_id": self.clip_b_id}
+
+
+@dataclass(frozen=True)
+class ClipReplacedPayload:
+    clip_id: str
+    with_asset_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        _require_nonempty_str(self.with_asset_id, "payload.with_asset_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id, "with_asset_id": self.with_asset_id}
+
+
+@dataclass(frozen=True)
+class ClipTextSetPayload:
+    clip_id: str
+    text: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        if not isinstance(self.text, str):
+            raise TimelineEventSchemaError("payload.text must be a string")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id, "text": self.text}
+
+
+@dataclass(frozen=True)
+class ClipAnnotatedPayload:
+    clip_id: str
+    note: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        if not isinstance(self.note, str):
+            raise TimelineEventSchemaError("payload.note must be a string")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id, "note": self.note}
+
+
 PayloadModel = (
     TimelineCreatedPayload
     | TimelineRenamedPayload
@@ -226,6 +446,14 @@ PayloadModel = (
     | TimelineTombstonedPayload
     | TimelineDeletedPayload
     | TimelineImportedPayload
+    | ClipAddedPayload
+    | ClipRemovedPayload
+    | ClipMovedPayload
+    | ClipRetimedPayload
+    | ClipSwappedPayload
+    | ClipReplacedPayload
+    | ClipTextSetPayload
+    | ClipAnnotatedPayload
 )
 
 
@@ -236,6 +464,14 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "timeline.tombstoned": TimelineTombstonedPayload,
     "timeline.deleted": TimelineDeletedPayload,
     "timeline.imported": TimelineImportedPayload,
+    "clip.added": ClipAddedPayload,
+    "clip.removed": ClipRemovedPayload,
+    "clip.moved": ClipMovedPayload,
+    "clip.retimed": ClipRetimedPayload,
+    "clip.swapped": ClipSwappedPayload,
+    "clip.replaced": ClipReplacedPayload,
+    "clip.text_set": ClipTextSetPayload,
+    "clip.annotated": ClipAnnotatedPayload,
 }
 
 

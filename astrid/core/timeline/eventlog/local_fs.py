@@ -40,6 +40,7 @@ class LocalFsBackend:
 
     def append_event(
         self,
+        timeline_id: str,
         kind: str,
         payload: dict[str, object],
         *,
@@ -47,6 +48,11 @@ class LocalFsBackend:
         expected_version: int | None = None,
         txn_id: str | None = None,
     ) -> TimelineEvent:
+        if timeline_id != self.timeline_id:
+            raise EventLogError(
+                f"timeline_id mismatch: expected {self.timeline_id!r}, "
+                f"got {timeline_id!r}"
+            )
         self.timeline_home.mkdir(parents=True, exist_ok=True)
         created = not self.events_path.exists()
         try:

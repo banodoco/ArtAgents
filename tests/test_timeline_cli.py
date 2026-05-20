@@ -15,8 +15,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.timeline import cli as timeline_cli
-from astrid.core.timeline.events.schema import TimelineActor
+from astrid.core.timeline import cli as timeline_cli, clip_edits
+from astrid.core.timeline.events.schema import ClipAddedPayload, TimelineActor
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +343,275 @@ def test_main_parses_set_default_and_dispatches_to_handler(
     assert rc == 0
     assert seen["args"].command == "set-default"
     assert seen["args"].slug == "primary"
+
+
+# ---------------------------------------------------------------------------
+# clip verb parsing tests
+# ---------------------------------------------------------------------------
+
+
+def test_clip_subcommands_appear_in_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "clip" in captured.out
+
+
+def test_clip_add_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_add(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
+
+    rc = timeline_cli.main(
+        ["clip", "add", "my-slug", "--kind", "visual", "--asset", "img_001", "--at", "0"]
+    )
+    assert rc == 0
+    args = seen["args"]
+    assert args.slug == "my-slug"
+    assert args.kind == "visual"
+    assert args.asset == "img_001"
+    assert args.at_index == 0
+
+
+def test_clip_add_parses_after_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_add(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
+
+    rc = timeline_cli.main(
+        ["clip", "add", "my-slug", "--kind", "audio", "--asset", "snd_001", "--after", "clip-1"]
+    )
+    assert rc == 0
+    assert seen["args"].after_id == "clip-1"
+    assert seen["args"].at_index is None
+
+
+def test_clip_add_parses_before_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_add(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
+
+    rc = timeline_cli.main(
+        ["clip", "add", "my-slug", "--kind", "text", "--asset", "txt_001", "--before", "clip-2"]
+    )
+    assert rc == 0
+    assert seen["args"].before_id == "clip-2"
+
+
+def test_clip_add_mutually_exclusive_position_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    """--at, --after, --before are in a mutually exclusive group."""
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(
+            ["clip", "add", "my-slug", "--kind", "visual", "--asset", "x", "--at", "0", "--after", "y"]
+        )
+    assert excinfo.value.code != 0
+
+
+def test_clip_remove_parses_clip_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_remove(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_remove", fake_remove)
+
+    rc = timeline_cli.main(["clip", "remove", "my-slug", "--clip-id", "c1"])
+    assert rc == 0
+    assert seen["args"].slug == "my-slug"
+    assert seen["args"].clip_id == "c1"
+
+
+def test_clip_move_parses_to_syntax(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_move(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_move", fake_move)
+
+    rc = timeline_cli.main(
+        ["clip", "move", "my-slug", "--clip-id", "c1", "--to", "after:c2"]
+    )
+    assert rc == 0
+    assert seen["args"].clip_id == "c1"
+    assert seen["args"].to_position == "after:c2"
+
+
+def test_clip_retime_parses_start_and_duration(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_retime(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_retime", fake_retime)
+
+    rc = timeline_cli.main(
+        ["clip", "retime", "my-slug", "--clip-id", "c1", "--start", "3.5", "--duration", "10.0"]
+    )
+    assert rc == 0
+    assert seen["args"].clip_id == "c1"
+    assert seen["args"].start == 3.5
+    assert seen["args"].duration == 10.0
+
+
+def test_clip_swap_parses_a_and_b(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_swap(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_swap", fake_swap)
+
+    rc = timeline_cli.main(
+        ["clip", "swap", "my-slug", "--a", "clip_a", "--b", "clip_b"]
+    )
+    assert rc == 0
+    assert seen["args"].clip_a == "clip_a"
+    assert seen["args"].clip_b == "clip_b"
+
+
+def test_clip_replace_parses_with_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_replace(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_replace", fake_replace)
+
+    rc = timeline_cli.main(
+        ["clip", "replace", "my-slug", "--clip-id", "c1", "--with", "new_asset"]
+    )
+    assert rc == 0
+    assert seen["args"].clip_id == "c1"
+    assert seen["args"].with_asset_id == "new_asset"
+
+
+def test_clip_set_text_parses_text_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_set_text(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_set_text", fake_set_text)
+
+    rc = timeline_cli.main(
+        ["clip", "set-text", "my-slug", "--clip-id", "c1", "--text", "Hello"]
+    )
+    assert rc == 0
+    assert seen["args"].clip_id == "c1"
+    assert seen["args"].text == "Hello"
+
+
+def test_clip_annotate_parses_note_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_annotate(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_annotate", fake_annotate)
+
+    rc = timeline_cli.main(
+        ["clip", "annotate", "my-slug", "--clip-id", "c1", "--note", "A note"]
+    )
+    assert rc == 0
+    assert seen["args"].clip_id == "c1"
+    assert seen["args"].note == "A note"
+
+
+def test_clip_add_missing_required_flags_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["clip", "add", "my-slug"])
+    assert excinfo.value.code != 0
+
+
+def test_clip_remove_missing_required_flags_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["clip", "remove", "my-slug"])
+    assert excinfo.value.code != 0
+
+
+def test_clip_handler_calls_clip_edits_not_direct_file_writes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify clip handlers call clip_edits functions (no direct file mutations)."""
+    seen: dict = {}
+
+    def fake_add(project_slug, slug, *, kind, asset_id, position=None, actor=None,
+                 expected_version=None, txn_id=None, root=None):
+        seen["called"] = "add_clip"
+        seen["kind"] = kind
+        seen["asset_id"] = asset_id
+        from astrid.core.timeline.events.schema import TimelineEvent
+        return TimelineEvent.new(
+            timeline_id="00000000-0000-0000-0000-000000000000",
+            ts="2026-05-20T12:00:00Z",
+            actor=actor or TimelineActor(type="system", id="test"),
+            kind="clip.added",
+            payload=ClipAddedPayload(clip_id=asset_id, kind=kind, asset_id=asset_id),
+        )
+
+    session = SimpleNamespace(project="demo", agent_id="test", id="s1")
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.clip_edits, "add_clip", fake_add)
+
+    rc = timeline_cli.cmd_clip_add(
+        argparse.Namespace(
+            slug="primary",
+            kind="visual",
+            asset="img_001",
+            at_index=None,
+            after_id=None,
+            before_id=None,
+        )
+    )
+    assert rc == 0
+    assert seen.get("called") == "add_clip"
+    assert seen.get("kind") == "visual"
+    assert seen.get("asset_id") == "img_001"
+
+
+def test_clip_edit_error_returns_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def fake_add(args: argparse.Namespace) -> int:
+        raise clip_edits.ClipEditError("test error")
+
+    monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
+
+    rc = timeline_cli.main(
+        ["clip", "add", "my-slug", "--kind", "visual", "--asset", "x"]
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "timelines: test error" in captured.err
+
+
+def test_clip_subcommand_help_shows_all_verbs(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["clip", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    for verb in ("add", "remove", "move", "retime", "swap", "replace", "set-text", "annotate"):
+        assert verb in captured.out

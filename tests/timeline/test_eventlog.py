@@ -55,6 +55,7 @@ def test_local_fs_backend_appends_and_updates_head(project_tree: Path) -> None:
     )
 
     event = backend.append_event(
+        identity["timeline_id"],
         "timeline.renamed",
         {"old_slug": "primary", "new_slug": "primary-v2"},
         actor=TimelineActor(type="agent", id="codex:test"),
@@ -81,6 +82,7 @@ def test_local_fs_backend_rebuilds_head_when_cache_is_missing_or_stale(project_t
     home = timeline_dir("demo", ulid, root=project_tree)
     backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
     event = backend.append_event(
+        identity["timeline_id"],
         "timeline.renamed",
         {"old_slug": "primary", "new_slug": "primary-v2"},
         actor=TimelineActor(type="agent", id="codex:test"),
@@ -143,6 +145,7 @@ def test_local_fs_backend_bootstraps_legacy_with_imported_event(project_tree: Pa
 
     backend = LocalFsBackend(timeline_id="00000000-0000-0000-0000-000000000000", timeline_home=legacy_home)
     backend.append_event(
+        "00000000-0000-0000-0000-000000000000",
         "timeline.renamed",
         {"old_slug": "legacy", "new_slug": "legacy-v2"},
         actor=TimelineActor(type="system", id="migration:test"),
@@ -164,6 +167,7 @@ def test_local_fs_backend_verify_chain_detects_tampering(project_tree: Path) -> 
     home = timeline_dir("demo", ulid, root=project_tree)
     backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
     backend.append_event(
+        identity["timeline_id"],
         "timeline.renamed",
         {"old_slug": "primary", "new_slug": "after"},
         actor=TimelineActor(type="agent", id="codex:test"),
@@ -190,6 +194,7 @@ def test_local_fs_backend_rejects_append_after_deleted(project_tree: Path) -> No
         timeline_home=timeline_dir("demo", ulid, root=project_tree),
     )
     backend.append_event(
+        identity["timeline_id"],
         "timeline.deleted",
         {},
         actor=TimelineActor(type="system", id="cleanup:test"),
@@ -197,6 +202,7 @@ def test_local_fs_backend_rejects_append_after_deleted(project_tree: Path) -> No
 
     with pytest.raises(EventLogError, match="rejects appends"):
         backend.append_event(
+            identity["timeline_id"],
             "timeline.renamed",
             {"old_slug": "primary", "new_slug": "after"},
             actor=TimelineActor(type="agent", id="codex:test"),
@@ -206,6 +212,7 @@ def test_local_fs_backend_rejects_append_after_deleted(project_tree: Path) -> No
 def _append_in_process(timeline_id: str, home: str, index: int) -> None:
     backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
     backend.append_event(
+        timeline_id,
         "timeline.renamed",
         {"old_slug": f"before-{index}", "new_slug": f"after-{index}"},
         actor=TimelineActor(type="agent", id=f"worker:{index}"),
@@ -301,6 +308,7 @@ def test_show_timeline_repairs_missing_display_from_eventlog(project_tree: Path)
     home = timeline_dir("demo", ulid, root=project_tree)
     backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
     backend.append_event(
+        identity["timeline_id"],
         "timeline.renamed",
         {"old_slug": "primary", "new_slug": "repaired"},
         actor=TimelineActor(type="agent", id="codex:test"),
@@ -323,6 +331,7 @@ def test_show_timeline_refuses_deleted_projection(project_tree: Path) -> None:
     home = timeline_dir("demo", ulid, root=project_tree)
     backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
     backend.append_event(
+        identity["timeline_id"],
         "timeline.deleted",
         {},
         actor=TimelineActor(type="system", id="cleanup:test"),
@@ -352,6 +361,7 @@ def test_load_display_stays_fail_closed_when_eventlog_exists_without_identity(
     identity = json.loads(identity_path.read_text(encoding="utf-8"))
     backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
     backend.append_event(
+        identity["timeline_id"],
         "timeline.renamed",
         {"old_slug": "primary", "new_slug": "after"},
         actor=TimelineActor(type="agent", id="codex:test"),

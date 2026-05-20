@@ -269,6 +269,7 @@ class TestRenameTimeline:
 
             def append_event(
                 self,
+                timeline_id: str,
                 kind: str,
                 payload: dict[str, object],
                 *,
@@ -276,6 +277,7 @@ class TestRenameTimeline:
                 expected_version: int | None = None,
                 txn_id: str | None = None,
             ) -> object:
+                seen["timeline_id"] = timeline_id
                 seen["kind"] = kind
                 seen["payload"] = payload
                 seen["actor"] = actor
@@ -324,6 +326,8 @@ class TestRenameTimeline:
     def test_rename_rejects_explicit_inert_supabase_backend(
         self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        from astrid.core.timeline.eventlog.types import EventLogNotImplementedError
+
         result = create_timeline("demo", "alpha")
         ulid = result["ulid"]
         identity = json.loads(
@@ -341,7 +345,7 @@ class TestRenameTimeline:
 
         monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
 
-        with pytest.raises(TimelineCrudError, match="supabase"):
+        with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
             rename_timeline("demo", "alpha", "beta")
 
 

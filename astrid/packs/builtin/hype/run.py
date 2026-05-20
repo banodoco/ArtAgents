@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
-"""Cache-aware subprocess orchestrator for the hype pipeline, including refine between cut and render in pool flow."""
+"""Cache-aware subprocess orchestrator for the hype pipeline, including refine between cut and render in pool flow.
+
+.. note::
+
+    The ``hype.timeline.json`` artifacts produced by the ``cut`` step (and
+    consumed by downstream steps like ``refine``, ``render``, ``validate``) are
+    **standalone** Remotion timeline files — they are NOT project-timeline
+    containers (``assembly.json`` / ``assembly.jsonl``).  Migrating the
+    orchestrated cut/hype clip assembly to emit ``clip.*`` events through the
+    project-timeline ``EventLogBackend`` is deferred to **m3.5**
+    (pack/worker write-path sweep)."""
 
 
 from __future__ import annotations
