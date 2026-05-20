@@ -28,9 +28,25 @@ TimelineEventKind = Literal[
     "clip.replaced",
     "clip.text_set",
     "clip.annotated",
+    "transition.set",
+    "transition.removed",
+    "effect.added",
+    "effect.removed",
+    "effect.tuned",
+    "theme.set",
+    "theme.overridden",
+    "track.added",
+    "track.removed",
+    "audio.bound",
+    "audio.unbound",
+    "pool.asset_added",
+    "pool.asset_removed",
+    "pool.asset_scored",
+    "arrangement.replaced",
 ]
 TimelineImportSource = Literal["legacy_local", "supabase_config", "other"]
 ClipKind = Literal["visual", "audio", "text"]
+TrackKind = Literal["visual", "audio"]
 
 
 class TimelineEventSchemaError(ValueError):
@@ -439,6 +455,267 @@ class ClipAnnotatedPayload:
         return {"clip_id": self.clip_id, "note": self.note}
 
 
+# ---------------------------------------------------------------------------
+# transition.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TransitionSetPayload:
+    left_clip_id: str
+    right_clip_id: str
+    kind: str
+    duration_seconds: float
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.left_clip_id, "payload.left_clip_id")
+        _require_nonempty_str(self.right_clip_id, "payload.right_clip_id")
+        _require_nonempty_str(self.kind, "payload.kind")
+        if not isinstance(self.duration_seconds, (int, float)) or isinstance(self.duration_seconds, bool):
+            raise TimelineEventSchemaError("payload.duration_seconds must be a number")
+        if self.duration_seconds <= 0:
+            raise TimelineEventSchemaError("payload.duration_seconds must be > 0")
+        object.__setattr__(self, "duration_seconds", float(self.duration_seconds))
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {
+            "left_clip_id": self.left_clip_id,
+            "right_clip_id": self.right_clip_id,
+            "kind": self.kind,
+            "duration_seconds": self.duration_seconds,
+        }
+
+
+@dataclass(frozen=True)
+class TransitionRemovedPayload:
+    left_clip_id: str
+    right_clip_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.left_clip_id, "payload.left_clip_id")
+        _require_nonempty_str(self.right_clip_id, "payload.right_clip_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"left_clip_id": self.left_clip_id, "right_clip_id": self.right_clip_id}
+
+
+# ---------------------------------------------------------------------------
+# effect.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EffectAddedPayload:
+    clip_id: str
+    effect_id: str
+    params: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        _require_nonempty_str(self.effect_id, "payload.effect_id")
+        if self.params is not None:
+            if not isinstance(self.params, dict):
+                raise TimelineEventSchemaError("payload.params must be a dict when present")
+            _validate_jsonable(self.params, "payload.params")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"clip_id": self.clip_id, "effect_id": self.effect_id}
+        if self.params is not None:
+            result["params"] = dict(self.params)
+        return result
+
+
+@dataclass(frozen=True)
+class EffectRemovedPayload:
+    clip_id: str
+    effect_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        _require_nonempty_str(self.effect_id, "payload.effect_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id, "effect_id": self.effect_id}
+
+
+@dataclass(frozen=True)
+class EffectTunedPayload:
+    clip_id: str
+    effect_id: str
+    param: str
+    value: Any
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        _require_nonempty_str(self.effect_id, "payload.effect_id")
+        _require_nonempty_str(self.param, "payload.param")
+        _validate_jsonable(self.value, "payload.value")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {
+            "clip_id": self.clip_id,
+            "effect_id": self.effect_id,
+            "param": self.param,
+            "value": self.value,
+        }
+
+
+# ---------------------------------------------------------------------------
+# theme.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ThemeSetPayload:
+    theme_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.theme_id, "payload.theme_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"theme_id": self.theme_id}
+
+
+@dataclass(frozen=True)
+class ThemeOverriddenPayload:
+    override_id: str
+    value: Any
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.override_id, "payload.override_id")
+        _validate_jsonable(self.value, "payload.value")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"override_id": self.override_id, "value": self.value}
+
+
+# ---------------------------------------------------------------------------
+# track.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TrackAddedPayload:
+    track_id: str
+    kind: TrackKind
+    label: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.track_id, "payload.track_id")
+        if self.kind not in {"visual", "audio"}:
+            raise TimelineEventSchemaError("payload.kind must be 'visual' or 'audio'")
+        if self.label is not None:
+            _require_nonempty_str(self.label, "payload.label")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {"track_id": self.track_id, "kind": self.kind}
+        if self.label is not None:
+            result["label"] = self.label
+        return result
+
+
+@dataclass(frozen=True)
+class TrackRemovedPayload:
+    track_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.track_id, "payload.track_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"track_id": self.track_id}
+
+
+# ---------------------------------------------------------------------------
+# audio.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AudioBoundPayload:
+    clip_id: str
+    asset_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        _require_nonempty_str(self.asset_id, "payload.asset_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id, "asset_id": self.asset_id}
+
+
+@dataclass(frozen=True)
+class AudioUnboundPayload:
+    clip_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id}
+
+
+# ---------------------------------------------------------------------------
+# pool.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PoolAssetAddedPayload:
+    asset_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.asset_id, "payload.asset_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"asset_id": self.asset_id}
+
+
+@dataclass(frozen=True)
+class PoolAssetRemovedPayload:
+    asset_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.asset_id, "payload.asset_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"asset_id": self.asset_id}
+
+
+@dataclass(frozen=True)
+class PoolAssetScoredPayload:
+    asset_id: str
+    score: float
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.asset_id, "payload.asset_id")
+        if not isinstance(self.score, (int, float)) or isinstance(self.score, bool):
+            raise TimelineEventSchemaError("payload.score must be a number")
+        if self.score < 0 or self.score > 1:
+            raise TimelineEventSchemaError("payload.score must be between 0 and 1")
+        object.__setattr__(self, "score", float(self.score))
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"asset_id": self.asset_id, "score": self.score}
+
+
+# ---------------------------------------------------------------------------
+# arrangement.* payload models
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ArrangementReplacedPayload:
+    arrangement: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.arrangement, dict):
+            raise TimelineEventSchemaError("payload.arrangement must be an object")
+        _validate_jsonable(self.arrangement, "payload.arrangement")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"arrangement": dict(self.arrangement)}
+
+
 PayloadModel = (
     TimelineCreatedPayload
     | TimelineRenamedPayload
@@ -454,6 +731,21 @@ PayloadModel = (
     | ClipReplacedPayload
     | ClipTextSetPayload
     | ClipAnnotatedPayload
+    | TransitionSetPayload
+    | TransitionRemovedPayload
+    | EffectAddedPayload
+    | EffectRemovedPayload
+    | EffectTunedPayload
+    | ThemeSetPayload
+    | ThemeOverriddenPayload
+    | TrackAddedPayload
+    | TrackRemovedPayload
+    | AudioBoundPayload
+    | AudioUnboundPayload
+    | PoolAssetAddedPayload
+    | PoolAssetRemovedPayload
+    | PoolAssetScoredPayload
+    | ArrangementReplacedPayload
 )
 
 
@@ -472,6 +764,21 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "clip.replaced": ClipReplacedPayload,
     "clip.text_set": ClipTextSetPayload,
     "clip.annotated": ClipAnnotatedPayload,
+    "transition.set": TransitionSetPayload,
+    "transition.removed": TransitionRemovedPayload,
+    "effect.added": EffectAddedPayload,
+    "effect.removed": EffectRemovedPayload,
+    "effect.tuned": EffectTunedPayload,
+    "theme.set": ThemeSetPayload,
+    "theme.overridden": ThemeOverriddenPayload,
+    "track.added": TrackAddedPayload,
+    "track.removed": TrackRemovedPayload,
+    "audio.bound": AudioBoundPayload,
+    "audio.unbound": AudioUnboundPayload,
+    "pool.asset_added": PoolAssetAddedPayload,
+    "pool.asset_removed": PoolAssetRemovedPayload,
+    "pool.asset_scored": PoolAssetScoredPayload,
+    "arrangement.replaced": ArrangementReplacedPayload,
 }
 
 

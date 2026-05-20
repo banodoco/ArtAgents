@@ -11,12 +11,25 @@ covered separately by ``tests/timeline/test_crud.py``.
 from __future__ import annotations
 
 import argparse
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from astrid.core.timeline import cli as timeline_cli, clip_edits
-from astrid.core.timeline.events.schema import ClipAddedPayload, TimelineActor
+from astrid.core.timeline.events.schema import (
+    ArrangementReplacedPayload,
+    AudioBoundPayload,
+    ClipAddedPayload,
+    EffectAddedPayload,
+    PoolAssetAddedPayload,
+    ThemeSetPayload,
+    TimelineActor,
+    TimelineEvent,
+    TrackAddedPayload,
+    TransitionSetPayload,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -615,3 +628,442 @@ def test_clip_subcommand_help_shows_all_verbs(capsys: pytest.CaptureFixture[str]
     captured = capsys.readouterr()
     for verb in ("add", "remove", "move", "retime", "swap", "replace", "set-text", "annotate"):
         assert verb in captured.out
+
+
+# ---------------------------------------------------------------------------
+# secondary CLI parsing / handler tests
+# ---------------------------------------------------------------------------
+
+
+def _session() -> SimpleNamespace:
+    return SimpleNamespace(project="demo", agent_id="tester", id="session-1")
+
+
+def _event(kind: str, payload: object) -> TimelineEvent:
+    return TimelineEvent.new(
+        timeline_id="00000000-0000-0000-0000-000000000000",
+        ts="2026-05-20T12:00:00Z",
+        actor=TimelineActor(type="agent", id="tester:session-1", display="tester"),
+        kind=kind,
+        payload=payload,
+    )
+
+
+def test_transition_subcommand_help_shows_verbs(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["transition", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    for verb in ("set", "remove"):
+        assert verb in captured.out
+
+
+@pytest.mark.parametrize(
+    ("argv", "handler_name", "expected"),
+    [
+        (
+            ["transition", "set", "my-slug", "--between", "a,b", "--kind", "cross-fade", "--duration", "0.75"],
+            "cmd_transition_set",
+            {"slug": "my-slug", "between": "a,b", "kind": "cross-fade", "duration_seconds": 0.75},
+        ),
+        (
+            ["transition", "remove", "my-slug", "--between", "a,b"],
+            "cmd_transition_remove",
+            {"slug": "my-slug", "between": "a,b"},
+        ),
+        (
+            ["effect", "add", "my-slug", "--clip", "c1", "--effect-id", "glow", "--params", "x=1", "--params", "y=2"],
+            "cmd_effect_add",
+            {"slug": "my-slug", "clip_id": "c1", "effect_id": "glow", "params_raw": ["x=1", "y=2"]},
+        ),
+        (
+            ["effect", "remove", "my-slug", "--clip", "c1", "--effect-id", "glow"],
+            "cmd_effect_remove",
+            {"slug": "my-slug", "clip_id": "c1", "effect_id": "glow"},
+        ),
+        (
+            ["effect", "tune", "my-slug", "--clip", "c1", "--effect-id", "glow", "--param", "opacity", "--value", "0.5"],
+            "cmd_effect_tune",
+            {"slug": "my-slug", "clip_id": "c1", "effect_id": "glow", "param": "opacity", "value": "0.5"},
+        ),
+        (
+            ["theme", "set", "my-slug", "--theme", "banodoco-default"],
+            "cmd_theme_set",
+            {"slug": "my-slug", "theme_id": "banodoco-default"},
+        ),
+        (
+            ["theme", "override", "my-slug", "--override-id", "visual", "--value", '{"fps":24}'],
+            "cmd_theme_override",
+            {"slug": "my-slug", "override_id": "visual", "value": '{"fps":24}'},
+        ),
+        (
+            ["track", "add", "my-slug", "--kind", "audio", "--label", "Music", "--track-id", "track-1"],
+            "cmd_track_add",
+            {"slug": "my-slug", "kind": "audio", "label": "Music", "track_id": "track-1"},
+        ),
+        (
+            ["track", "remove", "my-slug", "--track-id", "track-1"],
+            "cmd_track_remove",
+            {"slug": "my-slug", "track_id": "track-1"},
+        ),
+        (
+            ["audio", "bind", "my-slug", "--clip", "c1", "--asset", "a1"],
+            "cmd_audio_bind",
+            {"slug": "my-slug", "clip_id": "c1", "asset_id": "a1"},
+        ),
+        (
+            ["audio", "unbind", "my-slug", "--clip", "c1"],
+            "cmd_audio_unbind",
+            {"slug": "my-slug", "clip_id": "c1"},
+        ),
+        (
+            ["pool", "add", "my-slug", "--asset", "asset-1"],
+            "cmd_pool_add",
+            {"slug": "my-slug", "asset_id": "asset-1"},
+        ),
+        (
+            ["pool", "remove", "my-slug", "--asset-id", "asset-1"],
+            "cmd_pool_remove",
+            {"slug": "my-slug", "asset_id": "asset-1"},
+        ),
+        (
+            ["pool", "score", "my-slug", "--asset-id", "asset-1", "--score", "0.25"],
+            "cmd_pool_score",
+            {"slug": "my-slug", "asset_id": "asset-1", "score": 0.25},
+        ),
+        (
+            ["arrangement", "set", "my-slug", "--from-json", "/tmp/arrangement.json"],
+            "cmd_arrangement_set",
+            {"slug": "my-slug", "from_json": "/tmp/arrangement.json"},
+        ),
+        (
+            ["arrangement", "show", "my-slug", "--json"],
+            "cmd_arrangement_show",
+            {"slug": "my-slug", "json_out": True},
+        ),
+    ],
+)
+def test_secondary_subcommands_parse_and_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    handler_name: str,
+    expected: dict[str, object],
+) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, handler_name, fake_handler)
+
+    rc = timeline_cli.main(argv)
+    assert rc == 0
+    args = seen["args"]
+    for key, value in expected.items():
+        assert getattr(args, key) == value
+
+
+def test_track_add_rejects_caption_kind_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["track", "add", "my-slug", "--kind", "caption"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "invalid choice" in captured.err.lower()
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["transition", "set", "my-slug"],
+        ["effect", "add", "my-slug"],
+        ["theme", "override", "my-slug"],
+        ["track", "remove", "my-slug"],
+        ["audio", "bind", "my-slug"],
+        ["pool", "score", "my-slug"],
+        ["arrangement", "set", "my-slug"],
+    ],
+)
+def test_secondary_subcommands_missing_required_flags_error(
+    argv: list[str],
+) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(argv)
+    assert excinfo.value.code != 0
+
+
+def test_transition_handler_delegates_to_transition_edits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_transition_set(project_slug, slug, *, left_clip_id, right_clip_id, kind, duration_seconds, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update(
+            {
+                "project_slug": project_slug,
+                "slug": slug,
+                "left_clip_id": left_clip_id,
+                "right_clip_id": right_clip_id,
+                "kind": kind,
+                "duration_seconds": duration_seconds,
+            }
+        )
+        return _event(
+            "transition.set",
+            TransitionSetPayload(
+                left_clip_id=left_clip_id,
+                right_clip_id=right_clip_id,
+                kind=kind,
+                duration_seconds=duration_seconds,
+            ),
+        )
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.transition_edits, "transition_set", fake_transition_set)
+
+    rc = timeline_cli.cmd_transition_set(
+        argparse.Namespace(slug="primary", between="clip-a,clip-b", kind="cross-fade", duration_seconds=0.5)
+    )
+    assert rc == 0
+    assert seen == {
+        "project_slug": "demo",
+        "slug": "primary",
+        "left_clip_id": "clip-a",
+        "right_clip_id": "clip-b",
+        "kind": "cross-fade",
+        "duration_seconds": 0.5,
+    }
+    captured = capsys.readouterr()
+    assert "transition: event " in captured.out
+    assert "kind=transition.set" in captured.out
+    assert "backend=local_fs" in captured.out
+
+
+def test_effect_add_handler_delegates_to_effect_edits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_effect_add(project_slug, slug, *, clip_id, effect_id, params=None, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update(
+            {
+                "project_slug": project_slug,
+                "slug": slug,
+                "clip_id": clip_id,
+                "effect_id": effect_id,
+                "params": params,
+            }
+        )
+        return _event("effect.added", EffectAddedPayload(clip_id=clip_id, effect_id=effect_id, params=params))
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.effect_edits, "effect_add", fake_effect_add)
+
+    rc = timeline_cli.cmd_effect_add(
+        argparse.Namespace(slug="primary", clip_id="clip-1", effect_id="glow", params_raw=["opacity=0.5", "mode=soft"])
+    )
+    assert rc == 0
+    assert seen["params"] == {"opacity": "0.5", "mode": "soft"}
+    captured = capsys.readouterr()
+    assert "effect: event " in captured.out
+    assert "kind=effect.added" in captured.out
+
+
+def test_theme_set_handler_delegates_to_theme_edits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_theme_set(project_slug, slug, *, theme_id, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update({"project_slug": project_slug, "slug": slug, "theme_id": theme_id})
+        return _event("theme.set", ThemeSetPayload(theme_id=theme_id))
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.theme_edits, "theme_set", fake_theme_set)
+
+    rc = timeline_cli.cmd_theme_set(argparse.Namespace(slug="primary", theme_id="banodoco-default"))
+    assert rc == 0
+    assert seen == {"project_slug": "demo", "slug": "primary", "theme_id": "banodoco-default"}
+    captured = capsys.readouterr()
+    assert "theme: event " in captured.out
+    assert "kind=theme.set" in captured.out
+
+
+def test_track_add_handler_delegates_to_track_edits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_track_add(project_slug, slug, *, track_id, kind, label=None, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update({"project_slug": project_slug, "slug": slug, "track_id": track_id, "kind": kind, "label": label})
+        return _event("track.added", TrackAddedPayload(track_id=track_id, kind=kind, label=label))
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.track_edits, "track_add", fake_track_add)
+
+    rc = timeline_cli.cmd_track_add(argparse.Namespace(slug="primary", track_id="track-1", kind="audio", label="Music"))
+    assert rc == 0
+    assert seen == {
+        "project_slug": "demo",
+        "slug": "primary",
+        "track_id": "track-1",
+        "kind": "audio",
+        "label": "Music",
+    }
+    captured = capsys.readouterr()
+    assert "track: event " in captured.out
+    assert "kind=track.added" in captured.out
+
+
+def test_audio_bind_handler_delegates_to_audio_edits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_audio_bind(project_slug, slug, *, clip_id, asset_id, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update({"project_slug": project_slug, "slug": slug, "clip_id": clip_id, "asset_id": asset_id})
+        return _event("audio.bound", AudioBoundPayload(clip_id=clip_id, asset_id=asset_id))
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.audio_edits, "audio_bind", fake_audio_bind)
+
+    rc = timeline_cli.cmd_audio_bind(argparse.Namespace(slug="primary", clip_id="clip-1", asset_id="asset-1"))
+    assert rc == 0
+    assert seen == {
+        "project_slug": "demo",
+        "slug": "primary",
+        "clip_id": "clip-1",
+        "asset_id": "asset-1",
+    }
+    captured = capsys.readouterr()
+    assert "audio: event " in captured.out
+    assert "kind=audio.bound" in captured.out
+
+
+def test_pool_add_handler_delegates_to_pool_edits(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_pool_add(project_slug, slug, *, asset_id, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update({"project_slug": project_slug, "slug": slug, "asset_id": asset_id})
+        return _event("pool.asset_added", PoolAssetAddedPayload(asset_id=asset_id))
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.pool_edits, "pool_asset_add", fake_pool_add)
+
+    rc = timeline_cli.cmd_pool_add(argparse.Namespace(slug="primary", asset_id="asset-1"))
+    assert rc == 0
+    assert seen == {"project_slug": "demo", "slug": "primary", "asset_id": "asset-1"}
+    captured = capsys.readouterr()
+    assert "pool: event " in captured.out
+    assert "kind=pool.asset_added" in captured.out
+
+
+def test_arrangement_set_handler_delegates_to_arrangement_edits(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+    arrangement_path = tmp_path / "arrangement.json"
+    arrangement_payload = {"clips": [{"uuid": "clip-1"}]}
+    arrangement_path.write_text(json.dumps(arrangement_payload), encoding="utf-8")
+
+    def fake_arrangement_replace(project_slug, slug, *, arrangement, actor=None, expected_version=None, txn_id=None, root=None):
+        seen.update({"project_slug": project_slug, "slug": slug, "arrangement": arrangement})
+        return _event("arrangement.replaced", ArrangementReplacedPayload(arrangement=arrangement))
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
+    monkeypatch.setattr(timeline_cli.arrangement_edits, "arrangement_replace", fake_arrangement_replace)
+
+    rc = timeline_cli.cmd_arrangement_set(argparse.Namespace(slug="primary", from_json=str(arrangement_path)))
+    assert rc == 0
+    assert seen == {
+        "project_slug": "demo",
+        "slug": "primary",
+        "arrangement": arrangement_payload,
+    }
+    captured = capsys.readouterr()
+    assert "arrangement: event " in captured.out
+    assert "kind=arrangement.replaced" in captured.out
+
+
+def test_arrangement_show_handler_reads_arrangement_via_crud(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen: dict[str, object] = {}
+    arrangement = {"clips": [{"uuid": "clip-1"}]}
+
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+
+    def fake_get_arrangement(project_slug: str, slug: str, *, root=None):
+        seen["get_arrangement"] = (project_slug, slug, root)
+        return arrangement
+
+    def fake_show_timeline(project_slug: str, slug: str, *, root=None):
+        seen["show_timeline"] = True
+        return None
+
+    monkeypatch.setattr(timeline_cli.crud, "get_arrangement", fake_get_arrangement)
+    monkeypatch.setattr(timeline_cli.crud, "show_timeline", fake_show_timeline)
+
+    rc = timeline_cli.cmd_arrangement_show(argparse.Namespace(slug="primary", json_out=True))
+    assert rc == 0
+    assert seen["get_arrangement"] == ("demo", "primary", None)
+    assert "show_timeline" not in seen
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == arrangement
+
+
+def test_transition_set_bad_between_returns_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+
+    rc = timeline_cli.main(["transition", "set", "my-slug", "--between", "a", "--kind", "cross-fade", "--duration", "0.5"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "--between must be LEFT,RIGHT" in captured.err
+
+
+def test_pool_score_out_of_range_returns_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+
+    rc = timeline_cli.main(["pool", "score", "my-slug", "--asset-id", "asset-1", "--score", "1.5"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "score must be between 0 and 1" in captured.err
+
+
+def test_effect_tune_invalid_json_value_returns_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+
+    rc = timeline_cli.main(
+        ["effect", "tune", "my-slug", "--clip", "c1", "--effect-id", "glow", "--param", "opacity", "--value", "{bad"]
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "--value must be valid JSON" in captured.err
+
+
+def test_arrangement_set_invalid_json_file_returns_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    arrangement_path = tmp_path / "bad.json"
+    arrangement_path.write_text("{bad", encoding="utf-8")
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
+
+    rc = timeline_cli.main(["arrangement", "set", "my-slug", "--from-json", str(arrangement_path)])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "--from-json must contain valid JSON" in captured.err
