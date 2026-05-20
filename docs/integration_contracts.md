@@ -408,3 +408,72 @@ remote writes are **not** part of the m3.5 write-bypass migration:
   Supabase. No other pack may invent a LocalFs-to-Supabase blob copy path.
   Post-m6, `open_in_reigh` will use true RPC replay; pre-m6 it stages bridge
   metadata as a compatibility measure.
+
+## Identity Concepts: Navigating the Four Identifiers
+
+Users and developers encounter four distinct timeline-related identifiers.
+Each serves a different purpose:
+
+| Concept | Format | Where | Example |
+|---|---|---|---|
+| **Managed local binding** | `--project <slug>` + `--timeline-slug <slug>` | Child-pack CLI args | `--project my-show --timeline-slug ep01` |
+| **Project-run identity** | `run.timeline_id` = 26-char Crockford ULID | `run.json` top-level field | `01JQXYZ...` |
+| **Event-stream UUID** | `metadata.timeline_event_stream_id` = RFC 9562 UUID v7 | `run.json` → `metadata` sub-key | `018f4a3c-...` |
+| **Remote executor routing** | `--project <uuid>` + `--timeline-id <uuid>` | Executor CLI args (reigh-app UUIDs) | `--project a1b2c3d4-... --timeline-id e5f6a7b8-...` |
+
+- **Managed local binding** — Used by child packs (cut, refine, assemble) in
+  managed mode. Tells the pack to write canonical events through the event
+  gateway targeting a specific project-timeline container. Both flags must
+  be present together or both absent.
+- **Project-run identity** — Every run record stores a `timeline_id` ULID.
+  This is always a 26-char Crockford ULID, never a UUID. It identifies the
+  timeline *container* (directory), not the event stream.
+- **Event-stream UUID** — Stored in `run.metadata.timeline_event_stream_id`.
+  This is the RFC 9562 UUID v7 from the timeline's `assembly.identity.json`.
+  It is the `timeline_id` used by backend append/read operations.
+- **Remote executor routing** — Used by the executor CLI (`astrid executor run`)
+  in UUID handoff mode. The executor completes locally, emits bridge metadata,
+  and does NOT push to Supabase. Actual Supabase replay is deferred to m6
+  (`open_in_reigh` bridge).
+
+**Do not confuse these:**
+- `--timeline-slug` (child packs) ≠ `--timeline-id` (executor UUID mode).
+  Child packs intentionally do NOT accept `--timeline-id` — it is reserved
+  for executor UUID routing.
+- `run.timeline_id` (ULID container) ≠ `metadata.timeline_event_stream_id`
+  (UUID event stream). One is a container ID; the other is the event stream
+  identifier.
+
+## Bypass Audit Results (m3.5)
+
+Audit completed against in-scope managed write paths. Every surviving
+`save_timeline` / `save_arrangement` call is either:
+
+1. **A compatibility artifact write after managed event emission**
+   (event-stream-first, artifact is derived output). Examples:
+   - `cut/run.py:1273` — `save_timeline` after `_emit_cut_managed_events()`
+   - `refine/run.py:593,626` — `save_arrangement`/`save_timeline` after
+     `_emit_refine_managed_events()`
+   - `assemble/run.py:187-188` — `save_timeline` after
+     `_emit_assemble_managed_events()`
+   - `hype/run.py:1366` — `save_arrangement` after gateway event emission
+
+2. **An unmanaged artifact write in run-local pipeline mode** (no project
+   or timeline binding exists). Example:
+   - `cut/run.py:1059` — `save_timeline` in `write_resume_outputs()` writing
+     to a local `out_dir`
+
+No `SupabaseDataProvider.save_timeline()` calls remain on any in-scope
+pack or worker write path:
+- `open_in_reigh/run.py` — emits bridge metadata only; `save_timeline` call
+  removed
+- `executor/cli.py` — `_push_run_to_supabase()` removed; UUID handoff
+  metadata only
+- `banodoco_worker.py` — worker adapter uses `pack_write_gateway`;
+  `SupabaseDataProvider` only used for task client operations
+
+`verify_chain()` passes for all managed fixtures (tested via
+`test_managed_write_paths.py` and `test_edit_helpers.py`).
+
+The `project/cli.py` `SupabaseDataProvider.save_timeline()` path is the
+reigh-app web UI edit surface — out of m3.5 scope (m6).

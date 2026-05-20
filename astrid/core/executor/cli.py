@@ -100,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--service-role",
         action="store_true",
-        help="Worker-only escape hatch when pushing back via SupabaseDataProvider.",
+        help="Worker-only escape hatch for service-role authenticated operations (Supabase push deferred to m6).",
     )
     run_parser.add_argument("--input", action="append", default=[], metavar="NAME=VALUE", help="Executor input value; may be repeated.")
     run_parser.add_argument("--brief", help="Brief path for built-in pipeline context synthesis.")

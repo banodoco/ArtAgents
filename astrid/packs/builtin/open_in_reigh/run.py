@@ -39,17 +39,23 @@ PROBE_DIRS = ("public/timelines", "public/demos", "timelines", "demos")
 
 def build_parser():
     parser = argparse.ArgumentParser(
-        description="Push hype.timeline.json + hype.assets.json into reigh-app via SupabaseDataProvider.",
+        description=(
+            "open_in_reigh: the explicit LocalFs-to-Supabase bridge (m3.5). "
+            "Pre-m6: emits bridge metadata only. "
+            "Post-m6: reads LocalFs events and replays into Supabase via append_timeline_event."
+        ),
         epilog=(
-            "Default flow writes to public.timelines via the user-PAT auth path through "
-            "SupabaseDataProvider.save_timeline. --print-sql and --copy-to are escape hatches: "
+            "Pre-m6 behavior: emits compatibility export + bridge metadata only. "
+            "No SupabaseDataProvider.save_timeline() call is made — the actual "
+            "Supabase push is deferred to m6. "
+            "--print-sql and --copy-to are escape hatches: "
             "they skip the network entirely and emit a SQL template / byte-preserved file copies."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--out", type=Path, required=True, help="Directory containing hype.timeline.json and hype.assets.json.")
-    parser.add_argument("--timeline-id", required=True, help="UUID for public.timelines.id.")
-    parser.add_argument("--project-id", help="reigh-app project UUID. Required for the default DataProvider push (skipped for --print-sql / --copy-to / --copy-files).")
+    parser.add_argument("--timeline-id", required=True, help="UUID for public.timelines.id (used in bridge metadata).")
+    parser.add_argument("--project-id", help="reigh-app project UUID. Required for bridge metadata emission (skipped for --print-sql / --copy-to / --copy-files).")
     parser.add_argument("--reigh-app", type=Path, default=DEFAULT_REIGH_APP, help=f"Path to the reigh-app checkout for --copy-files probing. Default: {DEFAULT_REIGH_APP}")
     parser.add_argument("--copy-to", type=Path, help="Byte-preserved file copy: copy the JSON files into this directory.")
     parser.add_argument("--copy-files", action="store_true", help="Probe reigh-app for a file-based demo dir and copy hype.timeline.json/hype.assets.json there.")
