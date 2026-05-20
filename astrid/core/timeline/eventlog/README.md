@@ -110,10 +110,10 @@ This is the repository contract today across `crud.py`, `projector.py`,
 | `timeline.deleted` | yes | yes | yes, later appends are rejected when it is already the tail event | no |
 | `timeline.tombstoned` | yes | no | no | no |
 
-The CLI mirrors that same boundary:
+The CLI mirrors that same boundary in code:
 
-- `cmd_rename()` is the only timeline CLI path that routes through the eventlog
-  write path
+- `cmd_rename()` -> `rename_timeline()` is the only timeline CLI path that
+  routes through the eventlog write path
 - `cmd_create()` still delegates to legacy `create_timeline()` with no event
   emission
 - `cmd_set_default()` still delegates to legacy `set_default()` with no event

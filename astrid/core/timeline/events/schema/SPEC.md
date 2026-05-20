@@ -48,10 +48,10 @@ This spec documents the implementation actually shipped in Python m1.
 
 The deferred lifecycle behaviors are load-bearing for milestone close-out:
 
-- `create_timeline()` writes legacy files plus `assembly.identity.json`, but it
-  does not emit `timeline.created`.
-- `set_default()` rewrites `display.json` and `project.json`, but it does not
-  emit `timeline.default_set`.
+- `cmd_create()` -> `create_timeline()` writes legacy files plus
+  `assembly.identity.json`, but it does not emit `timeline.created`.
+- `cmd_set_default()` -> `set_default()` rewrites `display.json` and
+  `project.json`, but it does not emit `timeline.default_set`.
 - `tombstone_timeline()` is legacy-only and stamps
   `manifest.json.tombstoned_at`; it does not emit `timeline.tombstoned`.
 - `purge_timeline()` hard-deletes the timeline directory and does not emit

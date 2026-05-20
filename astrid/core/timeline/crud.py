@@ -68,6 +68,9 @@ def create_timeline(
     """Create a new timeline container under *project_slug*.
 
     Returns a dict with keys ``ulid``, ``slug``, ``display``, ``assembly``, ``manifest``.
+
+    Milestone 1 keeps create on the legacy write path. This seeds the identity
+    sidecar for later eventlog use, but it does not emit ``timeline.created``.
     """
     slug = validate_timeline_slug(slug)
     human_name = name or slug
@@ -366,7 +369,11 @@ def tombstone_timeline(
     *,
     root: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Soft-delete: stamp ``tombstoned_at`` in the manifest, leave files in place."""
+    """Soft-delete: stamp ``tombstoned_at`` in the manifest, leave files in place.
+
+    Milestone 1 intentionally leaves this on the legacy surface; it does not
+    emit ``timeline.tombstoned``.
+    """
     found = find_timeline_by_slug(project_slug, slug, root=root)
     if found is None:
         raise TimelineCrudError(f"timeline '{slug}' not found in project '{project_slug}'")
@@ -405,6 +412,9 @@ def purge_timeline(
 
     Refuses if the timeline is currently the project default — callers MUST
     ``set_default`` to a different timeline first.
+
+    Milestone 1 does not emit ``timeline.deleted`` here. Any delete event seen
+    by projection or append enforcement must already exist in the stream.
     """
     found = find_timeline_by_slug(project_slug, slug, root=root)
     if found is None:
@@ -439,6 +449,9 @@ def set_default(
     Rewrites ``display.json`` on the old default (clearing its ``is_default``),
     on the new one (setting ``is_default``), and updates ``project.json``
     ``default_timeline_id``.
+
+    Milestone 1 intentionally keeps this on the legacy write path and does not
+    emit ``timeline.default_set`` yet.
     """
     found = find_timeline_by_slug(project_slug, slug, root=root)
     if found is None:

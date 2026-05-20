@@ -326,3 +326,20 @@ def test_set_default_dispatches_to_legacy_crud_without_eventlog_surface(
     rc = timeline_cli.cmd_set_default(argparse.Namespace(slug="primary"))
     assert rc == 0
     assert seen == {"project": "demo", "slug": "primary", "root": None}
+
+
+def test_main_parses_set_default_and_dispatches_to_handler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_set_default(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_set_default", fake_set_default)
+
+    rc = timeline_cli.main(["set-default", "primary"])
+    assert rc == 0
+    assert seen["args"].command == "set-default"
+    assert seen["args"].slug == "primary"
