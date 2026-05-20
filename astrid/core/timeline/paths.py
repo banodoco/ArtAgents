@@ -118,6 +118,38 @@ def find_timeline_slug_for_ulid(
     return None
 
 
+def find_timeline_by_event_stream_id(
+    project_slug: str, event_stream_id: str, *, root: str | Path | None = None
+) -> tuple[str, str] | None:
+    """Find a local timeline whose identity sidecar carries *event_stream_id*.
+
+    Scans ``timelines/*/assembly.identity.json`` and returns
+    ``(timeline_ulid, timeline_slug)`` for the first match, or ``None``.
+    """
+    td = timelines_dir(project_slug, root=root)
+    if not td.is_dir():
+        return None
+    for child in sorted(td.iterdir()):
+        if not child.is_dir():
+            continue
+        identity_path = child / "assembly.identity.json"
+        if not identity_path.is_file():
+            continue
+        try:
+            identity = read_json(identity_path)
+        except (ProjectJsonError, OSError, ValueError):
+            continue
+        if isinstance(identity, dict) and identity.get("timeline_id") == event_stream_id:
+            try:
+                data = load_display_json_with_repair(child)
+                slug = data.get("slug") if isinstance(data, dict) else None
+            except (ProjectJsonError, OSError, ValueError):
+                slug = None
+            if isinstance(slug, str):
+                return (child.name, slug)
+    return None
+
+
 def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object] | None:
     from .eventlog import LocalFsBackend, project_display
     from .model import Display, TimelineValidationError

@@ -4,13 +4,15 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('builtin.open_in_reigh')
 
 
-Default flow: load ``hype.timeline.json`` + ``hype.assets.json`` from ``--out``,
-then call ``SupabaseDataProvider.save_timeline`` to upsert the row identified
-by ``--timeline-id``.
+**m3.5 bridge seam**: pre-m6 behavior emits compatibility export and bridge
+metadata only.  Post-m6 replay seam: read LocalFs events, replay into Supabase
+via ``append_timeline_event`` once m6 Supabase RPC exists.  This pack is the
+explicit LocalFs-to-Supabase bridge — no other pack or executor path writes
+directly to Supabase.
 
 SD-009 / FLAG-012 — auth scope: this CLI helper writes a user-owned row, so by
 default it authenticates with the user's PAT (``REIGH_PAT``) rather than the
-worker-only service-role key. The DataProvider's optimistic-versioning path
+worker-only service-role key.  The DataProvider's optimistic-versioning path
 still applies; ``--force`` skips the version check (logged WARNING) for
 operators who know what they're doing.
 
@@ -143,11 +145,18 @@ def print_sql(args, timeline_path, assets_path):
 
 
 def push_via_data_provider(args, timeline_path):
-    """Default flow: SupabaseDataProvider.save_timeline with the local timeline as mutator output."""
+    """Emit bridge metadata for the timeline (m3.5 bridge seam).
 
+    Pre-m6 behavior: emits compatibility export + bridge metadata only.
+    Post-m6 replay seam: read LocalFs events, replay into Supabase via
+    ``append_timeline_event`` once m6 Supabase RPC exists.
+
+    This function does NOT call ``SupabaseDataProvider.save_timeline()``.
+    The actual Supabase push is deferred to m6.
+    """
     if not args.project_id:
         print(
-            "open_in_reigh: --project-id is required for the default DataProvider push. "
+            "open_in_reigh: --project-id is required for bridge metadata. "
             "Use --print-sql, --copy-to, or --copy-files to skip the network.",
             file=sys.stderr,
         )
@@ -158,12 +167,8 @@ def push_via_data_provider(args, timeline_path):
         print("open_in_reigh: timeline JSON must be a JSON object", file=sys.stderr)
         return 2
     if "placements" in new_timeline:
-        # Pre-T10 placement-schema timelines are no longer pushable via the
-        # DataProvider; reigh-app's `timelines.config` column expects the
-        # canonical clip-shaped TimelineConfig. Reject early with a clear
-        # diagnostic instead of letting validate_timeline emit a generic error.
         print(
-            "open_in_reigh: refusing to push placement-style timeline.json to reigh-app. "
+            "open_in_reigh: refusing to bridge placement-style timeline.json to reigh-app. "
             "The DataProvider expects the canonical clip-shaped TimelineConfig "
             "(per @banodoco/timeline-schema). Re-export with the collapsed schema first.",
             file=sys.stderr,
@@ -172,37 +177,27 @@ def push_via_data_provider(args, timeline_path):
 
     if args.dry_run:
         print(
-            f"Would push timeline_id={args.timeline_id} project_id={args.project_id} via "
-            f"{'service-role' if args.service_role else 'user PAT'} auth"
+            f"Would emit bridge metadata for timeline_id={args.timeline_id} "
+            f"project_id={args.project_id} (post-m6 replay via open_in_reigh)"
         )
         return 0
 
-    from astrid.core.reigh import env as reigh_env
-    from astrid.core.reigh.data_provider import SupabaseDataProvider
-
-    provider = SupabaseDataProvider.from_env()
-
-    if args.service_role:
-        auth = ("service_role", reigh_env.resolve_service_role_key())
-    else:
-        auth = ("pat", reigh_env.resolve_pat())
-
-    def mutator(_current, _version):
-        return new_timeline
-
-    result = provider.save_timeline(
-        args.timeline_id,
-        mutator,
-        project_id=args.project_id,
-        auth=auth,
-        expected_version=None if args.force else 0,
-        retries=3,
-        force=bool(args.force),
-    )
-    print(
-        f"Pushed timeline {args.timeline_id} (project_id={args.project_id}, "
-        f"new_version={result.new_version}, attempts={result.attempts})"
-    )
+    # Emit bridge metadata — no SupabaseDataProvider.save_timeline() call.
+    import time as _time
+    bridge = {
+        "bridge": "open_in_reigh",
+        "schema_version": 1,
+        "project_id": args.project_id,
+        "timeline_id": args.timeline_id,
+        "timeline_path": str(timeline_path.resolve()),
+        "note": (
+            "Bridge metadata for m6 replay.  When m6 Supabase RPC is available, "
+            "open_in_reigh will read LocalFs events and replay them into Supabase "
+            "via append_timeline_event.  No direct save_timeline call is made here."
+        ),
+        "emitted_at": _time.time(),
+    }
+    print(json.dumps(bridge, separators=(",", ":"), sort_keys=True))
     return 0
 
 

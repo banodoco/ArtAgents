@@ -38,7 +38,12 @@ from ..asset_cache import run as asset_cache
 from .... import timeline
 from ...._paths import WORKSPACE_ROOT, executor_argv
 from ....core.project.run import (
+    METADATA_KEY_TIMELINE_BINDING_MODE,
+    METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
+    METADATA_KEY_TIMELINE_SLUG,
+    TIMELINE_BINDING_MODE_MANAGED,
     ProjectRunError,
+    bind_managed_timeline,
     finalize_project_run,
     prepare_project_run,
     project_thread_env,
@@ -617,6 +622,21 @@ def _brief_allow_generative_visuals(metadata: dict[str, object]) -> bool:
     return metadata.get("allow_generative_visuals") is True
 
 
+def _append_managed_binding(args: argparse.Namespace, cmd: list[str]) -> list[str]:
+    """Append --project and --timeline-slug to *cmd* when hype is managed.
+
+    File-only subprocess calls (those without --project on the hype parent)
+    are left unchanged — both flags are absent from args.
+
+    Returns *cmd* so callers can pipeline.
+    """
+    project_slug = getattr(args, "project", None)
+    timeline_slug = getattr(args, "timeline_slug", None)
+    if project_slug and timeline_slug:
+        cmd.extend(["--project", str(project_slug), "--timeline-slug", str(timeline_slug)])
+    return cmd
+
+
 def prepare_brief_artifacts(args: argparse.Namespace) -> None:
     args.brief_out.mkdir(parents=True, exist_ok=True)
     source_text = args.brief.read_text(encoding="utf-8")
@@ -645,6 +665,9 @@ def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
         "--out",
         str(args.brief_out),
     ]
+    # m3.5 managed binding: pass --project and --timeline-slug to child pack
+    # when hype is running in managed mode (project + timeline_slug on args).
+    _append_managed_binding(args, cmd)
     if (args.out / "scenes.json").exists():
         cmd.extend(["--scenes", str(args.out / "scenes.json")])
     if (args.out / "transcript.json").exists():
@@ -850,28 +873,31 @@ def build_pool_steps() -> list[Step]:
         Step(
             "refine",
             ("refine.json",),
-            lambda args: add_extra_args(
+            lambda args: _append_managed_binding(
                 args,
-                "refine",
-                [
-                    *step_argv("refine.py", args.python_exec),
-                    "--arrangement",
-                    str(args.brief_out / "arrangement.json"),
-                    "--pool",
-                    str(args.out / "pool.json"),
-                    "--timeline",
-                    str(args.brief_out / "hype.timeline.json"),
-                    "--assets",
-                    str(args.brief_out / "hype.assets.json"),
-                    "--metadata",
-                    str(args.brief_out / "hype.metadata.json"),
-                    "--transcript",
-                    str(args.out / "transcript.json"),
-                    "--out",
-                    str(args.brief_out),
-                    *(["--primary-asset", args.primary_asset] if getattr(args, "primary_asset", None) else []),
-                    *(["--env-file", str(args.env_file)] if args.env_file else []),
-                ],
+                add_extra_args(
+                    args,
+                    "refine",
+                    [
+                        *step_argv("refine.py", args.python_exec),
+                        "--arrangement",
+                        str(args.brief_out / "arrangement.json"),
+                        "--pool",
+                        str(args.out / "pool.json"),
+                        "--timeline",
+                        str(args.brief_out / "hype.timeline.json"),
+                        "--assets",
+                        str(args.brief_out / "hype.assets.json"),
+                        "--metadata",
+                        str(args.brief_out / "hype.metadata.json"),
+                        "--transcript",
+                        str(args.out / "transcript.json"),
+                        "--out",
+                        str(args.brief_out),
+                        *(["--primary-asset", args.primary_asset] if getattr(args, "primary_asset", None) else []),
+                        *(["--env-file", str(args.env_file)] if args.env_file else []),
+                    ],
+                ),
             ),
             per_brief=True,
         ),
@@ -1242,27 +1268,26 @@ def _apply_trim_deltas_to_arrangement(
     *,
     project_slug: str | None = None,
     timeline_slug: str | None = None,
+    timeline_event_stream_id: str | None = None,
+    actor_via: Any | None = None,
 ) -> None:
-    # m3 pack migration (T11):
+    # m3.5 pack migration (T11):
     #
     # This function mutates arrangement audio trim ranges in-place and writes
     # back to a run-local pipeline artifact via `timeline.save_arrangement()`.
     #
-    # When *project_slug* and *timeline_slug* are both provided (i.e. the
-    # hype run is bound to a project-timeline container), the revised
-    # arrangement is **also** emitted through the evented API
-    # ``arrangement_edits.arrangement_replace()`` so the managed timeline
-    # stays in sync.  The direct artifact write is kept for downstream
-    # artifact consumers (cut, render, etc.) that read from the run-local
-    # ``arrangement.json`` path.
+    # When *project_slug*, *timeline_slug*, and *timeline_event_stream_id*
+    # are all provided (i.e. the hype run is bound to a project-timeline
+    # container), the revised arrangement is emitted through the
+    # ``pack_write_gateway`` BEFORE the local artifact is saved.  This keeps
+    # the managed timeline event stream as the canonical source of truth and
+    # positions the run-local ``arrangement.json`` as a derived compatibility
+    # output.
     #
-    # Sibling pack write paths that write only run-local artifacts and have
-    # no project-timeline binding remain intentionally **deferred to m3.5**
-    # (pack/worker write-path sweep):
-    #   - `astrid/packs/builtin/arrange/run.py:811` — writes to `out_dir / "arrangement.json"`
-    #   - `astrid/packs/builtin/refine/run.py:542` — writes to `args.arrangement`
-    #   - `astrid/packs/builtin/pool_build/run.py` — no arrangement writes
-    #   - `astrid/packs/builtin/pool_merge/run.py` — no arrangement writes
+    # The gateway handles first-write bootstrap (``timeline.imported``) and
+    # appends an ``arrangement.replaced`` event with the full arrangement.
+    # Actor attribution uses a system actor with optional ``actor.via``
+    # chaining for upstream provenance.
     arrangement = timeline.load_arrangement(path, assign_missing_uuids=True)
     clips_by_order = {int(clip["order"]): clip for clip in arrangement.get("clips", [])}
     clips_by_uuid = {str(clip["uuid"]): clip for clip in arrangement.get("clips", []) if isinstance(clip.get("uuid"), str)}
@@ -1296,19 +1321,37 @@ def _apply_trim_deltas_to_arrangement(
             continue
         trim_range[0] = float(trim_range[0]) + float(detail.get("trim_delta_start_sec", 0.0))
         trim_range[1] = float(trim_range[1]) + float(detail.get("trim_delta_end_sec", 0.0))
-    # Always persist the run-local artifact for downstream consumers.
-    timeline.save_arrangement(arrangement, path)
 
-    # When running inside a project-timeline container, also emit the
-    # arrangement.replaced event so the managed timeline stays in sync.
-    if project_slug is not None and timeline_slug is not None:
+    # Managed path: emit arrangement.replaced through the event gateway
+    # *before* writing the run-local compatibility artifact.
+    if (
+        project_slug is not None
+        and timeline_slug is not None
+        and timeline_event_stream_id is not None
+    ):
         try:
-            from astrid.core.timeline.arrangement_edits import arrangement_replace
+            from astrid.core.timeline._edit_helpers import pack_write_gateway
+            from astrid.core.timeline.events.schema import TimelineActor
 
-            arrangement_replace(
-                project_slug,
-                timeline_slug,
-                arrangement=dict(arrangement),
+            actor = TimelineActor(
+                type="system",
+                id="builtin.hype:editor_micro_fix",
+                display="builtin.hype (editor micro-fix)",
+                via=[actor_via] if actor_via is not None else None,
+            )
+            events = [
+                {
+                    "kind": "arrangement.replaced",
+                    "payload": {"arrangement": dict(arrangement)},
+                }
+            ]
+            pack_write_gateway(
+                project_slug=project_slug,
+                timeline_slug=timeline_slug,
+                timeline_ulid="",  # resolved by gateway from slug
+                timeline_event_stream_id=timeline_event_stream_id,
+                events=events,
+                actor=actor,
             )
         except Exception as exc:
             print(
@@ -1316,6 +1359,11 @@ def _apply_trim_deltas_to_arrangement(
                 f" (project={project_slug!r}, timeline={timeline_slug!r}): {exc}",
                 file=sys.stderr,
             )
+
+    # Always persist the run-local artifact for downstream consumers
+    # (cut, render, etc.).  This is a derived compatibility output, not
+    # canonical state — the event stream is the source of truth.
+    timeline.save_arrangement(arrangement, path)
 
 
 def _rotate_editor_review(brief_out: Path, iteration: int) -> None:
@@ -1518,7 +1566,8 @@ def pool_main(args: argparse.Namespace) -> int:
                 arrangement_path,
                 notes,
                 project_slug=project_slug,
-                timeline_slug=getattr(args, "brief_slug", None),
+                timeline_slug=getattr(args, "timeline_slug", None) or getattr(args, "brief_slug", None),
+                timeline_event_stream_id=getattr(args, "timeline_event_stream_id", None),
             )
         elif action == "rework":
             returncode = _run_revise(args, arrangement_path, review_path)
@@ -1633,6 +1682,14 @@ def main(argv: list[str] | None = None) -> int:
             raise
         if project_context is not None:
             args.project = project_context.project_slug
+            # Propagate managed timeline slug and event-stream id from run
+            # metadata so subprocess callers (cut, refine, etc.) can pass
+            # --project + --timeline-slug, and hype-owned managed mutations
+            # (e.g. _apply_trim_deltas_to_arrangement) can use the gateway.
+            managed_meta = project_context.run.get("metadata", {}) if hasattr(project_context, "run") else {}
+            if isinstance(managed_meta, dict):
+                args.timeline_slug = managed_meta.get(METADATA_KEY_TIMELINE_SLUG)
+                args.timeline_event_stream_id = managed_meta.get(METADATA_KEY_TIMELINE_EVENT_STREAM_ID)
         keep_env = os.environ.get("HYPE_KEEP_DOWNLOADS", "").strip().lower() in {"1", "true", "yes"}
         keep_flag = bool(getattr(args, "keep_downloads", False))
         session_enabled = not (keep_flag or keep_env)
@@ -1689,16 +1746,48 @@ def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--project")
     parser.add_argument("--out")
+    parser.add_argument("--brief")
+    parser.add_argument("--brief-slug", dest="brief_slug")
     parsed, _unknown = parser.parse_known_args(argv)
     if not parsed.project:
         return None, argv
     reject_project_with_out(parsed.project, parsed.out)
+
+    # Derive managed timeline slug from brief (m3.5 managed binding).
+    brief_slug = getattr(parsed, "brief_slug", None) or None
+    if brief_slug is None:
+        brief_path = getattr(parsed, "brief", None) or None
+        if brief_path is not None:
+            brief_stem = Path(brief_path).stem
+            generic_brief_names = {"brief", "plan", "prompt"}
+            brief_slug = brief_stem if brief_stem.lower() not in generic_brief_names else None
+    # Fall back to a slug derived from the project name when no brief is available.
+    if brief_slug is None:
+        brief_slug = parsed.project
+
+    # Establish managed timeline binding.
+    try:
+        timeline_ulid, timeline_slug, timeline_event_stream_id = bind_managed_timeline(
+            parsed.project, brief_slug
+        )
+    except Exception as exc:
+        raise ProjectRunError(
+            f"failed to bind managed timeline for project {parsed.project!r}: {exc}"
+        ) from exc
+
+    managed_metadata: dict[str, Any] = {
+        "entrypoint": "direct",
+        METADATA_KEY_TIMELINE_SLUG: timeline_slug,
+        METADATA_KEY_TIMELINE_EVENT_STREAM_ID: timeline_event_stream_id,
+        METADATA_KEY_TIMELINE_BINDING_MODE: TIMELINE_BINDING_MODE_MANAGED,
+    }
     context = prepare_project_run(
         parsed.project,
         tool_id="builtin.hype",
         kind="orchestrator",
         argv=["hype", *argv],
-        metadata={"entrypoint": "direct"},
+        metadata=managed_metadata,
+        timeline_id=timeline_ulid,
     )
     return context, [*argv, "--out", str(context.run_root)]
 

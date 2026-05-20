@@ -17,6 +17,16 @@ from .project import require_project
 from .schema import build_run_record, utc_now_iso, validate_run_record
 
 PROJECT_RUN_ENV = "ASTRID_PROJECT_RUN"
+# Metadata keys for managed timeline binding (m3.5).
+# These are stored in run.metadata and allow the run record to carry
+# timeline identity without overloading run.timeline_id (which remains ULID-only).
+METADATA_KEY_TIMELINE_SLUG = "timeline_slug"
+METADATA_KEY_TIMELINE_EVENT_STREAM_ID = "timeline_event_stream_id"
+METADATA_KEY_TIMELINE_BINDING_MODE = "timeline_binding_mode"
+# Valid timeline binding modes.
+TIMELINE_BINDING_MODE_MANAGED = "managed"
+TIMELINE_BINDING_MODE_UNMANAGED = "unmanaged"
+TIMELINE_BINDING_MODES = {TIMELINE_BINDING_MODE_MANAGED, TIMELINE_BINDING_MODE_UNMANAGED}
 SENSITIVE_ARG_NAMES = {
     "--api-key",
     "--apikey",
@@ -215,6 +225,65 @@ def update_run_record(project_slug: str, run_id: str, updates: dict[str, Any], *
     return normalized
 
 
+def bind_managed_timeline(
+    project_slug: str,
+    timeline_slug: str,
+    *,
+    root: str | Path | None = None,
+) -> tuple[str, str, str]:
+    """Resolve or create a managed local timeline container for project-bound runs.
+
+    Returns ``(timeline_ulid, timeline_slug, timeline_event_stream_id)``:
+
+    * ``timeline_ulid`` — 26-char Crockford ULID suitable for ``run.timeline_id``.
+    * ``timeline_slug`` — the validated slug (echoed back for convenience).
+    * ``timeline_event_stream_id`` — UUID read from the timeline identity sidecar.
+
+    Uses existing timeline CRUD entrypoints rather than writing identity files
+    directly.  Callers pass this tuple into ``prepare_project_run`` so the run
+    record carries only the ULID in ``timeline_id`` while storing the slug and
+    event-stream UUID in ``metadata``.
+    """
+    from astrid.core.project.jsonio import read_json
+    from astrid.core.timeline.crud import create_timeline, TimelineCrudError
+    from astrid.core.timeline.paths import (
+        assembly_identity_path,
+        find_timeline_by_slug,
+        validate_timeline_slug,
+    )
+
+    slug = validate_timeline_slug(timeline_slug)
+
+    # 1. Try to find an existing timeline with this slug.
+    found = find_timeline_by_slug(project_slug, slug, root=root)
+    if found is not None:
+        ulid, _tdir = found
+    else:
+        # 2. Not found — create a fresh managed container.
+        try:
+            result = create_timeline(project_slug, slug, root=root)
+        except TimelineCrudError:
+            # Race: another caller created it between find and create.
+            found = find_timeline_by_slug(project_slug, slug, root=root)
+            if found is None:
+                raise
+            ulid, _tdir = found
+        else:
+            ulid = result["ulid"]
+
+    # 3. Read the identity sidecar for the event-stream UUID.
+    identity_path = assembly_identity_path(project_slug, ulid, root=root)
+    identity = read_json(identity_path)
+    timeline_event_stream_id = identity.get("timeline_id")
+    if not isinstance(timeline_event_stream_id, str) or not timeline_event_stream_id:
+        raise ProjectRunError(
+            f"timeline {ulid!r} in project {project_slug!r} is missing a valid "
+            f"timeline_id in its identity sidecar"
+        )
+
+    return (ulid, slug, str(timeline_event_stream_id))
+
+
 def redact_cli_args(argv: Iterable[str]) -> list[str]:
     redacted: list[str] = []
     hide_next = False
@@ -312,9 +381,16 @@ def _is_sensitive_key(value: str) -> bool:
 
 
 __all__ = [
+    "METADATA_KEY_TIMELINE_BINDING_MODE",
+    "METADATA_KEY_TIMELINE_EVENT_STREAM_ID",
+    "METADATA_KEY_TIMELINE_SLUG",
     "PROJECT_RUN_ENV",
     "ProjectRunContext",
     "ProjectRunError",
+    "TIMELINE_BINDING_MODE_MANAGED",
+    "TIMELINE_BINDING_MODE_UNMANAGED",
+    "TIMELINE_BINDING_MODES",
+    "bind_managed_timeline",
     "discover_hype_artifact_root",
     "finalize_project_run",
     "load_run_record",

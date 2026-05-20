@@ -168,57 +168,35 @@ class OpenInReighTest(unittest.TestCase):
 
     # ----- default flow: SupabaseDataProvider.save_timeline -----
 
-    def test_default_pushes_via_data_provider_with_pat_auth(self) -> None:
+    def test_default_emits_bridge_metadata(self) -> None:
+        """m3.5: default flow emits bridge metadata, does NOT call save_timeline."""
         root = self.make_workspace()
         out_dir = root / "out"
         out_dir.mkdir()
         self.write_outputs(out_dir)
 
-        captured: dict[str, object] = {}
-
-        class FakeProvider:
-            def save_timeline(self, timeline_id, mutator, *, project_id, auth, expected_version, retries, force):
-                captured["timeline_id"] = timeline_id
-                captured["project_id"] = project_id
-                captured["auth"] = auth
-                captured["expected_version"] = expected_version
-                captured["retries"] = retries
-                captured["force"] = force
-                produced = mutator({}, 0)
-                captured["produced"] = produced
-
-                class Result:
-                    new_version = 1
-                    attempts = 1
-
-                return Result()
-
-        with patch.object(open_in_reigh, "load_timeline_blob", side_effect=open_in_reigh.load_timeline_blob):
-            with patch(
-                "astrid.core.reigh.data_provider.SupabaseDataProvider.from_env",
-                return_value=FakeProvider(),
-            ), patch("astrid.core.reigh.env.resolve_pat", return_value="pat-token"):
-                code, stdout, stderr, error = self.run_main(
-                    [
-                        "--out",
-                        str(out_dir),
-                        "--timeline-id",
-                        "123e4567-e89b-12d3-a456-426614174000",
-                        "--project-id",
-                        "proj-uuid-1",
-                    ]
-                )
+        code, stdout, stderr, error = self.run_main(
+            [
+                "--out",
+                str(out_dir),
+                "--timeline-id",
+                "123e4567-e89b-12d3-a456-426614174000",
+                "--project-id",
+                "proj-uuid-1",
+            ]
+        )
 
         self.assertIsNone(error, msg=stderr)
         self.assertEqual(code, 0, msg=stderr)
-        self.assertIn("Pushed timeline", stdout)
-        self.assertEqual(captured["auth"], ("pat", "pat-token"))
-        self.assertEqual(captured["timeline_id"], "123e4567-e89b-12d3-a456-426614174000")
-        self.assertEqual(captured["project_id"], "proj-uuid-1")
-        self.assertFalse(captured["force"])
-        self.assertEqual(captured["retries"], 3)
+        bridge = json.loads(stdout.strip())
+        self.assertEqual(bridge["bridge"], "open_in_reigh")
+        self.assertEqual(bridge["project_id"], "proj-uuid-1")
+        self.assertEqual(bridge["timeline_id"], "123e4567-e89b-12d3-a456-426614174000")
+        self.assertIn("timeline_path", bridge)
+        self.assertIn("m6", bridge["note"].lower())
+        self.assertIn("emitted_at", bridge)
 
-    def test_default_requires_project_id(self) -> None:
+    def test_default_bridge_metadata_requires_project_id(self) -> None:
         root = self.make_workspace()
         out_dir = root / "out"
         out_dir.mkdir()
@@ -271,45 +249,72 @@ class OpenInReighTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("placement", stderr.lower())
 
-    def test_service_role_flag_routes_through_service_role_auth(self) -> None:
+    def test_bridge_metadata_with_service_role_flag(self) -> None:
+        """m3.5: --service-role flag still emits bridge metadata (no auth needed)."""
         root = self.make_workspace()
         out_dir = root / "out"
         out_dir.mkdir()
         self.write_outputs(out_dir)
 
-        captured: dict[str, object] = {}
-
-        class FakeProvider:
-            def save_timeline(self, *args, **kwargs):
-                captured["auth"] = kwargs["auth"]
-
-                class Result:
-                    new_version = 1
-                    attempts = 1
-
-                return Result()
-
-        with patch(
-            "astrid.core.reigh.data_provider.SupabaseDataProvider.from_env",
-            return_value=FakeProvider(),
-        ), patch(
-            "astrid.core.reigh.env.resolve_service_role_key", return_value="srv-key"
-        ):
-            code, _, stderr, error = self.run_main(
-                [
-                    "--out",
-                    str(out_dir),
-                    "--timeline-id",
-                    "123e4567-e89b-12d3-a456-426614174000",
-                    "--project-id",
-                    "proj-uuid-1",
-                    "--service-role",
-                ]
-            )
+        code, stdout, stderr, error = self.run_main(
+            [
+                "--out",
+                str(out_dir),
+                "--timeline-id",
+                "123e4567-e89b-12d3-a456-426614174000",
+                "--project-id",
+                "proj-uuid-1",
+                "--service-role",
+            ]
+        )
 
         self.assertIsNone(error, msg=stderr)
         self.assertEqual(code, 0)
-        self.assertEqual(captured["auth"], ("service_role", "srv-key"))
+        bridge = json.loads(stdout.strip())
+        self.assertEqual(bridge["bridge"], "open_in_reigh")
+        self.assertEqual(bridge["timeline_id"], "123e4567-e89b-12d3-a456-426614174000")
+
+    # ----- bridge seam tests (m3.5) -----
+
+    def test_bridge_metadata_contains_m6_replay_note(self) -> None:
+        """Prove bridge metadata documents the m6 replay seam."""
+        root = self.make_workspace()
+        out_dir = root / "out"
+        out_dir.mkdir()
+        self.write_outputs(out_dir)
+
+        code, stdout, stderr, error = self.run_main(
+            [
+                "--out", str(out_dir),
+                "--timeline-id", "123e4567-e89b-12d3-a456-426614174000",
+                "--project-id", "proj-uuid-1",
+            ]
+        )
+        self.assertIsNone(error, msg=stderr)
+        self.assertEqual(code, 0)
+        bridge = json.loads(stdout.strip())
+        self.assertIn("append_timeline_event", bridge["note"].lower())
+        self.assertIn("m6", bridge["note"].lower())
+
+    def test_bridge_metadata_dry_run(self) -> None:
+        """Prove --dry-run emits bridge intent without writing."""
+        root = self.make_workspace()
+        out_dir = root / "out"
+        out_dir.mkdir()
+        self.write_outputs(out_dir)
+
+        code, stdout, stderr, error = self.run_main(
+            [
+                "--out", str(out_dir),
+                "--timeline-id", "123e4567-e89b-12d3-a456-426614174000",
+                "--project-id", "proj-uuid-1",
+                "--dry-run",
+            ]
+        )
+        self.assertIsNone(error, msg=stderr)
+        self.assertEqual(code, 0)
+        self.assertIn("Would emit bridge metadata", stdout)
+        self.assertIn("post-m6 replay", stdout.lower())
 
 
 if __name__ == "__main__":

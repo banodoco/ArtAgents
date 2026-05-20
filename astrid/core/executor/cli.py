@@ -86,8 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Project identifier. A project slug runs in cache-only/offline mode "
             "(local sources/ + runs/ provenance). A reigh-app project UUID "
-            "(8-4-4-4-12 hex) routes the post-run timeline through "
-            "SupabaseDataProvider; pair with --timeline-id."
+            "(8-4-4-4-12 hex) runs in UUID handoff mode: the executor completes "
+            "locally, emits bridge metadata, and does NOT push to Supabase. "
+            "Pair with --timeline-id. The actual Supabase push is deferred to m6 "
+            "(open_in_reigh bridge replay)."
         ),
     )
     run_parser.add_argument(
@@ -578,11 +580,10 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         print(json.dumps(dict(result.payload), separators=(",", ":"), sort_keys=True))
     rc = int(result.returncode or 0)
     if rc == 0 and project_uuid is not None and not args.dry_run:
-        rc = _push_run_to_supabase(
+        rc = _emit_uuid_handoff_metadata(
             project_id=project_uuid,
             timeline_id=args.timeline_id,
             out_dir=Path(args.out),
-            service_role=bool(getattr(args, "service_role", False)),
         )
     return rc
 
@@ -598,51 +599,43 @@ def _project_uuid_or_none(value: str | None) -> str | None:
     return value if _UUID_RE.match(value) else None
 
 
-def _push_run_to_supabase(
+def _emit_uuid_handoff_metadata(
     *,
     project_id: str,
     timeline_id: str,
     out_dir: Path,
-    service_role: bool,
 ) -> int:
-    """Push the run's hype.timeline.json (if produced) via SupabaseDataProvider."""
+    """Emit bridge/handoff metadata for UUID-mode runs (m3.5).
 
+    UUID mode is a handoff contract: the local executor completes, produces
+    explicit bridge metadata, and does NOT call SupabaseDataProvider.save_timeline().
+    The actual Supabase push is deferred to m6 (open_in_reigh bridge replay).
+
+    When hype.timeline.json is present, emit JSON handoff metadata on stdout
+    so downstream tooling can pick up the bridge intent.  When it is absent,
+    log and return 0 (non-producing runs are valid handoffs).
+    """
     timeline_path = out_dir / "hype.timeline.json"
     if not timeline_path.is_file():
         print(
-            f"executors: --project {project_id} requested but {timeline_path} not produced by run; skipping push",
+            f"executors: --project {project_id} UUID mode: {timeline_path} not produced; "
+            f"handoff complete (no timeline to bridge)",
             file=sys.stderr,
         )
         return 0
 
-    from astrid.core.reigh import env as reigh_env
-    from astrid.core.reigh.data_provider import SupabaseDataProvider
-    from astrid.timeline import Timeline
-
-    timeline_blob = Timeline.load(timeline_path).to_json_data()
-    provider = SupabaseDataProvider.from_env()
-    if service_role:
-        auth = ("service_role", reigh_env.resolve_service_role_key())
-    else:
-        auth = ("pat", reigh_env.resolve_pat())
-    _, current_version = provider.load_timeline(project_id, timeline_id)
-
-    def _mutator(_config, _version):
-        return timeline_blob
-
-    result = provider.save_timeline(
-        timeline_id,
-        _mutator,
-        project_id=project_id,
-        auth=auth,
-        expected_version=current_version,
-        retries=3,
-        force=False,
-    )
-    print(
-        f"pushed timeline {timeline_id} project_id={project_id} "
-        f"new_version={result.new_version} attempts={result.attempts}"
-    )
+    import time as _time
+    handoff = {
+        "bridge": "executor-uuid-mode",
+        "schema_version": 1,
+        "project_id": project_id,
+        "timeline_id": timeline_id,
+        "out_dir": str(out_dir.resolve()),
+        "timeline_path": str(timeline_path.resolve()),
+        "note": "Bridge metadata for m6 replay.  Replay via open_in_reigh after m6 Supabase RPC exists.",
+        "emitted_at": _time.time(),
+    }
+    print(json.dumps(handoff, separators=(",", ":"), sort_keys=True))
     return 0
 
 

@@ -322,6 +322,74 @@ Do not point dependencies at `/typescript` subdirectories. The package root
 `package.json` files own `main`, `types`, and `exports`. Source citations and
 debugging should use `typescript/src/index.ts`.
 
+## Pack Execution Modes: Managed vs Unmanaged
+
+Every Astrid pack that produces timeline or arrangement state runs in one of
+two modes:
+
+### Managed mode (canonical event-sourced writes)
+
+A pack is **managed** when it targets a project-bound canonical timeline
+container. In managed mode:
+
+- The pack receives `--project <slug>` and `--timeline-slug <slug>`.
+- All timeline mutations go through the `EventLogBackend` selected for that
+  timeline; the pack never writes `assembly.json`, `hype.timeline.json`,
+  `timelines.config`, or arrangement blobs directly as canonical state.
+- Compatibility blobs (derived surfaces) may be refreshed *after* event append,
+  only through the projection/helper path.
+- Every event carries an actor matching the m1 schema. The proximate writer
+  wins; upstream human/agent provenance goes in `actor.via`.
+
+Managed mode is the only path that closes the write-side bypasses targeted
+by milestone m3.5. The `astrid timelines audit` command only checks
+managed-path mutations; it does not flag compatibility blob writes that
+follow an event append.
+
+### Unmanaged mode (file-only artifact generation)
+
+A pack is **unmanaged** when invoked as a standalone file-only tool:
+
+- The pack writes run-local artifacts (e.g., `hype.timeline.json`,
+  `hype.assets.json`) without any project or timeline container binding.
+- No events are emitted; no canonical event stream exists.
+- These runs are intentionally outside the event-sourcing boundary and are
+  not subject to the m3.5 write-bypass audit.
+
+This distinction is load-bearing: milestone m3.5 closes managed canonical
+write bypasses only. Standalone file-only invocations remain unmanaged
+artifact generation and are not required to emit events.
+
+## Audit Scope (m3.5)
+
+The bypass audit for m3.5 covers only **managed pack and worker write paths**:
+
+- `builtin.cut` with `--project` + `--timeline-slug`
+- `builtin.refine` with `--project` + `--timeline-slug`
+- `iteration.assemble` with `--project` + `--timeline-slug`
+- `builtin.hype` with `--project` (managed local mutations)
+- `open_in_reigh` (cross-boundary bridge)
+- `banodoco_worker` write-back
+
+Unmanaged file-only invocations of these packs are not in audit scope.
+The following sibling flows remain intentionally out of scope because they
+write run-local pipeline artifacts rather than timeline-container state:
+`builtin.arrange`, `builtin.pool_build`, `builtin.pool_merge`.
+
+## Publish Remote Writes (m6 Scope)
+
+The `builtin.publish` pack currently reads local timeline files (read-only)
+and uploads assets + timeline config to Supabase via `submit_import()`. These
+remote writes are **not** part of the m3.5 write-bypass migration:
+
+- Publish does not write `assembly.json`, `hype.timeline.json`, arrangement
+  blobs, or any other local canonical timeline state.
+- The remote Supabase upload path (`submit_import`, asset storage writes) is
+  m6 scope and will be migrated to event-based replay when the Supabase RPC
+  implementation exists.
+- For m3.5, publish is treated as a read-only projection consumer for local
+  canonical state. Regression tests in `tests/test_publish.py` enforce this.
+
 ## Phase Gates and Follow-On Notes
 
 - T2 must patch `reigh-data-fetch` so `TIMELINES_SELECT` includes
@@ -336,3 +404,7 @@ debugging should use `typescript/src/index.ts`.
 - Non-worker CLI writes must preserve the SD-009 auth boundary. Prefer PAT or
   user-JWT paths for user-owned authoring flows, reserving service-role for the
   trusted AA worker.
+- `open_in_reigh` is the named cross-boundary bridge between LocalFs and
+  Supabase. No other pack may invent a LocalFs-to-Supabase blob copy path.
+  Post-m6, `open_in_reigh` will use true RPC replay; pre-m6 it stages bridge
+  metadata as a compatibility measure.

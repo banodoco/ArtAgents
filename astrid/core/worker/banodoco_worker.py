@@ -47,14 +47,13 @@ from astrid.core.project import paths as project_paths
 from astrid.core.project.run import write_run_record
 from astrid.core.reigh import env as reigh_env
 from astrid.core.reigh.data_provider import SupabaseDataProvider
-from astrid.core.reigh.errors import TimelineVersionConflictError
 from astrid.core.reigh.task_client import (
     SUPPORTED_TASK_TYPES,
     ClaimResult,
     claim_next_task,
     update_task_status,
 )
-from astrid.core.reigh.timeline_io import Mutator, RawTimelinePayload as TimelineConfig, SaveResult
+from astrid.core.reigh.timeline_io import Mutator, RawTimelinePayload as TimelineConfig
 from astrid.core.reigh.worker_jwt import JwtVerificationError, VerifiedJwt, verify_user_jwt
 
 logger = logging.getLogger(__name__)
@@ -195,6 +194,87 @@ def _write_baseline_snapshot(
     return digest
 
 
+# ---------------------------------------------------------------------------
+# Worker event-append adapter (m3.5)
+# ---------------------------------------------------------------------------
+
+def _worker_append_events(
+    *,
+    project_slug: str | None,
+    project_id: str,
+    timeline_id: str,
+    worker_id: str,
+    claim_task_id: str,
+    mutator,
+    snapshot_payload: Any,
+) -> int:
+    """Append worker-generated timeline mutations through the local event gateway.
+
+    Attempts to resolve a local project-timeline binding for the remote
+    timeline.  When successful, appends ``arrangement.replaced`` events via
+    ``pack_write_gateway`` and returns the new event-stream version.
+
+    Remote-only claims (no local project_slug, or no matching local timeline)
+    raise ``RuntimeError`` as controlled failures — the actual Supabase
+    write-back is deferred to m6.
+
+    Returns:
+        int: Event-stream version after appends (used as ``config_version``
+        in the success payload).
+    """
+    if not project_slug:
+        raise RuntimeError(
+            f"worker append: no local project_slug configured; "
+            f"remote-only claim deferred to m6 (project_id={project_id})"
+        )
+
+    from astrid.core.timeline._edit_helpers import pack_write_gateway
+    from astrid.core.timeline.paths import find_timeline_by_event_stream_id
+    from astrid.core.timeline.events.schema import TimelineActor
+
+    # Resolve a local timeline slug from the remote timeline_id (event-stream UUID).
+    found = find_timeline_by_event_stream_id(project_slug, timeline_id)
+    if found is None:
+        raise RuntimeError(
+            f"worker append: no local timeline found for "
+            f"event_stream_id={timeline_id} in project {project_slug}; "
+            f"remote-only claim deferred to m6"
+        )
+    timeline_ulid, timeline_slug = found
+
+    # Build the actor: system actor for the worker, with upstream provenance
+    # in actor.via (the user/agent who initiated the task).
+    actor = TimelineActor(
+        type="system",
+        id=f"banodoco_worker:claim:{claim_task_id}",
+        display=f"banodoco-worker:{worker_id}",
+    )
+
+    # Apply the mutator to the snapshot to produce the new config.
+    new_config = mutator(snapshot_payload, 0)
+    if not isinstance(new_config, dict):
+        raise RuntimeError("worker mutator did not return a dict")
+
+    # Emit arrangement.replaced as a coarse event (finer events deferred to m6).
+    events = [
+        {
+            "kind": "arrangement.replaced",
+            "payload": {"arrangement": new_config},
+        }
+    ]
+
+    result = pack_write_gateway(
+        project_slug=project_slug,
+        timeline_slug=timeline_slug,
+        timeline_ulid=timeline_ulid,
+        timeline_event_stream_id=timeline_id,
+        events=events,
+        actor=actor,
+    )
+
+    return result.new_version
+
+
 @dataclass
 class BanodocoWorker:
     """Reusable worker engine; ``run`` enters the long-poll loop."""
@@ -330,30 +410,22 @@ class BanodocoWorker:
             _ensure_carry_fields(new_config.get("clips"))
             return new_config
 
-        # (f) versioned write via service-role
-        expected_version = params.get("expected_version")
-        if not isinstance(expected_version, int):
-            self._fail(
-                claim.task_id,
-                error="task.params.expected_version is required",
-                correlation_id=correlation_id,
-                service_role_key=service_role_key,
-            )
-            return
+        # (f) versioned write — m3.5: prefer local event gateway; remote-only
+        # claims without a local append backend fail with a controlled error.
         try:
-            result = provider.save_timeline(
-                timeline_id,
-                _wrapped_mutator,
+            config_version = _worker_append_events(
+                project_slug=self.config.project_slug,
                 project_id=project_id,
-                service_role_key=service_role_key,
-                expected_version=expected_version,
-                retries=3,
-                force=False,
+                timeline_id=timeline_id,
+                worker_id=self.config.worker_id,
+                claim_task_id=claim.task_id,
+                mutator=_wrapped_mutator,
+                snapshot_payload=snapshot_payload,
             )
-        except (TimelineVersionConflictError, Exception) as exc:  # noqa: BLE001
+        except RuntimeError as exc:
             self._fail(
                 claim.task_id,
-                error=f"save_timeline failed: {exc}",
+                error=f"worker append failed: {exc}",
                 correlation_id=correlation_id,
                 service_role_key=service_role_key,
             )
@@ -361,7 +433,7 @@ class BanodocoWorker:
 
         self._complete(
             claim.task_id,
-            result=result,
+            config_version=config_version,
             timeline_id=timeline_id,
             correlation_id=correlation_id,
             service_role_key=service_role_key,
@@ -373,13 +445,13 @@ class BanodocoWorker:
         self,
         task_id: str,
         *,
-        result: SaveResult,
+        config_version: int,
         timeline_id: str,
         correlation_id: str,
         service_role_key: str,
     ) -> None:
         result_data = {
-            "config_version": result.new_version,
+            "config_version": config_version,
             "correlation_id": correlation_id,
             "timeline_id": timeline_id,
         }
