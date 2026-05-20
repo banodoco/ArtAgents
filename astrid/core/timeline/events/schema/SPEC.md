@@ -24,6 +24,8 @@ these rules exactly.
 - Backend selection is per timeline: a known local `timeline_home` resolves to
   `LocalFsBackend`, while explicit `preferred_backend="supabase"` resolves to
   the inert `SupabaseBackend` stub.
+- CRUD-side selection keeps using the identity sidecar's `backend` marker when
+  present, rather than bypassing the selector with a hard-coded local backend.
 - Actor compatibility is intentionally broad in Python m1: `actor.id` is a
   non-empty string and current producers such as `maker`, `codex:test`,
   `migration:m1`, and `claude-code:session-123` remain valid.

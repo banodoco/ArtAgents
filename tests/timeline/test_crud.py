@@ -308,6 +308,18 @@ class TestRenameTimeline:
         assert seen["payload"] == {"old_slug": "alpha", "new_slug": "beta"}
         assert isinstance(seen["actor"], TimelineActor)
         assert seen["timeline_home"] is not None
+        assert seen["preferred_backend"] == "local_fs"
+
+    def test_rename_rejects_malformed_identity_backend(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity_path = assembly_identity_path("demo", ulid, root=project_tree)
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        identity["backend"] = {"bad": "shape"}
+        identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+        with pytest.raises(TimelineCrudError, match="malformed backend"):
+            rename_timeline("demo", "alpha", "beta")
 
     def test_rename_rejects_explicit_inert_supabase_backend(
         self, project_tree: Path, monkeypatch: pytest.MonkeyPatch

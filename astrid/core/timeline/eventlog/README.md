@@ -60,6 +60,9 @@ Timeline callers select a backend in two steps:
 The supported m1 cases are intentionally narrow:
 
 - local timelines with a known `timeline_home` construct `LocalFsBackend`
+- CRUD callers pass through the durable `assembly.identity.json["backend"]`
+  marker when it exists, so the per-timeline sidecar remains the source of
+  truth for local backend selection
 - explicit `preferred_backend="supabase"` constructs `SupabaseBackend`
   without network access and remains inert until m6
 - if a caller asks for local_fs without a local home, construction fails

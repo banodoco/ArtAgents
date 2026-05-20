@@ -257,8 +257,15 @@ def rename_timeline(
     timeline_id = identity.get("timeline_id")
     if not isinstance(timeline_id, str) or not timeline_id:
         raise TimelineCrudError("timeline identity sidecar is missing timeline_id")
+    preferred_backend = identity.get("backend")
+    if preferred_backend is not None and not isinstance(preferred_backend, str):
+        raise TimelineCrudError("timeline identity sidecar has malformed backend")
 
-    stream, backend = select_timeline_backend(timeline_id=timeline_id, timeline_home=tdir)
+    stream, backend = select_timeline_backend(
+        timeline_id=timeline_id,
+        timeline_home=tdir,
+        preferred_backend=preferred_backend,
+    )
     if stream.backend != "local_fs":
         raise TimelineCrudError(f"timeline backend {stream.backend!r} is not available for rename")
 
