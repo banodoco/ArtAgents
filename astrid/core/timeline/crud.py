@@ -235,6 +235,34 @@ def show_timeline(
 
 
 # ---------------------------------------------------------------------------
+# Arrangement read helper (m3 read model)
+# ---------------------------------------------------------------------------
+
+
+def get_arrangement(
+    project_slug: str,
+    slug: str,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Return the arrangement dict from the materialized assembly, or *None*.
+
+    Reads through the compatibility projection (``assembly.json``), not
+    event log replay.  In m4 this will become a projection read.
+
+    Args:
+        project_slug: Project that owns the timeline.
+        slug: Timeline slug within the project.
+        root: Filesystem root override.
+    """
+    data = show_timeline(project_slug, slug, root=root)
+    if data is None:
+        return None
+    assembly = data["assembly"]
+    return assembly.assembly.get("arrangement")
+
+
+# ---------------------------------------------------------------------------
 # Rename
 # ---------------------------------------------------------------------------
 
