@@ -1236,7 +1236,33 @@ def _plan_action(review: dict[str, Any]) -> str:
     return editor_review.plan_next_action(review)
 
 
-def _apply_trim_deltas_to_arrangement(path: Path, notes: list[dict[str, Any]]) -> None:
+def _apply_trim_deltas_to_arrangement(
+    path: Path,
+    notes: list[dict[str, Any]],
+    *,
+    project_slug: str | None = None,
+    timeline_slug: str | None = None,
+) -> None:
+    # m3 pack migration (T11):
+    #
+    # This function mutates arrangement audio trim ranges in-place and writes
+    # back to a run-local pipeline artifact via `timeline.save_arrangement()`.
+    #
+    # When *project_slug* and *timeline_slug* are both provided (i.e. the
+    # hype run is bound to a project-timeline container), the revised
+    # arrangement is **also** emitted through the evented API
+    # ``arrangement_edits.arrangement_replace()`` so the managed timeline
+    # stays in sync.  The direct artifact write is kept for downstream
+    # artifact consumers (cut, render, etc.) that read from the run-local
+    # ``arrangement.json`` path.
+    #
+    # Sibling pack write paths that write only run-local artifacts and have
+    # no project-timeline binding remain intentionally **deferred to m3.5**
+    # (pack/worker write-path sweep):
+    #   - `astrid/packs/builtin/arrange/run.py:811` — writes to `out_dir / "arrangement.json"`
+    #   - `astrid/packs/builtin/refine/run.py:542` — writes to `args.arrangement`
+    #   - `astrid/packs/builtin/pool_build/run.py` — no arrangement writes
+    #   - `astrid/packs/builtin/pool_merge/run.py` — no arrangement writes
     arrangement = timeline.load_arrangement(path, assign_missing_uuids=True)
     clips_by_order = {int(clip["order"]): clip for clip in arrangement.get("clips", [])}
     clips_by_uuid = {str(clip["uuid"]): clip for clip in arrangement.get("clips", []) if isinstance(clip.get("uuid"), str)}
@@ -1270,7 +1296,26 @@ def _apply_trim_deltas_to_arrangement(path: Path, notes: list[dict[str, Any]]) -
             continue
         trim_range[0] = float(trim_range[0]) + float(detail.get("trim_delta_start_sec", 0.0))
         trim_range[1] = float(trim_range[1]) + float(detail.get("trim_delta_end_sec", 0.0))
+    # Always persist the run-local artifact for downstream consumers.
     timeline.save_arrangement(arrangement, path)
+
+    # When running inside a project-timeline container, also emit the
+    # arrangement.replaced event so the managed timeline stays in sync.
+    if project_slug is not None and timeline_slug is not None:
+        try:
+            from astrid.core.timeline.arrangement_edits import arrangement_replace
+
+            arrangement_replace(
+                project_slug,
+                timeline_slug,
+                arrangement=dict(arrangement),
+            )
+        except Exception as exc:
+            print(
+                f"hype: arrangement.replaced event emission failed"
+                f" (project={project_slug!r}, timeline={timeline_slug!r}): {exc}",
+                file=sys.stderr,
+            )
 
 
 def _rotate_editor_review(brief_out: Path, iteration: int) -> None:
@@ -1469,7 +1514,12 @@ def pool_main(args: argparse.Namespace) -> int:
         action = _plan_action(review)
         arrangement_path = args.brief_out / "arrangement.json"
         if action == "micro-fix":
-            _apply_trim_deltas_to_arrangement(arrangement_path, notes)
+            _apply_trim_deltas_to_arrangement(
+                arrangement_path,
+                notes,
+                project_slug=project_slug,
+                timeline_slug=getattr(args, "brief_slug", None),
+            )
         elif action == "rework":
             returncode = _run_revise(args, arrangement_path, review_path)
             if returncode != 0:
