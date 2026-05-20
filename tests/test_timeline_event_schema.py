@@ -6,7 +6,9 @@ from uuid import uuid4
 from astrid.core.timeline.eventlog import (
     EventLogNotConfiguredError,
     EventLogNotImplementedError,
+    LocalFsBackend,
     SupabaseBackend,
+    select_timeline_backend,
     select_timeline_stream,
 )
 from astrid.core.timeline.events.schema import (
@@ -113,10 +115,36 @@ class TimelineEventSchemaTest(unittest.TestCase):
         self.assertIsNone(stream.home)
         self.assertEqual(stream.source, "preferred_backend")
 
+    def test_timeline_backend_selector_builds_local_fs_from_timeline_home(self) -> None:
+        timeline_id = str(uuid4())
+        stream, backend = select_timeline_backend(
+            timeline_id=timeline_id,
+            timeline_home="/tmp/timeline-home",
+        )
+        self.assertEqual(stream.backend, "local_fs")
+        self.assertEqual(stream.source, "timeline_home")
+        self.assertIsInstance(backend, LocalFsBackend)
+        self.assertEqual(backend.backend_name(), "local_fs")
+
+    def test_timeline_backend_selector_builds_inert_supabase_stub_explicitly(self) -> None:
+        timeline_id = str(uuid4())
+        stream, backend = select_timeline_backend(
+            timeline_id=timeline_id,
+            timeline_home="/tmp/timeline-home",
+            preferred_backend="supabase",
+        )
+        self.assertEqual(stream.backend, "supabase")
+        self.assertEqual(stream.source, "preferred_backend")
+        self.assertIsInstance(backend, SupabaseBackend)
+        self.assertEqual(backend.backend_name(), "supabase")
+
     def test_supabase_backend_stub_is_constructible_and_inert(self) -> None:
         backend = SupabaseBackend(timeline_id=str(uuid4()))
 
         self.assertEqual(backend.backend_name(), "supabase")
+
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineActor(type="agent", id="")
 
         with self.assertRaises(EventLogNotImplementedError):
             backend.append_event(

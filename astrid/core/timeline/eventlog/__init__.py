@@ -3,7 +3,7 @@
 from .protocol import EventLogBackend
 from .local_fs import LocalFsBackend
 from .projector import DisplayProjection, project_display
-from .selector import select_timeline_stream
+from .selector import build_timeline_backend, select_timeline_backend, select_timeline_stream
 from .supabase import SupabaseBackend
 from .types import (
     AppendEventRequest,
@@ -30,5 +30,7 @@ __all__ = [
     "project_display",
     "SupabaseBackend",
     "TimelineStreamRef",
+    "build_timeline_backend",
+    "select_timeline_backend",
     "select_timeline_stream",
 ]

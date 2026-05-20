@@ -12,7 +12,12 @@ from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.eventlog.types import EventLogError
 from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.model import Display
-from astrid.core.timeline.paths import assembly_head_path, assembly_identity_path, timeline_dir
+from astrid.core.timeline.paths import (
+    assembly_head_path,
+    assembly_identity_path,
+    load_display_json_with_repair,
+    timeline_dir,
+)
 
 
 @pytest.fixture
@@ -335,6 +340,26 @@ def test_show_timeline_refuses_deleted_projection(project_tree: Path) -> None:
     )
 
     assert show_timeline("demo", "primary", root=project_tree) is None
+
+
+def test_load_display_stays_fail_closed_when_eventlog_exists_without_identity(
+    project_tree: Path,
+) -> None:
+    result = create_timeline("demo", "primary", root=project_tree)
+    ulid = result["ulid"]
+    home = timeline_dir("demo", ulid, root=project_tree)
+    identity_path = assembly_identity_path("demo", ulid, root=project_tree)
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
+    backend.append_event(
+        "timeline.renamed",
+        {"old_slug": "primary", "new_slug": "after"},
+        actor=TimelineActor(type="agent", id="codex:test"),
+    )
+    identity_path.unlink()
+
+    assert load_display_json_with_repair(home) is None
+    assert show_timeline("demo", "after", root=project_tree) is None
 
 
 def test_next_read_repairs_display_after_post_append_projection_failure(

@@ -14,3 +14,16 @@ these rules exactly.
 - `event_id` and `txn_id` are ULIDs.
 - `timeline_id` is a UUID string.
 - `actor` is an object with `type`, `id`, and optional `display` / `via`.
+
+## Current m1 semantics
+
+- Legacy local timelines bootstrap on first append with `timeline.imported`
+  before the requested lifecycle event.
+- Local read repair is intentionally fail-closed when an eventlog exists but
+  the identity sidecar or projection cannot materialize a valid display state.
+- Backend selection is per timeline: a known local `timeline_home` resolves to
+  `LocalFsBackend`, while explicit `preferred_backend="supabase"` resolves to
+  the inert `SupabaseBackend` stub.
+- Actor compatibility is intentionally broad in Python m1: `actor.id` is a
+  non-empty string and current producers such as `maker`, `codex:test`,
+  `migration:m1`, and `claude-code:session-123` remain valid.

@@ -22,7 +22,7 @@ from .model import (
     Manifest,
     TimelineValidationError,
 )
-from .eventlog import LocalFsBackend, select_timeline_stream
+from .eventlog import select_timeline_backend
 from .events.schema import TimelineActor
 from .paths import (
     assembly_identity_path,
@@ -258,8 +258,8 @@ def rename_timeline(
     if not isinstance(timeline_id, str) or not timeline_id:
         raise TimelineCrudError("timeline identity sidecar is missing timeline_id")
 
-    stream = select_timeline_stream(timeline_id=timeline_id, timeline_home=tdir)
-    if stream.backend != "local_fs" or stream.home is None:
+    stream, backend = select_timeline_backend(timeline_id=timeline_id, timeline_home=tdir)
+    if stream.backend != "local_fs":
         raise TimelineCrudError(f"timeline backend {stream.backend!r} is not available for rename")
 
     rename_actor = actor or TimelineActor(
@@ -267,7 +267,6 @@ def rename_timeline(
         id="timeline-crud:rename",
         display="timeline-crud",
     )
-    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=stream.home)
     backend.append_event(
         "timeline.renamed",
         {"old_slug": old_slug, "new_slug": new_slug},

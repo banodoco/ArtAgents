@@ -47,6 +47,27 @@ Bootstrap contract:
 - true legacy timelines emit `timeline.imported` on first append
 - `timeline.deleted` is terminal for future appends
 
+## Backend selection in m1
+
+Timeline callers select a backend in two steps:
+
+- `select_timeline_stream(...)` resolves the per-timeline storage target from
+  explicit backend preference or persistent local home metadata
+- `select_timeline_backend(...)` turns that stream reference into the concrete
+  `EventLogBackend` implementation used by callers such as
+  `rename_timeline()`
+
+The supported m1 cases are intentionally narrow:
+
+- local timelines with a known `timeline_home` construct `LocalFsBackend`
+- explicit `preferred_backend="supabase"` constructs `SupabaseBackend`
+  without network access and remains inert until m6
+- if a caller asks for local_fs without a local home, construction fails
+  rather than inventing fallback path semantics
+
+This preserves the current fail-closed behavior and keeps backend selection
+limited to repository-representable cases.
+
 ## Projection scope in m1
 
 The event stream is authoritative, but m1 only repairs the compatibility
@@ -55,8 +76,21 @@ projection for `display.json`.
 - reads use the on-disk `display.json` when no eventlog exists
 - reads repair missing/corrupt/stale `display.json` from lifecycle events when
   an eventlog exists
+- reads stay fail-closed when an eventlog exists but identity/projection
+  materialization is unusable
 - deleted timelines refuse display materialization
 - `assembly.json` and `manifest.json` are explicitly out of scope for m1
+
+## Actor compatibility in m1
+
+Actor ids remain compatibility-first in the Python implementation.
+
+- `actor.type` is constrained to `agent`, `human`, or `system`
+- `actor.id` must be a non-empty string
+- existing producers continue to emit ids such as `maker`, `codex:test`,
+  `claude-code:session-123`, `timeline-crud:rename`, and `migration:m1`
+- m1 does not tighten actor ids to backend-specific formats; docs describe the
+  intended patterns while tests preserve current accepted producers
 
 ## Future Supabase target
 

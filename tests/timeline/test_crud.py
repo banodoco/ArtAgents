@@ -8,7 +8,7 @@ from uuid import UUID
 
 import pytest
 
-from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.eventlog import EventLogBackend, LocalFsBackend, SupabaseBackend
 from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.crud import (
     TimelineCrudError,
@@ -256,6 +256,81 @@ class TestRenameTimeline:
         event = backend.read_events()[-1]
         assert event.actor.type == "system"
         assert event.actor.id == "timeline-crud:rename"
+
+    def test_rename_uses_selected_backend_construction_seam(
+        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        create_timeline("demo", "alpha")
+        seen: dict[str, object] = {}
+
+        class RecordingBackend:
+            def backend_name(self) -> str:
+                return "local_fs"
+
+            def append_event(
+                self,
+                kind: str,
+                payload: dict[str, object],
+                *,
+                actor: TimelineActor,
+                expected_version: int | None = None,
+                txn_id: str | None = None,
+            ) -> object:
+                seen["kind"] = kind
+                seen["payload"] = payload
+                seen["actor"] = actor
+                seen["expected_version"] = expected_version
+                seen["txn_id"] = txn_id
+                return object()
+
+        def fake_select(
+            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None
+        ) -> tuple[object, EventLogBackend]:
+            seen["timeline_id"] = timeline_id
+            seen["timeline_home"] = timeline_home
+            seen["preferred_backend"] = preferred_backend
+            return (
+                type("Stream", (), {"backend": "local_fs"})(),
+                RecordingBackend(),
+            )
+
+        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
+
+        result = rename_timeline(
+            "demo",
+            "alpha",
+            "beta",
+            actor=TimelineActor(type="agent", id="maker"),
+        )
+
+        assert result["slug"] == "beta"
+        assert seen["kind"] == "timeline.renamed"
+        assert seen["payload"] == {"old_slug": "alpha", "new_slug": "beta"}
+        assert isinstance(seen["actor"], TimelineActor)
+        assert seen["timeline_home"] is not None
+
+    def test_rename_rejects_explicit_inert_supabase_backend(
+        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        def fake_select(
+            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None
+        ) -> tuple[object, EventLogBackend]:
+            assert timeline_id == identity["timeline_id"]
+            return (
+                type("Stream", (), {"backend": "supabase"})(),
+                SupabaseBackend(timeline_id=timeline_id),
+            )
+
+        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
+
+        with pytest.raises(TimelineCrudError, match="supabase"):
+            rename_timeline("demo", "alpha", "beta")
 
 
 # ---------------------------------------------------------------------------
