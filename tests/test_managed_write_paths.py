@@ -7,6 +7,9 @@ Proves:
 3. verify_chain() passes for pack-produced timeline fixtures.
 4. Actor attribution including actor.via chaining.
 5. Unmanaged artifact mode still works without breaking.
+
+These tests exercise the managed LocalFs event path while Astrid's Reigh-side
+blob writes remain a legacy compatibility bridge.
 """
 
 from __future__ import annotations

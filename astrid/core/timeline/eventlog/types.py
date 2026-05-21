@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+from astrid.core.timeline.events.schema import TimelineActor
 
 BackendName = Literal["local_fs", "supabase"]
 
@@ -21,6 +21,22 @@ class EventLogNotConfiguredError(EventLogError):
 
 class EventLogNotImplementedError(EventLogError):
     """Raised when a backend shape exists but the implementation is deferred."""
+
+
+class EventLogMissingConfigError(EventLogNotConfiguredError, EventLogNotImplementedError):
+    """Raised when a backend operation needs config that was not supplied."""
+
+
+class EventLogUnsupportedRpcError(EventLogNotImplementedError):
+    """Raised when the target backend lacks the requested RPC capability."""
+
+
+class EventLogAuthRequiredError(EventLogError):
+    """Raised when a write requires a verified auth subject that was not proven."""
+
+
+class EventLogTransportError(EventLogError):
+    """Raised when a backend transport returns malformed or unusable data."""
 
 
 @dataclass(frozen=True)
@@ -77,6 +93,24 @@ class TimelineStreamRef:
     timeline_id: str
     home: Path | None = None
     source: str = "timeline_home"
+    supabase_options: "SupabaseEventLogOptions | None" = None
+
+
+@dataclass(frozen=True)
+class SupabaseEventLogOptions:
+    """Optional transport/auth context for the Supabase eventlog backend.
+
+    The LocalFs backend ignores this structure entirely. It exists so callers
+    can pass one narrow context object through backend selection without
+    fanning separate Supabase kwargs across edit and CRUD call sites.
+    """
+
+    url: str | None = None
+    auth_token: str | None = None
+    verified_subject: str | None = None
+    actor_id: str | None = None
+    actor_display: str | None = None
+    rpc_append_name: str = "append_timeline_event"
 
 
 @dataclass(frozen=True)

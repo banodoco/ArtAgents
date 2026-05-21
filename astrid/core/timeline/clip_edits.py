@@ -7,8 +7,8 @@ event through ``EventLogBackend.append_event(...)``, and returns the
 
 **No function imports ``LocalFsBackend`` directly.**  The backend is
 always obtained via ``select_timeline_backend`` so that the same code
-works with ``LocalFsBackend``, ``SupabaseBackend`` (stub), or any
-future backend.
+works with ``LocalFsBackend``, the provisional ``SupabaseBackend``
+contract, or any future backend.
 
 Pass-through keyword arguments ``actor``, ``expected_version``, and
 ``txn_id`` are forwarded unchanged so callers can drive authentication

@@ -1,7 +1,7 @@
 # Timeline Eventlog Contract
 
 Milestone 1 locks the storage contract for timeline lifecycle events without
-shipping the full projection or Supabase implementation.
+shipping the full projection or live Supabase SQL/RPC implementation.
 
 ## Canonical envelope
 
@@ -61,14 +61,15 @@ Timeline callers select a backend in two steps:
   `EventLogBackend` implementation used by callers such as
   `rename_timeline()`
 
-The supported m1 cases are intentionally narrow:
+The supported cases in this repo are intentionally narrow:
 
 - local timelines with a known `timeline_home` construct `LocalFsBackend`
 - CRUD callers pass through the durable `assembly.identity.json["backend"]`
   marker when it exists, so the per-timeline sidecar remains the source of
   truth for local backend selection
 - explicit `preferred_backend="supabase"` constructs `SupabaseBackend`
-  without network access and remains inert until m6
+  as a provisional Astrid-side contract that can use mocked transports in
+  tests; live SQL/RPC parity remains deferred companion work
 - if a caller asks for local_fs without a local home, construction fails
   rather than inventing fallback path semantics
 
@@ -142,9 +143,10 @@ Actor ids remain compatibility-first in the Python implementation.
 - m1 does not tighten actor ids to backend-specific formats; docs describe the
   intended patterns while tests preserve current accepted producers
 
-## Future Supabase target
+## Deferred Supabase target
 
-Milestone 1 does not run migrations or RPCs, but the target shape is fixed:
+This repository does not run the owning migrations or RPCs, but the intended
+target shape is fixed:
 
 - table: `public.timeline_events`
 - columns:
@@ -167,3 +169,7 @@ Future RPC contract:
 - execution model: `SECURITY DEFINER`
 - hashing authority: server-side under row lock
 - direct `INSERT` into `public.timeline_events` stays unavailable to non-service roles
+
+Astrid-side tests may mock this contract, but they do not prove the actual SQL,
+grants, RLS, hashing, or actor-validation behavior until the companion trees
+(`reigh-app/`, top-level `supabase/migrations/`) are present.

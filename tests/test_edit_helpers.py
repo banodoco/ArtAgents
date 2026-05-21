@@ -25,6 +25,7 @@ from astrid.core.project.project import create_project
 from astrid.core.timeline._edit_helpers import pack_write_gateway, PackWriteResult
 from astrid.core.timeline.crud import create_timeline
 from astrid.core.timeline.events.schema import TimelineActor
+from astrid.core.timeline.eventlog.types import SupabaseEventLogOptions
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -143,6 +144,24 @@ class GatewayBootstrapTest(unittest.TestCase):
         )
         verification = backend.verify_chain()
         self.assertTrue(verification.ok, f"verify_chain failed: {verification.error}")
+
+    def test_selector_accepts_optional_supabase_options_seam(self):
+        from astrid.core.timeline.eventlog import select_timeline_backend
+        from uuid import uuid4
+
+        options = SupabaseEventLogOptions(
+            url="https://example.supabase.co",
+            auth_token="pat-token",
+            verified_subject="user-1",
+        )
+        _stream, backend = select_timeline_backend(
+            timeline_id=str(uuid4()),
+            timeline_home=self.tmp_root / "bootstrap-proj" / "timelines" / self._find_timeline_ulid(),
+            preferred_backend="supabase",
+            supabase_options=options,
+        )
+        self.assertEqual(backend.backend_name(), "supabase")
+        self.assertEqual(backend.supabase_url, "https://example.supabase.co")
 
 
 class GatewayAppendOrderingTest(unittest.TestCase):

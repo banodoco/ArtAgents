@@ -21,6 +21,9 @@ JWT-claim regression, a missing ``config_version`` in the edge-function
 payload, an RPC argument-shape drift, or a version-conflict retry-loop
 bug surface end-to-end instead of being swallowed by a per-module mock.
 
+This still exercises the legacy blob-RPC compatibility bridge rather than the
+future Supabase event-log append path.
+
 The element-catalog pack loader has a pre-existing bug (the
 ``packs/local/elements/effects/_shared`` folder has no manifest and the
 loader raises ``ElementValidationError`` while Astrid validates a clip's

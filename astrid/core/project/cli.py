@@ -26,7 +26,7 @@ import sys
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 from astrid.core.session.binding import (
     SessionBindingError,
@@ -48,6 +48,11 @@ from .source import add_source
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPS_HELPER = REPO_ROOT / "scripts" / "node" / "ops_helper.mjs"
+
+
+class OpsHelperResponse(TypedDict):
+    timeline: dict[str, Any]
+    event_descriptor: dict[str, Any]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -374,9 +379,12 @@ def _cmd_edit(args: argparse.Namespace) -> int:
     # conflict, but we need a starting version to satisfy the
     # save_timeline contract).
     _, current_version = provider.load_timeline(args.project_id, args.timeline_id)
+    helper_response: OpsHelperResponse | None = None
 
     def mutator(config: dict[str, Any], version: int) -> dict[str, Any]:
-        return _run_ops_helper(config, version, op, op_args)
+        nonlocal helper_response
+        helper_response = _run_ops_helper(config, version, op, op_args)
+        return helper_response["timeline"]
 
     result = provider.save_timeline(
         args.timeline_id,
@@ -395,6 +403,7 @@ def _cmd_edit(args: argparse.Namespace) -> int:
                 "op": op,
                 "new_version": result.new_version,
                 "attempts": result.attempts,
+                "event_descriptor": helper_response["event_descriptor"] if helper_response else None,
             }
         )
         return 0
@@ -402,6 +411,8 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         f"edited timeline {args.timeline_id} project_id={args.project_id} "
         f"op={op} new_version={result.new_version} attempts={result.attempts}"
     )
+    if helper_response is not None:
+        print(f"event_descriptor: {json.dumps(helper_response['event_descriptor'], sort_keys=True)}")
     return 0
 
 
@@ -429,7 +440,7 @@ def _run_ops_helper(
     version: int,
     op: str,
     op_args: dict[str, Any],
-) -> dict[str, Any]:
+) -> OpsHelperResponse:
     request = json.dumps({"timeline": timeline, "version": version, "op": op, "args": op_args})
     completed = subprocess.run(
         ["node", str(OPS_HELPER)],
@@ -448,7 +459,66 @@ def _run_ops_helper(
     timeline_out = response.get("timeline")
     if not isinstance(timeline_out, dict):
         raise ProjectError("ops_helper response missing .timeline object")
-    return timeline_out
+    event_descriptor = response.get("event_descriptor")
+    if event_descriptor is None:
+        event_descriptor = _synthesize_event_descriptor(op, op_args, response.get("detail"))
+    if not isinstance(event_descriptor, dict):
+        raise ProjectError("ops_helper response missing .event_descriptor object")
+    kind = event_descriptor.get("kind")
+    payload = event_descriptor.get("payload")
+    if not isinstance(kind, str) or not kind:
+        raise ProjectError("ops_helper event_descriptor.kind must be a non-empty string")
+    if not isinstance(payload, dict):
+        raise ProjectError("ops_helper event_descriptor.payload must be an object")
+    return {
+        "timeline": timeline_out,
+        "event_descriptor": event_descriptor,
+    }
+
+
+def _synthesize_event_descriptor(
+    op: str,
+    op_args: dict[str, Any],
+    detail: Any,
+) -> dict[str, Any]:
+    """Compatibility bridge for pre-event_descriptor helper outputs."""
+    if op == "add-clip":
+        clip = op_args.get("clip")
+        if isinstance(clip, dict):
+            return {
+                "kind": "clip.added",
+                "payload": {
+                    "clip_id": clip.get("id"),
+                    "kind": clip.get("kind", clip.get("clipType")),
+                    "asset_id": clip.get("asset", clip.get("assetId", clip.get("asset_id"))),
+                    "position": (
+                        {"mode": "index", "index": op_args["position"]}
+                        if isinstance(op_args.get("position"), int)
+                        else None
+                    ),
+                },
+            }
+    if op == "move-clip":
+        return {
+            "kind": "clip.moved",
+            "payload": {
+                "clip_id": op_args.get("clipId"),
+                "position": (
+                    {"mode": "index", "index": op_args["newPosition"]}
+                    if isinstance(op_args.get("newPosition"), (int, float))
+                    else None
+                ),
+            },
+        }
+    if op == "set-theme":
+        return {
+            "kind": "theme.set",
+            "payload": {
+                "theme_id": op_args.get("themeId"),
+                "detail": detail if isinstance(detail, dict) else None,
+            },
+        }
+    raise ProjectError(f"ops_helper response missing event_descriptor for unsupported op: {op}")
 
 
 # ---------------------------------------------------------------------------

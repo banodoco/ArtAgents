@@ -142,6 +142,7 @@ class EditCLITest(unittest.TestCase):
             "op": "set-theme",
             "changed": True,
             "detail": {"previousTheme": "banodoco-default", "nextTheme": "edited"},
+            "event_descriptor": {"kind": "theme.set", "payload": {"theme_id": "edited"}},
         }
         load_versions = list(load_versions or [7])
 
@@ -288,6 +289,41 @@ class EditCLITest(unittest.TestCase):
         self.assertEqual(ops_calls[0]["input"]["op"], "add-clip")
         self.assertEqual(ops_calls[0]["input"]["args"]["clip"], clip)
         self.assertEqual(ops_calls[0]["input"]["args"]["position"], 1)
+
+    def test_edit_helper_output_accepts_explicit_event_descriptor_shape(self) -> None:
+        rc, _fetch_calls, ops_calls, rpc_calls = self._run_edit(
+            [
+                "edit",
+                "proj-1",
+                "--timeline-id",
+                "tl-1",
+                "set-theme",
+                "--theme-id",
+                "edited",
+            ]
+        )
+        self.assertEqual(rc, 0, msg=(ops_calls, rpc_calls))
+
+    def test_edit_helper_falls_back_when_event_descriptor_is_absent(self) -> None:
+        rc, _fetch_calls, ops_calls, rpc_calls = self._run_edit(
+            [
+                "edit",
+                "proj-1",
+                "--timeline-id",
+                "tl-1",
+                "set-theme",
+                "--theme-id",
+                "edited",
+            ],
+            ops_helper_result={
+                "timeline": {**_canonical_timeline(), "theme": "edited"},
+                "version": 7,
+                "op": "set-theme",
+                "changed": True,
+                "detail": {"previousTheme": "banodoco-default", "nextTheme": "edited"},
+            },
+        )
+        self.assertEqual(rc, 0, msg=(ops_calls, rpc_calls))
 
 
 class SaveTimelineExpectedVersionContractTest(unittest.TestCase):

@@ -1,8 +1,44 @@
 # Astrid <-> Reigh Sprint 08 Integration Contracts
 
 This document pins the cross-repo contracts Astrid must follow while wiring
-into Reigh's bidirectional timeline editing platform. Paths are local sibling
-checkout paths as verified for this execution.
+into Reigh's bidirectional timeline editing platform.
+
+## Current Workspace Boundary
+
+This Astrid checkout does not include the companion trees that own the live
+Supabase SQL/RPC and canonical web-app write path:
+
+- `reigh-app/`
+- top-level `supabase/migrations/`
+
+Because those trees are absent here, this document serves two roles:
+
+1. It records previously verified cross-repo evidence and target contracts that
+   Astrid must match.
+2. It marks which deliverables are deferred companion work and therefore cannot
+   be re-proven inside this repo alone.
+
+For Milestone 6a, the active cleanup surface is the live Astrid runtime/spec/
+doc/test tree plus this document and
+`docs/megaplan/epics/timeline-event-sourcing/m6a-astrid-supabase-contract.md`.
+Historical milestone records are archival exceptions. The only allowed
+remaining wording-audit exceptions are:
+
+- `docs/megaplan/epics/timeline-event-sourcing/m1-schema.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m2-clip-primitives.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m3-secondary-primitives.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m5-concurrency.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m6-reigh-sync.md`
+- `docs/megaplan/epics/timeline-event-sourcing/chain.yaml`
+
+Deferred companion work, which is named here but not claimed as complete in
+this repo, includes:
+
+- creating `public.timeline_events`
+- implementing and granting `append_timeline_event(...)`
+- migrating canonical `reigh-app` timeline writes, subscriptions, and history
+- proving live server-side hashing, idempotency, rate limiting, RLS, and actor
+  validation against the real database/RPC path
 
 ## Source Evidence
 
@@ -477,3 +513,13 @@ pack or worker write path:
 
 The `project/cli.py` `SupabaseDataProvider.save_timeline()` path is the
 reigh-app web UI edit surface — out of m3.5 scope (m6).
+
+## M6a Status Note
+
+Within this repo, Supabase event-log work is limited to Astrid-side contract
+and transport scaffolding. Live parity with SQL/RPC behavior is deferred until
+the owning `reigh-app/` and top-level `supabase/migrations/` trees are mounted
+and tested in a companion workspace. Any remaining references in this document
+to `update_timeline_config_versioned` describe either legacy compatibility
+evidence or current companion-repo behavior, not the final event-first end
+state.

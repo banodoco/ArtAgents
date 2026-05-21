@@ -13,13 +13,45 @@ The full Supabase SQL/RPC and canonical `reigh-app/` write-path migration must
 run later in a workspace that includes those companion trees, or in separate
 repo-specific milestones.
 
+## Audit Boundary
+
+This checkout is intentionally limited to the Astrid repository. It does not
+contain the companion trees that own the live database and web-editor write
+path:
+
+- `reigh-app/`
+- top-level `supabase/migrations/`
+
+That absence is the reason earlier end-to-end M6 language stalled. The
+following deliverables are therefore blocked companion work, not claims this
+milestone can prove:
+
+- SQL objects for `public.timeline_events`
+- the `append_timeline_event(...)` RPC and its grants/RLS behavior
+- canonical `reigh-app` timeline write-path migration
+- realtime/history UI updates in `reigh-app`
+- live validation of server-side hashing, idempotency, rate limiting, and
+  actor enforcement against a real database implementation
+
+The active wording cleanup surface for this milestone is limited to live Astrid
+runtime/spec/doc/test surfaces plus this plan doc and
+`docs/integration_contracts.md`. Historical milestone records remain archival
+exceptions. The only allowed remaining wording-audit matches are:
+
+- `docs/megaplan/epics/timeline-event-sourcing/m1-schema.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m2-clip-primitives.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m3-secondary-primitives.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m5-concurrency.md`
+- `docs/megaplan/epics/timeline-event-sourcing/m6-reigh-sync.md`
+- `docs/megaplan/epics/timeline-event-sourcing/chain.yaml`
+
 ## Scope (IN)
 
 1. **Explicit companion-tree blocker.** Add a durable note or doc section that
    records why the previous M6 plan stalled: this checkout lacks
    `reigh-app/` and top-level `supabase/migrations/`, so end-to-end M6 cannot
    be proven here. The doc must name the blocked companion deliverables.
-2. **SupabaseBackend contract shape.** Replace pure "inert stub" semantics with
+2. **SupabaseBackend contract shape.** Replace pure placeholder-only semantics with
    a real, opt-in client contract for `SupabaseBackend` that can call a future
    `append_timeline_event(...)` RPC when configured. It may use mocked
    transport tests in this repo; do not claim real SQL parity without the SQL
@@ -37,7 +69,7 @@ repo-specific milestones.
    those edits. If implementation is feasible in this repo, add tests for that
    descriptor shape.
 6. **Docs/tests alignment.** Update docs/spec/test expectations that still say
-   `preferred_backend="supabase"` means only an inert stub. If behavior remains
+   `preferred_backend="supabase"` means only a placeholder backend shape. If behavior remains
    provisional, say exactly what is implemented and what requires companion
    SQL/app work.
 7. **Legacy blob-RPC inventory.** Identify Astrid-side callers/tests that still
@@ -69,6 +101,17 @@ repo-specific milestones.
 6. The implementation leaves M7 read-only observability able to run against
    LocalFs and any configured/mocked Supabase backend.
 
+## Implemented Here vs Deferred
+
+This milestone is allowed to land Astrid-side client/backend scaffolding,
+transport/auth wiring contracts, provisional documentation, and mocked tests
+for a future event-log RPC.
+
+It is not allowed to claim live SQL/RPC parity. Any statement about
+`append_timeline_event(...)`, `public.timeline_events`, or canonical
+`reigh-app` event-first writes remains deferred companion work until those
+trees are present and tested in their owning repositories.
+
 ## Follow-Up Companion Work
 
 The original M6 requirements remain real, but they need a workspace with the
@@ -80,4 +123,3 @@ right repositories:
   history to event-first behavior.
 - Prove server-side canonical hashing, idempotency, rate limiting, RLS, and
   actor validation against the actual database/RPC implementation.
-

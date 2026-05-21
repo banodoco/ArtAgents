@@ -1,4 +1,4 @@
-"""Timeline eventlog backend protocol."""
+"""Timeline eventlog backend and transport protocols."""
 
 from __future__ import annotations
 
@@ -6,6 +6,33 @@ from typing import Protocol
 
 from .types import BackendName, EventLogHead, EventLogVerification
 from ..events.schema import TimelineActor, TimelineEvent
+
+
+class SupabaseEventLogTransport(Protocol):
+    """Transport seam for mocked or live Supabase eventlog operations."""
+
+    def append_event(
+        self,
+        *,
+        timeline_id: str,
+        kind: str,
+        payload: dict[str, object],
+        actor: TimelineActor,
+        expected_version: int | None = None,
+        txn_id: str | None = None,
+    ) -> object: ...
+
+    def read_events(
+        self,
+        *,
+        timeline_id: str,
+        after: str | None = None,
+        limit: int | None = None,
+    ) -> object: ...
+
+    def head(self, *, timeline_id: str) -> object: ...
+
+    def verify_chain(self, *, timeline_id: str) -> object: ...
 
 
 class EventLogBackend(Protocol):

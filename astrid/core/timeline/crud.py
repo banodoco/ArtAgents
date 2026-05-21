@@ -23,6 +23,7 @@ from .model import (
     TimelineValidationError,
 )
 from .eventlog import select_timeline_backend
+from .eventlog.types import SupabaseEventLogOptions
 from .events.schema import TimelineActor
 from .paths import (
     assembly_identity_path,
@@ -277,6 +278,7 @@ def rename_timeline(
     expected_version: int | None = None,
     txn_id: str | None = None,
     root: str | Path | None = None,
+    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> dict[str, Any]:
     """Rewrite ``display.json`` so *old_slug* becomes *new_slug*.
 
@@ -306,11 +308,14 @@ def rename_timeline(
     if preferred_backend is not None and not isinstance(preferred_backend, str):
         raise TimelineCrudError("timeline identity sidecar has malformed backend")
 
-    stream, backend = select_timeline_backend(
-        timeline_id=timeline_id,
-        timeline_home=tdir,
-        preferred_backend=preferred_backend,
-    )
+    select_kwargs: dict[str, Any] = {
+        "timeline_id": timeline_id,
+        "timeline_home": tdir,
+        "preferred_backend": preferred_backend,
+    }
+    if supabase_options is not None:
+        select_kwargs["supabase_options"] = supabase_options
+    stream, backend = select_timeline_backend(**select_kwargs)
     rename_actor = actor or TimelineActor(
         type="system",
         id="timeline-crud:rename",
