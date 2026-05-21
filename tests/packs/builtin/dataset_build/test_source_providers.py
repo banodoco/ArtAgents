@@ -38,6 +38,51 @@ def test_local_folder_provider_creates_hashed_probed_candidates_without_network(
     assert all(item["rights"]["rights_status"] == "verified" for item in candidates)
 
 
+def test_local_folder_provider_honors_acquisition_request_exclusions_and_limit(tmp_path: Path) -> None:
+    first = tmp_path / "first.mp4"
+    second = tmp_path / "second.mp4"
+    third = tmp_path / "third.mp4"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    third.write_bytes(b"third")
+
+    provider = LocalFolderSourceProvider(prober=_probe)
+    candidates = list(
+        provider.acquire(
+            {
+                "path": str(tmp_path),
+                "source_id_template": "{stem}",
+                "acquisition_request": {
+                    "exclude_source_ids": ["first"],
+                    "limit_hint": 1,
+                },
+            }
+        )
+    )
+
+    assert [candidate["source_id"] for candidate in candidates] == ["second"]
+    assert provider.last_acquisition_result["yielded"] == 1
+    assert provider.last_acquisition_result["no_new_candidates"] is False
+
+
+def test_local_folder_provider_reports_no_new_candidates_for_processed_sources(tmp_path: Path) -> None:
+    first = tmp_path / "first.mp4"
+    first.write_bytes(b"first")
+    provider = LocalFolderSourceProvider(prober=_probe)
+    config = {
+        "path": str(tmp_path),
+        "source_id_template": "{stem}",
+        "acquisition_request": {"processed_source_ids": ["first"]},
+    }
+
+    candidates = list(provider.acquire(config))
+
+    assert candidates == []
+    assert config["acquisition_result"]["no_new_candidates"] is True
+    assert config["acquisition_result"]["skipped_processed"] == 1
+    assert provider.last_acquisition_result["reason"] == "no_new_candidates"
+
+
 def test_source_provider_registry_dispatches_config_sources(tmp_path: Path) -> None:
     media = tmp_path / "clip.mp4"
     media.write_bytes(b"clip")
@@ -150,3 +195,51 @@ def test_youtube_provider_skips_processed_source_before_download(tmp_path: Path)
 
     assert candidates == []
     assert calls == []
+
+
+def test_youtube_provider_honors_acquisition_request_exclusions_before_download(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    source = {"kind": "url", "value": "https://youtube.example/watch?v=topup-skip"}
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        raise AssertionError("excluded YouTube source should skip before download")
+
+    provider = YouTubeSourceProvider(runner=runner, prober=_probe)
+    candidates = list(
+        provider.acquire(
+            {
+                "out_dir": str(tmp_path / "yt"),
+                "source_urls": [source["value"]],
+                "acquisition_request": {"exclude_source_ids": [youtube_source_key(source)]},
+            }
+        )
+    )
+
+    assert candidates == []
+    assert calls == []
+    assert provider.last_acquisition_result["no_new_candidates"] is True
+    assert provider.last_acquisition_result["skipped_excluded"] == 1
+
+
+def test_youtube_provider_reports_no_new_candidates_for_processed_source_keys(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    source = {"kind": "query", "value": "already handled"}
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        raise AssertionError("processed source key should skip before download")
+
+    provider = YouTubeSourceProvider(runner=runner, prober=_probe)
+    config = {
+        "out_dir": str(tmp_path / "yt"),
+        "search_queries": [source["value"]],
+        "acquisition_request": {"processed_source_ids": [youtube_source_key(source)]},
+    }
+
+    candidates = list(provider.acquire(config))
+
+    assert candidates == []
+    assert calls == []
+    assert config["acquisition_result"]["no_new_candidates"] is True
+    assert config["acquisition_result"]["skipped_processed"] == 1

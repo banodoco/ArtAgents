@@ -82,8 +82,48 @@ def test_review_application_persists_edited_caption_sidecars_and_statuses(tmp_pa
     assert by_id["clip-b"]["review_decision"]["reject_reason"] == "low_quality"
     assert by_id["clip-c"]["review_status"] == "pending"
     sidecar = tmp_path / "clip-a.caption.json"
-    assert json.loads(sidecar.read_text(encoding="utf-8"))["text"] == "Edited accepted caption."
+    sidecar_payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert sidecar_payload["text"] == "Edited accepted caption."
+    assert sidecar_payload["hashes"]["media_hash"] == "a" * 64
+    assert sidecar_payload["hashes"]["prompt_hash"]
     assert by_id["clip-a"]["caption_file"] == str(sidecar)
+
+
+def test_review_application_preserves_existing_caption_hash_metadata(tmp_path: Path) -> None:
+    item = _item(tmp_path, "clip-a")
+    old_sidecar = tmp_path / "old" / "clip-a.caption.json"
+    old_sidecar.parent.mkdir()
+    old_sidecar.write_text(
+        json.dumps(
+            {
+                "text": "Original caption clip-a",
+                "schema_version": 1,
+                "confidence": 0.8,
+                "model": "fixture",
+                "hashes": {
+                    "prompt_hash": "prompt",
+                    "schema_hash": "schema",
+                    "media_hash": "media",
+                    "config_hash": "config",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    item["caption_file"] = str(old_sidecar)
+
+    reviewed = apply_review_decisions([item], _state(), now="2026-05-21T00:03:00Z")
+
+    sidecar = tmp_path / "clip-a.caption.json"
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert reviewed[0]["caption"]["text"] == "Edited accepted caption."
+    assert payload["text"] == "Edited accepted caption."
+    assert payload["hashes"] == {
+        "config_hash": "config",
+        "media_hash": "media",
+        "prompt_hash": "prompt",
+        "schema_hash": "schema",
+    }
 
 
 def test_canonical_and_ai_toolkit_manifests_include_only_accepted_items_and_validate(tmp_path: Path) -> None:

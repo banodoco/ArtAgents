@@ -133,6 +133,63 @@ def test_frozen_run_state_schema_rejects_package_local_parser_provenance() -> No
     assert any("Additional properties are not allowed" in error.message for error in errors)
 
 
+def test_runtime_and_frozen_schemas_accept_m2b_stage_ids_and_caption_validation_metadata() -> None:
+    config = _load_json(DOCS_CONTRACTS / "fixtures" / "dataset-config.valid.json")
+    config["filters"] = {
+        "stages": [
+            {"stage_id": "transcript_keyword_filter"},
+            {"stage_id": "semantic_visual_filter"},
+            {"stage_id": "semantic_video_filter"},
+            {"stage_id": "near_duplicate_filter"},
+        ]
+    }
+    config["review"]["top_up"] = {"max_rounds": 2}
+    config["caption"]["validation"] = {"text_pattern": "^APPROVED:", "min_length": 10}
+
+    item = {
+        "item_id": "fixture_clip_001",
+        "source_type": "local_folder",
+        "source_id": "fixture",
+        "source_url": "file://fixture.mp4",
+        "content_hash": "0" * 64,
+        "acquired_at": "2026-01-01T00:00:00Z",
+        "media_type": "video",
+        "media_path": "fixtures/media/fixture.mp4",
+        "caption_validation": {
+            "valid": False,
+            "failures": [{"code": "schema_error", "message": "caption missing text", "path": "text"}],
+        },
+    }
+
+    state = _load_json(DOCS_CONTRACTS / "fixtures" / "run-state.valid.json")
+    state["caption_validation_failures"] = [
+        {"item_id": "fixture_clip_001", "code": "schema_error", "message": "caption missing text"}
+    ]
+    state["quality_report"] = "runs/fixture-smoke-test/quality_report.json"
+    state["acquisition_results"] = [
+        {
+            "provider": "local_folder",
+            "round_index": 1,
+            "limit_hint": 1,
+            "considered": 1,
+            "yielded": 0,
+            "skipped_processed": 0,
+            "skipped_excluded": 1,
+            "skipped_duplicate_media": 0,
+            "no_new_candidates": True,
+            "reason": "no_new_candidates",
+        }
+    ]
+
+    for schema_root in (DOCS_SCHEMAS, RUNTIME_SCHEMAS):
+        _validator(schema_root, "dataset-config.schema.json").validate(config)
+        _validator(schema_root, "review-item.schema.json").validate(item)
+
+    _validator(DOCS_SCHEMAS, "run-state.schema.json").validate(state)
+    runtime_state = {**state, "schema_version_source": "deprecated_inferred_v1"}
+    _validator(RUNTIME_SCHEMAS, "run-state.schema.json").validate(runtime_state)
+
+
 def test_interfaces_port_m0_protocol_signatures() -> None:
     frozen = _load_module(DOCS_CONTRACTS / "interfaces.py", "builtin_training_m0_interfaces")
     runtime = _load_module(RUNTIME_PACKAGE / "interfaces.py", "dataset_build_runtime_interfaces")

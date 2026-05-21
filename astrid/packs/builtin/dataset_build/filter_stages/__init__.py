@@ -19,9 +19,12 @@ from .bucket_judge import BucketJudgeGate, judge_sidecar_path
 from .black_frame import BlackFrameFilter
 from .content_hash import ContentHashFilter
 from .duration import DurationFilter
+from .near_duplicate import NearDuplicateFilter
 from .resolution import ResolutionFilter
 from .rights import RightsFilter
+from .semantic import SemanticVideoFilter, SemanticVisualFilter, semantic_sidecar_path
 from .source_cap import SourceCapFilter
+from .transcript_keyword import TranscriptKeywordFilter, transcript_sidecar_path
 
 
 STAGES = {
@@ -32,6 +35,10 @@ STAGES = {
     "source_cap_filter": SourceCapFilter,
     "rights_filter": RightsFilter,
     "bucket_judge_filter": BucketJudgeGate,
+    "transcript_keyword_filter": TranscriptKeywordFilter,
+    "semantic_visual_filter": SemanticVisualFilter,
+    "semantic_video_filter": SemanticVideoFilter,
+    "near_duplicate_filter": NearDuplicateFilter,
 }
 
 
@@ -49,8 +56,11 @@ __all__ = [
     "BlackFrameFilter",
     "ContentHashFilter",
     "DurationFilter",
+    "NearDuplicateFilter",
     "ResolutionFilter",
     "RightsFilter",
+    "SemanticVideoFilter",
+    "SemanticVisualFilter",
     "STAGES",
     "SourceCapFilter",
     "build_filter_stats",
@@ -63,5 +73,8 @@ __all__ = [
     "record_warning",
     "reject_item",
     "resolve_media_path",
+    "semantic_sidecar_path",
+    "TranscriptKeywordFilter",
+    "transcript_sidecar_path",
     "with_filter_result",
 ]

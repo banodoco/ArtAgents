@@ -14,11 +14,17 @@ from astrid.packs.builtin.dataset_build.filter_stages import (
     BucketJudgeGate,
     ContentHashFilter,
     DurationFilter,
+    NearDuplicateFilter,
     ResolutionFilter,
     RightsFilter,
+    SemanticVideoFilter,
+    SemanticVisualFilter,
     SourceCapFilter,
+    TranscriptKeywordFilter,
     get_filter_stage,
     judge_sidecar_path,
+    semantic_sidecar_path,
+    transcript_sidecar_path,
 )
 
 
@@ -46,11 +52,20 @@ def _assert_filter_stats_schema(stats: dict[str, Any]) -> None:
     jsonschema.Draft7Validator(schema).validate(stats)
 
 
+def _pgm(pixels: bytes) -> bytes:
+    assert len(pixels) == 64
+    return b"P5\n8 8\n255\n" + pixels
+
+
 def test_filter_stage_registry_dispatches_known_stages() -> None:
     assert isinstance(get_filter_stage("duration_filter"), DurationFilter)
     assert isinstance(get_filter_stage("resolution_filter"), ResolutionFilter)
     assert isinstance(get_filter_stage("black_frame_filter"), BlackFrameFilter)
     assert isinstance(get_filter_stage("content_hash_filter"), ContentHashFilter)
+    assert isinstance(get_filter_stage("near_duplicate_filter"), NearDuplicateFilter)
+    assert isinstance(get_filter_stage("transcript_keyword_filter"), TranscriptKeywordFilter)
+    assert isinstance(get_filter_stage("semantic_visual_filter"), SemanticVisualFilter)
+    assert isinstance(get_filter_stage("semantic_video_filter"), SemanticVideoFilter)
     assert isinstance(get_filter_stage("source_cap_filter"), SourceCapFilter)
     assert isinstance(get_filter_stage("rights_filter"), RightsFilter)
     assert isinstance(get_filter_stage("bucket_judge_filter"), BucketJudgeGate)
@@ -174,6 +189,57 @@ def test_content_hash_filter_rejects_later_duplicates_without_counting_rejection
     assert duplicate_result["duplicate_of_source_id"] == "first"
     assert result.rejected[0]["review_status"] == "rejected"
     assert result.stats["rejection_reasons"] == {"duplicate_content_hash": 1}
+    _assert_filter_stats_schema(result.stats)
+
+
+def test_near_duplicate_filter_uses_fixture_hashes_deterministically(tmp_path: Path) -> None:
+    first = _item(tmp_path, "first")
+    duplicate = _item(tmp_path, "duplicate")
+    unique = _item(tmp_path, "unique")
+
+    result = NearDuplicateFilter().apply(
+        [first, duplicate, unique],
+        {},
+        {
+            "fixture_hashes": {
+                "first": ["0000000000000000"],
+                "duplicate": ["0000000000000003"],
+                "unique": ["ffffffffffffffff"],
+            },
+            "hamming_threshold": 3,
+        },
+    )
+
+    assert [item["item_id"] for item in result.passed] == ["first", "unique"]
+    assert [item["item_id"] for item in result.rejected] == ["duplicate"]
+    assert result.rejected[0]["filter_results"]["near_duplicate_filter"]["reason"] == "near_duplicate"
+    assert result.rejected[0]["filter_results"]["near_duplicate_filter"]["duplicate_of_item_id"] == "first"
+    _assert_filter_stats_schema(result.stats)
+
+
+def test_near_duplicate_filter_uses_injected_frame_runner_and_exclusions(tmp_path: Path) -> None:
+    first = _item(tmp_path, "first")
+    excluded = _item(tmp_path, "excluded")
+    excluded["content_hash"] = "e" * 64
+    calls: list[list[str]] = []
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        pattern = Path(cmd[-1])
+        pattern.parent.mkdir(parents=True, exist_ok=True)
+        (pattern.parent / "frame_001.pgm").write_bytes(_pgm(bytes(range(64))))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    result = NearDuplicateFilter(runner=runner).apply(
+        [first, excluded],
+        {},
+        {"out_dir": str(tmp_path / "frames"), "sample_count": 1, "exclude_media_hashes": ["e" * 64]},
+    )
+
+    assert [item["item_id"] for item in result.passed] == ["first"]
+    assert result.rejected[0]["filter_results"]["near_duplicate_filter"]["reason"] == "excluded_media_hash"
+    assert len(calls) == 1
+    assert calls[0][0] == "ffmpeg"
     _assert_filter_stats_schema(result.stats)
 
 
@@ -344,12 +410,40 @@ def test_bucket_judge_visual_understand_uses_schema_constrained_output_and_budge
     assert command[command.index("--query") + 1] == "Classify clip-a into closeup."
     assert "--response-schema" in command
     assert tracker.provider_calls == {"bucket_judge.visual_understand": 1}
-    assert json.loads(judge_sidecar_path(_item(tmp_path, "clip-a"), {"out_dir": str(tmp_path / "out")}).read_text(encoding="utf-8")) == {
+    sidecar_payload = json.loads(judge_sidecar_path(_item(tmp_path, "clip-a"), {"out_dir": str(tmp_path / "out")}).read_text(encoding="utf-8"))
+    assert {key: sidecar_payload[key] for key in ("accept", "bucket", "reason", "score")} == {
         "accept": True,
         "bucket": "closeup",
         "reason": "usable",
         "score": 0.83,
     }
+    assert sidecar_payload["hashes"]["prompt_hash"]
+    assert sidecar_payload["hashes"]["media_hash"] == "a" * 64
+
+
+def test_bucket_judge_reuses_only_matching_hashed_sidecars(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.write_text(json.dumps({"accept": True, "bucket": "wide", "reason": "usable", "score": 0.9}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    config = {"enabled": True, "provider": "visual_understand", "buckets": ["wide"], "out_dir": str(tmp_path / "out")}
+
+    first = BucketJudgeGate(runner=runner).apply([_item(tmp_path, "clip-a")], {}, config)
+    second = BucketJudgeGate(runner=runner).apply([_item(tmp_path, "clip-a")], {}, config)
+    changed = BucketJudgeGate(runner=runner).apply(
+        [_item(tmp_path, "clip-a")],
+        {},
+        {**config, "prompt_template": "Changed {clip_id}."},
+    )
+
+    assert first.passed[0]["bucket"] == "wide"
+    assert second.passed[0]["bucket"] == "wide"
+    assert changed.passed[0]["bucket"] == "wide"
+    assert len(calls) == 2
 
 
 def test_bucket_judge_video_understand_classifies_generically(tmp_path: Path) -> None:
@@ -384,6 +478,177 @@ def test_bucket_judge_video_understand_classifies_generically(tmp_path: Path) ->
     assert "astrid.packs.builtin.video_understand.run" in command
     assert command[command.index("--start") + 1] == "1.000"
     assert command[command.index("--end") + 1] == "6.000"
+
+
+def test_transcript_keyword_filter_fixture_sidecars_match_allowlist_and_denylist(tmp_path: Path) -> None:
+    fixture_dir = tmp_path / "transcripts"
+    fixture_dir.mkdir()
+    (fixture_dir / "clip-a.transcript.json").write_text(
+        json.dumps({"segments": [{"start": 0.0, "end": 1.0, "text": "bright laugh"}]}),
+        encoding="utf-8",
+    )
+    (fixture_dir / "clip-b.transcript.json").write_text(
+        json.dumps({"segments": [{"start": 0.0, "end": 1.0, "text": "copyright song"}]}),
+        encoding="utf-8",
+    )
+    (fixture_dir / "clip-c.transcript.json").write_text(json.dumps({"segments": []}), encoding="utf-8")
+
+    result = TranscriptKeywordFilter().apply(
+        [_item(tmp_path, "clip-a"), _item(tmp_path, "clip-b"), _item(tmp_path, "clip-c")],
+        {},
+        {
+            "fixture_mode": True,
+            "fixture_transcript_dir": str(fixture_dir),
+            "out_dir": str(tmp_path / "out"),
+            "allowlist": ["laugh"],
+            "denylist": ["copyright"],
+            "empty_transcript": "strict",
+        },
+    )
+
+    assert [item["item_id"] for item in result.passed] == ["clip-a"]
+    assert [item["item_id"] for item in result.rejected] == ["clip-b", "clip-c"]
+    assert result.rejected[0]["filter_results"]["transcript_keyword_filter"]["reason"] == "transcript_denylist_match"
+    assert result.rejected[0]["filter_results"]["transcript_keyword_filter"]["keyword"] == "copyright"
+    assert result.rejected[1]["filter_results"]["transcript_keyword_filter"]["reason"] == "transcript_empty"
+    _assert_filter_stats_schema(result.stats)
+
+
+def test_transcript_keyword_filter_uses_injected_runner_and_hashed_cache(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    tracker = BudgetTracker(max_api_calls=2)
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        work = Path(cmd[cmd.index("--out") + 1])
+        work.mkdir(parents=True, exist_ok=True)
+        (work / "transcript.json").write_text(
+            json.dumps({"segments": [{"start": 0.0, "end": 1.0, "text": "A useful laugh line."}]}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    config = {"out_dir": str(tmp_path / "out"), "allowlist": ["laugh"], "budget_tracker": tracker}
+    first = TranscriptKeywordFilter(runner=runner).apply([_item(tmp_path, "clip-a")], {}, config)
+    second = TranscriptKeywordFilter(runner=runner).apply([_item(tmp_path, "clip-a")], {}, config)
+    changed = TranscriptKeywordFilter(runner=runner).apply(
+        [_item(tmp_path, "clip-a")],
+        {},
+        {**config, "denylist": ["blocked"]},
+    )
+
+    assert [item["item_id"] for item in first.passed] == ["clip-a"]
+    assert [item["item_id"] for item in second.passed] == ["clip-a"]
+    assert [item["item_id"] for item in changed.passed] == ["clip-a"]
+    assert len(calls) == 2
+    assert "astrid.packs.builtin.transcribe.run" in calls[0]
+    assert calls[0][calls[0].index("--audio") + 1].endswith("clip-a.mp4")
+    assert tracker.provider_calls == {"filter.transcript.builtin.transcribe": 2}
+    payload = json.loads(transcript_sidecar_path(_item(tmp_path, "clip-a"), {"out_dir": str(tmp_path / "out")}).read_text(encoding="utf-8"))
+    assert payload["hashes"]["media_hash"] == "a" * 64
+
+
+def test_semantic_visual_filter_uses_injected_runner_budget_and_hashed_cache(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    tracker = BudgetTracker(max_api_calls=2)
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.write_text(
+            json.dumps(
+                {
+                    "results": [
+                        {
+                            "status": "ok",
+                            "answer": {
+                                "accept": False,
+                                "reason": "off topic",
+                                "score": 0.2,
+                                "details": {"hint": "find brighter product clips"},
+                            },
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    config = {
+        "prompt_template": "Keep useful {clip_id}.",
+        "out_dir": str(tmp_path / "semantic"),
+        "budget_tracker": tracker,
+    }
+
+    first = SemanticVisualFilter(runner=runner).apply([_item(tmp_path, "clip-a")], {}, config)
+    second = SemanticVisualFilter(runner=runner).apply([_item(tmp_path, "clip-a")], {}, config)
+    changed = SemanticVisualFilter(runner=runner).apply(
+        [_item(tmp_path, "clip-a")],
+        {},
+        {**config, "prompt_template": "Changed {clip_id}."},
+    )
+
+    assert first.passed == []
+    assert first.rejected[0]["filter_results"]["semantic_visual_filter"]["reason"] == "semantic_visual_filter_off_topic"
+    assert first.rejected[0]["filter_results"]["semantic_visual_filter"]["feedback_hint"] == "semantic_visual_filter:off_topic"
+    assert first.rejected[0]["filter_results"]["semantic_visual_filter"]["details"] == {"hint": "find brighter product clips"}
+    assert second.rejected[0]["filter_results"]["semantic_visual_filter"]["reason"] == "semantic_visual_filter_off_topic"
+    assert changed.rejected[0]["filter_results"]["semantic_visual_filter"]["reason"] == "semantic_visual_filter_off_topic"
+    assert len(calls) == 2
+    assert "astrid.packs.builtin.visual_understand.run" in calls[0]
+    assert calls[0][calls[0].index("--query") + 1] == "Keep useful clip-a."
+    assert calls[0][calls[0].index("--at") + 1] == "3.500"
+    assert tracker.provider_calls == {"filter.semantic_visual": 2}
+    payload = json.loads(
+        semantic_sidecar_path(
+            _item(tmp_path, "clip-a"),
+            {"out_dir": str(tmp_path / "semantic")},
+            stage_id="semantic_visual_filter",
+        ).read_text(encoding="utf-8")
+    )
+    assert payload["hashes"]["media_hash"] == "a" * 64
+
+
+def test_semantic_video_filter_dispatches_video_understand_and_fixture_sidecars(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps({"answer": {"accept": True, "reason": "usable_motion", "score": 0.88, "details": {"motion": "clear"}}}),
+            stderr="",
+        )
+
+    result = SemanticVideoFilter(runner=runner).apply(
+        [_item(tmp_path, "clip-a")],
+        {},
+        {"out_dir": str(tmp_path / "semantic")},
+    )
+
+    command = calls[0]
+    assert result.rejected == []
+    assert result.passed[0]["filter_results"]["semantic_video_filter"]["semantic_decision"]["details"] == {"motion": "clear"}
+    assert "astrid.packs.builtin.video_understand.run" in command
+    assert command[command.index("--start") + 1] == "1.000"
+    assert command[command.index("--end") + 1] == "6.000"
+
+    fixture_dir = tmp_path / "fixtures"
+    fixture_dir.mkdir()
+    (fixture_dir / "clip-b.semantic_video_filter.json").write_text(
+        json.dumps({"accept": False, "reason": "too dark", "score": 0.1, "details": {"lighting": "low"}}),
+        encoding="utf-8",
+    )
+    fixture = SemanticVideoFilter(runner=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("fixture must not call runner"))).apply(
+        [_item(tmp_path, "clip-b")],
+        {},
+        {"fixture_mode": True, "fixture_semantic_dir": str(fixture_dir), "out_dir": str(tmp_path / "fixture_out")},
+    )
+
+    assert fixture.rejected[0]["filter_results"]["semantic_video_filter"]["reason"] == "semantic_video_filter_too_dark"
+    assert fixture.rejected[0]["filter_results"]["semantic_video_filter"]["details"] == {"lighting": "low"}
 
 
 def test_filter_stage_code_has_no_domain_specific_literals() -> None:

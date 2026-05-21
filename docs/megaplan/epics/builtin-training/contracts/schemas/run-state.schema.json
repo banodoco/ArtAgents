@@ -68,6 +68,26 @@
       "items": {"type": "string"},
       "description": "Source IDs that have been fully processed (acquired + extracted). Used for resume to avoid re-downloading."
     },
+    "acquisition_results": {
+      "type": "array",
+      "description": "Per-round source acquisition metadata for quality reporting.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "provider": {"type": "string"},
+          "round_index": {"type": "integer", "minimum": 0},
+          "limit_hint": {"type": ["integer", "null"]},
+          "considered": {"type": "integer", "minimum": 0},
+          "yielded": {"type": "integer", "minimum": 0},
+          "skipped_processed": {"type": "integer", "minimum": 0},
+          "skipped_excluded": {"type": "integer", "minimum": 0},
+          "skipped_duplicate_media": {"type": "integer", "minimum": 0},
+          "no_new_candidates": {"type": "boolean"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
     "review_decisions": {
       "type": "object",
       "description": "Review decisions keyed by item_id. Only items with an explicit accept/reject decision appear here.",
@@ -81,6 +101,25 @@
       "additionalProperties": {
         "$ref": "filter-stats.schema.json"
       }
+    },
+    "caption_validation_failures": {
+      "type": "array",
+      "description": "Caption validation failures collected before manifest export.",
+      "items": {
+        "type": "object",
+        "required": ["item_id", "code", "message"],
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {"type": "string"},
+          "code": {"type": "string"},
+          "message": {"type": "string"},
+          "path": {"type": "string"}
+        }
+      }
+    },
+    "quality_report": {
+      "type": "string",
+      "description": "Path to quality_report.json when generated for this run."
     },
     "top_up_rounds": {
       "type": "integer",

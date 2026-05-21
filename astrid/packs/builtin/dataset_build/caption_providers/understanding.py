@@ -12,6 +12,7 @@ from typing import Any
 
 from astrid._paths import REPO_ROOT
 
+from ..artifacts import load_valid_cached_sidecar, sidecar_hashes, unlink_stale_sidecar, write_hashed_sidecar
 from ..interfaces import CaptionResult
 from ..items import deterministic_id, repo_relative_path
 
@@ -44,12 +45,17 @@ class _BaseUnderstandingCaptionProvider:
             return result
 
         sidecar.parent.mkdir(parents=True, exist_ok=True)
+        hashes = self._sidecar_hashes(item, config)
+        cached = load_valid_cached_sidecar(sidecar, hashes)
+        if cached is not None:
+            return _caption_from_raw(cached, provider_id=self.provider_id, fallback_model=self._model(config))
+        unlink_stale_sidecar(sidecar)
         command = self._build_command(item, config, sidecar)
         self._increment_budget(config)
         completed = self._runner(command, capture_output=True, text=True, check=True)
         raw = _load_runner_output(sidecar, completed.stdout)
         result = _caption_from_raw(raw, provider_id=self.provider_id, fallback_model=self._model(config))
-        _write_sidecar(sidecar, result)
+        write_hashed_sidecar(sidecar, _result_to_dict(result), hashes)
         return result
 
     def _fixture_caption(self, item: Mapping[str, Any], config: Mapping[str, Any]) -> CaptionResult:
@@ -87,6 +93,14 @@ class _BaseUnderstandingCaptionProvider:
         if not field_names:
             return template
         return template.format_map(values)
+
+    def _sidecar_hashes(self, item: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, str]:
+        return sidecar_hashes(
+            prompt=self._prompt(item, config),
+            schema=config.get("schema_path"),
+            media=item,
+            config=_cache_relevant_config(config),
+        )
 
     def _base_command(self, config: Mapping[str, Any], sidecar: Path) -> list[str]:
         command = [sys.executable, "-m", self.module_name, "--query", ""]
@@ -245,6 +259,22 @@ def _answer_to_text(answer: Any) -> str:
 
 def _fixture_mode(config: Mapping[str, Any]) -> bool:
     return bool(config.get("fixture_mode") or config.get("mode") == "fixture")
+
+
+def _cache_relevant_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    ignored = {
+        "artifact_helpers",
+        "budget_tracker",
+        "fixture_caption_dir",
+        "fixture_captions",
+        "fixture_dir",
+        "fixture_mode",
+        "mode",
+        "out_dir",
+        "clock",
+        "sleep",
+    }
+    return {str(key): value for key, value in config.items() if str(key) not in ignored}
 
 
 def _prebaked_caption_path(item: Mapping[str, Any], config: Mapping[str, Any], clip_id: str, *, repo_root: Path) -> Path | None:

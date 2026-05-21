@@ -144,6 +144,62 @@ def test_visual_understand_wrapper_writes_sidecar_and_tracks_budget(tmp_path: Pa
     assert command[command.index("--query") + 1] == "Describe clip-001 from bucket-a."
     assert command[command.index("--at") + 1] == "3.000"
     assert command[command.index("--response-schema") + 1] == str(schema_path)
+    sidecar_payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert sidecar_payload["hashes"]["prompt_hash"]
+    assert sidecar_payload["hashes"]["media_hash"] == item["content_hash"]
+
+
+def test_visual_understand_wrapper_reuses_only_matching_hashed_sidecar(tmp_path: Path) -> None:
+    item = _candidate(tmp_path)
+    calls: list[list[str]] = []
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.write_text(json.dumps({"text": "Fresh caption.", "model": "gpt-test"}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    provider = VisualUnderstandCaptionProvider(runner=runner)
+    config = {
+        "provider": "visual_understand",
+        "prompt_template": "Describe {clip_id}.",
+        "out_dir": str(tmp_path / "captions"),
+        "budget_tracker": BudgetTracker(max_api_calls=2),
+    }
+
+    first = provider.caption(item, config)
+    second = provider.caption(item, config)
+    changed = provider.caption(item, {**config, "prompt_template": "Changed {clip_id}."})
+
+    assert first.text == "Fresh caption."
+    assert second.text == "Fresh caption."
+    assert changed.text == "Fresh caption."
+    assert len(calls) == 2
+
+
+def test_visual_understand_wrapper_rejects_unhashed_production_sidecar(tmp_path: Path) -> None:
+    item = _candidate(tmp_path)
+    sidecar = tmp_path / "captions" / "clip-001.caption.json"
+    sidecar.parent.mkdir()
+    sidecar.write_text(json.dumps({"text": "Stale raw caption.", "model": "fixture"}), encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.write_text(json.dumps({"text": "Fresh production caption.", "model": "gpt-test"}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    result = VisualUnderstandCaptionProvider(runner=runner).caption(
+        item,
+        {"prompt_template": "Describe {clip_id}.", "out_dir": str(tmp_path / "captions")},
+    )
+
+    payload = json.loads(sidecar.read_text(encoding="utf-8"))
+    assert result.text == "Fresh production caption."
+    assert len(calls) == 1
+    assert payload["text"] == "Fresh production caption."
+    assert payload["hashes"]["prompt_hash"]
 
 
 def test_video_understand_wrapper_uses_video_runner_and_stays_bucket_judge_independent(tmp_path: Path) -> None:
@@ -200,5 +256,45 @@ def test_budget_tracker_rejects_caption_calls_over_limit(tmp_path: Path) -> None
         raise AssertionError("budget failure must happen before model runner execution")
 
     provider = VideoUnderstandCaptionProvider(runner=runner)
-    with pytest.raises(RuntimeError, match="caption budget exceeded"):
+    with pytest.raises(RuntimeError, match="API budget exceeded"):
         provider.caption(item, {"out_dir": str(tmp_path / "captions"), "budget_tracker": tracker})
+
+
+def test_budget_tracker_reexport_tracks_provider_limits_and_observed_calls() -> None:
+    tracker = BudgetTracker(max_api_calls=2, provider_limits={"caption.visual_understand": 1})
+
+    tracker.increment("caption.visual_understand")
+
+    assert tracker.as_dict()["observed_calls_by_provider"] == {"caption.visual_understand": 1}
+    with pytest.raises(RuntimeError, match="caption.visual_understand"):
+        tracker.increment("caption.visual_understand")
+
+
+def test_budget_tracker_enforces_rate_limit_with_injected_clock_sleep() -> None:
+    now = 100.0
+    sleeps: list[float] = []
+
+    def clock() -> float:
+        return now
+
+    def sleep(duration: float) -> None:
+        nonlocal now
+        sleeps.append(duration)
+        now += duration
+
+    tracker = BudgetTracker.from_config(
+        {
+            "budgets": {
+                "max_api_calls": 2,
+                "providers": {"caption.visual_understand": {"rate_limit_per_minute": 60}},
+            }
+        },
+        clock=clock,
+        sleep=sleep,
+    )
+
+    tracker.increment("caption.visual_understand")
+    tracker.increment("caption.visual_understand")
+
+    assert sleeps == [1.0]
+    assert tracker.as_dict()["provider_rate_limits"] == {"caption.visual_understand": 60}

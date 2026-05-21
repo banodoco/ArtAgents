@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,39 @@ def _patch_local_provider_many(monkeypatch, media_file: Path, count: int) -> Non
     monkeypatch.setattr(LocalFolderSourceProvider, "acquire", acquire)
 
 
+def _patch_round_provider(monkeypatch, media_file: Path) -> list[dict[str, Any]]:
+    seen_requests: list[dict[str, Any]] = []
+
+    def acquire(self: LocalFolderSourceProvider, config: dict[str, Any]):
+        request = dict(config.get("acquisition_request") or {})
+        seen_requests.append(request)
+        round_index = int(request.get("round_index", 0))
+        item_id = f"clip-{round_index}"
+        source_id = f"source-{round_index}"
+        excluded_candidates = set(request.get("exclude_candidate_ids") or [])
+        excluded_sources = set(request.get("exclude_source_ids") or [])
+        if item_id in excluded_candidates or source_id in excluded_sources:
+            return
+        yield {
+            **make_candidate_item(
+                source_type="local_folder",
+                source_id=source_id,
+                source_url=media_file.as_uri(),
+                media_path=media_file,
+                media_type="video",
+                source_metadata={"resolution": {"width": 64, "height": 64}},
+                duration_s=5.0,
+                clip_start_s=0.0,
+                clip_end_s=5.0,
+                scene_index=round_index,
+            ),
+            "item_id": item_id,
+        }
+
+    monkeypatch.setattr(LocalFolderSourceProvider, "acquire", acquire)
+    return seen_requests
+
+
 def test_dataset_build_cli_runs_noninteractive_pipeline_into_requested_out_dir(tmp_path: Path, monkeypatch) -> None:
     media_dir = tmp_path / "media"
     media_dir.mkdir()
@@ -122,10 +156,24 @@ def test_dataset_build_cli_runs_noninteractive_pipeline_into_requested_out_dir(t
     assert (out_dir / "final.manifest.json").is_file()
     assert (out_dir / "ai-toolkit-ltx.manifest.json").is_file()
     assert not (media_dir / "clip-a.caption.json").exists()
+    round_dir = out_dir / "rounds" / "0"
+    for relative_path in [
+        "review_state.json",
+        "candidates.json",
+        "work_preview.json",
+        "filtered_items.json",
+        "review_data.json",
+        "review_server/human_review.final.json",
+    ]:
+        assert (round_dir / relative_path).is_file()
+        assert json.loads((round_dir / relative_path).read_text(encoding="utf-8")) == json.loads(
+            (out_dir / relative_path).read_text(encoding="utf-8")
+        )
 
     state = json.loads((out_dir / "review_state.json").read_text(encoding="utf-8"))
     assert state["status"] == "finalized"
     assert state["submitted"] is True
+    assert state["quality_report"] == str(out_dir / "quality_report.json")
     canonical = json.loads((out_dir / "final.manifest.json").read_text(encoding="utf-8"))
     assert [item["item_id"] for item in canonical["items"]] == ["clip-a"]
     assert canonical["items"][0]["caption"]["text"] == "Edited from non-interactive review."
@@ -140,6 +188,10 @@ def test_dataset_build_cli_runs_noninteractive_pipeline_into_requested_out_dir(t
     assert preview["rejected_item_count"] == 0
     assert preview["planned_caption_calls"] == 1
     assert preview["enabled_model_backed_stages"] == []
+    report = json.loads((out_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["run_status"] == "finalized"
+    assert report["summary"]["accepted"] == 1
+    assert report["bucket_counts"]["wide"]["accepted"] == 1
 
 
 def test_dataset_build_pipeline_marks_state_failed_on_runtime_error(tmp_path: Path, monkeypatch) -> None:
@@ -160,6 +212,204 @@ def test_dataset_build_pipeline_marks_state_failed_on_runtime_error(tmp_path: Pa
     state = json.loads((tmp_path / "run" / "review_state.json").read_text(encoding="utf-8"))
     assert state["status"] == "failed"
     assert state["error"]["type"] == "FileNotFoundError"
+
+
+def test_run_pipeline_blocks_manifest_export_when_accepted_caption_validation_fails(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "source.mp4"
+    media_file.write_bytes(b"fixture")
+    _patch_local_provider(monkeypatch, media_file)
+    config_path = _config(tmp_path, media_dir)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["caption"]["validation"] = {"text_pattern": "^APPROVED:"}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    parsed = dataset_run.load_dataset_config(config_path)
+    decisions_path = tmp_path / "decisions.json"
+    decisions_path.write_text(
+        json.dumps(
+            [
+                {
+                    "item_id": "clip-a",
+                    "decision": "accept",
+                    "reviewed_at": "2026-05-21T00:00:00Z",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    summary = dataset_run.run_pipeline(parsed, tmp_path / "run", review_decisions_path=decisions_path)
+
+    assert summary["state_status"] == "failed"
+    assert summary["canonical_manifest"] is None
+    assert summary["adapter_manifest"] is None
+    assert not (tmp_path / "run" / "final.manifest.json").exists()
+    assert summary["caption_validation_failures"][0]["code"] == "caption_text_pattern_mismatch"
+    state = read_review_state(tmp_path / "run" / "review_state.json")
+    assert state["error"]["stage"] == "caption_validation"
+    assert state["caption_validation_failures"][0]["item_id"] == "clip-a"
+    review_data = json.loads((tmp_path / "run" / "review_data.json").read_text(encoding="utf-8"))
+    validation = review_data["items"][0]["caption_validation"]
+    assert validation["valid"] is False
+    assert validation["failures"][0]["code"] == "caption_text_pattern_mismatch"
+    report = json.loads((tmp_path / "run" / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["run_status"] == "failed"
+    assert report["caption_validation_failures"][0]["code"] == "caption_text_pattern_mismatch"
+
+
+def test_dataset_build_top_up_round_fills_bucket_shortfall_with_novel_candidates(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "source.mp4"
+    media_file.write_bytes(b"fixture")
+    seen_requests = _patch_round_provider(monkeypatch, media_file)
+    config_path = _config(tmp_path, media_dir)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["buckets"] = {"wide": {"target_count": 2}}
+    config["review"]["top_up"] = {"max_rounds": 2}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    parsed = dataset_run.load_dataset_config(config_path)
+    decisions_path = tmp_path / "decisions.json"
+    decisions_path.write_text(
+        json.dumps(
+            {
+                "rounds": {
+                    "0": [{"item_id": "clip-0", "decision": "accept", "reviewed_at": "2026-05-21T00:00:00Z"}],
+                    "1": [{"item_id": "clip-1", "decision": "accept", "reviewed_at": "2026-05-21T00:00:01Z"}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = dataset_run.run_pipeline(parsed, tmp_path / "run", review_decisions_path=decisions_path)
+
+    assert summary["state_status"] == "finalized"
+    assert summary["accepted"] == 2
+    assert [request["round_index"] for request in seen_requests] == [0, 1]
+    assert seen_requests[1]["target_shortfalls"] == {"wide": 1}
+    assert "clip-0" in seen_requests[1]["exclude_candidate_ids"]
+    assert "source-0" in seen_requests[1]["exclude_source_ids"]
+    out_dir = tmp_path / "run"
+    assert [candidate["item_id"] for candidate in json.loads((out_dir / "candidates.json").read_text(encoding="utf-8"))["candidates"]] == ["clip-0"]
+    assert [candidate["item_id"] for candidate in json.loads((out_dir / "rounds" / "1" / "candidates.json").read_text(encoding="utf-8"))["candidates"]] == ["clip-1"]
+    assert json.loads((out_dir / "rounds" / "1" / "review_data.json").read_text(encoding="utf-8"))["items"][0]["item_id"] == "clip-1"
+    state = read_review_state(out_dir / "review_state.json")
+    assert state["top_up_rounds"] == 1
+    assert state["buckets"]["wide"]["accepted"] == 2
+
+
+def test_dataset_build_top_up_requires_round_aware_noninteractive_decisions(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "source.mp4"
+    media_file.write_bytes(b"fixture")
+    _patch_round_provider(monkeypatch, media_file)
+    config_path = _config(tmp_path, media_dir)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["buckets"] = {"wide": {"target_count": 2}}
+    config["review"]["top_up"] = {"max_rounds": 1}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    parsed = dataset_run.load_dataset_config(config_path)
+    decisions_path = tmp_path / "decisions.json"
+    decisions_path.write_text(
+        json.dumps([{"item_id": "clip-0", "decision": "accept", "reviewed_at": "2026-05-21T00:00:00Z"}]),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"round 1"):
+        dataset_run.run_pipeline(parsed, tmp_path / "run", review_decisions_path=decisions_path)
+
+    out_dir = tmp_path / "run"
+    assert read_review_state(out_dir / "review_state.json")["status"] == "failed"
+    assert not (out_dir / "final.manifest.json").exists()
+    assert not (out_dir / "ai-toolkit-ltx.manifest.json").exists()
+
+
+def test_dataset_build_unmet_shortfalls_after_max_top_up_rounds_do_not_export_manifests(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "source.mp4"
+    media_file.write_bytes(b"fixture")
+
+    def acquire(self: LocalFolderSourceProvider, config: dict[str, Any]):
+        request = dict(config.get("acquisition_request") or {})
+        if int(request.get("round_index", 0)) > 0:
+            self.last_acquisition_result = {
+                "provider": "local_folder",
+                "round_index": int(request.get("round_index", 0)),
+                "limit_hint": request.get("limit_hint"),
+                "considered": 0,
+                "yielded": 0,
+                "skipped_processed": 0,
+                "skipped_excluded": 0,
+                "skipped_duplicate_media": 0,
+                "no_new_candidates": True,
+                "reason": "no_new_candidates",
+            }
+            return
+        self.last_acquisition_result = {
+            "provider": "local_folder",
+            "round_index": 0,
+            "limit_hint": request.get("limit_hint"),
+            "considered": 1,
+            "yielded": 1,
+            "skipped_processed": 0,
+            "skipped_excluded": 0,
+            "skipped_duplicate_media": 0,
+            "no_new_candidates": False,
+            "reason": "candidates_yielded",
+        }
+        yield {
+            **make_candidate_item(
+                source_type="local_folder",
+                source_id="source-0",
+                source_url=media_file.as_uri(),
+                media_path=media_file,
+                media_type="video",
+                source_metadata={"resolution": {"width": 64, "height": 64}},
+                duration_s=5.0,
+                clip_start_s=0.0,
+                clip_end_s=5.0,
+                scene_index=0,
+            ),
+            "item_id": "clip-0",
+        }
+
+    monkeypatch.setattr(LocalFolderSourceProvider, "acquire", acquire)
+    config_path = _config(tmp_path, media_dir)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["buckets"] = {"wide": {"target_count": 2}}
+    config["review"]["top_up"] = {"max_rounds": 1}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    parsed = dataset_run.load_dataset_config(config_path)
+    decisions_path = tmp_path / "decisions.json"
+    decisions_path.write_text(
+        json.dumps(
+            {
+                "rounds": {
+                    "0": [{"item_id": "clip-0", "decision": "accept", "reviewed_at": "2026-05-21T00:00:00Z"}],
+                    "1": [],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = dataset_run.run_pipeline(parsed, tmp_path / "run", review_decisions_path=decisions_path)
+
+    out_dir = tmp_path / "run"
+    assert summary["state_status"] == "failed"
+    assert summary["bucket_shortfalls"] == {"wide": 1}
+    assert summary["canonical_manifest"] is None
+    assert summary["adapter_manifest"] is None
+    assert not (out_dir / "final.manifest.json").exists()
+    assert not (out_dir / "ai-toolkit-ltx.manifest.json").exists()
+    report = json.loads((out_dir / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["run_status"] == "failed"
+    assert report["final_shortfalls"] == {"wide": 1}
+    assert [result["round_index"] for result in report["top_up_acquisition_results"]] == [0, 1]
 
 
 def test_dataset_build_resume_uses_existing_review_state_authoritatively(tmp_path: Path, monkeypatch) -> None:
@@ -195,6 +445,184 @@ def test_dataset_build_resume_uses_existing_review_state_authoritatively(tmp_pat
     assert summary["state_status"] == "finalized"
     assert state["state_version"] > written["state_version"]
     assert state["processed_source_ids"] == ["source-before-resume", "source-1"]
+    assert summary["quality_report"].endswith("/run/quality_report.json")
+
+
+def test_run_pipeline_threads_services_through_filter_caption_and_human_review(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "source.mp4"
+    media_file.write_bytes(b"fixture")
+    _patch_local_provider(monkeypatch, media_file)
+    config_path = _config(tmp_path, media_dir)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["extensions"] = {"fixture_mode": False}
+    config["filters"] = {
+        "stages": [
+            {"stage_id": "duration_filter", "config": {"min_s": 1.0, "max_s": 10.0}},
+            {
+                "stage_id": "bucket_judge_filter",
+                "config": {
+                    "enabled": True,
+                    "provider": "visual_understand",
+                    "buckets": ["wide"],
+                    "out_dir": str(tmp_path / "judges"),
+                },
+            },
+        ]
+    }
+    config["review"] = {"enabled": True}
+    config["budgets"] = {"max_api_calls": 2, "max_estimated_cost_usd": 1.0, "providers": {}}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    parsed = dataset_run.load_dataset_config(config_path)
+    calls: list[str] = []
+
+    def filter_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append("filter")
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.write_text(json.dumps({"accept": True, "bucket": "wide", "reason": "usable", "score": 0.9}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def caption_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append("caption")
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.write_text(json.dumps({"text": "Service caption.", "schema_version": 1, "confidence": 0.8, "model": "stub"}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def human_review_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append("human_review")
+        state_path = Path(cmd[cmd.index("--state") + 1])
+        out_path = Path(cmd[cmd.index("--out") + 1])
+        state = read_review_state(state_path)
+        decision = {
+            "item_id": "clip-a",
+            "decision": "accept",
+            "reject_reason": None,
+            "edited_caption": None,
+            "reviewed_at": "2026-05-21T00:00:01Z",
+            "state_version": state["state_version"],
+        }
+        state["review_decisions"] = {"clip-a": decision}
+        state["submitted"] = True
+        write_review_state(state_path, state)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps({"review_decisions": {"clip-a": decision}, "submitted": True}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    services = dataset_run.DatasetRunServices.from_config(
+        parsed.data,
+        caption_runner=caption_runner,
+        filter_stage_runners={"bucket_judge_filter": filter_runner},
+        human_review_runner=human_review_runner,
+    )
+
+    summary = dataset_run.run_pipeline(parsed, tmp_path / "run", services=services)
+
+    assert summary["state_status"] == "finalized"
+    assert summary["accepted"] == 1
+    assert summary["quality_report"].endswith("/run/quality_report.json")
+    assert calls == ["filter", "caption", "human_review"]
+    assert services.budget_tracker.as_dict()["total_api_calls"] == 2
+    assert services.budget_tracker.as_dict()["provider_calls"] == {
+        "bucket_judge.visual_understand": 1,
+        "caption.visual_understand": 1,
+    }
+
+
+def test_run_pipeline_exercises_transcript_semantic_and_near_duplicate_filters_with_injected_runners(tmp_path: Path, monkeypatch) -> None:
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    media_file = media_dir / "source.mp4"
+    media_file.write_bytes(b"fixture")
+    _patch_local_provider_many(monkeypatch, media_file, 2)
+    config_path = _config(tmp_path, media_dir)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["extensions"] = {"fixture_mode": False}
+    config["filters"] = {
+        "stages": [
+            {
+                "stage_id": "transcript_keyword_filter",
+                "config": {
+                    "allowlist": ["keep"],
+                    "out_dir": str(tmp_path / "transcripts"),
+                },
+            },
+            {
+                "stage_id": "semantic_visual_filter",
+                "config": {
+                    "prompt_template": "Keep useful clips. Prior feedback: {feedback_hints}",
+                    "out_dir": str(tmp_path / "semantic_visual"),
+                },
+            },
+            {
+                "stage_id": "semantic_video_filter",
+                "config": {
+                    "prompt_template": "Keep useful motion. Prior feedback: {feedback_hints}",
+                    "out_dir": str(tmp_path / "semantic_video"),
+                },
+            },
+            {
+                "stage_id": "near_duplicate_filter",
+                "config": {
+                    "fixture_hashes": {
+                        "clip-0": ["0000000000000000"],
+                        "clip-1": ["ffffffffffffffff"],
+                    },
+                    "hamming_threshold": 3,
+                    "out_dir": str(tmp_path / "frames"),
+                },
+            },
+        ]
+    }
+    config["review"] = {"enabled": False, "top_up": {"max_rounds": 0}}
+    config["budgets"] = {"max_api_calls": 10, "max_estimated_cost_usd": 1.0, "providers": {}}
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    parsed = dataset_run.load_dataset_config(config_path)
+    calls: list[str] = []
+
+    def transcript_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append("transcript")
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "transcript.json").write_text(json.dumps({"text": "keep this clip", "segments": [{"text": "keep this clip"}]}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def semantic_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append("semantic_video" if "video_understand" in " ".join(cmd) else "semantic_visual")
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"accept": True, "reason": "useful", "score": 0.9, "details": {"stub": True}}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def caption_runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append("caption")
+        out = Path(cmd[cmd.index("--out") + 1])
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps({"text": "Caption.", "schema_version": 1, "confidence": 0.9, "model": "stub"}), encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    services = dataset_run.DatasetRunServices.from_config(
+        parsed.data,
+        caption_runner=caption_runner,
+        filter_stage_runners={
+            "transcript_keyword_filter": transcript_runner,
+            "semantic_visual_filter": semantic_runner,
+            "semantic_video_filter": semantic_runner,
+        },
+        human_review_runner=subprocess.run,
+    )
+
+    summary = dataset_run.run_pipeline(parsed, tmp_path / "run", services=services)
+
+    assert summary["state_status"] == "finalized"
+    assert summary["accepted"] == 2
+    assert calls.count("transcript") == 2
+    assert calls.count("semantic_visual") == 2
+    assert calls.count("semantic_video") == 2
+    assert calls.count("caption") == 2
+    filtered = json.loads((tmp_path / "run" / "filtered_items.json").read_text(encoding="utf-8"))
+    assert [item["item_id"] for item in filtered["active"]] == ["clip-0", "clip-1"]
+    assert filtered["rejected"] == []
 
 
 @pytest.mark.parametrize(
@@ -278,6 +706,65 @@ def test_dataset_build_resume_rejects_config_hash_mismatch_without_mutating_stat
     assert state.get("error") is None
 
 
+def test_acquire_candidates_embeds_initial_and_top_up_request_in_provider_config(tmp_path: Path, monkeypatch) -> None:
+    media = tmp_path / "media.mp4"
+    media.write_bytes(b"candidate")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    state = make_initial_state(
+        run_id="fixture-run",
+        writer_id="builtin.dataset_build",
+        config_hash="hash",
+        status="acquiring",
+    )
+    state["processed_source_ids"] = ["processed-source"]
+    write_review_state(run_dir / "review_state.json", state)
+    seen_configs: list[dict[str, Any]] = []
+
+    class Provider:
+        def acquire(self, config: dict[str, Any]):
+            seen_configs.append(config)
+            yield {
+                **make_candidate_item(
+                    source_type="local_folder",
+                    source_id="source-1",
+                    source_url=media.as_uri(),
+                    media_path=media,
+                    media_type="video",
+                    source_metadata={"resolution": {"width": 64, "height": 64}},
+                    duration_s=5.0,
+                ),
+                "item_id": "clip-a",
+            }
+
+    monkeypatch.setattr(dataset_run, "get_source_provider", lambda provider_id, **kwargs: Provider())
+    config = {"sources": [{"provider": "local_folder", "config": {"path": str(tmp_path)}}]}
+
+    candidates = dataset_run._acquire_candidates(
+        config,
+        run_dir,
+        source_provider_kwargs=None,
+        acquisition_request={
+            "round_index": 1,
+            "target_shortfalls": {"wide": 2},
+            "exclude_candidate_ids": ["clip-before"],
+            "exclude_source_ids": ["source-before"],
+            "exclude_media_hashes": ["hash-before"],
+        },
+    )
+
+    request = seen_configs[0]["acquisition_request"]
+    assert candidates[0]["source_id"] == "source-1"
+    assert request["round_index"] == 1
+    assert request["target_shortfalls"] == {"wide": 2}
+    assert request["limit_hint"] == 2
+    assert request["exclude_candidate_ids"] == ["clip-before"]
+    assert request["exclude_source_ids"] == ["source-before"]
+    assert request["exclude_media_hashes"] == ["hash-before"]
+    assert request["processed_source_ids"] == ["processed-source"]
+    assert seen_configs[0]["processed_source_ids"] == ["processed-source"]
+
+
 def test_dataset_build_skip_review_finalizes_without_auto_accepting_pending_items(tmp_path: Path, monkeypatch) -> None:
     media_dir = tmp_path / "media"
     media_dir.mkdir()
@@ -298,6 +785,11 @@ def test_dataset_build_skip_review_finalizes_without_auto_accepting_pending_item
     assert not (tmp_path / "run" / "final.manifest.json").exists()
     state = read_review_state(tmp_path / "run" / "review_state.json")
     assert state["status"] == "reviewing"
+    assert state["quality_report"].endswith("/run/quality_report.json")
+    report = json.loads((tmp_path / "run" / "quality_report.json").read_text(encoding="utf-8"))
+    assert report["run_status"] == "reviewing"
+    assert report["summary"]["pending"] == 1
+    assert report["final_shortfalls"] == {"wide": 1}
     assert state["submitted"] is False
 
 
@@ -476,6 +968,7 @@ def test_dataset_build_dry_run_prints_plan_without_creating_artifacts(tmp_path: 
     assert payload["budget_limits"]["max_api_calls"] == 1
     assert payload["skip_review"] is False
     assert payload["review_only"] is False
+    assert payload["quality_report"] == str((out_dir / "quality_report.json").resolve())
 
 
 def test_dataset_build_cli_preflights_no_spend_api_config_before_run_dir_creation(tmp_path: Path, monkeypatch) -> None:

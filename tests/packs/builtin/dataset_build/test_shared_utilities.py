@@ -9,6 +9,13 @@ import jsonschema
 from referencing import Registry, Resource
 
 from astrid.packs.builtin.dataset_build.config import MISSING_SCHEMA_VERSION_SOURCE
+from astrid.packs.builtin.dataset_build.artifacts import (
+    load_valid_cached_sidecar,
+    prompt_hash,
+    schema_hash,
+    sidecar_hashes,
+    write_hashed_sidecar,
+)
 from astrid.packs.builtin.dataset_build.items import (
     config_hash,
     deterministic_id,
@@ -55,6 +62,38 @@ def test_hashes_ids_and_repo_relative_paths_are_stable(tmp_path: Path) -> None:
     assert deterministic_id("source", 1, prefix="clip") == deterministic_id("source", 1, prefix="clip")
     assert repo_relative_path(ROOT / "runs" / "x.mp4") == "runs/x.mp4"
     assert repo_relative_path(tmp_path / "outside.mp4").endswith("outside.mp4")
+
+
+def test_artifact_sidecar_hash_helpers_validate_production_cache_hits(tmp_path: Path) -> None:
+    media = tmp_path / "clip.mp4"
+    media.write_bytes(b"clip")
+    schema = tmp_path / "caption.schema.json"
+    schema.write_text('{"type":"object"}', encoding="utf-8")
+    hashes = sidecar_hashes(
+        prompt="Describe this.",
+        schema=schema,
+        media=media,
+        config={"model": "gpt-test", "budget_tracker": object()},
+    )
+    sidecar = tmp_path / "clip.caption.json"
+
+    written = write_hashed_sidecar(sidecar, {"text": "Caption.", "schema_version": 1}, hashes)
+
+    assert written["hashes"]["prompt_hash"] == prompt_hash("Describe this.")
+    assert written["hashes"]["schema_hash"] == schema_hash(schema)
+    assert load_valid_cached_sidecar(sidecar, hashes)["text"] == "Caption."
+    changed = dict(hashes)
+    changed["prompt_hash"] = prompt_hash("Changed prompt.")
+    assert load_valid_cached_sidecar(sidecar, changed) is None
+
+
+def test_raw_sidecars_are_fixture_only_cache_hits(tmp_path: Path) -> None:
+    sidecar = tmp_path / "raw.caption.json"
+    sidecar.write_text(json.dumps({"text": "Fixture caption."}), encoding="utf-8")
+    hashes = {"prompt_hash": "p", "media_hash": "m"}
+
+    assert load_valid_cached_sidecar(sidecar, hashes) is None
+    assert load_valid_cached_sidecar(sidecar, hashes, fixture_mode=True) == {"text": "Fixture caption."}
 
 
 def test_candidate_and_review_items_include_explicit_rights_and_validate(tmp_path: Path) -> None:

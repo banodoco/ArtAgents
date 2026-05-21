@@ -45,6 +45,7 @@ def test_load_dataset_config_accepts_strict_v1_and_resolves_relative_paths() -> 
     assert parsed.data["sources"][0]["config"]["path"] == str((FIXTURES / "fixtures" / "media").resolve())
     assert parsed.data["caption"]["schema_path"] == str((FIXTURES / "fixtures" / "schemas" / "caption.json").resolve())
     assert parsed.data["output"]["run_dir"] == str((FIXTURES / "runs" / "fixture-smoke-test").resolve())
+    assert parsed.data["review"]["top_up"]["max_rounds"] == 2
 
 
 def test_load_dataset_config_accepts_yaml_with_same_policy(tmp_path: Path) -> None:
@@ -147,6 +148,33 @@ def test_load_dataset_config_ordered_filter_stages_preserve_list_order_and_mark_
     assert stages[2]["config"]["bucket_judge"]["provider"] == "video_understand"
 
 
+def test_load_dataset_config_accepts_new_stage_ids_and_marks_model_backed_stages(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["filters"] = {
+        "stages": [
+            {"stage_id": "transcript_keyword_filter", "config": {"allowlist": ["laugh"]}},
+            {"stage_id": "semantic_visual_filter", "config": {"prompt_template": "Keep useful clips."}},
+            {"stage_id": "semantic_video_filter", "config": {"prompt_template": "Keep useful clips."}},
+            {"stage_id": "near_duplicate_filter", "config": {"hamming_threshold": 3}},
+        ]
+    }
+    data["review"] = {**data["review"], "top_up": {"max_rounds": 0}}
+    path = _write_json(tmp_path / "new-stages.json", data)
+
+    parsed = load_dataset_config(path)
+
+    stages = parsed.data["filters"]["stages"]
+    assert [stage["stage_id"] for stage in stages] == [
+        "transcript_keyword_filter",
+        "semantic_visual_filter",
+        "semantic_video_filter",
+        "near_duplicate_filter",
+    ]
+    assert [stage["model_backed"] for stage in stages] == [True, True, True, False]
+    assert [stage["expensive"] for stage in stages] == [True, True, True, False]
+    assert parsed.data["review"]["top_up"]["max_rounds"] == 0
+
+
 def test_load_dataset_config_adapts_extension_bucket_judge_when_enabled(tmp_path: Path) -> None:
     data = _load_fixture("dataset-config.valid.json")
     data["extensions"] = {
@@ -221,7 +249,18 @@ def test_preflight_rejects_api_backed_stage_with_zero_call_budget(tmp_path: Path
     path = _write_json(tmp_path / "budget.json", data)
     parsed = load_dataset_config(path)
 
-    with pytest.raises(BudgetPreflightError, match="budgets.max_api_calls is 0"):
+    with pytest.raises(BudgetPreflightError, match="budgets.max_api_calls must be positive"):
+        preflight_budget_and_secrets(parsed, env={"OPENAI_API_KEY": "test-key"})
+
+
+def test_preflight_rejects_api_backed_stage_without_global_budget(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["extensions"] = {"fixture_mode": False}
+    data.pop("budgets")
+    path = _write_json(tmp_path / "missing-budget.json", data)
+    parsed = load_dataset_config(path)
+
+    with pytest.raises(BudgetPreflightError, match="budgets.max_api_calls must be positive"):
         preflight_budget_and_secrets(parsed, env={"OPENAI_API_KEY": "test-key"})
 
 
@@ -253,6 +292,43 @@ def test_preflight_rejects_ordered_api_backed_bucket_judge_without_secret(tmp_pa
 
     with pytest.raises(SecretPreflightError, match="bucket_judge.visual_understand"):
         preflight_budget_and_secrets(parsed, env={})
+
+
+def test_preflight_rejects_api_backed_semantic_filter_without_secret(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["sources"] = [{"provider": "youtube", "config": {"source_urls": ["https://example.invalid/video"]}}]
+    data["caption"] = {"provider": "transcribe"}
+    data["extensions"] = {"fixture_mode": False}
+    data["filters"] = {"stages": [{"stage_id": "semantic_video_filter"}]}
+    path = _write_json(tmp_path / "semantic-preflight.json", data)
+    parsed = load_dataset_config(path)
+
+    with pytest.raises(SecretPreflightError, match="filter.semantic_video"):
+        preflight_budget_and_secrets(parsed, env={})
+
+
+def test_preflight_rejects_api_backed_transcript_filter_without_secret(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["sources"] = [{"provider": "youtube", "config": {"source_urls": ["https://example.invalid/video"]}}]
+    data["caption"] = {"provider": "transcribe"}
+    data["extensions"] = {"fixture_mode": False}
+    data["filters"] = {"stages": [{"stage_id": "transcript_keyword_filter"}]}
+    path = _write_json(tmp_path / "transcript-preflight.json", data)
+    parsed = load_dataset_config(path)
+
+    with pytest.raises(SecretPreflightError, match="filter.transcript.builtin.transcribe"):
+        preflight_budget_and_secrets(parsed, env={})
+
+
+def test_preflight_does_not_require_secret_for_near_duplicate_filter(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["caption"] = {"provider": "transcribe"}
+    data["extensions"] = {"fixture_mode": False}
+    data["filters"] = {"stages": [{"stage_id": "near_duplicate_filter"}]}
+    path = _write_json(tmp_path / "near-duplicate-preflight.json", data)
+    parsed = load_dataset_config(path)
+
+    preflight_budget_and_secrets(parsed, env={})
 
 
 def test_env_example_documents_dataset_build_secrets() -> None:

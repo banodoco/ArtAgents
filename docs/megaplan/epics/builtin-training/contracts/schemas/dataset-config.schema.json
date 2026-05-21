@@ -115,6 +115,36 @@
         "schema_path": {
           "type": "string",
           "description": "Path to JSON schema for structured caption output."
+        },
+        "validation": {
+          "type": "object",
+          "description": "Caption text validation rules applied before manifest export.",
+          "additionalProperties": false,
+          "properties": {
+            "text_pattern": {
+              "type": "string",
+              "description": "Regular expression that final accepted caption text must match."
+            },
+            "required_prefix": {
+              "type": "string",
+              "description": "Required prefix for final accepted caption text."
+            },
+            "required_substrings": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Required substrings for final accepted caption text."
+            },
+            "min_length": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Minimum accepted caption text length."
+            },
+            "max_length": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Maximum accepted caption text length."
+            }
+          }
         }
       }
     },
@@ -140,7 +170,11 @@
                   "black_frame_filter",
                   "content_hash_filter",
                   "source_cap_filter",
-                  "bucket_judge_filter"
+                  "bucket_judge_filter",
+                  "transcript_keyword_filter",
+                  "semantic_visual_filter",
+                  "semantic_video_filter",
+                  "near_duplicate_filter"
                 ]
               },
               "enabled": {"type": "boolean", "default": true},
@@ -249,6 +283,19 @@
           "items": {
             "type": "string",
             "enum": ["watermark", "wrong_scene", "wrong_character", "bad_motion", "low_quality", "wrong_content", "rights_concern", "other"]
+          }
+        },
+        "top_up": {
+          "type": "object",
+          "description": "Post-review acquisition loop configuration for bucket shortfalls.",
+          "additionalProperties": false,
+          "properties": {
+            "max_rounds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 2,
+              "description": "Maximum post-review top-up rounds. Use 0 to disable top-up."
+            }
           }
         }
       }
