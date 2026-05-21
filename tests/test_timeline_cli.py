@@ -1365,7 +1365,7 @@ def test_preview_out_guard_rejects_paths_inside_timeline_home(
     from astrid.core.timeline.observability import ResolvedTarget
     from astrid.core.timeline import observability as obs_mod
     from astrid.core.timeline import eventlog as evlog_mod
-    from astrid.core.timeline.events.schema import TimelineEvent as TE, TimelineActor as TA
+    from astrid.core.timeline.events.schema import TimelineEvent as TE
 
     fake_target = ResolvedTarget(
         backend="local_fs",
@@ -1454,7 +1454,7 @@ def test_preview_out_guard_allows_paths_outside_timeline_home(
     monkeypatch.setattr(obs_mod, "resolve_timeline_target", fake_resolve)
 
     # Stub out select_timeline_backend and replay_projection
-    from astrid.core.timeline.events.schema import TimelineEvent as TE2, TimelineActor as TA2
+    from astrid.core.timeline.events.schema import TimelineEvent as TE2
 
     at_eid2 = "01AAAAAAAAAAAAAAAAAAAAAA02"
     event = TE2.from_dict({

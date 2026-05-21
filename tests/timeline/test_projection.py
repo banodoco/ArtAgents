@@ -15,7 +15,6 @@ Proves:
 from __future__ import annotations
 
 import json
-import tempfile
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -638,8 +637,6 @@ class TestCheckpointParity:
         tdir = tmp_path / "cp-proj" / "timelines" / ulid
 
         from astrid.core.timeline.paths import assembly_identity_path
-        from astrid.core.timeline.eventlog import select_timeline_backend
-
         identity = read_json(assembly_identity_path("cp-proj", ulid, root=tmp_path))
         timeline_id = identity["timeline_id"]
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
@@ -749,7 +746,7 @@ class TestBootstrapBehavior:
 
     def test_created_timeline_no_bootstrap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """A fresh created timeline does NOT emit timeline.imported on first write."""
-        from astrid.core.timeline._edit_helpers import pack_write_gateway, PackWriteResult
+        from astrid.core.timeline._edit_helpers import pack_write_gateway
         from astrid.core.timeline.events.schema import TimelineActor
 
         monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
