@@ -319,6 +319,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | id | short_description |
 | --- | --- |
 | `builtin.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
+| `builtin.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `builtin.event_talks` | Orchestrate event-talk template, search, holding-screen, and render commands into a finished video. |
 | `builtin.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
 | `builtin.hype` | Run the canonical hype editing pipeline end-to-end (transcribe → cut → render → validate). |
@@ -339,9 +340,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `animations/slide-left` | Slide left entrance animation. |
 | `animations/slide-up` | Slide up exit animation. |
 | `animations/type-on` | Typewriter-style text reveal animation. |
-| `effects/model-trends` | Animated stacked-area chart of model-family share-of-conversation, driven by Remotion frame. |
-| `effects/neon-orbit-card` | DOM-to-canvas Remotion effect for post-processed cards. |
-| `effects/text-card` | Anchored text card overlay with built-in fade in/out. |
+| `effects/text-card` | Default text card effect for captions and titles. |
 | `transitions/cross-fade` | Cross fade transition. |
 | `transitions/fade` | Fade-through-black transition. |
 

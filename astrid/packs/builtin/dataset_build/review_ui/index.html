@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Dataset Review</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Dataset Review</h1>
+        <p id="summary">Loading...</p>
+      </div>
+      <div class="controls" aria-label="Review controls">
+        <label>
+          Status
+          <select id="statusFilter">
+            <option value="">All</option>
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </label>
+        <button id="prevPage" type="button">Previous</button>
+        <button id="nextPage" type="button">Next</button>
+        <button id="save" type="button">Save</button>
+        <button id="submit" type="button">Submit</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="rail">
+        <div id="pageMeta" class="page-meta"></div>
+        <ol id="itemList" class="item-list" aria-label="Visible review items"></ol>
+      </aside>
+      <section id="detail" class="detail" aria-live="polite"></section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
