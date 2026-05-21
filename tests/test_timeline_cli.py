@@ -45,7 +45,7 @@ def test_help_exits_zero_and_prints_usage(capsys: pytest.CaptureFixture[str]) ->
     # Prog string from build_parser().
     assert "python3 -m astrid timelines" in captured.out
     # Subcommands should be advertised.
-    for sub in ("ls", "create", "show", "rename", "finalize", "tombstone", "purge", "set-default", "export", "cost"):
+    for sub in ("ls", "create", "show", "rename", "finalize", "tombstone", "purge", "set-default", "export", "cost", "migrate-events"):
         assert sub in captured.out
 
 
@@ -1492,3 +1492,783 @@ def test_preview_out_guard_allows_paths_outside_timeline_home(
     captured = capsys.readouterr()
     assert "Projected state written to" in captured.out
     assert out_outside.is_file()
+
+
+# ---------------------------------------------------------------------------
+# m8 migrate-events — CLI parser/handler tests (T13)
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_events_appears_in_help(capsys: pytest.CaptureFixture[str]) -> None:
+    """migrate-events must appear in the top-level help listing."""
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "migrate-events" in captured.out
+    assert "Migrate legacy timeline data" in captured.out
+
+
+def test_migrate_events_help_shows_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    """migrate-events --help must list --dry-run, --apply, --project, --all-projects, --json."""
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["migrate-events", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "--dry-run" in captured.out
+    assert "--apply" in captured.out
+    assert "--project" in captured.out
+    assert "--all-projects" in captured.out
+    assert "--json" in captured.out
+
+
+def test_migrate_events_dry_run_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--dry-run must be True by default and --apply must be False by default."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--project", "demo"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.dry_run is True
+    assert args.apply is False
+
+
+def test_migrate_events_apply_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--apply must set apply=True."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--apply", "--project", "demo"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.apply is True
+
+
+def test_migrate_events_project_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--project <slug> must set project_slug."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--project", "my-proj"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.project_slug == "my-proj"
+    assert args.all_projects is False
+
+
+def test_migrate_events_all_projects_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--all-projects must set all_projects=True."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--all-projects"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.all_projects is True
+    assert args.project_slug is None
+
+
+def test_migrate_events_json_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--json must set json_out=True."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--project", "demo", "--json"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.json_out is True
+
+
+def test_migrate_events_json_defaults_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--json must default to False when not provided."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--project", "demo"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.json_out is False
+
+
+def test_migrate_events_requires_project_or_all(capsys: pytest.CaptureFixture[str]) -> None:
+    """migrate-events without --project or --all-projects must fail."""
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["migrate-events"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "error" in captured.err.lower() or "required" in captured.err.lower()
+
+
+def test_migrate_events_mutually_exclusive_project_all(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--project and --all-projects together must be rejected at parse time."""
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["migrate-events", "--project", "x", "--all-projects"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "not allowed" in captured.err.lower() or "error" in captured.err.lower()
+
+
+def test_migrate_events_handler_dispatches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verifies that migrate-events dispatches to cmd_migrate_events."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_handler(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_migrate_events", fake_handler)
+
+    rc = timeline_cli.main(["migrate-events", "--project", "demo"])
+    assert rc == 0
+    assert seen["args"].command == "migrate-events"
+
+
+# ---------------------------------------------------------------------------
+# m8 observability-on-imported-timelines integration tests (T13)
+# ---------------------------------------------------------------------------
+
+
+def _build_legacy_timeline_home(tmp_path: Path, slug: str = "demo") -> tuple[Path, str, str]:
+    """Create a minimal legacy timeline directory tree suitable for import.
+
+    Returns ``(timeline_home, project_slug, ulid)``.
+    """
+    ulid = "01J00000000000000000000000"
+    pdir = tmp_path / slug
+    pdir.mkdir(parents=True)
+    (pdir / "project.json").write_text(
+        json.dumps(
+            {
+                "created_at": "2026-05-11T00:00:00Z",
+                "name": slug,
+                "schema_version": 1,
+                "slug": slug,
+                "updated_at": "2026-05-11T00:00:00Z",
+                "default_timeline_id": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (pdir / "runs").mkdir()
+    (pdir / "sources").mkdir()
+
+    tdir = pdir / "timelines" / ulid
+    tdir.mkdir(parents=True)
+    return tdir, slug, ulid
+
+
+def _write_legacy_assembly(tdir: Path) -> dict[str, Any]:
+    """Write a minimal legacy assembly.json and return its body."""
+    body: dict[str, Any] = {
+        "schema_version": 1,
+        "assembly": {
+            "clips": [
+                {"id": "c1", "kind": "visual", "asset_id": "a1", "position": 0},
+            ],
+            "tracks": [
+                {"id": "t1", "kind": "visual", "label": "Main"},
+            ],
+            "transitions": [],
+            "effects": [],
+            "theme": {"name": "dark"},
+            "pool": {"assets": {}},
+            "audio": {},
+            "arrangement": {},
+        },
+    }
+    (tdir / "assembly.json").write_text(json.dumps(body), encoding="utf-8")
+    return body
+
+
+def _write_display_json(tdir: Path, slug: str = "test-tl") -> None:
+    """Write a minimal display.json."""
+    (tdir / "display.json").write_text(
+        json.dumps({"schema_version": 1, "slug": slug, "name": "Test Timeline"}),
+        encoding="utf-8",
+    )
+
+
+def _write_identity_json(tdir: Path, timeline_id: str | None = None) -> str:
+    """Write assembly.identity.json and return the timeline_id."""
+    tid = timeline_id or "00000000-0000-0000-0000-000000000099"
+    (tdir / "assembly.identity.json").write_text(
+        json.dumps({"timeline_id": tid, "backend": "local_fs"}),
+        encoding="utf-8",
+    )
+    return tid
+
+
+def _import_timeline(
+    tdir: Path,
+    ulid: str,
+    *,
+    skip_if_events_exist: bool = True,
+) -> dict[str, Any]:
+    """Run import_from_legacy_local on a legacy timeline dir and return the result dict.
+
+    If *skip_if_events_exist* is True (the default) and the timeline already has
+    events, the import is skipped — the returned dict will have ``imported: False``.
+    """
+    from astrid.core.timeline.migration import import_from_legacy_local
+    from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+    from astrid.core.timeline.events.schema import TimelineActor
+
+    backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
+    if skip_if_events_exist and backend.read_events():
+        return {"ok": True, "imported": False, "event_id": None, "parity_ok": None, "detail": "skipped"}
+
+    actor = TimelineActor(type="agent", id="test:cli", display="Test CLI")
+
+    return import_from_legacy_local(
+        backend=backend,
+        timeline_home=tdir,
+        actor=actor,
+    )
+
+
+def _count_events(tdir: Path) -> int:
+    """Return the number of events in the event log."""
+    from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+
+    # Use the timeline dir name as the timeline_id if no identity exists
+    ulid = tdir.name
+    backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
+    return len(backend.read_events())
+
+
+class TestObservabilityOnImportedLocalFs:
+    """Confirm observability commands work on imported LocalFs timelines."""
+
+    def test_history_on_imported_timeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """history must show events (including the imported event) on an imported timeline."""
+        tdir, slug, ulid = _build_legacy_timeline_home(tmp_path, slug="demo")
+        _write_legacy_assembly(tdir)
+        _write_display_json(tdir)
+        tid = _write_identity_json(tdir)
+
+        # Import the timeline
+        result = _import_timeline(tdir, ulid)
+        assert result.get("imported") is True, f"Import failed: {result.get('detail')}"
+
+        # Set up session
+        session = SimpleNamespace(project=slug, agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        # Now run history via CLI
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline import observability as obs_mod
+
+        fake_target = ResolvedTarget(
+            backend="local_fs",
+            timeline_id=tid,
+            timeline_ulid=ulid,
+            timeline_home=tdir,
+            slug="test-tl",
+            backend_name_display="local_fs",
+        )
+
+        def fake_resolve(project_slug, slug_or_id, *, root=None):
+            return fake_target
+
+        monkeypatch.setattr(obs_mod, "resolve_timeline_target", fake_resolve)
+
+        rc = timeline_cli.main(["history", "test-tl"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        # Must show the imported event
+        assert "timeline.imported" in captured.out
+        assert "Backend:" in captured.out
+        assert "Timeline:" in captured.out
+
+    def test_diff_on_imported_timeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """diff must work on an imported timeline."""
+        tdir, slug, ulid = _build_legacy_timeline_home(tmp_path, slug="demo")
+        _write_legacy_assembly(tdir)
+        _write_display_json(tdir)
+        tid = _write_identity_json(tdir)
+
+        result = _import_timeline(tdir, ulid)
+        assert result.get("imported") is True
+
+        session = SimpleNamespace(project=slug, agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline import observability as obs_mod
+
+        fake_target = ResolvedTarget(
+            backend="local_fs",
+            timeline_id=tid,
+            timeline_ulid=ulid,
+            timeline_home=tdir,
+            slug="test-tl",
+            backend_name_display="local_fs",
+        )
+
+        monkeypatch.setattr(obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target)
+
+        # Get the event ID of the imported event
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+
+        backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
+        events = backend.read_events()
+        assert len(events) >= 1
+        eid = events[0].event_id
+
+        rc = timeline_cli.main(
+            ["diff", "test-tl", "--from", eid, "--to", eid]
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        # diff should produce output (even if no differences when from==to)
+        assert "diff" in captured.out.lower() or "No differences" in captured.out or captured.out.strip() != ""
+
+    def test_audit_on_imported_timeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """audit must work on an imported timeline and show imported events."""
+        tdir, slug, ulid = _build_legacy_timeline_home(tmp_path, slug="demo")
+        _write_legacy_assembly(tdir)
+        _write_display_json(tdir)
+        tid = _write_identity_json(tdir)
+
+        result = _import_timeline(tdir, ulid)
+        assert result.get("imported") is True
+
+        session = SimpleNamespace(project=slug, agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline import observability as obs_mod
+
+        fake_target = ResolvedTarget(
+            backend="local_fs",
+            timeline_id=tid,
+            timeline_ulid=ulid,
+            timeline_home=tdir,
+            slug="test-tl",
+            backend_name_display="local_fs",
+        )
+
+        monkeypatch.setattr(obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target)
+
+        rc = timeline_cli.main(["audit", "test-tl", "--include-ops"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        # audit output should show all checks passed on imported timeline
+        assert "all checks passed" in captured.out.lower()
+
+    def test_preview_on_imported_timeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """preview must work on an imported timeline."""
+        tdir, slug, ulid = _build_legacy_timeline_home(tmp_path, slug="demo")
+        _write_legacy_assembly(tdir)
+        _write_display_json(tdir)
+        tid = _write_identity_json(tdir)
+
+        result = _import_timeline(tdir, ulid)
+        assert result.get("imported") is True
+
+        session = SimpleNamespace(project=slug, agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline import observability as obs_mod
+
+        fake_target = ResolvedTarget(
+            backend="local_fs",
+            timeline_id=tid,
+            timeline_ulid=ulid,
+            timeline_home=tdir,
+            slug="test-tl",
+            backend_name_display="local_fs",
+        )
+
+        monkeypatch.setattr(obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target)
+
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+
+        backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
+        events = backend.read_events()
+        assert len(events) >= 1
+        eid = events[0].event_id
+
+        out_path = tmp_path / "preview_out.json"
+        rc = timeline_cli.main(
+            ["preview", "test-tl", "--at", eid, "--out", str(out_path)]
+        )
+        assert rc == 0
+        captured = capsys.readouterr()
+        assert "Projected state written to" in captured.out
+        assert out_path.is_file()
+
+    def test_read_only_commands_do_not_append_events(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """history, diff, audit, preview must not mutate the event log."""
+        tdir, slug, ulid = _build_legacy_timeline_home(tmp_path, slug="demo")
+        _write_legacy_assembly(tdir)
+        _write_display_json(tdir)
+        tid = _write_identity_json(tdir)
+
+        # Import
+        result = _import_timeline(tdir, ulid)
+        assert result.get("imported") is True
+        event_count_before = _count_events(tdir)
+
+        session = SimpleNamespace(project=slug, agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline import observability as obs_mod
+
+        fake_target = ResolvedTarget(
+            backend="local_fs",
+            timeline_id=tid,
+            timeline_ulid=ulid,
+            timeline_home=tdir,
+            slug="test-tl",
+            backend_name_display="local_fs",
+        )
+
+        monkeypatch.setattr(obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target)
+
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+
+        backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
+        events = backend.read_events()
+        eid = events[0].event_id
+
+        # Run each read-only command
+        for argv in [
+            ["history", "test-tl"],
+            ["diff", "test-tl", "--from", eid, "--to", eid],
+            ["audit", "test-tl"],
+            ["preview", "test-tl", "--at", eid, "--out", str(Path("/tmp") / "pv_local.json")],
+        ]:
+            rc = timeline_cli.main(argv)
+            assert rc == 0, f"Command {' '.join(argv)} failed with rc={rc}"
+
+        event_count_after = _count_events(tdir)
+        assert event_count_after == event_count_before, (
+            f"Event count changed from {event_count_before} to {event_count_after} "
+            f"after running read-only commands"
+        )
+
+
+class TestAuditProjectionParityAfterImport:
+    """Confirm audit reports projection parity after import."""
+
+    def test_local_audit_shows_imported_event_count(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """After import, audit must report at least one event (the timeline.imported)."""
+        tdir, slug, ulid = _build_legacy_timeline_home(tmp_path, slug="demo")
+        body = _write_legacy_assembly(tdir)
+        _write_display_json(tdir)
+        tid = _write_identity_json(tdir)
+
+        result = _import_timeline(tdir, ulid)
+        assert result.get("imported") is True
+        assert result.get("parity_ok") is True
+
+        session = SimpleNamespace(project=slug, agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline import observability as obs_mod
+
+        fake_target = ResolvedTarget(
+            backend="local_fs",
+            timeline_id=tid,
+            timeline_ulid=ulid,
+            timeline_home=tdir,
+            slug="test-tl",
+            backend_name_display="local_fs",
+        )
+
+        monkeypatch.setattr(obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target)
+
+        rc = timeline_cli.main(["audit", "test-tl", "--include-ops"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        # Audit should show projection parity OK after import
+        assert "all checks passed" in captured.out.lower()
+
+        # Verify the source blob (assembly.json) was never mutated
+        from astrid.core.project.jsonio import read_json
+
+        current_assembly = read_json(tdir / "assembly.json")
+        assert current_assembly == body, "Source assembly.json was mutated!"
+
+    def test_supabase_mocked_audit_parity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Audit on a mocked Supabase-imported timeline must report correctly.
+
+        Uses a fake Supabase transport that returns a timeline.imported event
+        to verify the observability plumbing works end-to-end.
+        """
+        from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+        from astrid.core.timeline.eventlog.supabase import SupabaseBackend
+        from astrid.core.timeline.observability import ResolvedTarget
+
+        # Build a fake event that represents an imported timeline
+        tid = "00000000-0000-0000-0000-000000000100"
+        eid = "01AAAAAAAAAAAAAAAAAAAAA100"
+        actor = TimelineActor(type="agent", id="test:cli", display="Test CLI")
+
+        imported_event = TimelineEvent.from_dict(
+            {
+                "event_id": eid,
+                "timeline_id": tid,
+                "ts": "2026-05-20T12:00:00Z",
+                "actor": {"type": "agent", "id": "test:cli", "display": "Test CLI"},
+                "prev_hash": None,
+                "hash": "01AAAAAAAAAAAAAAAAAAAAA1000",
+                "kind": "timeline.imported",
+                "payload": {
+                    "snapshot": {
+                        "assembly.json": {"clips": [], "tracks": [], "transitions": []},
+                    },
+                    "source": "supabase_config",
+                },
+                "expected_version": None,
+                "schema_version": 2,
+                "txn_id": None,
+            }
+        )
+
+        class FakeSupabaseTransport:
+            def append_event(self, timeline_id, kind, payload, *, actor=None):
+                raise NotImplementedError("read-only test")
+
+            def read_events(self, timeline_id, after=None, limit=None):
+                return [imported_event]
+
+            def head(self, timeline_id):
+                return imported_event
+
+            def verify_chain(self, timeline_id):
+                return True, []
+
+        fake_transport = FakeSupabaseTransport()
+        # We can't use SupabaseBackend directly because it needs credentials,
+        # but we can monkeypatch the observability path to use our fake.
+        session = SimpleNamespace(project="demo", agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline import eventlog as evlog_mod
+
+        fake_target = ResolvedTarget(
+            backend="supabase",
+            timeline_id=tid,
+            timeline_ulid="01J00000000000000000000000",
+            timeline_home=tmp_path,  # not actually read for supabase
+            slug="test-tl",
+            backend_name_display="supabase",
+        )
+
+        monkeypatch.setattr(
+            obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target
+        )
+
+        # Provide the fake transport via select_timeline_backend
+        from astrid.core.timeline.eventlog.types import EventLogVerification, EventLogHead
+
+        class FakeSupabaseBackend:
+            def backend_name(self):
+                return "supabase"
+
+            def read_events(self, after=None, limit=None):
+                return [imported_event]
+
+            def head(self):
+                return EventLogHead(
+                    timeline_id=imported_event.timeline_id,
+                    last_event_id=imported_event.event_id,
+                    last_hash=imported_event.hash,
+                    event_count=1,
+                    version=1,
+                )
+
+            def verify_chain(self):
+                return EventLogVerification(
+                    ok=True, checked_events=1,
+                    last_event_id=imported_event.event_id,
+                )
+
+        monkeypatch.setattr(
+            evlog_mod,
+            "select_timeline_backend",
+            lambda timeline_id, timeline_home, preferred_backend: (None, FakeSupabaseBackend()),
+        )
+
+        rc = timeline_cli.main(["audit", "test-tl", "--include-ops"])
+        assert rc == 0
+        captured = capsys.readouterr()
+        # Audit should show backend as supabase and chain verification passed
+        assert "supabase" in captured.out.lower()
+        assert "Hash chain" in captured.out and "OK" in captured.out
+
+    def test_read_only_commands_on_supabase_imported_do_not_append(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Read-only commands on mocked Supabase import must not attempt appends."""
+        from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+        from astrid.core.timeline.observability import ResolvedTarget
+
+        tid = "00000000-0000-0000-0000-000000000101"
+        eid = "01AAAAAAAAAAAAAAAAAAAAA101"
+
+        imported_event = TimelineEvent.from_dict(
+            {
+                "event_id": eid,
+                "timeline_id": tid,
+                "ts": "2026-05-20T12:00:00Z",
+                "actor": {"type": "agent", "id": "test:cli", "display": "Test CLI"},
+                "prev_hash": None,
+                "hash": "01AAAAAAAAAAAAAAAAAAAAA1010",
+                "kind": "timeline.imported",
+                "payload": {
+                    "snapshot": {"assembly.json": {"clips": [], "tracks": [], "transitions": []}},
+                    "source": "supabase_config",
+                },
+                "expected_version": None,
+                "schema_version": 2,
+                "txn_id": None,
+            }
+        )
+
+        session = SimpleNamespace(project="demo", agent_id="tester", id="session-1")
+        monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline import eventlog as evlog_mod
+
+        fake_target = ResolvedTarget(
+            backend="supabase",
+            timeline_id=tid,
+            timeline_ulid="01J00000000000000000000000",
+            timeline_home=tmp_path,
+            slug="test-tl",
+            backend_name_display="supabase",
+        )
+
+        monkeypatch.setattr(
+            obs_mod, "resolve_timeline_target", lambda *a, **kw: fake_target
+        )
+
+        # Track whether append was called
+        append_calls: list[object] = []
+
+        from astrid.core.timeline.eventlog.types import EventLogVerification, EventLogHead
+
+        class ReadOnlySupabaseBackend:
+            def backend_name(self):
+                return "supabase"
+
+            def read_events(self, after=None, limit=None):
+                return [imported_event]
+
+            def head(self):
+                return EventLogHead(
+                    timeline_id=imported_event.timeline_id,
+                    last_event_id=imported_event.event_id,
+                    last_hash=imported_event.hash,
+                    event_count=1,
+                    version=1,
+                )
+
+            def verify_chain(self):
+                return EventLogVerification(
+                    ok=True, checked_events=1,
+                    last_event_id=imported_event.event_id,
+                )
+
+            def append_event(self, *args, **kwargs):
+                append_calls.append((args, kwargs))
+                raise AssertionError("append_event must not be called by read-only commands")
+
+        monkeypatch.setattr(
+            evlog_mod,
+            "select_timeline_backend",
+            lambda timeline_id, timeline_home, preferred_backend: (None, ReadOnlySupabaseBackend()),
+        )
+
+        # Run all read-only observability commands
+        for argv in [
+            ["history", "test-tl"],
+            ["diff", "test-tl", "--from", eid, "--to", eid],
+            ["audit", "test-tl"],
+            ["preview", "test-tl", "--at", eid, "--out", str(Path("/tmp") / "pv_supabase.json")],
+        ]:
+            rc = timeline_cli.main(argv)
+            assert rc == 0, f"Command {' '.join(argv)} failed with rc={rc}"
+
+        assert len(append_calls) == 0, (
+            f"append_event was called {len(append_calls)} times by read-only commands"
+        )
