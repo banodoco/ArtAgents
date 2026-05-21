@@ -1,11 +1,12 @@
-"""Tests for the shared mutation gateway (pack_write_gateway) — m3.5 T7.
+"""Tests for the shared mutation gateway (pack_write_gateway) — m4 T9 update.
 
 Proves:
-1. Explicit bootstrap: timeline.imported emitted before first domain mutation
-   when the event stream is empty and identity sidecar exists.
+1. Bootstrap behavior: created timelines (provenance "created") get NO
+   timeline.imported — first domain event is bare.  Only true-legacy
+   timelines (no identity sidecar) get timeline.imported bootstrap.
 2. Append ordering: events are appended in the order they are supplied.
 3. Actor attribution with actor.via chaining.
-4. Materialization sequencing: assembly.json is updated after each append.
+4. Materialization sequencing: assembly.json is regenerated after append.
 5. Gateway return values: PackWriteResult contains all required fields.
 """
 
@@ -45,7 +46,8 @@ def _arrangement_event_dict(config: dict[str, Any]) -> dict[str, Any]:
 
 
 class GatewayBootstrapTest(unittest.TestCase):
-    """Prove timeline.imported bootstrap behavior."""
+    """Prove bootstrap behavior: created timelines get NO timeline.imported;
+    only true-legacy timelines (no identity) bootstrap."""
 
     def setUp(self):
         self.tmp_root = Path(tempfile.mkdtemp(prefix="gw-bootstrap-", dir=ROOT))
@@ -64,8 +66,10 @@ class GatewayBootstrapTest(unittest.TestCase):
         ulid, _tdir = found
         return ulid
 
-    def test_first_write_emits_timeline_imported_before_domain_event(self):
-        """On first write to an empty stream, timeline.imported is emitted first."""
+    def test_created_timeline_first_write_no_bootstrap(self):
+        """On first write to a created timeline (provenance 'created'),
+        NO timeline.imported is emitted — the first event is the domain
+        event directly."""
         result = pack_write_gateway(
             project_slug="bootstrap-proj",
             timeline_slug="bs-timeline",
@@ -75,18 +79,18 @@ class GatewayBootstrapTest(unittest.TestCase):
             actor=TimelineActor(type="system", id="gw-test:bootstrap", display="Gateway Test"),
         )
 
-        self.assertTrue(result.bootstrap_emitted, "bootstrap should be emitted on first write")
-        # Bootstrap + 1 domain event = 2 events
-        self.assertEqual(result.attempts, 2, f"expected 2 events, got {result.attempts}")
-        self.assertEqual(len(result.event_ids), 2)
-        # Version should be >= 2 (bootstrap at v1, domain at v2)
-        self.assertGreaterEqual(result.new_version, 2)
+        self.assertFalse(result.bootstrap_emitted,
+                         "created timeline must NOT bootstrap")
+        self.assertEqual(result.attempts, 1,
+                         f"expected 1 domain event, got {result.attempts}")
+        self.assertEqual(len(result.event_ids), 1)
+        self.assertGreaterEqual(result.new_version, 1)
 
-    def test_second_write_skips_bootstrap(self):
-        """Second write to the same stream skips timeline.imported."""
+    def test_second_write_also_no_bootstrap(self):
+        """Second write to created timeline also has no bootstrap."""
         ulid = self._find_timeline_ulid()
 
-        # First write — bootstraps.
+        # First write — no bootstrap for created timeline.
         result1 = pack_write_gateway(
             project_slug="bootstrap-proj",
             timeline_slug="bs-timeline",
@@ -95,9 +99,10 @@ class GatewayBootstrapTest(unittest.TestCase):
             events=[_arrangement_event([{"id": "first"}])],
             actor=TimelineActor(type="system", id="gw-test:first", display="Gateway Test"),
         )
-        self.assertTrue(result1.bootstrap_emitted)
+        self.assertFalse(result1.bootstrap_emitted,
+                         "created timeline first write must NOT bootstrap")
 
-        # Second write — no bootstrap.
+        # Second write — also no bootstrap.
         result2 = pack_write_gateway(
             project_slug="bootstrap-proj",
             timeline_slug="bs-timeline",
@@ -106,10 +111,9 @@ class GatewayBootstrapTest(unittest.TestCase):
             events=[_arrangement_event([{"id": "second"}])],
             actor=TimelineActor(type="system", id="gw-test:second", display="Gateway Test"),
         )
-        self.assertFalse(result2.bootstrap_emitted, "bootstrap should be skipped on second write")
-        # Only 1 domain event
+        self.assertFalse(result2.bootstrap_emitted,
+                         "second write must NOT bootstrap")
         self.assertEqual(result2.attempts, 1)
-        # Version should be higher than first write
         self.assertGreater(result2.new_version, result1.new_version)
 
     def test_verify_chain_passes_after_writes(self):
@@ -154,7 +158,8 @@ class GatewayAppendOrderingTest(unittest.TestCase):
         create_timeline("order-proj", "order-tl")
 
     def test_events_appended_in_supplied_order(self):
-        """Events appear in the order they were given, after bootstrap."""
+        """Events appear in the order they were given (no bootstrap for
+        created timelines)."""
         events = [
             _arrangement_event([{"id": "1"}]),
             _arrangement_event([{"id": "2"}]),
@@ -170,9 +175,9 @@ class GatewayAppendOrderingTest(unittest.TestCase):
             actor=TimelineActor(type="system", id="gw-test:order", display="Gateway Test"),
         )
 
-        # Bootstrap + 3 domain = 4 total
-        self.assertEqual(result.attempts, 4)
-        self.assertEqual(result.new_version, 4)
+        # 3 domain events (no bootstrap for created timeline)
+        self.assertEqual(result.attempts, 3)
+        self.assertEqual(result.new_version, 3)
 
 
 class GatewayActorAttributionTest(unittest.TestCase):
@@ -224,11 +229,13 @@ class GatewayActorAttributionTest(unittest.TestCase):
         head = backend.head()
         self.assertGreater(head.event_count, 0)
 
-        # Check the domain event's actor (not the bootstrap event).
+        # For created timelines, only domain event is present (no bootstrap).
         events_list = backend.read_events(limit=head.event_count)
-        self.assertGreaterEqual(len(events_list), 2, "should have bootstrap + domain event")
+        self.assertGreaterEqual(len(events_list), 1, "should have at least 1 domain event")
 
-        domain_event = events_list[-1]
+        domain_event = events_list[0]
+        self.assertEqual(domain_event.kind, "arrangement.replaced")
+
         # TimelineEvent.actor is a TimelineActor dataclass.
         domain_actor = domain_event.actor
         self.assertEqual(domain_actor.type, "agent")

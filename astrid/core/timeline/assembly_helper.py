@@ -1,127 +1,52 @@
-"""Assembly.json compatibility contract for clip-level and secondary mutations.
+"""Thin delegation wrapper around ``projection.py`` for assembly.json
+compatibility writes.
 
-This module defines the **only** allowed mutation path for ``assembly.json``
-during m2+m3 editing.  Every edit that must keep ``assembly.json`` in sync
-with the event stream does so through the helpers here.
+After m4 this module no longer contains an independent dispatch table or
+applicator functions.  ``materialize_event()`` and ``materialize_clip_event()``
+delegate to the canonical projector in ``projection.py``: they load the current
+``assembly.json`` from disk, fold a single event onto it via
+``apply_event_to_assembly()``, and atomically write the result back.
 
-Contract (locked for m2, extended for m3)
-------------------------------------------
+In m4 the authority model shifted: mutation paths now call
+``regenerate_projection()`` (via ``_edit_helpers._materialize()``) to rebuild
+``assembly.json`` from the full canonical event stream.  This module remains
+as a thin compatibility shim for callers that still need the per-event fold
+(e.g. tests importing ``AssemblyMutationError`` or ``materialize_event``).
 
-The compatibility target is ``Assembly.assembly`` — the opaque dict stored
-under the ``"assembly"`` key of the on-disk ``assembly.json`` file:
-
-.. code-block:: json
-
-    {"schema_version": 1, "assembly": { ... }}
-
-Three explicit behaviors for each domain key:
-
-    (a) **Empty assembly** (``assembly == {}``)
-        Initialised with the domain's default shape (e.g. ``{"clips": []}``).
-
-    (b) **Existing assembly with the expected key**
-        The caller updates in-place; the helper ensures the pre-condition holds.
-
-    (c) **Non-empty assembly without the expected key**
-        The helper raises ``AssemblyMutationError`` at mutation time.
-        This protects unknown assembly shapes from accidental corruption.
-
-.. note::
-
-    ``assembly.json`` is maintained by a **compatibility materializer**
-    that runs synchronously after each event append.  In m4 this
-    file will become a projection-rebuild target and the synchronous
-    materializer will be removed.
-
-    Until m4, a crash between ``append_event`` and the materializer write
-    can leave the event stream ahead of ``assembly.json``.  Accept this
-    window; m4 projection will close it.
-
-Compatibility assembly.json shape per domain (m4 projection target)
--------------------------------------------------------------------
-
-**clips** (existing m2):
-    ``assembly.clips``: ``list[dict]`` where each dict has at minimum:
-    ``{"id": str, "kind": str, "asset_id": str, "start": float, "duration": float,
-      "text": str, "note": str}``.
-    Optional: ``"transition"`` dict, ``"effects"`` list.
-
-**tracks** (new m3):
-    ``assembly.tracks``: ``list[dict]`` where each dict has:
-    ``{"id": str, "kind": "visual"|"audio", "label": str | None}``.
-
-**theme** (new m3):
-    ``assembly.theme``: ``str`` — the active theme id.
-
-**theme_overrides** (new m3):
-    ``assembly.theme_overrides``: ``dict[str, Any]`` — keyed by namespace
-    (e.g. ``"visual"``, ``"generation"``, ``"voice"``, ``"audio"``, ``"pacing"``).
-    Nested values are treated as opaque JSON.
-
-**pool** (new m3):
-    ``assembly.pool``: ``{"entries": [{"asset_id": str, "score": float}]}``.
-
-**arrangement** (new m3):
-    ``assembly.arrangement``: ``dict`` — opaque arrangement dict with at minimum
-    ``{"clips": [...]}``.  Fully replaced on ``arrangement.replaced``.
-
-**Transitions** live on clips:
-    ``clip["transition"] = {"kind": str, "right_clip_id": str, "duration_seconds": float}``.
-    The transition is keyed on the LEFT clip of the adjacent pair.
-
-**Effects** live on clips:
-    ``clip["effects"] = [{"effect_id": str, "params": dict | None}]``.
-
-**Audio bindings** target the clip's ``asset_id`` field:
-    ``clip["asset_id"] = asset_id`` (bound) or ``""`` (unbound).
-    This targets the renderable timeline clip asset relationship.
-    Arrangement-level audio (``audio_source.pool_id``) stays with
-    ``arrangement.replaced``.
+External callers
+----------------
+* ``_edit_helpers._materialize()`` no longer calls ``materialize_event()`` —
+  it now calls ``regenerate_projection()`` directly.
+* ``clip_edits.py`` callers in tests import ``AssemblyMutationError``.
+* ``test_secondary_edits.py`` imports ``AssemblyMutationError`` and
+  ``materialize_event``.
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .events.schema import (
-    ArrangementReplacedPayload,
-    AudioBoundPayload,
-    AudioUnboundPayload,
-    ClipAddedPayload,
-    ClipAnnotatedPayload,
-    ClipMovedPayload,
-    ClipPosition,
-    ClipRemovedPayload,
-    ClipReplacedPayload,
-    ClipRetimedPayload,
-    ClipSwappedPayload,
-    ClipTextSetPayload,
-    EffectAddedPayload,
-    EffectRemovedPayload,
-    EffectTunedPayload,
-    PoolAssetAddedPayload,
-    PoolAssetRemovedPayload,
-    PoolAssetScoredPayload,
-    ThemeOverriddenPayload,
-    ThemeSetPayload,
-    TimelineEvent,
-    TrackAddedPayload,
-    TrackRemovedPayload,
-    TransitionRemovedPayload,
-    TransitionSetPayload,
-)
-from .model import Assembly, TIMELINE_SCHEMA_VERSION
+from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core.timeline.model import Assembly, TIMELINE_SCHEMA_VERSION
+
+from .events.schema import TimelineEvent
+from .projection import _DISPATCH_MAP, apply_event_to_assembly
+
+
+# ---------------------------------------------------------------------------
+# Exception (kept for backward compatibility with test imports)
+# ---------------------------------------------------------------------------
 
 
 class AssemblyMutationError(RuntimeError):
     """Raised when *assembly.json* cannot be safely mutated by editing code."""
 
 
-# ============================================================================
-# Generic ensure-key infrastructure
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Generic ensure-key infrastructure (preserved for backward-compatible error
+# messages; the projector owns the authoritative applicator logic).
+# ---------------------------------------------------------------------------
 
 
 def _ensure_key(
@@ -160,448 +85,33 @@ def _ensure_key(
     )
 
 
-# ---------------------------------------------------------------------------
-# Domain-specific ensure-key helpers
-# ---------------------------------------------------------------------------
-
-
 def ensure_clips_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    """Return *assembly* guaranteed to contain a ``"clips"`` key (list)."""
     return _ensure_key(assembly, "clips", [], type_check=list)
 
 
 def ensure_tracks_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    """Return *assembly* guaranteed to contain a ``"tracks"`` key (list).
-
-    Compatible shape: ``[{"id": str, "kind": "visual"|"audio", "label": str | None}]``
-    """
     return _ensure_key(assembly, "tracks", [], type_check=list)
 
 
 def ensure_theme_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    """Return *assembly* guaranteed to contain a ``"theme"`` key (str).
-
-    Compatible shape: a string theme id (empty string means no theme set).
-    """
     return _ensure_key(assembly, "theme", "", type_check=str)
 
 
 def ensure_theme_overrides_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    """Return *assembly* guaranteed to contain a ``"theme_overrides"`` key (dict).
-
-    Compatible shape: ``{"namespace": opaque_value}`` keyed by namespace
-    (visual, generation, voice, audio, pacing).  Nested values are opaque JSON.
-    """
     return _ensure_key(assembly, "theme_overrides", {}, type_check=dict)
 
 
 def ensure_pool_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    """Return *assembly* guaranteed to contain a ``"pool"`` key (dict).
-
-    Compatible shape: ``{"entries": [{"asset_id": str, "score": float}]}``.
-    """
     return _ensure_key(assembly, "pool", {"entries": []}, type_check=dict)
 
 
 def ensure_arrangement_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    """Return *assembly* guaranteed to contain an ``"arrangement"`` key (dict).
-
-    Compatible shape: ``{"clips": [...]}`` — opaque arrangement with at least
-    a clips list.  Fully replaced on ``arrangement.replaced``.
-    """
     return _ensure_key(assembly, "arrangement", {"clips": []}, type_check=dict)
 
 
-# ---------------------------------------------------------------------------
-# Convenience: load / materialise loop
-# ---------------------------------------------------------------------------
-
-
-def load_assembly_with_clips(assembly: Assembly) -> dict[str, Any]:
-    """Load the opaque ``assembly.assembly`` dict and enforce the clips contract.
-
-    Returns a mutable dict that the caller can update in-place.  The
-    returned dict is a *copy* of the assembly content so that the frozen
-    ``Assembly`` is not accidentally mutated.
-    """
-    return ensure_clips_key(dict(assembly.assembly))
-
-
-def materialise_assembly(assembly_dict: dict[str, Any]) -> Assembly:
-    """Wrap *assembly_dict* back into a frozen ``Assembly`` ready for writing.
-
-    The caller is responsible for writing the returned ``Assembly`` to disk
-    via ``assembly.write(path)`` or ``write_json_atomic(path, assembly.to_json_obj())``.
-    """
-    return Assembly(
-        schema_version=TIMELINE_SCHEMA_VERSION,
-        assembly=dict(assembly_dict),
-    )
-
-
-def get_clips(assembly: Assembly) -> list[dict[str, Any]]:
-    """Return the clips list from *assembly*, enforcing the contract.
-
-    Convenience accessor for code that reads clips without mutating them.
-    Raises ``AssemblyMutationError`` when the assembly shape is incompatible.
-    """
-    checked = ensure_clips_key(dict(assembly.assembly))
-    return checked["clips"]
-
-
-def set_clips(assembly: Assembly, clips: list[dict[str, Any]]) -> Assembly:
-    """Return a new ``Assembly`` with the clips list replaced.
-
-    Preserves unrelated keys inside ``assembly.assembly``.
-    """
-    checked = ensure_clips_key(dict(assembly.assembly))
-    checked["clips"] = list(clips)
-    return materialise_assembly(checked)
-
-
-# ============================================================================
-# Clip helpers (existing m2, unchanged)
-# ============================================================================
-
-
-def _clip_index(clips: list[dict[str, Any]], clip_id: str) -> int | None:
-    """Return the list index of *clip_id* in *clips*, or ``None``."""
-    for i, clip in enumerate(clips):
-        if clip.get("id") == clip_id:
-            return i
-    return None
-
-
-def _insert_at_position(
-    clips: list[dict[str, Any]], new_clip: dict[str, Any], position: ClipPosition | None
-) -> None:
-    """Insert *new_clip* into *clips* at *position* (append if None)."""
-    if position is None:
-        clips.append(new_clip)
-        return
-    if position.mode == "index":
-        idx = max(0, min(position.index or 0, len(clips)))
-        clips.insert(idx, new_clip)
-    elif position.mode == "after":
-        ref_idx = _clip_index(clips, position.ref_clip_id or "")
-        if ref_idx is not None:
-            clips.insert(ref_idx + 1, new_clip)
-        else:
-            clips.append(new_clip)
-    elif position.mode == "before":
-        ref_idx = _clip_index(clips, position.ref_clip_id or "")
-        if ref_idx is not None:
-            clips.insert(ref_idx, new_clip)
-        else:
-            clips.append(new_clip)
-
-
-def _make_clip_entry(payload: ClipAddedPayload) -> dict[str, Any]:
-    """Build a minimal clip dict from a ``clip.added`` payload."""
-    return {
-        "id": payload.clip_id,
-        "kind": payload.kind,
-        "asset_id": payload.asset_id,
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": "",
-    }
-
-
-# -- per-kind clip applicators ------------------------------------------------
-
-
-def _apply_clip_added(clips: list[dict[str, Any]], payload: ClipAddedPayload) -> None:
-    _insert_at_position(clips, _make_clip_entry(payload), payload.position)
-
-
-def _apply_clip_removed(clips: list[dict[str, Any]], payload: ClipRemovedPayload) -> None:
-    idx = _clip_index(clips, payload.clip_id)
-    if idx is not None:
-        clips.pop(idx)
-
-
-def _apply_clip_moved(clips: list[dict[str, Any]], payload: ClipMovedPayload) -> None:
-    idx = _clip_index(clips, payload.clip_id)
-    if idx is None:
-        return
-    clip = clips.pop(idx)
-    _insert_at_position(clips, clip, payload.position)
-
-
-def _apply_clip_retimed(clips: list[dict[str, Any]], payload: ClipRetimedPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["start"] = payload.start
-            clip["duration"] = payload.duration
-            return
-
-
-def _apply_clip_swapped(clips: list[dict[str, Any]], payload: ClipSwappedPayload) -> None:
-    idx_a = _clip_index(clips, payload.clip_a_id)
-    idx_b = _clip_index(clips, payload.clip_b_id)
-    if idx_a is not None and idx_b is not None:
-        clips[idx_a], clips[idx_b] = clips[idx_b], clips[idx_a]
-
-
-def _apply_clip_replaced(clips: list[dict[str, Any]], payload: ClipReplacedPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["asset_id"] = payload.with_asset_id
-            return
-
-
-def _apply_clip_text_set(clips: list[dict[str, Any]], payload: ClipTextSetPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["text"] = payload.text
-            return
-
-
-def _apply_clip_annotated(clips: list[dict[str, Any]], payload: ClipAnnotatedPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["note"] = payload.note
-            return
-
-
-# ============================================================================
-# Secondary primitive applicators (new m3)
-# ============================================================================
-
-
-# ---------------------------------------------------------------------------
-# transition.* applicators
-# ---------------------------------------------------------------------------
-# Transition identity is keyed by the LEFT clip of the adjacent pair.
-# Materialized as ``clip["transition"] = {kind, right_clip_id, duration_seconds}``.
-
-
-def _apply_transition_set(clips: list[dict[str, Any]], payload: TransitionSetPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.left_clip_id:
-            clip["transition"] = {
-                "kind": payload.kind,
-                "right_clip_id": payload.right_clip_id,
-                "duration_seconds": payload.duration_seconds,
-            }
-            return
-
-
-def _apply_transition_removed(clips: list[dict[str, Any]], payload: TransitionRemovedPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.left_clip_id:
-            clip.pop("transition", None)
-            return
-
-
-# ---------------------------------------------------------------------------
-# effect.* applicators
-# ---------------------------------------------------------------------------
-# Effects are clip-attached, stored as ``clip["effects"]`` list.
-# Each effect is ``{"effect_id": str, "params": dict | None}``.
-
-
-def _apply_effect_added(clips: list[dict[str, Any]], payload: EffectAddedPayload, assembly: dict[str, Any]) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            effects: list[dict[str, Any]] = clip.setdefault("effects", [])
-            effects.append({
-                "effect_id": payload.effect_id,
-                "params": dict(payload.params) if payload.params else None,
-            })
-            return
-
-
-def _apply_effect_removed(clips: list[dict[str, Any]], payload: EffectRemovedPayload, assembly: dict[str, Any]) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            effects = clip.get("effects")
-            if isinstance(effects, list):
-                clip["effects"] = [
-                    e for e in effects if e.get("effect_id") != payload.effect_id
-                ]
-            return
-
-
-def _apply_effect_tuned(clips: list[dict[str, Any]], payload: EffectTunedPayload, assembly: dict[str, Any]) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            effects = clip.get("effects")
-            if isinstance(effects, list):
-                for e in effects:
-                    if e.get("effect_id") == payload.effect_id:
-                        params = e.setdefault("params", {})
-                        params[payload.param] = payload.value
-                        return
-            return
-
-
-# ---------------------------------------------------------------------------
-# theme.* applicators
-# ---------------------------------------------------------------------------
-
-
-def _apply_theme_set(assembly: dict[str, Any], payload: ThemeSetPayload) -> None:
-    assembly["theme"] = payload.theme_id
-
-
-def _apply_theme_overridden(assembly: dict[str, Any], payload: ThemeOverriddenPayload) -> None:
-    overrides: dict[str, Any] = assembly["theme_overrides"]
-    overrides[payload.override_id] = payload.value
-
-
-# ---------------------------------------------------------------------------
-# track.* applicators
-# ---------------------------------------------------------------------------
-
-
-def _apply_track_added(assembly: dict[str, Any], payload: TrackAddedPayload) -> None:
-    tracks: list[dict[str, Any]] = assembly["tracks"]
-    track_entry: dict[str, Any] = {"id": payload.track_id, "kind": payload.kind}
-    if payload.label is not None:
-        track_entry["label"] = payload.label
-    tracks.append(track_entry)
-
-
-def _apply_track_removed(assembly: dict[str, Any], payload: TrackRemovedPayload) -> None:
-    tracks: list[dict[str, Any]] = assembly["tracks"]
-    assembly["tracks"] = [t for t in tracks if t.get("id") != payload.track_id]
-
-
-# ---------------------------------------------------------------------------
-# audio.* applicators
-# ---------------------------------------------------------------------------
-# Audio bind/unbind targets the clip's ``asset_id`` field.
-# This is the renderable timeline clip asset relationship.
-# Arrangement-level audio (audio_source.pool_id) stays with arrangement.replaced.
-
-
-def _apply_audio_bound(clips: list[dict[str, Any]], payload: AudioBoundPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["asset_id"] = payload.asset_id
-            return
-
-
-def _apply_audio_unbound(clips: list[dict[str, Any]], payload: AudioUnboundPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["asset_id"] = ""
-            return
-
-
-# ---------------------------------------------------------------------------
-# pool.* applicators
-# ---------------------------------------------------------------------------
-
-
-def _apply_pool_asset_added(assembly: dict[str, Any], payload: PoolAssetAddedPayload) -> None:
-    pool: dict[str, Any] = assembly["pool"]
-    entries: list[dict[str, Any]] = pool.setdefault("entries", [])
-    entries.append({"asset_id": payload.asset_id, "score": 0.0})
-
-
-def _apply_pool_asset_removed(assembly: dict[str, Any], payload: PoolAssetRemovedPayload) -> None:
-    pool: dict[str, Any] = assembly["pool"]
-    entries: list[dict[str, Any]] = pool.get("entries", [])
-    pool["entries"] = [e for e in entries if e.get("asset_id") != payload.asset_id]
-
-
-def _apply_pool_asset_scored(assembly: dict[str, Any], payload: PoolAssetScoredPayload) -> None:
-    pool: dict[str, Any] = assembly["pool"]
-    entries: list[dict[str, Any]] = pool.get("entries", [])
-    for e in entries:
-        if e.get("asset_id") == payload.asset_id:
-            e["score"] = payload.score
-            return
-
-
-# ---------------------------------------------------------------------------
-# arrangement.* applicators
-# ---------------------------------------------------------------------------
-
-
-def _apply_arrangement_replaced(assembly: dict[str, Any], payload: ArrangementReplacedPayload) -> None:
-    assembly["arrangement"] = dict(payload.arrangement)
-
-
-# ============================================================================
-# Unified dispatch table
-# ============================================================================
-# Maps every event kind -> (applicator, list of ensure_keys to call first)
-# Each applicator receives (assembly_dict, payload) and mutates assembly in-place.
-# For clip-scoped events, clips are extracted from assembly["clips"] and the
-# applicator receives (clips, payload, assembly_dict) to also allow clip-scoped
-# mutations that need assembly context (e.g. effects).
-
-
-def _dispatch_clip_applicator(
-    assembly: dict[str, Any],
-    payload: Any,
-    fn: Any,
-) -> None:
-    """Dispatch a clip-scoped applicator that only needs the clips list."""
-    clips: list[dict[str, Any]] = assembly["clips"]
-    fn(clips, payload)
-
-
-def _dispatch_clip_assembly_applicator(
-    assembly: dict[str, Any],
-    payload: Any,
-    fn: Any,
-) -> None:
-    """Dispatch a clip-scoped applicator that may also touch assembly context."""
-    clips: list[dict[str, Any]] = assembly["clips"]
-    fn(clips, payload, assembly)
-
-
-def _dispatch_assembly_applicator(
-    assembly: dict[str, Any],
-    payload: Any,
-    fn: Any,
-) -> None:
-    """Dispatch an assembly-scoped applicator."""
-    fn(assembly, payload)
-
-
-# (event_kind, ensure_keys, dispatch_fn, applicator)
-_DISPATCH: list[tuple[str, list[str], Any, Any]] = [
-    # -- clip.* (m2, unchanged) --
-    ("clip.added", ["clips"], _dispatch_clip_applicator, _apply_clip_added),
-    ("clip.removed", ["clips"], _dispatch_clip_applicator, _apply_clip_removed),
-    ("clip.moved", ["clips"], _dispatch_clip_applicator, _apply_clip_moved),
-    ("clip.retimed", ["clips"], _dispatch_clip_applicator, _apply_clip_retimed),
-    ("clip.swapped", ["clips"], _dispatch_clip_applicator, _apply_clip_swapped),
-    ("clip.replaced", ["clips"], _dispatch_clip_applicator, _apply_clip_replaced),
-    ("clip.text_set", ["clips"], _dispatch_clip_applicator, _apply_clip_text_set),
-    ("clip.annotated", ["clips"], _dispatch_clip_applicator, _apply_clip_annotated),
-    # -- transition.* (m3) --
-    ("transition.set", ["clips"], _dispatch_clip_applicator, _apply_transition_set),
-    ("transition.removed", ["clips"], _dispatch_clip_applicator, _apply_transition_removed),
-    # -- effect.* (m3) --
-    ("effect.added", ["clips"], _dispatch_clip_assembly_applicator, _apply_effect_added),
-    ("effect.removed", ["clips"], _dispatch_clip_assembly_applicator, _apply_effect_removed),
-    ("effect.tuned", ["clips"], _dispatch_clip_assembly_applicator, _apply_effect_tuned),
-    # -- theme.* (m3) --
-    ("theme.set", ["theme", "theme_overrides"], _dispatch_assembly_applicator, _apply_theme_set),
-    ("theme.overridden", ["theme", "theme_overrides"], _dispatch_assembly_applicator, _apply_theme_overridden),
-    # -- track.* (m3) --
-    ("track.added", ["tracks"], _dispatch_assembly_applicator, _apply_track_added),
-    ("track.removed", ["tracks"], _dispatch_assembly_applicator, _apply_track_removed),
-    # -- audio.* (m3) --
-    ("audio.bound", ["clips"], _dispatch_clip_applicator, _apply_audio_bound),
-    ("audio.unbound", ["clips"], _dispatch_clip_applicator, _apply_audio_unbound),
-    # -- pool.* (m3) --
-    ("pool.asset_added", ["pool"], _dispatch_assembly_applicator, _apply_pool_asset_added),
-    ("pool.asset_removed", ["pool"], _dispatch_assembly_applicator, _apply_pool_asset_removed),
-    ("pool.asset_scored", ["pool"], _dispatch_assembly_applicator, _apply_pool_asset_scored),
-    # -- arrangement.* (m3) --
-    ("arrangement.replaced", ["arrangement"], _dispatch_assembly_applicator, _apply_arrangement_replaced),
-]
-
-# Build fast lookup
+# Map of key → ensure function (mirrors the keys used by the projector's
+# dispatch table).  Used for pre-flight validation before delegating to
+# the projector, so error messages remain backward-compatible.
 _ENSURE_FN: dict[str, Any] = {
     "clips": ensure_clips_key,
     "tracks": ensure_tracks_key,
@@ -611,69 +121,85 @@ _ENSURE_FN: dict[str, Any] = {
     "arrangement": ensure_arrangement_key,
 }
 
-_EMPTY_INIT_DEFAULTS: dict[str, Any] = {
-    "clips": [],
-    "tracks": [],
-    "theme": "",
-    "theme_overrides": {},
-    "pool": {"entries": []},
-    "arrangement": {"clips": []},
-}
 
-
-def _copy_empty_default(value: Any) -> Any:
-    return deepcopy(value)
-
-_DISPATCH_MAP: dict[str, tuple[list[str], Any, Any]] = {}
-for kind, keys, dispatcher, applicator in _DISPATCH:
-    _DISPATCH_MAP[kind] = (keys, dispatcher, applicator)
-
-
-# ============================================================================
-# Materializer entry points (m4 removal seam)
-# ============================================================================
+# ---------------------------------------------------------------------------
+# Compatibility materializer entry points (delegation wrappers)
+# ---------------------------------------------------------------------------
 
 
 def materialize_event(timeline_home: Path, event: TimelineEvent) -> None:
-    """Apply a single event to ``assembly.json`` on disk.
+    """Apply a single *event* to ``assembly.json`` on disk.
 
-    Reads ``assembly.json``, ensures the required keys for *event*'s domain,
-    applies the event, and writes the result back atomically.
+    1. Load ``assembly.json`` (wrapper shape ``{schema_version, assembly}``).
+    2. Pre-validate assembly shape via ``_ENSURE_FN`` (backward-compatible
+       error messages).
+    3. Fold *event* onto the inner assembly dict via
+       ``apply_event_to_assembly()``.
+    4. Atomically write the projected result back to ``assembly.json``,
+       preserving the wrapper shape.
 
-    Raises ``AssemblyMutationError`` when the event kind is unsupported or the
-    assembly shape is incompatible.
-
-    **m4 removal seam**: this function and the synchronous materializer
-    block above will be removed in m4 when projection becomes the
-    authoritative source for ``assembly.json``.
+    Raises ``AssemblyMutationError`` when the assembly file is malformed or
+    the projector raises a ``ProjectionError``.
     """
-    dispatch_entry = _DISPATCH_MAP.get(event.kind)
-    if dispatch_entry is None:
-        raise AssemblyMutationError(
-            f"materialize_event does not support event kind {event.kind!r}"
-        )
-
-    ensure_keys, dispatcher, applicator = dispatch_entry
-
     assembly_path = timeline_home / "assembly.json"
-    assembly = Assembly.from_json(assembly_path)
-    assembly_dict = dict(assembly.assembly)
+    try:
+        assembly = Assembly.from_json(assembly_path)
+    except FileNotFoundError:
+        assembly = Assembly(
+            schema_version=TIMELINE_SCHEMA_VERSION,
+            assembly={},
+        )
+    except Exception as exc:
+        raise AssemblyMutationError(
+            f"failed to read assembly.json for materialization: {exc}"
+        ) from exc
 
-    if not assembly_dict:
-        for key in ensure_keys:
-            if key in _EMPTY_INIT_DEFAULTS:
-                assembly_dict[key] = _copy_empty_default(_EMPTY_INIT_DEFAULTS[key])
+    current_state = dict(assembly.assembly)
 
-    # Ensure all required keys exist
-    for key in ensure_keys:
-        ensure_fn = _ENSURE_FN.get(key)
-        if ensure_fn is not None:
-            assembly_dict = ensure_fn(assembly_dict)
+    # Pre-validate: look up which keys this event kind requires and run the
+    # backward-compatible ensure checks so error messages match the old format.
+    # Important: when the assembly is empty we initialize ALL required keys
+    # at once (as the old code did via _EMPTY_INIT_DEFAULTS), then run the
+    # type-checking ensure functions which will find the keys present.
+    dispatch_entry = _DISPATCH_MAP.get(event.kind)
+    if dispatch_entry is not None:
+        ensure_keys, _dispatcher, _applicator = dispatch_entry
+        if not current_state:
+            # Empty assembly: bulk-initialise all required keys.
+            from copy import deepcopy
 
-    # Apply the event
-    dispatcher(assembly_dict, event.payload, applicator)
+            _EMPTY_INIT_DEFAULTS: dict[str, Any] = {
+                "clips": [],
+                "tracks": [],
+                "theme": "",
+                "theme_overrides": {},
+                "pool": {"entries": []},
+                "arrangement": {"clips": []},
+            }
+            for key in ensure_keys:
+                if key in _EMPTY_INIT_DEFAULTS:
+                    current_state[key] = deepcopy(_EMPTY_INIT_DEFAULTS[key])
+        else:
+            # Non-empty assembly: run each ensure check independently.
+            for key in ensure_keys:
+                ensure_fn = _ENSURE_FN.get(key)
+                if ensure_fn is not None:
+                    current_state = ensure_fn(current_state)
 
-    new_assembly = materialise_assembly(assembly_dict)
+    # Fold the single event onto the current state.
+    try:
+        new_state = apply_event_to_assembly(current_state, event)
+    except Exception as exc:
+        raise AssemblyMutationError(
+            f"projection failed for event {event.event_id!r} "
+            f"({event.kind!r}): {exc}"
+        ) from exc
+
+    # Write back atomically with the wrapper shape.
+    new_assembly = Assembly(
+        schema_version=TIMELINE_SCHEMA_VERSION,
+        assembly=new_state,
+    )
     new_assembly.write(assembly_path)
 
 
@@ -682,9 +208,5 @@ def materialize_clip_event(timeline_home: Path, event: TimelineEvent) -> None:
 
     Delegates to ``materialize_event`` — kept for backward compatibility
     with existing ``clip_edits.py`` callers.
-
-    **m4 removal seam**: this function and the synchronous materializer
-    will be removed in m4 when projection becomes the authoritative source
-    for ``assembly.json``.
     """
     materialize_event(timeline_home, event)

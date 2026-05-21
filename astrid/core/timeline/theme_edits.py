@@ -59,7 +59,7 @@ def theme_set(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(theme_id, str) or not theme_id.strip():
         raise TimelineEditError("theme_id must be a non-empty string")
@@ -73,7 +73,7 @@ def theme_set(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -106,7 +106,7 @@ def theme_override(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(override_id, str) or not override_id.strip():
         raise TimelineEditError("override_id must be a non-empty string")
@@ -125,5 +125,5 @@ def theme_override(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event

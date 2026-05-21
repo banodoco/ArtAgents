@@ -1103,8 +1103,11 @@ def _emit_cut_managed_events(
     """Emit arrangement.replaced event through the pack write gateway.
 
     Called when cut runs in managed mode (--project + --timeline-slug).
-    Emits events before compatibility outputs are written, preserving the
-    append-then-materialize contract.
+    Emits events before compatibility outputs are written.  The gateway
+    handles bootstrap only for true-legacy timelines (no identity
+    sidecar); created timelines accept bare first domain events.  After
+    appending, ``assembly.json`` is regenerated from the canonical
+    event stream.
 
     When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
     chained as ``actor.via`` to preserve upstream human/agent/orchestrator

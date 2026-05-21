@@ -59,7 +59,7 @@ def pool_asset_add(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise TimelineEditError("asset_id must be a non-empty string")
@@ -73,7 +73,7 @@ def pool_asset_add(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -103,7 +103,7 @@ def pool_asset_remove(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise TimelineEditError("asset_id must be a non-empty string")
@@ -117,7 +117,7 @@ def pool_asset_remove(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -151,7 +151,7 @@ def pool_asset_score(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise TimelineEditError("asset_id must be a non-empty string")
@@ -169,5 +169,5 @@ def pool_asset_score(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event

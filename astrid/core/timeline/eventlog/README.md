@@ -41,10 +41,14 @@ Writer contract:
 - write newline-terminated canonical JSONL
 - update side files with atomic temp-file -> fsync -> rename
 
-Bootstrap contract:
+Bootstrap contract (m4):
 
 - post-m1 created timelines are distinguished by `assembly.identity.json`
-- true legacy timelines emit `timeline.imported` on first append
+  with provenance `"created"` — they accept bare first domain events
+  (no `timeline.imported`)
+- only true-legacy timelines (no identity sidecar, compatibility files
+  present) bootstrap via `timeline.imported` on first append; the identity
+  sidecar is then written with provenance `"imported"`
 - `timeline.deleted` is terminal for future appends
 
 ## Backend selection in m1
@@ -71,19 +75,23 @@ The supported m1 cases are intentionally narrow:
 This preserves the current fail-closed behavior and keeps backend selection
 limited to repository-representable cases.
 
-## Projection scope in m1
+## Projection scope in m4
 
-The event stream is authoritative, but m1 only repairs the compatibility
-projection for `display.json`.
+The event stream is authoritative.  Both `display.json` and `assembly.json`
+are repaired from the canonical event stream on every Astrid-owned read and
+export entry point.
 
-- reads use the on-disk `display.json` when no eventlog exists
-- reads repair missing/corrupt/stale `display.json` from lifecycle events when
-  an eventlog exists
+- reads use the on-disk file when no eventlog exists (legacy fallback)
+- `display.json` is repaired from lifecycle events via
+  `load_display_json_with_repair()`
+- `assembly.json` is repaired from the full domain event stream via
+  `load_assembly_json_with_repair()` (delegates to `regenerate_projection()`)
 - reads stay fail-closed when an eventlog exists but identity/projection
   materialization is unusable
 - `timeline.deleted` refuses display materialization when that event is already
   present in the stream
-- `assembly.json` and `manifest.json` are explicitly out of scope for m1
+- `assembly.json` repair covers every event kind from m1-m3 (clip, transition,
+  effect, theme, track, audio, pool, arrangement)
 
 Current read-side lifecycle handling is intentionally narrower than the schema
 surface. `project_display(...)` only branches on:

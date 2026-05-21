@@ -59,7 +59,7 @@ def arrangement_replace(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(arrangement, dict):
         raise TimelineEditError("arrangement must be a dict")
@@ -73,5 +73,5 @@ def arrangement_replace(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event

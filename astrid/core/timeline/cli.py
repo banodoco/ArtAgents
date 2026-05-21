@@ -678,6 +678,12 @@ def cmd_export(args: argparse.Namespace) -> int:
             sha = hashlib.sha256(dst.read_bytes()).hexdigest()
             manifest_entries.append((rel, sha))
 
+        # Repair assembly.json from the event log before export (ensures the
+        # exported tarball carries the current projected state even when the
+        # on-disk compatibility file is stale).
+        from .paths import load_assembly_json_with_repair
+        load_assembly_json_with_repair(timelines_dir)
+
         # Copy timeline container files
         for name in ("assembly.json", "manifest.json", "display.json"):
             src = timelines_dir / name

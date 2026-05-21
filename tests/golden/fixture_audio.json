@@ -1,0 +1,113 @@
+{
+  "description": "Golden fixture: audio.* event family (bound, unbound)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ1Z2H5764JP71YTMGG",
+      "timeline_id": "ddfe1a75-5a5f-4d23-a331-0b0280126765",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ1Z2H5764JP71YTMGM",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-silent",
+        "kind": "visual",
+        "asset_id": "placeholder-asset",
+        "position": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ1Z2H5764JP71YTMGH",
+      "timeline_id": "ddfe1a75-5a5f-4d23-a331-0b0280126765",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ1Z2H5764JP71YTMGN",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-music",
+        "kind": "audio",
+        "asset_id": "asset-music",
+        "position": {
+          "mode": "after",
+          "ref_clip_id": "clip-silent"
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ1Z2H5764JP71YTMGJ",
+      "timeline_id": "ddfe1a75-5a5f-4d23-a331-0b0280126765",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ1Z2H5764JP71YTMGP",
+      "kind": "audio.bound",
+      "payload": {
+        "clip_id": "clip-silent",
+        "asset_id": "asset-voiceover"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ1Z2H5764JP71YTMGK",
+      "timeline_id": "ddfe1a75-5a5f-4d23-a331-0b0280126765",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ1Z2H5764JP71YTMGQ",
+      "kind": "audio.unbound",
+      "payload": {
+        "clip_id": "clip-music"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "clips": [
+      {
+        "id": "clip-silent",
+        "kind": "visual",
+        "asset_id": "asset-voiceover",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": ""
+      },
+      {
+        "id": "clip-music",
+        "kind": "audio",
+        "asset_id": "",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": ""
+      }
+    ]
+  }
+}
