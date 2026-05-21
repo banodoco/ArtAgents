@@ -377,12 +377,14 @@ class TestRenameTimeline:
                     supabase_url=supabase_options.url,
                     auth_token=supabase_options.auth_token,
                     enabled=True,
+                    verified_subject=supabase_options.verified_subject,
+                    rpc_append_name=supabase_options.rpc_append_name,
                 ),
             )
 
         monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
 
-        with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event"):
+        with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event_v2"):
             rename_timeline(
                 "demo",
                 "alpha",
@@ -390,6 +392,8 @@ class TestRenameTimeline:
                 supabase_options=SupabaseEventLogOptions(
                     url="https://example.supabase.co",
                     auth_token="pat-token",
+                    verified_subject="user-1",
+                    rpc_append_name="append_timeline_event_v2",
                 ),
             )
 

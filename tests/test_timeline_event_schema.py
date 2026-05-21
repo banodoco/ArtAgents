@@ -202,6 +202,9 @@ class TimelineEventSchemaTest(unittest.TestCase):
             url="https://example.supabase.co",
             auth_token="pat-token",
             verified_subject="user-1",
+            actor_id="agent:codex",
+            actor_display="Codex",
+            rpc_append_name="append_timeline_event_v2",
         )
         stream, backend = select_timeline_backend(
             timeline_id=timeline_id,
@@ -216,6 +219,10 @@ class TimelineEventSchemaTest(unittest.TestCase):
         self.assertEqual(backend.backend_name(), "supabase")
         self.assertEqual(backend.supabase_url, "https://example.supabase.co")
         self.assertEqual(backend.auth_token, "pat-token")
+        self.assertEqual(backend.verified_subject, "user-1")
+        self.assertEqual(backend.actor_id, "agent:codex")
+        self.assertEqual(backend.actor_display, "Codex")
+        self.assertEqual(backend.rpc_append_name, "append_timeline_event_v2")
         self.assertTrue(backend.enabled)
 
     def test_supabase_backend_missing_config_raises_typed_errors(self) -> None:

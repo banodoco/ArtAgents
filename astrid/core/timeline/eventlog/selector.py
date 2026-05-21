@@ -51,6 +51,10 @@ def build_timeline_backend(stream: TimelineStreamRef) -> EventLogBackend:
             supabase_url=options.url if options is not None else None,
             auth_token=options.auth_token if options is not None else None,
             enabled=options is not None,
+            verified_subject=options.verified_subject if options is not None else None,
+            actor_id=options.actor_id if options is not None else None,
+            actor_display=options.actor_display if options is not None else None,
+            rpc_append_name=options.rpc_append_name if options is not None else "append_timeline_event",
         )
     if stream.home is None:
         raise ValueError("local_fs timeline stream requires a timeline home")

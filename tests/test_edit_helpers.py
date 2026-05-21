@@ -153,6 +153,7 @@ class GatewayBootstrapTest(unittest.TestCase):
             url="https://example.supabase.co",
             auth_token="pat-token",
             verified_subject="user-1",
+            rpc_append_name="append_timeline_event_v2",
         )
         _stream, backend = select_timeline_backend(
             timeline_id=str(uuid4()),
@@ -162,6 +163,8 @@ class GatewayBootstrapTest(unittest.TestCase):
         )
         self.assertEqual(backend.backend_name(), "supabase")
         self.assertEqual(backend.supabase_url, "https://example.supabase.co")
+        self.assertEqual(backend.verified_subject, "user-1")
+        self.assertEqual(backend.rpc_append_name, "append_timeline_event_v2")
 
 
 class GatewayAppendOrderingTest(unittest.TestCase):
