@@ -465,8 +465,8 @@ def discover_supabase_timelines(
 ) -> list[SupabaseTimelineCandidate]:
     """List candidate Supabase timelines for migration.
 
-    Uses the existing Reigh transport seam to query ``public.timelines``
-    and check whether ``public.timeline_events`` rows exist.
+    Uses the existing Reigh transport seam (``timeline_io.list_timelines``
+    and ``timeline_io.timeline_has_events``) per SD3.
 
     **No-credentials behaviour**: when *supabase_url* and *service_role_key*
     are both absent (the default local-only scenario), this function
@@ -487,9 +487,9 @@ def discover_supabase_timelines(
     list[SupabaseTimelineCandidate]
         Always a list (empty when config is absent or no timelines found).
     """
-    import json as _json
     import os as _os
-    import urllib.request as _request
+
+    from astrid.core.reigh.timeline_io import list_timelines, timeline_has_events
 
     url = supabase_url or _os.environ.get("SUPABASE_URL", "").strip()
     key = service_role_key or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
@@ -498,44 +498,23 @@ def discover_supabase_timelines(
     if not url or not key:
         return []
 
-    base_url = url.rstrip("/")
-
-    def _get_json(endpoint: str) -> Any:
-        """Thin GET helper using the Reigh auth pattern (service_role)."""
-        headers = {
-            "Authorization": f"Bearer {key}",
-            "apikey": key,
-            "Accept": "application/json",
-        }
-        req = _request.Request(f"{base_url}{endpoint}", headers=headers, method="GET")
-        try:
-            with _request.urlopen(req, timeout=30.0) as resp:
-                return _json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            raise
+    # Build service-role auth tuple (matching supabase_client.Auth contract)
+    auth = ("service_role", key)
 
     # ------------------------------------------------------------------
-    # 1. List public.timelines (via Reigh transport seam — SD3)
+    # 1. List public.timelines via Reigh transport seam (SD3)
     # ------------------------------------------------------------------
-    try:
-        timeline_endpoint = "/rest/v1/timelines?select=id,project_id,config_version"
-        if project_id:
-            from urllib.parse import quote
-            timeline_endpoint += f"&project_id=eq.{quote(project_id, safe='')}"
-        raw_timelines = _get_json(timeline_endpoint)
-    except Exception:
-        return []
-
-    if not isinstance(raw_timelines, list):
-        return []
+    raw_timelines = list_timelines(
+        supabase_url=url,
+        auth=auth,
+        project_id=project_id,
+    )
 
     # ------------------------------------------------------------------
     # 2. For each timeline, check if timeline_events exist
     # ------------------------------------------------------------------
     candidates: list[SupabaseTimelineCandidate] = []
     for row in raw_timelines:
-        if not isinstance(row, dict):
-            continue
         tid = row.get("id")
         pid = row.get("project_id")
         if not isinstance(tid, str) or not tid:
@@ -543,19 +522,11 @@ def discover_supabase_timelines(
         if not isinstance(pid, str):
             pid = ""
 
-        has_events = False
-        try:
-            from urllib.parse import quote
-            events_endpoint = (
-                f"/rest/v1/timeline_events"
-                f"?timeline_id=eq.{quote(tid, safe='')}"
-                f"&limit=1&select=event_id"
-            )
-            events_result = _get_json(events_endpoint)
-            if isinstance(events_result, list) and len(events_result) > 0:
-                has_events = True
-        except Exception:
-            pass
+        has_events = timeline_has_events(
+            supabase_url=url,
+            auth=auth,
+            timeline_id=tid,
+        )
 
         cv = row.get("config_version")
         candidates.append(

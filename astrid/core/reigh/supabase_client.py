@@ -88,6 +88,44 @@ def post_json(
         return raw
 
 
+def get_json(
+    url: str,
+    *,
+    auth: Auth,
+    extra_headers: Mapping[str, str] | None = None,
+    timeout: float = 60.0,
+) -> Any:
+    """GET a JSON response from ``url`` with the given auth.
+
+    Uses the same auth header pattern as ``post_json`` but performs a GET
+    with no request body (suitable for PostgREST table reads).
+    """
+
+    headers = _build_headers(auth, extra=extra_headers)
+    request = urllib.request.Request(url, headers=headers, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise SupabaseHTTPError(
+            f"Supabase GET failed: HTTP {exc.code}: {detail}",
+            status=exc.code,
+            body=detail,
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise SupabaseHTTPError(
+            f"Supabase GET failed: {exc.reason}", status=0, body=str(exc.reason)
+        ) from exc
+
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
 def rpc(
     name: str,
     params: Mapping[str, Any],

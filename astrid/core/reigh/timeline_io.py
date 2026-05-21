@@ -24,13 +24,14 @@ choice; callers select the auth scheme.
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from astrid import timeline as timeline_mod
 
 from .errors import TimelineNotFoundError, TimelineVersionConflictError
-from .supabase_client import Auth, SupabaseHTTPError, post_json, rpc
+from .supabase_client import Auth, SupabaseHTTPError, get_json, post_json, rpc
 
 logger = logging.getLogger(__name__)
 
@@ -255,3 +256,59 @@ def _extract_new_version(response: Any, *, fallback: int) -> int:
                 if isinstance(value, int):
                     return value
     return fallback
+
+
+# ---------------------------------------------------------------------------
+# Migration discovery helpers (SD3 — Reigh transport seam)
+# ---------------------------------------------------------------------------
+
+
+def list_timelines(
+    *,
+    supabase_url: str,
+    auth: Auth,
+    project_id: str | None = None,
+    timeout: float = 30.0,
+) -> list[dict[str, Any]]:
+    """List ``public.timelines`` rows via PostgREST GET.
+
+    Returns a list of row dicts (each with ``id``, ``project_id``,
+    ``config_version``).  When *project_id* is given, results are filtered
+    to that project.
+    """
+
+    base = supabase_url.rstrip("/")
+    endpoint = f"{base}/rest/v1/timelines?select=id,project_id,config_version"
+    if project_id:
+        endpoint += f"&project_id=eq.{urllib.parse.quote(project_id, safe='')}"
+
+    try:
+        result = get_json(endpoint, auth=auth, timeout=timeout)
+    except SupabaseHTTPError:
+        return []
+    if isinstance(result, list):
+        return [dict(row) for row in result if isinstance(row, dict)]
+    return []
+
+
+def timeline_has_events(
+    *,
+    supabase_url: str,
+    auth: Auth,
+    timeline_id: str,
+    timeout: float = 30.0,
+) -> bool:
+    """Check whether ``public.timeline_events`` has any rows for *timeline_id*."""
+
+    base = supabase_url.rstrip("/")
+    endpoint = (
+        f"{base}/rest/v1/timeline_events"
+        f"?timeline_id=eq.{urllib.parse.quote(timeline_id, safe='')}"
+        f"&limit=1&select=event_id"
+    )
+
+    try:
+        result = get_json(endpoint, auth=auth, timeout=timeout)
+    except SupabaseHTTPError:
+        return False
+    return isinstance(result, list) and len(result) > 0
