@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from ..acquisition import limit_hint_from_config, record_acquisition_result, request_from_config, string_set
 from ..items import deterministic_id, make_candidate_item
 from ..media import extract_clip_ffmpeg, ffprobe_metadata
 
@@ -44,49 +45,97 @@ class YouTubeSourceProvider:
         max_duration = float(config.get("max_duration_s", clip_config.get("max_duration_s", 60)))
         max_scenes = int(config.get("max_scenes_per_source", clip_config.get("max_scenes_per_source", 20)))
 
-        processed_source_ids = {str(source_id) for source_id in config.get("processed_source_ids", []) or []}
+        request = request_from_config(config)
+        processed_source_ids = string_set(config.get("processed_source_ids"), request.get("processed_source_ids"))
+        exclude_source_ids = string_set(config.get("exclude_source_ids"), request.get("exclude_source_ids"))
+        exclude_candidate_ids = string_set(config.get("exclude_candidate_ids"), request.get("exclude_candidate_ids"))
+        exclude_media_hashes = string_set(config.get("exclude_media_hashes"), request.get("exclude_media_hashes"))
+        limit_hint = limit_hint_from_config(config, request)
+        considered = 0
+        skipped_processed = 0
+        skipped_excluded = 0
+        skipped_duplicate_media = 0
+        if limit_hint == 0:
+            record_acquisition_result(
+                self,
+                config,
+                provider_id=self.provider_id,
+                request=request,
+                considered=0,
+                yielded=0,
+            )
+            return
+        yielded = 0
 
-        for source in _configured_sources(config, dataset_config):
-            source_id = youtube_source_key(source)
-            if source_id in processed_source_ids:
-                continue
-            video_path = self._download_source(source, source_id=source_id, downloads_dir=downloads_dir)
-            scenes = self._detect_scenes(video_path, scenes_dir / f"{video_path.stem}.scenes.json")
-            if not scenes:
-                scenes = [{"start": 0.0, "end": _duration_or_zero(video_path, self._prober)}]
-            for scene_index, scene in enumerate(scenes[:max_scenes]):
-                start_s, end_s = _scene_bounds(scene)
-                duration = end_s - start_s
-                if duration < min_duration or duration > max_duration:
+        try:
+            for source in _configured_sources(config, dataset_config):
+                considered += 1
+                source_id = youtube_source_key(source)
+                if source_id in processed_source_ids:
+                    skipped_processed += 1
                     continue
-                clip_id = deterministic_id(self.provider_id, source["kind"], source["value"], scene_index, prefix="yt")
-                clip_path = clips_dir / f"{clip_id}.mp4"
-                extract_clip_ffmpeg(
-                    video_path,
-                    start_s=start_s,
-                    end_s=end_s,
-                    out_path=clip_path,
-                    runner=self._runner,
-                )
-                metadata = dict(self._prober(clip_path))
-                yield make_candidate_item(
-                    source_type=self.provider_id,
-                    source_id=clip_id,
-                    source_url=source["value"] if source["kind"] == "url" else f"ytsearch:{source['value']}",
-                    media_path=clip_path,
-                    media_type="video",
-                    source_metadata=metadata,
-                    duration_s=duration,
-                    clip_start_s=start_s,
-                    clip_end_s=end_s,
-                    scene_index=scene_index,
-                    derived_from={
-                        "source_id": source_id,
-                        "source_type": self.provider_id,
-                        "transformation": "scene_extract",
-                    },
-                    rights=config.get("rights"),
-                )
+                if source_id in exclude_source_ids:
+                    skipped_excluded += 1
+                    continue
+                video_path = self._download_source(source, source_id=source_id, downloads_dir=downloads_dir)
+                scenes = self._detect_scenes(video_path, scenes_dir / f"{video_path.stem}.scenes.json")
+                if not scenes:
+                    scenes = [{"start": 0.0, "end": _duration_or_zero(video_path, self._prober)}]
+                for scene_index, scene in enumerate(scenes[:max_scenes]):
+                    start_s, end_s = _scene_bounds(scene)
+                    duration = end_s - start_s
+                    if duration < min_duration or duration > max_duration:
+                        continue
+                    clip_id = deterministic_id(self.provider_id, source["kind"], source["value"], scene_index, prefix="yt")
+                    if clip_id in exclude_candidate_ids:
+                        skipped_excluded += 1
+                        continue
+                    clip_path = clips_dir / f"{clip_id}.mp4"
+                    extract_clip_ffmpeg(
+                        video_path,
+                        start_s=start_s,
+                        end_s=end_s,
+                        out_path=clip_path,
+                        runner=self._runner,
+                    )
+                    metadata = dict(self._prober(clip_path))
+                    candidate = make_candidate_item(
+                        source_type=self.provider_id,
+                        source_id=clip_id,
+                        source_url=source["value"] if source["kind"] == "url" else f"ytsearch:{source['value']}",
+                        media_path=clip_path,
+                        media_type="video",
+                        source_metadata=metadata,
+                        duration_s=duration,
+                        clip_start_s=start_s,
+                        clip_end_s=end_s,
+                        scene_index=scene_index,
+                        derived_from={
+                            "source_id": source_id,
+                            "source_type": self.provider_id,
+                            "transformation": "scene_extract",
+                        },
+                        rights=config.get("rights"),
+                    )
+                    if str(candidate.get("content_hash") or "") in exclude_media_hashes:
+                        skipped_duplicate_media += 1
+                        continue
+                    yield candidate
+                    yielded += 1
+                    if limit_hint is not None and yielded >= limit_hint:
+                        return
+        finally:
+            record_acquisition_result(
+                self,
+                config,
+                provider_id=self.provider_id,
+                request=request,
+                considered=considered,
+                yielded=yielded,
+                skipped_processed=skipped_processed,
+                skipped_excluded=skipped_excluded,
+                skipped_duplicate_media=skipped_duplicate_media,
+            )
 
     def _download_source(self, source: Mapping[str, str], *, source_id: str, downloads_dir: Path) -> Path:
         out_base = downloads_dir / source_id

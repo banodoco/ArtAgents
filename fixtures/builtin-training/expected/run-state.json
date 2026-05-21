@@ -1,4 +1,18 @@
 {
+  "acquisition_results": [
+    {
+      "considered": 3,
+      "limit_hint": null,
+      "no_new_candidates": false,
+      "provider": "local_folder",
+      "reason": "candidates_yielded",
+      "round_index": 0,
+      "skipped_duplicate_media": 0,
+      "skipped_excluded": 0,
+      "skipped_processed": 0,
+      "yielded": 3
+    }
+  ],
   "buckets": {
     "establishing": {
       "accepted": 0,
@@ -40,6 +54,7 @@
     "fixture_test_clip_02",
     "fixture_test_clip_03"
   ],
+  "quality_report": "<RUN_DIR>/quality_report.json",
   "review_decisions": {
     "item_aaad37dfa8c5d42a": {
       "decision": "accept",
@@ -70,7 +85,7 @@
     }
   },
   "run_id": "builtin-training-fixture",
-  "state_version": 11,
+  "state_version": 13,
   "status": "finalized",
   "submitted": true,
   "top_up_rounds": 0,

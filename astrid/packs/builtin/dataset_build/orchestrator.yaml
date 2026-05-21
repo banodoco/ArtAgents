@@ -41,6 +41,13 @@
       "mode": "create_or_replace",
       "path_template": "{out}/manifests/ai-toolkit-ltx/manifest.json",
       "description": "Adapter manifest for ai-toolkit LTX training."
+    },
+    {
+      "name": "quality_report.json",
+      "type": "json",
+      "mode": "create_or_replace",
+      "path_template": "{out}/quality_report.json",
+      "description": "Dataset quality report with filter, caption-validation, budget, and shortfall observations."
     }
   ],
   "runtime": {
@@ -57,6 +64,7 @@
   "child_executors": [
     "builtin.youtube_audio",
     "builtin.scenes",
+    "builtin.transcribe",
     "builtin.visual_understand",
     "builtin.video_understand",
     "builtin.human_review"

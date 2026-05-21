@@ -15,7 +15,8 @@ import jsonschema
 
 from astrid._paths import REPO_ROOT
 
-from ..caption_providers import BudgetTracker
+from ..artifacts import load_valid_cached_sidecar, sidecar_hashes, unlink_stale_sidecar, write_hashed_sidecar
+from ..budget import BudgetTracker
 from ..interfaces import FilterResult
 from ..items import deterministic_id
 from ._common import build_filter_stats, increment_reason, pass_item, reject_item, resolve_media_path
@@ -106,12 +107,22 @@ class BucketJudgeGate:
 
         sidecar.parent.mkdir(parents=True, exist_ok=True)
         schema_path = _write_schema_sidecar(sidecar)
+        hashes = sidecar_hashes(
+            prompt=_prompt(item, config),
+            schema=schema_path,
+            media=item,
+            config=_cache_relevant_config(config, allowed_buckets),
+        )
+        cached = load_valid_cached_sidecar(sidecar, hashes)
+        if cached is not None:
+            return _extract_decision(cached)
+        unlink_stale_sidecar(sidecar)
         command = _understand_command(item, config, sidecar, schema_path, repo_root=self._repo_root)
         _increment_budget(config)
         completed = self._runner(command, capture_output=True, text=True, check=True)
         raw = _load_model_decision(sidecar, completed.stdout)
         decision = _extract_decision(raw)
-        sidecar.write_text(json.dumps(decision, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        write_hashed_sidecar(sidecar, decision, hashes)
         return decision
 
 
@@ -127,7 +138,11 @@ def judge_sidecar_path(item: Mapping[str, Any], config: Mapping[str, Any], *, re
 
 def _gate_config(config: Mapping[str, Any]) -> dict[str, Any]:
     if "bucket_judge" in config and isinstance(config["bucket_judge"], Mapping):
-        return dict(config["bucket_judge"])
+        gate_config = dict(config["bucket_judge"])
+        for key in ("budget_tracker", "budgets", "clock", "sleep", "artifact_helpers", "fixture_mode", "mode"):
+            if key in config and key not in gate_config:
+                gate_config[key] = config[key]
+        return gate_config
     extensions = config.get("extensions")
     if isinstance(extensions, Mapping) and isinstance(extensions.get("bucket_judge"), Mapping):
         return dict(extensions["bucket_judge"])
@@ -258,7 +273,12 @@ def _load_model_decision(sidecar: Path, stdout: str) -> dict[str, Any]:
 
 def _extract_decision(raw: Any) -> dict[str, Any]:
     if isinstance(raw, Mapping) and {"accept", "bucket", "reason", "score"}.issubset(raw.keys()):
-        return dict(raw)
+        return {
+            "accept": bool(raw["accept"]),
+            "bucket": raw["bucket"],
+            "reason": str(raw["reason"]),
+            "score": float(raw["score"]),
+        }
     if isinstance(raw, Mapping):
         results = raw.get("results")
         if isinstance(results, list):
@@ -286,6 +306,13 @@ def _increment_budget(config: Mapping[str, Any]) -> None:
 
 def _fixture_mode(config: Mapping[str, Any]) -> bool:
     return bool(config.get("fixture_mode") or config.get("mode") == "fixture")
+
+
+def _cache_relevant_config(config: Mapping[str, Any], allowed_buckets: list[str]) -> dict[str, Any]:
+    ignored = {"artifact_helpers", "budget_tracker", "clock", "sleep", "out_dir", "fixture_mode", "mode"}
+    payload = {str(key): value for key, value in config.items() if str(key) not in ignored}
+    payload["allowed_buckets"] = list(allowed_buckets)
+    return payload
 
 
 def _fixture_judge_path(item: Mapping[str, Any], config: Mapping[str, Any], *, repo_root: Path) -> Path | None:

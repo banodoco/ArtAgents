@@ -112,6 +112,30 @@
       "type": "string",
       "description": "Path to the caption sidecar JSON file."
     },
+    "caption_validation": {
+      "type": "object",
+      "description": "Validation metadata for the accepted caption sidecar and final caption text.",
+      "additionalProperties": false,
+      "required": ["valid", "failures"],
+      "properties": {
+        "valid": {"type": "boolean"},
+        "schema_path": {"type": "string"},
+        "validated_at": {"type": "string", "format": "date-time"},
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["code", "message"],
+            "additionalProperties": false,
+            "properties": {
+              "code": {"type": "string"},
+              "message": {"type": "string"},
+              "path": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
     "filter_results": {
       "type": "object",
       "description": "Results from filter stages applied to this item.",

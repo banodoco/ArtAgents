@@ -10,6 +10,7 @@ from typing import Any
 
 from astrid.core.project.jsonio import write_json_atomic
 
+from .artifacts import HASHES_KEY, sidecar_hashes, write_hashed_sidecar
 from .items import repo_relative_path, utc_now_iso
 from .state import make_initial_state, write_review_state
 
@@ -109,10 +110,44 @@ def _persist_caption_sidecar(item: dict[str, Any]) -> Path:
     caption.setdefault("confidence", 0.0)
     caption.setdefault("model", "")
     sidecar = media_path.with_name(f"{item['item_id']}.caption.json")
-    sidecar.parent.mkdir(parents=True, exist_ok=True)
-    sidecar.write_text(json.dumps(caption, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    hashes = _caption_sidecar_hashes(item, caption, target_sidecar=sidecar)
+    write_hashed_sidecar(sidecar, caption, hashes)
     item["caption_file"] = repo_relative_path(sidecar)
     return sidecar
+
+
+def _caption_sidecar_hashes(item: Mapping[str, Any], caption: Mapping[str, Any], *, target_sidecar: Path) -> dict[str, str]:
+    existing = _existing_caption_sidecar(item, target_sidecar=target_sidecar)
+    if existing is not None and existing.is_file():
+        raw = json.loads(existing.read_text(encoding="utf-8"))
+        if isinstance(raw, Mapping) and isinstance(raw.get(HASHES_KEY), Mapping):
+            return {str(key): str(value) for key, value in raw[HASHES_KEY].items() if value}
+    return sidecar_hashes(
+        prompt=str(caption.get("prompt") or item.get("caption_prompt") or ""),
+        schema=caption.get("schema") or item.get("caption_schema") or caption.get("schema_version", 1),
+        media=item,
+        config=_caption_cache_config(item, caption),
+    )
+
+
+def _existing_caption_sidecar(item: Mapping[str, Any], *, target_sidecar: Path) -> Path | None:
+    value = item.get("caption_file")
+    if not isinstance(value, str) or not value:
+        return target_sidecar if target_sidecar.is_file() else None
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    from astrid._paths import REPO_ROOT
+
+    return (REPO_ROOT / path).resolve()
+
+
+def _caption_cache_config(item: Mapping[str, Any], caption: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "caption_model": caption.get("model", ""),
+        "caption_schema_version": caption.get("schema_version", 1),
+        "caption_provider": item.get("caption_provider", ""),
+    }
 
 
 def _normalize_decision(value: Any) -> str:

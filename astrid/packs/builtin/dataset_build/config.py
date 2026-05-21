@@ -38,7 +38,17 @@ API_BACKED_CAPTION_PROVIDERS = {
     "visual_understand": ("OPENAI_API_KEY",),
     "video_understand": ("OPENAI_API_KEY",),
 }
-MODEL_BACKED_FILTER_STAGE_IDS = {"bucket_judge_filter"}
+API_BACKED_TRANSCRIPT_PROVIDERS = {
+    "builtin.transcribe": ("OPENAI_API_KEY",),
+    "transcribe": ("OPENAI_API_KEY",),
+}
+MODEL_BACKED_FILTER_STAGE_IDS = {
+    "bucket_judge_filter",
+    "transcript_keyword_filter",
+    "semantic_visual_filter",
+    "semantic_video_filter",
+}
+API_BACKED_FILTER_STAGE_IDS = MODEL_BACKED_FILTER_STAGE_IDS - {"near_duplicate_filter"}
 LEGACY_FILTER_STAGE_ORDER = (
     ("duration", "duration_filter"),
     ("resolution", "resolution_filter"),
@@ -105,6 +115,7 @@ def load_dataset_config(path: str | Path) -> ParsedDatasetConfig:
     _validate_schema(raw)
     resolved = _resolve_path_values(copy.deepcopy(raw), base_dir=config_path.parent)
     resolved = normalize_filter_stages(resolved)
+    resolved = normalize_review_config(resolved)
     return ParsedDatasetConfig(
         data=resolved,
         path=config_path,
@@ -130,11 +141,11 @@ def preflight_budget_and_secrets(
 
     budgets = config.get("budgets") or {}
     max_api_calls = budgets.get("max_api_calls")
-    if isinstance(max_api_calls, int) and max_api_calls <= 0:
-        raise BudgetPreflightError("api-backed stages configured but budgets.max_api_calls is 0")
+    if not isinstance(max_api_calls, int) or max_api_calls <= 0:
+        raise BudgetPreflightError("api-backed stages configured but budgets.max_api_calls must be positive")
     max_cost = budgets.get("max_estimated_cost_usd")
-    if isinstance(max_cost, (int, float)) and max_cost <= 0:
-        raise BudgetPreflightError("api-backed stages configured but budgets.max_estimated_cost_usd is 0")
+    if not isinstance(max_cost, (int, float)) or max_cost <= 0:
+        raise BudgetPreflightError("api-backed stages configured but budgets.max_estimated_cost_usd must be positive")
 
     provider_budgets = budgets.get("providers") or {}
     for provider_id in requirements:
@@ -169,6 +180,18 @@ def normalize_filter_stages(config: Mapping[str, Any]) -> dict[str, Any]:
 
     filters["stages"] = stages
     normalized["filters"] = filters
+    return normalized
+
+
+def normalize_review_config(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Return config with review.top_up defaults applied."""
+
+    normalized = copy.deepcopy(dict(config))
+    review = dict(normalized.get("review") or {})
+    top_up = dict(review.get("top_up") or {})
+    top_up.setdefault("max_rounds", 2)
+    review["top_up"] = top_up
+    normalized["review"] = review
     return normalized
 
 
@@ -341,13 +364,25 @@ def _api_requirements(config: Mapping[str, Any]) -> dict[str, tuple[str, ...]]:
     for stage in normalize_filter_stages(config).get("filters", {}).get("stages", []):
         if not isinstance(stage, Mapping) or stage.get("enabled") is not True:
             continue
-        if stage.get("stage_id") != "bucket_judge_filter":
+        stage_id = str(stage.get("stage_id") or "")
+        if stage_id not in API_BACKED_FILTER_STAGE_IDS:
             continue
         stage_config = stage.get("config") or {}
-        bucket_judge = stage_config.get("bucket_judge") if isinstance(stage_config, Mapping) else {}
-        if not isinstance(bucket_judge, Mapping):
-            bucket_judge = {}
-        provider = bucket_judge.get("provider", "visual_understand")
-        if isinstance(provider, str) and provider in API_BACKED_CAPTION_PROVIDERS:
-            requirements[f"bucket_judge.{provider}"] = API_BACKED_CAPTION_PROVIDERS[provider]
+        if not isinstance(stage_config, Mapping):
+            stage_config = {}
+        if stage_id == "bucket_judge_filter":
+            bucket_judge = stage_config.get("bucket_judge")
+            if not isinstance(bucket_judge, Mapping):
+                bucket_judge = {}
+            provider = bucket_judge.get("provider", "visual_understand")
+            if isinstance(provider, str) and provider in API_BACKED_CAPTION_PROVIDERS:
+                requirements[f"bucket_judge.{provider}"] = API_BACKED_CAPTION_PROVIDERS[provider]
+        elif stage_id == "semantic_visual_filter":
+            requirements["filter.semantic_visual"] = API_BACKED_CAPTION_PROVIDERS["visual_understand"]
+        elif stage_id == "semantic_video_filter":
+            requirements["filter.semantic_video"] = API_BACKED_CAPTION_PROVIDERS["video_understand"]
+        elif stage_id == "transcript_keyword_filter":
+            provider = str(stage_config.get("provider") or "builtin.transcribe")
+            env_names = API_BACKED_TRANSCRIPT_PROVIDERS.get(provider, API_BACKED_TRANSCRIPT_PROVIDERS["builtin.transcribe"])
+            requirements[f"filter.transcript.{provider}"] = env_names
     return requirements

@@ -109,7 +109,7 @@ def test_offline_fixture_drives_full_no_network_pipeline(tmp_path: Path) -> None
     assert (out_dir / "clips" / "item_aaad37dfa8c5d42a.caption.json").is_file()
     assert (out_dir / "clips" / "judges" / "item_ea4e240dfc31e8a5.judge.json").is_file()
 
-    generated_state = _normalize_state(_load_json(out_dir / "review_state.json"))
+    generated_state = _normalize_state(_load_json(out_dir / "review_state.json"), out_dir)
     expected_state = _load_json(FIXTURE_ROOT / "expected" / "run-state.json")
     assert generated_state == expected_state
 
@@ -204,12 +204,14 @@ def test_offline_fixture_review_modes_and_interrupted_resume_use_checkpoints(tmp
     assert review_only_summary["accepted"] == 2
 
 
-def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
+def _normalize_state(state: dict[str, Any], out_dir: Path | None = None) -> dict[str, Any]:
     normalized = copy.deepcopy(state)
     normalized["config_hash"] = "<CONFIG_HASH>"
     for key in ("created_at", "updated_at", "completed_at"):
         if key in normalized:
             normalized[key] = "2026-05-21T00:00:00Z"
+    if out_dir is not None and "quality_report" in normalized:
+        normalized["quality_report"] = str(normalized["quality_report"]).replace(out_dir.as_posix(), "<RUN_DIR>")
     for stats in normalized.get("filter_stats", {}).values():
         if "duration_ms" in stats:
             stats["duration_ms"] = 0.0
