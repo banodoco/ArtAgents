@@ -502,6 +502,44 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Emit structured JSON.")
     arr_show_p.set_defaults(handler=cmd_arrangement_show)
 
+    # --- migrate-events ---
+    migrate_parser = subparsers.add_parser(
+        "migrate-events",
+        help="Migrate legacy timeline data into event streams.",
+    )
+    migrate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=True,
+        help="Preview migration without writing (default).",
+    )
+    migrate_parser.add_argument(
+        "--apply",
+        action="store_true",
+        dest="apply",
+        default=False,
+        help="Actually write event-stream imports.",
+    )
+    project_or_all = migrate_parser.add_mutually_exclusive_group(required=True)
+    project_or_all.add_argument(
+        "--project",
+        dest="project_slug",
+        help="Migrate timelines for one project slug.",
+    )
+    project_or_all.add_argument(
+        "--all-projects",
+        action="store_true",
+        dest="all_projects",
+        help="Migrate timelines across all discovered projects.",
+    )
+    migrate_parser.add_argument(
+        "--json",
+        dest="json_out",
+        action="store_true",
+        help="Emit structured JSON instead of pretty-print.",
+    )
+    migrate_parser.set_defaults(handler=cmd_migrate_events)
+
     return parser
 
 
@@ -1488,6 +1526,175 @@ def cmd_arrangement_show(args: argparse.Namespace) -> int:
             return 1
     print(json.dumps(arrangement, indent=2, default=str))
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: migrate-events (m8)
+# ---------------------------------------------------------------------------
+
+
+def cmd_migrate_events(args: argparse.Namespace) -> int:
+    """Run timeline event-stream migration (dry-run or --apply).
+
+    Supports --project <slug> or --all-projects.  --dry-run is the default;
+    --apply actually writes event-stream imports.  --json emits structured
+    output instead of pretty-print.
+
+    Returns nonzero on parity failures or unreadable source blobs.
+    """
+    from .migration import (
+        MigrationResult,
+        SkippedTimeline,
+        discover_projects_for_migration,
+        discover_timelines_for_project,
+        import_from_legacy_local,
+    )
+    from .eventlog.local_fs import LocalFsBackend
+    from .events.schema import TimelineActor
+
+    write_mode = bool(getattr(args, "apply", False))
+    json_out = bool(getattr(args, "json_out", False))
+    all_projects = bool(getattr(args, "all_projects", False))
+    project_slug: str | None = getattr(args, "project_slug", None)
+
+    # --- Resolve project list ---
+    if all_projects:
+        slugs = discover_projects_for_migration()
+    elif project_slug:
+        slugs = [project_slug]
+    else:
+        print("timelines migrate-events: must specify --project or --all-projects", file=sys.stderr)
+        return 2
+
+    if not slugs:
+        print("(no projects discovered)", file=sys.stderr)
+        return 0
+
+    result = MigrationResult()
+
+    for slug in slugs:
+        timelines = discover_timelines_for_project(slug)
+        for ulid, classification in timelines:
+            if classification == "already_event_sourced":
+                result.skipped.append(
+                    SkippedTimeline(
+                        project_slug=slug,
+                        timeline_ulid=ulid,
+                        reason="Already event-sourced — skipping",
+                        classification=classification,
+                    )
+                )
+                continue
+
+            if classification == "malformed_incomplete":
+                result.skipped.append(
+                    SkippedTimeline(
+                        project_slug=slug,
+                        timeline_ulid=ulid,
+                        reason="Malformed or incomplete timeline directory",
+                        classification=classification,
+                    )
+                )
+                continue
+
+            # classification == "legacy_local"
+            if not write_mode:
+                # Dry-run: just report what would happen
+                result.skipped.append(
+                    SkippedTimeline(
+                        project_slug=slug,
+                        timeline_ulid=ulid,
+                        reason="Would import (dry-run)",
+                        classification=classification,
+                    )
+                )
+                continue
+
+            # --apply mode: actually import
+            from astrid.core.timeline.paths import timeline_dir
+
+            tdir = timeline_dir(slug, ulid)
+            backend = LocalFsBackend(timeline_home=tdir, timeline_id=ulid)
+            actor = TimelineActor(type="agent", id="cli:migrate-events", display="migrate-events")
+
+            import_result = import_from_legacy_local(
+                backend=backend,
+                timeline_home=tdir,
+                actor=actor,
+            )
+
+            if import_result.get("imported"):
+                result.imported.append(ulid)
+                if not import_result.get("parity_ok"):
+                    from .migration import ParityFailure
+                    result.parity_failures.append(
+                        ParityFailure(
+                            project_slug=slug,
+                            timeline_ulid=ulid,
+                            source_hash="",
+                            projected_hash="",
+                            detail=import_result.get("detail", "Parity check failed"),
+                        )
+                    )
+            else:
+                result.skipped.append(
+                    SkippedTimeline(
+                        project_slug=slug,
+                        timeline_ulid=ulid,
+                        reason=import_result.get("detail", "Import skipped"),
+                        classification=classification,
+                    )
+                )
+
+    # --- Output ---
+    if json_out:
+        output = {
+            "imported_count": len(result.imported),
+            "skipped_count": len(result.skipped),
+            "parity_failure_count": len(result.parity_failures),
+            "imported": result.imported,
+            "skipped": [
+                {
+                    "project_slug": s.project_slug,
+                    "timeline_ulid": s.timeline_ulid,
+                    "reason": s.reason,
+                    "classification": s.classification,
+                }
+                for s in result.skipped
+            ],
+            "parity_failures": [
+                {
+                    "project_slug": f.project_slug,
+                    "timeline_ulid": f.timeline_ulid,
+                    "detail": f.detail,
+                }
+                for f in result.parity_failures
+            ],
+            "ok": result.ok,
+        }
+        print(json.dumps(output, indent=2, sort_keys=True, default=str))
+    else:
+        mode_label = "dry-run" if not write_mode else "applied"
+        print(f"Migration {mode_label} — {len(result.imported)} imported, "
+              f"{len(result.skipped)} skipped, "
+              f"{len(result.parity_failures)} parity failures")
+
+        if result.skipped:
+            print("\nSkipped:")
+            for s in result.skipped:
+                print(f"  [{s.project_slug}] {s.timeline_ulid or '?'}: {s.reason}")
+
+        if result.parity_failures:
+            print(f"\nParity failures ({len(result.parity_failures)}):")
+            for f in result.parity_failures:
+                print(f"  [{f.project_slug}] {f.timeline_ulid}: {f.detail}")
+
+        if result.imported:
+            print(f"\nImported ({len(result.imported)}):")
+            for ulid in result.imported:
+                print(f"  {ulid}")
+
+    return 0 if result.ok else 1
 
 
 # ---------------------------------------------------------------------------

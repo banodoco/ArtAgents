@@ -571,6 +571,187 @@ def discover_supabase_timelines(
 
 
 # ---------------------------------------------------------------------------
+# Idempotent Supabase config import (T5)
+# ---------------------------------------------------------------------------
+
+
+def import_supabase_config(
+    *,
+    backend: Any,
+    project_id: str,
+    timeline_id: str,
+    config: dict[str, Any],
+    actor: Any,
+    config_version: int | None = None,
+) -> dict[str, Any]:
+    """Idempotently import a Supabase timeline config as a ``timeline.imported`` event.
+
+    Per SD2, parity is **config-as-snapshot**: the stored snapshot must equal
+    the source config blob — NOT projected assembly.  This is a different data
+    model from the LocalFs path, where the source blob is an assembly document.
+
+    (a) When the event log is empty, appends exactly one ``timeline.imported``
+        event with ``source='supabase_config'`` and ``snapshot`` containing
+        the full config blob (wrapped as ``{"config": <config>}``).
+
+    (b) Idempotent guard: if the first event is already ``timeline.imported``
+        with ``source='supabase_config'`` **and** config-as-snapshot parity
+        holds, returns immediately without appending.
+
+    (c) Does NOT use projection for parity — per SD2, parity means
+        ``snapshot["config"] == config``.
+
+    Parameters
+    ----------
+    backend:
+        A ``SupabaseBackend`` instance or compatible mock with the same
+        ``read_events()`` / ``append_event()`` surface.
+    project_id:
+        Supabase project identifier (used for logging / error messages only).
+    timeline_id:
+        Supabase timeline identifier.
+    config:
+        The full Reigh config blob (as loaded from ``public.timelines.config``
+        via the Reigh transport seam).
+    actor:
+        ``TimelineActor`` recorded on the imported event.
+    config_version:
+        Optional config version from Supabase (for logging / audit).
+
+    Returns
+    -------
+    dict
+        Keys: ``ok`` (bool), ``imported`` (bool), ``event_id`` (str|None),
+        ``parity_ok`` (bool | None), ``detail`` (str), ``skipped_state``
+        (str|None).  ``skipped_state`` is one of ``"already_imported"``,
+        ``"already_event_sourced"``, ``"no_config"``, or ``None``.
+    """
+    import json as _json
+
+    from astrid.core.timeline.events.schema import TimelineImportedPayload, TimelineEvent
+
+    # ------------------------------------------------------------------
+    # 0. Null config guard
+    # ------------------------------------------------------------------
+    if not config or not isinstance(config, dict):
+        return {
+            "ok": False,
+            "imported": False,
+            "event_id": None,
+            "parity_ok": None,
+            "detail": "No config blob provided — nothing to import",
+            "skipped_state": "no_config",
+        }
+
+    # ------------------------------------------------------------------
+    # 1. Read existing event stream
+    # ------------------------------------------------------------------
+    events = backend.read_events()
+
+    # ------------------------------------------------------------------
+    # 2. Idempotence: if already imported, verify config-as-snapshot parity
+    # ------------------------------------------------------------------
+    if events:
+        first = events[0]
+
+        if first.kind == "timeline.imported":
+            source = first.payload.source if hasattr(first.payload, 'source') else None
+            if source == "supabase_config":
+                # Check config-as-snapshot parity (SD2)
+                snapshot = first.payload.snapshot if hasattr(first.payload, 'snapshot') else None
+                if isinstance(snapshot, dict):
+                    stored_config = snapshot.get("config")
+                    parity_ok = stored_config == config
+                else:
+                    parity_ok = False
+
+                if parity_ok:
+                    return {
+                        "ok": True,
+                        "imported": False,
+                        "event_id": first.event_id,
+                        "parity_ok": True,
+                        "detail": "Already imported — config-as-snapshot parity holds, skipping",
+                        "skipped_state": "already_imported",
+                    }
+                else:
+                    return {
+                        "ok": False,
+                        "imported": False,
+                        "event_id": first.event_id,
+                        "parity_ok": False,
+                        "detail": "Already imported but config-as-snapshot parity does NOT hold",
+                        "skipped_state": None,
+                    }
+
+        # Stream exists but first event is not a matching timeline.imported
+        return {
+            "ok": False,
+            "imported": False,
+            "event_id": None,
+            "parity_ok": None,
+            "detail": (
+                f"Event log is not empty and first event is "
+                f"{first.kind!r}, not timeline.imported with source='supabase_config' — "
+                f"refusing to import"
+            ),
+            "skipped_state": "already_event_sourced",
+        }
+
+    # ------------------------------------------------------------------
+    # 3. Event log is empty — perform the import
+    # ------------------------------------------------------------------
+    snapshot: dict[str, Any] = {"config": config}
+
+    try:
+        event = backend.append_event(
+            timeline_id,
+            "timeline.imported",
+            {
+                "snapshot": snapshot,
+                "source": "supabase_config",
+            },
+            actor=actor,
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "imported": False,
+            "event_id": None,
+            "parity_ok": None,
+            "detail": f"Failed to append timeline.imported: {exc}",
+            "skipped_state": None,
+        }
+
+    # ------------------------------------------------------------------
+    # 4. Verify config-as-snapshot parity (SD2)
+    # ------------------------------------------------------------------
+    all_events = backend.read_events()
+    if all_events:
+        imported_event = all_events[0]
+        imp_snapshot = imported_event.payload.snapshot if hasattr(imported_event.payload, 'snapshot') else None
+        if isinstance(imp_snapshot, dict):
+            parity_ok = imp_snapshot.get("config") == config
+        else:
+            parity_ok = False
+    else:
+        parity_ok = False
+
+    return {
+        "ok": parity_ok,
+        "imported": True,
+        "event_id": event.event_id,
+        "parity_ok": parity_ok,
+        "detail": (
+            "Import succeeded, config-as-snapshot parity matches"
+            if parity_ok
+            else "Import succeeded but config-as-snapshot parity does NOT match"
+        ),
+        "skipped_state": None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Resumable checkpoint helpers
 # ---------------------------------------------------------------------------
 
@@ -654,6 +835,7 @@ __all__ = [
     "discover_supabase_timelines",
     # Idempotent import
     "import_from_legacy_local",
+    "import_supabase_config",
     # Checkpointing
     "checkpoint_path_for_run",
     "write_resumable_checkpoint",
