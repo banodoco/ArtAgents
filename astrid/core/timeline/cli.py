@@ -34,6 +34,7 @@ from . import (
     transition_edits,
 )
 from ._edit_helpers import TimelineEditError
+from .eventlog import EventLogError
 from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
 from .paths import assembly_identity_path, find_timeline_by_slug
@@ -49,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
-    except (crud.TimelineCrudError, TimelineEditError, SessionBindingError) as exc:
+    except (crud.TimelineCrudError, TimelineEditError, SessionBindingError, EventLogError) as exc:
         print(f"timelines: {exc}", file=sys.stderr)
         return 2
     except ValueError as exc:
@@ -104,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     rename_parser = subparsers.add_parser("rename", help="Rename a timeline slug.")
     rename_parser.add_argument("old_slug", metavar="slug", help="Current timeline slug.")
     rename_parser.add_argument("new_slug", metavar="new-slug", help="New timeline slug.")
+    _add_expected_version_arg(rename_parser)
     rename_parser.set_defaults(handler=cmd_rename)
 
     # --- finalize ---
@@ -188,12 +190,14 @@ def build_parser() -> argparse.ArgumentParser:
     pos_group.add_argument("--at", type=int, dest="at_index", help="Insert at 0-based index.")
     pos_group.add_argument("--after", dest="after_id", help="Insert after clip id.")
     pos_group.add_argument("--before", dest="before_id", help="Insert before clip id.")
+    _add_expected_version_arg(clip_add)
     clip_add.set_defaults(handler=cmd_clip_add)
 
     # clip remove
     clip_remove = clip_subs.add_parser("remove", help="Remove a clip from a timeline.")
     clip_remove.add_argument("slug", help="Timeline slug.")
     clip_remove.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    _add_expected_version_arg(clip_remove)
     clip_remove.set_defaults(handler=cmd_clip_remove)
 
     # clip move
@@ -201,6 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_move.add_argument("slug", help="Timeline slug.")
     clip_move.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_move.add_argument("--to", required=True, dest="to_position", help="Target position: index, after:<id>, or before:<id>.")
+    _add_expected_version_arg(clip_move)
     clip_move.set_defaults(handler=cmd_clip_move)
 
     # clip retime
@@ -209,6 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_retime.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_retime.add_argument("--start", required=True, type=float, help="Start time in seconds (>= 0).")
     clip_retime.add_argument("--duration", required=True, type=float, help="Duration in seconds (> 0).")
+    _add_expected_version_arg(clip_retime)
     clip_retime.set_defaults(handler=cmd_clip_retime)
 
     # clip swap
@@ -216,6 +222,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_swap.add_argument("slug", help="Timeline slug.")
     clip_swap.add_argument("--a", required=True, dest="clip_a", help="First clip identifier.")
     clip_swap.add_argument("--b", required=True, dest="clip_b", help="Second clip identifier.")
+    _add_expected_version_arg(clip_swap)
     clip_swap.set_defaults(handler=cmd_clip_swap)
 
     # clip replace
@@ -223,6 +230,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_replace.add_argument("slug", help="Timeline slug.")
     clip_replace.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_replace.add_argument("--with", required=True, dest="with_asset_id", metavar="ASSET_ID", help="Replacement asset identifier.")
+    _add_expected_version_arg(clip_replace)
     clip_replace.set_defaults(handler=cmd_clip_replace)
 
     # clip set-text
@@ -230,6 +238,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_set_text.add_argument("slug", help="Timeline slug.")
     clip_set_text.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_set_text.add_argument("--text", required=True, help="Text content.")
+    _add_expected_version_arg(clip_set_text)
     clip_set_text.set_defaults(handler=cmd_clip_set_text)
 
     # clip annotate
@@ -237,6 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_annotate.add_argument("slug", help="Timeline slug.")
     clip_annotate.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_annotate.add_argument("--note", required=True, help="Annotation note text.")
+    _add_expected_version_arg(clip_annotate)
     clip_annotate.set_defaults(handler=cmd_clip_annotate)
 
     # --- transition ---
@@ -251,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     trans_set.add_argument("--kind", default="cross-fade", help="Transition kind (default: cross-fade).")
     trans_set.add_argument("--duration", type=float, default=0.5, dest="duration_seconds",
                            help="Transition duration in seconds (default: 0.5).")
+    _add_expected_version_arg(trans_set)
     trans_set.set_defaults(handler=cmd_transition_set)
 
     # transition remove
@@ -258,6 +269,7 @@ def build_parser() -> argparse.ArgumentParser:
     trans_remove.add_argument("slug", help="Timeline slug.")
     trans_remove.add_argument("--between", required=True, metavar="LEFT,RIGHT",
                               help="Two clip ids separated by comma (left clip, right clip).")
+    _add_expected_version_arg(trans_remove)
     trans_remove.set_defaults(handler=cmd_transition_remove)
 
     # --- effect ---
@@ -271,6 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
     effect_add_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
     effect_add_p.add_argument("--params", action="append", dest="params_raw", metavar="k=v",
                               help="Effect parameter as k=v (repeatable).")
+    _add_expected_version_arg(effect_add_p)
     effect_add_p.set_defaults(handler=cmd_effect_add)
 
     # effect remove
@@ -278,6 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     effect_remove_p.add_argument("slug", help="Timeline slug.")
     effect_remove_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
     effect_remove_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
+    _add_expected_version_arg(effect_remove_p)
     effect_remove_p.set_defaults(handler=cmd_effect_remove)
 
     # effect tune
@@ -287,6 +301,7 @@ def build_parser() -> argparse.ArgumentParser:
     effect_tune_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
     effect_tune_p.add_argument("--param", required=True, help="Parameter name (k).")
     effect_tune_p.add_argument("--value", required=True, help="Parameter value (parsed as JSON).")
+    _add_expected_version_arg(effect_tune_p)
     effect_tune_p.set_defaults(handler=cmd_effect_tune)
 
     # --- theme ---
@@ -297,6 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     theme_set_p = theme_subs.add_parser("set", help="Set the active theme.")
     theme_set_p.add_argument("slug", help="Timeline slug.")
     theme_set_p.add_argument("--theme", required=True, dest="theme_id", help="Theme identifier.")
+    _add_expected_version_arg(theme_set_p)
     theme_set_p.set_defaults(handler=cmd_theme_set)
 
     # theme override
@@ -305,6 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     theme_override_p.add_argument("--override-id", required=True, dest="override_id",
                                   help="Override namespace (visual|generation|voice|audio|pacing).")
     theme_override_p.add_argument("--value", required=True, help="Override value (parsed as JSON).")
+    _add_expected_version_arg(theme_override_p)
     theme_override_p.set_defaults(handler=cmd_theme_override)
 
     # --- track ---
@@ -319,12 +336,14 @@ def build_parser() -> argparse.ArgumentParser:
     track_add_p.add_argument("--label", default=None, help="Optional human-readable label.")
     track_add_p.add_argument("--track-id", default=None, dest="track_id",
                              help="Track identifier (auto-generated UUID if omitted).")
+    _add_expected_version_arg(track_add_p)
     track_add_p.set_defaults(handler=cmd_track_add)
 
     # track remove
     track_remove_p = track_subs.add_parser("remove", help="Remove a track.")
     track_remove_p.add_argument("slug", help="Timeline slug.")
     track_remove_p.add_argument("--track-id", required=True, dest="track_id", help="Track identifier.")
+    _add_expected_version_arg(track_remove_p)
     track_remove_p.set_defaults(handler=cmd_track_remove)
 
     # --- audio ---
@@ -336,12 +355,14 @@ def build_parser() -> argparse.ArgumentParser:
     audio_bind_p.add_argument("slug", help="Timeline slug.")
     audio_bind_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
     audio_bind_p.add_argument("--asset", required=True, dest="asset_id", help="Audio asset identifier.")
+    _add_expected_version_arg(audio_bind_p)
     audio_bind_p.set_defaults(handler=cmd_audio_bind)
 
     # audio unbind
     audio_unbind_p = audio_subs.add_parser("unbind", help="Unbind audio from a clip.")
     audio_unbind_p.add_argument("slug", help="Timeline slug.")
     audio_unbind_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
+    _add_expected_version_arg(audio_unbind_p)
     audio_unbind_p.set_defaults(handler=cmd_audio_unbind)
 
     # --- pool ---
@@ -352,12 +373,14 @@ def build_parser() -> argparse.ArgumentParser:
     pool_add_p = pool_subs.add_parser("add", help="Add an asset to the pool.")
     pool_add_p.add_argument("slug", help="Timeline slug.")
     pool_add_p.add_argument("--asset", required=True, dest="asset_id", help="Asset identifier.")
+    _add_expected_version_arg(pool_add_p)
     pool_add_p.set_defaults(handler=cmd_pool_add)
 
     # pool remove
     pool_remove_p = pool_subs.add_parser("remove", help="Remove an asset from the pool.")
     pool_remove_p.add_argument("slug", help="Timeline slug.")
     pool_remove_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
+    _add_expected_version_arg(pool_remove_p)
     pool_remove_p.set_defaults(handler=cmd_pool_remove)
 
     # pool score
@@ -365,6 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     pool_score_p.add_argument("slug", help="Timeline slug.")
     pool_score_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
     pool_score_p.add_argument("--score", type=float, required=True, help="Score between 0 and 1.")
+    _add_expected_version_arg(pool_score_p)
     pool_score_p.set_defaults(handler=cmd_pool_score)
 
     # --- arrangement ---
@@ -376,6 +400,7 @@ def build_parser() -> argparse.ArgumentParser:
     arr_set_p.add_argument("slug", help="Timeline slug.")
     arr_set_p.add_argument("--from-json", required=True, dest="from_json",
                            help="Path to a JSON file containing the new arrangement.")
+    _add_expected_version_arg(arr_set_p)
     arr_set_p.set_defaults(handler=cmd_arrangement_set)
 
     # arrangement show
@@ -541,11 +566,13 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 def cmd_rename(args: argparse.Namespace) -> int:
     session = _require_session()
+    extra = _expected_version_kwargs(args)
     result = crud.rename_timeline(
         session.project,
         args.old_slug,
         args.new_slug,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(f"renamed timeline '{args.old_slug}' -> '{result['slug']}'")
     return 0
@@ -890,6 +917,7 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     pos = _parse_clip_position(args)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.add_clip(
         session.project,
         args.slug,
@@ -897,6 +925,7 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
         asset_id=args.asset,
         position=pos,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -905,11 +934,13 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
 def cmd_clip_remove(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.remove_clip(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -919,12 +950,14 @@ def cmd_clip_move(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     pos = _parse_move_position(args.to_position)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.move_clip(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         position=pos,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -933,6 +966,7 @@ def cmd_clip_move(args: argparse.Namespace) -> int:
 def cmd_clip_retime(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.retime_clip(
         session.project,
         args.slug,
@@ -940,6 +974,7 @@ def cmd_clip_retime(args: argparse.Namespace) -> int:
         start=args.start,
         duration=args.duration,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -948,12 +983,14 @@ def cmd_clip_retime(args: argparse.Namespace) -> int:
 def cmd_clip_swap(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.swap_clips(
         session.project,
         args.slug,
         clip_a_id=args.clip_a,
         clip_b_id=args.clip_b,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -962,12 +999,14 @@ def cmd_clip_swap(args: argparse.Namespace) -> int:
 def cmd_clip_replace(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.replace_clip(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         with_asset_id=args.with_asset_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -976,12 +1015,14 @@ def cmd_clip_replace(args: argparse.Namespace) -> int:
 def cmd_clip_set_text(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.set_clip_text(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         text=args.text,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -990,12 +1031,14 @@ def cmd_clip_set_text(args: argparse.Namespace) -> int:
 def cmd_clip_annotate(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = clip_edits.annotate_clip(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         note=args.note,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_clip_success(event, backend_name))
     return 0
@@ -1023,6 +1066,7 @@ def cmd_transition_set(args: argparse.Namespace) -> int:
     session = _require_session()
     left, right = _parse_between(args.between)
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = transition_edits.transition_set(
         session.project,
         args.slug,
@@ -1031,6 +1075,7 @@ def cmd_transition_set(args: argparse.Namespace) -> int:
         kind=args.kind,
         duration_seconds=args.duration_seconds,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("transition", event, backend_name))
     return 0
@@ -1040,12 +1085,14 @@ def cmd_transition_remove(args: argparse.Namespace) -> int:
     session = _require_session()
     left, right = _parse_between(args.between)
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = transition_edits.transition_remove(
         session.project,
         args.slug,
         left_clip_id=left,
         right_clip_id=right,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("transition", event, backend_name))
     return 0
@@ -1095,6 +1142,7 @@ def cmd_effect_add(args: argparse.Namespace) -> int:
     session = _require_session()
     params = _parse_params(args.params_raw)
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = effect_edits.effect_add(
         session.project,
         args.slug,
@@ -1102,6 +1150,7 @@ def cmd_effect_add(args: argparse.Namespace) -> int:
         effect_id=args.effect_id,
         params=params,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("effect", event, backend_name))
     return 0
@@ -1110,12 +1159,14 @@ def cmd_effect_add(args: argparse.Namespace) -> int:
 def cmd_effect_remove(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = effect_edits.effect_remove(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         effect_id=args.effect_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("effect", event, backend_name))
     return 0
@@ -1125,6 +1176,7 @@ def cmd_effect_tune(args: argparse.Namespace) -> int:
     session = _require_session()
     value = _parse_json_value(args.value, flag="--value")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = effect_edits.effect_tune(
         session.project,
         args.slug,
@@ -1133,6 +1185,7 @@ def cmd_effect_tune(args: argparse.Namespace) -> int:
         param=args.param,
         value=value,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("effect", event, backend_name))
     return 0
@@ -1146,11 +1199,13 @@ def cmd_effect_tune(args: argparse.Namespace) -> int:
 def cmd_theme_set(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = theme_edits.theme_set(
         session.project,
         args.slug,
         theme_id=args.theme_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("theme", event, backend_name))
     return 0
@@ -1160,12 +1215,14 @@ def cmd_theme_override(args: argparse.Namespace) -> int:
     session = _require_session()
     value = _parse_json_value(args.value, flag="--value")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = theme_edits.theme_override(
         session.project,
         args.slug,
         override_id=args.override_id,
         value=value,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("theme", event, backend_name))
     return 0
@@ -1182,6 +1239,7 @@ def cmd_track_add(args: argparse.Namespace) -> int:
     from uuid import uuid4 as _uuid4
 
     track_id = args.track_id or str(_uuid4())
+    extra = _expected_version_kwargs(args)
     event = track_edits.track_add(
         session.project,
         args.slug,
@@ -1189,6 +1247,7 @@ def cmd_track_add(args: argparse.Namespace) -> int:
         kind=args.kind,
         label=args.label,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("track", event, backend_name))
     return 0
@@ -1197,11 +1256,13 @@ def cmd_track_add(args: argparse.Namespace) -> int:
 def cmd_track_remove(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = track_edits.track_remove(
         session.project,
         args.slug,
         track_id=args.track_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("track", event, backend_name))
     return 0
@@ -1215,12 +1276,14 @@ def cmd_track_remove(args: argparse.Namespace) -> int:
 def cmd_audio_bind(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = audio_edits.audio_bind(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         asset_id=args.asset_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("audio", event, backend_name))
     return 0
@@ -1229,11 +1292,13 @@ def cmd_audio_bind(args: argparse.Namespace) -> int:
 def cmd_audio_unbind(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = audio_edits.audio_unbind(
         session.project,
         args.slug,
         clip_id=args.clip_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("audio", event, backend_name))
     return 0
@@ -1247,11 +1312,13 @@ def cmd_audio_unbind(args: argparse.Namespace) -> int:
 def cmd_pool_add(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = pool_edits.pool_asset_add(
         session.project,
         args.slug,
         asset_id=args.asset_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("pool", event, backend_name))
     return 0
@@ -1260,11 +1327,13 @@ def cmd_pool_add(args: argparse.Namespace) -> int:
 def cmd_pool_remove(args: argparse.Namespace) -> int:
     session = _require_session()
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = pool_edits.pool_asset_remove(
         session.project,
         args.slug,
         asset_id=args.asset_id,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("pool", event, backend_name))
     return 0
@@ -1275,12 +1344,14 @@ def cmd_pool_score(args: argparse.Namespace) -> int:
     if args.score < 0 or args.score > 1:
         raise TimelineEditError("score must be between 0 and 1")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = pool_edits.pool_asset_score(
         session.project,
         args.slug,
         asset_id=args.asset_id,
         score=args.score,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("pool", event, backend_name))
     return 0
@@ -1303,11 +1374,13 @@ def cmd_arrangement_set(args: argparse.Namespace) -> int:
     if not isinstance(arrangement_data, dict):
         raise TimelineEditError("arrangement JSON file must contain a JSON object")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
     event = arrangement_edits.arrangement_replace(
         session.project,
         args.slug,
         arrangement=arrangement_data,
         actor=_timeline_actor_from_session(session),
+        **extra,
     )
     print(_edit_success("arrangement", event, backend_name))
     return 0
@@ -1337,6 +1410,23 @@ def _require_session(slug: str | None = None) -> Any:
     if session is None:
         raise SessionBindingError(_SESSION_GATE_HINT)
     return session
+
+
+def _add_expected_version_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--expected-version",
+        type=int,
+        dest="expected_version",
+        default=None,
+        help="Require the current eventlog version to match before applying the mutation.",
+    )
+
+
+def _expected_version_kwargs(args: argparse.Namespace) -> dict[str, int]:
+    expected_version = getattr(args, "expected_version", None)
+    if expected_version is None:
+        return {}
+    return {"expected_version": expected_version}
 
 
 def _timeline_actor_from_session(session: Any) -> TimelineActor:

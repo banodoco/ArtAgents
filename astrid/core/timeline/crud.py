@@ -274,6 +274,8 @@ def rename_timeline(
     new_slug: str,
     *,
     actor: TimelineActor | None = None,
+    expected_version: int | None = None,
+    txn_id: str | None = None,
     root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Rewrite ``display.json`` so *old_slug* becomes *new_slug*.
@@ -319,6 +321,8 @@ def rename_timeline(
         "timeline.renamed",
         {"old_slug": old_slug, "new_slug": new_slug},
         actor=rename_actor,
+        expected_version=expected_version,
+        txn_id=txn_id,
     )
 
     dp = tdir / "display.json"
