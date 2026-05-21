@@ -1,5 +1,5 @@
 base_branch: main
-merge_policy: review
+merge_policy: auto
 
 milestones:
   - label: m0-contracts-and-fixtures
@@ -9,6 +9,9 @@ milestones:
     robustness: full
     depth: high
     vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
     with_prep: true
     prep_direction: >
       Verify the actual existing Astrid surfaces before designing contracts:
@@ -35,6 +38,9 @@ milestones:
     robustness: full
     depth: high
     vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
     with_prep: true
     prep_direction: >
       Read M0 handoff: CONTRACTS.md, contracts/interfaces.py,
@@ -68,6 +74,9 @@ milestones:
     robustness: full
     depth: high
     vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
     with_prep: true
     prep_direction: >
       Read M0 handoff: CONTRACTS.md, contracts/interfaces.py (FilterStage Protocol),
@@ -90,6 +99,9 @@ milestones:
     robustness: full
     depth: high
     vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
     with_prep: true
     prep_direction: >
       Read M0 handoff: CONTRACTS.md §10 (cost/rate-limit),
@@ -112,6 +124,9 @@ milestones:
     robustness: full
     depth: high
     vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
     with_prep: true
     prep_direction: >
       Read M0 handoff: CONTRACTS.md §6.2 (ai-toolkit adapter manifest),
@@ -139,6 +154,9 @@ milestones:
     robustness: full
     depth: medium
     vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
     with_prep: true
     prep_direction: >
       Read M0 handoff: PLACEMENT.md (full placement map),
