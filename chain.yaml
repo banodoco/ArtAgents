@@ -62,13 +62,13 @@ milestones:
     notes: "Turn on expected_version as the protocol contract: LocalFs enforces file-version + fcntl guarded CAS, and SupabaseBackend keeps the same append_event signature while remaining a stub until m6. Stale-version errors become typed so m6 can enforce the same contract server-side."
 
   - label: m6
-    idea: docs/megaplan/epics/timeline-event-sourcing/m6-reigh-sync.md
-    branch: epic/timeline/m6-reigh-sync
-    profile: premium                # tier 4 — dual-backend + reigh-app integration; default-lower rule prefers premium over apex
+    idea: docs/megaplan/epics/timeline-event-sourcing/m6a-astrid-supabase-contract.md
+    branch: epic/timeline/m6a-astrid-supabase-contract
+    profile: premium                # tier 4 — dual-backend contract surface; original SQL/app M6 needs companion repos
     robustness: thorough
     depth: high
     vendor: codex
-    notes: "Implement SupabaseBackend for real and migrate canonical reigh-app write paths in two phases: isolated RPC/projection parity, then app event writes/realtime/UI history. Premium with high depth on author phases."
+    notes: "Recovered M6 scope for the current Astrid-only cloud workspace. Land SupabaseBackend contract/client scaffolding, docs, tests, and explicit companion-tree blockers without claiming SQL/RPC or reigh-app migration is complete."
 
   - label: m7
     idea: docs/megaplan/epics/timeline-event-sourcing/m7-observability.md
