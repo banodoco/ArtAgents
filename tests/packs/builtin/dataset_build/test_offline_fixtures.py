@@ -9,7 +9,10 @@ import jsonschema
 from referencing import Registry, Resource
 
 from astrid.packs.builtin.dataset_build import run as dataset_run
+from astrid.packs.builtin.dataset_build.items import make_candidate_item
 from astrid.packs.builtin.dataset_build.media import ffprobe_metadata
+from astrid.packs.builtin.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
+from astrid.packs.builtin.dataset_build.state import read_review_state, set_status
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -55,6 +58,7 @@ def test_offline_fixture_media_is_valid_and_small() -> None:
 def test_runtime_and_frozen_fixture_contracts_validate_against_both_schema_locations() -> None:
     runtime_fixtures = [
         ("dataset-config.schema.json", FIXTURE_ROOT / "dataset-config.json"),
+        ("dataset-config.schema.json", FIXTURE_ROOT / "dataset-config-cheap-filters.json"),
         ("run-state.schema.json", FIXTURE_ROOT / "expected" / "run-state.json"),
         ("manifest.schema.json", FIXTURE_ROOT / "expected" / "final.manifest.json"),
         ("ai-toolkit-adapter-manifest.schema.json", FIXTURE_ROOT / "expected" / "ai-toolkit-ltx.manifest.json"),
@@ -109,6 +113,10 @@ def test_offline_fixture_drives_full_no_network_pipeline(tmp_path: Path) -> None
     expected_state = _load_json(FIXTURE_ROOT / "expected" / "run-state.json")
     assert generated_state == expected_state
 
+    generated_preview = _load_json(out_dir / "work_preview.json")
+    expected_preview = _load_json(FIXTURE_ROOT / "expected" / "work-preview.json")
+    assert generated_preview == expected_preview
+
     generated_manifest = _normalize_manifest(_load_json(out_dir / "final.manifest.json"), out_dir)
     expected_manifest = _load_json(FIXTURE_ROOT / "expected" / "final.manifest.json")
     assert generated_manifest == expected_manifest
@@ -119,6 +127,81 @@ def test_offline_fixture_drives_full_no_network_pipeline(tmp_path: Path) -> None
 
     caption = _load_json(out_dir / "clips" / "item_aaad37dfa8c5d42a.caption.json")
     assert caption["text"] == "A reviewer-edited green-frame fixture caption for export."
+
+
+def test_offline_cheap_filter_fixture_covers_ordered_filter_contracts(tmp_path: Path, monkeypatch) -> None:
+    media_files = sorted((FIXTURE_ROOT / "media").glob("*.mp4"))
+    _patch_cheap_filter_provider(monkeypatch, media_files)
+    parsed = dataset_run.load_dataset_config(FIXTURE_ROOT / "dataset-config-cheap-filters.json")
+
+    summary = dataset_run.run_pipeline(parsed, tmp_path / "cheap-filter-run", skip_review=True)
+
+    assert summary["accepted"] == 0
+    assert summary["canonical_manifest"] is None
+    assert summary["adapter_manifest"] is None
+    out_dir = tmp_path / "cheap-filter-run"
+    preview = _load_json(out_dir / "work_preview.json")
+    assert preview["phase"] == "post_deterministic_filters"
+    assert preview["active_item_count"] == 2
+    assert preview["rejected_item_count"] == 3
+    assert preview["planned_caption_calls"] == 2
+    assert preview["enabled_model_backed_stages"] == []
+    assert preview["filter_rejected_counts"] == {
+        "black_frame_filter": 0,
+        "content_hash_filter": 1,
+        "duration_filter": 0,
+        "rights_filter": 1,
+        "source_cap_filter": 1,
+    }
+    assert preview["filter_warning_counts"]["black_frame_filter"] == 1
+
+    filtered = _load_json(out_dir / "filtered_items.json")
+    assert filtered["phase"] == "post_model_backed_filters"
+    assert [item["item_id"] for item in filtered["active"]] == ["fixture-keep", "fixture-missing-black"]
+    assert [item["item_id"] for item in filtered["rejected"]] == [
+        "fixture-restricted-rights",
+        "fixture-duplicate",
+        "fixture-source-cap",
+    ]
+
+    by_id = {item["item_id"]: item for item in _load_json(out_dir / "review_data.json")["items"]}
+    assert by_id["fixture-duplicate"]["filter_results"]["content_hash_filter"]["reason"] == "duplicate_content_hash"
+    assert by_id["fixture-source-cap"]["filter_results"]["source_cap_filter"]["reason"] == "source_cap_exceeded"
+    assert by_id["fixture-restricted-rights"]["filter_results"]["rights_filter"]["reason"] == "rights_status_restricted"
+    assert by_id["fixture-missing-black"]["filter_results"]["black_frame_filter"]["reason"] == "missing_black_frame_metadata"
+    assert by_id["fixture-keep"]["review_sampled"]["sampled"] is True
+    assert by_id["fixture-missing-black"]["review_sampled"]["sampled"] is False
+    assert read_review_state(out_dir / "review_state.json")["status"] == "reviewing"
+
+
+def test_offline_fixture_review_modes_and_interrupted_resume_use_checkpoints(tmp_path: Path) -> None:
+    parsed = dataset_run.load_dataset_config(FIXTURE_ROOT / "dataset-config.json")
+    out_dir = tmp_path / "review-mode-run"
+
+    skip_summary = dataset_run.run_pipeline(parsed, out_dir, skip_review=True)
+    assert skip_summary["state_status"] == "reviewing"
+    assert skip_summary["canonical_manifest"] is None
+    assert (out_dir / "review_data.json").is_file()
+    assert not (out_dir / "final.manifest.json").exists()
+
+    set_status(out_dir / "review_state.json", "preview_ready")
+    resumed_summary = dataset_run.run_pipeline(
+        parsed,
+        out_dir,
+        review_decisions_path=FIXTURE_ROOT / "review-decisions.json",
+    )
+    assert resumed_summary["state_status"] == "finalized"
+    assert resumed_summary["accepted"] == 2
+
+    set_status(out_dir / "review_state.json", "reviewing")
+    review_only_summary = dataset_run.run_pipeline(
+        parsed,
+        out_dir,
+        review_decisions_path=FIXTURE_ROOT / "review-decisions.json",
+        review_only=True,
+    )
+    assert review_only_summary["state_status"] == "finalized"
+    assert review_only_summary["accepted"] == 2
 
 
 def _normalize_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -156,3 +239,97 @@ def _replace_paths(value: Any, out_dir: Path) -> Any:
         repo = ROOT.as_posix()
         return value.replace(out_dir.as_posix(), "<RUN_DIR>").replace(repo, "<REPO>")
     return value
+
+
+def _patch_cheap_filter_provider(monkeypatch, media_files: list[Path]) -> None:
+    def acquire(self: LocalFolderSourceProvider, config: dict[str, Any]):
+        yield _fixture_candidate(
+            "fixture-keep",
+            media_files[0],
+            source_id="yt-video-1-s00",
+            derived_source_id="yt-video-1",
+            black_frame_ratio=0.1,
+            rights_status="verified",
+            scene_index=0,
+        )
+        yield _fixture_candidate(
+            "fixture-source-cap",
+            media_files[1],
+            source_id="yt-video-1-s01",
+            derived_source_id="yt-video-1",
+            black_frame_ratio=0.1,
+            rights_status="verified",
+            scene_index=1,
+        )
+        yield _fixture_candidate(
+            "fixture-duplicate",
+            media_files[0],
+            source_id="yt-video-2-s00",
+            derived_source_id="yt-video-2",
+            black_frame_ratio=0.1,
+            rights_status="verified",
+            scene_index=2,
+        )
+        yield _fixture_candidate(
+            "fixture-restricted-rights",
+            media_files[2],
+            source_id="yt-video-3-s00",
+            derived_source_id="yt-video-3",
+            black_frame_ratio=0.1,
+            rights_status="restricted",
+            scene_index=3,
+        )
+        yield _fixture_candidate(
+            "fixture-missing-black",
+            media_files[2],
+            source_id="yt-video-4-s00",
+            derived_source_id="yt-video-4",
+            black_frame_ratio=None,
+            rights_status="verified",
+            scene_index=4,
+        )
+
+    monkeypatch.setattr(LocalFolderSourceProvider, "acquire", acquire)
+
+
+def _fixture_candidate(
+    item_id: str,
+    media_path: Path,
+    *,
+    source_id: str,
+    derived_source_id: str,
+    black_frame_ratio: float | None,
+    rights_status: str,
+    scene_index: int,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "duration_s": 2.0,
+        "resolution": {"width": 64, "height": 64},
+    }
+    if black_frame_ratio is not None:
+        metadata["black_frame_ratio"] = black_frame_ratio
+    item = make_candidate_item(
+        source_type="youtube",
+        source_id=source_id,
+        source_url=f"https://www.youtube.com/watch?v={derived_source_id}",
+        media_path=media_path,
+        media_type="video",
+        source_metadata=metadata,
+        rights={
+            "license": "fixture",
+            "attribution": "Astrid fixture media",
+            "restrictions": [],
+            "rights_status": rights_status,
+        },
+        duration_s=2.0,
+        clip_start_s=0.0,
+        clip_end_s=2.0,
+        scene_index=scene_index,
+        derived_from={
+            "source_id": derived_source_id,
+            "source_type": "youtube",
+            "transformation": "scene",
+        },
+    )
+    item["item_id"] = item_id
+    return item

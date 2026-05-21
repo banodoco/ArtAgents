@@ -17,19 +17,30 @@ const state = {
   limit: PAGE_LIMIT,
   total: 0,
   status: "",
+  sampled: "",
   items: [],
   activeIndex: 0,
   baseStateVersion: 0,
   revisions: new Map(),
+  conflict: false,
 };
 
 const els = {
   summary: document.getElementById("summary"),
   statusFilter: document.getElementById("statusFilter"),
+  sampledFilter: document.getElementById("sampledFilter"),
   prevPage: document.getElementById("prevPage"),
   nextPage: document.getElementById("nextPage"),
+  batchRejectReason: document.getElementById("batchRejectReason"),
+  acceptVisible: document.getElementById("acceptVisible"),
+  rejectVisible: document.getElementById("rejectVisible"),
+  acceptFiltered: document.getElementById("acceptFiltered"),
+  rejectFiltered: document.getElementById("rejectFiltered"),
   save: document.getElementById("save"),
   submit: document.getElementById("submit"),
+  conflictBanner: document.getElementById("conflictBanner"),
+  reapplyLocal: document.getElementById("reapplyLocal"),
+  discardLocal: document.getElementById("discardLocal"),
   pageMeta: document.getElementById("pageMeta"),
   itemList: document.getElementById("itemList"),
   detail: document.getElementById("detail"),
@@ -54,6 +65,7 @@ async function loadPage(offset = state.offset) {
     limit: String(state.limit),
   });
   if (state.status) params.set("status", state.status);
+  if (state.sampled) params.set("sampled", state.sampled);
   const response = await fetch(`/data.json?${params.toString()}`);
   if (!response.ok) throw new Error(`data load failed: ${response.status}`);
   const payload = await response.json();
@@ -64,12 +76,19 @@ async function loadPage(offset = state.offset) {
 }
 
 function render() {
-  els.summary.textContent = `${state.total} item${state.total === 1 ? "" : "s"}${state.status ? ` (${state.status})` : ""}`;
+  const filters = [state.status, state.sampled ? (state.sampled === "true" ? "sampled" : "unsampled") : ""].filter(Boolean);
+  els.summary.textContent = `${state.total} item${state.total === 1 ? "" : "s"}${filters.length ? ` (${filters.join(", ")})` : ""}`;
   els.pageMeta.textContent = `Showing ${state.offset + 1}-${Math.min(state.offset + state.items.length, state.offset + state.limit)} of ${state.total}`;
   els.prevPage.disabled = state.offset === 0;
   els.nextPage.disabled = state.offset + state.limit >= state.total;
+  renderConflict();
   renderVisibleList();
   renderDetail();
+}
+
+function renderConflict() {
+  els.conflictBanner.hidden = !state.conflict;
+  els.reapplyLocal.disabled = !state.revisions.size;
 }
 
 function renderVisibleList() {
@@ -115,6 +134,7 @@ function renderDetail() {
         <dl class="meta-grid">
           <dt>Bucket</dt><dd>${escapeHtml(item.bucket || "")}</dd>
           <dt>Status</dt><dd>${escapeHtml(revision.decision || reviewStatus(item))}</dd>
+          <dt>Sampled</dt><dd>${isSampled(item) ? "yes" : "no"}</dd>
           <dt>Duration</dt><dd>${escapeHtml(String(item.duration_s ?? ""))}</dd>
           <dt>Hash</dt><dd>${escapeHtml(item.content_hash || "")}</dd>
         </dl>
@@ -161,7 +181,7 @@ function updateRevision(item, patch) {
 
 async function saveDiff() {
   const revisions = Array.from(state.revisions.values());
-  if (!revisions.length) return;
+  if (!revisions.length) return true;
   const response = await fetch("/save", {
     method: "POST",
     headers: {"Content-Type": "application/json", ...authHeaders()},
@@ -170,21 +190,82 @@ async function saveDiff() {
       revisions,
     }),
   });
+  if (response.status === 409) {
+    await recoverFromConflict();
+    return false;
+  }
   if (!response.ok) throw new Error(`save failed: ${response.status}`);
   const payload = await response.json();
   state.baseStateVersion = Number(payload.state_version || state.baseStateVersion);
   state.revisions.clear();
+  state.conflict = false;
   await loadPage(state.offset);
+  return true;
 }
 
 async function submitReview() {
-  await saveDiff();
+  const saved = await saveDiff();
+  if (!saved) return;
   const response = await fetch("/submit", {
     method: "POST",
     headers: {"Content-Type": "application/json", ...authHeaders()},
     body: JSON.stringify({submitted_at: new Date().toISOString()}),
   });
   if (!response.ok) throw new Error(`submit failed: ${response.status}`);
+}
+
+async function submitBatch({decision, scope}) {
+  const body = {
+    base_state_version: state.baseStateVersion,
+    decision,
+  };
+  if (decision === "rejected") {
+    body.reject_reason = els.batchRejectReason.value || "low_quality";
+  }
+  if (scope === "visible") {
+    body.item_ids = [];
+    for (const item of state.items) {
+      if (item.item_id) body.item_ids.push(item.item_id);
+    }
+  } else {
+    body.scope = "filtered";
+    const filter = {};
+    if (state.status) filter.status = state.status;
+    if (state.sampled) filter.sampled = state.sampled;
+    if (Object.keys(filter).length) body.filter = filter;
+  }
+  const response = await fetch("/submit-batch", {
+    method: "POST",
+    headers: {"Content-Type": "application/json", ...authHeaders()},
+    body: JSON.stringify(body),
+  });
+  if (response.status === 409) {
+    await recoverFromConflict();
+    return false;
+  }
+  if (!response.ok) throw new Error(`batch failed: ${response.status}`);
+  const payload = await response.json();
+  state.baseStateVersion = Number(payload.state_version || state.baseStateVersion);
+  state.conflict = false;
+  await loadPage(state.offset);
+  return true;
+}
+
+async function recoverFromConflict() {
+  state.conflict = true;
+  await loadState();
+  await loadPage(state.offset);
+}
+
+async function reapplyLocalRevisions() {
+  if (!state.revisions.size) return;
+  await saveDiff();
+}
+
+function discardLocalRevisions() {
+  state.revisions.clear();
+  state.conflict = false;
+  render();
 }
 
 function selectIndex(index) {
@@ -198,6 +279,14 @@ function captionText(item) {
 
 function reviewStatus(item) {
   return item.review_status || "pending";
+}
+
+function isSampled(item) {
+  if (item.review_sampled && typeof item.review_sampled === "object" && "sampled" in item.review_sampled) {
+    return Boolean(item.review_sampled.sampled);
+  }
+  if (typeof item.review_sampled === "boolean") return item.review_sampled;
+  return true;
 }
 
 function escapeHtml(value) {
@@ -248,10 +337,22 @@ document.addEventListener("keydown", event => {
 
 els.prevPage.addEventListener("click", () => loadPage(Math.max(0, state.offset - state.limit)));
 els.nextPage.addEventListener("click", () => loadPage(state.offset + state.limit));
+els.acceptVisible.addEventListener("click", () => submitBatch({decision: "accepted", scope: "visible"}));
+els.rejectVisible.addEventListener("click", () => submitBatch({decision: "rejected", scope: "visible"}));
+els.acceptFiltered.addEventListener("click", () => submitBatch({decision: "accepted", scope: "filtered"}));
+els.rejectFiltered.addEventListener("click", () => submitBatch({decision: "rejected", scope: "filtered"}));
 els.save.addEventListener("click", () => saveDiff());
 els.submit.addEventListener("click", () => submitReview());
+els.reapplyLocal.addEventListener("click", () => reapplyLocalRevisions());
+els.discardLocal.addEventListener("click", () => discardLocalRevisions());
 els.statusFilter.addEventListener("change", () => {
   state.status = els.statusFilter.value;
+  state.offset = 0;
+  state.activeIndex = 0;
+  loadPage(0);
+});
+els.sampledFilter.addEventListener("change", () => {
+  state.sampled = els.sampledFilter.value;
   state.offset = 0;
   state.activeIndex = 0;
   loadPage(0);

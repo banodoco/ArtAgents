@@ -160,8 +160,13 @@ def test_review_state_lifecycle_writes_schema_valid_versions(tmp_path: Path) -> 
     assert written["updated_at"] == "2026-05-21T00:00:01Z"
     _validate("run-state.schema.json", read_review_state(path))
 
-    finalized = set_status(path, "finalized", now="2026-05-21T00:00:02Z")
-    assert finalized["state_version"] == 2
+    preview_ready = set_status(path, "preview_ready", now="2026-05-21T00:00:02Z")
+    assert preview_ready["state_version"] == 2
+    assert preview_ready["status"] == "preview_ready"
+    _validate("run-state.schema.json", read_review_state(path))
+
+    finalized = set_status(path, "finalized", now="2026-05-21T00:00:03Z")
+    assert finalized["state_version"] == 3
     assert finalized["status"] == "finalized"
-    assert finalized["completed_at"] == "2026-05-21T00:00:02Z"
+    assert finalized["completed_at"] == "2026-05-21T00:00:03Z"
     _validate("run-state.schema.json", read_review_state(path))

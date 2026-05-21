@@ -38,6 +38,15 @@ API_BACKED_CAPTION_PROVIDERS = {
     "visual_understand": ("OPENAI_API_KEY",),
     "video_understand": ("OPENAI_API_KEY",),
 }
+MODEL_BACKED_FILTER_STAGE_IDS = {"bucket_judge_filter"}
+LEGACY_FILTER_STAGE_ORDER = (
+    ("duration", "duration_filter"),
+    ("resolution", "resolution_filter"),
+    ("rights", "rights_filter"),
+    ("black_frame", "black_frame_filter"),
+    ("content_hash", "content_hash_filter"),
+    ("source_cap", "source_cap_filter"),
+)
 
 
 class ConfigParseError(ValueError):
@@ -95,6 +104,7 @@ def load_dataset_config(path: str | Path) -> ParsedDatasetConfig:
 
     _validate_schema(raw)
     resolved = _resolve_path_values(copy.deepcopy(raw), base_dir=config_path.parent)
+    resolved = normalize_filter_stages(resolved)
     return ParsedDatasetConfig(
         data=resolved,
         path=config_path,
@@ -140,6 +150,106 @@ def preflight_budget_and_secrets(
             missing.append(f"{provider_id}: one of {', '.join(env_names)}")
     if missing:
         raise SecretPreflightError("missing required secrets for API-backed stages: " + "; ".join(sorted(missing)))
+
+
+def normalize_filter_stages(config: Mapping[str, Any]) -> dict[str, Any]:
+    """Return config with filters.stages normalized to the internal stage model."""
+
+    normalized = copy.deepcopy(dict(config))
+    filters = dict(normalized.get("filters") or {})
+    raw_stages = filters.get("stages")
+    if isinstance(raw_stages, list):
+        stages = [_normalize_stage_entry(entry, normalized) for entry in raw_stages if isinstance(entry, Mapping)]
+    else:
+        stages = _legacy_filter_stages(normalized, filters)
+
+    bucket_stage = _extension_bucket_judge_stage(normalized)
+    if bucket_stage is not None and not any(stage["stage_id"] == "bucket_judge_filter" for stage in stages):
+        stages.append(bucket_stage)
+
+    filters["stages"] = stages
+    normalized["filters"] = filters
+    return normalized
+
+
+def _legacy_filter_stages(config: Mapping[str, Any], filters: Mapping[str, Any]) -> list[dict[str, Any]]:
+    stages: list[dict[str, Any]] = []
+    for legacy_key, stage_id in LEGACY_FILTER_STAGE_ORDER:
+        stage_config = _legacy_stage_config(config, filters, legacy_key)
+        if stage_config is None:
+            continue
+        enabled = bool(stage_config.pop("enabled", True))
+        stages.append(_stage_model(stage_id=stage_id, enabled=enabled, config=stage_config))
+    return stages
+
+
+def _legacy_stage_config(config: Mapping[str, Any], filters: Mapping[str, Any], legacy_key: str) -> dict[str, Any] | None:
+    block = filters.get(legacy_key)
+    block_config = dict(block) if isinstance(block, Mapping) else None
+    clip_config = config.get("clip_config") if isinstance(config.get("clip_config"), Mapping) else {}
+
+    if legacy_key == "duration":
+        stage_config = dict(block_config or {})
+        stage_config.setdefault("min_s", clip_config.get("min_duration_s", 0.0))
+        stage_config.setdefault("max_s", clip_config.get("max_duration_s", 60.0))
+        return stage_config
+
+    if legacy_key == "source_cap":
+        if block_config is None:
+            return None
+        stage_config = dict(block_config or {})
+        stage_config.setdefault("max_per_source", clip_config.get("max_scenes_per_source"))
+        return stage_config
+
+    return block_config
+
+
+def _normalize_stage_entry(entry: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:
+    stage_id = str(entry.get("stage_id", ""))
+    enabled = bool(entry.get("enabled", True))
+    stage_config = entry.get("config")
+    if not isinstance(stage_config, Mapping):
+        stage_config = {}
+    if stage_id == "bucket_judge_filter":
+        if isinstance(stage_config.get("bucket_judge"), Mapping):
+            stage_config = dict(stage_config)
+        else:
+            stage_config = _bucket_judge_config(config, dict(stage_config))
+    return _stage_model(stage_id=stage_id, enabled=enabled, config=dict(stage_config))
+
+
+def _extension_bucket_judge_stage(config: Mapping[str, Any]) -> dict[str, Any] | None:
+    extensions = config.get("extensions") or {}
+    if not isinstance(extensions, Mapping):
+        return None
+    bucket_judge = extensions.get("bucket_judge")
+    if not isinstance(bucket_judge, Mapping) or bucket_judge.get("enabled") is not True:
+        return None
+    return _stage_model(
+        stage_id="bucket_judge_filter",
+        enabled=True,
+        config=_bucket_judge_config(config, dict(bucket_judge)),
+    )
+
+
+def _bucket_judge_config(config: Mapping[str, Any], bucket_judge: Mapping[str, Any]) -> dict[str, Any]:
+    stage_config = copy.deepcopy(dict(config))
+    stage_config["bucket_judge"] = dict(bucket_judge)
+    extensions = config.get("extensions") or {}
+    if isinstance(extensions, Mapping) and extensions.get("fixture_judge_dir") and "fixture_dir" not in stage_config["bucket_judge"]:
+        stage_config["bucket_judge"]["fixture_dir"] = extensions["fixture_judge_dir"]
+    return stage_config
+
+
+def _stage_model(stage_id: str, *, enabled: bool, config: Mapping[str, Any]) -> dict[str, Any]:
+    model_backed = stage_id in MODEL_BACKED_FILTER_STAGE_IDS
+    return {
+        "stage_id": stage_id,
+        "enabled": enabled,
+        "config": dict(config),
+        "model_backed": model_backed,
+        "expensive": model_backed,
+    }
 
 
 def _load_mapping(path: Path) -> dict[str, Any]:
@@ -228,11 +338,16 @@ def _api_requirements(config: Mapping[str, Any]) -> dict[str, tuple[str, ...]]:
         if isinstance(provider, str) and provider in API_BACKED_CAPTION_PROVIDERS:
             requirements[f"caption.{provider}"] = API_BACKED_CAPTION_PROVIDERS[provider]
 
-    extensions = config.get("extensions") or {}
-    if isinstance(extensions, Mapping):
-        bucket_judge = extensions.get("bucket_judge")
-        if isinstance(bucket_judge, Mapping) and bucket_judge.get("enabled") is True:
-            provider = bucket_judge.get("provider", "visual_understand")
-            if isinstance(provider, str) and provider in API_BACKED_CAPTION_PROVIDERS:
-                requirements[f"bucket_judge.{provider}"] = API_BACKED_CAPTION_PROVIDERS[provider]
+    for stage in normalize_filter_stages(config).get("filters", {}).get("stages", []):
+        if not isinstance(stage, Mapping) or stage.get("enabled") is not True:
+            continue
+        if stage.get("stage_id") != "bucket_judge_filter":
+            continue
+        stage_config = stage.get("config") or {}
+        bucket_judge = stage_config.get("bucket_judge") if isinstance(stage_config, Mapping) else {}
+        if not isinstance(bucket_judge, Mapping):
+            bucket_judge = {}
+        provider = bucket_judge.get("provider", "visual_understand")
+        if isinstance(provider, str) and provider in API_BACKED_CAPTION_PROVIDERS:
+            requirements[f"bucket_judge.{provider}"] = API_BACKED_CAPTION_PROVIDERS[provider]
     return requirements

@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..interfaces import FilterResult
+from ._common import build_filter_stats, increment_reason, pass_item, reject_item
 
 
 class DurationFilter:
@@ -33,23 +34,21 @@ class DurationFilter:
             elif max_s is not None and duration > max_s:
                 reason = "duration_too_long"
             else:
-                updated = _with_filter_result(item, self.stage_id, passed=True, reason="", score=duration)
+                updated = pass_item(item, self.stage_id, score=duration)
                 passed.append(updated)
                 continue
-            reasons[reason] = reasons.get(reason, 0) + 1
-            updated = _with_filter_result(item, self.stage_id, passed=False, reason=reason, score=duration)
-            updated["review_status"] = "rejected"
+            increment_reason(reasons, reason)
+            updated = reject_item(item, self.stage_id, reason=reason, score=duration)
             rejected.append(updated)
-        stats = {
-            "stage_id": self.stage_id,
-            "stage_order": self.stage_order,
-            "items_in": len(items),
-            "items_passed": len(passed),
-            "items_rejected": len(rejected),
-            "rejection_reasons": reasons,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-            "warnings": [],
-        }
+        stats = build_filter_stats(
+            stage_id=self.stage_id,
+            stage_order=self.stage_order,
+            items_in=len(items),
+            items_passed=len(passed),
+            items_rejected=len(rejected),
+            rejection_reasons=reasons,
+            started=started,
+        )
         return FilterResult(passed=passed, rejected=rejected, stats=stats)
 
 
@@ -74,15 +73,3 @@ def _duration(item: Mapping[str, Any]) -> float | None:
     if isinstance(start, (int, float)) and isinstance(end, (int, float)) and float(end) >= float(start):
         return float(end) - float(start)
     return None
-
-
-def _with_filter_result(item: Mapping[str, Any], stage_id: str, *, passed: bool, reason: str, score: float | None) -> dict[str, Any]:
-    updated = dict(item)
-    filter_results = dict(updated.get("filter_results") or {})
-    result: dict[str, Any] = {"passed": passed, "reason": reason}
-    if score is not None:
-        result["score"] = score
-    filter_results[stage_id] = result
-    updated["filter_results"] = filter_results
-    updated.setdefault("review_status", "pending")
-    return updated

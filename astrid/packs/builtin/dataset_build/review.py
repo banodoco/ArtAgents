@@ -8,6 +8,8 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from astrid.core.project.jsonio import write_json_atomic
+
 from .items import repo_relative_path, utc_now_iso
 from .state import make_initial_state, write_review_state
 
@@ -16,7 +18,7 @@ def write_review_data(path: str | Path, items: list[Mapping[str, Any]]) -> Path:
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"items": [dict(item) for item in items]}
-    out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(out_path, payload)
     return out_path
 
 

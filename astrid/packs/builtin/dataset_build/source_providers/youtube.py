@@ -44,8 +44,13 @@ class YouTubeSourceProvider:
         max_duration = float(config.get("max_duration_s", clip_config.get("max_duration_s", 60)))
         max_scenes = int(config.get("max_scenes_per_source", clip_config.get("max_scenes_per_source", 20)))
 
-        for index, source in enumerate(_configured_sources(config, dataset_config)):
-            video_path = self._download_source(source, index=index, downloads_dir=downloads_dir)
+        processed_source_ids = {str(source_id) for source_id in config.get("processed_source_ids", []) or []}
+
+        for source in _configured_sources(config, dataset_config):
+            source_id = youtube_source_key(source)
+            if source_id in processed_source_ids:
+                continue
+            video_path = self._download_source(source, source_id=source_id, downloads_dir=downloads_dir)
             scenes = self._detect_scenes(video_path, scenes_dir / f"{video_path.stem}.scenes.json")
             if not scenes:
                 scenes = [{"start": 0.0, "end": _duration_or_zero(video_path, self._prober)}]
@@ -76,15 +81,15 @@ class YouTubeSourceProvider:
                     clip_end_s=end_s,
                     scene_index=scene_index,
                     derived_from={
-                        "source_id": video_path.stem,
+                        "source_id": source_id,
                         "source_type": self.provider_id,
                         "transformation": "scene_extract",
                     },
                     rights=config.get("rights"),
                 )
 
-    def _download_source(self, source: Mapping[str, str], *, index: int, downloads_dir: Path) -> Path:
-        out_base = downloads_dir / f"source-{index:04d}"
+    def _download_source(self, source: Mapping[str, str], *, source_id: str, downloads_dir: Path) -> Path:
+        out_base = downloads_dir / source_id
         cmd = [
             sys.executable,
             "-m",
@@ -135,6 +140,10 @@ def _configured_sources(config: Mapping[str, Any], dataset_config: Mapping[str, 
             for query in bucket.get("search_queries", []) or []:
                 sources.append({"kind": "query", "value": str(query)})
     return sources
+
+
+def youtube_source_key(source: Mapping[str, str]) -> str:
+    return deterministic_id("youtube", source.get("kind", ""), source.get("value", ""), prefix="yt_source")
 
 
 def _scene_bounds(scene: Mapping[str, Any]) -> tuple[float, float]:

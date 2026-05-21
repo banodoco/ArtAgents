@@ -1,0 +1,34 @@
+{
+  "active_item_count": 3,
+  "budget_limits": {
+    "max_api_calls": 0,
+    "max_estimated_cost_usd": 0,
+    "providers": {
+      "bucket_judge.visual_understand": {
+        "max_calls": 0
+      },
+      "caption.visual_understand": {
+        "max_calls": 0
+      }
+    }
+  },
+  "enabled_model_backed_stages": [
+    {
+      "enabled": true,
+      "expensive": true,
+      "stage_id": "bucket_judge_filter"
+    }
+  ],
+  "expensive_spend_disabled": true,
+  "filter_rejected_counts": {
+    "duration_filter": 0
+  },
+  "filter_warning_counts": {
+    "duration_filter": 0
+  },
+  "fixture_mode": true,
+  "phase": "post_deterministic_filters",
+  "planned_caption_calls": 3,
+  "rejected_item_count": 0,
+  "schema_version": 1
+}

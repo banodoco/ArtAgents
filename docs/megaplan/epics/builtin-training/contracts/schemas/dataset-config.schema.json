@@ -123,13 +123,52 @@
       "description": "Filter stage configuration.",
       "additionalProperties": false,
       "properties": {
+        "stages": {
+          "type": "array",
+          "description": "Ordered filter stages. When present, stages execute in list order.",
+          "items": {
+            "type": "object",
+            "required": ["stage_id"],
+            "additionalProperties": false,
+            "properties": {
+              "stage_id": {
+                "type": "string",
+                "enum": [
+                  "duration_filter",
+                  "resolution_filter",
+                  "rights_filter",
+                  "black_frame_filter",
+                  "content_hash_filter",
+                  "source_cap_filter",
+                  "bucket_judge_filter"
+                ]
+              },
+              "enabled": {"type": "boolean", "default": true},
+              "config": {
+                "type": "object",
+                "description": "Stage-specific configuration.",
+                "additionalProperties": true
+              },
+              "model_backed": {
+                "type": "boolean",
+                "description": "Normalized runtime marker for model-backed stages."
+              },
+              "expensive": {
+                "type": "boolean",
+                "description": "Normalized runtime marker for stages that may spend API/model budget."
+              }
+            }
+          }
+        },
         "duration": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
             "enabled": {"type": "boolean", "default": true},
             "min_s": {"type": "number", "default": 2.0},
-            "max_s": {"type": "number", "default": 60.0}
+            "max_s": {"type": "number", "default": 60.0},
+            "min_duration_s": {"type": "number"},
+            "max_duration_s": {"type": "number"}
           }
         },
         "resolution": {
@@ -138,7 +177,17 @@
           "properties": {
             "enabled": {"type": "boolean", "default": true},
             "min_width": {"type": "integer", "default": 480},
-            "min_height": {"type": "integer", "default": 360}
+            "min_height": {"type": "integer", "default": 360},
+            "require_metadata": {"type": "boolean", "default": false}
+          }
+        },
+        "black_frame": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "default": true},
+            "max_black_frame_ratio": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.98},
+            "probe_media": {"type": "boolean", "default": false}
           }
         },
         "content_hash": {
@@ -146,6 +195,29 @@
           "additionalProperties": false,
           "properties": {
             "enabled": {"type": "boolean", "default": true}
+          }
+        },
+        "source_cap": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "default": true},
+            "max_per_source": {"type": "integer", "minimum": 0}
+          }
+        },
+        "rights": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "default": true},
+            "reject_statuses": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "restricted_licenses": {
+              "type": "array",
+              "items": {"type": "string"}
+            }
           }
         }
       }

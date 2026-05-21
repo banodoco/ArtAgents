@@ -95,6 +95,78 @@ def test_load_dataset_config_accepts_unknown_keys_under_extensions(tmp_path: Pat
     assert parsed.data["extensions"]["experimental_top_level"] is True
 
 
+def test_load_dataset_config_normalizes_legacy_filter_blocks_in_deterministic_order(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["filters"] = {
+        "duration": {"enabled": True, "min_s": 2.0, "max_s": 30.0},
+        "resolution": {"enabled": True, "min_width": 64, "min_height": 64},
+        "rights": {"enabled": True, "restricted_licenses": ["editorial-only"]},
+        "black_frame": {"enabled": True, "max_black_frame_ratio": 0.97},
+        "content_hash": {"enabled": True},
+        "source_cap": {"enabled": True, "max_per_source": 3},
+    }
+    path = _write_json(tmp_path / "legacy-filters.json", data)
+
+    parsed = load_dataset_config(path)
+
+    stages = parsed.data["filters"]["stages"]
+    assert [stage["stage_id"] for stage in stages] == [
+        "duration_filter",
+        "resolution_filter",
+        "rights_filter",
+        "black_frame_filter",
+        "content_hash_filter",
+        "source_cap_filter",
+    ]
+    assert all(stage["enabled"] is True for stage in stages)
+    assert all(stage["model_backed"] is False and stage["expensive"] is False for stage in stages)
+    assert stages[0]["config"] == {"min_s": 2.0, "max_s": 30.0}
+    assert stages[-1]["config"]["max_per_source"] == 3
+
+
+def test_load_dataset_config_ordered_filter_stages_preserve_list_order_and_mark_bucket_judge(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["filters"] = {
+        "stages": [
+            {"stage_id": "content_hash_filter"},
+            {"stage_id": "duration_filter", "enabled": False, "config": {"min_s": 3.0, "max_s": 9.0}},
+            {"stage_id": "bucket_judge_filter", "config": {"enabled": True, "provider": "video_understand"}},
+        ]
+    }
+    path = _write_json(tmp_path / "ordered-filters.json", data)
+
+    parsed = load_dataset_config(path)
+
+    stages = parsed.data["filters"]["stages"]
+    assert [stage["stage_id"] for stage in stages] == ["content_hash_filter", "duration_filter", "bucket_judge_filter"]
+    assert stages[0]["enabled"] is True
+    assert stages[1]["enabled"] is False
+    assert stages[1]["config"] == {"min_s": 3.0, "max_s": 9.0}
+    assert stages[2]["model_backed"] is True
+    assert stages[2]["expensive"] is True
+    assert stages[2]["config"]["bucket_judge"]["provider"] == "video_understand"
+
+
+def test_load_dataset_config_adapts_extension_bucket_judge_when_enabled(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["extensions"] = {
+        "bucket_judge": {
+            "enabled": True,
+            "provider": "visual_understand",
+            "buckets": ["smoke_bucket"],
+        }
+    }
+    path = _write_json(tmp_path / "extension-bucket.json", data)
+
+    parsed = load_dataset_config(path)
+
+    stages = parsed.data["filters"]["stages"]
+    assert stages[-1]["stage_id"] == "bucket_judge_filter"
+    assert stages[-1]["model_backed"] is True
+    assert stages[-1]["expensive"] is True
+    assert stages[-1]["config"]["bucket_judge"]["buckets"] == ["smoke_bucket"]
+
+
 def test_load_dataset_config_enforces_video_media_type(tmp_path: Path) -> None:
     data = _load_fixture("dataset-config.valid.json")
     data["media_type"] = "image"
@@ -165,8 +237,25 @@ def test_preflight_rejects_api_backed_stage_with_provider_zero_call_budget(tmp_p
         preflight_budget_and_secrets(parsed, env={"OPENAI_API_KEY": "test-key"})
 
 
+def test_preflight_rejects_ordered_api_backed_bucket_judge_without_secret(tmp_path: Path) -> None:
+    data = _load_fixture("dataset-config.valid.json")
+    data["sources"] = [{"provider": "youtube", "config": {"source_urls": ["https://example.invalid/video"]}}]
+    data["caption"] = {"provider": "transcribe"}
+    data["filters"] = {
+        "stages": [
+            {"stage_id": "duration_filter", "config": {"min_s": 1.0, "max_s": 10.0}},
+            {"stage_id": "bucket_judge_filter", "config": {"enabled": True, "provider": "visual_understand"}},
+        ]
+    }
+    data["extensions"] = {"fixture_mode": False}
+    path = _write_json(tmp_path / "ordered-bucket-preflight.json", data)
+    parsed = load_dataset_config(path)
+
+    with pytest.raises(SecretPreflightError, match="bucket_judge.visual_understand"):
+        preflight_budget_and_secrets(parsed, env={})
+
+
 def test_env_example_documents_dataset_build_secrets() -> None:
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "OPENAI_API_KEY=" in text
     assert "builtin.dataset_build" in text
-
