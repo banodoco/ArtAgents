@@ -31,6 +31,7 @@ from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
 )
+from astrid.core.timeline.paths import assembly_identity_path
 from astrid.core.timeline.projection import (
     ProjectionError,
     apply_event_to_assembly,
@@ -934,3 +935,227 @@ class TestEdgeCases:
         })
         result = apply_event_to_assembly(state, event)
         assert result["clips"] == []
+
+
+# ============================================================================
+# m7 observability — integration/behavior tests (T6)
+# ============================================================================
+
+
+class TestReplayProjection:
+    """Prove replay_projection() full replay, prefix replay, and error cases."""
+
+    def test_full_replay_produces_assembly(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """replay_projection without stop_at_event_id returns full assembly."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.projection import replay_projection
+
+        create_project("replay-proj")
+        result = create_timeline("replay-proj", "replay-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "replay-proj" / "timelines" / ulid
+
+        identity = read_json(assembly_identity_path("replay-proj", ulid, root=tmp_path))
+        timeline_id = identity["timeline_id"]
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+
+        backend.append_event(
+            timeline_id=timeline_id,
+            kind="clip.added",
+            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            actor=_actor(),
+        )
+        backend.append_event(
+            timeline_id=timeline_id,
+            kind="clip.added",
+            payload={"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            actor=_actor(),
+        )
+
+        assembly = replay_projection(backend)
+        assert len(assembly["clips"]) == 2
+        assert assembly["clips"][0]["id"] == "c1"
+        assert assembly["clips"][1]["id"] == "c2"
+
+    def test_prefix_replay_stops_at_event_id(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """replay_projection with stop_at_event_id returns state after that event."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.projection import replay_projection
+
+        create_project("prefix-proj")
+        result = create_timeline("prefix-proj", "prefix-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "prefix-proj" / "timelines" / ulid
+
+        identity = read_json(assembly_identity_path("prefix-proj", ulid, root=tmp_path))
+        timeline_id = identity["timeline_id"]
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+
+        e1 = backend.append_event(
+            timeline_id=timeline_id,
+            kind="clip.added",
+            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            actor=_actor(),
+        )
+        e2 = backend.append_event(
+            timeline_id=timeline_id,
+            kind="clip.added",
+            payload={"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            actor=_actor(),
+        )
+
+        # Prefix replay stopping at first event
+        assembly = replay_projection(backend, stop_at_event_id=e1.event_id)
+        assert len(assembly["clips"]) == 1
+        assert assembly["clips"][0]["id"] == "c1"
+
+        # Prefix replay stopping at second event
+        assembly2 = replay_projection(backend, stop_at_event_id=e2.event_id)
+        assert len(assembly2["clips"]) == 2
+
+    def test_prefix_replay_raises_projection_error_for_missing_event_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """replay_projection with missing stop_at_event_id raises ProjectionError."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.projection import replay_projection
+
+        create_project("missing-proj")
+        result = create_timeline("missing-proj", "missing-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "missing-proj" / "timelines" / ulid
+
+        identity = read_json(assembly_identity_path("missing-proj", ulid, root=tmp_path))
+        timeline_id = identity["timeline_id"]
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+
+        backend.append_event(
+            timeline_id=timeline_id,
+            kind="clip.added",
+            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            actor=_actor(),
+        )
+
+        with pytest.raises(ProjectionError, match="not found in event stream"):
+            replay_projection(backend, stop_at_event_id="01ZZZZZZZZZZZZZZZZZZZZZZZZ")
+
+
+class TestBackendSelection:
+    """Prove backend-selection: slug vs ULID vs event-stream UUID resolution."""
+
+    def test_slug_resolution(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """resolve_timeline_target finds a timeline by slug."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.observability import resolve_timeline_target
+
+        create_project("slug-proj")
+        result = create_timeline("slug-proj", "slug-tl")
+        ulid = result["ulid"]
+
+        target = resolve_timeline_target("slug-proj", "slug-tl", root=tmp_path)
+        assert target.slug == "slug-tl"
+        assert target.timeline_ulid == ulid
+        assert target.backend == "local_fs"
+        assert target.timeline_home.is_dir()
+
+    def test_ulid_resolution(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """resolve_timeline_target finds a timeline by ULID."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.observability import resolve_timeline_target
+
+        create_project("ulid-proj")
+        result = create_timeline("ulid-proj", "ulid-tl")
+        ulid = result["ulid"]
+
+        target = resolve_timeline_target("ulid-proj", ulid, root=tmp_path)
+        assert target.timeline_ulid == ulid
+        assert target.backend == "local_fs"
+        assert target.timeline_home.is_dir()
+
+    def test_slug_not_found_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        """resolve_timeline_target raises ValueError for non-existent slug."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.observability import resolve_timeline_target
+
+        create_project("nf-proj")
+        with pytest.raises(ValueError, match="not found"):
+            resolve_timeline_target("nf-proj", "no-such-slug", root=tmp_path)
+
+    def test_uuid_resolution_via_event_stream_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """resolve_timeline_target finds a timeline by event-stream UUID."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.observability import resolve_timeline_target
+
+        create_project("uuid-proj")
+        result = create_timeline("uuid-proj", "uuid-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "uuid-proj" / "timelines" / ulid
+
+        identity = read_json(assembly_identity_path("uuid-proj", ulid, root=tmp_path))
+        timeline_id = identity["timeline_id"]
+
+        target = resolve_timeline_target("uuid-proj", timeline_id, root=tmp_path)
+        assert target.timeline_id == timeline_id
+        assert target.slug == "uuid-tl"
+        assert target.timeline_home.is_dir()
+
+
+class TestPreviewAtEventId:
+    """Prove preview-at-event-id stdout and --out guard rejection."""
+
+    def test_preview_at_event_id_stdout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    ):
+        """replay_projection at a specific event_id prints to stdout."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.projection import replay_projection
+
+        create_project("prev-proj")
+        result = create_timeline("prev-proj", "prev-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "prev-proj" / "timelines" / ulid
+
+        identity = read_json(assembly_identity_path("prev-proj", ulid, root=tmp_path))
+        timeline_id = identity["timeline_id"]
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+
+        e1 = backend.append_event(
+            timeline_id=timeline_id,
+            kind="clip.added",
+            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            actor=_actor(),
+        )
+
+        assembly = replay_projection(backend, stop_at_event_id=e1.event_id)
+        assert len(assembly["clips"]) == 1
+        assert assembly["clips"][0]["id"] == "c1"
+
+    def test_preview_no_events_returns_empty_dict(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    ):
+        """replay_projection on empty stream returns empty dict for full replay."""
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        from astrid.core.timeline.projection import replay_projection
+
+        create_project("empty-proj")
+        result = create_timeline("empty-proj", "empty-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "empty-proj" / "timelines" / ulid
+
+        identity = read_json(assembly_identity_path("empty-proj", ulid, root=tmp_path))
+        timeline_id = identity["timeline_id"]
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+
+        assembly = replay_projection(backend)
+        assert assembly == {}

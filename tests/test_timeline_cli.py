@@ -1067,3 +1067,428 @@ def test_arrangement_set_invalid_json_file_returns_exit_code_2(
     assert rc == 2
     captured = capsys.readouterr()
     assert "--from-json must contain valid JSON" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# m7 observability — CLI parser/handler dispatch tests (T5)
+# ---------------------------------------------------------------------------
+
+
+def test_m7_subcommands_appear_in_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    for verb in ("history", "diff", "audit", "preview", "who-edited"):
+        assert verb in captured.out
+
+
+def test_history_parses_slug_or_id_and_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_history(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_history", fake_history)
+
+    rc = timeline_cli.main(["history", "my-slug", "--since", "01EVENT0001", "--limit", "25"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.slug_or_id == "my-slug"
+    assert args.since_event_id == "01EVENT0001"
+    assert args.limit == 25
+
+
+def test_history_default_limit_is_50(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_history(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_history", fake_history)
+
+    rc = timeline_cli.main(["history", "my-slug"])
+    assert rc == 0
+    assert seen["args"].limit == 50
+    assert seen["args"].since_event_id is None
+
+
+def test_history_missing_slug_or_id_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["history"])
+    assert excinfo.value.code != 0
+
+
+def test_diff_parses_from_to_and_with_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_diff(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_diff", fake_diff)
+
+    rc = timeline_cli.main(
+        ["diff", "my-slug", "--from", "01EVENT01", "--to", "01EVENT02", "--with-state"]
+    )
+    assert rc == 0
+    args = seen["args"]
+    assert args.slug_or_id == "my-slug"
+    assert args.from_event_id == "01EVENT01"
+    assert args.to_event_id == "01EVENT02"
+    assert args.with_state is True
+
+
+def test_diff_missing_required_from_flag_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["diff", "my-slug", "--to", "01EVENT02"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--from" in captured.err
+
+
+def test_diff_missing_required_to_flag_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["diff", "my-slug", "--from", "01EVENT01"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--to" in captured.err
+
+
+def test_audit_parses_slug_or_id_and_include_ops(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_audit(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_audit", fake_audit)
+
+    rc = timeline_cli.main(["audit", "my-slug", "--include-ops"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.slug_or_id == "my-slug"
+    assert args.include_ops is True
+
+
+def test_audit_without_include_ops_defaults_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_audit(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_audit", fake_audit)
+
+    rc = timeline_cli.main(["audit", "my-slug"])
+    assert rc == 0
+    assert seen["args"].include_ops is False
+
+
+def test_preview_parses_at_and_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_preview(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_preview", fake_preview)
+
+    rc = timeline_cli.main(["preview", "my-slug", "--at", "01EVENT42", "--out", "/tmp/preview.json"])
+    assert rc == 0
+    args = seen["args"]
+    assert args.slug_or_id == "my-slug"
+    assert args.at_event_id == "01EVENT42"
+    assert args.out_path == "/tmp/preview.json"
+
+
+def test_preview_missing_required_at_flag_errors(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["preview", "my-slug"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--at" in captured.err
+
+
+def test_who_edited_parses_slug_or_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_who_edited(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_who_edited", fake_who_edited)
+
+    rc = timeline_cli.main(["who-edited", "my-slug"])
+    assert rc == 0
+    assert seen["args"].slug_or_id == "my-slug"
+
+
+def test_history_help_shows_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["history", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "--since" in captured.out
+    assert "--limit" in captured.out
+    assert "slug_or_id" in captured.out
+
+
+def test_diff_help_shows_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["diff", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "--from" in captured.out
+    assert "--to" in captured.out
+    assert "--with-state" in captured.out
+
+
+def test_audit_help_shows_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["audit", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "--include-ops" in captured.out
+
+
+def test_preview_help_shows_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["preview", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "--at" in captured.out
+    assert "--out" in captured.out
+
+
+# ── handler dispatch tests (monkeypatch) ──────────────────────────────────────
+
+
+def test_cmd_history_dispatches_via_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_history(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_history", fake_history)
+
+    rc = timeline_cli.main(["history", "target-1"])
+    assert rc == 0
+    assert seen["args"].command == "history"
+
+
+def test_cmd_diff_dispatches_via_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_diff(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_diff", fake_diff)
+
+    rc = timeline_cli.main(["diff", "target-1", "--from", "e1", "--to", "e2"])
+    assert rc == 0
+    assert seen["args"].command == "diff"
+
+
+def test_cmd_audit_dispatches_via_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_audit(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_audit", fake_audit)
+
+    rc = timeline_cli.main(["audit", "target-1"])
+    assert rc == 0
+    assert seen["args"].command == "audit"
+
+
+def test_cmd_preview_dispatches_via_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_preview(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_preview", fake_preview)
+
+    rc = timeline_cli.main(["preview", "target-1", "--at", "e1"])
+    assert rc == 0
+    assert seen["args"].command == "preview"
+
+
+def test_cmd_who_edited_dispatches_via_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_who_edited(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_who_edited", fake_who_edited)
+
+    rc = timeline_cli.main(["who-edited", "target-1"])
+    assert rc == 0
+    assert seen["args"].command == "who-edited"
+
+
+# ── --out guard rejection test ────────────────────────────────────────────────
+
+
+def test_preview_out_guard_rejects_paths_inside_timeline_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """cmd_preview --out rejects paths inside the timeline home directory."""
+    session = _session()
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+    # Create a fake timeline home
+    timeline_home = tmp_path / "demo" / "timelines" / "01J00000000000000000000000"
+    timeline_home.mkdir(parents=True)
+    (timeline_home / "assembly.json").write_text(
+        '{"schema_version": 1, "assembly": {"clips": []}}', encoding="utf-8"
+    )
+    (timeline_home / "display.json").write_text(
+        '{"schema_version": 1, "slug": "test-tl", "name": "Test"}', encoding="utf-8"
+    )
+    (timeline_home / "assembly.identity.json").write_text(
+        '{"timeline_id": "00000000-0000-0000-0000-000000000001", "backend": "local_fs"}',
+        encoding="utf-8",
+    )
+
+    from astrid.core.timeline.observability import ResolvedTarget
+    from astrid.core.timeline import observability as obs_mod
+    from astrid.core.timeline import eventlog as evlog_mod
+    from astrid.core.timeline.events.schema import TimelineEvent as TE, TimelineActor as TA
+
+    fake_target = ResolvedTarget(
+        backend="local_fs",
+        timeline_id="00000000-0000-0000-0000-000000000001",
+        timeline_ulid="01J00000000000000000000000",
+        timeline_home=timeline_home,
+        slug="test-tl",
+        backend_name_display="local_fs",
+    )
+
+    def fake_resolve(project_slug: str, slug_or_id: str, *, root=None):
+        return fake_target
+
+    monkeypatch.setattr(obs_mod, "resolve_timeline_target", fake_resolve)
+
+    # Provide a fake backend with a matching event so replay succeeds
+    at_event_id = "01AAAAAAAAAAAAAAAAAAAAAA01"
+    event = TE.from_dict({
+        "event_id": at_event_id,
+        "timeline_id": "00000000-0000-0000-0000-000000000001",
+        "ts": "2026-05-20T12:00:00Z",
+        "actor": {"type": "system", "id": "test", "display": "Test"},
+        "prev_hash": None,
+        "hash": "01AAAAAAAAAAAAAAAAAAAAAA010",
+        "kind": "clip.added",
+        "payload": {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+        "expected_version": None,
+        "schema_version": 2,
+        "txn_id": None,
+    })
+
+    class FakeBackend:
+        def backend_name(self):
+            return "local_fs"
+        def read_events(self, after=None, limit=None):
+            return [event]
+
+    monkeypatch.setattr(
+        evlog_mod, "select_timeline_backend",
+        lambda timeline_id, timeline_home, preferred_backend: (None, FakeBackend()),
+    )
+
+    # Attempt to write inside timeline home — should be rejected
+    out_inside = timeline_home / "stale_assembly.json"
+    rc = timeline_cli.main(
+        ["preview", "test-tl", "--at", at_event_id, "--out", str(out_inside)]
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "inside the timeline home" in captured.err
+
+
+def test_preview_out_guard_allows_paths_outside_timeline_home(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """cmd_preview --out allows paths outside the timeline home."""
+    session = _session()
+    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: session)
+
+    timeline_home = tmp_path / "demo" / "timelines" / "01J00000000000000000000000"
+    timeline_home.mkdir(parents=True)
+    (timeline_home / "assembly.identity.json").write_text(
+        '{"timeline_id": "00000000-0000-0000-0000-000000000002", "backend": "local_fs"}',
+        encoding="utf-8",
+    )
+
+    from astrid.core.timeline.observability import ResolvedTarget
+
+    fake_target = ResolvedTarget(
+        backend="local_fs",
+        timeline_id="00000000-0000-0000-0000-000000000002",
+        timeline_ulid="01J00000000000000000000000",
+        timeline_home=timeline_home,
+        slug="test-tl",
+        backend_name_display="local_fs",
+    )
+
+    def fake_resolve(project_slug: str, slug_or_id: str, *, root=None):
+        return fake_target
+
+    from astrid.core.timeline import observability as obs_mod
+    from astrid.core.timeline import eventlog as evlog_mod
+
+    monkeypatch.setattr(obs_mod, "resolve_timeline_target", fake_resolve)
+
+    # Stub out select_timeline_backend and replay_projection
+    from astrid.core.timeline.events.schema import TimelineEvent as TE2, TimelineActor as TA2
+
+    at_eid2 = "01AAAAAAAAAAAAAAAAAAAAAA02"
+    event = TE2.from_dict({
+        "event_id": at_eid2,
+        "timeline_id": "00000000-0000-0000-0000-000000000002",
+        "ts": "2026-05-20T12:00:00Z",
+        "actor": {"type": "system", "id": "test", "display": "Test"},
+        "prev_hash": None,
+        "hash": "01AAAAAAAAAAAAAAAAAAAAAA020",
+        "kind": "clip.added",
+        "payload": {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+        "expected_version": None,
+        "schema_version": 2,
+        "txn_id": None,
+    })
+
+    class FakeBackendWithEvent:
+        def backend_name(self):
+            return "local_fs"
+
+        def read_events(self, after=None, limit=None):
+            return [event]
+
+    monkeypatch.setattr(
+        evlog_mod,
+        "select_timeline_backend",
+        lambda timeline_id, timeline_home, preferred_backend: (None, FakeBackendWithEvent()),
+    )
+
+    out_outside = tmp_path / "outside_preview.json"
+    rc = timeline_cli.main(
+        ["preview", "test-tl", "--at", at_eid2, "--out", str(out_outside)]
+    )
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "Projected state written to" in captured.out
+    assert out_outside.is_file()

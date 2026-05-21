@@ -73,8 +73,30 @@ def resolve_timeline_target(
             f"timeline with ULID '{slug_or_id}' not found in project '{project_slug}'"
         )
 
-    # --- Strategy 2: slug ---
-    found = find_timeline_by_slug(project_slug, slug_or_id, root=root)
+    # --- Strategy 2: event-stream UUID (check before slug to avoid slug validation) ---
+    _is_uuid = _looks_like_uuid(slug_or_id)
+    if _is_uuid:
+        uuid_found = find_timeline_by_event_stream_id(project_slug, slug_or_id, root=root)
+        if uuid_found is not None:
+            ulid, slug = uuid_found
+            tdir = timeline_dir(project_slug, ulid, root=root)
+            return ResolvedTarget(
+                backend="local_fs",
+                timeline_id=slug_or_id,
+                timeline_ulid=ulid,
+                timeline_home=tdir,
+                slug=slug,
+                backend_name_display="local_fs",
+            )
+        raise ValueError(
+            f"timeline with event-stream UUID '{slug_or_id}' not found in project '{project_slug}'"
+        )
+
+    # --- Strategy 3: slug ---
+    try:
+        found = find_timeline_by_slug(project_slug, slug_or_id, root=root)
+    except Exception:
+        found = None
     if found is not None:
         ulid, tdir = found
         identity = _read_identity(tdir)
@@ -93,25 +115,6 @@ def resolve_timeline_target(
             )
         raise ValueError(
             f"timeline '{slug_or_id}' has no identity sidecar in project '{project_slug}'"
-        )
-
-    # --- Strategy 3: event-stream UUID ---
-    _is_uuid = _looks_like_uuid(slug_or_id)
-    uuid_found = find_timeline_by_event_stream_id(project_slug, slug_or_id, root=root)
-    if uuid_found is not None:
-        ulid, slug = uuid_found
-        tdir = timeline_dir(project_slug, ulid, root=root)
-        return ResolvedTarget(
-            backend="local_fs",
-            timeline_id=slug_or_id,
-            timeline_ulid=ulid,
-            timeline_home=tdir,
-            slug=slug,
-            backend_name_display="local_fs",
-        )
-    if _is_uuid:
-        raise ValueError(
-            f"timeline with event-stream UUID '{slug_or_id}' not found in project '{project_slug}'"
         )
 
     raise ValueError(
