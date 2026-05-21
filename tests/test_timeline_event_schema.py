@@ -9,6 +9,7 @@ from astrid.core.timeline.eventlog import (
     EventLogNotImplementedError,
     LocalFsBackend,
     SupabaseBackend,
+    build_timeline_backend,
     select_timeline_backend,
     select_timeline_stream,
 )
@@ -224,6 +225,31 @@ class TimelineEventSchemaTest(unittest.TestCase):
         self.assertEqual(backend.actor_display, "Codex")
         self.assertEqual(backend.rpc_append_name, "append_timeline_event_v2")
         self.assertTrue(backend.enabled)
+
+    def test_build_timeline_backend_preserves_full_supabase_options_payload(self) -> None:
+        options = SupabaseEventLogOptions(
+            url="https://example.supabase.co",
+            auth_token="pat-token",
+            verified_subject="user-1",
+            actor_id="agent:codex",
+            actor_display="Codex",
+            rpc_append_name="append_timeline_event_v2",
+        )
+        stream = select_timeline_stream(
+            timeline_id=str(uuid4()),
+            preferred_backend="supabase",
+            supabase_options=options,
+        )
+
+        backend = build_timeline_backend(stream)
+
+        assert isinstance(backend, SupabaseBackend)
+        self.assertEqual(backend.supabase_url, options.url)
+        self.assertEqual(backend.auth_token, options.auth_token)
+        self.assertEqual(backend.verified_subject, options.verified_subject)
+        self.assertEqual(backend.actor_id, options.actor_id)
+        self.assertEqual(backend.actor_display, options.actor_display)
+        self.assertEqual(backend.rpc_append_name, options.rpc_append_name)
 
     def test_supabase_backend_missing_config_raises_typed_errors(self) -> None:
         tid = str(uuid4())

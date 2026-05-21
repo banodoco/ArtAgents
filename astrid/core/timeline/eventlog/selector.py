@@ -46,15 +46,20 @@ def select_timeline_stream(
 def build_timeline_backend(stream: TimelineStreamRef) -> EventLogBackend:
     if stream.backend == "supabase":
         options = stream.supabase_options
+        backend_kwargs = {
+            "timeline_id": stream.timeline_id,
+            "supabase_url": options.url if options is not None else None,
+            "auth_token": options.auth_token if options is not None else None,
+            "enabled": options is not None,
+            "verified_subject": options.verified_subject if options is not None else None,
+            "actor_id": options.actor_id if options is not None else None,
+            "actor_display": options.actor_display if options is not None else None,
+            "rpc_append_name": (
+                options.rpc_append_name if options is not None else "append_timeline_event"
+            ),
+        }
         return SupabaseBackend(
-            timeline_id=stream.timeline_id,
-            supabase_url=options.url if options is not None else None,
-            auth_token=options.auth_token if options is not None else None,
-            enabled=options is not None,
-            verified_subject=options.verified_subject if options is not None else None,
-            actor_id=options.actor_id if options is not None else None,
-            actor_display=options.actor_display if options is not None else None,
-            rpc_append_name=options.rpc_append_name if options is not None else "append_timeline_event",
+            **backend_kwargs,
         )
     if stream.home is None:
         raise ValueError("local_fs timeline stream requires a timeline home")

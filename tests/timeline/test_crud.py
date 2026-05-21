@@ -378,6 +378,8 @@ class TestRenameTimeline:
                     auth_token=supabase_options.auth_token,
                     enabled=True,
                     verified_subject=supabase_options.verified_subject,
+                    actor_id=supabase_options.actor_id,
+                    actor_display=supabase_options.actor_display,
                     rpc_append_name=supabase_options.rpc_append_name,
                 ),
             )
@@ -393,6 +395,8 @@ class TestRenameTimeline:
                     url="https://example.supabase.co",
                     auth_token="pat-token",
                     verified_subject="user-1",
+                    actor_id="agent:codex",
+                    actor_display="Codex",
                     rpc_append_name="append_timeline_event_v2",
                 ),
             )
