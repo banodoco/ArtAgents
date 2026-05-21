@@ -1587,6 +1587,7 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
                 continue
 
             if classification == "malformed_incomplete":
+                result.malformed.append(ulid)
                 result.skipped.append(
                     SkippedTimeline(
                         project_slug=slug,
@@ -1652,6 +1653,7 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
             "imported_count": len(result.imported),
             "skipped_count": len(result.skipped),
             "parity_failure_count": len(result.parity_failures),
+            "malformed_count": len(result.malformed),
             "imported": result.imported,
             "skipped": [
                 {
@@ -1670,6 +1672,7 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
                 }
                 for f in result.parity_failures
             ],
+            "malformed": result.malformed,
             "ok": result.ok,
         }
         print(json.dumps(output, indent=2, sort_keys=True, default=str))
@@ -1677,7 +1680,8 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
         mode_label = "dry-run" if not write_mode else "applied"
         print(f"Migration {mode_label} — {len(result.imported)} imported, "
               f"{len(result.skipped)} skipped, "
-              f"{len(result.parity_failures)} parity failures")
+              f"{len(result.parity_failures)} parity failures, "
+              f"{len(result.malformed)} malformed")
 
         if result.skipped:
             print("\nSkipped:")
@@ -1688,6 +1692,11 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
             print(f"\nParity failures ({len(result.parity_failures)}):")
             for f in result.parity_failures:
                 print(f"  [{f.project_slug}] {f.timeline_ulid}: {f.detail}")
+
+        if result.malformed:
+            print(f"\nMalformed ({len(result.malformed)}):")
+            for ulid in result.malformed:
+                print(f"  {ulid}")
 
         if result.imported:
             print(f"\nImported ({len(result.imported)}):")

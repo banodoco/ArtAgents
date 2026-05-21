@@ -97,13 +97,14 @@ class MigrationResult:
     imported: list[str] = field(default_factory=list)  # timeline ULIDs
     skipped: list[SkippedTimeline] = field(default_factory=list)
     parity_failures: list[ParityFailure] = field(default_factory=list)
+    malformed: list[str] = field(default_factory=list)  # timeline ULIDs
     resumable: ResumableStatus = field(default_factory=ResumableStatus)
     started_at: str = ""
     finished_at: str = ""
 
     @property
     def ok(self) -> bool:
-        return len(self.parity_failures) == 0
+        return len(self.parity_failures) == 0 and len(self.malformed) == 0
 
 
 # ---------------------------------------------------------------------------
