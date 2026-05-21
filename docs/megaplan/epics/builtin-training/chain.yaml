@@ -1,0 +1,189 @@
+base_branch: main
+merge_policy: auto
+
+milestones:
+  - label: m0-contracts-and-fixtures
+    idea: docs/megaplan/epics/builtin-training/briefs/m0-contracts-and-fixtures.md
+    branch: megaplan/builtin-training-m0-contracts
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
+    with_prep: true
+    prep_direction: >
+      Verify the actual existing Astrid surfaces before designing contracts:
+      inspect builtin.scenes, builtin.visual_understand, builtin.video_understand,
+      builtin.transcribe, builtin.human_review, builtin.clip_extract,
+      builtin.youtube_audio, seinfeld.dataset_build, seinfeld.lora_train, and
+      seinfeld.script_pipeline.
+      Produce locked contracts and fixture strategy; do not implement the full
+      pipeline in this milestone.
+    notes: >
+      Freeze names, config schema, review item/decision schema, manifest adapter
+      interface, source/caption provider interfaces, filter-stage interface,
+      run-state schema, secrets/cost/server contracts, module placement map,
+      fixture plan, generic creative-writing script id, and Seinfeld deletion
+      path before code-heavy milestones start.
+      CONTRACTS.md, PLACEMENT.md, FIXTURES.md, contracts/interfaces.py,
+      contracts/schemas/*.json, and contracts/fixtures/*.json are the
+      frozen M0 handoff artifacts.
+
+  - label: m1-generic-training-dataset
+    idea: docs/megaplan/epics/builtin-training/briefs/m1-generic-training-dataset.md
+    branch: megaplan/builtin-training-m1-dataset
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
+    with_prep: true
+    prep_direction: >
+      Read M0 handoff: CONTRACTS.md, contracts/interfaces.py,
+      contracts/schemas/dataset-config.schema.json,
+      contracts/schemas/candidate-item.schema.json,
+      contracts/schemas/review-item.schema.json,
+      contracts/schemas/review-decision.schema.json,
+      contracts/schemas/manifest.schema.json,
+      contracts/schemas/ai-toolkit-adapter-manifest.schema.json,
+      contracts/schemas/run-state.schema.json,
+      PLACEMENT.md, FIXTURES.md.
+      Inspect astrid/packs/seinfeld/dataset_build, builtin.human_review,
+      builtin.youtube_audio, builtin.scenes, builtin.visual_understand,
+      builtin.video_understand, and seinfeld.lora_train preflight.
+      Focus on turning the existing Seinfeld prototype into a generic
+      built-in training dataset orchestrator without broad unrelated
+      Astrid refactors.
+      NOTE: builtin.clip_extract does not exist — extraction is inlined
+      in seinfeld.dataset_build or will be internal to builtin.dataset_build.
+    notes: >
+      Implement the contracts frozen in M0. This milestone should produce a
+      working video dataset flow with source/caption providers, scalable human
+      review, provenance/rights metadata, and ai-toolkit export.
+      Emit canonical final.manifest.json and ai-toolkit adapter manifest.
+      Handoff to M2a: canonical manifest, review data/state/final.
+
+  - label: m2a-cheap-filters-and-resume
+    idea: docs/megaplan/epics/builtin-training/briefs/m2a-cheap-filters-and-resume.md
+    branch: megaplan/builtin-training-m2a-filters
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
+    with_prep: true
+    prep_direction: >
+      Read M0 handoff: CONTRACTS.md, contracts/interfaces.py (FilterStage Protocol),
+      contracts/schemas/filter-stats.schema.json,
+      contracts/schemas/run-state.schema.json,
+      contracts/schemas/review-decision.schema.json.
+      Inspect the filter-stage interface and current builtin.human_review behavior.
+      NOTE: current human_review does full-state /save; diff-based saves and
+      stale-save detection are new M2a work, per M0 contract.
+    notes: >
+      Add cheap deterministic filters, review-only/skip-review/resume modes,
+      canonical state handling, stale-save detection, review batching/sampling,
+      cost preview, and offline fixture coverage.
+      Handoff to M2b: canonical state, filter behavior, stale-save detection.
+
+  - label: m2b-semantic-quality-and-topup
+    idea: docs/megaplan/epics/builtin-training/briefs/m2b-semantic-quality-and-topup.md
+    branch: megaplan/builtin-training-m2b-semantic-topup
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
+    with_prep: true
+    prep_direction: >
+      Read M0 handoff: CONTRACTS.md §10 (cost/rate-limit),
+      contracts/interfaces.py (CaptionProvider, FilterStage),
+      contracts/schemas/dataset-config.schema.json (budgets block).
+      Inspect the filter-stage interface from M0/M2a and the concrete
+      visual_understand/video_understand/transcribe CLIs.
+      Focus on semantic filter caching, invalidation, top-up rounds,
+      and quality reporting.
+    notes: >
+      Add semantic filtering, prompt/schema/media-hash invalidation, capped
+      top-up loops after review rejects, API budget/rate-limit enforcement, and
+      actionable dataset quality reports.
+      Handoff to M3: quality artifacts, top-up manifests.
+
+  - label: m3-generic-training-run
+    idea: docs/megaplan/epics/builtin-training/briefs/m3-generic-training-run.md
+    branch: megaplan/builtin-training-m3-run
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
+    with_prep: true
+    prep_direction: >
+      Read M0 handoff: CONTRACTS.md §6.2 (ai-toolkit adapter manifest),
+      contracts/schemas/ai-toolkit-adapter-manifest.schema.json,
+      contracts/schemas/training-run-config.schema.json,
+      contracts/interfaces.py (TrainerAdapter, ComputeBackend),
+      PLACEMENT.md (training homes).
+      Inspect astrid/packs/seinfeld/lora_train, aitoolkit_stage,
+      aitoolkit_train, lora_eval_grid, samples_collage, lora_register, and
+      external.runpod. Preserve existing RunPod/ai-toolkit behavior while
+      extracting the generic built-in training-run surface.
+      Training preflight expects flat clips[] with clip_file/path, clip_id,
+      and sibling <clip_id>.caption.json sidecars.
+    notes: >
+      Generalize the Seinfeld ai-toolkit LoRA training orchestrator into a
+      built-in training_run orchestrator for ai-toolkit LTX manifests produced
+      by m1/m2, with explicit cost budgets, spend confirmation, and RunPod
+      recovery/teardown state.
+      Handoff to M4: training run artifacts.
+
+  - label: m4-pack-migration-and-examples
+    idea: docs/megaplan/epics/builtin-training/briefs/m4-pack-migration-and-examples.md
+    branch: megaplan/builtin-training-m4-migration
+    profile: directed
+    robustness: full
+    depth: medium
+    vendor: codex
+    phase_model:
+      - finalize=codex:high
+      - execute=codex:high
+    with_prep: true
+    prep_direction: >
+      Read M0 handoff: PLACEMENT.md (full placement map),
+      CONTRACTS.md §13 (Seinfeld deletion path).
+      Locked generic ids: builtin.dataset_build, builtin.training_run,
+      builtin.script_pipeline.
+      seinfeld.dataset_build → example config; seinfeld.lora_train → example config;
+      seinfeld.script_pipeline → preset config for builtin.script_pipeline.
+      Target: delete astrid/packs/seinfeld/ after examples/presets exist.
+      No compatibility shim lives in the Seinfeld pack.
+    notes: >
+      Move Seinfeld and Always Sunny usage onto the built-in pipeline through
+      configs/examples, extract the Seinfeld script pipeline into a generic
+      built-in creative-writing/script module with presets, reconcile the tree
+      against the placement map, delete astrid/packs/seinfeld, and document the
+      end-to-end workflow.
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+
+driver:
+  stall_threshold: 5
+  max_iterations: 120
+  phase_timeout: 3600
+  status_timeout: 60
+  on_escalate: abort
+  robustness: full
+  auto_approve: true
