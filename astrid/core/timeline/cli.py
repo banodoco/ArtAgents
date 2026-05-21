@@ -37,6 +37,7 @@ from ._edit_helpers import TimelineEditError
 from .eventlog import EventLogError
 from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
+from .projection import ErasedPayloadProjectionError, ProjectionError
 from .paths import assembly_identity_path, find_timeline_by_slug
 
 _SESSION_GATE_HINT = (
@@ -51,6 +52,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.handler(args))
     except (crud.TimelineCrudError, TimelineEditError, SessionBindingError, EventLogError) as exc:
+        print(f"timelines: {exc}", file=sys.stderr)
+        return 2
+    except ErasedPayloadProjectionError as exc:
+        print(f"timelines: {exc} (erased payload)", file=sys.stderr)
+        return 2
+    except ProjectionError as exc:
         print(f"timelines: {exc}", file=sys.stderr)
         return 2
     except ValueError as exc:
@@ -539,6 +546,269 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit structured JSON instead of pretty-print.",
     )
     migrate_parser.set_defaults(handler=cmd_migrate_events)
+
+    # --- push (m9) ---
+    push_parser = subparsers.add_parser(
+        "push", help="Push a local timeline to Supabase via event-log replay."
+    )
+    push_parser.add_argument(
+        "slug_or_id", help="Local timeline slug, ULID, or event-stream UUID."
+    )
+    push_parser.add_argument(
+        "--to",
+        required=True,
+        dest="to_backend",
+        choices=["supabase"],
+        help="Destination backend (only 'supabase' in v1).",
+    )
+    push_parser.add_argument(
+        "--project",
+        help="Project slug (required when no session is bound).",
+    )
+    push_parser.set_defaults(handler=cmd_push)
+
+    # --- pull (m9) ---
+    pull_parser = subparsers.add_parser(
+        "pull", help="Pull a Supabase timeline to a local destination via event-log replay."
+    )
+    pull_parser.add_argument(
+        "slug_or_id", help="Remote timeline slug or event-stream UUID on Supabase."
+    )
+    pull_parser.add_argument(
+        "--from",
+        required=True,
+        dest="from_backend",
+        choices=["supabase"],
+        help="Source backend (only 'supabase' in v1).",
+    )
+    pull_parser.add_argument(
+        "--project",
+        required=True,
+        help="Project slug for the local destination.",
+    )
+    pull_parser.add_argument(
+        "--into",
+        dest="into_slug",
+        default=None,
+        help="Pull into an existing local timeline with this slug.",
+    )
+    pull_parser.add_argument(
+        "--as",
+        dest="create_as_slug",
+        default=None,
+        help="Create a new local timeline with this slug (requires --create).",
+    )
+    pull_parser.add_argument(
+        "--create",
+        action="store_true",
+        default=False,
+        help="Create a new local timeline as the pull destination.",
+    )
+    pull_parser.set_defaults(handler=cmd_pull)
+
+    # --- branch (m9) ---
+    branch_parser = subparsers.add_parser(
+        "branch", help="Manage timeline branches."
+    )
+    branch_subs = branch_parser.add_subparsers(dest="branch_command", required=True)
+
+    # branch create
+    branch_create = branch_subs.add_parser(
+        "create", help="Create a branch from a source timeline at a specific event."
+    )
+    branch_create.add_argument(
+        "source_slug_or_id", help="Source timeline slug, ULID, or UUID."
+    )
+    branch_create.add_argument(
+        "branch_slug", help="Slug for the new branch timeline."
+    )
+    branch_create.add_argument(
+        "--from",
+        required=True,
+        dest="from_event_id",
+        help="Source event ID to branch from (anchor point).",
+    )
+    branch_create.add_argument(
+        "--reason",
+        default="",
+        help="Human-readable reason for the branch.",
+    )
+    branch_create.set_defaults(handler=cmd_branch_create)
+
+    # branch list
+    branch_list = branch_subs.add_parser(
+        "list", help="List branches of a source timeline."
+    )
+    branch_list.add_argument(
+        "source_slug_or_id", help="Source timeline slug, ULID, or UUID."
+    )
+    branch_list.set_defaults(handler=cmd_branch_list)
+
+    # --- undo (m9) ---
+    undo_parser = subparsers.add_parser(
+        "undo", help="Undo the latest undoable event on a timeline."
+    )
+    undo_parser.add_argument(
+        "slug", help="Timeline slug."
+    )
+    undo_parser.add_argument(
+        "--from",
+        dest="from_backend",
+        default=None,
+        choices=["supabase"],
+        help="Backend to undo on (default: local_fs).",
+    )
+    undo_parser.add_argument(
+        "--project",
+        help="Project slug (required when no session is bound).",
+    )
+    undo_parser.set_defaults(handler=cmd_undo)
+
+    # --- mass-undo (m9) ---
+    mass_undo_parser = subparsers.add_parser(
+        "mass-undo", help="Preview-first mass undo of events matching filter criteria."
+    )
+    mass_undo_parser.add_argument(
+        "slug", help="Timeline slug."
+    )
+    mass_undo_parser.add_argument(
+        "--since",
+        dest="ts_since",
+        default=None,
+        help="Timestamp ISO-8601 lower bound (inclusive) — only undo events at or after this time.",
+    )
+    mass_undo_parser.add_argument(
+        "--actor",
+        dest="actor_id",
+        default=None,
+        help="Exact actor ID match.",
+    )
+    mass_undo_parser.add_argument(
+        "--actor-prefix",
+        dest="actor_id_prefix",
+        default=None,
+        help="Actor ID prefix match.",
+    )
+    mass_undo_parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Confirm mass undo (required to actually write).",
+    )
+    mass_undo_parser.add_argument(
+        "--from",
+        dest="from_backend",
+        default=None,
+        choices=["supabase"],
+        help="Backend to undo on (default: local_fs).",
+    )
+    mass_undo_parser.add_argument(
+        "--project",
+        help="Project slug (required when no session is bound).",
+    )
+    mass_undo_parser.set_defaults(handler=cmd_mass_undo)
+
+    # --- erase (m9) ---
+    erase_parser = subparsers.add_parser(
+        "erase", help="Erase (redact) event payloads matching a selector."
+    )
+    erase_parser.add_argument(
+        "slug", help="Timeline slug."
+    )
+    erase_parser.add_argument(
+        "--event-ids",
+        dest="event_ids_raw",
+        default=None,
+        help="Comma-separated event IDs (ULIDs) to erase.",
+    )
+    erase_parser.add_argument(
+        "--kind",
+        dest="kind_allowlist_raw",
+        default=None,
+        help="Comma-separated event kind allowlist (e.g. 'clip.added,clip.removed').",
+    )
+    erase_parser.add_argument(
+        "--actor",
+        dest="actor_id",
+        default=None,
+        help="Exact actor ID match.",
+    )
+    erase_parser.add_argument(
+        "--actor-prefix",
+        dest="actor_id_prefix",
+        default=None,
+        help="Actor ID prefix match.",
+    )
+    erase_parser.add_argument(
+        "--after",
+        dest="ts_after",
+        default=None,
+        help="Timestamp ISO-8601 lower bound (inclusive).",
+    )
+    erase_parser.add_argument(
+        "--before",
+        dest="ts_before",
+        default=None,
+        help="Timestamp ISO-8601 upper bound (inclusive).",
+    )
+    erase_parser.add_argument(
+        "--reason",
+        required=True,
+        help="Human-readable reason for the erasure.",
+    )
+    erase_parser.add_argument(
+        "--policy-ref",
+        dest="policy_ref",
+        default=None,
+        help="Optional policy reference for the erasure.",
+    )
+    erase_parser.add_argument(
+        "--yes",
+        action="store_true",
+        default=False,
+        help="Actually perform the erasure (preview-only without this flag).",
+    )
+    erase_parser.set_defaults(handler=cmd_erase)
+
+    # --- recover (m9) ---
+    recover_parser = subparsers.add_parser(
+        "recover", help="Recover a timeline to a known-good anchor event."
+    )
+    recover_parser.add_argument(
+        "slug", help="Timeline slug."
+    )
+    recover_parser.add_argument(
+        "--at",
+        required=True,
+        dest="at_event_id",
+        help="Event ID (ULID) to recover to (anchor point).",
+    )
+    recover_parser.add_argument(
+        "--reason",
+        required=True,
+        help="Human-readable reason for the recovery.",
+    )
+    recover_parser.add_argument(
+        "--from",
+        dest="from_backend",
+        default=None,
+        choices=["supabase"],
+        help="Backend to recover on (default: local_fs).",
+    )
+    recover_parser.add_argument(
+        "--project",
+        help="Project slug (required when no session is bound).",
+    )
+    recover_parser.set_defaults(handler=cmd_recover)
+
+    # --- branches (m9) ---
+    branches_parser = subparsers.add_parser(
+        "branches", help="List branches of a timeline (alias for 'branch list')."
+    )
+    branches_parser.add_argument(
+        "source_slug_or_id", help="Source timeline slug, ULID, or UUID."
+    )
+    branches_parser.set_defaults(handler=cmd_branch_list)
 
     return parser
 
@@ -2180,8 +2450,567 @@ def cmd_who_edited(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Handler: push (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_push(args: argparse.Namespace) -> int:
+    """Push a local timeline to Supabase via event-log replay."""
+    session = _resolve_optional_session(args)
+    project_slug = _resolve_project_slug(args, session)
+
+    from .transfer import push_timeline
+
+    try:
+        result = push_timeline(
+            project_slug,
+            args.slug_or_id,
+            destination_actor=_timeline_actor_from_session(session) if session else None,
+        )
+    except ValueError as exc:
+        print(f"timelines push: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Push: {result.direction} {result.source_backend_name} → {result.destination_backend_name}")
+    print(f"  source timeline: {result.source_timeline_id}")
+    print(f"  destination timeline: {result.destination_timeline_id}")
+    print(f"  scanned: {result.scanned}")
+    print(f"  appended: {result.appended}")
+    print(f"  skipped (idempotent): {result.skipped_idempotent}")
+    print(f"  failed: {result.failed}")
+    print(f"  destination version: {result.destination_version}")
+    print(f"  projection regenerated: {result.projection_regenerated}")
+
+    if result.failed > 0:
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: pull (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    """Pull a Supabase timeline to a local destination via event-log replay."""
+    project_slug = args.project  # --project is required for pull
+
+    from .transfer import pull_timeline
+
+    try:
+        result = pull_timeline(
+            project_slug,
+            args.slug_or_id,
+            into=args.into_slug,
+            create_as=args.create_as_slug,
+            create=args.create,
+        )
+    except ValueError as exc:
+        print(f"timelines pull: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Pull: {result.direction} {result.source_backend_name} → {result.destination_backend_name}")
+    print(f"  source timeline: {result.source_timeline_id}")
+    print(f"  destination timeline: {result.destination_timeline_id}")
+    print(f"  scanned: {result.scanned}")
+    print(f"  appended: {result.appended}")
+    print(f"  skipped (idempotent): {result.skipped_idempotent}")
+    print(f"  failed: {result.failed}")
+    print(f"  destination version: {result.destination_version}")
+    print(f"  projection regenerated: {result.projection_regenerated}")
+
+    if result.failed > 0:
+        return 1
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: branch create (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_branch_create(args: argparse.Namespace) -> int:
+    """Create a branch timeline from a source timeline."""
+    session = _require_session()
+
+    from .branch import create_branch_timeline
+
+    try:
+        result = create_branch_timeline(
+            session.project,
+            args.source_slug_or_id,
+            args.branch_slug,
+            from_event_id=args.from_event_id,
+            actor=_timeline_actor_from_session(session),
+            reason=args.reason,
+        )
+    except (ValueError, ProjectionError) as exc:
+        print(f"timelines branch create: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Branch created: {result.branch_slug}")
+    print(f"  branch timeline ID: {result.branch_timeline_id}")
+    print(f"  branch timeline ULID: {result.branch_timeline_ulid}")
+    print(f"  anchor event: {result.anchor_event_id} (hash: {result.source_anchor_hash})")
+    print(f"  seed event: {result.seed_event_id}")
+    print(f"  source branched_from event: {result.source_branched_from_event_id}")
+    print(f"  projection: clips={result.branch_projection_summary.get('clip_count', 0)}, "
+          f"tracks={result.branch_projection_summary.get('track_count', 0)}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: branch list (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_branch_list(args: argparse.Namespace) -> int:
+    """List branches of a source timeline."""
+    session = _require_session()
+
+    from .branch import list_branches
+
+    try:
+        branches = list_branches(session.project, args.source_slug_or_id)
+    except ValueError as exc:
+        print(f"timelines branch list: {exc}", file=sys.stderr)
+        return 1
+
+    if not branches:
+        print(f"(no branches for timeline '{args.source_slug_or_id}')")
+        return 0
+
+    print(f"Branches of '{args.source_slug_or_id}':")
+    for b in branches:
+        reason_str = f"  reason: {b['reason']}" if b.get("reason") else ""
+        print(f"  - branch: {b['branch_timeline_id']}")
+        print(f"    anchor: {b['anchor_event_id']}")
+        print(f"    at: {b['ts']}")
+        if reason_str:
+            print(f"   {reason_str}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: undo (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_undo(args: argparse.Namespace) -> int:
+    """Undo the latest undoable event on a timeline."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import build_timeline_backend, select_timeline_stream
+    from .inverses import plan_inverses
+    from .projection import replay_projection, regenerate_projection
+
+    # Resolve the timeline
+    try:
+        target = resolve_timeline_target(project_slug, args.slug)
+    except ValueError as exc:
+        print(f"timelines undo: {exc}", file=sys.stderr)
+        return 1
+
+    preferred_backend = getattr(args, "from_backend", None) or target.backend
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=preferred_backend,
+    )
+
+    # Verify chain before undoing
+    verification = backend.verify_chain()
+    if not verification.ok:
+        print(
+            f"timelines undo: chain verification failed: "
+            f"{verification.error or 'unknown error'}; refusing to undo",
+            file=sys.stderr,
+        )
+        return 2
+
+    # Get all events
+    all_events = backend.read_events()
+    if not all_events:
+        print("timelines undo: no events in timeline", file=sys.stderr)
+        return 1
+
+    # Find the latest undoable event (skip lifecycle/ops by default)
+    from .inverses import _NON_REVERSIBLE_KINDS
+
+    # Also skip erased events
+    from astrid.core.timeline.events.schema import ErasedPayload
+
+    target_idx: int | None = None
+    target_event = None
+    for i in range(len(all_events) - 1, -1, -1):
+        evt = all_events[i]
+        # Skip lifecycle/ops events
+        if evt.kind in _NON_REVERSIBLE_KINDS:
+            continue
+        # Skip already-erased events
+        if isinstance(evt.payload, ErasedPayload):
+            continue
+        target_idx = i
+        target_event = evt
+        break
+
+    if target_event is None or target_idx is None:
+        print("timelines undo: no undoable events found (all are lifecycle/ops or erased)", file=sys.stderr)
+        return 0
+
+    # Project before and after states
+    before_events = all_events[:target_idx]  # events up to (not including) target
+    after_events = all_events[: target_idx + 1]  # events up to and including target
+
+    try:
+        before_projection = replay_projection(backend, stop_at_event_id=before_events[-1].event_id) if before_events else {}
+    except Exception as exc:
+        print(f"timelines undo: failed to project before state: {exc}", file=sys.stderr)
+        return 2
+
+    try:
+        after_projection = replay_projection(backend, stop_at_event_id=target_event.event_id)
+    except Exception as exc:
+        print(f"timelines undo: failed to project after state: {exc}", file=sys.stderr)
+        return 2
+
+    # Plan inverses for the target event
+    inverses = plan_inverses([target_event], before_projection, after_projection)
+
+    if not inverses:
+        print("timelines undo: no inverse planned for target event", file=sys.stderr)
+        return 0
+
+    actor = _timeline_actor_from_session(session)
+    appended_ids: list[str] = []
+
+    for inv in inverses:
+        if inv.invertible and inv.inverse_kind and inv.inverse_payload is not None:
+            # Append the mechanical inverse event
+            event = backend.append_event(
+                target.timeline_id,
+                inv.inverse_kind,
+                inv.inverse_payload,
+                actor=actor,
+            )
+            appended_ids.append(event.event_id)
+        else:
+            # Non-invertible: append timeline.reverted
+            from astrid.core.timeline.events.schema import TimelineRevertedPayload
+            revert_payload = TimelineRevertedPayload(
+                target_event_id=target_event.event_id,
+                reason=inv.revert_reason or f"undo of {target_event.kind}",
+                before_projection=inv.before_projection,
+                after_projection=inv.after_projection,
+            ).to_json_obj()
+            event = backend.append_event(
+                target.timeline_id,
+                "timeline.reverted",
+                revert_payload,
+                actor=actor,
+            )
+            appended_ids.append(event.event_id)
+
+    # Regenerate projection
+    try:
+        regenerate_projection(
+            target.timeline_id,
+            backend,
+            timeline_home=target.timeline_home,
+        )
+    except Exception as exc:
+        print(f"timelines undo: warning — projection regeneration failed: {exc}", file=sys.stderr)
+
+    print(f"Undo: target event {target_event.event_id} (kind={target_event.kind})")
+    print(f"  appended inverse events: {', '.join(appended_ids)}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: mass-undo (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_mass_undo(args: argparse.Namespace) -> int:
+    """Mass-undo events matching filter criteria (preview-first, chunked writes)."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import build_timeline_backend, select_timeline_stream
+    from .undo import (
+        MassUndoSelector,
+        MassUndoResult,
+        plan_mass_undo,
+        execute_mass_undo,
+    )
+
+    # Validate: at least one filter criterion
+    if not (args.ts_since or args.actor_id or args.actor_id_prefix):
+        print(
+            "timelines mass-undo: at least one of --since, --actor, or --actor-prefix must be specified",
+            file=sys.stderr,
+        )
+        return 1
+
+    # Resolve the timeline
+    try:
+        target = resolve_timeline_target(project_slug, args.slug)
+    except ValueError as exc:
+        print(f"timelines mass-undo: {exc}", file=sys.stderr)
+        return 1
+
+    preferred_backend = getattr(args, "from_backend", None) or target.backend
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=preferred_backend,
+    )
+
+    # Build selector
+    selector = MassUndoSelector(
+        ts_since=args.ts_since,
+        actor_id=args.actor_id,
+        actor_id_prefix=args.actor_id_prefix,
+    )
+
+    # Verify chain before any work
+    verification = backend.verify_chain()
+    if not verification.ok:
+        print(
+            f"timelines mass-undo: chain verification failed: "
+            f"{verification.error or 'unknown error'}; refusing to undo",
+            file=sys.stderr,
+        )
+        return 2
+
+    actor = _timeline_actor_from_session(session)
+
+    if not args.yes:
+        # --- Preview mode ---
+        try:
+            preview = plan_mass_undo(backend, selector)
+        except ValueError as exc:
+            print(f"timelines mass-undo: {exc}", file=sys.stderr)
+            return 1
+
+        if preview.matched_count == 0:
+            print("mass-undo: no matching events found (preview)")
+            return 0
+
+        print(f"mass-undo PREVIEW ({preview.matched_count} candidate(s) of {preview.total_events} total events):")
+        print()
+        for cand in preview.candidates:
+            invertible_str = "MECHANICAL" if cand["invertible"] else "FALLBACK"
+            print(f"  {cand['event_id']}  kind={cand['kind']}  →  {invertible_str}")
+            if cand["invertible"]:
+                print(f"    inverse: {cand['inverse_kind']}  payload={cand['inverse_payload']}")
+            else:
+                print(f"    reason: {cand['revert_reason']}")
+        print()
+        print("(Preview only — no writes performed.  Use --yes to execute.)")
+        return 0
+
+    # --- Execute mode (--yes) ---
+    print(f"mass-undo: executing with --yes ...")
+    try:
+        result = execute_mass_undo(
+            backend,
+            selector,
+            timeline_id=target.timeline_id,
+            actor=actor,
+            timeline_home=target.timeline_home,
+        )
+    except ValueError as exc:
+        print(f"timelines mass-undo: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"mass-undo result:")
+    print(f"  planned: {result.planned_count} inverses")
+    print(f"  appended: {result.appended_count} events")
+    print(f"  chunks: {result.chunk_count}")
+    print(f"  projection regenerated: {result.projection_regenerated}")
+    if result.appended_event_ids:
+        print(f"  appended IDs: {', '.join(result.appended_event_ids)}")
+    if not result.complete:
+        print(f"  ERROR (partial failure): {result.error}", file=sys.stderr)
+        return 2
+    if result.error:
+        print(f"  warning: {result.error}")
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: erase (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_erase(args: argparse.Namespace) -> int:
+    """Erase (redact) event payloads matching a selector."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import build_timeline_backend, select_timeline_stream
+    from .erasure import (
+        ErasureSelector,
+        apply_erasure,
+        query_erasure,
+    )
+
+    # Resolve the timeline
+    try:
+        target = resolve_timeline_target(project_slug, args.slug)
+    except ValueError as exc:
+        print(f"timelines erase: {exc}", file=sys.stderr)
+        return 1
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=target.backend,
+    )
+
+    # Parse selector
+    event_ids = None
+    if args.event_ids_raw:
+        event_ids = tuple(eid.strip() for eid in args.event_ids_raw.split(",") if eid.strip())
+
+    kind_allowlist = None
+    if args.kind_allowlist_raw:
+        kind_allowlist = tuple(k.strip() for k in args.kind_allowlist_raw.split(",") if k.strip())
+
+    selector = ErasureSelector(
+        event_ids=event_ids,
+        kind_allowlist=kind_allowlist,
+        actor_id=args.actor_id,
+        actor_id_prefix=args.actor_id_prefix,
+        ts_after=args.ts_after,
+        ts_before=args.ts_before,
+    )
+
+    # Always preview first
+    try:
+        preview = query_erasure(backend, selector)
+    except ValueError as exc:
+        print(f"timelines erase: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Erasure preview for timeline '{args.slug}':")
+    print(f"  matched events: {preview.matched_count} of {preview.total_events_in_stream}")
+    print(f"  selector: {json.dumps(preview.selector_summary, default=str)}")
+
+    if preview.matched_count == 0:
+        print("  (no events match — nothing to erase)")
+        return 0
+
+    if not args.yes:
+        print()
+        if preview.matched_count <= 20:
+            print("  Matched event IDs:")
+            for eid in preview.matched_event_ids:
+                print(f"    - {eid}")
+        else:
+            print(f"  (showing first 20 of {preview.matched_count} matched event IDs)")
+            for eid in preview.matched_event_ids[:20]:
+                print(f"    - {eid}")
+        print()
+        print("  Re-run with --yes to perform the erasure.")
+        return 0
+
+    # --yes: perform erasure
+    try:
+        result = apply_erasure(
+            backend,
+            selector,
+            timeline_id=target.timeline_id,
+            actor=_timeline_actor_from_session(session),
+            reason=args.reason,
+            policy_ref=args.policy_ref,
+            timeline_home=target.timeline_home,
+        )
+    except (ValueError, ProjectionError) as exc:
+        print(f"timelines erase: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Erasure applied:")
+    print(f"  audit event: {result.audit_event_id}")
+    print(f"  payloads replaced: {result.replaced_count}")
+    print(f"  downstream recomputed: {result.downstream_count}")
+    print(f"  reason: {result.reason}")
+    if result.policy_ref:
+        print(f"  policy ref: {result.policy_ref}")
+    print(f"  projection regenerated: {result.projection_regenerated}")
+    print(f"  erased event IDs: {', '.join(result.erased_event_ids)}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: recover (m9)
+# ---------------------------------------------------------------------------
+
+
+def cmd_recover(args: argparse.Namespace) -> int:
+    """Recover a timeline to a known-good anchor event."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .operations import recover_to_event
+
+    try:
+        result = recover_to_event(
+            project_slug,
+            args.slug,
+            event_id=args.at_event_id,
+            actor=_timeline_actor_from_session(session),
+            reason=args.reason,
+        )
+    except (ValueError, ProjectionError) as exc:
+        print(f"timelines recover: {exc}", file=sys.stderr)
+        return 2
+
+    print(f"Recovery applied:")
+    print(f"  anchor event: {result.anchor_event_id} (type={result.anchor_type})")
+    print(f"  recovered event: {result.new_event_id}")
+    print(f"  new version: {result.new_version}")
+    print(f"  reason: {result.reason}")
+    print(f"  projection summary: clips={result.projected_head_summary.get('clip_count', 0)}, "
+          f"tracks={result.projected_head_summary.get('track_count', 0)}")
+    print(f"  regenerated artifacts: {', '.join(result.regenerated_artifact_paths)}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_optional_session(args: argparse.Namespace) -> Any:
+    """Resolve a session if possible, but don't raise when not found.
+
+    Used by commands that accept --project as an alternative to session binding.
+    """
+    try:
+        return resolve_current_session(slug=getattr(args, "project", None) or None)
+    except Exception:
+        return None
+
+
+def _resolve_project_slug(args: argparse.Namespace, session: Any) -> str:
+    """Resolve a project slug from args or session."""
+    project_slug = getattr(args, "project", None)
+    if project_slug:
+        return project_slug
+    if session is not None:
+        return session.project
+    raise ValueError(
+        "no project specified; use --project <slug> or bind a session with 'astrid attach'"
+    )
 
 
 def _require_session(slug: str | None = None) -> Any:

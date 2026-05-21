@@ -34,17 +34,22 @@ from astrid.core.timeline.events.schema import (
     EffectAddedPayload,
     EffectRemovedPayload,
     EffectTunedPayload,
+    ErasedPayload,
     PoolAssetAddedPayload,
     PoolAssetRemovedPayload,
     PoolAssetScoredPayload,
     ThemeOverriddenPayload,
     ThemeSetPayload,
     TimelineActor,
+    TimelineBranchedFromPayload,
     TimelineCreatedPayload,
+    TimelineErasedPayload,
     TimelineEvent,
     TimelineEventSchemaError,
     TimelineImportedPayload,
+    TimelineRecoveredPayload,
     TimelineRenamedPayload,
+    TimelineRevertedPayload,
     TrackAddedPayload,
     TrackRemovedPayload,
     TransitionRemovedPayload,
@@ -79,6 +84,29 @@ class TimelineEventSchemaTest(unittest.TestCase):
                 "txn_id": kwargs.get("txn_id"),
             }
 
+        def append_imported_event(self, **kwargs: object) -> dict[str, object]:
+            self.calls.append(("append_imported_event", dict(kwargs)))
+            source = kwargs["source_event"]
+            assert isinstance(source, TimelineEvent)
+            actor_raw = kwargs["actor"]
+            return {
+                "schema_version": EVENT_SCHEMA_VERSION,
+                "event_id": generate_event_ulid(),
+                "timeline_id": kwargs["timeline_id"],
+                "kind": source.kind,
+                "ts": "2026-05-21T00:00:00Z",
+                "actor": actor_raw.to_json_obj() if hasattr(actor_raw, "to_json_obj") else actor_raw,
+                "payload": source.payload.to_json_obj() if hasattr(source.payload, "to_json_obj") else dict(source.payload),
+                "prev_hash": None,
+                "hash": "def456",
+                "source_backend": source.source_backend or "unknown",
+                "source_timeline_id": source.timeline_id,
+                "source_event_id": source.event_id,
+                "source_version": source.source_version,
+                "source_hash": source.hash,
+                "txn_id": kwargs.get("txn_id"),
+            }
+
         def read_events(self, **kwargs: object) -> list[dict[str, object]]:
             self.calls.append(("read_events", dict(kwargs)))
             return []
@@ -96,6 +124,17 @@ class TimelineEventSchemaTest(unittest.TestCase):
         def verify_chain(self, **kwargs: object) -> dict[str, object]:
             self.calls.append(("verify_chain", dict(kwargs)))
             return {"ok": True, "checked_events": 0, "last_event_id": None, "error": None}
+
+        def repair_erasure(self, **kwargs: object) -> dict[str, object]:
+            self.calls.append(("repair_erasure", dict(kwargs)))
+            return {
+                "replaced_count": 0,
+                "downstream_count": 0,
+                "head_event_count": 0,
+                "head_version": 0,
+                "last_event_id": None,
+                "last_hash": None,
+            }
 
     def test_timeline_event_canonical_json_omits_nulls_and_hash(self) -> None:
         actor = TimelineActor(type="agent", id="codex:run-1", display=None)
@@ -997,6 +1036,603 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
         p5 = event5.payload
         assert isinstance(p5, ArrangementReplacedPayload)
         self.assertEqual(p5.arrangement, {"clips": [{"id": "x"}]})
+
+
+class RecoveryAndErasureSchemaTest(unittest.TestCase):
+    """Validate new recovery/lifecycle/erasure event kinds and ErasedPayload envelope."""
+
+    def setUp(self) -> None:
+        self.actor = TimelineActor(type="system", id="migration:m9")
+        self.tid = str(uuid4())
+
+    # ------------------------------------------------------------------
+    # ErasedPayload direct construction and validation
+    # ------------------------------------------------------------------
+
+    def test_erased_payload_constructs_with_required_fields(self) -> None:
+        p = ErasedPayload(
+            erased=True,
+            reason="gdpr-request",
+            erased_at="2026-05-21T12:00:00Z",
+            erased_by="agent:codex",
+        )
+        self.assertTrue(p.erased)
+        self.assertEqual(p.reason, "gdpr-request")
+        self.assertEqual(p.erased_at, "2026-05-21T12:00:00Z")
+        self.assertEqual(p.erased_by, "agent:codex")
+        self.assertIsNone(p.policy_ref)
+
+    def test_erased_payload_with_policy_ref(self) -> None:
+        p = ErasedPayload(
+            erased=True,
+            reason="compliance",
+            erased_at="2026-05-21T12:00:00Z",
+            erased_by="system:auto",
+            policy_ref="POL-001",
+        )
+        self.assertEqual(p.policy_ref, "POL-001")
+
+    def test_erased_payload_to_json(self) -> None:
+        p = ErasedPayload(
+            erased=True,
+            reason="gdpr-request",
+            erased_at="2026-05-21T12:00:00Z",
+            erased_by="agent:codex",
+        )
+        obj = p.to_json_obj()
+        self.assertEqual(obj["erased"], True)
+        self.assertEqual(obj["reason"], "gdpr-request")
+        self.assertEqual(obj["erased_at"], "2026-05-21T12:00:00Z")
+        self.assertEqual(obj["erased_by"], "agent:codex")
+        self.assertNotIn("policy_ref", obj)
+
+    def test_erased_payload_to_json_with_policy_ref(self) -> None:
+        p = ErasedPayload(
+            erased=True,
+            reason="compliance",
+            erased_at="2026-05-21T12:00:00Z",
+            erased_by="system:auto",
+            policy_ref="POL-001",
+        )
+        obj = p.to_json_obj()
+        self.assertEqual(obj["policy_ref"], "POL-001")
+
+    def test_erased_payload_rejects_false_erased(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ErasedPayload(erased=False, reason="x", erased_at="t", erased_by="y")  # type: ignore[arg-type]
+
+    def test_erased_payload_rejects_empty_reason(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ErasedPayload(erased=True, reason="", erased_at="t", erased_by="y")
+
+    def test_erased_payload_rejects_empty_erased_at(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ErasedPayload(erased=True, reason="x", erased_at="", erased_by="y")
+
+    def test_erased_payload_rejects_empty_erased_by(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ErasedPayload(erased=True, reason="x", erased_at="t", erased_by="")
+
+    def test_erased_payload_rejects_empty_policy_ref(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ErasedPayload(erased=True, reason="x", erased_at="t", erased_by="y", policy_ref="")
+
+    # ------------------------------------------------------------------
+    # ErasedPayload accepted by TimelineEvent.from_dict() for any event kind
+    # ------------------------------------------------------------------
+
+    def test_erased_envelope_parses_for_strict_domain_kind_clip_added(self) -> None:
+        """Erased clip.added event round-trips through from_dict."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "clip.added",
+            "payload": {
+                "erased": True,
+                "reason": "gdpr-request",
+                "erased_at": "2026-05-21T12:00:00Z",
+                "erased_by": "agent:codex",
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        event = TimelineEvent.from_dict(raw)
+        self.assertEqual(event.kind, "clip.added")
+        self.assertIsInstance(event.payload, ErasedPayload)
+        p = event.payload
+        assert isinstance(p, ErasedPayload)
+        self.assertTrue(p.erased)
+        self.assertEqual(p.reason, "gdpr-request")
+
+    def test_erased_envelope_parses_for_transition_set(self) -> None:
+        """Erased transition.set event round-trips through from_dict."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "transition.set",
+            "payload": {
+                "erased": True,
+                "reason": "policy-violation",
+                "erased_at": "2026-05-21T13:00:00Z",
+                "erased_by": "human:admin",
+                "policy_ref": "POL-002",
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        event = TimelineEvent.from_dict(raw)
+        self.assertEqual(event.kind, "transition.set")
+        self.assertIsInstance(event.payload, ErasedPayload)
+
+    def test_erased_envelope_parses_for_arrangement_replaced(self) -> None:
+        """Erased arrangement.replaced event round-trips through from_dict."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "arrangement.replaced",
+            "payload": {
+                "erased": True,
+                "reason": "cleanup",
+                "erased_at": "2026-05-21T14:00:00Z",
+                "erased_by": "system:sweep",
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        event = TimelineEvent.from_dict(raw)
+        self.assertEqual(event.kind, "arrangement.replaced")
+        self.assertIsInstance(event.payload, ErasedPayload)
+
+    def test_erased_envelope_round_trips_through_canonical_json(self) -> None:
+        """Erased event survives canonical_json_text → from_dict round-trip."""
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="clip.added",
+            payload=ErasedPayload(
+                erased=True,
+                reason="gdpr-request",
+                erased_at="2026-05-21T12:00:00Z",
+                erased_by="agent:codex",
+            ),
+        )
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.kind, "clip.added")
+        self.assertIsInstance(restored.payload, ErasedPayload)
+        p = restored.payload
+        assert isinstance(p, ErasedPayload)
+        self.assertEqual(p.reason, "gdpr-request")
+
+    # ------------------------------------------------------------------
+    # Reject mixed erased-plus-domain payloads
+    # ------------------------------------------------------------------
+
+    def test_rejects_mixed_erased_and_domain_fields(self) -> None:
+        """Payload with both erased:true and domain fields like clip_id must fail."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "clip.added",
+            "payload": {
+                "erased": True,
+                "reason": "bad",
+                "erased_at": "t",
+                "erased_by": "x",
+                "clip_id": "c1",  # domain field mixed in
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineEvent.from_dict(raw)
+
+    def test_rejects_mixed_erased_and_domain_fields_transition(self) -> None:
+        """Mixed payload for transition.set must also fail."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "transition.set",
+            "payload": {
+                "erased": True,
+                "reason": "bad",
+                "erased_at": "t",
+                "erased_by": "x",
+                "left_clip_id": "a",  # domain field mixed in
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineEvent.from_dict(raw)
+
+    def test_rejects_malformed_erased_missing_reason(self) -> None:
+        """Erased payload missing required 'reason' field must fail."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "clip.added",
+            "payload": {
+                "erased": True,
+                # reason missing
+                "erased_at": "2026-05-21T12:00:00Z",
+                "erased_by": "agent:codex",
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        with self.assertRaises((TimelineEventSchemaError, KeyError)):
+            TimelineEvent.from_dict(raw)
+
+    def test_rejects_malformed_erased_missing_erased_at(self) -> None:
+        """Erased payload missing required 'erased_at' field must fail."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "clip.added",
+            "payload": {
+                "erased": True,
+                "reason": "gdpr",
+                # erased_at missing
+                "erased_by": "agent:codex",
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        with self.assertRaises((TimelineEventSchemaError, KeyError)):
+            TimelineEvent.from_dict(raw)
+
+    def test_rejects_malformed_erased_missing_erased_by(self) -> None:
+        """Erased payload missing required 'erased_by' field must fail."""
+        raw = {
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "clip.added",
+            "payload": {
+                "erased": True,
+                "reason": "gdpr",
+                "erased_at": "2026-05-21T12:00:00Z",
+                # erased_by missing
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        }
+        with self.assertRaises((TimelineEventSchemaError, KeyError)):
+            TimelineEvent.from_dict(raw)
+
+    # ------------------------------------------------------------------
+    # timeline.erased audit event
+    # ------------------------------------------------------------------
+
+    def test_timeline_erased_payload_constructs_and_serialises(self) -> None:
+        p = TimelineErasedPayload(
+            selector_summary={"kind_filter": ["clip.added"], "count": 3},
+            reason="gdpr-request",
+            affected_count=3,
+            affected_event_ids=["E1", "E2", "E3"],
+        )
+        obj = p.to_json_obj()
+        self.assertEqual(obj["reason"], "gdpr-request")
+        self.assertEqual(obj["affected_count"], 3)
+        self.assertEqual(obj["affected_event_ids"], ["E1", "E2", "E3"])
+
+    def test_timeline_erased_event_round_trips(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.erased",
+            payload=TimelineErasedPayload(
+                selector_summary={"kind_filter": ["clip.added"]},
+                reason="gdpr-request",
+                affected_count=1,
+            ),
+        )
+        self.assertEqual(event.kind, "timeline.erased")
+        self.assertIsInstance(event.payload, TimelineErasedPayload)
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.kind, "timeline.erased")
+        self.assertIsInstance(restored.payload, TimelineErasedPayload)
+
+    def test_timeline_erased_rejects_negative_affected_count(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineErasedPayload(
+                selector_summary={},
+                reason="x",
+                affected_count=-1,
+            )
+
+    def test_timeline_erased_rejects_bool_affected_count(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineErasedPayload(
+                selector_summary={},
+                reason="x",
+                affected_count=True,  # type: ignore[arg-type]
+            )
+
+    def test_timeline_erased_rejects_empty_affected_event_id(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineErasedPayload(
+                selector_summary={},
+                reason="x",
+                affected_count=1,
+                affected_event_ids=[""],
+            )
+
+    # ------------------------------------------------------------------
+    # timeline.recovered
+    # ------------------------------------------------------------------
+
+    def test_timeline_recovered_payload_constructs_and_serialises(self) -> None:
+        p = TimelineRecoveredPayload(
+            anchor_event_id=generate_event_ulid(),
+            anchor_type="event",
+            reason="manual-repair",
+        )
+        obj = p.to_json_obj()
+        self.assertEqual(obj["anchor_type"], "event")
+        self.assertEqual(obj["reason"], "manual-repair")
+
+    def test_timeline_recovered_event_round_trips(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.recovered",
+            payload=TimelineRecoveredPayload(
+                anchor_event_id=generate_event_ulid(),
+                anchor_type="snapshot",
+                reason="restore-from-checkpoint",
+                projected_state_summary={"clips": 5},
+            ),
+        )
+        self.assertEqual(event.kind, "timeline.recovered")
+        self.assertIsInstance(event.payload, TimelineRecoveredPayload)
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.kind, "timeline.recovered")
+
+    def test_timeline_recovered_rejects_invalid_anchor_type(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineRecoveredPayload(
+                anchor_event_id=generate_event_ulid(),
+                anchor_type="bad",  # type: ignore[arg-type]
+                reason="x",
+            )
+
+    def test_timeline_recovered_rejects_empty_reason(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineRecoveredPayload(
+                anchor_event_id=generate_event_ulid(),
+                anchor_type="event",
+                reason="",
+            )
+
+    # ------------------------------------------------------------------
+    # timeline.reverted
+    # ------------------------------------------------------------------
+
+    def test_timeline_reverted_payload_constructs_and_serialises(self) -> None:
+        p = TimelineRevertedPayload(
+            target_event_id=generate_event_ulid(),
+            reason="rollback",
+        )
+        obj = p.to_json_obj()
+        self.assertEqual(obj["reason"], "rollback")
+
+    def test_timeline_reverted_event_round_trips(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.reverted",
+            payload=TimelineRevertedPayload(
+                target_event_id=generate_event_ulid(),
+                reason="undo-batch",
+                before_projection={"clips": ["a"]},
+                after_projection={"clips": []},
+            ),
+        )
+        self.assertEqual(event.kind, "timeline.reverted")
+        self.assertIsInstance(event.payload, TimelineRevertedPayload)
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.kind, "timeline.reverted")
+
+    def test_timeline_reverted_rejects_empty_reason(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineRevertedPayload(
+                target_event_id=generate_event_ulid(),
+                reason="",
+            )
+
+    # ------------------------------------------------------------------
+    # timeline.branched_from
+    # ------------------------------------------------------------------
+
+    def test_timeline_branched_from_payload_constructs_and_serialises(self) -> None:
+        p = TimelineBranchedFromPayload(
+            branch_timeline_id=str(uuid4()),
+            anchor_event_id=generate_event_ulid(),
+            reason="explore-variant",
+        )
+        obj = p.to_json_obj()
+        self.assertEqual(obj["reason"], "explore-variant")
+
+    def test_timeline_branched_from_event_round_trips(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.branched_from",
+            payload=TimelineBranchedFromPayload(
+                branch_timeline_id=str(uuid4()),
+                anchor_event_id=generate_event_ulid(),
+            ),
+        )
+        self.assertEqual(event.kind, "timeline.branched_from")
+        self.assertIsInstance(event.payload, TimelineBranchedFromPayload)
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.kind, "timeline.branched_from")
+
+    def test_timeline_branched_from_rejects_invalid_branch_timeline_id(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineBranchedFromPayload(
+                branch_timeline_id="not-a-uuid",
+                anchor_event_id=generate_event_ulid(),
+            )
+
+    # ------------------------------------------------------------------
+    # Import metadata fields
+    # ------------------------------------------------------------------
+
+    def test_timeline_event_with_import_metadata(self) -> None:
+        """Import metadata fields serialize and deserialize correctly."""
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="clip.added",
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            source_backend="supabase",
+            source_timeline_id=str(uuid4()),
+            source_event_id=generate_event_ulid(),
+            source_version=42,
+            source_hash="abc123def456",
+        )
+        self.assertEqual(event.source_backend, "supabase")
+        self.assertEqual(event.source_version, 42)
+        self.assertEqual(event.source_hash, "abc123def456")
+
+        obj = event.to_json_obj()
+        self.assertEqual(obj["source_backend"], "supabase")
+        self.assertEqual(obj["source_version"], 42)
+        self.assertEqual(obj["source_hash"], "abc123def456")
+
+        # Round-trip through from_dict
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.source_backend, "supabase")
+        self.assertEqual(restored.source_version, 42)
+        self.assertEqual(restored.source_hash, "abc123def456")
+
+    def test_timeline_event_without_import_metadata_omits_fields(self) -> None:
+        """Import metadata fields are omitted from JSON when None."""
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="clip.added",
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+        )
+        obj = event.to_json_obj()
+        self.assertNotIn("source_backend", obj)
+        self.assertNotIn("source_timeline_id", obj)
+        self.assertNotIn("source_event_id", obj)
+        self.assertNotIn("source_version", obj)
+        self.assertNotIn("source_hash", obj)
+
+    def test_import_metadata_rejects_empty_source_backend(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineEvent.new(
+                timeline_id=self.tid,
+                ts="2026-05-21T12:00:00Z",
+                actor=self.actor,
+                kind="clip.added",
+                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+                source_backend="",
+            )
+
+    def test_import_metadata_rejects_invalid_source_timeline_id(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineEvent.new(
+                timeline_id=self.tid,
+                ts="2026-05-21T12:00:00Z",
+                actor=self.actor,
+                kind="clip.added",
+                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+                source_timeline_id="not-a-uuid",
+            )
+
+    def test_import_metadata_rejects_bool_source_version(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            TimelineEvent.new(
+                timeline_id=self.tid,
+                ts="2026-05-21T12:00:00Z",
+                actor=self.actor,
+                kind="clip.added",
+                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+                source_version=True,  # type: ignore[arg-type]
+            )
+
+    # ------------------------------------------------------------------
+    # ErasedPayload as a raw dict also accepted by from_dict
+    # ------------------------------------------------------------------
+
+    def test_erased_payload_dict_coerced_via_new_factory(self) -> None:
+        """TimelineEvent.new() with erased dict payload coerces to ErasedPayload."""
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="clip.added",
+            payload={
+                "erased": True,
+                "reason": "gdpr-request",
+                "erased_at": "2026-05-21T12:00:00Z",
+                "erased_by": "agent:codex",
+            },
+        )
+        self.assertIsInstance(event.payload, ErasedPayload)
+
+    def test_erased_payload_skips_kind_registration_check(self) -> None:
+        """ErasedPayload events do not require the kind to be registered in _PAYLOAD_TYPES
+        for the erased check, but the kind must still be registered for normal validation."""
+        # An erased clip.added is fine because clip.added IS registered
+        event = TimelineEvent.from_dict({
+            "event_id": generate_event_ulid(),
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "clip.added",
+            "payload": {
+                "erased": True,
+                "reason": "cleanup",
+                "erased_at": "2026-05-21T12:00:00Z",
+                "erased_by": "system:sweep",
+            },
+            "schema_version": EVENT_SCHEMA_VERSION,
+        })
+        self.assertIsInstance(event.payload, ErasedPayload)
 
 
 if __name__ == "__main__":  # pragma: no cover

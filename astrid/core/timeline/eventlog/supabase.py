@@ -75,6 +75,29 @@ class SupabaseBackend:
         )
         return self._coerce_timeline_event(raw, operation="append_event")
 
+    def append_imported_event(
+        self,
+        timeline_id: str,
+        source_event: TimelineEvent,
+        *,
+        idempotency_key: str,
+        actor: TimelineActor,
+    ) -> TimelineEvent:
+        """Import a source event via the transport with idempotency.
+
+        The transport handles RPC-shaped import (not direct table mutation).
+        Source identity is preserved in import metadata fields only.
+        """
+        self._require_verified_human_subject(actor)
+        transport = self._require_transport(operation="append_imported_event")
+        raw = transport.append_imported_event(
+            timeline_id=timeline_id,
+            source_event=source_event,
+            idempotency_key=idempotency_key,
+            actor=actor,
+        )
+        return self._coerce_timeline_event(raw, operation="append_imported_event")
+
     def read_events(
         self,
         *,
@@ -135,6 +158,32 @@ class SupabaseBackend:
             ),
             error=self._optional_str(raw.get("error"), "verify_chain.error"),
         )
+
+    def repair_erasure(
+        self,
+        target_event_ids: list[str],
+        *,
+        reason: str,
+        erased_by: str,
+        policy_ref: str | None = None,
+    ) -> dict[str, object]:
+        """Replace payloads of selected historical events with ErasedPayload envelope.
+
+        Exposed as transport/RPC capability for Supabase.
+        """
+        transport = self._require_transport(operation="repair_erasure")
+        raw = transport.repair_erasure(
+            timeline_id=self.timeline_id,
+            target_event_ids=target_event_ids,
+            reason=reason,
+            erased_by=erased_by,
+            policy_ref=policy_ref,
+        )
+        if not isinstance(raw, dict):
+            raise EventLogTransportError(
+                "SupabaseBackend.repair_erasure transport returned a non-object response"
+            )
+        return raw
 
     def _require_transport(self, *, operation: str) -> SupabaseEventLogTransport:
         if self.transport is not None:

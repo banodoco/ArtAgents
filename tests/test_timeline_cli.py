@@ -45,7 +45,8 @@ def test_help_exits_zero_and_prints_usage(capsys: pytest.CaptureFixture[str]) ->
     # Prog string from build_parser().
     assert "python3 -m astrid timelines" in captured.out
     # Subcommands should be advertised.
-    for sub in ("ls", "create", "show", "rename", "finalize", "tombstone", "purge", "set-default", "export", "cost", "migrate-events"):
+    for sub in ("ls", "create", "show", "rename", "finalize", "tombstone", "purge", "set-default", "export", "cost", "migrate-events",
+                "push", "pull", "recover", "branch", "branches", "undo", "mass-undo", "erase"):
         assert sub in captured.out
 
 
@@ -283,6 +284,48 @@ def test_main_wraps_value_error_as_exit_code_2(
     assert rc == 2
     captured = capsys.readouterr()
     assert "timelines: bad value" in captured.err
+
+
+def test_main_wraps_erased_payload_projection_error_as_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from astrid.core.timeline.projection import ErasedPayloadProjectionError
+
+    def raising_ls(args: argparse.Namespace) -> int:
+        raise ErasedPayloadProjectionError(
+            event_id="01AAAAAAAAAAAAAAAAAAAAA100",
+            kind="clip.added",
+            reason="payload is erased",
+        )
+
+    monkeypatch.setattr(timeline_cli, "cmd_ls", raising_ls)
+
+    rc = timeline_cli.main(["ls", "--project", "p"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "erased payload" in captured.err
+    assert "01AAAAAAAAAAAAAAAAAAAAA100" in captured.err
+
+
+def test_main_wraps_projection_error_as_exit_code_2(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from astrid.core.timeline.projection import ProjectionError
+
+    def raising_ls(args: argparse.Namespace) -> int:
+        raise ProjectionError(
+            event_id="01AAAAAAAAAAAAAAAAAAAAA200",
+            kind="transition.set",
+            reason="projection failed",
+        )
+
+    monkeypatch.setattr(timeline_cli, "cmd_ls", raising_ls)
+
+    rc = timeline_cli.main(["ls", "--project", "p"])
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "timelines:" in captured.err
+    assert "01AAAAAAAAAAAAAAAAAAAAA200" in captured.err
 
 
 def test_cmd_rename_passes_explicit_actor_from_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -627,6 +670,393 @@ def test_clip_subcommand_help_shows_all_verbs(capsys: pytest.CaptureFixture[str]
     assert excinfo.value.code == 0
     captured = capsys.readouterr()
     for verb in ("add", "remove", "move", "retime", "swap", "replace", "set-text", "annotate"):
+        assert verb in captured.out
+
+
+# ---------------------------------------------------------------------------
+# m9 verb parsing tests
+# ---------------------------------------------------------------------------
+
+
+def test_push_requires_to_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["push", "my-slug"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--to" in captured.err
+
+
+def test_push_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_push(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_push", fake_push)
+
+    rc = timeline_cli.main(["push", "my-slug", "--to", "supabase", "--project", "demo"])
+    assert rc == 0
+    assert seen["args"].slug_or_id == "my-slug"
+    assert seen["args"].to_backend == "supabase"
+    assert seen["args"].project == "demo"
+
+
+def test_pull_requires_from_and_project_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["pull", "remote-slug"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--from" in captured.err or "--project" in captured.err
+
+
+def test_pull_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_pull(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_pull", fake_pull)
+
+    rc = timeline_cli.main([
+        "pull", "remote-slug", "--from", "supabase", "--project", "demo",
+        "--into", "existing-local",
+    ])
+    assert rc == 0
+    assert seen["args"].slug_or_id == "remote-slug"
+    assert seen["args"].from_backend == "supabase"
+    assert seen["args"].project == "demo"
+    assert seen["args"].into_slug == "existing-local"
+    assert seen["args"].create_as_slug is None
+    assert seen["args"].create is False
+
+
+def test_pull_as_without_create_parses_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--as without --create is accepted by argparse (store), but the
+    combination is validated by the handler.  Test that both flags parse
+    together correctly."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_pull(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_pull", fake_pull)
+
+    # --as without --create still parses but the handler validates
+    rc = timeline_cli.main([
+        "pull", "remote-slug", "--from", "supabase", "--project", "demo",
+        "--as", "new-local",
+    ])
+    assert rc == 0
+    assert seen["args"].create_as_slug == "new-local"
+    assert seen["args"].create is False
+
+
+def test_pull_create_with_as_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_pull(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_pull", fake_pull)
+
+    rc = timeline_cli.main([
+        "pull", "remote-slug", "--from", "supabase", "--project", "demo",
+        "--create", "--as", "new-local",
+    ])
+    assert rc == 0
+    assert seen["args"].slug_or_id == "remote-slug"
+    assert seen["args"].create is True
+    assert seen["args"].create_as_slug == "new-local"
+
+
+def test_pull_create_without_as_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--create without --as means implicit create (remote provides slug)."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_pull(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_pull", fake_pull)
+
+    rc = timeline_cli.main([
+        "pull", "remote-slug", "--from", "supabase", "--project", "demo",
+        "--create",
+    ])
+    assert rc == 0
+    assert seen["args"].create is True
+    assert seen["args"].create_as_slug is None
+
+
+def test_pull_into_and_create_are_mutually_exclusive_in_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Both --into and --create can be parsed simultaneously (argparse allows),
+    but the handler must reject. Test that handler receives both and we
+    document the expected validation."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_pull(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        # Simulate handler validation: both cannot be active
+        if args.into_slug and args.create:
+            raise ValueError("--into and --create are mutually exclusive")
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_pull", fake_pull)
+
+    # --into and --create together should parse but the handler rejects
+    # (we verify the args are set correctly)
+    rc = timeline_cli.main([
+        "pull", "remote-slug", "--from", "supabase", "--project", "demo",
+        "--into", "existing", "--create",
+    ])
+    assert rc == 2  # handler raises ValueError -> exit code 2
+    assert seen["args"].into_slug == "existing"
+    assert seen["args"].create is True
+
+
+def test_recover_requires_at_and_reason_flags(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["recover", "my-slug"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--at" in captured.err or "--reason" in captured.err
+
+
+def test_recover_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_recover(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_recover", fake_recover)
+
+    rc = timeline_cli.main([
+        "recover", "my-slug", "--at", "01AAAAAAAAAAAAAAAAAAAAA100",
+        "--reason", "corrupted after this point",
+    ])
+    assert rc == 0
+    assert seen["args"].slug == "my-slug"
+    assert seen["args"].at_event_id == "01AAAAAAAAAAAAAAAAAAAAA100"
+    assert seen["args"].reason == "corrupted after this point"
+    assert seen["args"].from_backend is None
+    assert seen["args"].project is None
+
+
+def test_recover_parses_from_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_recover(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_recover", fake_recover)
+
+    rc = timeline_cli.main([
+        "recover", "my-slug", "--at", "01AAAAAAAAAAAAAAAAAAAAA100",
+        "--reason", "recovery", "--from", "supabase", "--project", "demo",
+    ])
+    assert rc == 0
+    assert seen["args"].from_backend == "supabase"
+    assert seen["args"].project == "demo"
+
+
+def test_branch_create_requires_from_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["branch", "create", "source-slug", "branch-slug"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--from" in captured.err
+
+
+def test_branch_create_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_branch_create(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_branch_create", fake_branch_create)
+
+    rc = timeline_cli.main([
+        "branch", "create", "source-slug", "branch-slug",
+        "--from", "01AAAAAAAAAAAAAAAAAAAAA200",
+        "--reason", "exploratory branch",
+    ])
+    assert rc == 0
+    assert seen["args"].source_slug_or_id == "source-slug"
+    assert seen["args"].branch_slug == "branch-slug"
+    assert seen["args"].from_event_id == "01AAAAAAAAAAAAAAAAAAAAA200"
+    assert seen["args"].reason == "exploratory branch"
+
+
+def test_branch_list_parses_source_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_branch_list(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_branch_list", fake_branch_list)
+
+    rc = timeline_cli.main(["branch", "list", "source-slug"])
+    assert rc == 0
+    assert seen["args"].source_slug_or_id == "source-slug"
+
+
+def test_branches_alias_parses_source_slug(monkeypatch: pytest.MonkeyPatch) -> None:
+    """branches is an alias for branch list."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_branch_list(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_branch_list", fake_branch_list)
+
+    rc = timeline_cli.main(["branches", "source-slug"])
+    assert rc == 0
+    assert seen["args"].source_slug_or_id == "source-slug"
+
+
+def test_undo_parses_slug_and_from_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_undo(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_undo", fake_undo)
+
+    rc = timeline_cli.main(["undo", "my-slug"])
+    assert rc == 0
+    assert seen["args"].slug == "my-slug"
+    assert seen["args"].from_backend is None
+
+    rc = timeline_cli.main(["undo", "my-slug", "--from", "supabase", "--project", "demo"])
+    assert rc == 0
+    assert seen["args"].from_backend == "supabase"
+    assert seen["args"].project == "demo"
+
+
+def test_mass_undo_filters_parse_correctly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mass-undo filters --since, --actor, --actor-prefix parse correctly."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_mass_undo(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_mass_undo", fake_mass_undo)
+
+    # All three filters
+    rc = timeline_cli.main([
+        "mass-undo", "my-slug",
+        "--since", "2026-05-01T00:00:00Z",
+        "--actor", "agent:tester",
+        "--actor-prefix", "agent:",
+    ])
+    assert rc == 0
+    assert seen["args"].ts_since == "2026-05-01T00:00:00Z"
+    assert seen["args"].actor_id == "agent:tester"
+    assert seen["args"].actor_id_prefix == "agent:"
+    assert seen["args"].yes is False
+
+
+def test_mass_undo_yes_flag_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_mass_undo(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_mass_undo", fake_mass_undo)
+
+    rc = timeline_cli.main([
+        "mass-undo", "my-slug", "--actor", "agent:x", "--yes",
+    ])
+    assert rc == 0
+    assert seen["args"].yes is True
+
+
+def test_erase_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_erase(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_erase", fake_erase)
+
+    rc = timeline_cli.main([
+        "erase", "my-slug",
+        "--event-ids", "01AAAAAAAAAAAAAAAAAAAAA100,01AAAAAAAAAAAAAAAAAAAAA200",
+        "--kind", "clip.added,clip.removed",
+        "--actor", "agent:tester",
+        "--actor-prefix", "agent:",
+        "--after", "2026-05-01T00:00:00Z",
+        "--before", "2026-05-21T00:00:00Z",
+        "--reason", "GDPR request",
+        "--policy-ref", "POL-2026-001",
+        "--yes",
+    ])
+    assert rc == 0
+    assert seen["args"].slug == "my-slug"
+    assert seen["args"].event_ids_raw == "01AAAAAAAAAAAAAAAAAAAAA100,01AAAAAAAAAAAAAAAAAAAAA200"
+    assert seen["args"].kind_allowlist_raw == "clip.added,clip.removed"
+    assert seen["args"].actor_id == "agent:tester"
+    assert seen["args"].actor_id_prefix == "agent:"
+    assert seen["args"].ts_after == "2026-05-01T00:00:00Z"
+    assert seen["args"].ts_before == "2026-05-21T00:00:00Z"
+    assert seen["args"].reason == "GDPR request"
+    assert seen["args"].policy_ref == "POL-2026-001"
+    assert seen["args"].yes is True
+
+
+def test_erase_requires_reason_flag(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["erase", "my-slug"])
+    assert excinfo.value.code != 0
+    captured = capsys.readouterr()
+    assert "--reason" in captured.err
+
+
+def test_erase_defaults_to_preview(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without --yes, the --yes flag defaults to False (preview mode)."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_erase(args: argparse.Namespace) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(timeline_cli, "cmd_erase", fake_erase)
+
+    rc = timeline_cli.main([
+        "erase", "my-slug", "--reason", "test",
+    ])
+    assert rc == 0
+    assert seen["args"].yes is False
+
+
+def test_m9_subcommands_appear_in_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    for cmd in ("push", "pull", "recover", "branch", "branches", "undo", "mass-undo", "erase"):
+        assert cmd in captured.out
+
+
+def test_branch_subcommands_appear_in_help(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        timeline_cli.main(["branch", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    for verb in ("create", "list"):
         assert verb in captured.out
 
 
@@ -2102,6 +2532,9 @@ class TestAuditProjectionParityAfterImport:
             def append_event(self, timeline_id, kind, payload, *, actor=None):
                 raise NotImplementedError("read-only test")
 
+            def append_imported_event(self, timeline_id, source_event, *, idempotency_key=None, actor=None):
+                raise NotImplementedError("read-only test")
+
             def read_events(self, timeline_id, after=None, limit=None):
                 return [imported_event]
 
@@ -2110,6 +2543,9 @@ class TestAuditProjectionParityAfterImport:
 
             def verify_chain(self, timeline_id):
                 return True, []
+
+            def repair_erasure(self, timeline_id, target_event_ids, *, reason=None, erased_by=None, policy_ref=None):
+                raise NotImplementedError("read-only test")
 
         fake_transport = FakeSupabaseTransport()
         # We can't use SupabaseBackend directly because it needs credentials,
@@ -2252,6 +2688,10 @@ class TestAuditProjectionParityAfterImport:
             def append_event(self, *args, **kwargs):
                 append_calls.append((args, kwargs))
                 raise AssertionError("append_event must not be called by read-only commands")
+
+            def append_imported_event(self, *args, **kwargs):
+                append_calls.append((args, kwargs))
+                raise AssertionError("append_imported_event must not be called by read-only commands")
 
         monkeypatch.setattr(
             evlog_mod,

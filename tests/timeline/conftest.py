@@ -30,6 +30,8 @@ def pytest_configure(config: pytest.Config) -> None:
 from astrid.core.project.schema import utc_now_iso
 from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
 from astrid.core.timeline.eventlog.types import (
+    EventLogError,
+    EventLogIdempotentError,
     EventLogStaleVersionError,
     EventLogVerification,
     TimelineVersionConflict,
@@ -54,6 +56,7 @@ class FakeSupabaseTransport:
 
     def __init__(self) -> None:
         self._streams: dict[str, list[TimelineEvent]] = {}
+        self._idem_registry: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Public transport surface (matches SupabaseEventLogTransport)
@@ -116,6 +119,66 @@ class FakeSupabaseTransport:
         event = with_event_hash(event, prev_hash=prev_hash)
 
         stream.append(event)
+        return event
+
+    def append_imported_event(
+        self,
+        *,
+        timeline_id: str,
+        source_event: TimelineEvent,
+        idempotency_key: str,
+        actor: TimelineActor,
+    ) -> TimelineEvent:
+        """Import a source event with idempotency and CAS enforcement.
+
+        Uses an in-memory idempotency registry keyed by ``idempotency_key``.
+        Retrying the same key returns the already-appended event.
+        """
+        stream = self._streams.setdefault(timeline_id, [])
+
+        # Check idempotency
+        existing = self._idem_registry.get(idempotency_key)
+        if existing is not None:
+            # Find the existing event in the stream
+            for evt in stream:
+                if evt.event_id == existing:
+                    return evt
+            raise EventLogIdempotentError(existing)
+
+        # Reject appends after timeline.deleted
+        if stream and stream[-1].kind == "timeline.deleted":
+            raise EventLogError(
+                f"timeline {timeline_id} rejects appends after timeline.deleted"
+            )
+
+        # Compute prev_hash from the tail
+        prev_hash = stream[-1].hash if stream else None
+
+        # Convert source payload to dict
+        payload_dict = (
+            source_event.payload.to_json_obj()
+            if hasattr(source_event.payload, "to_json_obj")
+            else dict(source_event.payload)
+        )
+
+        # Build destination-native event with import metadata
+        event = TimelineEvent.new(
+            timeline_id=timeline_id,
+            ts=utc_now_iso(),
+            actor=actor,
+            kind=source_event.kind,
+            payload=payload_dict,
+            prev_hash=prev_hash,
+            source_backend=source_event.source_backend or "unknown",
+            source_timeline_id=source_event.timeline_id,
+            source_event_id=source_event.event_id,
+            source_version=source_event.source_version,
+            source_hash=source_event.hash,
+        )
+        event = with_event_hash(event, prev_hash=prev_hash)
+
+        stream.append(event)
+        self._idem_registry[idempotency_key] = event.event_id
         return event
 
     def read_events(
@@ -255,6 +318,123 @@ class FakeSupabaseTransport:
             expected_version=old.expected_version,
         )
         stream[index] = tampered
+
+    def repair_erasure(
+        self,
+        *,
+        timeline_id: str,
+        target_event_ids: list[str],
+        reason: str,
+        erased_by: str,
+        policy_ref: str | None = None,
+    ) -> dict[str, object]:
+        """Replace payloads of selected events with ErasedPayload and recompute chain."""
+        from astrid.core.timeline.events.schema import ErasedPayload
+
+        stream = self._streams.get(timeline_id, [])
+        if not stream:
+            return {
+                "replaced_count": 0,
+                "downstream_count": 0,
+                "head_event_count": 0,
+                "head_version": 0,
+                "last_event_id": None,
+                "last_hash": None,
+            }
+
+        target_set = frozenset(target_event_ids)
+        to_erase: list[int] = []
+        for i, evt in enumerate(stream):
+            if evt.event_id in target_set:
+                if isinstance(evt.payload, ErasedPayload):
+                    continue
+                to_erase.append(i)
+
+        if not to_erase:
+            last = stream[-1]
+            return {
+                "replaced_count": 0,
+                "downstream_count": 0,
+                "head_event_count": len(stream),
+                "head_version": len(stream),
+                "last_event_id": last.event_id,
+                "last_hash": last.hash,
+            }
+
+        erased_at = utc_now_iso()
+        to_erase.sort()
+        first_erased_idx = to_erase[0]
+
+        repaired: list[TimelineEvent] = []
+        for i, evt in enumerate(stream):
+            if i in to_erase:
+                erased_payload = ErasedPayload(
+                    erased=True,
+                    reason=reason,
+                    erased_at=erased_at,
+                    erased_by=erased_by,
+                    policy_ref=policy_ref,
+                )
+                repaired_evt = TimelineEvent(
+                    schema_version=evt.schema_version,
+                    event_id=evt.event_id,
+                    timeline_id=evt.timeline_id,
+                    ts=evt.ts,
+                    actor=evt.actor,
+                    kind=evt.kind,
+                    payload=erased_payload,
+                    prev_hash=evt.prev_hash if i == 0 else repaired[-1].hash,
+                    hash=None,
+                    expected_version=evt.expected_version,
+                    txn_id=evt.txn_id,
+                    source_backend=evt.source_backend,
+                    source_timeline_id=evt.source_timeline_id,
+                    source_event_id=evt.source_event_id,
+                    source_version=evt.source_version,
+                    source_hash=evt.source_hash,
+                )
+                repaired.append(repaired_evt)
+            elif i >= first_erased_idx:
+                prev = repaired[-1].hash if repaired else None
+                downstream = TimelineEvent(
+                    schema_version=evt.schema_version,
+                    event_id=evt.event_id,
+                    timeline_id=evt.timeline_id,
+                    ts=evt.ts,
+                    actor=evt.actor,
+                    kind=evt.kind,
+                    payload=evt.payload,
+                    prev_hash=prev,
+                    hash=None,
+                    expected_version=evt.expected_version,
+                    txn_id=evt.txn_id,
+                    source_backend=evt.source_backend,
+                    source_timeline_id=evt.source_timeline_id,
+                    source_event_id=evt.source_event_id,
+                    source_version=evt.source_version,
+                    source_hash=evt.source_hash,
+                )
+                repaired.append(downstream)
+            else:
+                repaired.append(evt)
+
+        # Recompute hashes for all events from first_erased_idx onward
+        for i in range(first_erased_idx, len(repaired)):
+            prev_hash = repaired[i - 1].hash if i > 0 else None
+            repaired[i] = with_event_hash(repaired[i], prev_hash=prev_hash)
+
+        self._streams[timeline_id] = repaired
+
+        last = repaired[-1]
+        downstream_count = len(repaired) - first_erased_idx
+        return {
+            "replaced_count": len(to_erase),
+            "downstream_count": downstream_count,
+            "head_event_count": len(repaired),
+            "head_version": len(repaired),
+            "last_event_id": last.event_id,
+            "last_hash": last.hash,
+        }
 
     @property
     def stream_count(self, timeline_id: str) -> int:

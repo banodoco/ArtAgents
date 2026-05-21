@@ -72,3 +72,61 @@ The deferred lifecycle behaviors are load-bearing for milestone close-out:
   transition, effect, theme, track, audio, pool, arrangement) and is
   regenerated from the canonical event stream on every Astrid-owned read
   and export entry point.
+
+## m5 schema additions (recovery + cross-backend)
+
+### New event kinds
+
+| kind | schema-defined | purpose |
+| --- | --- | --- |
+| `timeline.recovered` | yes | Recovery operation: restores projected state to a prior anchor event or snapshot. |
+| `timeline.reverted` | yes | Non-reversible undo fallback: records target event and before/after projections. |
+| `timeline.branched_from` | yes | Branch provenance: emitted on source timeline when a branch is successfully created. |
+| `timeline.erased` | yes | Audit/control event: describes an erasure operation (selector, reason, policy_ref, affected events). |
+
+### Erased payload envelope (`ErasedPayload`)
+
+Erased historical events carry a canonical `ErasedPayload` envelope that
+replaces the original domain payload.  The envelope is accepted by
+`TimelineEvent.from_dict()` for **any** event kind before per-kind coercion
+runs, so erased events remain parseable regardless of their original kind.
+
+Required fields:
+- `erased` — must be `true` (literal)
+- `reason` — non-empty string describing why the payload was erased
+- `erased_at` — ISO-8601 timestamp of the erasure
+- `erased_by` — non-empty actor identifier
+
+Optional field:
+- `policy_ref` — reference to the governing erasure policy (non-empty string)
+
+Mixed payloads that include both erased-envelope fields **and** domain-specific
+keys (e.g. `clip_id` alongside `erased: true`) are rejected with
+`TimelineEventSchemaError`.  Malformed erased payloads missing required fields
+also fail deterministically.
+
+**Semantic distinction:**
+- `timeline.erased` is the **audit/control event** that describes the erasure
+  operation (payload: `TimelineErasedPayload` with selector summary, reason,
+  affected count, optional policy_ref and affected event IDs).
+- `ErasedPayload` is the **repaired payload shape** of each affected historical
+  event (e.g. a `clip.added` that was erased has its payload replaced with
+  `ErasedPayload` while retaining its original `kind`, `event_id`, `actor`,
+  `ts`, and recomputed chain fields).
+
+### Import metadata fields
+
+`TimelineEvent` carries optional import metadata for cross-backend transfer
+provenance.  These fields are clearly separated from domain payload fields and
+are omitted from canonical JSON when `None`:
+
+- `source_backend` — the originating backend name (e.g. `"supabase"`, `"local_fs"`)
+- `source_timeline_id` — UUID of the source timeline
+- `source_event_id` — ULID of the source event
+- `source_version` — integer version number in the source stream
+- `source_hash` — SHA-256 hex digest of the source event
+
+Import metadata is validated: `source_backend` must be non-empty,
+`source_timeline_id` must be a valid UUID, `source_event_id` must be non-empty,
+`source_version` must be an integer, and `source_hash` must be non-empty.
+
