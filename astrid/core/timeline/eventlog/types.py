@@ -120,3 +120,69 @@ class AppendEventRequest:
     actor: TimelineActor
     expected_version: int | None = None
     txn_id: str | None = None
+
+
+# ============================================================================
+# Observability result shapes (m7)
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    """Fully-resolved timeline target produced by ``resolve_timeline_target()``."""
+
+    backend: BackendName
+    timeline_id: str
+    timeline_ulid: str
+    timeline_home: Path
+    slug: str
+    backend_name_display: str  # e.g. "local_fs" or "supabase"
+
+
+@dataclass(frozen=True)
+class OpsLogEntry:
+    """A single operational failure log entry from ``events_ops.jsonl``."""
+
+    ts: str
+    event_id: str | None
+    kind: str | None
+    error: str
+    raw: dict[str, object]
+
+
+@dataclass(frozen=True)
+class HistoryRow:
+    """One row returned by ``cmd_history`` for pretty-printing."""
+
+    backend: str
+    timeline_id: str
+    version: int  # 1-based event index in the stream
+    event_id: str
+    actor_display: str  # redacted: never includes via/session/token
+    kind: str
+    ts: str
+
+
+@dataclass(frozen=True)
+class AuditResult:
+    """Aggregated result from ``cmd_audit``."""
+
+    chain_ok: bool
+    chain_checked: int
+    chain_error: str | None
+    head_ok: bool
+    head_error: str | None
+    projection_parity_ok: bool | None  # None when no derived blob exists
+    projection_parity_error: str | None
+    ops_log_entries: list[OpsLogEntry] | None  # None when --include-ops not given
+    ops_log_error: str | None  # "no operational failure logs" or None
+
+
+@dataclass(frozen=True)
+class ActorRollupEntry:
+    """One entry in an actor rollup produced by ``cmd_who_edited``."""
+
+    actor_id: str
+    actor_display: str  # redacted: never includes via/session/token
+    kinds: dict[str, int]  # kind -> count
+    total: int

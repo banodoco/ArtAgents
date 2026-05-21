@@ -613,6 +613,63 @@ def project_to_assembly(
 
 
 # ============================================================================
+# Pure replay (never writes files — used by observability / audit)
+# ============================================================================
+
+
+def replay_projection(
+    backend: Any,
+    *,
+    stop_at_event_id: str | None = None,
+) -> dict[str, Any]:
+    """Replay the full event stream into an assembly dict **without any disk I/O**.
+
+    This is the pure, read-only counterpart of ``regenerate_projection()``.
+    It reads events through *backend* (which must satisfy
+    ``EventLogBackend.read_events()``) and folds them via
+    ``apply_event_to_assembly``.
+
+    Parameters
+    ----------
+    backend:
+        Any object with a ``read_events(*, after=None, limit=None) -> list[TimelineEvent]``
+        method.
+    stop_at_event_id:
+        When set, replay stops after applying the event whose ``event_id``
+        matches this value.  The returned assembly reflects state **after**
+        that event was applied.
+
+    Returns
+    -------
+    dict
+        The **inner** projected assembly dict (not the wrapper).
+
+    Raises
+    ------
+    ProjectionError
+        When ``stop_at_event_id`` is provided but not found in the stream,
+        or when any event cannot be projected.
+    """
+    all_events = backend.read_events()
+
+    if stop_at_event_id is None:
+        return project_to_assembly(all_events)
+
+    # Prefix replay: fold events one by one, check each event_id.
+    state: dict[str, Any] = {}
+    for event in all_events:
+        state = apply_event_to_assembly(state, event)
+        if event.event_id == stop_at_event_id:
+            return state
+
+    raise ProjectionError(
+        event_id=stop_at_event_id,
+        kind="(target)",
+        reason=f"stop_at_event_id {stop_at_event_id!r} not found in event stream",
+    )
+
+
+# ============================================================================
 # Replay orchestration (backend-agnostic, with LocalFs checkpoint support)
 # ============================================================================
 
@@ -641,8 +698,7 @@ def regenerate_projection(
     3. **Checkpoint hit**: seed ``project_to_assembly`` with the cached
        assembly and replay only suffix events (``after=last_event_id``).
     4. **Checkpoint miss / corruption / version mismatch**: fall back to
-       full replay from genesis (read all events via
-       ``backend.read_events()``).
+       full replay via ``replay_projection()`` (the pure read-only path).
     5. Atomically write the projected assembly to ``assembly.json``
        (wrapper shape ``{schema_version, assembly}``).
     6. Atomically write / refresh ``assembly.checkpoint.json``.
@@ -718,10 +774,9 @@ def regenerate_projection(
             events_applied = head.event_count
             checkpoint_valid = True
 
-    # --- Fall back to full replay ---
+    # --- Fall back to full replay (via pure replay_projection) ---
     if not checkpoint_valid:
-        all_events = backend.read_events()
-        assembly = project_to_assembly(all_events)
+        assembly = replay_projection(backend)
         events_applied = head.event_count
 
     # --- Write assembly.json atomically ---

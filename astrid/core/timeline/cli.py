@@ -177,6 +177,98 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cost_parser.set_defaults(handler=cmd_cost)
 
+    # --- history (m7) ---
+    history_parser = subparsers.add_parser(
+        "history", help="Read the event history of a timeline."
+    )
+    history_parser.add_argument(
+        "slug_or_id", help="Timeline slug, ULID, or event-stream UUID."
+    )
+    history_parser.add_argument(
+        "--since",
+        dest="since_event_id",
+        default=None,
+        help="Start reading after this event ID.",
+    )
+    history_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Maximum number of events to return (default: 50).",
+    )
+    history_parser.set_defaults(handler=cmd_history)
+
+    # --- diff (m7) ---
+    diff_parser = subparsers.add_parser(
+        "diff", help="Semantic diff between two events."
+    )
+    diff_parser.add_argument(
+        "slug_or_id", help="Timeline slug, ULID, or event-stream UUID."
+    )
+    diff_parser.add_argument(
+        "--from",
+        required=True,
+        dest="from_event_id",
+        help="Starting event ID for the diff.",
+    )
+    diff_parser.add_argument(
+        "--to",
+        required=True,
+        dest="to_event_id",
+        help="Ending event ID for the diff.",
+    )
+    diff_parser.add_argument(
+        "--with-state",
+        action="store_true",
+        help="Include projected before/after assembly snapshots.",
+    )
+    diff_parser.set_defaults(handler=cmd_diff)
+
+    # --- audit (m7) ---
+    audit_parser = subparsers.add_parser(
+        "audit", help="Verify event chain integrity and projection parity."
+    )
+    audit_parser.add_argument(
+        "slug_or_id", help="Timeline slug, ULID, or event-stream UUID."
+    )
+    audit_parser.add_argument(
+        "--include-ops",
+        action="store_true",
+        dest="include_ops",
+        help="Include operational failure logs in the audit report.",
+    )
+    audit_parser.set_defaults(handler=cmd_audit)
+
+    # --- preview (m7) ---
+    preview_parser = subparsers.add_parser(
+        "preview", help="Project a past state at a specific event."
+    )
+    preview_parser.add_argument(
+        "slug_or_id", help="Timeline slug, ULID, or event-stream UUID."
+    )
+    preview_parser.add_argument(
+        "--at",
+        required=True,
+        dest="at_event_id",
+        help="Event ID to project state at.",
+    )
+    preview_parser.add_argument(
+        "--out",
+        dest="out_path",
+        default=None,
+        help="Write projected state to this file (default: stdout).",
+    )
+    preview_parser.set_defaults(handler=cmd_preview)
+
+    # --- who-edited (m7) ---
+    who_edited_parser = subparsers.add_parser(
+        "who-edited", help="Show actor rollup for a timeline."
+    )
+    who_edited_parser.add_argument(
+        "slug_or_id", help="Timeline slug, ULID, or event-stream UUID."
+    )
+    who_edited_parser.set_defaults(handler=cmd_who_edited)
+
     # --- clip ---
     clip_parser = subparsers.add_parser("clip", help="Edit clips in a timeline.")
     clip_subs = clip_parser.add_subparsers(dest="clip_command", required=True)
@@ -1395,6 +1487,479 @@ def cmd_arrangement_show(args: argparse.Namespace) -> int:
             print(f"timeline '{args.slug}' not found", file=sys.stderr)
             return 1
     print(json.dumps(arrangement, indent=2, default=str))
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: history (m7)
+# ---------------------------------------------------------------------------
+
+
+def _redact_actor(actor: TimelineActor) -> str:
+    """Return a safe display string for an actor (no via/session/token)."""
+    if actor.display:
+        return actor.display
+    return actor.id
+
+
+def _format_history_row(version: int, event: TimelineEvent, backend_name: str) -> str:
+    """Format one event row for the history table."""
+    actor_display = _redact_actor(event.actor)
+    return (
+        f"  v{version:<6} {event.event_id}  "
+        f"kind={event.kind:<28}  actor={actor_display}"
+    )
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    """Read and pretty-print the event history of a timeline."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import select_timeline_backend
+
+    try:
+        target = resolve_timeline_target(project_slug, args.slug_or_id)
+    except ValueError as exc:
+        print(f"timelines: {exc}", file=sys.stderr)
+        return 1
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=target.backend,
+    )
+
+    events = backend.read_events(
+        after=getattr(args, "since_event_id", None),
+        limit=getattr(args, "limit", 50),
+    )
+
+    backend_label = backend.backend_name()
+
+    if not events:
+        print(f"(no events — backend={backend_label}, timeline={target.timeline_id})")
+        return 0
+
+    print(f"Backend:    {backend_label}")
+    print(f"Timeline:   {target.timeline_id}  (slug: {target.slug})")
+    print(f"Event count in this page: {len(events)}")
+    print()
+
+    # Determine starting version: if --since was given, find its index.
+    if getattr(args, "since_event_id", None):
+        all_events = backend.read_events()
+        base_idx = next(
+            (i for i, e in enumerate(all_events) if e.event_id == args.since_event_id),
+            None,
+        )
+        base_version = (base_idx + 1) if base_idx is not None else 0
+    else:
+        base_version = 0
+
+    for i, event in enumerate(events, start=1):
+        version = base_version + i
+        print(_format_history_row(version, event, backend_label))
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: diff (m7)
+# ---------------------------------------------------------------------------
+
+
+def _summarize_event_payload(event: TimelineEvent) -> str:
+    """Produce a short operation-level summary of an event's payload."""
+    payload = event.payload
+    if isinstance(payload, dict):
+        # Show a few key fields
+        keys = sorted(payload.keys())
+        if len(keys) <= 4:
+            brief = {k: payload[k] for k in keys}
+        else:
+            brief = {k: payload[k] for k in keys[:4]}
+            brief["..."] = f"+{len(keys) - 4} more fields"
+        try:
+            return json.dumps(brief, default=str)
+        except Exception:
+            return str(brief)
+    return str(payload)
+
+
+def cmd_diff(args: argparse.Namespace) -> int:
+    """Semantic diff between two events in a timeline."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import select_timeline_backend
+    from .projection import replay_projection
+
+    try:
+        target = resolve_timeline_target(project_slug, args.slug_or_id)
+    except ValueError as exc:
+        print(f"timelines: {exc}", file=sys.stderr)
+        return 1
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=target.backend,
+    )
+
+    all_events = backend.read_events()
+
+    # Find from/to indices
+    from_idx: int | None = None
+    to_idx: int | None = None
+    for i, event in enumerate(all_events):
+        if event.event_id == args.from_event_id:
+            from_idx = i
+        if event.event_id == args.to_event_id:
+            to_idx = i
+
+    if from_idx is None:
+        print(
+            f"timelines: event '{args.from_event_id}' not found in timeline '{target.slug}'",
+            file=sys.stderr,
+        )
+        return 1
+    if to_idx is None:
+        print(
+            f"timelines: event '{args.to_event_id}' not found in timeline '{target.slug}'",
+            file=sys.stderr,
+        )
+        return 1
+
+    from_event = all_events[from_idx]
+    to_event = all_events[to_idx]
+
+    print(f"Diff:  {from_event.event_id}  →  {to_event.event_id}")
+    print(f"Timeline: {target.timeline_id}  (slug: {target.slug})")
+    print(f"Backend:  {backend.backend_name()}")
+    print()
+
+    print("From event:")
+    print(f"  kind:    {from_event.kind}")
+    print(f"  actor:   {_redact_actor(from_event.actor)}")
+    print(f"  ts:      {from_event.ts}")
+    print(f"  payload: {_summarize_event_payload(from_event)}")
+    print()
+    print("To event:")
+    print(f"  kind:    {to_event.kind}")
+    print(f"  actor:   {_redact_actor(to_event.actor)}")
+    print(f"  ts:      {to_event.ts}")
+    print(f"  payload: {_summarize_event_payload(to_event)}")
+    print()
+
+    # Show intervening events as operation-level summaries
+    if to_idx - from_idx > 1:
+        print(f"Intervening events ({to_idx - from_idx - 1}):")
+        for i in range(from_idx + 1, to_idx):
+            ev = all_events[i]
+            print(
+                f"  [{i + 1}] {ev.event_id}  kind={ev.kind}  "
+                f"actor={_redact_actor(ev.actor)}"
+            )
+        print()
+
+    if getattr(args, "with_state", False):
+        try:
+            from_state = replay_projection(backend, stop_at_event_id=from_event.event_id)
+        except Exception as exc:
+            print(f"timelines: failed to project state at from event: {exc}", file=sys.stderr)
+            return 2
+        try:
+            to_state = replay_projection(backend, stop_at_event_id=to_event.event_id)
+        except Exception as exc:
+            print(f"timelines: failed to project state at to event: {exc}", file=sys.stderr)
+            return 2
+
+        print("Projected state at FROM event:")
+        print(json.dumps(from_state, indent=2, default=str))
+        print()
+        print("Projected state at TO event:")
+        print(json.dumps(to_state, indent=2, default=str))
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: audit (m7)
+# ---------------------------------------------------------------------------
+
+
+def _diff_keys(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
+    """Return keys that differ between two dicts (top-level only)."""
+    keys = sorted(set(before.keys()) | set(after.keys()))
+    diffs: list[str] = []
+    for k in keys:
+        if before.get(k) != after.get(k):
+            diffs.append(k)
+    return diffs
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    """Verify event chain integrity and projection parity."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import read_ops_log, resolve_timeline_target
+    from .eventlog import select_timeline_backend
+    from .projection import replay_projection
+
+    try:
+        target = resolve_timeline_target(project_slug, args.slug_or_id)
+    except ValueError as exc:
+        print(f"timelines: {exc}", file=sys.stderr)
+        return 1
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=target.backend,
+    )
+
+    issues: list[str] = []
+
+    # 1. Verify hash chain
+    verification = backend.verify_chain()
+    chain_ok = verification.ok
+    chain_checked = verification.checked_events
+    chain_error = verification.error
+
+    # 2. Head
+    head_ok = True
+    head_error: str | None = None
+    try:
+        head = backend.head()
+    except Exception as exc:
+        head_ok = False
+        head_error = str(exc)
+
+    # 3. Projection parity: pure replay vs on-disk assembly.json
+    projection_parity_ok: bool | None = None
+    projection_parity_error: str | None = None
+    try:
+        replayed = replay_projection(backend)
+    except Exception as exc:
+        projection_parity_ok = False
+        projection_parity_error = f"replay failed: {exc}"
+    else:
+        assembly_path = target.timeline_home / "assembly.json"
+        if assembly_path.is_file():
+            try:
+                existing = read_json(assembly_path)
+            except Exception as exc:
+                projection_parity_ok = False
+                projection_parity_error = f"failed to read assembly.json: {exc}"
+            else:
+                if isinstance(existing, dict):
+                    existing_assembly = existing.get("assembly", existing)
+                else:
+                    existing_assembly = existing
+                if existing_assembly != replayed:
+                    projection_parity_ok = False
+                    diff_keys = _diff_keys(
+                        existing_assembly if isinstance(existing_assembly, dict) else {},
+                        replayed if isinstance(replayed, dict) else {},
+                    )
+                    projection_parity_error = (
+                        f"assembly.json does not match replay; "
+                        f"differing keys: {diff_keys if diff_keys else '(structural mismatch)'}"
+                    )
+                else:
+                    projection_parity_ok = True
+        else:
+            # No derived blob exists — parity check is not applicable.
+            projection_parity_ok = None
+
+    # 4. Ops log
+    ops_entries = None
+    ops_log_error: str | None = None
+    if getattr(args, "include_ops", False):
+        ops_entries = read_ops_log(target.timeline_home)
+        if ops_entries is None:
+            ops_log_error = "no operational failure logs"
+
+    # --- Print results ---
+    print(f"Audit for timeline '{target.slug}'")
+    print(f"  Backend:     {backend.backend_name()}")
+    print(f"  Timeline ID: {target.timeline_id}")
+    print()
+
+    # Chain
+    status_chain = "OK" if chain_ok else "FAIL"
+    print(f"  Hash chain:  {status_chain}  (checked {chain_checked} events)")
+    if chain_error:
+        issues.append(f"chain: {chain_error}")
+        print(f"    Error: {chain_error}")
+
+    # Head
+    status_head = "OK" if head_ok else "FAIL"
+    print(f"  Head:        {status_head}")
+    if head_error:
+        issues.append(f"head: {head_error}")
+        print(f"    Error: {head_error}")
+    elif head_ok:
+        print(f"    timeline_id={head.timeline_id}, version={head.version}, "
+              f"events={head.event_count}, last={head.last_event_id}")
+
+    # Projection parity
+    if projection_parity_ok is None:
+        print(f"  Projection:  N/A  (no assembly.json to compare)")
+    elif projection_parity_ok:
+        print(f"  Projection:  OK  (assembly.json matches replay)")
+    else:
+        issues.append(f"projection: {projection_parity_error}")
+        print(f"  Projection:  MISMATCH")
+        if projection_parity_error:
+            print(f"    {projection_parity_error}")
+
+    # Ops log
+    if ops_entries is not None:
+        print(f"  Ops log:     {len(ops_entries)} entries")
+        for entry in ops_entries:
+            print(f"    - [{entry.ts}] event={entry.event_id} kind={entry.kind}: {entry.error}")
+    elif ops_log_error is not None:
+        print(f"  Ops log:     ({ops_log_error})")
+
+    print()
+
+    if issues:
+        print(f"Summary: {len(issues)} issue(s) found")
+        for issue in issues:
+            print(f"  - {issue}")
+        return 1
+
+    print("Summary: all checks passed")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: preview (m7)
+# ---------------------------------------------------------------------------
+
+
+def cmd_preview(args: argparse.Namespace) -> int:
+    """Project a past state at a specific event."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import select_timeline_backend
+    from .projection import replay_projection
+
+    try:
+        target = resolve_timeline_target(project_slug, args.slug_or_id)
+    except ValueError as exc:
+        print(f"timelines: {exc}", file=sys.stderr)
+        return 1
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=target.backend,
+    )
+
+    try:
+        state = replay_projection(backend, stop_at_event_id=args.at_event_id)
+    except Exception as exc:
+        print(f"timelines: failed to project state at '{args.at_event_id}': {exc}", file=sys.stderr)
+        return 2
+
+    out_path_raw = getattr(args, "out_path", None)
+    if out_path_raw:
+        out_path = Path(out_path_raw).expanduser().resolve()
+        timeline_home_resolved = target.timeline_home.resolve()
+
+        # Guard: reject --out paths inside the timeline home.
+        try:
+            out_path.relative_to(timeline_home_resolved)
+        except ValueError:
+            pass  # not inside timeline home — ok
+        else:
+            print(
+                f"timelines: --out path '{out_path_raw}' is inside the timeline home; "
+                f"refusing to overwrite canonical files",
+                file=sys.stderr,
+            )
+            return 2
+
+        from astrid.core.project.jsonio import write_json_atomic
+
+        write_json_atomic(out_path, state)
+        print(f"Projected state written to {out_path}")
+    else:
+        print(json.dumps(state, indent=2, default=str))
+
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Handler: who-edited (m7)
+# ---------------------------------------------------------------------------
+
+
+def cmd_who_edited(args: argparse.Namespace) -> int:
+    """Show actor rollup for a timeline."""
+    session = _require_session()
+    project_slug = session.project
+
+    from .observability import resolve_timeline_target
+    from .eventlog import select_timeline_backend
+
+    try:
+        target = resolve_timeline_target(project_slug, args.slug_or_id)
+    except ValueError as exc:
+        print(f"timelines: {exc}", file=sys.stderr)
+        return 1
+
+    stream_ref, backend = select_timeline_backend(
+        timeline_id=target.timeline_id,
+        timeline_home=target.timeline_home,
+        preferred_backend=target.backend,
+    )
+
+    events = backend.read_events()
+
+    if not events:
+        print(f"(no events — backend={backend.backend_name()}, timeline={target.timeline_id})")
+        return 0
+
+    # Actor rollup: group by actor.id, count events by kind.
+    rollup: dict[str, dict[str, Any]] = {}
+    for event in events:
+        actor = event.actor
+        actor_key = actor.id
+        if actor_key not in rollup:
+            rollup[actor_key] = {
+                "actor_id": actor.id,
+                "actor_display": _redact_actor(actor),
+                "kinds": {},
+                "total": 0,
+            }
+        entry = rollup[actor_key]
+        entry["kinds"][event.kind] = entry["kinds"].get(event.kind, 0) + 1
+        entry["total"] += 1
+
+    sorted_entries = sorted(rollup.values(), key=lambda e: e["total"], reverse=True)
+
+    print(f"Actor rollup for timeline '{target.slug}'")
+    print(f"  Backend:     {backend.backend_name()}")
+    print(f"  Timeline ID: {target.timeline_id}")
+    print(f"  Total actors: {len(sorted_entries)}")
+    print()
+
+    for entry in sorted_entries:
+        print(f"  {entry['actor_display']}  (id: {entry['actor_id']})")
+        print(f"    total events: {entry['total']}")
+        for kind, count in sorted(entry["kinds"].items()):
+            print(f"      {kind}: {count}")
+        print()
+
     return 0
 
 
