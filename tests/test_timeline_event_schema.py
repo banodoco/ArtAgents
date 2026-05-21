@@ -5,8 +5,6 @@ import unittest
 from uuid import uuid4
 
 from astrid.core.timeline.eventlog import (
-    EventLogNotConfiguredError,
-    EventLogNotImplementedError,
     LocalFsBackend,
     SupabaseBackend,
     build_timeline_backend,
