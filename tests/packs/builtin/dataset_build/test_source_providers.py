@@ -7,7 +7,7 @@ from typing import Any
 
 from astrid.packs.builtin.dataset_build.source_providers import get_source_provider, iter_source_candidates
 from astrid.packs.builtin.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
-from astrid.packs.builtin.dataset_build.source_providers.youtube import YouTubeSourceProvider
+from astrid.packs.builtin.dataset_build.source_providers.youtube import YouTubeSourceProvider, youtube_source_key
 
 
 def _probe(path: Path) -> dict[str, Any]:
@@ -127,3 +127,26 @@ def test_youtube_provider_uses_bucket_search_queries_from_config(tmp_path: Path)
     assert len(candidates) == 1
     query_commands = [cmd for cmd in calls if "astrid.packs.builtin.youtube_audio.run" in cmd]
     assert query_commands[0][query_commands[0].index("--query") + 1] == "query from bucket"
+
+
+def test_youtube_provider_skips_processed_source_before_download(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+    source = {"kind": "url", "value": "https://youtube.example/watch?v=already"}
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(cmd)
+        raise AssertionError("processed YouTube source should skip before download")
+
+    provider = YouTubeSourceProvider(runner=runner, prober=_probe)
+    candidates = list(
+        provider.acquire(
+            {
+                "out_dir": str(tmp_path / "yt"),
+                "source_urls": [source["value"]],
+                "processed_source_ids": [youtube_source_key(source)],
+            }
+        )
+    )
+
+    assert candidates == []
+    assert calls == []

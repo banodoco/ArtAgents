@@ -144,6 +144,18 @@
       "default": "pending",
       "description": "Current review status."
     },
+    "review_sampled": {
+      "type": "object",
+      "description": "Deterministic review sampling metadata. Unsampled items remain present and pending unless explicitly reviewed.",
+      "additionalProperties": false,
+      "required": ["sampled", "mode", "sample_count"],
+      "properties": {
+        "sampled": {"type": "boolean"},
+        "mode": {"type": "string", "enum": ["all", "random_sample", "top_n"]},
+        "sample_count": {"type": "integer", "minimum": 0},
+        "rank": {"type": "integer", "minimum": 1}
+      }
+    },
     "review_decision": {
       "$ref": "review-decision.schema.json",
       "description": "The review decision for this item, if decided."

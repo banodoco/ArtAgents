@@ -129,7 +129,30 @@ def test_data_json_paginates_and_filters_by_review_status(tmp_path: Path) -> Non
         "offset": 1,
         "limit": 1,
         "status": "accepted",
+        "sampled": None,
     }
+
+
+def test_data_json_filters_by_review_sampled_metadata(tmp_path: Path) -> None:
+    payload = {
+        "items": [
+            {"item_id": "sampled-a", "review_status": "pending", "review_sampled": {"sampled": True}},
+            {"item_id": "unsampled-a", "review_status": "pending", "review_sampled": {"sampled": False}},
+            {"item_id": "legacy-a", "review_status": "pending"},
+        ]
+    }
+    handler, token, _, _ = _handler(tmp_path, data=payload)
+    sampled_status, _, sampled_body = _request(handler, "GET", "/data.json?sampled=true", token=token)
+    unsampled_status, _, unsampled_body = _request(handler, "GET", "/data.json?sampled=false", token=token)
+
+    assert sampled_status == 200
+    assert unsampled_status == 200
+    sampled_page = json.loads(sampled_body)
+    unsampled_page = json.loads(unsampled_body)
+    assert [item["item_id"] for item in sampled_page["items"]] == ["sampled-a", "legacy-a"]
+    assert [item["item_id"] for item in unsampled_page["items"]] == ["unsampled-a"]
+    assert sampled_page["sampled"] == "true"
+    assert unsampled_page["sampled"] == "false"
 
 
 def test_data_json_paging_bounds_large_metadata_payloads(tmp_path: Path) -> None:
@@ -164,14 +187,16 @@ def test_data_json_paging_bounds_large_metadata_payloads(tmp_path: Path) -> None
     assert b"item-119" not in body
 
 
-def test_save_legacy_full_state_shape_is_preserved(tmp_path: Path) -> None:
+def test_save_rejects_non_diff_payload_without_overwriting_state(tmp_path: Path) -> None:
     legacy_state = {"seinfeld": True, "items": [{"id": "legacy"}]}
-    handler, token, state_path, _ = _handler(tmp_path, data=[], state=_state())
+    initial = _state()
+    handler, token, state_path, _ = _handler(tmp_path, data=[], state=initial)
     status, _, body = _request(handler, "POST", "/save", body=legacy_state, token=token)
 
-    assert status == 204
-    assert body == b""
-    assert json.loads(state_path.read_text(encoding="utf-8")) == legacy_state
+    assert status == 400
+    response = json.loads(body)
+    assert response["error"] == "diff_required"
+    assert read_review_state(state_path)["run_id"] == initial["run_id"]
 
 
 def test_save_dataset_diff_merges_revision_and_increments_state_version(tmp_path: Path) -> None:
@@ -201,6 +226,60 @@ def test_save_dataset_diff_merges_revision_and_increments_state_version(tmp_path
     assert state["state_version"] == 2
     assert state["review_decisions"]["item-1"]["decision"] == "accept"
     assert state["review_decisions"]["item-1"]["edited_caption"] == "caption edit"
+
+
+def test_save_dataset_diff_returns_409_on_stale_state_without_mutation(tmp_path: Path) -> None:
+    handler, token, state_path, _ = _handler(tmp_path, data=[], state=_state())
+    initial = read_review_state(state_path)
+
+    status, _, body = _request(
+        handler,
+        "POST",
+        "/save",
+        token=token,
+        body={
+            "base_state_version": initial["state_version"] - 1,
+            "revisions": [{"item_id": "item-1", "decision": "accepted"}],
+        },
+    )
+
+    assert status == 409
+    response = json.loads(body)
+    assert response["error"] == "stale_state"
+    state = read_review_state(state_path)
+    assert state["state_version"] == initial["state_version"]
+    assert state["review_decisions"] == {}
+
+
+def test_save_error_statuses_distinguish_stale_from_non_diff_without_mutation(tmp_path: Path) -> None:
+    handler, token, state_path, _ = _handler(tmp_path, data=[], state=_state())
+    initial = read_review_state(state_path)
+
+    stale_status, _, stale_body = _request(
+        handler,
+        "POST",
+        "/save",
+        token=token,
+        body={
+            "base_state_version": initial["state_version"] - 1,
+            "revisions": [{"item_id": "item-1", "decision": "accepted"}],
+        },
+    )
+    non_diff_status, _, non_diff_body = _request(
+        handler,
+        "POST",
+        "/save",
+        token=token,
+        body={"items": [{"item_id": "legacy-full-state"}]},
+    )
+
+    assert stale_status == 409
+    assert json.loads(stale_body)["error"] == "stale_state"
+    assert non_diff_status == 400
+    assert json.loads(non_diff_body)["error"] == "diff_required"
+    state = read_review_state(state_path)
+    assert state["state_version"] == initial["state_version"]
+    assert state["review_decisions"] == {}
 
 
 def test_save_dataset_diff_normalizes_multiple_revision_statuses_and_updates_timestamp_once(tmp_path: Path) -> None:
@@ -247,6 +326,148 @@ def test_save_dataset_diff_normalizes_multiple_revision_statuses_and_updates_tim
     assert state["review_decisions"]["rejected-item"]["decision"] == "reject"
     assert state["review_decisions"]["rejected-item"]["reject_reason"] == "wrong_content"
     assert state["review_decisions"]["pending-item"]["decision"] == "pending"
+
+
+def test_submit_batch_visible_item_ids_merges_with_same_state_guard(tmp_path: Path) -> None:
+    handler, token, state_path, _ = _handler(
+        tmp_path,
+        data={"items": [{"item_id": "a", "review_status": "pending"}, {"item_id": "b", "review_status": "pending"}]},
+        state=_state(),
+    )
+    initial = read_review_state(state_path)
+
+    status, _, body = _request(
+        handler,
+        "POST",
+        "/submit-batch",
+        token=token,
+        body={
+            "base_state_version": initial["state_version"],
+            "item_ids": ["a", "b"],
+            "decision": "accepted",
+        },
+    )
+
+    assert status == 200
+    response = json.loads(body)
+    assert response["state_version"] == initial["state_version"] + 1
+    state = read_review_state(state_path)
+    assert state["review_decisions"]["a"]["decision"] == "accept"
+    assert state["review_decisions"]["b"]["decision"] == "accept"
+    assert state["review_decisions"]["a"]["reviewer_id"] == "human_review_batch"
+
+
+def test_submit_batch_filtered_scope_selects_matching_data_items(tmp_path: Path) -> None:
+    handler, token, state_path, _ = _handler(
+        tmp_path,
+        data={
+            "items": [
+                {"item_id": "pending-a", "review_status": "pending"},
+                {"item_id": "accepted-a", "review_status": "accepted"},
+                {"item_id": "pending-b", "review_status": "pending"},
+            ]
+        },
+        state=_state(),
+    )
+    initial = read_review_state(state_path)
+
+    status, _, _ = _request(
+        handler,
+        "POST",
+        "/submit-batch",
+        token=token,
+        body={
+            "base_state_version": initial["state_version"],
+            "scope": "filtered",
+            "filter": {"status": "pending"},
+            "decision": "rejected",
+            "reject_reason": "low_quality",
+        },
+    )
+
+    assert status == 200
+    state = read_review_state(state_path)
+    assert sorted(state["review_decisions"]) == ["pending-a", "pending-b"]
+    assert state["review_decisions"]["pending-a"]["decision"] == "reject"
+    assert state["review_decisions"]["pending-a"]["reject_reason"] == "low_quality"
+
+
+def test_submit_batch_filtered_scope_can_select_unsampled_items(tmp_path: Path) -> None:
+    handler, token, state_path, _ = _handler(
+        tmp_path,
+        data={
+            "items": [
+                {"item_id": "sampled-pending", "review_status": "pending", "review_sampled": {"sampled": True}},
+                {"item_id": "unsampled-pending", "review_status": "pending", "review_sampled": {"sampled": False}},
+                {"item_id": "unsampled-accepted", "review_status": "accepted", "review_sampled": {"sampled": False}},
+            ]
+        },
+        state=_state(),
+    )
+    initial = read_review_state(state_path)
+
+    status, _, _ = _request(
+        handler,
+        "POST",
+        "/submit-batch",
+        token=token,
+        body={
+            "base_state_version": initial["state_version"],
+            "scope": "filtered",
+            "filter": {"status": "pending", "sampled": "false"},
+            "decision": "accepted",
+        },
+    )
+
+    assert status == 200
+    state = read_review_state(state_path)
+    assert sorted(state["review_decisions"]) == ["unsampled-pending"]
+    assert state["review_decisions"]["unsampled-pending"]["decision"] == "accept"
+
+
+def test_submit_batch_requires_token_and_base_state_version(tmp_path: Path) -> None:
+    handler, token, _, _ = _handler(tmp_path, data={"items": [{"item_id": "a"}]}, state=_state())
+
+    no_token_status, _, _ = _request(
+        handler,
+        "POST",
+        "/submit-batch",
+        body={"base_state_version": 1, "item_ids": ["a"], "decision": "accepted"},
+    )
+    missing_base_status, _, missing_base_body = _request(
+        handler,
+        "POST",
+        "/submit-batch",
+        token=token,
+        body={"item_ids": ["a"], "decision": "accepted"},
+    )
+
+    assert no_token_status == 403
+    assert missing_base_status == 400
+    assert json.loads(missing_base_body)["error"] == "base_state_version_required"
+
+
+def test_submit_batch_returns_409_on_stale_state_without_mutation(tmp_path: Path) -> None:
+    handler, token, state_path, _ = _handler(tmp_path, data={"items": [{"item_id": "a"}]}, state=_state())
+    initial = read_review_state(state_path)
+
+    status, _, body = _request(
+        handler,
+        "POST",
+        "/submit-batch",
+        token=token,
+        body={
+            "base_state_version": initial["state_version"] - 1,
+            "item_ids": ["a"],
+            "decision": "accepted",
+        },
+    )
+
+    assert status == 409
+    assert json.loads(body)["error"] == "stale_state"
+    state = read_review_state(state_path)
+    assert state["state_version"] == initial["state_version"]
+    assert state["review_decisions"] == {}
 
 
 def test_state_and_save_require_token(tmp_path: Path) -> None:

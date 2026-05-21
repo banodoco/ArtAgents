@@ -18,6 +18,7 @@ from astrid._paths import REPO_ROOT
 from ..caption_providers import BudgetTracker
 from ..interfaces import FilterResult
 from ..items import deterministic_id
+from ._common import build_filter_stats, increment_reason, pass_item, reject_item, resolve_media_path
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -69,27 +70,26 @@ class BucketJudgeGate:
             bucket = decision["bucket"]
             if decision["accept"] is True and isinstance(bucket, str) and bucket in allowed_buckets:
                 updated["bucket"] = bucket
-                updated = _with_filter_result(updated, self.stage_id, passed=True, reason=reason, score=score)
+                updated = pass_item(updated, self.stage_id, reason=reason, score=score)
                 passed.append(updated)
                 continue
             if decision["accept"] is True:
                 reason = f"invalid_bucket:{bucket}"
                 warnings.append(reason)
-            reasons[reason] = reasons.get(reason, 0) + 1
-            updated = _with_filter_result(updated, self.stage_id, passed=False, reason=reason, score=score)
-            updated["review_status"] = "rejected"
+            increment_reason(reasons, reason)
+            updated = reject_item(updated, self.stage_id, reason=reason, score=score)
             rejected.append(updated)
 
-        stats = {
-            "stage_id": self.stage_id,
-            "stage_order": self.stage_order,
-            "items_in": len(items),
-            "items_passed": len(passed),
-            "items_rejected": len(rejected),
-            "rejection_reasons": reasons,
-            "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-            "warnings": warnings,
-        }
+        stats = build_filter_stats(
+            stage_id=self.stage_id,
+            stage_order=self.stage_order,
+            items_in=len(items),
+            items_passed=len(passed),
+            items_rejected=len(rejected),
+            rejection_reasons=reasons,
+            warnings=warnings,
+            started=started,
+        )
         return FilterResult(passed=passed, rejected=rejected, stats=stats)
 
     def _judge_item(self, item: Mapping[str, Any], config: Mapping[str, Any], allowed_buckets: list[str]) -> dict[str, Any]:
@@ -135,17 +135,16 @@ def _gate_config(config: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _disabled_result(stage_id: str, stage_order: int, items: list[dict[str, Any]], started: float) -> FilterResult:
-    passed = [_with_filter_result(item, stage_id, passed=True, reason="disabled", score=1.0) for item in items]
-    stats = {
-        "stage_id": stage_id,
-        "stage_order": stage_order,
-        "items_in": len(items),
-        "items_passed": len(passed),
-        "items_rejected": 0,
-        "rejection_reasons": {},
-        "duration_ms": round((time.perf_counter() - started) * 1000, 3),
-        "warnings": ["bucket_judge disabled"],
-    }
+    passed = [pass_item(item, stage_id, reason="disabled", score=1.0) for item in items]
+    stats = build_filter_stats(
+        stage_id=stage_id,
+        stage_order=stage_order,
+        items_in=len(items),
+        items_passed=len(passed),
+        items_rejected=0,
+        warnings=["bucket_judge disabled"],
+        started=started,
+    )
     return FilterResult(passed=passed, rejected=[], stats=stats)
 
 
@@ -311,15 +310,6 @@ def _deterministic_fixture_decision(allowed_buckets: list[str]) -> dict[str, Any
     }
 
 
-def _with_filter_result(item: Mapping[str, Any], stage_id: str, *, passed: bool, reason: str, score: float) -> dict[str, Any]:
-    updated = dict(item)
-    filter_results = dict(updated.get("filter_results") or {})
-    filter_results[stage_id] = {"passed": passed, "reason": reason, "score": score}
-    updated["filter_results"] = filter_results
-    updated.setdefault("review_status", "pending")
-    return updated
-
-
 def _clip_id(item: Mapping[str, Any]) -> str:
     for key in ("clip_id", "item_id", "source_id"):
         value = item.get(key)
@@ -329,11 +319,10 @@ def _clip_id(item: Mapping[str, Any]) -> str:
 
 
 def _media_path(item: Mapping[str, Any], *, repo_root: Path) -> Path:
-    value = item.get("media_path")
-    if not isinstance(value, str) or not value:
+    resolved = resolve_media_path(item, repo_root=repo_root, required=True)
+    if resolved is None:
         raise ValueError("item missing media_path")
-    path = Path(value).expanduser()
-    return path if path.is_absolute() else (repo_root / path).resolve()
+    return resolved
 
 
 def _sample_time(item: Mapping[str, Any]) -> str:

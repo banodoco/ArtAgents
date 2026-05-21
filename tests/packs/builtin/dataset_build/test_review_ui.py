@@ -14,6 +14,7 @@ def test_review_ui_declares_generic_paginated_data_loading() -> None:
     assert 'offset: String(state.offset)' in js
     assert 'limit: String(state.limit)' in js
     assert 'params.set("status", state.status)' in js
+    assert 'params.set("sampled", state.sampled)' in js
     assert "fetch(`/data.json?${params.toString()}`)" in js
 
 
@@ -53,8 +54,42 @@ def test_review_ui_saves_diff_payload_with_base_state_version() -> None:
     assert "base_state_version: state.baseStateVersion" in js
     assert "revisions," in js
     assert 'fetch("/save"' in js
+    assert "response.status === 409" in js
+    assert "recoverFromConflict" in js
     assert "state.revisions.clear()" in js
     assert 'fetch("/state.json"' in js
+
+
+def test_review_ui_exposes_batch_controls_and_submit_batch_payloads() -> None:
+    js = APP_JS.read_text(encoding="utf-8")
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'id="acceptVisible"' in html
+    assert 'id="rejectVisible"' in html
+    assert 'id="acceptFiltered"' in html
+    assert 'id="rejectFiltered"' in html
+    assert 'id="batchRejectReason"' in html
+    assert 'id="sampledFilter"' in html
+    assert 'fetch("/submit-batch"' in js
+    assert "body.item_ids = []" in js
+    assert "for (const item of state.items)" in js
+    assert 'body.scope = "filtered"' in js
+    assert "filter.sampled = state.sampled" in js
+    assert "body.reject_reason = els.batchRejectReason.value" in js
+    assert "base_state_version: state.baseStateVersion" in js
+
+
+def test_review_ui_conflict_recovery_preserves_local_revisions_until_choice() -> None:
+    js = APP_JS.read_text(encoding="utf-8")
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    assert 'id="conflictBanner"' in html
+    assert 'id="reapplyLocal"' in html
+    assert 'id="discardLocal"' in html
+    assert "state.conflict = true" in js
+    assert "await loadState()" in js
+    assert "await loadPage(state.offset)" in js
+    assert "state.revisions.clear()" in js
+    assert "els.reapplyLocal.addEventListener" in js
+    assert "els.discardLocal.addEventListener" in js
 
 
 def test_review_ui_assets_are_generic_and_linked() -> None:

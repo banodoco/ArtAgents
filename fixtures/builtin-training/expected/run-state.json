@@ -35,7 +35,11 @@
       "warnings": []
     }
   },
-  "processed_source_ids": [],
+  "processed_source_ids": [
+    "fixture_test_clip_01",
+    "fixture_test_clip_02",
+    "fixture_test_clip_03"
+  ],
   "review_decisions": {
     "item_aaad37dfa8c5d42a": {
       "decision": "accept",
@@ -66,7 +70,7 @@
     }
   },
   "run_id": "builtin-training-fixture",
-  "state_version": 8,
+  "state_version": 11,
   "status": "finalized",
   "submitted": true,
   "top_up_rounds": 0,

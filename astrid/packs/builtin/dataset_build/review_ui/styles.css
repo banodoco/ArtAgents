@@ -90,6 +90,21 @@ button[disabled] {
   font-size: 13px;
 }
 
+.conflict {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid #f1c9a8;
+  background: #fff4e8;
+  color: #7a3b00;
+  font-size: 13px;
+}
+
+.conflict[hidden] {
+  display: none;
+}
+
 .item-list {
   list-style: none;
   margin: 0;
