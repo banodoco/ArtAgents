@@ -80,6 +80,12 @@ def build_parser() -> argparse.ArgumentParser:
     # added here -- it is reserved for executor UUID mode.
     add("--project", help="Project slug for managed canonical writes.")
     add("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
+    add(
+        "--actor-via",
+        type=json.loads,
+        default=None,
+        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
+    )
     return parser
 
 
@@ -547,12 +553,19 @@ def _flag_entry(finding: enriched_arrangement.ReviewerFinding) -> dict[str, Any]
     }
 
 
-def _emit_refine_managed_events(args: argparse.Namespace, arrangement: dict[str, Any]) -> int:
+def _emit_refine_managed_events(
+    args: argparse.Namespace, arrangement: dict[str, Any],
+    *, actor_via: Any | None = None,
+) -> int:
     """Emit arrangement.replaced event through the pack write gateway.
 
     Called when refine runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written, preserving the
     append-then-materialize contract.
+
+    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
+    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
+    provenance on the emitted events.
     """
     import time as _time
 
@@ -563,6 +576,7 @@ def _emit_refine_managed_events(args: argparse.Namespace, arrangement: dict[str,
         type="system",
         id=f"builtin.refine:{hash(str(_time.time()))}",
         display="builtin.refine",
+        via=[actor_via] if actor_via is not None else None,
     )
     events = [
         {
@@ -589,7 +603,11 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
     # m3.5 managed mode: emit events through the gateway before writing
     # compatibility outputs.
     if managed:
-        _emit_refine_managed_events(args, dict(enriched.arrangement))
+        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
+
+        actor_via_raw = getattr(args, "actor_via", None)
+        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
+        _emit_refine_managed_events(args, dict(enriched.arrangement), actor_via=actor_via)
     save_arrangement(enriched.arrangement, args.arrangement, set(pool_entries))
     compiled_plan = compile_arrangement_plan(enriched.arrangement, enriched.pool)
     provenance = dict(prior_meta.get("pipeline", {}).get("pool_provenance", {}) or {})

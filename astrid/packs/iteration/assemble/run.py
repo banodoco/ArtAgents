@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     # added here -- it is reserved for executor UUID mode.
     parser.add_argument("--project", help="Project slug for managed canonical writes.")
     parser.add_argument("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
+    parser.add_argument(
+        "--actor-via",
+        type=json.loads,
+        default=None,
+        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
+    )
     return parser
 
 
@@ -55,6 +61,7 @@ def _is_managed_mode(args: argparse.Namespace) -> bool:
 # Thread-local managed binding state (set by main before assemble_iteration).
 _managed_project: str | None = None
 _managed_timeline_slug: str | None = None
+_managed_actor_via: Any | None = None
 
 
 def _get_managed_project() -> str | None:
@@ -65,14 +72,23 @@ def _get_managed_timeline_slug() -> str | None:
     return _managed_timeline_slug
 
 
+def _get_managed_actor_via() -> Any | None:
+    return _managed_actor_via
+
+
 def _emit_assemble_managed_events(
-    project_slug: str, timeline_slug: str, timeline: dict[str, Any]
+    project_slug: str, timeline_slug: str, timeline: dict[str, Any],
+    *, actor_via: Any | None = None,
 ) -> int:
     """Emit arrangement.replaced event through the pack write gateway.
 
     Called when assemble runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written, preserving the
     append-then-materialize contract.
+
+    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
+    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
+    provenance on the emitted events.
     """
     import time as _time
 
@@ -83,6 +99,7 @@ def _emit_assemble_managed_events(
         type="system",
         id=f"iteration.assemble:{hash(str(_time.time()))}",
         display="iteration.assemble",
+        via=[actor_via] if actor_via is not None else None,
     )
     events = [
         {
@@ -107,9 +124,13 @@ def main(argv: list[str] | None = None) -> int:
     # m3.5 managed binding seam: detect managed vs unmanaged mode.
     managed = _is_managed_mode(args)
     if managed:
+        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
+
         print(f"assemble: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
         _managed_project = args.project
         _managed_timeline_slug = args.timeline_slug
+        actor_via_raw = getattr(args, "actor_via", None)
+        _managed_actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
     else:
         if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
             print("--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode", file=sys.stderr)
@@ -181,8 +202,9 @@ def assemble_iteration(
     # compatibility outputs.
     project_slug = _get_managed_project()
     timeline_slug = _get_managed_timeline_slug()
+    actor_via = _get_managed_actor_via()
     if project_slug is not None and timeline_slug is not None:
-        _emit_assemble_managed_events(project_slug, timeline_slug, assembly["timeline"])
+        _emit_assemble_managed_events(project_slug, timeline_slug, assembly["timeline"], actor_via=actor_via)
 
     timeline.save_timeline(assembly["timeline"], timeline_path)
     timeline.save_timeline(assembly["timeline"], hype_timeline_path)

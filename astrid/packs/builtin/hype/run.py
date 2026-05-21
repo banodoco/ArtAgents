@@ -628,12 +628,25 @@ def _append_managed_binding(args: argparse.Namespace, cmd: list[str]) -> list[st
     File-only subprocess calls (those without --project on the hype parent)
     are left unchanged — both flags are absent from args.
 
+    When an ``actor_via`` TimelineActor is available on *args* (set by the
+    hype orchestrator based on how it was invoked — human CLI, agent, or
+    system), the actor-via JSON is also appended as ``--actor-via`` so
+    child packs can chain upstream provenance into their emitted events.
+
     Returns *cmd* so callers can pipeline.
     """
     project_slug = getattr(args, "project", None)
     timeline_slug = getattr(args, "timeline_slug", None)
     if project_slug and timeline_slug:
         cmd.extend(["--project", str(project_slug), "--timeline-slug", str(timeline_slug)])
+        actor_via = getattr(args, "actor_via", None)
+        if actor_via is not None:
+            import json as _json
+
+            if hasattr(actor_via, "to_json_obj"):
+                cmd.extend(["--actor-via", _json.dumps(actor_via.to_json_obj())])
+            elif isinstance(actor_via, dict):
+                cmd.extend(["--actor-via", _json.dumps(actor_via)])
     return cmd
 
 
@@ -1568,6 +1581,7 @@ def pool_main(args: argparse.Namespace) -> int:
                 project_slug=project_slug,
                 timeline_slug=getattr(args, "timeline_slug", None) or getattr(args, "brief_slug", None),
                 timeline_event_stream_id=getattr(args, "timeline_event_stream_id", None),
+                actor_via=getattr(args, "actor_via", None),
             )
         elif action == "rework":
             returncode = _run_revise(args, arrangement_path, review_path)
@@ -1690,6 +1704,18 @@ def main(argv: list[str] | None = None) -> int:
             if isinstance(managed_meta, dict):
                 args.timeline_slug = managed_meta.get(METADATA_KEY_TIMELINE_SLUG)
                 args.timeline_event_stream_id = managed_meta.get(METADATA_KEY_TIMELINE_EVENT_STREAM_ID)
+            # m3.5 actor provenance: when managed, determine who launched hype
+            # and set args.actor_via so child packs and in-process mutations
+            # can chain upstream provenance in actor.via.
+            if not hasattr(args, "actor_via") or args.actor_via is None:
+                from astrid.core.timeline.events.schema import TimelineActor as _HypeActor
+
+                _hype_actor_type = "agent" if task_env.is_in_task_run(project_context.project_slug) else "human"
+                args.actor_via = _HypeActor(
+                    type=_hype_actor_type,
+                    id=f"hype:{project_context.project_slug}",
+                    display=f"hype ({_hype_actor_type})",
+                )
         keep_env = os.environ.get("HYPE_KEEP_DOWNLOADS", "").strip().lower() in {"1", "true", "yes"}
         keep_flag = bool(getattr(args, "keep_downloads", False))
         session_enabled = not (keep_flag or keep_env)

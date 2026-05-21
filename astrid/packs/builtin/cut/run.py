@@ -97,6 +97,12 @@ def build_parser() -> argparse.ArgumentParser:
     # added here -- it is reserved for executor UUID mode.
     parser.add_argument("--project", help="Project slug for managed canonical writes. When combined with --timeline-slug, timeline mutations emit events through the gateway.")
     parser.add_argument("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
+    parser.add_argument(
+        "--actor-via",
+        type=json.loads,
+        default=None,
+        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
+    )
     return parser
 
 def _is_managed_mode(args: argparse.Namespace) -> bool:
@@ -1090,12 +1096,19 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     return 0
 
 
-def _emit_cut_managed_events(args: argparse.Namespace, timeline: dict[str, Any]) -> int:
+def _emit_cut_managed_events(
+    args: argparse.Namespace, timeline: dict[str, Any],
+    *, actor_via: Any | None = None,
+) -> int:
     """Emit arrangement.replaced event through the pack write gateway.
 
     Called when cut runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written, preserving the
     append-then-materialize contract.
+
+    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
+    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
+    provenance on the emitted events.
     """
     import time as _time
 
@@ -1106,6 +1119,7 @@ def _emit_cut_managed_events(args: argparse.Namespace, timeline: dict[str, Any])
         type="system",
         id=f"builtin.cut:{hash(str(_time.time()))}",
         display="builtin.cut",
+        via=[actor_via] if actor_via is not None else None,
     )
     events = [
         {
@@ -1269,7 +1283,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # m3.5 managed mode: emit events through the gateway before writing
     # compatibility outputs.
     if managed:
-        _emit_cut_managed_events(args, timeline)
+        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
+
+        actor_via_raw = getattr(args, "actor_via", None)
+        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
+        _emit_cut_managed_events(args, timeline, actor_via=actor_via)
     save_timeline(timeline, timeline_path)
     save_registry(registry, assets_path)
     save_metadata(meta, metadata_path)

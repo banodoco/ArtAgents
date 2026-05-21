@@ -207,6 +207,7 @@ def _worker_append_events(
     claim_task_id: str,
     mutator,
     snapshot_payload: Any,
+    verified_user_id: str | None = None,
 ) -> int:
     """Append worker-generated timeline mutations through the local event gateway.
 
@@ -217,6 +218,10 @@ def _worker_append_events(
     Remote-only claims (no local project_slug, or no matching local timeline)
     raise ``RuntimeError`` as controlled failures — the actual Supabase
     write-back is deferred to m6.
+
+    When *verified_user_id* is provided (from the JWKS-verified user JWT),
+    it is chained as ``actor.via`` on the emitted events to preserve
+    initiator provenance.
 
     Returns:
         int: Event-stream version after appends (used as ``config_version``
@@ -244,10 +249,18 @@ def _worker_append_events(
 
     # Build the actor: system actor for the worker, with upstream provenance
     # in actor.via (the user/agent who initiated the task).
+    actor_via = None
+    if verified_user_id:
+        actor_via = TimelineActor(
+            type="human",
+            id=verified_user_id,
+            display=verified_user_id,
+        )
     actor = TimelineActor(
         type="system",
         id=f"banodoco_worker:claim:{claim_task_id}",
         display=f"banodoco-worker:{worker_id}",
+        via=[actor_via] if actor_via is not None else None,
     )
 
     # Apply the mutator to the snapshot to produce the new config.
@@ -421,6 +434,7 @@ class BanodocoWorker:
                 claim_task_id=claim.task_id,
                 mutator=_wrapped_mutator,
                 snapshot_payload=snapshot_payload,
+                verified_user_id=verified.user_id,
             )
         except RuntimeError as exc:
             self._fail(
