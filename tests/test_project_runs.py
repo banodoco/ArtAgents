@@ -268,3 +268,147 @@ def _clear_thread_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ASTRID_TASK_ITERATION",
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+# ── m3.5 T18: Managed hype preparation tests ────────────────────────────
+
+
+def test_hype_prepare_project_main_writes_ulid_to_timeline_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prove _prepare_project_main writes a valid ULID to run.timeline_id."""
+    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.threads.ids import is_ulid
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("make a short thing", encoding="utf-8")
+
+    context, effective_argv = _prepare_project_main(
+        ["--project", "demo", "--brief", str(brief), "--brief-slug", "brief-a"]
+    )
+
+    assert context is not None
+    timeline_id = context.record.get("timeline_id")
+    assert timeline_id is not None, "run.timeline_id must be set for managed runs"
+    assert is_ulid(timeline_id), (
+        f"run.timeline_id must be a valid ULID, got {timeline_id!r}"
+    )
+
+
+def test_hype_prepare_project_main_writes_slug_and_uuid_to_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prove _prepare_project_main writes timeline_slug and timeline_event_stream_id to run.metadata."""
+    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.core.project.run import (
+        METADATA_KEY_TIMELINE_SLUG,
+        METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
+        METADATA_KEY_TIMELINE_BINDING_MODE,
+    )
+    import uuid as _uuid
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("make a short thing", encoding="utf-8")
+
+    context, effective_argv = _prepare_project_main(
+        ["--project", "demo", "--brief", str(brief), "--brief-slug", "brief-a"]
+    )
+
+    assert context is not None
+    meta = context.record.get("metadata", {})
+    assert isinstance(meta, dict)
+
+    # timeline_slug must be present and match the expected slug
+    slug = meta.get(METADATA_KEY_TIMELINE_SLUG)
+    assert slug == "brief-a", (
+        f"metadata.timeline_slug must be 'brief-a', got {slug!r}"
+    )
+
+    # timeline_event_stream_id must be a valid UUID
+    esid = meta.get(METADATA_KEY_TIMELINE_EVENT_STREAM_ID)
+    assert isinstance(esid, str) and len(esid) > 0, (
+        f"metadata.timeline_event_stream_id must be non-empty, got {esid!r}"
+    )
+    try:
+        _uuid.UUID(esid)
+    except ValueError:
+        pytest.fail(f"metadata.timeline_event_stream_id must be a valid UUID, got {esid!r}")
+
+    # timeline_binding_mode must be 'managed'
+    mode = meta.get(METADATA_KEY_TIMELINE_BINDING_MODE)
+    assert mode == "managed", (
+        f"metadata.timeline_binding_mode must be 'managed', got {mode!r}"
+    )
+
+
+def test_hype_prepare_project_main_returns_none_for_file_only_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prove _prepare_project_main returns (None, argv) when --project is absent."""
+    from astrid.packs.builtin.hype.run import _prepare_project_main
+
+    argv = ["--brief", str(tmp_path / "brief.txt"), "--target-duration", "1"]
+    context, effective_argv = _prepare_project_main(argv)
+
+    assert context is None, "file-only runs must not bind a managed timeline"
+    assert effective_argv == argv, "file-only argv must be returned unchanged"
+
+
+def test_hype_prepare_project_main_derives_slug_from_brief_stem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prove _prepare_project_main derives slug from brief stem when not generic."""
+    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.core.project.run import METADATA_KEY_TIMELINE_SLUG
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    brief = tmp_path / "my-custom-brief.md"
+    brief.write_text("make something cool", encoding="utf-8")
+
+    context, effective_argv = _prepare_project_main(
+        ["--project", "demo", "--brief", str(brief)]
+    )
+
+    assert context is not None
+    meta = context.record.get("metadata", {})
+    slug = meta.get(METADATA_KEY_TIMELINE_SLUG)
+    assert slug == "my-custom-brief", (
+        f"slug should be derived from brief stem, got {slug!r}"
+    )
+
+
+def test_hype_prepare_project_main_falls_back_to_project_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Prove _prepare_project_main falls back to project slug when brief has generic name."""
+    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.core.project.run import METADATA_KEY_TIMELINE_SLUG
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("my-proj")
+    brief = tmp_path / "brief.txt"
+    brief.write_text("make it", encoding="utf-8")
+
+    context, effective_argv = _prepare_project_main(
+        ["--project", "my-proj", "--brief", str(brief)]
+    )
+
+    assert context is not None
+    meta = context.record.get("metadata", {})
+    slug = meta.get(METADATA_KEY_TIMELINE_SLUG)
+    assert slug == "my-proj", (
+        f"slug should fall back to project slug for generic brief names, got {slug!r}"
+    )
