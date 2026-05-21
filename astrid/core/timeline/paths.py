@@ -76,6 +76,13 @@ def display_path(
     return timeline_dir(project_slug, ulid, root=root) / "display.json"
 
 
+def checkpoint_path(
+    project_slug: str, ulid: str, *, root: str | Path | None = None
+) -> Path:
+    """Return the path to ``assembly.checkpoint.json`` inside the timeline home."""
+    return timeline_dir(project_slug, ulid, root=root) / "assembly.checkpoint.json"
+
+
 def find_timeline_by_slug(
     project_slug: str, slug: str, *, root: str | Path | None = None
 ) -> tuple[str, Path] | None:
@@ -200,3 +207,77 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
     if needs_write:
         projection.display.write(display_file)
     return projected
+
+
+def load_assembly_json_with_repair(
+    timeline_home: str | Path,
+) -> dict[str, object] | None:
+    """Return the assembly dict (wrapper shape) with repair from the event log.
+
+    When an event log (``assembly.jsonl``) and identity sidecar exist,
+    resolve the backend, read events, call ``regenerate_projection()``,
+    and return the projected assembly wrapper dict.  When no event log
+    exists, fall back to reading ``assembly.json`` directly.
+
+    This is the assembly analogue of ``load_display_json_with_repair()``.
+    It closes the debt item ``timeline-assembly-repair``: stale or missing
+    ``assembly.json`` is regenerated from the canonical event stream on
+    every Astrid-owned read/export entry point.
+    """
+    from .eventlog import LocalFsBackend
+    from .model import Assembly, TimelineValidationError
+    from .projection import regenerate_projection
+
+    timeline_dir_path = Path(timeline_home)
+    assembly_file = timeline_dir_path / "assembly.json"
+    events_file = timeline_dir_path / "assembly.jsonl"
+    identity_file = timeline_dir_path / "assembly.identity.json"
+
+    # No event log → fall back to direct file read.
+    if not events_file.is_file():
+        if not assembly_file.is_file():
+            return None
+        try:
+            raw = read_json(assembly_file)
+        except (ProjectJsonError, FileNotFoundError):
+            return None
+        return raw if isinstance(raw, dict) else None
+
+    # Event log exists but no identity → can't resolve backend.
+    if not identity_file.is_file():
+        return None
+
+    identity = read_json(identity_file)
+    if not isinstance(identity, dict):
+        return None
+    timeline_id = identity.get("timeline_id")
+    if not isinstance(timeline_id, str):
+        return None
+
+    # Resolve backend and regenerate projection from events.
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_dir_path)
+    try:
+        inner_assembly = regenerate_projection(
+            timeline_id, backend, timeline_home=timeline_dir_path,
+        )
+    except Exception:
+        # If projection fails, fall back to reading assembly.json directly.
+        if assembly_file.is_file():
+            try:
+                raw = read_json(assembly_file)
+            except (ProjectJsonError, FileNotFoundError):
+                return None
+            return raw if isinstance(raw, dict) else None
+        return None
+
+    # Build the wrapper shape expected by callers.
+    from .model import TIMELINE_SCHEMA_VERSION
+
+    try:
+        wrapper = Assembly(
+            schema_version=TIMELINE_SCHEMA_VERSION,
+            assembly=inner_assembly,
+        )
+    except TimelineValidationError:
+        return None
+    return wrapper.to_json_obj()

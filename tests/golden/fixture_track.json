@@ -1,0 +1,101 @@
+{
+  "description": "Golden fixture: track.* event family (added, removed)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE13",
+      "timeline_id": "cfdf5083-ac9e-430a-a72f-b8c2cd0a05c6",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE17",
+      "kind": "track.added",
+      "payload": {
+        "track_id": "track-1",
+        "kind": "visual",
+        "label": "Main"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE14",
+      "timeline_id": "cfdf5083-ac9e-430a-a72f-b8c2cd0a05c6",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE18",
+      "kind": "track.added",
+      "payload": {
+        "track_id": "track-2",
+        "kind": "audio",
+        "label": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE15",
+      "timeline_id": "cfdf5083-ac9e-430a-a72f-b8c2cd0a05c6",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE19",
+      "kind": "track.added",
+      "payload": {
+        "track_id": "track-3",
+        "kind": "visual",
+        "label": "Overlay"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE16",
+      "timeline_id": "cfdf5083-ac9e-430a-a72f-b8c2cd0a05c6",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE1A",
+      "kind": "track.removed",
+      "payload": {
+        "track_id": "track-2"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "tracks": [
+      {
+        "id": "track-1",
+        "kind": "visual",
+        "label": "Main"
+      },
+      {
+        "id": "track-3",
+        "kind": "visual",
+        "label": "Overlay"
+      }
+    ]
+  }
+}

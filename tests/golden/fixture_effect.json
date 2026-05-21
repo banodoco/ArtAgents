@@ -1,0 +1,134 @@
+{
+  "description": "Golden fixture: effect.* event family (added, removed, tuned)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KNQ",
+      "timeline_id": "978b09b9-a3b5-4965-8f78-64432e86357d",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KNW",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-x",
+        "kind": "visual",
+        "asset_id": "asset-x",
+        "position": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KNR",
+      "timeline_id": "978b09b9-a3b5-4965-8f78-64432e86357d",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KNX",
+      "kind": "effect.added",
+      "payload": {
+        "clip_id": "clip-x",
+        "effect_id": "blur",
+        "params": {
+          "radius": 5
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KNS",
+      "timeline_id": "978b09b9-a3b5-4965-8f78-64432e86357d",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KNY",
+      "kind": "effect.added",
+      "payload": {
+        "clip_id": "clip-x",
+        "effect_id": "brightness",
+        "params": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KNT",
+      "timeline_id": "978b09b9-a3b5-4965-8f78-64432e86357d",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KNZ",
+      "kind": "effect.tuned",
+      "payload": {
+        "clip_id": "clip-x",
+        "effect_id": "blur",
+        "param": "radius",
+        "value": 10
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KNV",
+      "timeline_id": "978b09b9-a3b5-4965-8f78-64432e86357d",
+      "ts": "2026-01-01T00:04:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KP0",
+      "kind": "effect.removed",
+      "payload": {
+        "clip_id": "clip-x",
+        "effect_id": "brightness"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "clips": [
+      {
+        "id": "clip-x",
+        "kind": "visual",
+        "asset_id": "asset-x",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": "",
+        "effects": [
+          {
+            "effect_id": "blur",
+            "params": {
+              "radius": 10
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

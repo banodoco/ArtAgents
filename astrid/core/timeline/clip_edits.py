@@ -105,7 +105,7 @@ def add_clip(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise ClipEditError("asset_id must be a non-empty string")
@@ -128,7 +128,7 @@ def add_clip(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -148,7 +148,7 @@ def remove_clip(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.removed`` event for *clip_id*."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_id, str) or not clip_id.strip():
         raise ClipEditError("clip_id must be a non-empty string")
@@ -162,7 +162,7 @@ def remove_clip(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -183,7 +183,7 @@ def move_clip(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.moved`` event for *clip_id* to *position*."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_id, str) or not clip_id.strip():
         raise ClipEditError("clip_id must be a non-empty string")
@@ -201,7 +201,7 @@ def move_clip(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -223,7 +223,7 @@ def retime_clip(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.retimed`` event for *clip_id*."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_id, str) or not clip_id.strip():
         raise ClipEditError("clip_id must be a non-empty string")
@@ -245,7 +245,7 @@ def retime_clip(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -266,7 +266,7 @@ def swap_clips(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.swapped`` event for two clips."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_a_id, str) or not clip_a_id.strip():
         raise ClipEditError("clip_a_id must be a non-empty string")
@@ -284,7 +284,7 @@ def swap_clips(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -305,7 +305,7 @@ def replace_clip(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.replaced`` event for *clip_id*."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_id, str) or not clip_id.strip():
         raise ClipEditError("clip_id must be a non-empty string")
@@ -321,7 +321,7 @@ def replace_clip(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -342,7 +342,7 @@ def set_clip_text(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.text_set`` event for *clip_id*."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_id, str) or not clip_id.strip():
         raise ClipEditError("clip_id must be a non-empty string")
@@ -358,7 +358,7 @@ def set_clip_text(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event
 
 
@@ -379,7 +379,7 @@ def annotate_clip(
     root: str | Path | None = None,
 ) -> TimelineEvent:
     """Append a ``clip.annotated`` event for *clip_id*."""
-    timeline_id, tdir, backend = _resolve_backend(project_slug, slug, root=root)
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
 
     if not isinstance(clip_id, str) or not clip_id.strip():
         raise ClipEditError("clip_id must be a non-empty string")
@@ -395,5 +395,5 @@ def annotate_clip(
         expected_version=expected_version,
         txn_id=txn_id,
     )
-    _materialize(tdir, event)
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
     return event

@@ -1,8 +1,8 @@
-"""End-to-end tests for managed write paths — m3.5 T12.
+"""End-to-end tests for managed write paths — m4 T9 update.
 
 Proves:
 1. Managed flows emit correct event kinds and order
-   (arrangement.replaced, timeline.imported where applicable).
+   (arrangement.replaced; timeline.imported only for true-legacy timelines).
 2. Compatibility outputs remain byte-equivalent after managed writes.
 3. verify_chain() passes for pack-produced timeline fixtures.
 4. Actor attribution including actor.via chaining.
@@ -92,8 +92,9 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
         events = backend.read_events(limit=100)
         return [e.kind for e in events]
 
-    def test_first_managed_write_emits_imported_then_arrangement_replaced(self):
-        """First managed write emits timeline.imported before arrangement.replaced."""
+    def test_first_managed_write_no_bootstrap_for_created_timeline(self):
+        """First managed write on a created timeline emits arrangement.replaced
+        directly — NO timeline.imported bootstrap."""
         ulid, tdir = self._find_timeline_ulid_and_dir()
 
         result = pack_write_gateway(
@@ -105,19 +106,18 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
             actor=TimelineActor(type="system", id="test:evkinds", display="Event Kinds Test"),
         )
 
-        self.assertTrue(result.bootstrap_emitted)
+        self.assertFalse(result.bootstrap_emitted,
+                         "created timeline must NOT bootstrap")
         kinds = self._read_event_kinds(tdir)
-        self.assertEqual(kinds[0], "timeline.imported",
-                         f"First event should be timeline.imported, got {kinds}")
-        self.assertEqual(kinds[1], "arrangement.replaced",
-                         f"Second event should be arrangement.replaced, got {kinds}")
+        self.assertEqual(kinds[0], "arrangement.replaced",
+                         f"First event should be arrangement.replaced, got {kinds}")
 
-    def test_subsequent_managed_write_emits_only_arrangement_replaced(self):
-        """Subsequent write skips bootstrap, emits only arrangement.replaced."""
+    def test_subsequent_managed_write_no_bootstrap(self):
+        """Both first and second writes skip bootstrap for created timelines."""
         ulid, tdir = self._find_timeline_ulid_and_dir()
 
-        # First write
-        pack_write_gateway(
+        # First write — no bootstrap for created timeline.
+        result1 = pack_write_gateway(
             project_slug="evkinds-proj",
             timeline_slug="evkinds-tl",
             timeline_ulid=ulid,
@@ -125,8 +125,9 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
             events=[_arrangement_event([{"id": "first"}])],
             actor=TimelineActor(type="system", id="test:evkinds-1", display="Event Kinds Test 1"),
         )
+        self.assertFalse(result1.bootstrap_emitted)
 
-        # Second write
+        # Second write — also no bootstrap.
         result2 = pack_write_gateway(
             project_slug="evkinds-proj",
             timeline_slug="evkinds-tl",
@@ -459,8 +460,8 @@ class ManagedWritePackWriteResultTest(unittest.TestCase):
         self.assertIsNotNone(found)
         ulid, tdir = found
 
-        # First write (bootstrap).
-        pack_write_gateway(
+        # First write (no bootstrap for created timeline).
+        result1 = pack_write_gateway(
             project_slug="result-proj",
             timeline_slug="result-tl",
             timeline_ulid=ulid,
@@ -468,8 +469,10 @@ class ManagedWritePackWriteResultTest(unittest.TestCase):
             events=[_arrangement_event()],
             actor=TimelineActor(type="system", id="builtin.hype:editor_micro_fix", display="builtin.hype"),
         )
+        self.assertFalse(result1.bootstrap_emitted,
+                         "created timeline first write must NOT bootstrap")
 
-        # Second write (no bootstrap) — like hype's _apply_trim_deltas.
+        # Second write (still no bootstrap) — like hype's _apply_trim_deltas.
         result = pack_write_gateway(
             project_slug="result-proj",
             timeline_slug="result-tl",
@@ -483,7 +486,7 @@ class ManagedWritePackWriteResultTest(unittest.TestCase):
                          "Second write should not bootstrap")
         self.assertEqual(result.attempts, 1,
                          "Second write should append exactly 1 event")
-        self.assertGreater(result.new_version, 1,
+        self.assertGreater(result.new_version, result1.new_version,
                            "new_version should increment from previous write")
 
 
@@ -534,7 +537,8 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
         create_timeline("multi-proj", "multi-tl")
 
     def test_multiple_arrangement_replaced_events_in_order(self):
-        """Multiple arrangement.replaced events appended in order."""
+        """Multiple arrangement.replaced events appended in order (no bootstrap
+        for created timelines)."""
         from astrid.core.timeline.paths import find_timeline_by_slug
 
         found = find_timeline_by_slug("multi-proj", "multi-tl")
@@ -556,9 +560,10 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
             actor=TimelineActor(type="system", id="test:multi", display="Multi Test"),
         )
 
-        # Bootstrap + 3 domain = 4 total
-        self.assertEqual(result.attempts, 4)
-        self.assertEqual(result.new_version, 4)
+        # 3 domain events (no bootstrap for created timeline)
+        self.assertFalse(result.bootstrap_emitted)
+        self.assertEqual(result.attempts, 3)
+        self.assertEqual(result.new_version, 3)
 
         # Verify ordering from event stream.
         from astrid.core.timeline.paths import assembly_identity_path
@@ -574,11 +579,10 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
         all_events = backend.read_events(limit=10)
         kinds = [e.kind for e in all_events]
 
-        self.assertEqual(kinds[0], "timeline.imported")
+        self.assertEqual(kinds[0], "arrangement.replaced")
         self.assertEqual(kinds[1], "arrangement.replaced")
         self.assertEqual(kinds[2], "arrangement.replaced")
-        self.assertEqual(kinds[3], "arrangement.replaced")
-        self.assertEqual(len(kinds), 4)
+        self.assertEqual(len(kinds), 3)
 
 
 if __name__ == "__main__":

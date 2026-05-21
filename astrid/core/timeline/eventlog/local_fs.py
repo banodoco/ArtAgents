@@ -38,6 +38,57 @@ class LocalFsBackend:
     def backend_name(self) -> str:
         return "local_fs"
 
+    def bootstrap_legacy(
+        self,
+        *,
+        actor: TimelineActor,
+    ) -> tuple[str, dict[str, Any]]:
+        """Bootstrap a true-legacy timeline (no identity sidecar) into the
+        event-sourced model.
+
+        Synthesises a ``timeline.imported`` event from the compatibility
+        files on disk, writes the identity sidecar with provenance
+        ``"imported"``, and returns ``(timeline_id, identity_dict)``.
+
+        After this call the caller can resolve the backend normally and
+        append domain events.
+
+        Raises ``EventLogError`` when the compatibility files cannot be
+        read or the identity cannot be written.
+        """
+        self.timeline_home.mkdir(parents=True, exist_ok=True)
+        imported_event = self._build_imported_event(actor=actor, prev_hash=None)
+        identity = self._write_imported_identity(imported_event.timeline_id)
+
+        # Write the imported event into the event log.
+        created = not self.events_path.exists()
+        try:
+            fd = os.open(
+                self.events_path, os.O_CREAT | os.O_APPEND | os.O_RDWR, 0o644
+            )
+        except OSError as exc:
+            raise EventLogError(
+                f"failed to open {self.events_path}: {exc}"
+            ) from exc
+
+        try:
+            with os.fdopen(fd, "a+b", closefd=True) as handle:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+                try:
+                    self._append_line_locked(handle, imported_event)
+                    head = self._rebuild_head_locked()
+                    self._write_head_atomic(head)
+                finally:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        except OSError as exc:
+            raise EventLogError(
+                f"failed to write imported event to {self.events_path}: {exc}"
+            ) from exc
+
+        if created:
+            _fsync_dir(self.timeline_home)
+        return imported_event.timeline_id, identity
+
     def append_event(
         self,
         timeline_id: str,

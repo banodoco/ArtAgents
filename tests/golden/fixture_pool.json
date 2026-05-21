@@ -1,0 +1,135 @@
+{
+  "description": "Golden fixture: pool.* event family (asset_added, asset_removed, asset_scored)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KP1",
+      "timeline_id": "5d50bd9d-a553-46ba-b8fe-8247c2bc6fbe",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KP7",
+      "kind": "pool.asset_added",
+      "payload": {
+        "asset_id": "pool-asset-1"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KP2",
+      "timeline_id": "5d50bd9d-a553-46ba-b8fe-8247c2bc6fbe",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KP8",
+      "kind": "pool.asset_added",
+      "payload": {
+        "asset_id": "pool-asset-2"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KP3",
+      "timeline_id": "5d50bd9d-a553-46ba-b8fe-8247c2bc6fbe",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KP9",
+      "kind": "pool.asset_scored",
+      "payload": {
+        "asset_id": "pool-asset-1",
+        "score": 0.85
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KP4",
+      "timeline_id": "5d50bd9d-a553-46ba-b8fe-8247c2bc6fbe",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPA",
+      "kind": "pool.asset_scored",
+      "payload": {
+        "asset_id": "pool-asset-2",
+        "score": 0.42
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KP5",
+      "timeline_id": "5d50bd9d-a553-46ba-b8fe-8247c2bc6fbe",
+      "ts": "2026-01-01T00:04:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPB",
+      "kind": "pool.asset_added",
+      "payload": {
+        "asset_id": "pool-asset-3"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KP6",
+      "timeline_id": "5d50bd9d-a553-46ba-b8fe-8247c2bc6fbe",
+      "ts": "2026-01-01T00:05:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPC",
+      "kind": "pool.asset_removed",
+      "payload": {
+        "asset_id": "pool-asset-2"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "pool": {
+      "entries": [
+        {
+          "asset_id": "pool-asset-1",
+          "score": 0.85
+        },
+        {
+          "asset_id": "pool-asset-3",
+          "score": 0.0
+        }
+      ]
+    }
+  }
+}

@@ -584,8 +584,16 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
         seen_runs: set[str] = set()
         all_run_ids: list[str] = []
         for ts in timelines:
-            # Copy timeline container files
+            # Repair assembly.json from the event log before copying (ensures
+            # the exported tarball carries the current projected state).
             tdir = proj_root / "timelines" / ts.ulid
+            try:
+                from astrid.core.timeline.paths import load_assembly_json_with_repair
+                load_assembly_json_with_repair(tdir)
+            except Exception:
+                pass
+
+            # Copy timeline container files
             for name in ("assembly.json", "manifest.json", "display.json"):
                 src = tdir / name
                 if src.is_file():

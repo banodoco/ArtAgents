@@ -6,17 +6,30 @@ track_edits, audio_edits, pool_edits, arrangement_edits).
 
 Every public mutation function in the edit modules uses:
 
-* ``_resolve_backend`` — resolve (timeline_id, timeline_home, backend)
-* ``_materialize`` — synchronous compatibility materializer (m4 removal seam)
+* ``_resolve_or_bootstrap_backend`` — locate the timeline, then resolve or
+  bootstrap the event-log backend.  Handles three cases:
+  1. Identity exists with provenance ``"created"`` → resolve backend normally,
+     first domain event is bare (no ``timeline.imported``).
+  2. No identity, no ``assembly.jsonl``, compatibility files exist →
+     true-legacy bootstrap: emit ``timeline.imported`` via
+     ``LocalFsBackend.bootstrap_legacy()``, write identity with provenance
+     ``"imported"``, then resolve backend normally.
+  3. Identity missing but ``assembly.jsonl`` already exists → fail closed.
+* ``_materialize`` — post-append projection regenerator that calls
+  ``regenerate_projection()`` to rewrite ``assembly.json`` from the
+  canonical event stream.
 * ``_default_actor`` — sensible system actor for editing operations
 * ``TimelineEditError`` — shared exception base caught by the CLI handler
 
-Pack / worker write paths (m3.5) use:
+Pack / worker write paths use:
 
-* ``pack_write_gateway`` — centralized append-then-materialize gateway that
-  accepts a managed binding tuple, resolves the backend, handles first-write
-  bootstrap (``timeline.imported``), appends events, materializes compatibility
-  outputs, and returns a normalized ``PackWriteResult``.
+* ``pack_write_gateway`` — centralized append-then-regenerate gateway that
+  accepts a managed binding tuple, resolves the backend through the legacy
+  bootstrap seam (only true-legacy timelines with no identity sidecar get
+  ``timeline.imported``; created timelines with provenance ``"created"``
+  accept bare first domain events), appends events in a batch, regenerates
+  ``assembly.json`` once from the canonical event stream, and returns a
+  normalised ``PackWriteResult``.
 * ``PackWriteResult`` — dataclass carrying new_version, event_ids, attempts,
   backend_name, timeline_ulid, timeline_slug, timeline_event_stream_id,
   and timeline_home.
@@ -30,10 +43,14 @@ from typing import Any
 
 from astrid.core.project.jsonio import read_json
 
-from .assembly_helper import materialize_event
 from .eventlog import EventLogBackend, select_timeline_backend
+from .eventlog.local_fs import LocalFsBackend
 from .events.schema import TimelineActor, TimelineEvent
-from .paths import assembly_identity_path, find_timeline_by_slug
+from .paths import (
+    assembly_identity_path,
+    find_timeline_by_slug,
+)
+from .projection import regenerate_projection
 
 
 # ---------------------------------------------------------------------------
@@ -60,57 +77,152 @@ ClipEditError = TimelineEditError
 # ---------------------------------------------------------------------------
 
 
-def _resolve_backend(
+def _locate_timeline(
     project_slug: str,
     slug: str,
     *,
     root: str | Path | None = None,
-) -> tuple[str, Path, EventLogBackend]:
-    """Look up *slug* in *project_slug*, read the identity sidecar, and
-    return ``(timeline_id, timeline_home, backend)``.
+) -> tuple[str, Path]:
+    """Find the timeline ULID and home directory for *slug*.
 
-    Raises ``TimelineEditError`` when the timeline cannot be found or its
-    identity sidecar is missing/malformed.
+    Returns ``(timeline_ulid, timeline_home)``.
+
+    Raises ``TimelineEditError`` when the timeline cannot be found.
     """
     found = find_timeline_by_slug(project_slug, slug, root=root)
     if found is None:
         raise TimelineEditError(
             f"timeline '{slug}' not found in project '{project_slug}'"
         )
-    ulid, tdir = found
-
-    identity = read_json(assembly_identity_path(project_slug, ulid, root=root))
-    if not isinstance(identity, dict):
-        raise TimelineEditError("timeline identity sidecar is malformed")
-
-    timeline_id = identity.get("timeline_id")
-    if not isinstance(timeline_id, str) or not timeline_id:
-        raise TimelineEditError("timeline identity sidecar is missing timeline_id")
-
-    preferred_backend = identity.get("backend")
-    if preferred_backend is not None and not isinstance(preferred_backend, str):
-        raise TimelineEditError("timeline identity sidecar has malformed backend")
-
-    _stream, backend = select_timeline_backend(
-        timeline_id=timeline_id,
-        timeline_home=tdir,
-        preferred_backend=preferred_backend,
-    )
-    return timeline_id, tdir, backend
+    return found  # (timeline_ulid, timeline_home)
 
 
-def _materialize(tdir: Path, event: TimelineEvent) -> None:
-    """Synchronous compatibility materializer call — m4 removal seam.
+def _resolve_or_bootstrap_backend(
+    project_slug: str,
+    slug: str,
+    *,
+    root: str | Path | None = None,
+    actor: TimelineActor | None = None,
+) -> tuple[str, Path, EventLogBackend, bool]:
+    """Resolve the event-log backend, bootstrapping true-legacy timelines.
 
-    Keeps ``assembly.json`` in sync with the event stream so that
-    readers like ``crud.show_timeline()`` see the latest state
-    before projection becomes authoritative in m4.
+    Three cases
+    -----------
+    1. **Identity exists with provenance ``"created"``** —
+       resolve the backend normally.  The first domain event is bare
+       (no ``timeline.imported``).
+    2. **No identity, no ``assembly.jsonl``, compatibility files exist** —
+       true-legacy bootstrap.  Emit ``timeline.imported`` via
+       ``LocalFsBackend.bootstrap_legacy()``, write identity with
+       provenance ``"imported"``, then resolve.
+    3. **Identity missing but ``assembly.jsonl`` already exists** —
+       fail closed with a clear error.
 
-    A crash between ``append_event`` and this call leaves the event log
-    ahead of ``assembly.json``.  Accept this window for m2+m3; m4 projection
-    will close it.
+    Returns ``(timeline_id, timeline_home, backend, bootstrap_performed)``.
+
+    Raises ``TimelineEditError`` on any failure.
     """
-    materialize_event(tdir, event)
+    ulid, tdir = _locate_timeline(project_slug, slug, root=root)
+    identity_path = assembly_identity_path(project_slug, ulid, root=root)
+    jsonl_path = tdir / "assembly.jsonl"
+
+    identity = None
+    try:
+        identity = read_json(identity_path)
+    except FileNotFoundError:
+        identity = None
+    except Exception:
+        identity = None
+
+    # --- Case 1: Identity exists → resolve normally ---
+    if isinstance(identity, dict):
+        timeline_id = identity.get("timeline_id")
+        if not isinstance(timeline_id, str) or not timeline_id:
+            raise TimelineEditError(
+                "timeline identity sidecar is missing timeline_id"
+            )
+        preferred_backend = identity.get("backend")
+        if preferred_backend is not None and not isinstance(preferred_backend, str):
+            raise TimelineEditError(
+                "timeline identity sidecar has malformed backend"
+            )
+        _stream, backend = select_timeline_backend(
+            timeline_id=timeline_id,
+            timeline_home=tdir,
+            preferred_backend=preferred_backend,
+        )
+        return timeline_id, tdir, backend, False
+
+    # --- Case 3: No identity but assembly.jsonl already exists → fail closed ---
+    if jsonl_path.is_file():
+        raise TimelineEditError(
+            f"timeline '{slug}' has an event log ({jsonl_path.name}) "
+            f"but no identity sidecar.  This timeline may be corrupted "
+            f"or was partially migrated.  Restore the identity sidecar "
+            f"or delete the event log and retry."
+        )
+
+    # --- Case 2: No identity, no assembly.jsonl, compatibility files
+    #     should exist → true-legacy bootstrap ---
+    if actor is None:
+        actor = _default_actor("bootstrap_legacy")
+
+    # Construct a LocalFsBackend for the bootstrap.
+    # We don't have a timeline_id yet, so use a temporary one.
+    backend = LocalFsBackend(timeline_id="", timeline_home=tdir)
+    new_timeline_id, _identity = backend.bootstrap_legacy(actor=actor)
+
+    # Now resolve the backend with the newly written identity.
+    timeline_id, tdir_resolved, backend_resolved, _ = _resolve_or_bootstrap_backend(
+        project_slug, slug, root=root, actor=actor,
+    )
+    return timeline_id, tdir_resolved, backend_resolved, True
+
+
+def _resolve_backend(
+    project_slug: str,
+    slug: str,
+    *,
+    root: str | Path | None = None,
+) -> tuple[str, Path, EventLogBackend, bool]:
+    """Look up *slug* in *project_slug*, read the identity sidecar, and
+    return ``(timeline_id, timeline_home, backend, bootstrap_performed)``.
+
+    Kept for backward compatibility with existing edit modules that call
+    ``_resolve_backend`` directly.  Delegates to
+    ``_resolve_or_bootstrap_backend``.
+
+    Raises ``TimelineEditError`` when the timeline cannot be found or its
+    identity sidecar is missing/malformed.
+    """
+    return _resolve_or_bootstrap_backend(project_slug, slug, root=root)
+
+
+def _materialize(
+    tdir: Path,
+    event: TimelineEvent,
+    *,
+    timeline_id: str | None = None,
+    backend: EventLogBackend | None = None,
+) -> None:
+    """Synchronous projection regenerator — m4 authority model.
+
+    Regenerates ``assembly.json`` from the canonical event stream via
+    ``regenerate_projection()``.  This is the single shared post-append
+    materialization helper used by all edit modules and
+    ``pack_write_gateway()``.
+
+    When *timeline_id* and *backend* are provided, the full stream is
+    replayed and ``assembly.json`` is atomically rewritten.  When they
+    are ``None`` (backward-compatible callers), the call is a no-op:
+    callers that haven't been updated yet will get projection repair
+    from read-side entry points instead.
+
+    Post-m4 there is no per-event ``materialize_event()`` delegation —
+    the projector owns the authoritative applicator logic.
+    """
+    if timeline_id is not None and backend is not None:
+        regenerate_projection(timeline_id, backend, timeline_home=tdir)
 
 
 def _default_actor(fn_name: str) -> TimelineActor:
@@ -183,11 +295,12 @@ def pack_write_gateway(
     """Centralized append-then-materialize gateway for pack / worker writes.
 
     Accepts the **managed binding tuple** produced by
-    ``bind_managed_timeline()``, resolves the event-log backend, constructs
-    an actor with optional ``actor.via`` chaining, handles first-write
-    bootstrap (``timeline.imported`` before the first domain mutation when
-    the stream is empty), appends every event, materializes compatibility
-    outputs synchronously, and returns a normalised ``PackWriteResult``.
+    ``bind_managed_timeline()``, resolves the event-log backend through
+    the legacy bootstrap seam (only true-legacy timelines with no identity
+    sidecar get ``timeline.imported``; created timelines with provenance
+    ``"created"`` accept bare first domain events), appends every event,
+    materializes compatibility outputs synchronously, and returns a
+    normalised ``PackWriteResult``.
 
     Parameters
     ----------
@@ -258,42 +371,18 @@ def pack_write_gateway(
             via=existing_via + [actor_via],
         )
 
-    # 2. Resolve backend.
-    resolved_timeline_id, timeline_home, backend = _resolve_backend(
-        project_slug, timeline_slug, root=root
-    )
-    # Use the backend-resolved timeline_id for all append operations.
+    # 2. Resolve backend through the legacy bootstrap seam.
+    #    Only true-legacy timelines (no identity sidecar, compatibility
+    #    files present) get timeline.imported bootstrap.  Created timelines
+    #    with provenance "created" accept bare first domain events.
+    resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
+        _resolve_or_bootstrap_backend(
+            project_slug, timeline_slug, root=root, actor=actor,
+        )
     effective_stream_id = resolved_timeline_id
 
-    # 3. First-write bootstrap: emit timeline.imported when the stream is empty.
-    bootstrap_emitted = False
+    # 4. Append domain events (batch — no per-event materialization).
     event_ids: list[str] = []
-    head = backend.head()
-    if head.event_count == 0:
-        # Build a snapshot from the identity sidecar for the imported event.
-        identity_path = assembly_identity_path(project_slug, effective_ulid, root=root)
-        identity = read_json(identity_path)
-        snapshot: dict[str, Any] = {
-            "timeline_ulid": effective_ulid,
-            "slug": timeline_slug,
-        }
-        if isinstance(identity, dict):
-            for key in ("display", "schema_version", "provenance", "created_at"):
-                if key in identity:
-                    snapshot[key] = identity[key]
-
-        imported_event = backend.append_event(
-            timeline_id=effective_stream_id,
-            kind="timeline.imported",
-            payload={"snapshot": snapshot, "source": "legacy_local"},
-            actor=actor,
-        )
-        # timeline.imported is a system bootstrap event — it does not mutate
-        # assembly.json, so skip synchronous materialization.
-        event_ids.append(imported_event.event_id)
-        bootstrap_emitted = True
-
-    # 4. Append domain events.
     for event_spec in events:
         kind = event_spec["kind"]
         payload = event_spec.get("payload", {})
@@ -303,10 +392,12 @@ def pack_write_gateway(
             payload=payload,
             actor=actor,
         )
-        _materialize(timeline_home, event)
         event_ids.append(event.event_id)
 
-    # 5. Read final head for version.
+    # 5. Regenerate assembly.json once from the canonical event stream.
+    regenerate_projection(effective_stream_id, backend, timeline_home=timeline_home)
+
+    # 6. Read final head for version.
     final_head = backend.head()
 
     return PackWriteResult(

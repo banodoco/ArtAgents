@@ -228,7 +228,7 @@ class TestAddClip:
         monkeypatch.setattr("astrid.core.timeline._edit_helpers.read_json",
                             lambda p: identity)
         monkeypatch.setattr("astrid.core.timeline.clip_edits._materialize",
-                            lambda tdir, event: None)
+                            lambda tdir, event, **kwargs: None)
 
         add_clip(
             "demo", "primary",
@@ -523,44 +523,54 @@ class TestAssemblyShapeEdgeCases:
         assembly = _read_assembly_json(tdir)
         assert len(assembly["assembly"]["clips"]) == 2
 
-    def test_unrelated_assembly_content_preserved(self, demo_timeline: dict) -> None:
-        """Unrelated keys in Assembly.assembly survive clip operations."""
+    def test_assembly_regenerated_from_event_stream(self, demo_timeline: dict) -> None:
+        """Under m4 regeneration, assembly.json is fully regenerated from the
+        canonical event stream on every edit.  Manual tampering with
+        assembly.json between edits is overwritten."""
         ulid = demo_timeline["ulid"]
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
 
-        # Already has empty assembly from create_timeline.
-        # Manually inject a key alongside the 'clips' key that clip_edits will create.
-        # First add a clip to initialise 'clips' key
+        # Add a clip
         add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
 
-        # Now manually inject an unrelated key
+        # Manually inject an unrelated key into assembly.json
         assembly = Assembly.from_json(tdir / "assembly.json")
         new_assembly_dict = dict(assembly.assembly)
         new_assembly_dict["other_key"] = "preserved_value"
         new_assembly = Assembly(schema_version=1, assembly=new_assembly_dict)
         new_assembly.write(tdir / "assembly.json")
 
-        # Remove the clip we just added, which changes the clips key
-        remove_clip("demo", "primary", clip_id="v1", actor=_actor(), root=demo_timeline["root"])
+        # Now add another clip — assembly.json is regenerated from the event stream,
+        # so the manually injected key is overwritten.
+        add_clip("demo", "primary", kind="audio", asset_id="a1", actor=_actor(), root=demo_timeline["root"])
 
         assembly_after = _read_assembly_json(tdir)
-        assert assembly_after["assembly"]["other_key"] == "preserved_value"
-        assert len(assembly_after["assembly"]["clips"]) == 0
+        # The manually injected key is NOT preserved because assembly.json is
+        # fully regenerated from the canonical event stream.
+        assert "other_key" not in assembly_after["assembly"]
+        assert len(assembly_after["assembly"]["clips"]) == 2
 
-    def test_incompatible_nonempty_assembly_without_clips_raises(
+    def test_assembly_regenerated_even_from_corrupted_file(
         self, demo_timeline: dict
     ) -> None:
-        """Case (c): non-empty assembly without 'clips' → AssemblyMutationError."""
+        """A corrupted assembly.json does not prevent edits — regeneration
+        rebuilds from the event stream."""
         ulid = demo_timeline["ulid"]
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
 
         # Replace assembly.json with incompatible shape
-        assembly = Assembly.from_json(tdir / "assembly.json")
         bad_assembly = Assembly(schema_version=1, assembly={"some_other_key": "value"})
         bad_assembly.write(tdir / "assembly.json")
 
-        with pytest.raises(AssemblyMutationError, match="no 'clips' key"):
-            add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
+        # Under m4, add_clip regenerates assembly.json from the event stream
+        # before applying the new event.  Since the event stream is empty
+        # (no clips yet), the assembly starts empty and the clip is added.
+        event = add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
+        assert event.kind == "clip.added"
+
+        assembly_after = _read_assembly_json(tdir)
+        assert "clips" in assembly_after["assembly"]
+        assert len(assembly_after["assembly"]["clips"]) == 1
 
 
 # ── Supabase-selected paths ─────────────────────────────────────────────────

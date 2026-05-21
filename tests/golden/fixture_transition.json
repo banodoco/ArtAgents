@@ -1,0 +1,116 @@
+{
+  "description": "Golden fixture: transition.* event family (set, removed)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE1B",
+      "timeline_id": "af8c46dc-14c7-4483-b6a1-00d825914954",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE1F",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-a",
+        "kind": "visual",
+        "asset_id": "asset-1",
+        "position": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE1C",
+      "timeline_id": "af8c46dc-14c7-4483-b6a1-00d825914954",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE1G",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-b",
+        "kind": "visual",
+        "asset_id": "asset-2",
+        "position": {
+          "mode": "after",
+          "ref_clip_id": "clip-a"
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE1D",
+      "timeline_id": "af8c46dc-14c7-4483-b6a1-00d825914954",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE1H",
+      "kind": "transition.set",
+      "payload": {
+        "left_clip_id": "clip-a",
+        "right_clip_id": "clip-b",
+        "kind": "crossfade",
+        "duration_seconds": 1.5
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ4QP4KEAE73ZA6QE1E",
+      "timeline_id": "af8c46dc-14c7-4483-b6a1-00d825914954",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ4QP4KEAE73ZA6QE1J",
+      "kind": "transition.removed",
+      "payload": {
+        "left_clip_id": "clip-a",
+        "right_clip_id": "clip-b"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "clips": [
+      {
+        "id": "clip-a",
+        "kind": "visual",
+        "asset_id": "asset-1",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": ""
+      },
+      {
+        "id": "clip-b",
+        "kind": "visual",
+        "asset_id": "asset-2",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": ""
+      }
+    ]
+  }
+}

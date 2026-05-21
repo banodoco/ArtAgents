@@ -28,6 +28,7 @@ from .paths import (
     assembly_identity_path,
     display_path,
     find_timeline_by_slug,
+    load_assembly_json_with_repair,
     load_display_json_with_repair,
     timeline_dir,
     timelines_dir,
@@ -206,21 +207,21 @@ def show_timeline(
 ) -> dict[str, Any] | None:
     """Return the full timeline record (assembly + manifest + display).
 
-    .. note::
-
-        ``assembly.json`` is maintained by the **compatibility materializer**
-        that runs after each clip event append (see ``assembly_helper.py``).
-        In m4 this file will become a projection-rebuild target and the
-        synchronous materializer will be removed.  Until then, direct reads
-        like this one are the authoritative source for assembly state.
+    ``assembly.json`` is now a derived projection regenerated from the
+    canonical event stream via ``load_assembly_json_with_repair()``.
+    If an event log exists, the assembly is rebuilt from events; if not,
+    the on-disk ``assembly.json`` is read directly (legacy fallback).
     """
     found = find_timeline_by_slug(project_slug, slug, root=root)
     if found is None:
         return None
     ulid, tdir = found
-    # assembly.json is maintained by the compatibility materializer;
-    # it will become a projection-rebuild target in m4.
-    assembly = Assembly.from_json(tdir / "assembly.json")
+    # Load assembly.json with repair — regenerates from event log when
+    # available, falls back to direct file read for legacy timelines.
+    raw_assembly = load_assembly_json_with_repair(tdir)
+    if raw_assembly is None:
+        return None
+    assembly = Assembly.from_dict(raw_assembly)
     manifest = Manifest.from_json(tdir / "manifest.json")
     raw_display = load_display_json_with_repair(tdir)
     if raw_display is None:
