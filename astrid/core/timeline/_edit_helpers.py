@@ -29,7 +29,8 @@ Pack / worker write paths use:
   ``timeline.imported``; created timelines with provenance ``"created"``
   accept bare first domain events), appends events in a batch, regenerates
   ``assembly.json`` once from the canonical event stream, and returns a
-  normalised ``PackWriteResult``.
+  normalised ``PackWriteResult``. Batch-level CAS, soft-lock enforcement,
+  and explicit transaction orchestration are intentionally deferred in m5.
 * ``PackWriteResult`` — dataclass carrying new_version, event_ids, attempts,
   backend_name, timeline_ulid, timeline_slug, timeline_event_stream_id,
   and timeline_home.
@@ -301,6 +302,13 @@ def pack_write_gateway(
     ``"created"`` accept bare first domain events), appends every event,
     materializes compatibility outputs synchronously, and returns a
     normalised ``PackWriteResult``.
+
+    Scope note
+    ----------
+    This helper remains a simple append loop in m5. It does not yet provide
+    a pack-level ``expected_version`` / CAS boundary across the whole batch,
+    soft-lock checks, or explicit transaction APIs; those require semantics
+    beyond the per-event eventlog contract and are intentionally deferred.
 
     Parameters
     ----------

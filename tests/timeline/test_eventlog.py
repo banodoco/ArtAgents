@@ -9,7 +9,7 @@ import pytest
 
 from astrid.core.timeline.crud import create_timeline, rename_timeline, show_timeline
 from astrid.core.timeline.eventlog import LocalFsBackend
-from astrid.core.timeline.eventlog.types import EventLogError
+from astrid.core.timeline.eventlog.types import EventLogError, EventLogStaleVersionError
 from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.model import Display
 from astrid.core.timeline.paths import (
@@ -207,6 +207,48 @@ def test_local_fs_backend_rejects_append_after_deleted(project_tree: Path) -> No
             {"old_slug": "primary", "new_slug": "after"},
             actor=TimelineActor(type="agent", id="codex:test"),
         )
+
+
+def test_local_fs_backend_rejects_stale_expected_version_without_mutating_files(
+    project_tree: Path,
+) -> None:
+    result = create_timeline("demo", "primary", root=project_tree)
+    ulid = result["ulid"]
+    identity = json.loads(
+        assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+    )
+    home = timeline_dir("demo", ulid, root=project_tree)
+    backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=home)
+    backend.append_event(
+        identity["timeline_id"],
+        "timeline.renamed",
+        {"old_slug": "primary", "new_slug": "primary-v2"},
+        actor=TimelineActor(type="agent", id="codex:test"),
+    )
+
+    before_log = (home / "assembly.jsonl").read_text(encoding="utf-8")
+    before_head = assembly_head_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+
+    with pytest.raises(EventLogStaleVersionError) as excinfo:
+        backend.append_event(
+            identity["timeline_id"],
+            "timeline.renamed",
+            {"old_slug": "primary-v2", "new_slug": "primary-v3"},
+            actor=TimelineActor(type="agent", id="codex:test"),
+            expected_version=0,
+        )
+
+    conflict = excinfo.value.conflict
+    assert conflict.timeline_id == identity["timeline_id"]
+    assert conflict.expected_version == 0
+    assert conflict.current_version == 1
+    assert conflict.last_event_kind == "timeline.renamed"
+    assert conflict.last_event_id is not None
+    assert conflict.last_event_summary is not None
+
+    assert (home / "assembly.jsonl").read_text(encoding="utf-8") == before_log
+    assert assembly_head_path("demo", ulid, root=project_tree).read_text(encoding="utf-8") == before_head
+    assert backend.head().version == 1
 
 
 def _append_in_process(timeline_id: str, home: str, index: int) -> None:

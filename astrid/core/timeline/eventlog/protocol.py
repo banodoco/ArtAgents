@@ -28,6 +28,24 @@ class EventLogBackend(Protocol):
     ) -> TimelineEvent:
         """Append a semantic event to the identified timeline.
 
+        Version semantics
+        -----------------
+        ``expected_version`` compares against the current stream version,
+        which in m5 is the same value exposed as the local event count/head
+        version. Omitting it remains a compatibility path for single-writer
+        and legacy callers: the append proceeds without optimistic CAS.
+
+        Deferred non-goals for this contract patch
+        ------------------------------------------
+        This interface shape reserves room for later work without implying
+        it exists here:
+
+        * soft-lock event semantics are deferred to follow-on milestone work
+        * explicit multi-event transaction APIs are deferred beyond the
+          per-event ``txn_id`` passthrough field
+        * pack-level batch CAS hooks in ``pack_write_gateway()`` are deferred
+          until transaction semantics are defined
+
         Args:
             timeline_id: UUID that identifies the target timeline.
             kind: Dot-separated event kind (e.g. ``timeline.renamed``,
@@ -35,9 +53,11 @@ class EventLogBackend(Protocol):
             payload: JSON-serializable event payload dict.
             actor: Who performed the action.
             expected_version: Optional optimistic-concurrency guard
-                (enforced starting in m5).
-            txn_id: Optional transaction-coordination id (enforced
-                starting in m5).
+                against the current stream version. ``None`` preserves the
+                pre-m5 append-without-CAS behavior for compatibility.
+            txn_id: Optional correlation id carried on the event envelope.
+                It is metadata only in m5; explicit transaction APIs are
+                intentionally deferred.
 
         Returns:
             The fully-materialized ``TimelineEvent`` as stored.

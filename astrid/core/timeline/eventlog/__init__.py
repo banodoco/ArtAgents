@@ -12,7 +12,9 @@ from .types import (
     EventLogHead,
     EventLogNotConfiguredError,
     EventLogNotImplementedError,
+    EventLogStaleVersionError,
     EventLogVerification,
+    TimelineVersionConflict,
     TimelineStreamRef,
 )
 
@@ -24,11 +26,13 @@ __all__ = [
     "EventLogHead",
     "EventLogNotConfiguredError",
     "EventLogNotImplementedError",
+    "EventLogStaleVersionError",
     "EventLogVerification",
     "DisplayProjection",
     "LocalFsBackend",
     "project_display",
     "SupabaseBackend",
+    "TimelineVersionConflict",
     "TimelineStreamRef",
     "build_timeline_backend",
     "select_timeline_backend",

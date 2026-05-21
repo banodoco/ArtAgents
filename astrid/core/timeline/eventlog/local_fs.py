@@ -22,7 +22,13 @@ from astrid.core.timeline.events.schema import (
     with_event_hash,
 )
 
-from .types import EventLogError, EventLogHead, EventLogVerification
+from .types import (
+    EventLogError,
+    EventLogHead,
+    EventLogStaleVersionError,
+    EventLogVerification,
+    TimelineVersionConflict,
+)
 
 
 class LocalFsBackend:
@@ -117,6 +123,7 @@ class LocalFsBackend:
                 try:
                     identity = self._load_identity_locked()
                     tail = self._read_tail_event_locked(handle)
+                    locked_head = self._rebuild_head_locked()
                     bootstrap_events: list[TimelineEvent] = []
                     prev_hash = tail.hash if tail is not None else None
 
@@ -125,10 +132,30 @@ class LocalFsBackend:
                         bootstrap_events.append(imported_event)
                         identity = self._write_imported_identity(imported_event.timeline_id)
                         prev_hash = imported_event.hash
+                        locked_head = EventLogHead(
+                            timeline_id=imported_event.timeline_id,
+                            last_event_id=imported_event.event_id,
+                            last_hash=imported_event.hash,
+                            event_count=1,
+                            version=1,
+                        )
+                        tail = imported_event
 
                     if tail is not None and tail.kind == "timeline.deleted":
                         raise EventLogError(
                             f"timeline {identity['timeline_ulid']} rejects appends after timeline.deleted"
+                        )
+
+                    if expected_version is not None and expected_version != locked_head.version:
+                        raise EventLogStaleVersionError(
+                            TimelineVersionConflict(
+                                timeline_id=identity["timeline_id"],
+                                expected_version=expected_version,
+                                current_version=locked_head.version,
+                                last_event_id=locked_head.last_event_id,
+                                last_event_kind=tail.kind if tail is not None else None,
+                                last_event_summary=self._summarize_event(tail),
+                            )
                         )
 
                     event = TimelineEvent.new(
@@ -341,6 +368,11 @@ class LocalFsBackend:
             prev_hash=prev_hash,
         )
         return with_event_hash(imported, prev_hash=prev_hash)
+
+    def _summarize_event(self, event: TimelineEvent | None) -> str | None:
+        if event is None:
+            return None
+        return f"{event.kind}#{event.event_id}"
 
 
 def _fsync_dir(path: Path) -> None:
