@@ -3,7 +3,8 @@
 //
 // Reads a JSON request `{timeline, version, op, args}` from stdin, dispatches
 // `op` to the matching primitive (`addClip`, `moveClip`, `setTimelineTheme`),
-// and writes `{timeline, version, op, changed, detail}` to stdout. Exits
+// and writes `{timeline, version, op, changed, detail, event_descriptor}` to
+// stdout. Exits
 // non-zero with a JSON error object on stderr if the op is unknown or the
 // stdin shape is invalid.
 //
@@ -59,6 +60,49 @@ const dispatch = (op, timeline, args) => {
   fail(`unsupported op: ${op}`, {supported: [...SUPPORTED_OPS]});
 };
 
+const buildEventDescriptor = (op, args, result) => {
+  if (op === 'add-clip') {
+    const clip = args.clip ?? {};
+    return {
+      kind: 'clip.added',
+      payload: {
+        clip_id: clip.id ?? null,
+        kind: clip.kind ?? clip.clipType ?? null,
+        asset_id: clip.asset ?? clip.assetId ?? clip.asset_id ?? null,
+        position:
+          typeof args.position === 'number'
+            ? {mode: 'index', index: args.position}
+            : null,
+      },
+    };
+  }
+  if (op === 'move-clip') {
+    return {
+      kind: 'clip.moved',
+      payload: {
+        clip_id: args.clipId ?? null,
+        position:
+          typeof args.newPosition === 'number'
+            ? {mode: 'index', index: args.newPosition}
+            : null,
+      },
+    };
+  }
+  if (op === 'set-theme') {
+    return {
+      kind: 'theme.set',
+      payload: {
+        theme_id: args.themeId ?? null,
+        detail: result?.detail ?? null,
+      },
+    };
+  }
+  return {
+    kind: 'unknown',
+    payload: {op},
+  };
+};
+
 const main = async () => {
   const raw = await readStdin();
   if (!raw.trim()) {
@@ -84,6 +128,7 @@ const main = async () => {
     op,
     changed: result.changed,
     detail: result.detail,
+    event_descriptor: buildEventDescriptor(op, args, result),
   };
   process.stdout.write(`${JSON.stringify(response)}\n`);
 };

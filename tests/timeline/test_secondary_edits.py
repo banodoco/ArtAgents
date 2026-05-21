@@ -3,7 +3,7 @@
 Tests cover:
 - LocalFs materialization and event-log behavior for all 15 secondary events.
 - Assembly-shape edge cases for the secondary materializer domains.
-- Supabase-selected paths that prove the new edit APIs fail explicitly.
+- Supabase-selected paths that prove the provisional typed Supabase errors fail explicitly.
 """
 
 from __future__ import annotations
@@ -20,7 +20,11 @@ from astrid.core.timeline.audio_edits import audio_bind, audio_unbind
 from astrid.core.timeline.clip_edits import add_clip
 from astrid.core.timeline.crud import create_timeline, get_arrangement
 from astrid.core.timeline.effect_edits import effect_add, effect_remove, effect_tune
-from astrid.core.timeline.eventlog import EventLogNotImplementedError, LocalFsBackend, SupabaseBackend
+from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
+from astrid.core.timeline.eventlog.types import (
+    EventLogMissingConfigError,
+    EventLogUnsupportedRpcError,
+)
 from astrid.core.timeline.events.schema import (
     ArrangementReplacedPayload,
     AudioBoundPayload,
@@ -635,7 +639,7 @@ def test_arrangement_replace_materializes_and_reads_back(demo_timeline: dict[str
     assert get_arrangement("demo", "primary", root=demo_timeline["root"]) == arrangement
 
 
-def test_secondary_supabase_stub_paths_raise_explicitly(
+def test_secondary_supabase_paths_raise_missing_config_explicitly(
     demo_timeline: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -658,5 +662,26 @@ def test_secondary_supabase_stub_paths_raise_explicitly(
     ]
 
     for op in ops:
-        with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
+        with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
             op()
+
+
+def test_secondary_supabase_paths_raise_unsupported_rpc_when_configured(
+    demo_timeline: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
+        return (
+            SimpleNamespace(backend="supabase", source="preferred_backend"),
+            SupabaseBackend(
+                timeline_id=timeline_id,
+                supabase_url="https://example.supabase.co",
+                auth_token="pat-token",
+                enabled=True,
+            ),
+        )
+
+    monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
+
+    with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event"):
+        theme_set("demo", "primary", theme_id="banodoco-default", actor=_actor(), root=demo_timeline["root"])

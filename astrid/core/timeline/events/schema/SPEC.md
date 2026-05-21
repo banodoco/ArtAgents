@@ -1,8 +1,8 @@
 # Timeline Event Canonicalization
 
 This package is the byte-for-byte source of truth for timeline event envelope
-serialization. The TypeScript implementation planned for m6 must conform to
-these rules exactly.
+serialization. Any TypeScript or SQL-backed implementation landed later must
+conform to these rules exactly.
 
 - Envelope keys are sorted lexicographically.
 - JSON uses compact separators: `","` and `":"`.
@@ -33,12 +33,15 @@ these rules exactly.
   ``timeline.tombstoned`` remains a non-assembly mutation in m4.
 - Backend selection is per timeline: a known local `timeline_home` resolves to
   `LocalFsBackend`, while explicit `preferred_backend="supabase"` resolves to
-  the inert `SupabaseBackend` stub.
+  the provisional `SupabaseBackend` contract implemented in Python.
 - CRUD-side selection keeps using the identity sidecar's `backend` marker when
   present, rather than bypassing the selector with a hard-coded local backend.
 - Actor compatibility is intentionally broad in Python: `actor.id` is a
   non-empty string and current producers such as `maker`, `codex:test`,
   `migration:m1`, and `claude-code:session-123` remain valid.
+- The current Supabase path is still Astrid-side scaffolding plus mocked
+  transport coverage only; live SQL/RPC behavior remains deferred companion
+  work outside this repository.
 
 ## Current lifecycle matrix (m4)
 

@@ -5,8 +5,8 @@ Tests cover:
   payload, and assembly.json output verification.
 - Assembly-shape edge cases: empty initialization, existing with clips,
   incompatible non-empty without 'clips'.
-- Supabase-selected paths that prove EventLogNotImplementedError surfaces
-  (not a preemptive local_fs guard).
+- Supabase-selected paths that prove the provisional typed error contract
+  surfaces from SupabaseBackend itself (not a preemptive local_fs guard).
 """
 
 from __future__ import annotations
@@ -32,10 +32,13 @@ from astrid.core.timeline.clip_edits import (
 from astrid.core.timeline.crud import create_timeline, show_timeline
 from astrid.core.timeline.eventlog import (
     EventLogBackend,
-    EventLogNotImplementedError,
     LocalFsBackend,
     SupabaseBackend,
     select_timeline_backend,
+)
+from astrid.core.timeline.eventlog.types import (
+    EventLogMissingConfigError,
+    EventLogUnsupportedRpcError,
 )
 from astrid.core.timeline.events.schema import (
     ClipAddedPayload,
@@ -577,11 +580,11 @@ class TestAssemblyShapeEdgeCases:
 
 
 class TestSupabaseSelectedPaths:
-    def test_supabase_backend_raises_not_implemented_on_clip_edit(
+    def test_supabase_backend_raises_missing_config_on_clip_edit(
         self, demo_timeline: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Prove clip-edit code calls SupabaseBackend.append_event and
-        surfaces EventLogNotImplementedError (not a preemptive local_fs guard)."""
+        surfaces the typed missing-config error (not a preemptive local_fs guard)."""
         ulid = demo_timeline["ulid"]
         identity = demo_timeline["identity"]
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
@@ -596,13 +599,13 @@ class TestSupabaseSelectedPaths:
         monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
 
         # find_timeline_by_slug and read_json still work normally for resolution
-        with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
+        with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
             add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
 
     def test_supabase_error_not_preemptive_local_fs_guard(
         self, demo_timeline: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Confirm EventLogNotImplementedError is NOT a preemptive local_fs
+        """Confirm the Supabase error is NOT a preemptive local_fs
         AvailabilityError — it comes from SupabaseBackend.append_event itself."""
         ulid = demo_timeline["ulid"]
         timeline_id = demo_timeline["identity"]["timeline_id"]
@@ -633,16 +636,16 @@ class TestSupabaseSelectedPaths:
 
         monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
 
-        with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
+        with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
             add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
 
         # This proves the error came from SupabaseBackend.append_event, not a preemptive guard
         assert "append_event" in called_backend
 
-    def test_all_eight_primitives_raise_on_supabase(
+    def test_all_eight_primitives_raise_on_supabase_without_config(
         self, demo_timeline: dict, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """All 8 clip.* verbs raise EventLogNotImplementedError on Supabase."""
+        """All 8 clip.* verbs raise typed missing-config errors on unconfigured Supabase."""
         # Force Supabase selection
         def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
             return (
@@ -669,8 +672,27 @@ class TestSupabaseSelectedPaths:
         ]
 
         for i, op in enumerate(ops):
-            with pytest.raises(EventLogNotImplementedError, match="SupabaseBackend"):
+            with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
                 op()
+
+    def test_configured_supabase_backend_raises_unsupported_rpc_on_clip_edit(
+        self, demo_timeline: dict, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def fake_select(*, timeline_id, timeline_home=None, preferred_backend=None):
+            return (
+                SimpleNamespace(backend="supabase", source="preferred_backend"),
+                SupabaseBackend(
+                    timeline_id=timeline_id,
+                    supabase_url="https://example.supabase.co",
+                    auth_token="pat-token",
+                    enabled=True,
+                ),
+            )
+
+        monkeypatch.setattr("astrid.core.timeline._edit_helpers.select_timeline_backend", fake_select)
+
+        with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event"):
+            add_clip("demo", "primary", kind="visual", asset_id="x", actor=_actor(), root=demo_timeline["root"])
 
 
 # ── default actor fallback ──────────────────────────────────────────────────

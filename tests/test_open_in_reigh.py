@@ -295,6 +295,7 @@ class OpenInReighTest(unittest.TestCase):
         bridge = json.loads(stdout.strip())
         self.assertIn("append_timeline_event", bridge["note"].lower())
         self.assertIn("m6", bridge["note"].lower())
+        self.assertIn("no direct save_timeline call", bridge["note"].lower())
 
     def test_bridge_metadata_dry_run(self) -> None:
         """Prove --dry-run emits bridge intent without writing."""

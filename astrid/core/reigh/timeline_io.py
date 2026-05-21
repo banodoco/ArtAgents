@@ -1,13 +1,18 @@
-"""Versioned timeline read/write loop against reigh-data-fetch + RPC.
+"""Versioned timeline read/write loop against reigh-data-fetch + blob RPC.
 
-The ``save_timeline`` helper here is the canonical write path used by both the
-worker (T9) and the DataProvider write API (T6). It implements the
-optimistic-concurrency contract documented in
-``docs/integration_contracts.md``: load ``(timeline, config_version)`` via the
-``reigh-data-fetch`` Edge Function, apply a caller-supplied mutator, then call
-the ``update_timeline_config_versioned(p_timeline_id, p_expected_version,
+The ``save_timeline`` helper here is the legacy compatibility write path used
+by Astrid's current Reigh bridge surfaces. It implements the optimistic-
+concurrency contract documented in ``docs/integration_contracts.md``: load
+``(timeline, config_version)`` via the ``reigh-data-fetch`` Edge Function,
+apply a caller-supplied mutator, then call the
+``update_timeline_config_versioned(p_timeline_id, p_expected_version,
 p_config)`` RPC. On version-mismatch, re-load and re-apply the mutator up to
 ``retries`` times before raising :class:`TimelineVersionConflictError`.
+
+This remains a blob-save compatibility path, not Astrid's future event-first
+architecture. The provisional ``SupabaseBackend`` event-log contract lives in
+``astrid.core.timeline.eventlog`` and still depends on companion SQL/RPC work
+outside this repository.
 
 Auth scopes (FLAG-012 / SD-009): the worker write path uses ``service_role``
 auth so it can write any timeline once it has verified ownership separately;

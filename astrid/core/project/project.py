@@ -3,8 +3,9 @@
 After the placement-schema collapse (T10), local ``project.json`` keeps an
 opaque ``project_id`` that points at the canonical reigh-app row. Local
 ``timeline.json`` is no longer the source of truth — timeline reads/writes go
-through ``astrid.core.reigh.SupabaseDataProvider``. The local provenance
-cache (``sources/`` and ``runs/`` directories) survives.
+through ``astrid.core.reigh.SupabaseDataProvider`` as a legacy compatibility
+bridge. The local provenance cache (``sources/`` and ``runs/`` directories)
+survives.
 """
 
 from __future__ import annotations

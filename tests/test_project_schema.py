@@ -51,7 +51,7 @@ def test_project_helpers_resolve_env_root_and_write_deterministic_json(tmp_path:
 
 
 def test_create_project_does_not_write_timeline_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """T10 invariant: timeline.json is no longer written; sources/ + runs/ still are."""
+    """T10 invariant: project creation stays local-only; Reigh blob writes remain a legacy compatibility bridge."""
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))

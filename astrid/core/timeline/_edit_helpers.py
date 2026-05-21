@@ -46,6 +46,7 @@ from astrid.core.project.jsonio import read_json
 
 from .eventlog import EventLogBackend, select_timeline_backend
 from .eventlog.local_fs import LocalFsBackend
+from .eventlog.types import SupabaseEventLogOptions
 from .events.schema import TimelineActor, TimelineEvent
 from .paths import (
     assembly_identity_path,
@@ -104,6 +105,7 @@ def _resolve_or_bootstrap_backend(
     *,
     root: str | Path | None = None,
     actor: TimelineActor | None = None,
+    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> tuple[str, Path, EventLogBackend, bool]:
     """Resolve the event-log backend, bootstrapping true-legacy timelines.
 
@@ -147,11 +149,14 @@ def _resolve_or_bootstrap_backend(
             raise TimelineEditError(
                 "timeline identity sidecar has malformed backend"
             )
-        _stream, backend = select_timeline_backend(
-            timeline_id=timeline_id,
-            timeline_home=tdir,
-            preferred_backend=preferred_backend,
-        )
+        select_kwargs: dict[str, Any] = {
+            "timeline_id": timeline_id,
+            "timeline_home": tdir,
+            "preferred_backend": preferred_backend,
+        }
+        if supabase_options is not None:
+            select_kwargs["supabase_options"] = supabase_options
+        _stream, backend = select_timeline_backend(**select_kwargs)
         return timeline_id, tdir, backend, False
 
     # --- Case 3: No identity but assembly.jsonl already exists → fail closed ---
@@ -175,7 +180,7 @@ def _resolve_or_bootstrap_backend(
 
     # Now resolve the backend with the newly written identity.
     timeline_id, tdir_resolved, backend_resolved, _ = _resolve_or_bootstrap_backend(
-        project_slug, slug, root=root, actor=actor,
+        project_slug, slug, root=root, actor=actor, supabase_options=supabase_options,
     )
     return timeline_id, tdir_resolved, backend_resolved, True
 
@@ -185,6 +190,7 @@ def _resolve_backend(
     slug: str,
     *,
     root: str | Path | None = None,
+    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> tuple[str, Path, EventLogBackend, bool]:
     """Look up *slug* in *project_slug*, read the identity sidecar, and
     return ``(timeline_id, timeline_home, backend, bootstrap_performed)``.
@@ -196,7 +202,12 @@ def _resolve_backend(
     Raises ``TimelineEditError`` when the timeline cannot be found or its
     identity sidecar is missing/malformed.
     """
-    return _resolve_or_bootstrap_backend(project_slug, slug, root=root)
+    return _resolve_or_bootstrap_backend(
+        project_slug,
+        slug,
+        root=root,
+        supabase_options=supabase_options,
+    )
 
 
 def _materialize(
@@ -292,6 +303,7 @@ def pack_write_gateway(
     actor_display: str | None = None,
     actor_via: TimelineActor | None = None,
     root: str | Path | None = None,
+    supabase_options: SupabaseEventLogOptions | None = None,
 ) -> PackWriteResult:
     """Centralized append-then-materialize gateway for pack / worker writes.
 
@@ -385,7 +397,11 @@ def pack_write_gateway(
     #    with provenance "created" accept bare first domain events.
     resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
         _resolve_or_bootstrap_backend(
-            project_slug, timeline_slug, root=root, actor=actor,
+            project_slug,
+            timeline_slug,
+            root=root,
+            actor=actor,
+            supabase_options=supabase_options,
         )
     effective_stream_id = resolved_timeline_id
 

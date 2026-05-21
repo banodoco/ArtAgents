@@ -5,12 +5,17 @@ import unittest
 from uuid import uuid4
 
 from astrid.core.timeline.eventlog import (
-    EventLogNotConfiguredError,
-    EventLogNotImplementedError,
     LocalFsBackend,
     SupabaseBackend,
+    build_timeline_backend,
     select_timeline_backend,
     select_timeline_stream,
+)
+from astrid.core.timeline.eventlog.types import (
+    EventLogAuthRequiredError,
+    EventLogMissingConfigError,
+    EventLogUnsupportedRpcError,
+    SupabaseEventLogOptions,
 )
 from astrid.core.timeline.events.schema import (
     EVENT_SCHEMA_VERSION,
@@ -53,6 +58,45 @@ from astrid.core.timeline.events.schema import (
 
 
 class TimelineEventSchemaTest(unittest.TestCase):
+    class _FakeSupabaseTransport:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, object]]] = []
+
+        def append_event(self, **kwargs: object) -> dict[str, object]:
+            self.calls.append(("append_event", dict(kwargs)))
+            actor = kwargs["actor"]
+            assert isinstance(actor, TimelineActor)
+            return {
+                "schema_version": EVENT_SCHEMA_VERSION,
+                "event_id": generate_event_ulid(),
+                "timeline_id": kwargs["timeline_id"],
+                "kind": kwargs["kind"],
+                "ts": "2026-05-21T00:00:00Z",
+                "actor": actor.to_json_obj(),
+                "payload": kwargs["payload"],
+                "prev_hash": None,
+                "hash": "abc123",
+                "txn_id": kwargs.get("txn_id"),
+            }
+
+        def read_events(self, **kwargs: object) -> list[dict[str, object]]:
+            self.calls.append(("read_events", dict(kwargs)))
+            return []
+
+        def head(self, **kwargs: object) -> dict[str, object]:
+            self.calls.append(("head", dict(kwargs)))
+            return {
+                "timeline_id": kwargs["timeline_id"],
+                "last_event_id": None,
+                "last_hash": None,
+                "event_count": 0,
+                "version": 0,
+            }
+
+        def verify_chain(self, **kwargs: object) -> dict[str, object]:
+            self.calls.append(("verify_chain", dict(kwargs)))
+            return {"ok": True, "checked_events": 0, "last_event_id": None, "error": None}
+
     def test_timeline_event_canonical_json_omits_nulls_and_hash(self) -> None:
         actor = TimelineActor(type="agent", id="codex:run-1", display=None)
         event = TimelineEvent.new(
@@ -151,19 +195,61 @@ class TimelineEventSchemaTest(unittest.TestCase):
         self.assertIsInstance(backend, LocalFsBackend)
         self.assertEqual(backend.backend_name(), "local_fs")
 
-    def test_timeline_backend_selector_builds_inert_supabase_stub_explicitly(self) -> None:
+    def test_timeline_backend_selector_builds_supabase_backend_from_options(self) -> None:
         timeline_id = str(uuid4())
+        options = SupabaseEventLogOptions(
+            url="https://example.supabase.co",
+            auth_token="pat-token",
+            verified_subject="user-1",
+            actor_id="agent:codex",
+            actor_display="Codex",
+            rpc_append_name="append_timeline_event_v2",
+        )
         stream, backend = select_timeline_backend(
             timeline_id=timeline_id,
             timeline_home="/tmp/timeline-home",
             preferred_backend="supabase",
+            supabase_options=options,
         )
         self.assertEqual(stream.backend, "supabase")
         self.assertEqual(stream.source, "preferred_backend")
+        self.assertEqual(stream.supabase_options, options)
         self.assertIsInstance(backend, SupabaseBackend)
         self.assertEqual(backend.backend_name(), "supabase")
+        self.assertEqual(backend.supabase_url, "https://example.supabase.co")
+        self.assertEqual(backend.auth_token, "pat-token")
+        self.assertEqual(backend.verified_subject, "user-1")
+        self.assertEqual(backend.actor_id, "agent:codex")
+        self.assertEqual(backend.actor_display, "Codex")
+        self.assertEqual(backend.rpc_append_name, "append_timeline_event_v2")
+        self.assertTrue(backend.enabled)
 
-    def test_supabase_backend_stub_is_constructible_and_inert(self) -> None:
+    def test_build_timeline_backend_preserves_full_supabase_options_payload(self) -> None:
+        options = SupabaseEventLogOptions(
+            url="https://example.supabase.co",
+            auth_token="pat-token",
+            verified_subject="user-1",
+            actor_id="agent:codex",
+            actor_display="Codex",
+            rpc_append_name="append_timeline_event_v2",
+        )
+        stream = select_timeline_stream(
+            timeline_id=str(uuid4()),
+            preferred_backend="supabase",
+            supabase_options=options,
+        )
+
+        backend = build_timeline_backend(stream)
+
+        assert isinstance(backend, SupabaseBackend)
+        self.assertEqual(backend.supabase_url, options.url)
+        self.assertEqual(backend.auth_token, options.auth_token)
+        self.assertEqual(backend.verified_subject, options.verified_subject)
+        self.assertEqual(backend.actor_id, options.actor_id)
+        self.assertEqual(backend.actor_display, options.actor_display)
+        self.assertEqual(backend.rpc_append_name, options.rpc_append_name)
+
+    def test_supabase_backend_missing_config_raises_typed_errors(self) -> None:
         tid = str(uuid4())
         backend = SupabaseBackend(timeline_id=tid)
 
@@ -172,7 +258,7 @@ class TimelineEventSchemaTest(unittest.TestCase):
         with self.assertRaises(TimelineEventSchemaError):
             TimelineActor(type="agent", id="")
 
-        with self.assertRaises(EventLogNotImplementedError):
+        with self.assertRaises(EventLogMissingConfigError):
             backend.append_event(
                 tid,
                 "timeline.renamed",
@@ -180,14 +266,63 @@ class TimelineEventSchemaTest(unittest.TestCase):
                 actor=TimelineActor(type="agent", id="codex:run-1"),
             )
 
-        with self.assertRaises(EventLogNotConfiguredError):
+        with self.assertRaises(EventLogMissingConfigError):
             backend.read_events()
 
-        with self.assertRaises(EventLogNotConfiguredError):
+        with self.assertRaises(EventLogMissingConfigError):
             backend.head()
 
-        with self.assertRaises(EventLogNotConfiguredError):
+        with self.assertRaises(EventLogMissingConfigError):
             backend.verify_chain()
+
+    def test_supabase_backend_without_transport_raises_typed_unsupported_rpc(self) -> None:
+        tid = str(uuid4())
+        backend = SupabaseBackend(
+            timeline_id=tid,
+            supabase_url="https://example.supabase.co",
+            auth_token="pat-token",
+            enabled=True,
+        )
+        with self.assertRaises(EventLogUnsupportedRpcError):
+            backend.head()
+
+    def test_supabase_backend_mocked_transport_supports_append_read_head_and_verify(self) -> None:
+        tid = str(uuid4())
+        transport = self._FakeSupabaseTransport()
+        backend = SupabaseBackend(
+            timeline_id=tid,
+            transport=transport,
+            verified_subject="user-1",
+        )
+
+        event = backend.append_event(
+            tid,
+            "timeline.renamed",
+            {"old_slug": "before", "new_slug": "after"},
+            actor=TimelineActor(type="human", id="user-1", display="Maker"),
+            txn_id=generate_event_ulid(),
+        )
+
+        self.assertIsInstance(event, TimelineEvent)
+        self.assertEqual(event.kind, "timeline.renamed")
+        self.assertEqual(backend.read_events(), [])
+        self.assertEqual(backend.head().event_count, 0)
+        self.assertTrue(backend.verify_chain().ok)
+        self.assertEqual(
+            [name for name, _kwargs in transport.calls],
+            ["append_event", "read_events", "head", "verify_chain"],
+        )
+
+    def test_supabase_backend_rejects_unverified_human_writes(self) -> None:
+        tid = str(uuid4())
+        backend = SupabaseBackend(timeline_id=tid, transport=self._FakeSupabaseTransport())
+        with self.assertRaises(EventLogAuthRequiredError):
+            backend.append_event(
+                tid,
+                "timeline.renamed",
+                {"old_slug": "before", "new_slug": "after"},
+                actor=TimelineActor(type="human", id="user-2", display="Maker"),
+            )
 
 
 class ClipPayloadSchemaTest(unittest.TestCase):
