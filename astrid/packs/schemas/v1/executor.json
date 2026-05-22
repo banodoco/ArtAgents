@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astrid.dev/schemas/packs/v1/executor.json",
+  "title": "Astrid Executor Manifest",
+  "type": "object",
+  "required": ["schema_version", "id", "name", "version", "runtime"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"type": "number", "const": 1},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$"},
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "kind": {"type": "string"},
+    "short_description": {"type": "string"},
+    "description": {"type": "string"},
+    "keywords": {"type": "array", "items": {"type": "string"}},
+    "inputs": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "outputs": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "conditions": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "clip_kinds_supported": {"type": "array", "items": {"type": "string"}},
+    "pipeline_requirements": {"type": "array", "items": {"type": "string"}},
+    "graph": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "depends_on": {"type": "array", "items": {"type": "string"}},
+        "consumes": {"type": "array", "items": {"type": "string"}},
+        "provides": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "cache": {"type": "object", "additionalProperties": true},
+    "isolation": {"type": "object", "additionalProperties": true},
+    "docs": {"type": "object", "additionalProperties": {"type": "string"}},
+    "metadata": {"type": "object", "additionalProperties": true},
+    "runtime": {
+      "type": "object",
+      "oneOf": [
+        {
+          "required": ["type", "entrypoint"],
+          "properties": {
+            "type": {"type": "string"},
+            "entrypoint": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": true
+        },
+        {
+          "required": ["kind"],
+          "properties": {
+            "kind": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      ]
+    }
+  }
+}

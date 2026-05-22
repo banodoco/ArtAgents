@@ -18,7 +18,6 @@ from __future__ import annotations
 import argparse
 import html
 import json
-import re
 import subprocess
 import sys
 import textwrap
@@ -99,31 +98,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--open", action="store_true", help="Open index.html in a browser when done.")
     p.add_argument("--produces-dir", type=Path, default=None, help="Orchestrator produces dir.")
     return p
-
-
-def _ssh_target(pod_handle: dict) -> tuple[str, int]:
-    ssh = pod_handle["ssh"]
-    m = re.match(r"(\S+)\s+-p\s+(\d+)", ssh)
-    if not m:
-        raise ValueError(f"Unexpected ssh field: {ssh}")
-    return m.group(1), int(m.group(2))
-
-
-def _scp_pull(local_dir: Path, ssh_target: str, port: int, key: str, remote_dir: str) -> None:
-    local_dir.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "scp", "-r",
-        "-i", key,
-        "-P", str(port),
-        "-o", "StrictHostKeyChecking=no",
-        "-o", "IdentitiesOnly=yes",
-        f"{ssh_target}:{remote_dir}",
-        str(local_dir),
-    ]
-    print(f"$ {' '.join(cmd)}", file=sys.stderr)
-    rv = subprocess.run(cmd)
-    if rv.returncode != 0:
-        raise RuntimeError(f"scp failed rc={rv.returncode}")
 
 
 def _parse_mp4_name(name: str) -> tuple[int, int | None, str]:
@@ -289,21 +263,28 @@ def main(argv: list[str] | None = None) -> int:
     produces = args.produces_dir or args.out
     produces.mkdir(parents=True, exist_ok=True)
 
-    pod_handle = json.loads(args.pod_handle.read_text(encoding="utf-8"))
-    target, port = _ssh_target(pod_handle)
-
     out = args.out
     out.mkdir(parents=True, exist_ok=True)
     samples_local = out / "samples"
 
     remote = args.remote_output_dir.rstrip("/") + "/samples/."
-    try:
-        _scp_pull(samples_local, target, port, args.ssh_key, remote)
-    except Exception as exc:
-        print(f"ERROR: samples download failed: {exc}", file=sys.stderr)
+    pull_produces = produces / "_sample_pull"
+    pull_produces.mkdir(parents=True, exist_ok=True)
+    pull_cmd = [
+        sys.executable, "-m", "astrid.packs.external.runpod.run", "pull",
+        "--produces-dir", str(pull_produces),
+        "--pod-handle", str(args.pod_handle),
+        "--remote-path", remote,
+        "--local-dir", str(samples_local),
+    ]
+    if args.ssh_key:
+        pull_cmd.extend(["--ssh-key", args.ssh_key])
+    rv = subprocess.run(pull_cmd, cwd=REPO_ROOT)
+    if rv.returncode != 0 or not list(samples_local.glob("**/*.mp4")):
+        print(f"ERROR: samples download failed: rc={rv.returncode}", file=sys.stderr)
         # Still write an HTML so the orchestrator's downstream step doesn't error on a missing file.
         (out / "index.html").write_text(
-            f"<html><body><h1>samples_collage</h1><p>scp failed: {html.escape(str(exc))}</p></body></html>",
+            f"<html><body><h1>samples_collage</h1><p>artifact pull failed: rc={rv.returncode}</p></body></html>",
             encoding="utf-8",
         )
         return 2

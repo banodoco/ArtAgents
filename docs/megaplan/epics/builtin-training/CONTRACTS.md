@@ -174,6 +174,24 @@ def teardown(handle: ComputeHandle) -> None: ...
 def estimate_cost(config: ComputeConfig) -> CostEstimate: ...
 ```
 
+ComputeBackend is intentionally limited to provisioning lifecycle and cost
+planning. Remote command execution and artifact transfer are separate so generic
+training orchestration can select them through registries rather than importing
+provider-specific helpers.
+
+### 5.7 RemoteExecutionBackend
+```python
+backend_id: str  # e.g. "runpod"; matches the companion ComputeBackend
+capabilities: ProviderCapabilities
+def exec(handle: ComputeHandle, command: list[str], config: dict) -> RemoteExecResult: ...
+def pull_artifacts(handle: ComputeHandle, remote_paths: list[str], local_dir: Path, config: dict) -> ArtifactPullResult: ...
+```
+
+`ProviderCapabilities` advertises support for remote exec, artifact pull/push,
+and cost estimates. The RunPod implementation uses typed `RunPodConfig` and
+`RunPodHandle` shapes whose secret fields store environment variable names,
+never literal secret values.
+
 ---
 
 ## 6. Manifest Contracts
@@ -351,9 +369,20 @@ Required fields:
 - `trainer_id` (e.g. `ai-toolkit-ltx`)
 - `manifest_path` — path to canonical or adapter manifest
 - `compute` block with `backend`, `max_gpu_hours`, `max_runpod_spend_usd`
+- `secrets.required_env` — optional declared environment variable names such as
+  `RUNPOD_API_KEY` and `HF_TOKEN`; dry-runs report missing names, live runs fail
+  before provisioning if any declared name is absent
 - `base_model` — model identifier
 - `lora_config` — LoRA-specific hyperparameters
 - `output` — output directory
+
+For ai-toolkit LTX, `<dataset-run>/ai-toolkit-ltx.manifest.json` remains the
+dataset-builder compatibility source of truth. `builtin.training_run` may also
+accept canonical `final.manifest.json` and any flat `clips[]` manifest, then
+writes its own normalized copy at
+`<training-run>/manifests/ai-toolkit-ltx/manifest.json` and records the source
+manifest path in training-run state. Dataset build does not write that nested
+training-run copy.
 
 ---
 

@@ -14,6 +14,10 @@ Curated Astrid executor metadata for managing RunPod GPU compute through
   Does not terminate. Pair with `external.runpod.teardown`.
 - **`external.runpod.exec`** — Reattach to a provisioned pod, ship code,
   execute a script, download artifacts. Leaves pod alive.
+- **`external.runpod.pull`** — Reattach to a provisioned pod using the existing
+  `pod_handle.json` and pull remote artifacts into a local directory via the
+  SSH/SCP connection. Used for checkpoints, manifests, sample MP4s, and review
+  assets that must exist locally before a training step can report success.
 - **`external.runpod.teardown`** — Terminate a pod by handle. Idempotent.
 - **`external.runpod.session`** — Composite provision → exec → teardown with
   `try/finally` guaranteed cleanup. Default for callers that don't need a

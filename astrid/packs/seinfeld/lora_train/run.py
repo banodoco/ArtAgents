@@ -310,11 +310,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     if rc != 0:
         return rc
 
-    rc = _invoke_repo_setup(out)
-    if rc != 0:
-        print(f"ERROR: seinfeld.repo_setup failed (rc={rc})", file=sys.stderr)
-        return rc
-
     if args.dry_run:
         # Run stage in dry-run only — no pod work.
         produces = out / "stage"
@@ -346,6 +341,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         })
         print(f"lora_train: dry-run complete → {out / 'last_run.json'}")
         return 0
+
+    rc = _invoke_repo_setup(out)
+    if rc != 0:
+        print(f"ERROR: seinfeld.repo_setup failed (rc={rc})", file=sys.stderr)
+        return rc
 
     rc, pod_handle = _provision(args, out)
     if rc != 0 or pod_handle is None:
@@ -436,20 +436,16 @@ def cmd_resume(args: argparse.Namespace) -> int:
     register_src.mkdir(parents=True, exist_ok=True)
     local_lora = register_src / Path(match["remote_path"]).name
     pull_argv = [
-        sys.executable, "-m", "astrid.packs.external.runpod.run", "exec",
+        sys.executable, "-m", "astrid.packs.external.runpod.run", "pull",
         "--pod-handle", _abs(pod_handle),
         "--produces-dir", _abs(register_src),
-        "--remote-script", f"cat {match['remote_path']}",
-        "--download", f"{match['remote_path']}:{_abs(local_lora)}",
+        "--remote-path", match["remote_path"],
+        "--local-dir", _abs(register_src),
     ]
-    # The exec executor does not necessarily support --download; if missing, the user
-    # must copy the file via scp from the SSH address in pod_handle.json. Best effort:
     rc = subprocess.run(pull_argv, cwd=REPO_ROOT).returncode
     if rc != 0 or not local_lora.exists():
         print(
-            f"WARNING: could not auto-pull checkpoint from pod; copy manually before teardown:\n"
-            f"  scp -P <port> root@<ip>:{match['remote_path']} {local_lora}\n"
-            f"(SSH details in {pod_handle})",
+            f"ERROR: could not pull checkpoint from pod before teardown: {match['remote_path']} -> {local_lora}",
             file=sys.stderr,
         )
         if not local_lora.exists():
