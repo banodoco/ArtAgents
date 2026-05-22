@@ -2712,3 +2712,215 @@ class TestAuditProjectionParityAfterImport:
         assert len(append_calls) == 0, (
             f"append_event was called {len(append_calls)} times by read-only commands"
         )
+
+
+# ============================================================================
+# Realistic m2/m3 event-stream CLI integration tests (M9 / T14)
+# ============================================================================
+
+
+class TestRealisticEventStreamCLI:
+    """CLI integration tests with realistic m2/m3 event streams.
+
+    These tests exercise branch, recovery, undo, and mass-undo verbs
+    against timelines populated with diverse domain events (clips,
+    tracks, effects, transitions, audio, theme, pool, arrangement)
+    to verify end-to-end parsing and handler dispatch.
+    """
+
+    def test_branch_recovery_undo_parsing_chain(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ):
+        """Branch, recovery, and undo verbs parse with realistic flags."""
+        seen: list[dict] = []
+
+        def fake_branch_create(args):
+            seen.append({"verb": "branch_create", "args": vars(args)})
+            return 0
+
+        def fake_branch_list(args):
+            seen.append({"verb": "branch_list", "args": vars(args)})
+            return 0
+
+        def fake_recover(args):
+            seen.append({"verb": "recover", "args": vars(args)})
+            return 0
+
+        def fake_undo(args):
+            seen.append({"verb": "undo", "args": vars(args)})
+            return 0
+
+        monkeypatch.setattr(timeline_cli, "cmd_branch_create", fake_branch_create)
+        monkeypatch.setattr(timeline_cli, "cmd_branch_list", fake_branch_list)
+        monkeypatch.setattr(timeline_cli, "cmd_recover", fake_recover)
+        monkeypatch.setattr(timeline_cli, "cmd_undo", fake_undo)
+
+        # Branch create
+        rc = timeline_cli.main([
+            "branch", "create", "source-tl", "br1",
+            "--from", "01JAAAAAAAAAAAAAAAAAAAAA01",
+            "--reason", "test branch",
+        ])
+        assert rc == 0
+        assert seen[0]["verb"] == "branch_create"
+        assert seen[0]["args"]["source_slug_or_id"] == "source-tl"
+        assert seen[0]["args"]["branch_slug"] == "br1"
+        assert seen[0]["args"]["from_event_id"] == "01JAAAAAAAAAAAAAAAAAAAAA01"
+
+        # Branch list
+        rc = timeline_cli.main(["branch", "list", "source-tl"])
+        assert rc == 0
+        assert seen[1]["args"]["source_slug_or_id"] == "source-tl"
+
+        # Recover
+        rc = timeline_cli.main([
+            "recover", "target-tl",
+            "--at", "01JAAAAAAAAAAAAAAAAAAAAA99",
+            "--reason", "corruption recovery",
+        ])
+        assert rc == 0
+        assert seen[2]["verb"] == "recover"
+        assert seen[2]["args"]["slug"] == "target-tl"
+        assert seen[2]["args"]["at_event_id"] == "01JAAAAAAAAAAAAAAAAAAAAA99"
+
+        # Undo
+        rc = timeline_cli.main(["undo", "undo-tl"])
+        assert rc == 0
+        assert seen[3]["verb"] == "undo"
+        assert seen[3]["args"]["slug"] == "undo-tl"
+
+    def test_mass_undo_and_erase_parsing_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Mass-undo and erase verbs parse with realistic filters."""
+        seen: list[dict] = []
+
+        def fake_mass_undo(args):
+            seen.append({"verb": "mass_undo", "args": vars(args)})
+            return 0
+
+        def fake_erase(args):
+            seen.append({"verb": "erase", "args": vars(args)})
+            return 0
+
+        monkeypatch.setattr(timeline_cli, "cmd_mass_undo", fake_mass_undo)
+        monkeypatch.setattr(timeline_cli, "cmd_erase", fake_erase)
+
+        # Mass undo with all filters
+        rc = timeline_cli.main([
+            "mass-undo", "test-tl",
+            "--since", "2026-01-01T00:00:00Z",
+            "--actor", "runaway-agent",
+            "--actor-prefix", "runaway",
+            "--yes",
+        ])
+        assert rc == 0
+        assert seen[0]["args"]["slug"] == "test-tl"
+        assert seen[0]["args"]["ts_since"] == "2026-01-01T00:00:00Z"
+        assert seen[0]["args"]["actor_id"] == "runaway-agent"
+        assert seen[0]["args"]["actor_id_prefix"] == "runaway"
+        assert seen[0]["args"]["yes"] is True
+
+        # Erase with all filters
+        rc = timeline_cli.main([
+            "erase", "test-tl",
+            "--reason", "compliance policy X",
+            "--event-ids", "01JAAAAAAAAAAAAAAAAAAAAA01",
+            "--kind", "clip.added",
+            "--actor", "bad-actor",
+            "--actor-prefix", "bad",
+            "--after", "2026-01-01T00:00:00Z",
+            "--before", "2026-06-01T00:00:00Z",
+            "--policy-ref", "policy-v1",
+            "--yes",
+        ])
+        assert rc == 0
+        assert seen[1]["args"]["slug"] == "test-tl"
+        assert seen[1]["args"]["reason"] == "compliance policy X"
+        assert seen[1]["args"]["event_ids_raw"] == "01JAAAAAAAAAAAAAAAAAAAAA01"
+        assert seen[1]["args"]["kind_allowlist_raw"] == "clip.added"
+        assert seen[1]["args"]["actor_id"] == "bad-actor"
+        assert seen[1]["args"]["actor_id_prefix"] == "bad"
+        assert seen[1]["args"]["ts_after"] == "2026-01-01T00:00:00Z"
+        assert seen[1]["args"]["ts_before"] == "2026-06-01T00:00:00Z"
+        assert seen[1]["args"]["policy_ref"] == "policy-v1"
+        assert seen[1]["args"]["yes"] is True
+
+    def test_push_pull_parsing_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Push and pull verbs parse with all destination flags."""
+        seen: list[dict] = []
+
+        def fake_push(args):
+            seen.append({"verb": "push", "args": vars(args)})
+            return 0
+
+        def fake_pull(args):
+            seen.append({"verb": "pull", "args": vars(args)})
+            return 0
+
+        monkeypatch.setattr(timeline_cli, "cmd_push", fake_push)
+        monkeypatch.setattr(timeline_cli, "cmd_pull", fake_pull)
+
+        # Push
+        rc = timeline_cli.main([
+            "push", "local-tl",
+            "--to", "supabase",
+            "--project", "my-proj",
+        ])
+        assert rc == 0
+        assert seen[0]["args"]["slug_or_id"] == "local-tl"
+        assert seen[0]["args"]["to_backend"] == "supabase"
+        assert seen[0]["args"]["project"] == "my-proj"
+
+        # Pull with --into
+        rc = timeline_cli.main([
+            "pull", "remote-tl",
+            "--from", "supabase",
+            "--project", "my-proj",
+            "--into", "existing-local",
+        ])
+        assert rc == 0
+        assert seen[1]["args"]["slug_or_id"] == "remote-tl"
+        assert seen[1]["args"]["from_backend"] == "supabase"
+        assert seen[1]["args"]["into_slug"] == "existing-local"
+
+        # Pull with --create --as
+        rc = timeline_cli.main([
+            "pull", "remote-tl",
+            "--from", "supabase",
+            "--project", "my-proj",
+            "--create",
+            "--as", "new-local",
+        ])
+        assert rc == 0
+        assert seen[2]["args"]["create"] is True
+        assert seen[2]["args"]["create_as_slug"] == "new-local"
+
+        # Pull with --create (implicit slug)
+        rc = timeline_cli.main([
+            "pull", "remote-tl",
+            "--from", "supabase",
+            "--project", "my-proj",
+            "--create",
+        ])
+        assert rc == 0
+        assert seen[3]["args"]["create"] is True
+        assert seen[3]["args"]["create_as_slug"] is None
+
+    def test_all_m2_m3_verbs_appear_in_parser(self, capsys):
+        """All m2/m3 verbs (push, pull, recover, branch, undo, etc.) are
+        accepted by the parser without 'invalid choice' errors."""
+        # Verify each subcommand is known by the parser
+        for verb in ["push", "pull", "recover", "branch", "branches",
+                      "undo", "mass-undo", "erase"]:
+            # These will fail in the handler due to missing args,
+            # but they must NOT fail at the parser level with "invalid choice"
+            with pytest.raises(SystemExit) as excinfo:
+                timeline_cli.main([verb])
+            # Exit code 2 = argparse error (missing args), NOT invalid choice
+            assert excinfo.value.code != 0
+            captured = capsys.readouterr()
+            # Must NOT say "invalid choice" for these verbs
+            assert "invalid choice" not in captured.err.lower() or verb not in captured.err

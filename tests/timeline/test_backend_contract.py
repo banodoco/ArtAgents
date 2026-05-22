@@ -1198,3 +1198,249 @@ class TestSupabaseFakeErasureRepairContract:
 
         verification = backend.verify_chain()
         assert verification.ok is True
+
+
+# ======================================================================
+# Recovery contract tests (M9 / T14)
+# ======================================================================
+
+
+class TestLocalFsRecoveryContract:
+    """Contract tests for recovery on LocalFsBackend."""
+
+    def test_recover_to_event_appends_timeline_recovered(
+        self, local_fs_backend, monkeypatch
+    ):
+        """Recover to an anchor: chain verified, timeline.recovered appended."""
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline.operations import recover_to_event, RecoveryResult
+
+        backend = local_fs_backend
+        timeline_id = backend.timeline_id
+        home = backend.timeline_home
+
+        e1 = backend.append_event(
+            timeline_id, "clip.added",
+            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            actor=_ACTOR,
+        )
+        e2 = backend.append_event(
+            timeline_id, "track.added",
+            {"track_id": "t1", "kind": "visual"},
+            actor=_ACTOR,
+        )
+
+        monkeypatch.setattr(
+            obs_mod, "resolve_timeline_target",
+            lambda *a, **kw: ResolvedTarget(
+                backend="local_fs", timeline_id=timeline_id,
+                timeline_ulid="01J00000000000000000000000",
+                timeline_home=home, slug="rcv-test",
+                backend_name_display="local_fs",
+            ),
+        )
+
+        # Write minimal assembly so projection can work
+        from astrid.core.project.jsonio import write_json_atomic
+        write_json_atomic(
+            home / "assembly.json",
+            {"schema_version": 1, "assembly": {"clips": [], "tracks": [], "pool": {"entries": []}}},
+        )
+
+        result = recover_to_event(
+            "test-project", "rcv-test", e2.event_id,
+            _ACTOR, "contract recovery",
+        )
+
+        assert isinstance(result, RecoveryResult)
+        assert result.anchor_event_id == e2.event_id
+        assert result.anchor_type == "event"
+        assert result.new_version == 3
+
+        events = backend.read_events()
+        assert len(events) == 3
+        assert events[-1].kind == "timeline.recovered"
+
+    def test_recover_refuses_broken_chain(
+        self, local_fs_backend, monkeypatch
+    ):
+        """Recovery refused when chain is broken."""
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline.operations import recover_to_event
+        from astrid.core.timeline.projection import ProjectionError
+
+        backend = local_fs_backend
+        timeline_id = backend.timeline_id
+        home = backend.timeline_home
+
+        e1 = backend.append_event(
+            timeline_id, "clip.added",
+            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            actor=_ACTOR,
+        )
+
+        monkeypatch.setattr(
+            obs_mod, "resolve_timeline_target",
+            lambda *a, **kw: ResolvedTarget(
+                backend="local_fs", timeline_id=timeline_id,
+                timeline_ulid="01J00000000000000000000000",
+                timeline_home=home, slug="rcv-broken",
+                backend_name_display="local_fs",
+            ),
+        )
+
+        # Tamper: append bad event directly to break chain
+        import json
+        events_path = home / "assembly.jsonl"
+        with open(events_path, "a") as f:
+            f.write(
+                json.dumps({
+                    "event_id": "01J0000000000000000000000Y",
+                    "timeline_id": timeline_id,
+                    "ts": "2026-05-21T00:00:00Z",
+                    "actor": {"type": "agent", "id": "x"},
+                    "prev_hash": "wrong-hash",
+                    "hash": "also-wrong",
+                    "kind": "clip.added",
+                    "payload": {"clip_id": "bad", "kind": "visual", "asset_id": "x"},
+                    "schema_version": 2,
+                })
+                + "\n"
+            )
+
+        with pytest.raises(ProjectionError, match="recovery refused"):
+            recover_to_event(
+                "test-project", "rcv-broken", e1.event_id,
+                _ACTOR, "should fail",
+            )
+
+
+class TestSupabaseFakeRecoveryContract:
+    """Contract tests for recovery on SupabaseBackend (fake transport)."""
+
+    def test_recover_to_event_fake_transport(
+        self, supabase_backend_with_fake, fake_supabase_transport, monkeypatch
+    ):
+        """Recover through fake transport appends timeline.recovered."""
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline import eventlog as evlog_mod
+        from astrid.core.timeline import paths as paths_mod
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline.operations import recover_to_event, RecoveryResult
+
+        backend = supabase_backend_with_fake
+        timeline_id = backend.timeline_id
+
+        e1 = backend.append_event(
+            timeline_id, "clip.added",
+            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            actor=_ACTOR,
+        )
+        e2 = backend.append_event(
+            timeline_id, "track.added",
+            {"track_id": "t1", "kind": "audio"},
+            actor=_ACTOR,
+        )
+
+        tl_ulid = "01JSUPABASEBASEEXAMPLE001"
+
+        monkeypatch.setattr(
+            obs_mod, "resolve_timeline_target",
+            lambda *a, **kw: ResolvedTarget(
+                backend="supabase", timeline_id=timeline_id,
+                timeline_ulid=tl_ulid,
+                timeline_home=None, slug="rcv-fake",
+                backend_name_display="supabase",
+            ),
+        )
+        # Inject the fake transport into the backend selection path
+        monkeypatch.setattr(
+            evlog_mod, "build_timeline_backend",
+            lambda stream: backend,
+        )
+        monkeypatch.setattr(
+            evlog_mod, "select_timeline_stream",
+            lambda *a, **kw: (backend, None),
+        )
+        # Also patch timeline_dir to avoid filesystem issues
+        import tempfile
+        tmp_dir = _Path(tempfile.mkdtemp())
+        monkeypatch.setattr(
+            paths_mod, "timeline_dir",
+            lambda project_slug, ulid, root=None: tmp_dir,
+        )
+
+        result = recover_to_event(
+            "test-project", "rcv-fake", e2.event_id,
+            _ACTOR, "fake recovery test",
+        )
+
+        assert isinstance(result, RecoveryResult)
+        assert result.anchor_event_id == e2.event_id
+        assert result.new_version == 3
+
+        events = backend.read_events()
+        assert len(events) == 3
+        assert events[-1].kind == "timeline.recovered"
+
+    def test_recover_refuses_broken_chain_fake(
+        self, supabase_backend_with_fake, fake_supabase_transport, monkeypatch
+    ):
+        """Recovery on fake transport refuses broken chain."""
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline import eventlog as evlog_mod
+        from astrid.core.timeline import paths as paths_mod
+        from astrid.core.timeline.observability import ResolvedTarget
+        from astrid.core.timeline.operations import recover_to_event
+        from astrid.core.timeline.projection import ProjectionError
+
+        backend = supabase_backend_with_fake
+        timeline_id = backend.timeline_id
+
+        e1 = backend.append_event(
+            timeline_id, "clip.added",
+            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            actor=_ACTOR,
+        )
+
+        tl_ulid = "01JSUPABASEBASEEXAMPLE002"
+
+        monkeypatch.setattr(
+            obs_mod, "resolve_timeline_target",
+            lambda *a, **kw: ResolvedTarget(
+                backend="supabase", timeline_id=timeline_id,
+                timeline_ulid=tl_ulid,
+                timeline_home=None, slug="rcv-broken-fake",
+                backend_name_display="supabase",
+            ),
+        )
+        # Inject the fake transport into the backend selection path
+        monkeypatch.setattr(
+            evlog_mod, "build_timeline_backend",
+            lambda stream: backend,
+        )
+        monkeypatch.setattr(
+            evlog_mod, "select_timeline_stream",
+            lambda *a, **kw: (backend, None),
+        )
+        # Also patch timeline_dir to avoid filesystem issues
+        import tempfile
+        tmp_dir = _Path(tempfile.mkdtemp())
+        monkeypatch.setattr(
+            paths_mod, "timeline_dir",
+            lambda project_slug, ulid, root=None: tmp_dir,
+        )
+
+        # Tamper via fake transport
+        fake_supabase_transport.tamper_hash(
+            timeline_id, 0,
+            "deadbeef00000000000000000000000000000000000000000000000000000000",
+        )
+
+        with pytest.raises(ProjectionError, match="recovery refused"):
+            recover_to_event(
+                "test-project", "rcv-broken-fake", e1.event_id,
+                _ACTOR, "should fail",
+            )
