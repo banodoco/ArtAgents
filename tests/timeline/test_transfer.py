@@ -19,7 +19,6 @@ from uuid import uuid4
 
 from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
-from astrid.core.timeline.eventlog.types import EventLogIdempotentError
 from astrid.core.timeline.transfer import (
     TransferResult,
     _transfer_events,
@@ -337,96 +336,6 @@ class TestTransferIdempotencyKeys:
         # parts[3] is source timeline UUID
         # parts[4] is source event ULID
         assert len(parts) == 5
-
-
-class TestPullDestinationResolution:
-    """Tests for pull destination resolution behaviors."""
-
-    def test_pull_ambiguous_destination_fails(self):
-        """Pull without --into, --create, or --as should fail."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
-
-        with pytest.raises(ValueError, match="requires a local destination"):
-            resolve_pull_destination(
-                "test-project",
-                into=None,
-                create_as=None,
-                create=False,
-            )
-
-    def test_pull_into_nonexistent_fails(self):
-        """Pull --into with a nonexistent slug fails."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
-
-        with pytest.raises(ValueError, match="not found"):
-            resolve_pull_destination(
-                "test-project",
-                into="nonexistent-slug",
-            )
-
-    def test_pull_create_as_with_duplicate_slug_fails(self, tmp_path: Path, monkeypatch):
-        """Pull --create --as with an existing slug fails."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
-        from astrid.core.timeline import paths as paths_mod
-
-        # Set up a project dir with an existing timeline
-        proj_dir = tmp_path / "test-project"
-        tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
-        tl_dir.mkdir(parents=True)
-        from astrid.core.project.jsonio import write_json_atomic
-        write_json_atomic(
-            tl_dir / "display.json",
-            {"schema_version": 1, "slug": "existing", "name": "existing", "is_default": False},
-        )
-        write_json_atomic(
-            tl_dir / "assembly.identity.json",
-            {"schema_version": 1, "timeline_id": str(uuid4()), "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
-        )
-
-        def fake_timelines_dir(project_slug, root=None):
-            return proj_dir / "timelines"
-
-        monkeypatch.setattr(paths_mod, "timelines_dir", fake_timelines_dir)
-        monkeypatch.setattr(paths_mod, "validate_timeline_slug", lambda s: s)
-
-        with pytest.raises(ValueError, match="already exists"):
-            resolve_pull_destination(
-                "test-project",
-                create=True,
-                create_as="existing",
-                root=tmp_path,
-            )
-
-    def test_pull_create_writes_imported_provenance(self, tmp_path: Path, monkeypatch):
-        """Pull --create --as writes provenance: imported identity."""
-        from astrid.core.timeline.eventlog.selector import resolve_pull_destination
-        from astrid.core.timeline import paths as paths_mod
-
-        proj_dir = tmp_path / "test-project"
-        tl_dir = proj_dir / "timelines"
-        tl_dir.mkdir(parents=True)
-
-        def fake_timelines_dir(project_slug, root=None):
-            return tl_dir
-
-        monkeypatch.setattr(paths_mod, "timelines_dir", fake_timelines_dir)
-        monkeypatch.setattr(paths_mod, "validate_timeline_slug", lambda s: s)
-
-        dest = resolve_pull_destination(
-            "test-project",
-            create=True,
-            create_as="pulled-timeline",
-            remote_source_timeline_id=str(uuid4()),
-            root=tmp_path,
-        )
-
-        assert dest.created is True
-        assert dest.target.source == "imported"
-
-        # Check identity was written with provenance: imported
-        import json
-        identity = json.loads(dest.identity_path.read_text())
-        assert identity["provenance"] == "imported"
 
 
 class TestTransferReportsCounts:

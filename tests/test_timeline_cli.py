@@ -2499,7 +2499,6 @@ class TestAuditProjectionParityAfterImport:
         to verify the observability plumbing works end-to-end.
         """
         from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
-        from astrid.core.timeline.eventlog.supabase import SupabaseBackend
         from astrid.core.timeline.observability import ResolvedTarget
 
         # Build a fake event that represents an imported timeline

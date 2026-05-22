@@ -17,7 +17,6 @@ import pytest
 
 from astrid.core.timeline.eventlog.types import (
     EventLogError,
-    EventLogIdempotentError,
     EventLogStaleVersionError,
 )
 from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
