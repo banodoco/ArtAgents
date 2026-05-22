@@ -10,10 +10,9 @@ import pytest
 import yaml
 
 from astrid.packs.builtin.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
+from astrid.packs.builtin.training_run.defaults import AI_TOOLKIT_LTX_DEFAULTS, RUNPOD_LTX_DEFAULTS
 import astrid.packs.builtin.training_run.run as training_run_module
 from astrid.packs.builtin.training_run.run import main as training_run_main
-from astrid.packs.seinfeld.aitoolkit_stage.run import HIVEMIND_DEFAULTS
-from astrid.packs.seinfeld.lora_train import run as legacy_lora_train
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_CONFIG = REPO_ROOT / "examples" / "configs" / "training" / "seinfeld-training.yaml"
@@ -75,7 +74,7 @@ class SeinfeldMockCompute:
         self.provision_calls.append(dict(config))
         handle_path = self.tmp_path / "pod_handle.json"
         handle_path.write_text(json.dumps({"pod_id": "pod-seinfeld"}) + "\n", encoding="utf-8")
-        return RunPodHandle("pod-seinfeld", legacy_lora_train.DEFAULT_GPU, metadata={"handle_path": str(handle_path)})
+        return RunPodHandle("pod-seinfeld", RUNPOD_LTX_DEFAULTS["gpu_type"], metadata={"handle_path": str(handle_path)})
 
     def teardown(self, handle: RunPodHandle) -> None:
         self.teardown_calls.append(handle)
@@ -123,28 +122,28 @@ def test_seinfeld_example_config_preserves_legacy_defaults_without_wrapper() -> 
     compute = payload["compute"]
     lora = payload["lora_config"]
 
-    assert compute["image"] == legacy_lora_train.DEFAULT_IMAGE
-    assert compute["ports"] == legacy_lora_train.DEFAULT_PORTS
-    assert compute["storage_name"] == legacy_lora_train.DEFAULT_STORAGE
-    assert compute["gpu_type"] == legacy_lora_train.DEFAULT_GPU
-    assert compute["container_disk_gb"] == legacy_lora_train.DEFAULT_CONTAINER_DISK_GB
-    assert compute["max_runtime_seconds"] == legacy_lora_train.DEFAULT_MAX_RUNTIME
-    assert payload["base_model"] == legacy_lora_train.DEFAULT_BASE_MODEL
+    assert compute["image"] == RUNPOD_LTX_DEFAULTS["image"]
+    assert compute["ports"] == RUNPOD_LTX_DEFAULTS["ports"]
+    assert compute["storage_name"] == "seinfeld-dataset"
+    assert compute["gpu_type"] == RUNPOD_LTX_DEFAULTS["gpu_type"]
+    assert compute["container_disk_gb"] == RUNPOD_LTX_DEFAULTS["container_disk_gb"]
+    assert compute["max_runtime_seconds"] == RUNPOD_LTX_DEFAULTS["max_runtime_seconds"]
+    assert payload["base_model"] == AI_TOOLKIT_LTX_DEFAULTS["base_model_default"]
     assert lora["lora_id"] == "seinfeld-scene-v1"
-    assert lora["trigger_word"] == HIVEMIND_DEFAULTS["trigger_word"]
-    assert lora["rank"] == HIVEMIND_DEFAULTS["rank"]
-    assert lora["alpha"] == HIVEMIND_DEFAULTS["rank"]
-    assert lora["steps"] == HIVEMIND_DEFAULTS["steps_default"]
-    assert lora["learning_rate"] == HIVEMIND_DEFAULTS["lr"]
-    assert lora["seed"] == HIVEMIND_DEFAULTS["seed_default"]
-    assert lora["width"] == HIVEMIND_DEFAULTS["resolution"]
+    assert lora["trigger_word"] == "seinfeld scene"
+    assert lora["rank"] == AI_TOOLKIT_LTX_DEFAULTS["rank"]
+    assert lora["alpha"] == AI_TOOLKIT_LTX_DEFAULTS["rank"]
+    assert lora["steps"] == AI_TOOLKIT_LTX_DEFAULTS["steps_default"]
+    assert lora["learning_rate"] == AI_TOOLKIT_LTX_DEFAULTS["learning_rate"]
+    assert lora["seed"] == AI_TOOLKIT_LTX_DEFAULTS["seed_default"]
+    assert lora["width"] == AI_TOOLKIT_LTX_DEFAULTS["resolution"]
     assert lora["height"] == 768
-    assert lora["num_frames"] == HIVEMIND_DEFAULTS["num_frames"]
-    assert lora["fps"] == HIVEMIND_DEFAULTS["fps"]
-    assert lora["batch_size"] == HIVEMIND_DEFAULTS["batch_size"]
-    assert lora["gradient_accumulation_steps"] == HIVEMIND_DEFAULTS["grad_accum"]
-    assert lora["save_every"] == HIVEMIND_DEFAULTS["save_every"]
-    assert lora["sample_every"] == HIVEMIND_DEFAULTS["sample_every"]
+    assert lora["num_frames"] == AI_TOOLKIT_LTX_DEFAULTS["num_frames"]
+    assert lora["fps"] == AI_TOOLKIT_LTX_DEFAULTS["fps"]
+    assert lora["batch_size"] == AI_TOOLKIT_LTX_DEFAULTS["batch_size"]
+    assert lora["gradient_accumulation_steps"] == AI_TOOLKIT_LTX_DEFAULTS["gradient_accumulation_steps"]
+    assert lora["save_every"] == AI_TOOLKIT_LTX_DEFAULTS["save_every"]
+    assert lora["sample_every"] == AI_TOOLKIT_LTX_DEFAULTS["sample_every"]
     assert not (REPO_ROOT / "astrid" / "packs" / "seinfeld" / "training_run").exists()
     assert not (REPO_ROOT / "astrid" / "packs" / "seinfeld" / "builtin_training_run").exists()
 
@@ -171,25 +170,29 @@ def test_seinfeld_config_dry_run_emits_equivalent_ai_toolkit_config(tmp_path: Pa
     process = generated["config"]["process"][0]
     payload = _example_payload()
 
-    assert process["trigger_word"] == HIVEMIND_DEFAULTS["trigger_word"]
-    assert process["network"] == {"type": "lora", "linear": HIVEMIND_DEFAULTS["rank"], "linear_alpha": HIVEMIND_DEFAULTS["rank"]}
-    assert process["save"]["save_every"] == HIVEMIND_DEFAULTS["save_every"]
+    assert process["trigger_word"] == "seinfeld scene"
+    assert process["network"] == {
+        "type": "lora",
+        "linear": AI_TOOLKIT_LTX_DEFAULTS["rank"],
+        "linear_alpha": AI_TOOLKIT_LTX_DEFAULTS["rank"],
+    }
+    assert process["save"]["save_every"] == AI_TOOLKIT_LTX_DEFAULTS["save_every"]
     assert process["datasets"][0]["folder_path"] == "/workspace/dataset"
-    assert process["datasets"][0]["resolution"] == [HIVEMIND_DEFAULTS["resolution"], 768]
-    assert process["datasets"][0]["num_frames"] == HIVEMIND_DEFAULTS["num_frames"]
-    assert process["datasets"][0]["fps"] == HIVEMIND_DEFAULTS["fps"]
-    assert process["train"]["batch_size"] == HIVEMIND_DEFAULTS["batch_size"]
-    assert process["train"]["steps"] == HIVEMIND_DEFAULTS["steps_default"]
-    assert process["train"]["gradient_accumulation_steps"] == HIVEMIND_DEFAULTS["grad_accum"]
-    assert process["train"]["lr"] == HIVEMIND_DEFAULTS["lr"]
-    assert process["train"]["seed"] == HIVEMIND_DEFAULTS["seed_default"]
-    assert process["model"]["name_or_path"] == legacy_lora_train.DEFAULT_BASE_MODEL
+    assert process["datasets"][0]["resolution"] == [AI_TOOLKIT_LTX_DEFAULTS["resolution"], 768]
+    assert process["datasets"][0]["num_frames"] == AI_TOOLKIT_LTX_DEFAULTS["num_frames"]
+    assert process["datasets"][0]["fps"] == AI_TOOLKIT_LTX_DEFAULTS["fps"]
+    assert process["train"]["batch_size"] == AI_TOOLKIT_LTX_DEFAULTS["batch_size"]
+    assert process["train"]["steps"] == AI_TOOLKIT_LTX_DEFAULTS["steps_default"]
+    assert process["train"]["gradient_accumulation_steps"] == AI_TOOLKIT_LTX_DEFAULTS["gradient_accumulation_steps"]
+    assert process["train"]["lr"] == AI_TOOLKIT_LTX_DEFAULTS["learning_rate"]
+    assert process["train"]["seed"] == AI_TOOLKIT_LTX_DEFAULTS["seed_default"]
+    assert process["model"]["name_or_path"] == AI_TOOLKIT_LTX_DEFAULTS["base_model_default"]
     assert process["model"]["is_ltx"] is True
-    assert process["sample"]["sample_every"] == HIVEMIND_DEFAULTS["sample_every"]
-    assert process["sample"]["width"] == HIVEMIND_DEFAULTS["resolution"]
+    assert process["sample"]["sample_every"] == AI_TOOLKIT_LTX_DEFAULTS["sample_every"]
+    assert process["sample"]["width"] == AI_TOOLKIT_LTX_DEFAULTS["resolution"]
     assert process["sample"]["height"] == 768
-    assert process["sample"]["num_frames"] == HIVEMIND_DEFAULTS["num_frames"]
-    assert process["sample"]["fps"] == HIVEMIND_DEFAULTS["fps"]
+    assert process["sample"]["num_frames"] == AI_TOOLKIT_LTX_DEFAULTS["num_frames"]
+    assert process["sample"]["fps"] == AI_TOOLKIT_LTX_DEFAULTS["fps"]
     assert process["sample"]["prompts"] == payload["checkpoint"]["sample_prompts"]
     assert generated["meta"]["name"] == "seinfeld-scene-v1"
     assert generated["meta"]["review_labels"] == payload["checkpoint"]["review_labels"]

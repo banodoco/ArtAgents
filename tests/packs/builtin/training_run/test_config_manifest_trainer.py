@@ -65,6 +65,15 @@ def test_manifest_normalization_accepts_valid_input_and_fails_on_missing_files(
     with pytest.raises(TrainingManifestError, match="clip_file missing"):
         normalize_ai_toolkit_manifest(missing_manifest, tmp_path / "bad-run")
 
+    missing_caption_manifest = tmp_path / "missing-caption.json"
+    missing_caption_manifest.write_text(
+        json.dumps({"clips": [{"clip_id": "clip_003", "clip_file": str(clip)}]}),
+        encoding="utf-8",
+    )
+    caption.unlink()
+    with pytest.raises(TrainingManifestError, match="inferred caption sidecar missing"):
+        normalize_ai_toolkit_manifest(missing_caption_manifest, tmp_path / "bad-caption-run")
+
 
 def test_trainer_adapter_generates_config_and_generic_python_omits_seinfeld_literals(
     tmp_path: Path,

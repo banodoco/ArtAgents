@@ -50,9 +50,9 @@ python3 -m astrid.packs.builtin.training_run.run \
 ## Seinfeld Example
 
 `examples/configs/training/seinfeld-training.yaml` carries the current Seinfeld
-LoRA defaults as config for `builtin.training_run`. The existing
-`seinfeld.lora_train` path is intentionally preserved for M3; removing or
-migrating that pack-specific path is deferred to a later milestone.
+LoRA defaults as config for `builtin.training_run`. Historical Seinfeld pack
+notes are archived under `docs/examples/seinfeld/`; active runs should use this
+built-in orchestrator and explicit example config.
 
 ## Live Run
 

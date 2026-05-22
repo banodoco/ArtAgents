@@ -38,7 +38,7 @@ schema, the name defaults to `"response"` and strict defaults to true.
 
 - **VLM bucket-judge / caption with locked vocab.** Generate a schema whose
   fields are enums over your vocabulary file; the model can't emit
-  out-of-vocab tokens. This is how `seinfeld.dataset_build` enforces
+  out-of-vocab tokens. This is how dataset-build configs can enforce
   caption-template adherence without a project-specific VLM wrapper.
 - **One-off image questions.** Skip `--response-schema` and use the free-text
   mode.

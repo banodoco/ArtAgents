@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://astrid.builtin-training/schemas/ai-toolkit-adapter-manifest.schema.json",
   "title": "AI-Toolkit Adapter Manifest",
-  "description": "The flat 'clips' shape expected by seinfeld.lora_train preflight and ai-toolkit staging. This is what the 'ai-toolkit-ltx' manifest adapter exports from the canonical manifest.",
+  "description": "The flat 'clips' shape expected by builtin.training_run preflight and ai-toolkit staging. This is what the 'ai-toolkit-ltx' manifest adapter exports from the canonical manifest.",
   "type": "object",
   "required": ["clips"],
   "additionalProperties": false,
