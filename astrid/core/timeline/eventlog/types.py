@@ -113,6 +113,17 @@ class SupabaseEventLogOptions:
     rpc_append_name: str = "append_timeline_event"
 
 
+class EventLogIdempotentError(EventLogError):
+    """Raised when an idempotent import succeeds (event already exists)."""
+
+    def __init__(self, existing_event_id: str) -> None:
+        self.existing_event_id = existing_event_id
+        super().__init__(
+            f"import already exists (destination event {existing_event_id}); "
+            f"this is a success, not a failure — callers should unwrap and return the existing event"
+        )
+
+
 @dataclass(frozen=True)
 class AppendEventRequest:
     kind: str
@@ -120,6 +131,15 @@ class AppendEventRequest:
     actor: TimelineActor
     expected_version: int | None = None
     txn_id: str | None = None
+
+
+@dataclass(frozen=True)
+class ImportEventRequest:
+    """Request to import a source event into a destination backend."""
+
+    source_event: "TimelineEvent"  # forward-ref; resolved at runtime
+    idempotency_key: str
+    actor: "TimelineActor"
 
 
 # ============================================================================

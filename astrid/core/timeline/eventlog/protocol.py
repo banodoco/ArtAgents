@@ -22,6 +22,15 @@ class SupabaseEventLogTransport(Protocol):
         txn_id: str | None = None,
     ) -> object: ...
 
+    def append_imported_event(
+        self,
+        *,
+        timeline_id: str,
+        source_event: TimelineEvent,
+        idempotency_key: str,
+        actor: TimelineActor,
+    ) -> object: ...
+
     def read_events(
         self,
         *,
@@ -33,6 +42,16 @@ class SupabaseEventLogTransport(Protocol):
     def head(self, *, timeline_id: str) -> object: ...
 
     def verify_chain(self, *, timeline_id: str) -> object: ...
+
+    def repair_erasure(
+        self,
+        *,
+        timeline_id: str,
+        target_event_ids: list[str],
+        reason: str,
+        erased_by: str,
+        policy_ref: str | None = None,
+    ) -> object: ...
 
 
 class EventLogBackend(Protocol):
@@ -88,6 +107,45 @@ class EventLogBackend(Protocol):
 
         Returns:
             The fully-materialized ``TimelineEvent`` as stored.
+        """
+        ...
+
+    def append_imported_event(
+        self,
+        timeline_id: str,
+        source_event: TimelineEvent,
+        *,
+        idempotency_key: str,
+        actor: TimelineActor,
+    ) -> TimelineEvent:
+        """Import a source event into the destination with idempotency.
+
+        Creates a **destination-native** event whose ID, version, hash,
+        and prev_hash are materialised locally.  The source event identity
+        is preserved **only** in the import metadata fields
+        (``source_backend``, ``source_timeline_id``, ``source_event_id``,
+        ``source_version``, ``source_hash``) and in the idempotency state
+        keyed by ``idempotency_key``.
+
+        Idempotency keys are deterministic and follow the form:
+        ``transfer:<direction>:<source-backend>:<source-timeline-id>:<source-event-id>``
+
+        Retrying the same key after a successful import returns the
+        already-appended destination event without creating a duplicate.
+
+        Raises ``EventLogError`` when the stream is deleted,
+        ``EventLogStaleVersionError`` when a CAS guard embedded in the
+        idempotency state fails, and ``EventLogTransportError`` when
+        the chain verification step fails.
+
+        Args:
+            timeline_id: UUID that identifies the target timeline.
+            source_event: Validated source event envelope to import.
+            idempotency_key: Deterministic deduplication key.
+            actor: Who performed the import.
+
+        Returns:
+            The fully-materialized destination-native ``TimelineEvent``.
         """
         ...
 

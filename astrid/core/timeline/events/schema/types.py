@@ -20,6 +20,10 @@ TimelineEventKind = Literal[
     "timeline.tombstoned",
     "timeline.deleted",
     "timeline.imported",
+    "timeline.recovered",
+    "timeline.reverted",
+    "timeline.branched_from",
+    "timeline.erased",
     "clip.added",
     "clip.removed",
     "clip.moved",
@@ -716,6 +720,166 @@ class ArrangementReplacedPayload:
         return {"arrangement": dict(self.arrangement)}
 
 
+# ---------------------------------------------------------------------------
+# recovery / lifecycle / erasure payload models
+# ---------------------------------------------------------------------------
+
+_ERASED_PAYLOAD_FIELDS = frozenset({"erased", "reason", "erased_at", "erased_by", "policy_ref"})
+
+
+@dataclass(frozen=True)
+class ErasedPayload:
+    """Canonical erased envelope for any event kind whose payload has been erased.
+
+    This replaces the original domain payload of affected historical events.
+    It is accepted by ``TimelineEvent.from_dict()`` for **any** event kind
+    before per-kind coercion runs.
+    """
+
+    erased: Literal[True]
+    reason: str
+    erased_at: str
+    erased_by: str
+    policy_ref: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.erased is not True:
+            raise TimelineEventSchemaError("erased must be True")
+        _require_nonempty_str(self.reason, "payload.reason")
+        _require_nonempty_str(self.erased_at, "payload.erased_at")
+        _require_nonempty_str(self.erased_by, "payload.erased_by")
+        if self.policy_ref is not None:
+            _require_nonempty_str(self.policy_ref, "payload.policy_ref")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "erased": True,
+            "reason": self.reason,
+            "erased_at": self.erased_at,
+            "erased_by": self.erased_by,
+        }
+        if self.policy_ref is not None:
+            result["policy_ref"] = self.policy_ref
+        return result
+
+
+@dataclass(frozen=True)
+class TimelineRecoveredPayload:
+    anchor_event_id: str
+    anchor_type: Literal["event", "snapshot"]
+    reason: str
+    projected_state_summary: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.anchor_event_id, "payload.anchor_event_id")
+        if self.anchor_type not in {"event", "snapshot"}:
+            raise TimelineEventSchemaError("payload.anchor_type must be 'event' or 'snapshot'")
+        _require_nonempty_str(self.reason, "payload.reason")
+        if self.projected_state_summary is not None:
+            _validate_jsonable(self.projected_state_summary, "payload.projected_state_summary")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "anchor_event_id": self.anchor_event_id,
+            "anchor_type": self.anchor_type,
+            "reason": self.reason,
+        }
+        if self.projected_state_summary is not None:
+            result["projected_state_summary"] = dict(self.projected_state_summary)
+        return result
+
+
+@dataclass(frozen=True)
+class TimelineRevertedPayload:
+    target_event_id: str
+    reason: str
+    before_projection: dict[str, Any] | None = None
+    after_projection: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.target_event_id, "payload.target_event_id")
+        _require_nonempty_str(self.reason, "payload.reason")
+        if self.before_projection is not None:
+            _validate_jsonable(self.before_projection, "payload.before_projection")
+        if self.after_projection is not None:
+            _validate_jsonable(self.after_projection, "payload.after_projection")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "target_event_id": self.target_event_id,
+            "reason": self.reason,
+        }
+        if self.before_projection is not None:
+            result["before_projection"] = dict(self.before_projection)
+        if self.after_projection is not None:
+            result["after_projection"] = dict(self.after_projection)
+        return result
+
+
+@dataclass(frozen=True)
+class TimelineBranchedFromPayload:
+    branch_timeline_id: str
+    anchor_event_id: str
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        _require_uuid_str(self.branch_timeline_id, "payload.branch_timeline_id")
+        _require_nonempty_str(self.anchor_event_id, "payload.anchor_event_id")
+        if self.reason is not None:
+            _require_nonempty_str(self.reason, "payload.reason")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "branch_timeline_id": self.branch_timeline_id,
+            "anchor_event_id": self.anchor_event_id,
+        }
+        if self.reason is not None:
+            result["reason"] = self.reason
+        return result
+
+
+@dataclass(frozen=True)
+class TimelineErasedPayload:
+    """Audit/control event payload for ``timeline.erased``.
+
+    This is the control event that describes the erasure operation,
+    not the erased envelope that replaces affected historical payloads.
+    """
+
+    selector_summary: dict[str, Any]
+    reason: str
+    affected_count: int
+    policy_ref: str | None = None
+    affected_event_ids: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        _validate_jsonable(self.selector_summary, "payload.selector_summary")
+        _require_nonempty_str(self.reason, "payload.reason")
+        if not isinstance(self.affected_count, int) or isinstance(self.affected_count, bool):
+            raise TimelineEventSchemaError("payload.affected_count must be an integer")
+        if self.affected_count < 0:
+            raise TimelineEventSchemaError("payload.affected_count must be >= 0")
+        if self.policy_ref is not None:
+            _require_nonempty_str(self.policy_ref, "payload.policy_ref")
+        if self.affected_event_ids is not None:
+            if not isinstance(self.affected_event_ids, list):
+                raise TimelineEventSchemaError("payload.affected_event_ids must be a list when present")
+            for idx, eid in enumerate(self.affected_event_ids):
+                _require_nonempty_str(eid, f"payload.affected_event_ids[{idx}]")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "selector_summary": dict(self.selector_summary),
+            "reason": self.reason,
+            "affected_count": self.affected_count,
+        }
+        if self.policy_ref is not None:
+            result["policy_ref"] = self.policy_ref
+        if self.affected_event_ids is not None:
+            result["affected_event_ids"] = list(self.affected_event_ids)
+        return result
+
+
 PayloadModel = (
     TimelineCreatedPayload
     | TimelineRenamedPayload
@@ -723,6 +887,11 @@ PayloadModel = (
     | TimelineTombstonedPayload
     | TimelineDeletedPayload
     | TimelineImportedPayload
+    | TimelineRecoveredPayload
+    | TimelineRevertedPayload
+    | TimelineBranchedFromPayload
+    | TimelineErasedPayload
+    | ErasedPayload
     | ClipAddedPayload
     | ClipRemovedPayload
     | ClipMovedPayload
@@ -756,6 +925,10 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "timeline.tombstoned": TimelineTombstonedPayload,
     "timeline.deleted": TimelineDeletedPayload,
     "timeline.imported": TimelineImportedPayload,
+    "timeline.recovered": TimelineRecoveredPayload,
+    "timeline.reverted": TimelineRevertedPayload,
+    "timeline.branched_from": TimelineBranchedFromPayload,
+    "timeline.erased": TimelineErasedPayload,
     "clip.added": ClipAddedPayload,
     "clip.removed": ClipRemovedPayload,
     "clip.moved": ClipMovedPayload,
@@ -789,7 +962,41 @@ def payload_to_json_obj(payload: PayloadModel | dict[str, Any]) -> dict[str, Any
     return payload.to_json_obj()
 
 
+def _is_erased_payload_dict(payload: object) -> bool:
+    """Return True when *payload* is a dict whose ``erased`` key is truthy."""
+    return isinstance(payload, dict) and bool(payload.get("erased"))
+
+
+def _has_mixed_erased_and_domain_fields(payload: dict[str, Any]) -> bool:
+    """Return True when *payload* mixes erased-envelope keys with domain-specific keys."""
+    erased_keys = _ERASED_PAYLOAD_FIELDS
+    extra_keys = set(payload.keys()) - erased_keys
+    return len(extra_keys) > 0
+
+
 def coerce_payload(kind: str, payload: PayloadModel | dict[str, Any]) -> PayloadModel:
+    # ------------------------------------------------------------------
+    # Erased payload envelope: accepted for ANY event kind (including
+    # timeline.erased itself) BEFORE per-kind coercion.
+    # ------------------------------------------------------------------
+    if isinstance(payload, ErasedPayload):
+        return payload
+    if _is_erased_payload_dict(payload):
+        assert isinstance(payload, dict)
+        if _has_mixed_erased_and_domain_fields(payload):
+            raise TimelineEventSchemaError(
+                "erased payload must not include domain-specific fields; "
+                "only erased, reason, erased_at, erased_by, and optional policy_ref are allowed"
+            )
+        return ErasedPayload(
+            erased=True,
+            reason=payload["reason"],
+            erased_at=payload["erased_at"],
+            erased_by=payload["erased_by"],
+            policy_ref=payload.get("policy_ref"),
+        )
+
+    # Normal per-kind coercion
     model_type = _PAYLOAD_TYPES.get(kind)
     if model_type is None:
         raise TimelineEventSchemaError(f"unsupported event kind: {kind}")
@@ -817,6 +1024,12 @@ class TimelineEvent:
     expected_version: int | None = None
     schema_version: int = EVENT_SCHEMA_VERSION
     txn_id: str | None = None
+    # --- import metadata (cross-backend transfer provenance) ---
+    source_backend: str | None = None
+    source_timeline_id: str | None = None
+    source_event_id: str | None = None
+    source_version: int | None = None
+    source_hash: str | None = None
 
     def __post_init__(self) -> None:
         _require_ulid_str(self.event_id, "event_id")
@@ -828,7 +1041,7 @@ class TimelineEvent:
             _require_nonempty_str(self.prev_hash, "prev_hash")
         if self.hash is not None:
             _require_nonempty_str(self.hash, "hash")
-        if self.kind not in _PAYLOAD_TYPES:
+        if self.kind not in _PAYLOAD_TYPES and not isinstance(self.payload, ErasedPayload):
             raise TimelineEventSchemaError(f"unsupported event kind: {self.kind}")
         object.__setattr__(self, "payload", coerce_payload(self.kind, self.payload))
         if self.expected_version is not None and (
@@ -841,9 +1054,21 @@ class TimelineEvent:
             )
         if self.txn_id is not None:
             _require_ulid_str(self.txn_id, "txn_id")
+        # Validate import metadata fields when present
+        if self.source_backend is not None:
+            _require_nonempty_str(self.source_backend, "source_backend")
+        if self.source_timeline_id is not None:
+            _require_uuid_str(self.source_timeline_id, "source_timeline_id")
+        if self.source_event_id is not None:
+            _require_nonempty_str(self.source_event_id, "source_event_id")
+        if self.source_version is not None:
+            if not isinstance(self.source_version, int) or isinstance(self.source_version, bool):
+                raise TimelineEventSchemaError("source_version must be an integer when present")
+        if self.source_hash is not None:
+            _require_nonempty_str(self.source_hash, "source_hash")
 
     def to_json_obj(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "event_id": self.event_id,
             "timeline_id": self.timeline_id,
             "ts": self.ts,
@@ -856,6 +1081,17 @@ class TimelineEvent:
             "schema_version": self.schema_version,
             "txn_id": self.txn_id,
         }
+        if self.source_backend is not None:
+            result["source_backend"] = self.source_backend
+        if self.source_timeline_id is not None:
+            result["source_timeline_id"] = self.source_timeline_id
+        if self.source_event_id is not None:
+            result["source_event_id"] = self.source_event_id
+        if self.source_version is not None:
+            result["source_version"] = self.source_version
+        if self.source_hash is not None:
+            result["source_hash"] = self.source_hash
+        return result
 
     @classmethod
     def new(
@@ -869,6 +1105,11 @@ class TimelineEvent:
         prev_hash: str | None = None,
         expected_version: int | None = None,
         txn_id: str | None = None,
+        source_backend: str | None = None,
+        source_timeline_id: str | None = None,
+        source_event_id: str | None = None,
+        source_version: int | None = None,
+        source_hash: str | None = None,
     ) -> "TimelineEvent":
         return cls(
             event_id=generate_event_ulid(),
@@ -881,6 +1122,11 @@ class TimelineEvent:
             payload=payload,
             expected_version=expected_version,
             txn_id=txn_id,
+            source_backend=source_backend,
+            source_timeline_id=source_timeline_id,
+            source_event_id=source_event_id,
+            source_version=source_version,
+            source_hash=source_hash,
         )
 
     @classmethod
@@ -899,4 +1145,9 @@ class TimelineEvent:
             expected_version=raw.get("expected_version"),  # type: ignore[arg-type]
             schema_version=raw.get("schema_version", EVENT_SCHEMA_VERSION),  # type: ignore[arg-type]
             txn_id=raw.get("txn_id"),  # type: ignore[arg-type]
+            source_backend=raw.get("source_backend"),  # type: ignore[arg-type]
+            source_timeline_id=raw.get("source_timeline_id"),  # type: ignore[arg-type]
+            source_event_id=raw.get("source_event_id"),  # type: ignore[arg-type]
+            source_version=raw.get("source_version"),  # type: ignore[arg-type]
+            source_hash=raw.get("source_hash"),  # type: ignore[arg-type]
         )

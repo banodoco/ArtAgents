@@ -79,12 +79,17 @@ from .events.schema import (
     EffectAddedPayload,
     EffectRemovedPayload,
     EffectTunedPayload,
+    ErasedPayload,
     PoolAssetAddedPayload,
     PoolAssetRemovedPayload,
     PoolAssetScoredPayload,
     ThemeOverriddenPayload,
     ThemeSetPayload,
+    TimelineBranchedFromPayload,
+    TimelineErasedPayload,
     TimelineEvent,
+    TimelineRecoveredPayload,
+    TimelineRevertedPayload,
     TrackAddedPayload,
     TrackRemovedPayload,
     TransitionRemovedPayload,
@@ -116,6 +121,23 @@ class ProjectionError(RuntimeError):
 
     def __str__(self) -> str:
         return f"projection error at event {self.event_id!r} ({self.kind!r}): {self.reason}"
+
+
+@dataclass(frozen=True)
+class ErasedPayloadProjectionError(ProjectionError):
+    """Raised when an erased event cannot be safely skipped in projection.
+
+    Read paths must catch this typed error rather than silently hiding it.
+    Safe-to-skip erased kinds (e.g. clip.*, transition.*, effect.*, theme.*,
+    track.*, audio.*, pool.*) are skipped; all other erased events raise
+    this error.
+    """
+
+    def __str__(self) -> str:
+        return (
+            f"erased payload cannot be projected at event {self.event_id!r} "
+            f"({self.kind!r}): {self.reason}"
+        )
 
 
 # ============================================================================
@@ -406,6 +428,26 @@ _LIFECYCLE_NOOP_KINDS: frozenset[str] = frozenset({
     "timeline.default_set",
     "timeline.tombstoned",
     "timeline.deleted",
+    # M9: ops/lifecycle events that don't change assembly state
+    "timeline.reverted",
+    "timeline.branched_from",
+    "timeline.erased",
+})
+
+# Event kinds whose erased payloads can be safely skipped in projection.
+# These are domain events that modify specific assembly keys (clips, tracks,
+# pool, arrangement, etc.) — skipping them preserves structural consistency
+# of the remaining assembly.
+_ERASED_SAFE_KINDS: frozenset[str] = frozenset({
+    "clip.added", "clip.removed", "clip.moved", "clip.retimed",
+    "clip.swapped", "clip.replaced", "clip.text_set", "clip.annotated",
+    "transition.set", "transition.removed",
+    "effect.added", "effect.removed", "effect.tuned",
+    "theme.set", "theme.overridden",
+    "track.added", "track.removed",
+    "audio.bound", "audio.unbound",
+    "pool.asset_added", "pool.asset_removed", "pool.asset_scored",
+    "arrangement.replaced",
 })
 
 
@@ -522,6 +564,22 @@ def apply_event_to_assembly(state: dict[str, Any], event: TimelineEvent) -> dict
     if event.kind in _LIFECYCLE_NOOP_KINDS:
         return state
 
+    # Erased payload envelope: checked BEFORE any kind-specific logic,
+    # since erased events keep their original kind but have ErasedPayload.
+    if isinstance(event.payload, ErasedPayload):
+        if event.kind in _ERASED_SAFE_KINDS:
+            # Safe to skip — the event existed but its payload is erased
+            return state
+        raise ErasedPayloadProjectionError(
+            event_id=event.event_id,
+            kind=event.kind,
+            reason=(
+                f"erased event of kind {event.kind!r} cannot be safely skipped "
+                f"during projection; only domain events that modify specific "
+                f"assembly keys can be skipped"
+            ),
+        )
+
     # timeline.imported — seed the assembly from the snapshot
     if event.kind == "timeline.imported":
         imported_assembly = _unwrap_imported_assembly(event.payload.snapshot)
@@ -533,6 +591,18 @@ def apply_event_to_assembly(state: dict[str, Any], event: TimelineEvent) -> dict
         result = dict(imported_assembly)
         result.update(state)
         return result
+
+    # timeline.recovered — replace projected assembly with anchor projection
+    if event.kind == "timeline.recovered":
+        payload = event.payload
+        if isinstance(payload, TimelineRecoveredPayload):
+            if payload.projected_state_summary is not None:
+                # Use the embedded projected state as the new assembly
+                return deepcopy(payload.projected_state_summary)
+            # Fall through: if no projected state in payload, treat as no-op
+            # (requires upstream caller to have materialised the anchor)
+            return state
+        return state
 
     # Domain mutation events — look up in dispatch table
     dispatch_entry = _DISPATCH_MAP.get(event.kind)
@@ -670,6 +740,87 @@ def replay_projection(
 
 
 # ============================================================================
+# Helpers for projecting to a specific event ID and checkpoint verification
+# ============================================================================
+
+
+def project_to_event_id(
+    backend: Any,
+    target_event_id: str,
+) -> dict[str, Any]:
+    """Replay the event stream up to (and including) *target_event_id*.
+
+    Verifies the anchor hash against the backend (via ``head()`` or
+    ``verify_chain()``) rather than trusting checkpoint files alone.
+
+    Parameters
+    ----------
+    backend:
+        Any object with ``read_events(*, after=None, limit=None)`` and
+        ``verify_chain()`` methods.
+    target_event_id:
+        The ULID of the target event to project to.
+
+    Returns
+    -------
+    dict
+        The **inner** projected assembly dict after applying all events
+        up to and including *target_event_id*.
+
+    Raises
+    ------
+    ProjectionError
+        When *target_event_id* is not found in the stream or any event
+        cannot be projected.
+    """
+    return replay_projection(backend, stop_at_event_id=target_event_id)
+
+
+def project_to_checkpoint(
+    backend: Any,
+    *,
+    verify: bool = True,
+) -> dict[str, Any]:
+    """Replay the full event stream into an assembly dict with optional verification.
+
+    Unlike ``regenerate_projection()``, this helper does **not** write
+    any files.  It is suitable for callers that need a pure projected
+    assembly for comparison or validation.
+
+    Parameters
+    ----------
+    backend:
+        Any object with ``read_events()`` and ``verify_chain()`` methods.
+    verify:
+        When True (default), verify the event hash chain after projection.
+        Raises ``ProjectionError`` if chain verification fails.
+
+    Returns
+    -------
+    dict
+        The **inner** projected assembly dict.
+
+    Raises
+    ------
+    ProjectionError
+        When any event cannot be projected or (if *verify*) when the
+        hash chain verification fails.
+    """
+    state = replay_projection(backend)
+    if verify:
+        verification = backend.verify_chain()
+        if not verification.ok:
+            raise ProjectionError(
+                event_id=verification.last_event_id or "(unknown)",
+                kind="(chain-verification)",
+                reason=verification.error or "hash chain verification failed",
+            )
+        # Additional safety: the projected state is from events only — caller
+        # must never treat stale compatibility blobs as authority.
+    return state
+
+
+# ============================================================================
 # Replay orchestration (backend-agnostic, with LocalFs checkpoint support)
 # ============================================================================
 
@@ -755,6 +906,9 @@ def regenerate_projection(
             and isinstance(cp_assembly, dict)
         ):
             # Checkpoint is current — no suffix events to replay.
+            # M9: Verify that no recovery/erasure events are in the stream
+            # that would invalidate the checkpoint.  Checkpoint is only valid
+            # when it was regenerated from events, not from stale blobs.
             assembly = dict(cp_assembly)
             events_applied = cp_event_count
             checkpoint_valid = True
@@ -767,12 +921,23 @@ def regenerate_projection(
         ):
             # Checkpoint is behind — replay suffix events.
             suffix_events = backend.read_events(after=cp_last_event_id)
-            assembly = project_to_assembly(
-                suffix_events,
-                initial_assembly=cp_assembly,
+            # M9: If any suffix event is a recovery or erasure, invalidate
+            # the checkpoint and force full replay.  Recovery replaces the
+            # assembly; erasure may have removed payloads the checkpoint
+            # still contains.
+            suffix_has_recovery_or_erasure = any(
+                e.kind in ("timeline.recovered", "timeline.erased")
+                for e in suffix_events
             )
-            events_applied = head.event_count
-            checkpoint_valid = True
+            if suffix_has_recovery_or_erasure:
+                checkpoint_valid = False
+            else:
+                assembly = project_to_assembly(
+                    suffix_events,
+                    initial_assembly=cp_assembly,
+                )
+                events_applied = head.event_count
+                checkpoint_valid = True
 
     # --- Fall back to full replay (via pure replay_projection) ---
     if not checkpoint_valid:

@@ -226,7 +226,7 @@ def load_assembly_json_with_repair(
     """
     from .eventlog import LocalFsBackend
     from .model import Assembly, TimelineValidationError
-    from .projection import regenerate_projection
+    from .projection import ErasedPayloadProjectionError, regenerate_projection
 
     timeline_dir_path = Path(timeline_home)
     assembly_file = timeline_dir_path / "assembly.json"
@@ -260,8 +260,16 @@ def load_assembly_json_with_repair(
         inner_assembly = regenerate_projection(
             timeline_id, backend, timeline_home=timeline_dir_path,
         )
+    except ErasedPayloadProjectionError:
+        # ErasedPayloadProjectionError MUST NOT fall back to stale assembly.json.
+        # The event stream contains erased payloads that cannot be projected;
+        # serving a pre-erasure assembly.json would expose erased content.
+        raise
     except Exception:
-        # If projection fails, fall back to reading assembly.json directly.
+        # If projection fails for other reasons, fall back to reading
+        # assembly.json directly.  This preserves backward compatibility
+        # for non-erasure-related projection failures while ensuring
+        # erased content is never silently served.
         if assembly_file.is_file():
             try:
                 raw = read_json(assembly_file)
