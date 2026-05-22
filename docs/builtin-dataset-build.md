@@ -7,7 +7,7 @@
 Run a no-network fixture smoke path:
 
 ```bash
-python3 -m astrid.packs.builtin.dataset_build.run \
+python3 -m astrid orchestrators run builtin.dataset_build -- \
   --config fixtures/builtin-training/dataset-config.json \
   --out runs/builtin-training-fixture \
   --review-decisions fixtures/builtin-training/review-decisions.json
@@ -17,14 +17,14 @@ Run the Seinfeld example after replacing source URLs and providing the required 
 
 ```bash
 OPENAI_API_KEY=... \
-python3 -m astrid.packs.builtin.dataset_build.run \
+python3 -m astrid orchestrators run builtin.dataset_build -- \
   --config examples/configs/dataset/seinfeld-dataset.yaml \
   --out runs/seinfeld-dataset
 ```
 
 For unattended runs, pass `--review-decisions <json>`. Without that flag, the orchestrator starts `builtin.human_review` with the generic review UI and waits for submit.
 
-## Migration From `seinfeld.dataset_build`
+## Migration From The Historical Seinfeld Dataset Builder
 
 Use `examples/configs/dataset/seinfeld-dataset.yaml` as the migration template. Show-specific behavior now belongs in config:
 
@@ -36,6 +36,11 @@ Use `examples/configs/dataset/seinfeld-dataset.yaml` as the migration template. 
 - training export is selected with `manifest.adapter: ai-toolkit-ltx`
 
 M1 reproduces the prototype's generic VLM bucket-judge and caption flow. It does not implement the M2b top-up loop, and there is intentionally no Seinfeld compatibility shim in built-in code. Continue using explicit config if a show-specific dataset needs different buckets, prompts, rights policy, or budgets.
+
+Historical Seinfeld stage notes now live under `docs/examples/seinfeld/` as
+archive-only reference material. Active workflows should use
+`builtin.dataset_build`, `builtin.training_run`, and `builtin.script_pipeline`
+with example configs or presets rather than direct pack-module execution.
 
 ## Outputs
 

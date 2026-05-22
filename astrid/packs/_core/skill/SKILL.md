@@ -284,6 +284,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.render` | Render a hype timeline to hype.mp4 through the Remotion compositor. |
 | `builtin.scene_describe` | Caption each detected scene with a vision model for downstream selection. |
 | `builtin.scenes` | Detect source-video scene boundaries with ffmpeg-driven analysis. |
+| `builtin.script_pipeline` | Generate short scripts through rough attempts, synthesis, style pass, and optional judging. |
 | `builtin.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |
 | `builtin.shots` | Slice scenes into shot windows for downstream pool building. |
 | `builtin.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
@@ -307,12 +308,6 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `external.vibecomfy.validate` | Validate a VibeComfy / ComfyUI workflow JSON without executing it. |
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
-| `seinfeld.aitoolkit_stage` | Generate ai-toolkit job config from manifest + vocabulary; upload to pod; start AI Toolkit UI on :8675. |
-| `seinfeld.aitoolkit_train` | Kick off ai-toolkit training on a pod and mirror remote logs locally. |
-| `seinfeld.lora_eval_grid` | Run baseline LTX + per-checkpoint inference samples, download MP4s, write static index.html viewer. |
-| `seinfeld.lora_register` | Pure-local: copy chosen .safetensors into registered/ and write registered_lora.json. |
-| `seinfeld.repo_setup` | Idempotent git submodule add + checkout of ostris/ai-toolkit for config-schema reference. |
-| `seinfeld.script_pipeline` | Generate Seinfeld-style short scene scripts through ideation, synthesis, and voice passes. |
 | `upload.youtube` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
 
 ### Orchestrators
@@ -329,8 +324,6 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.thumbnail_maker` | Plan source evidence and thumbnail generation candidates for a video/query pair. |
 | `builtin.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
 | `builtin.vary_grid` | Iterative grid editor: take an existing grid image and emit a new grid of variations via fal. |
-| `seinfeld.dataset_build` | Bucket-fill loop that builds the Seinfeld LoRA training set from YouTube. |
-| `seinfeld.lora_train` | Train an LTX 2.3 LoRA on the Seinfeld dataset via ai-toolkit on RunPod. |
 
 ### Elements
 

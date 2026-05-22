@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 import unittest
+from pathlib import Path
 
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
@@ -62,6 +67,28 @@ class ShippedPackAlignmentTest(unittest.TestCase):
                         f"astrid/packs/{pack}/{executor_id.split('.', 1)[1]}"
                     ),
                     f"executor_root for {executor_id} did not land under packs/{pack}/",
+                )
+
+    def test_cli_lists_do_not_register_seinfeld_pack_ids(self) -> None:
+        commands = [
+            ([sys.executable, "-m", "astrid", "executors", "list", "--json"], "executors"),
+            ([sys.executable, "-m", "astrid", "orchestrators", "list", "--json"], "orchestrators"),
+        ]
+        for argv, key in commands:
+            with self.subTest(command=" ".join(argv)):
+                result = subprocess.run(
+                    argv,
+                    cwd=Path(__file__).resolve().parents[1],
+                    env=os.environ.copy(),
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                )
+                payload = json.loads(result.stdout)
+                ids = [item["id"] for item in payload[key]]
+                self.assertFalse(
+                    any(identifier.startswith("seinfeld.") for identifier in ids),
+                    f"unexpected Seinfeld ids from {' '.join(argv)}: {ids}",
                 )
 
 

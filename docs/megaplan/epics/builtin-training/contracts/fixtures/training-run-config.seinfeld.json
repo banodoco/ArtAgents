@@ -2,7 +2,7 @@
   "schema_version": 1,
   "trainer_id": "ai-toolkit-ltx",
   "manifest_path": "runs/seinfeld-dataset/ai-toolkit-ltx.manifest.json",
-  "vocabulary_path": "astrid/packs/seinfeld/vocabulary.yaml",
+  "vocabulary_path": "docs/examples/seinfeld/vocabulary.yaml",
   "compute": {
     "backend": "runpod",
     "gpu_type": "NVIDIA RTX 6000 Ada Generation",
