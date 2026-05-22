@@ -68,6 +68,14 @@
           "type": "string",
           "description": "RunPod network storage volume name."
         },
+        "name_prefix": {
+          "type": "string",
+          "description": "RunPod pod name prefix."
+        },
+        "datacenter_id": {
+          "type": "string",
+          "description": "Optional RunPod datacenter id."
+        },
         "image": {
           "type": "string",
           "default": "ostris/aitoolkit:latest",
@@ -77,6 +85,61 @@
           "type": "string",
           "default": "8675/http,22/tcp",
           "description": "Port mapping string for RunPod."
+        },
+        "upload_mode": {
+          "type": "string",
+          "default": "sftp_walk",
+          "description": "Remote staging upload mode passed to the RunPod remote execution backend."
+        },
+        "excludes": {
+          "description": "Files or directories excluded while staging local inputs to the pod.",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "ssh_key": {
+          "type": "string",
+          "description": "Optional SSH private key path used for artifact pulls."
+        },
+        "stage_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout for staging inputs on the remote backend."
+        },
+        "training_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout for the remote training command."
+        },
+        "review_timeout_seconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout for remote sample generation and review artifact pulls."
+        }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "Secret requirements declared as environment variable names. Values are read from the process environment during live preflight and are never stored in config state.",
+      "required": ["required_env"],
+      "additionalProperties": false,
+      "properties": {
+        "required_env": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true,
+          "default": []
         }
       }
     },
@@ -93,6 +156,14 @@
         "lora_id": {
           "type": "string",
           "description": "Identifier for this LoRA (used in output paths)."
+        },
+        "trigger_word": {
+          "type": "string",
+          "description": "Training trigger word or phrase to inject into captions and prompts."
+        },
+        "prompt_text": {
+          "type": "string",
+          "description": "Generic prompt text used by review and sample generation."
         },
         "rank": {
           "type": "integer",
@@ -117,6 +188,46 @@
         "seed": {
           "type": "integer",
           "default": 42
+        },
+        "width": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sample and training frame width."
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sample and training frame height."
+        },
+        "num_frames": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Frames per training/sample clip."
+        },
+        "fps": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Frames per second for training/sample clips."
+        },
+        "batch_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Trainer batch size."
+        },
+        "gradient_accumulation_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Gradient accumulation steps."
+        },
+        "save_every": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Checkpoint save interval in training steps."
+        },
+        "sample_every": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Sample generation interval in training steps."
         }
       }
     },
@@ -130,6 +241,11 @@
           "type": "array",
           "items": {"type": "string"},
           "description": "Prompts used to generate sample outputs at each checkpoint."
+        },
+        "review_labels": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Labels shown during checkpoint review."
         }
       }
     },
@@ -141,6 +257,14 @@
         "run_dir": {
           "type": "string",
           "description": "Output directory for this training run."
+        },
+        "remote_root": {
+          "type": "string",
+          "description": "Remote workspace root used while staging training inputs."
+        },
+        "remote_output_dir": {
+          "type": "string",
+          "description": "Remote directory where ai-toolkit writes checkpoints and samples."
         }
       }
     },

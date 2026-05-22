@@ -61,6 +61,7 @@ def _public_signature_map(module: ModuleType) -> dict[str, dict[str, str]]:
         "ManifestAdapter",
         "TrainerAdapter",
         "ComputeBackend",
+        "RemoteExecutionBackend",
     ]
     signatures: dict[str, dict[str, str]] = {}
     for class_name in class_names:
@@ -190,7 +191,125 @@ def test_runtime_and_frozen_schemas_accept_m2b_stage_ids_and_caption_validation_
     _validator(RUNTIME_SCHEMAS, "run-state.schema.json").validate(runtime_state)
 
 
+def test_training_run_config_schema_accepts_declared_required_env_contract() -> None:
+    config = _load_json(DOCS_CONTRACTS / "fixtures" / "training-run-config.seinfeld.json")
+    assert config["secrets"]["required_env"] == ["RUNPOD_API_KEY", "HF_TOKEN"]
+
+    for schema_root in (DOCS_SCHEMAS, RUNTIME_SCHEMAS):
+        _validator(schema_root, "training-run-config.schema.json").validate(config)
+
+
 def test_interfaces_port_m0_protocol_signatures() -> None:
     frozen = _load_module(DOCS_CONTRACTS / "interfaces.py", "builtin_training_m0_interfaces")
     runtime = _load_module(RUNTIME_PACKAGE / "interfaces.py", "dataset_build_runtime_interfaces")
     assert _public_signature_map(runtime) == _public_signature_map(frozen)
+
+
+def test_compute_backend_stays_lifecycle_only_and_remote_execution_is_companion_protocol() -> None:
+    runtime = _load_module(RUNTIME_PACKAGE / "interfaces.py", "dataset_build_runtime_interfaces_split")
+
+    compute_members = _public_signature_map(runtime)["ComputeBackend"]
+    assert compute_members == {
+        "backend_id": "property:(self) -> 'str'",
+        "provision": "(self, config: 'dict[str, Any]') -> 'ComputeHandle'",
+        "teardown": "(self, handle: 'ComputeHandle') -> 'None'",
+        "estimate_cost": "(self, config: 'dict[str, Any]') -> 'CostEstimate'",
+    }
+
+    remote_members = _public_signature_map(runtime)["RemoteExecutionBackend"]
+    assert remote_members == {
+        "backend_id": "property:(self) -> 'str'",
+        "capabilities": "property:(self) -> 'ProviderCapabilities'",
+        "exec": "(self, handle: 'ComputeHandle', command: 'list[str]', config: 'dict[str, Any]') -> 'RemoteExecResult'",
+        "pull_artifacts": "(self, handle: 'ComputeHandle', remote_paths: 'list[str]', local_dir: 'Path', config: 'dict[str, Any]') -> 'ArtifactPullResult'",
+    }
+
+
+def test_generic_training_backend_flow_uses_registry_protocols_not_direct_runpod_helpers(tmp_path: Path) -> None:
+    runtime = _load_module(RUNTIME_PACKAGE / "interfaces.py", "dataset_build_runtime_registry_protocols")
+
+    class FakeComputeBackend:
+        backend_id = "fake"
+
+        def __init__(self) -> None:
+            self.provisioned = False
+            self.torn_down = False
+
+        def provision(self, config: dict[str, Any]):
+            self.provisioned = True
+            return runtime.ComputeHandle(self.backend_id, "pod-123")
+
+        def teardown(self, handle):
+            assert handle.backend == self.backend_id
+            self.torn_down = True
+
+        def estimate_cost(self, config: dict[str, Any]):
+            return runtime.CostEstimate(0.25, 0.10, self.backend_id)
+
+    class FakeRemoteExecutionBackend:
+        backend_id = "fake"
+
+        @property
+        def capabilities(self):
+            return runtime.ProviderCapabilities(
+                self.backend_id,
+                supports_exec=True,
+                supports_artifact_pull=True,
+                supports_cost_estimate=True,
+            )
+
+        def __init__(self) -> None:
+            self.commands: list[list[str]] = []
+            self.pulled: list[str] = []
+
+        def exec(self, handle, command: list[str], config: dict[str, Any]):
+            assert handle.backend == self.backend_id
+            self.commands.append(command)
+            return runtime.RemoteExecResult(0, stdout="ok", command=command)
+
+        def pull_artifacts(self, handle, remote_paths: list[str], local_dir: Path, config: dict[str, Any]):
+            assert handle.backend == self.backend_id
+            self.pulled.extend(remote_paths)
+            local = local_dir / "checkpoint.safetensors"
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_text("fake checkpoint", encoding="utf-8")
+            return runtime.ArtifactPullResult([local], remote_paths)
+
+    class FakeRegistry:
+        def __init__(self) -> None:
+            self.compute = FakeComputeBackend()
+            self.remote = FakeRemoteExecutionBackend()
+
+        def get_compute_backend(self, backend_id: str):
+            assert backend_id == "fake"
+            return self.compute
+
+        def get_remote_execution_backend(self, backend_id: str):
+            assert backend_id == "fake"
+            return self.remote
+
+    def generic_training_flow(registry: Any, backend_id: str) -> Path:
+        compute = registry.get_compute_backend(backend_id)
+        remote = registry.get_remote_execution_backend(backend_id)
+        assert isinstance(compute, runtime.ComputeBackend)
+        assert isinstance(remote, runtime.RemoteExecutionBackend)
+        assert remote.capabilities.supports_exec
+        assert remote.capabilities.supports_artifact_pull
+
+        handle = compute.provision({"backend": backend_id})
+        try:
+            result = remote.exec(handle, ["train", "--config", "/workspace/config.yaml"], {})
+            assert result.exit_code == 0
+            pulled = remote.pull_artifacts(handle, ["/workspace/output/checkpoint.safetensors"], tmp_path, {})
+            return pulled.local_paths[0]
+        finally:
+            compute.teardown(handle)
+
+    registry = FakeRegistry()
+    checkpoint = generic_training_flow(registry, "fake")
+
+    assert checkpoint.read_text(encoding="utf-8") == "fake checkpoint"
+    assert registry.compute.provisioned is True
+    assert registry.compute.torn_down is True
+    assert registry.remote.commands == [["train", "--config", "/workspace/config.yaml"]]
+    assert registry.remote.pulled == ["/workspace/output/checkpoint.safetensors"]

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astrid.dev/schemas/packs/v1/element.json",
+  "title": "Astrid Element Manifest",
+  "type": "object",
+  "required": ["schema_version", "id", "kind", "pack_id"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {"type": "number", "const": 1},
+    "id": {"type": "string", "minLength": 1},
+    "kind": {"type": "string"},
+    "pack_id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"}
+  }
+}

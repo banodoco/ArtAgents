@@ -41,10 +41,12 @@ def _render_index_html(prompts: list[str], buckets: list[str], grid_dir: Path) -
         cells: list[str] = []
         for b in buckets:
             mp4 = f"{b}/prompt_{pi:02d}.mp4"
-            cells.append(
-                f'<td><div class="lbl">{html.escape(b)}</div>'
-                f'<video src="{html.escape(mp4)}" controls width="320"></video></td>'
-            )
+            local_mp4 = grid_dir / mp4
+            if local_mp4.exists():
+                body = f'<video src="{html.escape(mp4)}" controls width="320"></video>'
+            else:
+                body = '<div class="missing">missing local asset</div>'
+            cells.append(f'<td><div class="lbl">{html.escape(b)}</div>{body}</td>')
         rows.append(
             f"<tr><td class='prompt'>{html.escape(prompt)}</td>{''.join(cells)}</tr>"
         )
@@ -54,6 +56,7 @@ def _render_index_html(prompts: list[str], buckets: list[str], grid_dir: Path) -
         "<title>Seinfeld LoRA Eval Grid</title>"
         "<style>body{font-family:sans-serif}td{vertical-align:top;padding:6px}"
         ".prompt{max-width:260px;font-size:13px}.lbl{font-size:11px;color:#666}"
+        ".missing{font-size:12px;color:#9b1c1c;padding:16px;background:#fee}"
         "table{border-collapse:collapse}</style></head><body>"
         "<h1>Seinfeld LoRA Eval Grid</h1>"
         f"<table><thead><tr>{head_cells}</tr></thead><tbody>"
@@ -133,11 +136,24 @@ def main(argv: list[str] | None = None) -> int:
                 ],
                 cwd=repo_root,
             )
-            # TODO: download of remote_mp4 → grid_dir not yet implemented.
-            # external.runpod.exec's artifact_dir auto-copies /workspace recursively;
-            # would need a follow-up exec that consolidates eval outputs or a dedicated
-            # --pull-file flag added upstream. For now, eval mp4s stay on the pod.
-            # The grid_dir/index.html will reference paths that won't resolve locally.
+            pull_dir = grid_dir / bucket
+            pull_dir.mkdir(parents=True, exist_ok=True)
+            pull_produces = grid_dir / "_pull" / bucket / f"prompt_{i:02d}"
+            pull_produces.mkdir(parents=True, exist_ok=True)
+            pull = subprocess.run(
+                [
+                    sys.executable, "-m", "astrid.packs.external.runpod.run", "pull",
+                    "--produces-dir", str(pull_produces),
+                    "--pod-handle", str(args.pod_handle),
+                    "--remote-path", remote_mp4,
+                    "--local-dir", str(pull_dir),
+                ],
+                cwd=repo_root,
+            )
+            local_mp4 = pull_dir / Path(remote_mp4).name
+            if pull.returncode != 0 or not local_mp4.exists():
+                print(f"ERROR: eval sample was not pulled locally: {local_mp4}", file=sys.stderr)
+                return 4
 
     (grid_dir / "index.html").write_text(
         _render_index_html(prompts, buckets, grid_dir), encoding="utf-8"

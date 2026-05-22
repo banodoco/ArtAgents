@@ -12,7 +12,7 @@ from astrid.core.orchestrator.folder import load_folder_orchestrators
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
-INTERNAL_PACK_DIRS = {"__pycache__"}
+INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
 TOP_LEVEL_ASTRID_FILES = {
     "__init__.py",
     "__main__.py",

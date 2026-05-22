@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
-from typing import Any, Iterable
+from typing import Any
 
 
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
@@ -46,6 +46,7 @@ _UNBOUND_TOP_LEVEL = {
 }
 _UNBOUND_PROJECTS_SUBVERBS = {"ls", "create", "default"}
 _UNBOUND_SESSIONS_SUBVERBS = {"ls", "takeover", "detach"}
+_UNBOUND_DISCOVERY_SUBVERBS = {"inspect", "search"}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,7 +69,6 @@ def main(argv: list[str] | None = None) -> int:
     # session record; print the documented hint and exit 2 otherwise.
     if not _verb_is_unbound_allowlisted(raw):
         from .core.session.binding import (
-            ASTRID_SESSION_ID_ENV,  # noqa: F401 — referenced in the error path
             SessionBindingError,
             resolve_current_session,
         )
@@ -163,6 +163,15 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
     # FLAG-S1-002: executors new / orchestrators new are builder-facing
     # scaffold commands that short-circuit before registry loading (T6).
     if top in ("executors", "orchestrators") and len(raw) >= 2 and raw[1] == "new":
+        return True
+    # Capability metadata inspection is read-only discovery. Keep run/install
+    # paths session-gated, but allow agents and CI to inspect definitions before
+    # a project session has been attached.
+    if (
+        top in ("executors", "orchestrators", "elements")
+        and len(raw) >= 2
+        and raw[1] in _UNBOUND_DISCOVERY_SUBVERBS
+    ):
         return True
     if top == "projects" and len(raw) >= 2 and raw[1] in _UNBOUND_PROJECTS_SUBVERBS:
         return True

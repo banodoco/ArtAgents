@@ -300,6 +300,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
 | `external.runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
 | `external.runpod.provision` | Provision a RunPod GPU pod and emit a pod handle for later exec/teardown. |
+| `external.runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
 | `external.runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
 | `external.runpod.teardown` | Terminate a RunPod pod. Idempotent. |
 | `external.vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
@@ -326,6 +327,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.iteration_video` | Prepare an iteration graph, assemble render inputs, render through builtin.render, and finalize iteration video outputs. |
 | `builtin.logo_ideas` | Generate a grid of distinct logo concepts via Kimi K2 prompts + GPT Image 2 (or z-image) renders. |
 | `builtin.thumbnail_maker` | Plan source evidence and thumbnail generation candidates for a video/query pair. |
+| `builtin.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
 | `builtin.vary_grid` | Iterative grid editor: take an existing grid image and emit a new grid of variations via fal. |
 | `seinfeld.dataset_build` | Bucket-fill loop that builds the Seinfeld LoRA training set from YouTube. |
 | `seinfeld.lora_train` | Train an LTX 2.3 LoRA on the Seinfeld dataset via ai-toolkit on RunPod. |

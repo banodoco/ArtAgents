@@ -94,6 +94,115 @@ class ComputeHandle:
         self.metadata = metadata or {}
 
 
+class ProviderCapabilities:
+    """Backend capability metadata used by generic orchestration code."""
+    backend: str
+    supports_exec: bool
+    supports_artifact_pull: bool
+    supports_artifact_push: bool
+    supports_cost_estimate: bool
+    metadata: dict[str, Any]
+
+    def __init__(self, backend: str, supports_exec: bool = False,
+                 supports_artifact_pull: bool = False,
+                 supports_artifact_push: bool = False,
+                 supports_cost_estimate: bool = False,
+                 metadata: dict[str, Any] | None = None):
+        self.backend = backend
+        self.supports_exec = supports_exec
+        self.supports_artifact_pull = supports_artifact_pull
+        self.supports_artifact_push = supports_artifact_push
+        self.supports_cost_estimate = supports_cost_estimate
+        self.metadata = metadata or {}
+
+
+class RemoteExecResult:
+    """Result from executing a command on a provisioned remote resource."""
+    exit_code: int
+    stdout: str
+    stderr: str
+    command: list[str]
+    metadata: dict[str, Any]
+
+    def __init__(self, exit_code: int, stdout: str = "", stderr: str = "",
+                 command: list[str] | None = None,
+                 metadata: dict[str, Any] | None = None):
+        self.exit_code = exit_code
+        self.stdout = stdout
+        self.stderr = stderr
+        self.command = command or []
+        self.metadata = metadata or {}
+
+
+class ArtifactPullResult:
+    """Result from pulling artifacts from a provisioned remote resource."""
+    local_paths: list[Path]
+    remote_paths: list[str]
+    metadata: dict[str, Any]
+
+    def __init__(self, local_paths: list[Path] | None = None,
+                 remote_paths: list[str] | None = None,
+                 metadata: dict[str, Any] | None = None):
+        self.local_paths = local_paths or []
+        self.remote_paths = remote_paths or []
+        self.metadata = metadata or {}
+
+
+class RunPodConfig:
+    """Typed RunPod compute config shape.
+
+    Secret fields store environment variable names, not literal secret values.
+    """
+    api_key_env: str
+    gpu_type: str | list[str]
+    image: str
+    container_disk_gb: int
+    max_gpu_hours: float
+    max_spend_usd: float
+    network_volume_id: str | None
+    ports: str | None
+    env: dict[str, str]
+
+    def __init__(self, api_key_env: str = "RUNPOD_API_KEY",
+                 gpu_type: str | list[str] = "NVIDIA GeForce RTX 4090",
+                 image: str = "runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04",
+                 container_disk_gb: int = 200,
+                 max_gpu_hours: float = 0.0,
+                 max_spend_usd: float = 0.0,
+                 network_volume_id: str | None = None,
+                 ports: str | None = None,
+                 env: dict[str, str] | None = None):
+        self.api_key_env = api_key_env
+        self.gpu_type = gpu_type
+        self.image = image
+        self.container_disk_gb = container_disk_gb
+        self.max_gpu_hours = max_gpu_hours
+        self.max_spend_usd = max_spend_usd
+        self.network_volume_id = network_volume_id
+        self.ports = ports
+        self.env = env or {}
+
+
+class RunPodHandle(ComputeHandle):
+    """Typed RunPod handle shape persisted after provisioning."""
+    pod_id: str
+    gpu_type: str
+    ui_url: str | None
+    recovery_command: str | None
+    config_snapshot: dict[str, Any]
+
+    def __init__(self, pod_id: str, gpu_type: str, status: str = "provisioned",
+                 ui_url: str | None = None,
+                 recovery_command: str | None = None,
+                 config_snapshot: dict[str, Any] | None = None,
+                 metadata: dict[str, Any] | None = None):
+        super().__init__("runpod", pod_id, status=status, metadata=metadata)
+        self.gpu_type = gpu_type
+        self.ui_url = ui_url
+        self.recovery_command = recovery_command
+        self.config_snapshot = config_snapshot or {}
+
+
 # ── Protocol interfaces ─────────────────────────────────────────────────────
 
 @runtime_checkable
@@ -241,7 +350,8 @@ class TrainerAdapter(Protocol):
 class ComputeBackend(Protocol):
     """Provision and manage compute resources for training.
 
-    First concrete backend: RunPod.
+    First concrete backend: RunPod. Remote command execution and artifact
+    transfer are provided by RemoteExecutionBackend, not this protocol.
     """
     @property
     def backend_id(self) -> str:
@@ -275,5 +385,52 @@ class ComputeBackend(Protocol):
 
         Returns:
             CostEstimate with gpu_hours and estimated_cost_usd.
+        """
+        ...
+
+
+@runtime_checkable
+class RemoteExecutionBackend(Protocol):
+    """Execute commands and transfer artifacts on provisioned compute.
+
+    This companion protocol is resolved through backend registries alongside
+    ComputeBackend so generic orchestration avoids direct provider helpers.
+    """
+    @property
+    def backend_id(self) -> str:
+        """Backend identifier matching the companion ComputeBackend."""
+        ...
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """Provider capability metadata for planning and preflight."""
+        ...
+
+    def exec(self, handle: ComputeHandle, command: list[str],
+             config: dict[str, Any]) -> RemoteExecResult:
+        """Execute a command on the provisioned resource.
+
+        Args:
+            handle: Handle from ComputeBackend.provision().
+            command: Tokenized command to run remotely.
+            config: Provider-specific execution config.
+
+        Returns:
+            RemoteExecResult with exit code and captured output.
+        """
+        ...
+
+    def pull_artifacts(self, handle: ComputeHandle, remote_paths: list[str],
+                       local_dir: Path, config: dict[str, Any]) -> ArtifactPullResult:
+        """Pull remote artifacts into a local directory.
+
+        Args:
+            handle: Handle from ComputeBackend.provision().
+            remote_paths: Remote files or directories to fetch.
+            local_dir: Local destination directory.
+            config: Provider-specific transfer config.
+
+        Returns:
+            ArtifactPullResult with fetched local paths.
         """
         ...

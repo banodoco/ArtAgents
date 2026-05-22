@@ -36,9 +36,9 @@ def test_dry_run_writes_parseable_yaml_with_hivemind_keys(tmp_path: Path) -> Non
     assert proc["network"]["linear_alpha"] == 32
     assert proc["save"]["save_every"] == 250
     assert proc["sample"]["sample_every"] == 250
-    assert proc["datasets"][0]["resolution"] == [512]
-    assert proc["datasets"][0]["num_frames"] == 97
-    assert proc["datasets"][0]["fps"] == 24
+    assert proc["datasets"][0]["resolution"] == stage_run.HIVEMIND_DEFAULTS["resolution_buckets"]
+    assert proc["datasets"][0]["num_frames"] == stage_run.HIVEMIND_DEFAULTS["num_frames"]
+    assert proc["datasets"][0]["fps"] == stage_run.HIVEMIND_DEFAULTS["fps"]
     assert proc["datasets"][0]["bucketing"] is True
     assert proc["train"]["steps"] == 2000
     assert proc["train"]["batch_size"] == 1
@@ -48,7 +48,7 @@ def test_dry_run_writes_parseable_yaml_with_hivemind_keys(tmp_path: Path) -> Non
     assert proc["model"]["arch"] == "ltx2.3"
     assert proc["model"]["quantize"] is True
     assert proc["model"]["name_or_path"] == "Lightricks/LTX-2.3/ltx-2.3-22b-dev.safetensors"
-    assert proc["sample"]["width"] == 512
+    assert proc["sample"]["width"] == stage_run.HIVEMIND_DEFAULTS["resolution"]
     assert proc["sample"]["height"] == 768
     assert len(proc["sample"]["prompts"]) >= 3
 
