@@ -279,3 +279,46 @@ conformance + stash {4} regressive), `5_plan_archaeology` (epic scope ledger, de
 
 Each brief carried a hard read-only guardrail; the test-suite agent ran scoped pytest only. Several agent
 claims were cross-checked with direct commands (see §7 corrections). Raw outputs preserved at the paths above.
+
+---
+
+## 11. Execution results (2026-05-23)
+
+The plan was executed end-to-end. Outcome: **all three epics now live on `main`**; the working tree,
+branch list, and stash list are clean.
+
+**Phase A — preserve (done):**
+- pack-system M0–M5 committed (was unprotected dirty state). Verified against the clean baseline:
+  **0 regressions** — the repo's ~30 full-suite failures are pre-existing (golden-drift / generated
+  fixtures / cloud-API-key); the "305/0" figure was a scoped subset.
+- Content packs committed with real `description`/`agent.purpose` (drafted by a DeepSeek agent);
+  `external/pack.yaml` got `schema_version: 1`.
+- Stash audit corrected the plan: {0} and {1}-visual were **already present**; only the
+  `video_understand --response-schema` half of {1} was unique → ported (`3a9b14f`). {2}/{3} dup {1},
+  {4} regressive, {5} (logo grid) superseded by `build_grid_prompt`/`render_grid_image`, {6} README —
+  **all 7 stashes dropped.**
+- PR **#26** opened (per-project-plan-md).
+
+**Phase B — integrate (done, with corrections):**
+- The plan's "timeline integrates with **one** conflict (`runpod/run.py`)" was **wrong** — `runpod/run.py`
+  auto-merged; the real surface was **~20 conflicts**, centered on `main` having generalized the seinfeld
+  pack into `builtin/{dataset_build,training_run,script_pipeline,…}`. A DeepSeek coverage audit confirmed
+  **seinfeld is fully superseded** (every capability has a builtin superset) → deleted on the merge; its
+  training *data* is preserved in git history + archived. Schema/SKILL/human_review conflicts adjudicated
+  per-file by a second DeepSeek agent; merge-reconciliation fixes: restored `"html"` to `PortType`,
+  fixed the `no_urllib` allowlist for the script_pipeline migration. **PR #27 merged → timeline on main.**
+- pack-system rebased onto the new main (4 conflicts: keep `visibility: hidden` + real descriptions;
+  recalibrated two stale `>=55` executor-count thresholds to 54). **PR #28 merged → pack-system on main.**
+
+**B8 — deferred by decision.** The PR #8 operational-substrate port is a ~2–3 day project; a full spec
+is at `docs/megaplan/epics/pack-system/pr8-substrate-port-spec.md`. **PR #8 stays open** until then.
+
+**Phase C — delete (done, all positive-evidence):** removed 4 worktrees (dirty payloads verified
+identical-or-older vs main, `not_on_main=0`), 6 local + 4 remote branches (epic deliverables confirmed on
+main), and all 7 stashes. **Held:** `chain-setup`, `pack-system-run`, `feature/per-project-plan-md` (PR #26),
+`sprint-02` (PR #8). One untracked leftover remains: the orphaned 48 MB vendored `seinfeld/ai_toolkit/upstream`
+git repo (recoverable from ostris upstream) — left for an explicit decision.
+
+`main` HEAD `686ad68`: timeline (42 files) + builtin-training (`dataset_build` 50 files) + pack-system
+identity layer. Execution used DeepSeek agents for the pack descriptions, the seinfeld coverage audit,
+and the conflict adjudication.
