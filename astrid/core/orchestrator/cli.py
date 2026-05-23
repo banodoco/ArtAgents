@@ -6,6 +6,7 @@ import argparse
 import json
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +15,14 @@ from astrid.core._search import (
     search as run_search,
     short_description_or_truncated,
 )
+from astrid.core.dirty import detect_local_edits
 from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
+from astrid.core.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
+from astrid.core.update import update_check, update_apply
 
 from .registry import OrchestratorRegistry, load_default_registry
-from .schema import OrchestratorDefinition, OrchestratorValidationError
+from .schema import OrchestratorDefinition, OrchestratorValidationError, to_capability_handle
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,9 +36,18 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "command", None) == "new":
         return int(args.handler(args, registry=None))
     try:
-        registry = load_default_registry(banodoco_config=_banodoco_config_from_args(args))
+        # SD2: orchestrator CLI defaults to Path.cwd() so forks land in the
+        # user's current project, not the source-tree REPO_ROOT.
+        project_root = getattr(args, "project_root", None) or Path.cwd()
+        # Create OverrideStore so --show-overrides and override set/remove/list work.
+        override_store = OverrideStore(project_root=project_root)
+        registry = load_default_registry(
+            banodoco_config=_banodoco_config_from_args(args),
+            project_root=project_root,
+        )
+        registry.override_store = override_store
         return int(args.handler(args, registry))
-    except (KeyError, OrchestratorValidationError, ProjectRunError, ValueError) as exc:
+    except (KeyError, OrchestratorValidationError, ProjectRunError, ValueError, OverrideStoreError) as exc:
         print(f"orchestrators: {exc}", file=sys.stderr)
         return 2
 
@@ -51,23 +64,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--banodoco-refresh", action="store_true", help="Refresh cached git checkouts before loading Banodoco orchestrators.")
     parser.add_argument("--no-banodoco-defaults", action="store_true", help="Skip Banodoco catalog orchestrators marked default.")
     parser.add_argument("--no-banodoco-mandatory", action="store_true", help="Skip Banodoco catalog orchestrators marked mandatory.")
+    # SD2: executor/orchestrator CLIs fork to Path.cwd() by default.
+    parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="List available orchestrators.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--kind", choices=("built_in", "external"), help="Filter orchestrators by kind.")
+    list_parser.add_argument("--pack", help="Filter orchestrators by source pack id.")
     list_parser.add_argument("--no-describe", action="store_true", help="Omit the short_description column for legacy parsers.")
+    list_parser.add_argument("--show-overrides", action="store_true", help="Annotate capabilities with active overrides.")
     list_parser.set_defaults(handler=_cmd_list)
 
     search_parser = subparsers.add_parser("search", help="Search orchestrators by id, keywords, and descriptions.")
     search_parser.add_argument("terms", nargs="+", help="One or more search terms.")
     search_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     search_parser.add_argument("--limit", type=int, default=25, help="Maximum number of hits (default 25).")
+    search_parser.add_argument("--pack", help="Filter orchestrators by source pack id.")
     search_parser.set_defaults(handler=_cmd_search)
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect one orchestrator.")
     inspect_parser.add_argument("orchestrator_id")
     inspect_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    inspect_parser.add_argument("--pack", help="Require the resolved orchestrator to belong to this pack id.")
+    inspect_parser.add_argument("--show-overrides", action="store_true", help="Show override status for this capability.")
     inspect_parser.set_defaults(handler=_cmd_inspect)
 
     validate_parser = subparsers.add_parser("validate", help="Validate orchestrator metadata.")
@@ -113,7 +133,75 @@ def build_parser() -> argparse.ArgumentParser:
     )
     new_parser.set_defaults(handler=_cmd_new)
 
+    fork_parser = subparsers.add_parser("fork", help="Fork an orchestrator into the local pack (astrid/packs/local).")
+    fork_parser.add_argument("orchestrator_id", help="Qualified orchestrator id to fork (e.g., builtin.hype).")
+    fork_parser.add_argument("--overwrite", action="store_true", help="Replace an existing local fork.")
+    fork_parser.add_argument("--deep", action="store_true", help="Also recursively fork all child executors and orchestrators.")
+    fork_parser.set_defaults(handler=_cmd_fork)
+
+    # --- Override subcommands ---
+    override_parser = subparsers.add_parser("override", help="Manage capability overrides.")
+    override_sub = override_parser.add_subparsers(dest="override_action", required=True)
+
+    override_set = override_sub.add_parser("set", help="Set an override: route an orchestrator to a replacement.")
+    override_set.add_argument("orchestrator_id")
+    override_set.add_argument("target_id", help="Fully-qualified id of the replacement orchestrator.")
+    override_set.set_defaults(handler=_cmd_override)
+
+    override_remove = override_sub.add_parser("remove", help="Remove an override.")
+    override_remove.add_argument("orchestrator_id")
+    override_remove.set_defaults(handler=_cmd_override)
+
+    override_list = override_sub.add_parser("list", help="List all active overrides.")
+    override_list.set_defaults(handler=_cmd_override)
+
+    # --- Dirty subcommands ---
+    dirty_parser = subparsers.add_parser("dirty", help="Check or list locally-modified (dirty) orchestrators.")
+    dirty_sub = dirty_parser.add_subparsers(dest="dirty_action", required=True)
+
+    dirty_check = dirty_sub.add_parser("check", help="Check dirty state for one orchestrator.")
+    dirty_check.add_argument("orchestrator_id")
+    dirty_check.set_defaults(handler=_cmd_dirty)
+
+    dirty_list = dirty_sub.add_parser("list", help="List all dirty orchestrators.")
+    dirty_list.set_defaults(handler=_cmd_dirty)
+
+    # --- Update subcommands ---
+    update_parser = subparsers.add_parser("update", help="Check for or apply upstream updates to forked orchestrators.")
+    update_sub = update_parser.add_subparsers(dest="update_action", required=True)
+
+    update_check_parser = update_sub.add_parser("check", help="Compare local fork against upstream.")
+    update_check_parser.add_argument("orchestrator_id")
+    update_check_parser.set_defaults(handler=_cmd_update)
+
+    update_apply_parser = update_sub.add_parser("apply", help="Apply upstream update to a local fork.")
+    update_apply_parser.add_argument("orchestrator_id")
+    update_apply_parser.add_argument("--force", action="store_true", help="Apply even if safety escalations are detected.")
+    update_apply_parser.add_argument("--skip-safety", action="store_true", help="Skip safety escalation checks.")
+    update_apply_parser.set_defaults(handler=_cmd_update)
+
     return parser
+
+
+def _cmd_fork(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
+    # SD2: orchestrator CLI forks to Path.cwd() by default so forked
+    # orchestrators land in the user's current project, not the source-tree
+    # REPO_ROOT.
+    project_root = getattr(args, "project_root", None) or Path.cwd()
+
+    # Resolve alias BEFORE fork (watch item): alias → canonical ID,
+    # then fork the canonical orchestrator.
+    resolver = registry.alias_resolver
+    resolved_id = resolver.resolve(args.orchestrator_id) if resolver else args.orchestrator_id
+
+    target = registry.fork(
+        resolved_id,
+        project_root=project_root,
+        overwrite=bool(args.overwrite),
+        deep=bool(args.deep),
+    )
+    print(f"forked: {target}")
+    return 0
 
 
 def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
@@ -187,25 +275,38 @@ def _banodoco_config_from_args(args: argparse.Namespace) -> BanodocoCatalogConfi
 
 
 def _cmd_list(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
-    orchestrators = registry.list(kind=args.kind)
+    orchestrators = _filter_by_pack(registry.list(kind=args.kind), getattr(args, "pack", None))
+    show_overrides = bool(getattr(args, "show_overrides", False))
     if args.json:
-        print(json.dumps({"orchestrators": [item.to_dict() for item in orchestrators]}, indent=2, sort_keys=True))
+        result = []
+        for item in orchestrators:
+            handle = to_capability_handle(item)
+            entry = {'_capability': handle.to_dict(), 'source_pack': _definition_pack_id(item), **item.to_dict()}
+            if show_overrides and registry.override_store is not None:
+                entry['_override'] = registry.override_store.resolve("orchestrator", item.id)
+            result.append(entry)
+        print(json.dumps({'orchestrators': result}, indent=2, sort_keys=True))
         return 0
     no_describe = bool(getattr(args, "no_describe", False))
     for orchestrator in orchestrators:
+        override_tag = ""
+        if show_overrides and registry.override_store is not None:
+            target = registry.override_store.resolve("orchestrator", orchestrator.id)
+            if target is not None:
+                override_tag = f"\t→ {target}"
         if no_describe:
-            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}")
+            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}{override_tag}")
         else:
             from astrid.core.executor.cli import _format_invocation_hint
 
             short = short_description_or_truncated(orchestrator.short_description, orchestrator.description)
             invoke = _format_invocation_hint("orchestrators", orchestrator.id, orchestrator.inputs)
-            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}\t{invoke}")
+            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}\t{invoke}{override_tag}")
     return 0
 
 
 def _cmd_search(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
-    records = [_orchestrator_search_record(item) for item in registry.list()]
+    records = [_orchestrator_search_record(item) for item in _filter_by_pack(registry.list(), getattr(args, "pack", None))]
     hits = run_search(records, list(args.terms), limit=int(args.limit))
     if args.json:
         payload = [
@@ -232,15 +333,31 @@ def _orchestrator_search_record(orchestrator: OrchestratorDefinition) -> SearchR
         "short_description": orchestrator.short_description,
         "description": orchestrator.description,
         "keywords": " ".join(orchestrator.keywords),
+        "pack_id": orchestrator.id.split(".")[0] if "." in orchestrator.id else orchestrator.id,
+        "version": orchestrator.version,
+        "category": str(orchestrator.metadata.get("category") or orchestrator.kind),
     }
     return SearchRecord(id=orchestrator.id, kind=orchestrator.kind, short_description=short, fields=fields)
 
 
 def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
-    _require_qualified_id(args.orchestrator_id, "orchestrator id")
-    orchestrator = registry.get(args.orchestrator_id)
+    # Resolve alias BEFORE _require_qualified_id (SD1): alias → canonical ID
+    # (which always contains a dot), then qualify, then lookup.
+    resolver = registry.alias_resolver
+    resolved_id = resolver.resolve(args.orchestrator_id) if resolver else args.orchestrator_id
+    _require_qualified_id(resolved_id, "orchestrator id")
+    orchestrator = registry.get(resolved_id)
+    _require_pack_match(orchestrator, getattr(args, "pack", None))
+    show_overrides = bool(getattr(args, "show_overrides", False))
     if args.json:
-        print(orchestrator.to_json())
+        handle = to_capability_handle(orchestrator)
+        if resolver is not None:
+            aliases = resolver.get_aliases_for(resolved_id)
+            handle = replace(handle, aliases=tuple(aliases))
+        result = {"_capability": handle.to_dict(), **orchestrator.to_dict()}
+        if show_overrides and registry.override_store is not None:
+            result["_override"] = registry.override_store.resolve("orchestrator", orchestrator.id)
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     print(f"id: {orchestrator.id}")
     print(f"name: {orchestrator.name}")
@@ -259,6 +376,12 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
         print(f"child_executors: {', '.join(orchestrator.child_executors)}")
     if orchestrator.child_orchestrators:
         print(f"child_orchestrators: {', '.join(orchestrator.child_orchestrators)}")
+    if show_overrides and registry.override_store is not None:
+        target = registry.override_store.resolve("orchestrator", orchestrator.id)
+        if target is not None:
+            print(f"override: orchestrator/{orchestrator.id} → {target}")
+        else:
+            print("override: none")
     # Fix 6 (v6 dogfood): show a concrete example invocation when the
     # orchestrator declares input ports. The `command` block below also
     # synthesises an invocation snippet for the `{orchestrator_args}`
@@ -286,6 +409,24 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
             print("  # anything after `--` is forwarded verbatim to the pack runtime.")
     _print_active_thread_footer()
     return 0
+
+
+def _definition_pack_id(definition: OrchestratorDefinition) -> str:
+    source_pack = definition.metadata.get("source_pack")
+    if isinstance(source_pack, str) and source_pack:
+        return source_pack
+    return definition.id.split(".", 1)[0]
+
+
+def _filter_by_pack(definitions: list[OrchestratorDefinition], pack_id: str | None) -> list[OrchestratorDefinition]:
+    if not pack_id:
+        return definitions
+    return [definition for definition in definitions if _definition_pack_id(definition) == pack_id]
+
+
+def _require_pack_match(definition: OrchestratorDefinition, pack_id: str | None) -> None:
+    if pack_id and _definition_pack_id(definition) != pack_id:
+        raise ValueError(f"orchestrator {definition.id!r} does not belong to pack {pack_id!r}")
 
 
 def _cmd_validate(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
@@ -395,6 +536,93 @@ def _print_active_thread_footer() -> None:
     else:
         print("active_thread: none")
     print("thread_details: python3 -m astrid thread show @active")
+
+
+def _cmd_override(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
+    store = registry.override_store
+    if store is None:
+        print("orchestrators: override store not available", file=sys.stderr)
+        return 1
+    action = getattr(args, "override_action", None)
+    if action == "set":
+        store.set_override("orchestrator", args.orchestrator_id, args.target_id)
+        print(f"override set: orchestrator/{args.orchestrator_id} → {args.target_id}")
+    elif action == "remove":
+        store.remove_override("orchestrator", args.orchestrator_id)
+        print(f"override removed: orchestrator/{args.orchestrator_id}")
+    elif action == "list":
+        overrides = store.list_overrides()
+        if not overrides:
+            print("no overrides")
+            return 0
+        for override_type, mappings in sorted(overrides.items()):
+            for override_id, target in sorted(mappings.items()):
+                print(f"{override_type}/{override_id} → {target}")
+    else:
+        print(f"orchestrators override: unknown action {action!r}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_dirty(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
+    action = getattr(args, "dirty_action", None)
+    if action == "check":
+        orchestrator = registry.get(args.orchestrator_id)
+        content_root = _orchestrator_content_root(orchestrator)
+        forked_from = str(orchestrator.metadata.get("forked_from") or "")
+        state = detect_local_edits(content_root, forked_from=forked_from)
+        print(f"orchestrator/{orchestrator.id}: {state}")
+    elif action == "list":
+        dirty_found = 0
+        for orchestrator in registry.list():
+            content_root = _orchestrator_content_root(orchestrator)
+            forked_from = str(orchestrator.metadata.get("forked_from") or "")
+            state = detect_local_edits(content_root, forked_from=forked_from)
+            if state != "clean":
+                print(f"orchestrator/{orchestrator.id}: {state}")
+                dirty_found += 1
+        if dirty_found == 0:
+            print("no dirty orchestrators")
+    else:
+        print(f"orchestrators dirty: unknown action {action!r}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_update(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
+    action = getattr(args, "update_action", None)
+    if action == "check":
+        report = update_check(
+            args.orchestrator_id, registry,
+            capability_type="orchestrator",
+        )
+        print(report["report"])
+        return 0
+    elif action == "apply":
+        force = bool(getattr(args, "force", False))
+        skip_safety = bool(getattr(args, "skip_safety", False))
+        report = update_apply(
+            args.orchestrator_id, registry,
+            force=force, skip_safety=skip_safety,
+            capability_type="orchestrator",
+        )
+        print(report["report"])
+        return 0 if report.get("applied") else 1
+    else:
+        print(f"orchestrators update: unknown action {action!r}", file=sys.stderr)
+        return 2
+
+
+def _orchestrator_content_root(definition: OrchestratorDefinition) -> Path:
+    """Extract content root from orchestrator definition metadata."""
+    root_str = definition.metadata.get("content_root")
+    if root_str:
+        return Path(root_str)
+    # Fallback to orchestrator_root metadata key.
+    root_str = definition.metadata.get("orchestrator_root")
+    if root_str:
+        return Path(root_str)
+    return Path.cwd()
 
 
 if __name__ == "__main__":

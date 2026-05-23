@@ -28,6 +28,7 @@ from .schema import (
     Port,
     RuntimeSpec,
     load_orchestrator_manifest,
+    to_capability_handle,
     validate_orchestrator_definition,
 )
 
@@ -57,5 +58,6 @@ __all__ = [
     "load_orchestrator_manifest",
     "orchestrator",
     "run_orchestrator",
+    "to_capability_handle",
     "validate_orchestrator_definition",
 ]

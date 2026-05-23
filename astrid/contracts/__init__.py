@@ -5,13 +5,17 @@ from .schema import (
     ISOLATION_MODES,
     OUTPUT_MODES,
     PORT_REQUIRED_TYPES,
+    AliasRecord,
     CachePolicy,
+    CapabilityHandle,
     CommandSpec,
     IsolationMetadata,
     Output,
     Port,
     PerformerOutput,
     PerformerPort,
+    Provenance,
+    SafetyDeclaration,
 )
 
 __all__ = [
@@ -19,11 +23,15 @@ __all__ = [
     "ISOLATION_MODES",
     "OUTPUT_MODES",
     "PORT_REQUIRED_TYPES",
+    "AliasRecord",
     "CachePolicy",
+    "CapabilityHandle",
     "CommandSpec",
     "IsolationMetadata",
     "Output",
     "Port",
     "PerformerOutput",
     "PerformerPort",
+    "Provenance",
+    "SafetyDeclaration",
 ]

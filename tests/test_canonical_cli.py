@@ -30,6 +30,13 @@ class CanonicalCliTest(unittest.TestCase):
         self.assertNotIn("conductors", payload)
         self.assertIn("builtin.hype", {item["id"] for item in payload["orchestrators"]})
 
+    def test_orchestrators_list_pack_filter(self) -> None:
+        result, stdout, stderr = self.capture(orchestrators_cli.main, ["list", "--pack", "builtin", "--json"])
+        self.assertEqual(result, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertTrue(payload["orchestrators"])
+        self.assertTrue(all(item["id"].startswith("builtin.") for item in payload["orchestrators"]))
+
     def test_orchestrator_help_uses_canonical_terms(self) -> None:
         stdout = io.StringIO()
         with self.assertRaises(SystemExit) as raised, contextlib.redirect_stdout(stdout):
@@ -82,6 +89,20 @@ class CanonicalCliTest(unittest.TestCase):
         self.assertIn("executors", payload)
         self.assertNotIn("performers", payload)
         self.assertIn("builtin.render", {item["id"] for item in payload["executors"]})
+
+    def test_executors_list_pack_filter(self) -> None:
+        result, stdout, stderr = self.capture(executors_cli.main, ["list", "--pack", "external", "--json"])
+        self.assertEqual(result, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertTrue(payload["executors"])
+        self.assertTrue(all(item["id"].startswith("external.") for item in payload["executors"]))
+
+    def test_elements_list_pack_filter(self) -> None:
+        result, stdout, stderr = self.capture(elements_cli.main, ["list", "--pack", "builtin", "--json"])
+        self.assertEqual(result, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertTrue(payload["elements"])
+        self.assertTrue(all(item["metadata"]["pack_id"] == "builtin" for item in payload["elements"]))
 
     def test_executor_help_uses_canonical_terms(self) -> None:
         stdout = io.StringIO()

@@ -29,6 +29,10 @@ class PackYamlSchemaTest(unittest.TestCase):
             self.assertEqual(pack.name, "builtin")
             self.assertEqual(pack.version, "0.1.0")
             self.assertEqual(pack.metadata, {})
+            self.assertEqual(pack.content, {})
+            self.assertEqual(pack.agent, {})
+            self.assertEqual(pack.status, "active")
+            self.assertEqual(pack.visibility, "visible")
             self.assertEqual(pack.root, pack_root.resolve())
 
     def test_full_manifest_round_trips_name_version_and_metadata(self) -> None:
@@ -55,6 +59,39 @@ class PackYamlSchemaTest(unittest.TestCase):
             pack_root = self._write_pack(Path(tmp), "id: 1invalid\n", folder="invalid")
             with self.assertRaisesRegex(PackValidationError, "safe pack identifier"):
                 load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_pack_id_rejects_uppercase_and_hyphen(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad_id, folder in (("Invalid", "Invalid"), ("my-pack", "my-pack")):
+                with self.subTest(bad_id=bad_id):
+                    pack_root = self._write_pack(Path(tmp), f"id: {bad_id}\n", folder=folder)
+                    with self.assertRaisesRegex(PackValidationError, "safe pack identifier"):
+                        load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_canonical_nested_manifest_loads_content_agent_status_visibility(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+name: Builtin
+version: 1.2.3
+description: Canonical nested manifest.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Test purpose
+status: experimental
+visibility: hidden
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.description, "Canonical nested manifest.")
+            self.assertEqual(pack.content["executors"], "executors")
+            self.assertEqual(pack.agent["purpose"], "Test purpose")
+            self.assertEqual(pack.status, "experimental")
+            self.assertEqual(pack.visibility, "hidden")
 
     def test_pack_id_must_match_folder_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

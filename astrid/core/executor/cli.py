@@ -6,6 +6,7 @@ import argparse
 import json
 import shlex
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,9 +18,13 @@ from astrid.core._search import (
     short_description_or_truncated,
 )
 
+from astrid.core.dirty import detect_local_edits
+from astrid.core.override import OverrideStore, OverrideStoreError
+from astrid.core.update import update_check, update_apply
+
 from .banodoco_catalog import BanodocoCatalogConfig
 from .registry import ExecutorRegistry, load_default_registry
-from .schema import ExecutorDefinition, ExecutorValidationError
+from .schema import ExecutorDefinition, ExecutorValidationError, to_capability_handle
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -30,9 +35,17 @@ def main(argv: list[str] | None = None) -> int:
     if getattr(args, "command", None) == "new":
         return int(args.handler(args, registry=None))
     try:
-        registry = load_default_registry(_banodoco_config_from_args(args))
+        # SD2: executor CLI defaults to Path.cwd() so forks land in the
+        # user's current project, not the source-tree REPO_ROOT.
+        project_root = getattr(args, "project_root", None) or Path.cwd()
+        # Create OverrideStore so --show-overrides and override set/remove/list work.
+        override_store = OverrideStore(project_root=project_root)
+        registry = load_default_registry(
+            _banodoco_config_from_args(args), project_root=project_root
+        )
+        registry.override_store = override_store
         return int(args.handler(args, registry))
-    except (KeyError, ExecutorValidationError, ProjectRunError, ValueError) as exc:
+    except (KeyError, ExecutorValidationError, ProjectRunError, ValueError, OverrideStoreError) as exc:
         print(f"executors: {exc}", file=sys.stderr)
         return 2
 
@@ -49,23 +62,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--banodoco-refresh", action="store_true", help="Refresh cached git checkouts before loading Banodoco executors.")
     parser.add_argument("--no-banodoco-defaults", action="store_true", help="Skip Banodoco catalog executors marked default.")
     parser.add_argument("--no-banodoco-mandatory", action="store_true", help="Skip Banodoco catalog executors marked mandatory.")
+    # SD2: executor/orchestrator CLIs fork to Path.cwd() by default.
+    parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="List available executors.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--kind", choices=("built_in", "external"), help="Filter executors by kind.")
+    list_parser.add_argument("--pack", help="Filter executors by source pack id.")
     list_parser.add_argument("--no-describe", action="store_true", help="Omit the short_description column for legacy parsers.")
+    list_parser.add_argument("--show-overrides", action="store_true", help="Annotate capabilities with active overrides.")
     list_parser.set_defaults(handler=_cmd_list)
 
     search_parser = subparsers.add_parser("search", help="Search executors by id, keywords, descriptions, and binaries.")
     search_parser.add_argument("terms", nargs="+", help="One or more search terms.")
     search_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     search_parser.add_argument("--limit", type=int, default=25, help="Maximum number of hits (default 25).")
+    search_parser.add_argument("--pack", help="Filter executors by source pack id.")
     search_parser.set_defaults(handler=_cmd_search)
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect one executor.")
     inspect_parser.add_argument("executor_id")
     inspect_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    inspect_parser.add_argument("--pack", help="Require the resolved executor to belong to this pack id.")
+    inspect_parser.add_argument("--show-overrides", action="store_true", help="Show override status for this capability.")
     inspect_parser.set_defaults(handler=_cmd_inspect)
 
     validate_parser = subparsers.add_parser("validate", help="Validate executor metadata.")
@@ -128,7 +148,74 @@ def build_parser() -> argparse.ArgumentParser:
     )
     new_parser.set_defaults(handler=_cmd_new)
 
+    fork_parser = subparsers.add_parser("fork", help="Fork an executor into the local pack (astrid/packs/local).")
+    fork_parser.add_argument("executor_id", help="Qualified executor id to fork (e.g., builtin.render).")
+    fork_parser.add_argument("--overwrite", action="store_true", help="Replace an existing local fork.")
+    fork_parser.add_argument("--deep", action="store_true", help="Also recursively fork all depended-on executors.")
+    fork_parser.set_defaults(handler=_cmd_fork)
+
+    # --- Override subcommands ---
+    override_parser = subparsers.add_parser("override", help="Manage capability overrides.")
+    override_sub = override_parser.add_subparsers(dest="override_action", required=True)
+
+    override_set = override_sub.add_parser("set", help="Set an override: route an executor to a replacement.")
+    override_set.add_argument("executor_id")
+    override_set.add_argument("target_id", help="Fully-qualified id of the replacement executor.")
+    override_set.set_defaults(handler=_cmd_override)
+
+    override_remove = override_sub.add_parser("remove", help="Remove an override.")
+    override_remove.add_argument("executor_id")
+    override_remove.set_defaults(handler=_cmd_override)
+
+    override_list = override_sub.add_parser("list", help="List all active overrides.")
+    override_list.set_defaults(handler=_cmd_override)
+
+    # --- Dirty subcommands ---
+    dirty_parser = subparsers.add_parser("dirty", help="Check or list locally-modified (dirty) executors.")
+    dirty_sub = dirty_parser.add_subparsers(dest="dirty_action", required=True)
+
+    dirty_check = dirty_sub.add_parser("check", help="Check dirty state for one executor.")
+    dirty_check.add_argument("executor_id")
+    dirty_check.set_defaults(handler=_cmd_dirty)
+
+    dirty_list = dirty_sub.add_parser("list", help="List all dirty executors.")
+    dirty_list.set_defaults(handler=_cmd_dirty)
+
+    # --- Update subcommands ---
+    update_parser = subparsers.add_parser("update", help="Check for or apply upstream updates to forked executors.")
+    update_sub = update_parser.add_subparsers(dest="update_action", required=True)
+
+    update_check_parser = update_sub.add_parser("check", help="Compare local fork against upstream.")
+    update_check_parser.add_argument("executor_id")
+    update_check_parser.set_defaults(handler=_cmd_update)
+
+    update_apply_parser = update_sub.add_parser("apply", help="Apply upstream update to a local fork.")
+    update_apply_parser.add_argument("executor_id")
+    update_apply_parser.add_argument("--force", action="store_true", help="Apply even if safety escalations are detected.")
+    update_apply_parser.add_argument("--skip-safety", action="store_true", help="Skip safety escalation checks.")
+    update_apply_parser.set_defaults(handler=_cmd_update)
+
     return parser
+
+
+def _cmd_fork(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
+    # SD2: executor CLI forks to Path.cwd() by default so forked executors
+    # land in the user's current project, not the source-tree REPO_ROOT.
+    project_root = getattr(args, "project_root", None) or Path.cwd()
+
+    # Resolve alias BEFORE fork (watch item): alias → canonical ID,
+    # then fork the canonical executor.
+    resolver = registry.alias_resolver
+    resolved_id = resolver.resolve(args.executor_id) if resolver else args.executor_id
+
+    target = registry.fork(
+        resolved_id,
+        project_root=project_root,
+        overwrite=bool(args.overwrite),
+        deep=bool(args.deep),
+    )
+    print(f"forked: {target}")
+    return 0
 
 
 def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
@@ -412,23 +499,36 @@ def _banodoco_config_from_args(args: argparse.Namespace) -> BanodocoCatalogConfi
 
 
 def _cmd_list(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
-    executors = registry.list(kind=args.kind)
+    executors = _filter_by_pack(registry.list(kind=args.kind), getattr(args, "pack", None))
+    show_overrides = bool(getattr(args, "show_overrides", False))
     if args.json:
-        print(json.dumps({"executors": [executor.to_dict() for executor in executors]}, indent=2, sort_keys=True))
+        result = []
+        for item in executors:
+            handle = to_capability_handle(item)
+            entry = {'_capability': handle.to_dict(), 'source_pack': _definition_pack_id(item), **item.to_dict()}
+            if show_overrides and registry.override_store is not None:
+                entry['_override'] = registry.override_store.resolve("executor", item.id)
+            result.append(entry)
+        print(json.dumps({'executors': result}, indent=2, sort_keys=True))
         return 0
     no_describe = bool(getattr(args, "no_describe", False))
     for executor in executors:
+        override_tag = ""
+        if show_overrides and registry.override_store is not None:
+            target = registry.override_store.resolve("executor", executor.id)
+            if target is not None:
+                override_tag = f"\t→ {target}"
         if no_describe:
-            print(f"{executor.id}\t{executor.kind}\t{executor.name}")
+            print(f"{executor.id}\t{executor.kind}\t{executor.name}{override_tag}")
         else:
             short = short_description_or_truncated(executor.short_description, executor.description)
             invoke = _format_invocation_hint("executors", executor.id, executor.inputs)
-            print(f"{executor.id}\t{executor.kind}\t{executor.name}\t{short}\t{invoke}")
+            print(f"{executor.id}\t{executor.kind}\t{executor.name}\t{short}\t{invoke}{override_tag}")
     return 0
 
 
 def _cmd_search(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
-    records = [_executor_search_record(executor) for executor in registry.list()]
+    records = [_executor_search_record(executor) for executor in _filter_by_pack(registry.list(), getattr(args, "pack", None))]
     hits = run_search(records, list(args.terms), limit=int(args.limit))
     if args.json:
         payload = [
@@ -456,15 +556,31 @@ def _executor_search_record(executor: ExecutorDefinition) -> SearchRecord:
         "description": executor.description,
         "keywords": " ".join(executor.keywords),
         "binaries": " ".join(executor.isolation.binaries),
+        "pack_id": executor.id.split(".")[0] if "." in executor.id else executor.id,
+        "version": executor.version,
+        "category": str(executor.metadata.get("category") or executor.kind),
     }
     return SearchRecord(id=executor.id, kind=executor.kind, short_description=short, fields=fields)
 
 
 def _cmd_inspect(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
-    _require_qualified_id(args.executor_id, "executor id")
-    executor = registry.get(args.executor_id)
+    # Resolve alias BEFORE _require_qualified_id (SD1): alias → canonical ID
+    # (which always contains a dot), then qualify, then lookup.
+    resolver = registry.alias_resolver
+    resolved_id = resolver.resolve(args.executor_id) if resolver else args.executor_id
+    _require_qualified_id(resolved_id, "executor id")
+    executor = registry.get(resolved_id)
+    _require_pack_match(executor, getattr(args, "pack", None))
+    show_overrides = bool(getattr(args, "show_overrides", False))
     if args.json:
-        print(executor.to_json())
+        handle = to_capability_handle(executor)
+        if resolver is not None:
+            aliases = resolver.get_aliases_for(resolved_id)
+            handle = replace(handle, aliases=tuple(aliases))
+        result = {"_capability": handle.to_dict(), **executor.to_dict()}
+        if show_overrides and registry.override_store is not None:
+            result["_override"] = registry.override_store.resolve("executor", executor.id)
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     print(f"id: {executor.id}")
     print(f"name: {executor.name}")
@@ -485,9 +601,33 @@ def _cmd_inspect(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         print(f"cache_sentinels: {', '.join(executor.cache.sentinels)}")
     if executor.isolation.binaries:
         print(f"binaries: {', '.join(executor.isolation.binaries)}")
+    if show_overrides and registry.override_store is not None:
+        target = registry.override_store.resolve("executor", executor.id)
+        if target is not None:
+            print(f"override: executor/{executor.id} → {target}")
+        else:
+            print("override: none")
     _print_invocation_example("executors", executor.id, executor.inputs)
     _print_active_thread_footer()
     return 0
+
+
+def _definition_pack_id(definition: ExecutorDefinition) -> str:
+    source_pack = definition.metadata.get("source_pack")
+    if isinstance(source_pack, str) and source_pack:
+        return source_pack
+    return definition.id.split(".", 1)[0]
+
+
+def _filter_by_pack(definitions: list[ExecutorDefinition], pack_id: str | None) -> list[ExecutorDefinition]:
+    if not pack_id:
+        return definitions
+    return [definition for definition in definitions if _definition_pack_id(definition) == pack_id]
+
+
+def _require_pack_match(definition: ExecutorDefinition, pack_id: str | None) -> None:
+    if pack_id and _definition_pack_id(definition) != pack_id:
+        raise ValueError(f"executor {definition.id!r} does not belong to pack {pack_id!r}")
 
 
 def _cmd_validate(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
@@ -777,6 +917,93 @@ def _print_active_thread_footer() -> None:
     else:
         print("active_thread: none")
     print("thread_details: python3 -m astrid thread show @active")
+
+
+def _cmd_override(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
+    store = registry.override_store
+    if store is None:
+        print("executors: override store not available", file=sys.stderr)
+        return 1
+    action = getattr(args, "override_action", None)
+    if action == "set":
+        store.set_override("executor", args.executor_id, args.target_id)
+        print(f"override set: executor/{args.executor_id} → {args.target_id}")
+    elif action == "remove":
+        store.remove_override("executor", args.executor_id)
+        print(f"override removed: executor/{args.executor_id}")
+    elif action == "list":
+        overrides = store.list_overrides()
+        if not overrides:
+            print("no overrides")
+            return 0
+        for override_type, mappings in sorted(overrides.items()):
+            for override_id, target in sorted(mappings.items()):
+                print(f"{override_type}/{override_id} → {target}")
+    else:
+        print(f"executors override: unknown action {action!r}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_dirty(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
+    action = getattr(args, "dirty_action", None)
+    if action == "check":
+        executor = registry.get(args.executor_id)
+        content_root = _definition_content_root(executor)
+        forked_from = str(executor.metadata.get("forked_from") or "")
+        state = detect_local_edits(content_root, forked_from=forked_from)
+        print(f"executor/{executor.id}: {state}")
+    elif action == "list":
+        dirty_found = 0
+        for executor in registry.list():
+            content_root = _definition_content_root(executor)
+            forked_from = str(executor.metadata.get("forked_from") or "")
+            state = detect_local_edits(content_root, forked_from=forked_from)
+            if state != "clean":
+                print(f"executor/{executor.id}: {state}")
+                dirty_found += 1
+        if dirty_found == 0:
+            print("no dirty executors")
+    else:
+        print(f"executors dirty: unknown action {action!r}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_update(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
+    action = getattr(args, "update_action", None)
+    if action == "check":
+        report = update_check(
+            args.executor_id, registry,
+            capability_type="executor",
+        )
+        print(report["report"])
+        return 0
+    elif action == "apply":
+        force = bool(getattr(args, "force", False))
+        skip_safety = bool(getattr(args, "skip_safety", False))
+        report = update_apply(
+            args.executor_id, registry,
+            force=force, skip_safety=skip_safety,
+            capability_type="executor",
+        )
+        print(report["report"])
+        return 0 if report.get("applied") else 1
+    else:
+        print(f"executors update: unknown action {action!r}", file=sys.stderr)
+        return 2
+
+
+def _definition_content_root(definition: ExecutorDefinition) -> Path:
+    """Extract content root from executor definition metadata."""
+    root_str = definition.metadata.get("content_root")
+    if root_str:
+        return Path(root_str)
+    # Fallback to executor_root metadata key.
+    root_str = definition.metadata.get("executor_root")
+    if root_str:
+        return Path(root_str)
+    return Path.cwd()
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ schema_version: 1
 id: clip_tools
 name: Clip Tools
 version: 0.1.0
+visibility: hidden
 description: A pack for Clip Tools.
 content:
   executors: executors

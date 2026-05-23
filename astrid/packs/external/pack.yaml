@@ -1,4 +1,5 @@
 schema_version: 1
 id: external
+schema_version: 1
 name: Astrid External Tools
 version: 1.0.0

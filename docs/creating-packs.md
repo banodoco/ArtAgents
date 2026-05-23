@@ -4,6 +4,12 @@ This guide walks you through creating a pack — a reusable bundle of
 executors, orchestrators, and elements that Astrid agents can discover
 and run.
 
+Terminology note: for pack identity, capability identity, default-enabled versus
+optional placement, aliases, forks, overrides, and in-place edits, use the
+Milestone 0 contract at
+`docs/megaplan/epics/pack-system/pack-contract.md`. This guide stays focused on
+the current authoring workflow.
+
 ## Quick Start
 
 ```bash
@@ -50,7 +56,42 @@ my_video_tools/
 ```
 
 The exact layout is declared by `pack.yaml`, not guessed by scanning
-the repository. See the `content` section of your pack manifest.
+the repository. Runtime discovery now reads the same `content` roots that
+`packs validate` checks. Legacy flat packs without `schema_version` are still
+supported, but new packs should use the canonical `executors/`,
+`orchestrators/`, and `elements/` roots declared in `pack.yaml`.
+
+Pack discovery commands:
+
+```bash
+# List all discovered packs
+python3 -m astrid packs list
+python3 -m astrid packs list --json
+
+# Filter by category, effective status, or visibility
+python3 -m astrid packs list --category media
+python3 -m astrid packs list --status stub
+python3 -m astrid packs list --visibility hidden
+
+# Include packs marked visibility: hidden (excluded by default)
+python3 -m astrid packs list --show-hidden
+
+# Inspect a specific pack (always includes hidden packs)
+python3 -m astrid packs inspect my_video_tools
+python3 -m astrid packs inspect my_video_tools --json
+
+# Validate every discovered pack and show effective status
+python3 -m astrid packs status
+python3 -m astrid packs status --json
+python3 -m astrid packs status --show-hidden
+```
+
+`packs status` annotates packs whose `agent.purpose` is
+`"TODO: describe what this pack is for"` with an effective status of
+`stub`. This annotation is runtime-only — no manifest files are
+modified. The `--show-hidden` flag includes packs with
+`visibility: hidden` (excluded by default from both `list` and
+`status`).
 
 ## Manifests
 
@@ -192,6 +233,37 @@ remain the reference for the built-in format.
 
 The new v1 external pack contract described in this document is a
 separate path. The canonical external example is `examples/packs/minimal/`.
+
+## Related Guides
+
+The pack system is documented across several complementary guides. Refer to
+these for the topics they cover:
+
+- [pack-contract.md](megaplan/epics/pack-system/pack-contract.md) — Formal
+  definitions for pack identity, capability identity, aliases, forks,
+  overrides, and the unified layout contract.
+- [discovery-for-agents.md](discovery-for-agents.md) — How a cold agent
+  discovers capabilities via `skills list`, `executors search`, and
+  `inspect --json`.
+- [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —
+  Decision table and CLI examples for the three customization mechanisms.
+- [personal-packs.md](personal-packs.md) — Scaffolding and managing
+  personal packs with forks, overrides, and dirty detection.
+- [adapter-packs.md](adapter-packs.md) — What makes a pack an adapter,
+  trust/ownership distinctions, and the `kind: external` convention.
+- [update-workflow.md](update-workflow.md) — Detecting, reviewing, and
+  promoting local edits with dirty check and fork CLI.
+
+## Future Work
+
+Several pack-system capabilities are deferred to future milestones:
+
+- **Remote registry** — A shared catalog for publishing, discovering, and
+  installing packs from outside the repository.
+- **Dependency isolation** — Per-pack virtual environments and isolated
+  dependency resolution to prevent conflicts between packs.
+- **Semantic merge** — Three-way merge of upstream pack updates with local
+  forks and overrides, replacing the current manual review workflow.
 
 ## Next Steps
 

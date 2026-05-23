@@ -10,6 +10,7 @@ from typing import Any, cast
 
 # Single source of truth for element kinds lives in astrid.core.pack to avoid a
 # circular import (element.__init__ would import pack.py during schema load).
+from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
 from astrid.core.pack import ELEMENT_KINDS, ElementKind
 REQUIRED_ELEMENT_FILES = ("component.tsx", "element.yaml")
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
@@ -57,6 +58,60 @@ class ElementDefinition:
 
     def to_json(self, *, indent: int | None = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+
+def to_capability_handle(definition: ElementDefinition) -> CapabilityHandle:
+    """Adapt an ``ElementDefinition`` into a ``CapabilityHandle``.
+
+    Field mapping:
+
+    * ``canonical_id`` — ``"<kind>/<id>"`` slash-separator display string
+      (e.g. ``"effects/blur"``)
+    * ``local_id`` — ``definition.id``
+    * ``pack_id`` — from ``metadata.pack_id`` when available, else ``""``
+    * ``kind`` — ``definition.kind`` (e.g. ``"effects"``, ``"animations"``)
+    * ``name`` — ``metadata.name`` or ``metadata.label`` or ``definition.id``
+    * ``version`` — ``metadata.version`` (default ``""``)
+    * ``provenance.source`` — ``definition.source`` preserved as-is
+      (``"pack:builtin"``, ``"active_theme"``, etc.)
+    * ``safety.network`` — ``False`` (elements have no network isolation)
+    """
+    metadata = definition.metadata
+
+    name = str(metadata.get("name") or metadata.get("label") or definition.id)
+    version = str(metadata.get("version") or "")
+    pack_id = str(metadata.get("pack_id") or "")
+
+    canonical_id = f"{definition.kind}/{definition.id}"
+
+    forked_from = str(metadata.get("forked_from") or "")
+    upstream_version = str(metadata.get("upstream_version") or "")
+    compatibility_token = str(metadata.get("compatibility_token") or "")
+    local_edit_state = str(metadata.get("local_edit_state") or "clean")
+    override_target = str(metadata.get("override_target") or "")
+
+    return CapabilityHandle(
+        canonical_id=canonical_id,
+        local_id=definition.id,
+        pack_id=pack_id,
+        kind=definition.kind,
+        name=name,
+        version=version,
+        provenance=Provenance(
+            source=definition.source,
+            forked_from=forked_from or None,
+            upstream_version=upstream_version or None,
+            compatibility_token=compatibility_token or None,
+        ),
+        safety=SafetyDeclaration(network=False),
+        description=definition.description,
+        short_description=definition.short_description,
+        keywords=definition.keywords,
+        local_edit_state=local_edit_state,
+        override_target=override_target or None,
+        inputs=(),
+        outputs=(),
+    )
 
 
 def load_element_definition(
