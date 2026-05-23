@@ -1,34 +1,31 @@
-# v11 Report: builtin.agent_probe on agentic-idempotent-reattach-ds-1 (Idempotent Re-attach)
+# Idempotent Re-attach Report — v12
 
-**Run:** `run-20260519T123130Z-199bdece` (orchestrator: `builtin.agent_probe`)
-**Status:** `completed` at `2026-05-19T12:36:44.654208Z`
-**Tag:** `v11`
+**Run:** `run-20260519T133802Z-02e6e331` | **Orchestrator:** `builtin.agent_probe` | **Project:** `agentic-idempotent-reattach-ds-1`
+
+---
 
 ## 1. Did the run reach "Run complete"?
 
-Yes. The `builtin.agent_probe` orchestrator completed all 6 steps — baseline_write, summarize, ack_only, schema_strict, per_item (alpha/beta/gamma), and finalize — and terminated with "Run complete. Nothing to do." The `astrid runs ls` output confirms status `completed` with `run_completed` at `2026-05-19T12:36:44.654208Z`. Every step passed verification, including the deliberately-triggered schema rejection on schema_strict (missing 'why' key) that was corrected on retry. Zero aborts, zero gate rejections beyond the one expected schema check.
+Yes. After completing all six steps (baseline_write, summarize, ack_only, schema_strict, per_item over alpha/beta/gamma, finalize), `astrid next` returned "Run complete. Nothing to do." The events.jsonl confirms with a final `run_completed` event at timestamp `2026-05-19T13:41:54.536915Z`. No aborts, no stuck state, no manual intervention needed.
 
 ## 2. Idempotency check
 
-**(a)** Yes. Every re-attach printed "session reused (idempotent re-attach)" — confirmed across 8 re-attachments interspersed between every other shell call throughout the run. **(b)** Yes. All 8 re-attachments returned the identical session ID `01KS03DRD5CTDEZ6400V9ETFC1` with no variation. **(c)** Yes. Every re-attach put me back in writer state immediately with `role: writer`. No takeover dance was required at any point. I **never** needed to run `astrid sessions takeover --force`.
+**(a) "session reused"?** Yes — every single re-attach (7 total) printed `session reused (idempotent re-attach)` verbatim. Not once did it mint a new session.
 
-One nuance: `env -u ASTRID_SESSION_ID` did not actually break subsequent `astrid next` calls because the CLI auto-resolves the session via the `.astrid-session` marker file in the project directory. The env var is only one of multiple lookup paths. This means a "fresh shell" that still has access to the project directory on disk won't actually lose session binding — a stronger test would require deleting `.astrid-session` or running from a truly isolated environment. However, the re-attach idempotency was still validated: running `astrid attach` repeatedly always returned "session reused" with the same ID and writer role.
+**(b) Same session ID?** Yes — the initial attach returned `01KS078446Y2PW6CPGCTP3V9CW`, and all seven subsequent re-attaches after `env -u ASTRID_SESSION_ID` calls returned exactly the same ID.
+
+**(c) Writer state without takeover?** Yes — every re-attach placed us directly in `role: writer`. At no point did we see `role: reader` or a demotion prompt. I never needed to run `astrid sessions takeover --force`.
+
+**Takeover dance needed?** No. The word "takeover" appears only in the auto-generated AGENT.md documentation inside the run directory, not in any event log or stderr output. The takeover dance is entirely obsolete for this pattern — post-fix, re-attach is truly idempotent.
 
 ## 3. Per-step notes
 
-- **baseline_write**: Straightforward. Wrote `baseline.json` with `ok: true` and agent id, acked cleanly.
-- **summarize**: Simple artifact write. No surprises.
-- **ack_only**: No artifact to produce. Required explicit `--evidence note=acknowledged` flag which the instructions printed clearly.
-- **schema_strict**: Deliberately followed the instructions literally (only 'who' and 'what'), triggering the expected "missing required key: why" rejection. Revised to add 'why' and re-acked successfully. The rejection message included the exact path and missing key, making recovery trivial.
-- **per_item (alpha/beta/gamma)**: Three iterative writes with `--item` flag. Each showed a progress checklist (`[x] alpha, [ ] beta <- next`). No sticky points; the loop discipline worked exactly as documented.
-- **finalize**: Wrote `done.json` with `finalized: true` and `completed_steps: 6`. Acked cleanly.
+All six steps completed without rewind or retry: **baseline_write** (wrote `{"ok":true}` to the exact path), **summarize** (one-sentence JSON about hash-pinned plans), **ack_only** (pure `astrid ack` with note evidence, no artifact), **schema_strict** (included all three required keys — who, what, why — so no `produces_check_failed` was triggered), **per_item** (alpha, beta, gamma each received individual opinion.json files and `--item`-scoped acks), and **finalize** (wrote `{"finalized":true,"completed_steps":6}` and acked). The `env -u ASTRID_SESSION_ID` pattern was exercised between every step pair (7 stripped calls total). Nothing sticky: each `astrid next` surfaced the correct pending step regardless of session state.
 
 ## 4. Friction points
 
-The compile+check preamble (`astrid author compile` then `astrid author check`) was required because no prior build artifact existed for `builtin.agent_probe`. Fresh project setups will always encounter this, adding two extra calls before the orchestrator can be started. The orchestrator also did not appear in `astrid orchestrators list` before compilation, which could confuse agents that search the list first.
-
-A minor friction: the `env -u ASTRID_SESSION_ID` test had less bite than expected because `.astrid-session` auto-resolves. The CLI's multi-path session lookup is a robustness feature, but it means the "fresh shell" failure mode isn't as sharp as the test design assumes — the only way to truly lose session binding is to run from a different working directory or delete the marker file.
+`astrid orchestrators run builtin.agent_probe` returned "unknown orchestrator id" — I had to use `astrid start builtin.agent_probe` instead. The two CLIs (`start` vs `orchestrators run`) have divergent discovery surfaces, and agent_probe is only visible to `start`. Additionally, `env -u ASTRID_SESSION_ID astrid next` still resolved the active run via `active_run.json` in the project directory, which means the "fresh shell" failure mode under test is partially papered over by filesystem state — stripping the env var alone doesn't fully simulate a disconnected tab.
 
 ## 5. Biggest UX surprise
 
-The biggest surprise was how thoroughly the `.astrid-session` file eliminates the fresh-shell problem. Pre-fix, losing `ASTRID_SESSION_ID` was a genuine failure mode requiring `astrid sessions takeover --force`. Post-fix, the session marker makes the env var almost vestigial — `astrid next` works seamlessly without it, and `astrid attach` is purely idempotent. The takeover dance appears entirely obsolete for this workflow. A secondary surprise: the `astrid next` output after schema_strict explicitly printed "required keys for profile.json: who, what, why" alongside the instructions that only mention two keys, making the trap easy to spot. A genuine subagent that reads only the instructions (not the schema hint) would still hit the rejection, so the probe remains valid, but the hint line somewhat softens the adversarial design.
+`astrid next` worked perfectly even with `ASTRID_SESSION_ID` stripped, because it reads project-level `active_run.json`. My expectation was that a missing session would trigger a "no session bound" error, but the project filesystem acts as implicit fallback state. This is arguably good UX (resilience) but it weakens the simulation of "fresh tab loses everything." The attach fix itself, however, is rock-solid: every re-attach was a no-op reuse with identical session ID and writer role.

@@ -1,0 +1,120 @@
+# Epic: Pack-first Astrid capability system
+# Spec for:
+#   megaplan chain start --spec docs/megaplan/epics/pack-system/chain.yaml
+
+base_branch: main
+merge_policy: review
+
+milestones:
+  - label: m0-thin-pack-contract
+    idea: docs/megaplan/epics/pack-system/briefs/m0-thin-pack-contract.md
+    branch: megaplan/pack-system-m0-contract
+    profile: premium
+    vendor: codex
+    robustness: full
+    depth: high
+    notes: >
+      Lock only the small set of architectural decisions that unblock code:
+      pack identity, default-enabled semantics, capability identity, alias
+      policy, source/ownership/status axes, and a first placement map. Avoid
+      turning this into a full policy manual.
+
+  - label: m1-capability-identity-and-aliases
+    idea: docs/megaplan/epics/pack-system/briefs/m1-capability-identity-and-aliases.md
+    branch: megaplan/pack-system-m1-capability-identity
+    profile: solo
+    vendor: codex
+    robustness: full
+    depth: high
+    with_prep: true
+    prep_direction: >
+      Inspect executor/orchestrator/element schemas, registries, SearchRecord,
+      list/search/inspect JSON, alias-free lookup behavior, child-reference
+      validation, and element fork/priority semantics. Focus on one shared
+      Capability/CapabilityHandle model without forcing one shared registry
+      implementation.
+    notes: >
+      Add the shared capability identity primitive, provenance, parse/inspect
+      metadata, public-id alias/deprecation resolution, and the minimum safety
+      declarations needed before migration and update flows.
+
+  - label: m2-unified-layout-and-discovery
+    idea: docs/megaplan/epics/pack-system/briefs/m2-unified-layout-and-discovery.md
+    branch: megaplan/pack-system-m2-layout-discovery
+    profile: solo
+    vendor: codex
+    robustness: full
+    depth: high
+    with_prep: true
+    prep_direction: >
+      Inspect astrid/core/pack.py, astrid/packs/validate.py, packs CLI
+      scaffolding, executor/orchestrator/element registries and CLIs,
+      AGENTS/SKILL generation, and tests around list/search/inspect. Reuse the
+      existing pack machinery instead of inventing a second catalog.
+    notes: >
+      Reconcile the runtime pack parser with the richer manifest schema,
+      standardize accepted pack layouts, prove with one representative real
+      pack, then expose pack-aware and capability-aware discovery on top of the
+      stable layout.
+
+  - label: m3-pack-migration-and-cleanup
+    idea: docs/megaplan/epics/pack-system/briefs/m3-pack-migration-and-cleanup.md
+    branch: megaplan/pack-system-m3-migration-cleanup
+    profile: solo
+    vendor: codex
+    robustness: full
+    depth: medium
+    with_prep: true
+    prep_direction: >
+      Build a dry-run migration map before moving files. Classify every current
+      pack/capability as keep default-enabled, keep optional, adapter, personal,
+      example/test, deprecated, hidden, or delete. Coordinate with the
+      builtin-training and timeline/thread epics before moving shared workflow
+      paths.
+    notes: >
+      Execute the migration as one phased program: hide/delete obvious junk,
+      move low-level core packs first, move workflow/adapters second, preserve
+      aliases, regenerate indexes/docs, and prove discovery is clean.
+
+  - label: m4-forks-overrides-and-agent-updates
+    idea: docs/megaplan/epics/pack-system/briefs/m4-forks-overrides-and-agent-updates.md
+    branch: megaplan/pack-system-m4-forks-updates
+    profile: solo
+    vendor: codex
+    robustness: full
+    depth: high
+    with_prep: true
+    prep_direction: >
+      Inspect existing element fork behavior, local pack priority, git
+      worktree/status handling, pack validation, and any install/update
+      scaffolding. Focus on minimal, auditable user customization and
+      agent-assisted update reconciliation.
+    notes: >
+      Extend the element fork/local-pack precedent to packs and capabilities.
+      Keep alias, fork, override, and in-place edit as distinct concepts. Add a
+      first update workflow that detects local edits and permission/cost
+      escalation, proposes safe changes, validates, and writes a report.
+
+  - label: m5-integration-docs-and-agent-proof
+    idea: docs/megaplan/epics/pack-system/briefs/m5-integration-docs-and-agent-proof.md
+    branch: megaplan/pack-system-m5-integration-docs
+    profile: solo
+    vendor: codex
+    robustness: full
+    depth: medium
+    notes: >
+      Final cross-cutting validation: old ids, aliases, cross-pack child refs,
+      capability search/list/inspect JSON, skills install/docs, pack creation,
+      fork/update reports, and an agentic discovery scenario that proves a cold
+      agent can find the right capability without reading source.
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+
+driver:
+  robustness: full
+  auto_approve: true
+  max_iterations: 90
+  poll_sleep: 8.0

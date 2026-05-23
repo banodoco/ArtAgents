@@ -403,7 +403,7 @@ def run(args: argparse.Namespace) -> int:
         print(json.dumps(payload_preview, indent=2))
         return 0
 
-    api_key = load_api_key(args.env_file)
+    api_key = load_api_key("OPENAI_API_KEY", args.env_file)
     response_schema: dict[str, Any] | None = None
     if args.response_schema:
         schema_path = args.response_schema.expanduser()

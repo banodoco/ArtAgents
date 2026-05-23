@@ -3,8 +3,8 @@
   "name": "Clip Extract",
   "kind": "built_in",
   "version": "1.0",
-  "short_description": "Extract a clip segment from a video using ffmpeg stream copy.",
-  "description": "Extract a clip segment from a source video using ffmpeg -ss (start time) and -t (duration) with stream copy (-c copy) for lossless, fast extraction.",
+  "short_description": "Extract a clip segment from a video using ffmpeg.",
+  "description": "Extract a clip segment from a source video using ffmpeg -ss (start time) and -t (duration), re-encoding to H.264/AAC so arbitrary scene-boundary cuts produce playable video.",
   "keywords": ["video", "clip", "ffmpeg", "extract", "trim", "segment"],
   "inputs": [
     {

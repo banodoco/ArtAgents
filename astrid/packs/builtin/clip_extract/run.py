@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract a clip segment from a video using ffmpeg stream copy.
+"""Extract a clip segment from a video using ffmpeg.
 
 
 Invoked by the Astrid runtime per command.argv in executor.yaml.
@@ -13,7 +13,6 @@ from __future__ import annotations
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('builtin.clip_extract')
 import argparse
-import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +21,7 @@ from pathlib import Path
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="builtin.clip_extract",
-        description="Extract a clip from a video using ffmpeg -ss -t -c copy.",
+        description="Extract a clip from a video using ffmpeg -ss/-t and H.264/AAC re-encoding.",
     )
     parser.add_argument(
         "--input", type=Path, required=True, help="Source video file path."
@@ -54,10 +53,15 @@ def build_ffmpeg_cmd(src: Path, start: float, dur: float, out: Path) -> list[str
     return [
         "ffmpeg",
         "-y",
-        "-i", str(src),
         "-ss", str(start),
+        "-i", str(src),
         "-t", str(dur),
-        "-c", "copy",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
         str(out),
     ]
 
@@ -81,18 +85,14 @@ def main(argv: list[str] | None = None) -> int:
 
     cmd = build_ffmpeg_cmd(src, args.start, args.dur, out)
 
-    # Defer actual invocation — print the command that would run.
-    # When wired through `astrid executors run`, the runtime handles
-    # dry-run vs. live execution.  Remove the guard below to execute
-    # ffmpeg directly.
-    print(f"[clip_extract] would run: {shlex.join(cmd)}")
-
-    # Uncomment the lines below to invoke ffmpeg for real:
-    # result = subprocess.run(cmd, check=False)
-    # if result.returncode != 0:
-    #     print(f"Error: ffmpeg exited with {result.returncode}", file=sys.stderr)
-    # return result.returncode
-
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        print(f"Error: ffmpeg exited with {result.returncode}", file=sys.stderr)
+        return result.returncode
+    if not out.is_file():
+        print(f"Error: ffmpeg completed but output was not created: {out}", file=sys.stderr)
+        return 3
+    print(f"Extracted: {out} ({out.stat().st_size:,} bytes)")
     return 0
 
 

@@ -29,6 +29,9 @@ priming:
   # Add more priming verbs as needed:
   #   - touch: <file-path>               # touch a file mtime
   #   - write: { path: ..., content: ... }
+  #   - start_with_plan:                 # start from an inline compiled plan
+  #       id: builtin.synthetic
+  #       plan: { plan_id: builtin.synthetic, version: 2, steps: [...] }
   #   - env: { KEY: value }
 
 # OPTIONAL — declare an orchestrator this scenario expects the agent to use

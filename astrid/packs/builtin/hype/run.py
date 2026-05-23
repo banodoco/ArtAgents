@@ -976,6 +976,21 @@ def build_pool_steps() -> list[Step]:
             ),
             per_brief=True,
         ),
+        Step(
+            "verdict",
+            ("verdict.json",),
+            lambda args: add_extra_args(
+                args,
+                "verdict",
+                [
+                    "bash",
+                    "-c",
+                    "echo '{\"verdict\": \"pass\"}' > "
+                    + str(args.brief_out / "verdict.json"),
+                ],
+            ),
+            per_brief=True,
+        ),
     ]
 
 

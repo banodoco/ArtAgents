@@ -288,12 +288,13 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `builtin.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
 | `builtin.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
-| `builtin.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
+| `builtin.clip_extract` | Extract a clip segment from a video using ffmpeg. |
 | `builtin.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
 | `builtin.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
 | `builtin.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
 | `builtin.generate_image` | Generate images from text prompts via local or cloud backends. v2: model→mode→backend. |
 | `builtin.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
+| `builtin.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes. |
 | `builtin.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
 | `builtin.human_notes` | Convert human editorial notes into structured pipeline inputs. |
 | `builtin.human_review` | Serve a small HTML page locally, collect human decisions as JSON, block until submit. |
@@ -321,7 +322,11 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
 | `builtin.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
 | `builtin.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
+| `clip_tools.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `external.comfy_prompt_image` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
+| `external.comfy_t2i` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
+| `external.comfy_t2i_ds1` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
+| `external.comfy_workflow_image` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
 | `external.example_comfy_image` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
 | `external.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
 | `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
@@ -331,14 +336,19 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `external.runpod.teardown` | Terminate a RunPod pod. Idempotent. |
 | `external.vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
 | `external.vibecomfy.validate` | Validate a VibeComfy / ComfyUI workflow JSON without executing it. |
+| `file_summarizer.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
+| `iteration.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
+| `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `seinfeld.aitoolkit_stage` | Generate ai-toolkit job config from manifest + vocabulary; upload to pod; start AI Toolkit UI on :8675. |
 | `seinfeld.aitoolkit_train` | Kick off ai-toolkit training on a pod and mirror remote logs locally. |
 | `seinfeld.lora_eval_grid` | Run baseline LTX + per-checkpoint inference samples, download MP4s, write static index.html viewer. |
 | `seinfeld.lora_register` | Pure-local: copy chosen .safetensors into registered/ and write registered_lora.json. |
 | `seinfeld.repo_setup` | Idempotent git submodule add + checkout of ostris/ai-toolkit for config-schema reference. |
 | `seinfeld.script_pipeline` | Generate Seinfeld-style short scene scripts through ideation, synthesis, and voice passes. |
+| `text_digest.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
+| `text_review.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `upload.youtube` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
 | `video_tools.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 

@@ -118,4 +118,14 @@ def hype():
             ),
             ack="actor",
         ),
+        attested(
+            "agentic_append_verdict",
+            command="echo '{\"verdict\": \"ship\"}' > agentic_append_verdict.json",
+            instructions=(
+                "Write a one-line JSON verdict to agentic_append_verdict.json with a single "
+                "\"verdict\" key (e.g. {\"verdict\": \"ship\"}), then ack to finish."
+            ),
+            ack="actor",
+            produces={"verdict": (json_file(), "agentic_append_verdict.json")},
+        ),
     ]

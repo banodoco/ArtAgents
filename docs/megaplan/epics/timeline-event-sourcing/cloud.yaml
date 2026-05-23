@@ -56,9 +56,9 @@ toolchains:
         && bun --version
 
 secrets:
-  - GITHUB_TOKEN
-  - CLAUDE_CODE_OAUTH_TOKEN
-  - ANTHROPIC_API_KEY
+  # Only list secrets we want this deploy to (re)upload. Other keys
+  # (GITHUB_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY,
+  # OPENAI_API_KEY) are already set on the shared Railway service from
+  # prior deploys and left untouched. See megaplan-cloud gotcha #5.
   - DEEPSEEK_API_KEY
-  - OPENAI_API_KEY
   - FIREWORKS_API_KEY

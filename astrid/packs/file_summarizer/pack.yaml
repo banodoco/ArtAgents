@@ -2,10 +2,10 @@ schema_version: 1
 id: file_summarizer
 name: File Summarizer
 version: 0.1.0
-description: A pack for File Summarizer.
+description: Pipelines for reading text files, producing attested JSON summaries with word/line/char counts and notes, and emitting a verdict.
 content:
   executors: executors
   orchestrators: orchestrators
   elements: elements
 agent:
-  purpose: "TODO: describe what this pack is for"
+  purpose: "Use when you need to ingest a text file and produce a structured, agent-attested summary with counts and a final verdict through a multi-step pipeline."

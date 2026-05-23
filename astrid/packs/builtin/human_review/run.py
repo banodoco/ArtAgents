@@ -214,9 +214,20 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
     return Handler
 
 
+_OPTIONAL_SENTINELS = {"", "__none__", "none", "None", "null"}
+
+
+def _optional_path(value: Path | None) -> Path | None:
+    if value is None or str(value) in _OPTIONAL_SENTINELS:
+        return None
+    return value
+
+
 def _parse_mounts(values: list[str]) -> dict[str, Path]:
     out: dict[str, Path] = {}
     for v in values or []:
+        if v in _OPTIONAL_SENTINELS:
+            continue
         if "=" not in v:
             raise SystemExit(f"--serve expects PREFIX=DIR, got: {v}")
         prefix, root = v.split("=", 1)
@@ -250,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: --data not found: {args.data}", file=sys.stderr)
         return 2
 
+    args.state = _optional_path(args.state)
+    args.response_schema = _optional_path(args.response_schema)
     mounts = _parse_mounts(args.serve)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 

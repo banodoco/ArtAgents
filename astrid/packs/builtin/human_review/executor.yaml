@@ -9,16 +9,15 @@
   "inputs": [
     {"name": "html", "type": "file", "required": true, "description": "Path to the page to serve as /. May be a single .html file or a directory served statically."},
     {"name": "data", "type": "file", "required": true, "description": "JSON file served read-only at /data.json."},
-    {"name": "serve", "type": "string", "required": false, "description": "Repeatable static mount as <prefix>=<dir> (e.g. /clips=runs/x/accepted)."},
-    {"name": "state", "type": "file", "required": false, "description": "Partial-state path. POST /save writes here per keystroke; GET /state.json returns contents or 404."},
-    {"name": "out", "type": "file", "required": true, "description": "Output path. POST /submit writes the validated body here and the server exits 0."},
-    {"name": "response_schema", "type": "file", "required": false, "description": "Optional JSON schema validating /submit bodies (jsonschema strict mode)."},
-    {"name": "port", "type": "integer", "required": false, "description": "Explicit port, or 0 for auto-pick. Default 0."},
+    {"name": "serve", "type": "string", "required": false, "default": "__none__", "description": "Static mount as <prefix>=<dir> (e.g. /clips=runs/x/accepted)."},
+    {"name": "state", "type": "file", "required": false, "default": "__none__", "description": "Partial-state path. POST /save writes here per keystroke; GET /state.json returns contents or 404."},
+    {"name": "response_schema", "type": "file", "required": false, "default": "__none__", "description": "Optional JSON schema validating /submit bodies (jsonschema strict mode)."},
+    {"name": "port", "type": "integer", "required": false, "default": 0, "description": "Explicit port, or 0 for auto-pick. Default 0."},
     {"name": "no_open", "type": "boolean", "required": false, "description": "Skip auto-launching the browser. Default false."},
-    {"name": "timeout", "type": "integer", "required": false, "description": "Exit nonzero if no /submit by this many seconds. 0 = unlimited."}
+    {"name": "timeout", "type": "integer", "required": false, "default": 0, "description": "Exit nonzero if no /submit by this many seconds. 0 = unlimited."}
   ],
   "outputs": [
-    {"name": "decisions", "type": "file", "description": "Validated submit body."}
+    {"name": "decisions", "type": "file", "path_template": "{out}/human_review.final.json", "description": "Validated submit body."}
   ],
   "isolation": {"mode": "subprocess", "network": false},
   "cache": {"mode": "none"},
@@ -31,8 +30,18 @@
       "{html}",
       "--data",
       "{data}",
+      "--serve",
+      "{serve}",
+      "--state",
+      "{state}",
       "--out",
-      "{out}"
+      "{decisions}",
+      "--response-schema",
+      "{response_schema}",
+      "--port",
+      "{port}",
+      "--timeout",
+      "{timeout}"
     ]
   },
   "metadata": {

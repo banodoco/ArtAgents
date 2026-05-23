@@ -2,10 +2,10 @@ schema_version: 1
 id: text_digest
 name: Text Digest
 version: 0.1.0
-description: A pack for Text Digest.
+description: Multi-orchestrator pack for digesting text files through attested agent-in-the-loop pipelines that read, summarize, and deliver verdicts.
 content:
   executors: executors
   orchestrators: orchestrators
   elements: elements
 agent:
-  purpose: "TODO: describe what this pack is for"
+  purpose: "Use when you want an agent to read and attest a structured JSON summary of a text file (line count, word count, notes) before returning a final verdict."

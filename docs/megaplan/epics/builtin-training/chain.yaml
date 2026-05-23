@@ -1,0 +1,123 @@
+base_branch: main
+merge_policy: review
+
+milestones:
+  - label: m0-contracts-and-fixtures
+    idea: docs/megaplan/epics/builtin-training/briefs/m0-contracts-and-fixtures.md
+    branch: megaplan/builtin-training-m0-contracts
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true
+    prep_direction: >
+      Verify the actual existing Astrid surfaces before designing contracts:
+      inspect builtin.scenes, builtin.visual_understand, builtin.video_understand,
+      builtin.transcribe, builtin.human_review, builtin.clip_extract,
+      builtin.youtube_audio, seinfeld.dataset_build, seinfeld.lora_train, and
+      seinfeld.script_pipeline.
+      Produce locked contracts and fixture strategy; do not implement the full
+      pipeline in this milestone.
+    notes: >
+      Freeze names, config schema, review item/decision schema, manifest adapter
+      interface, source/caption provider interfaces, filter-stage interface,
+      run-state schema, secrets/cost/server contracts, module placement map,
+      fixture plan, generic creative-writing script id, and Seinfeld deletion
+      path before code-heavy milestones start.
+
+  - label: m1-generic-training-dataset
+    idea: docs/megaplan/epics/builtin-training/briefs/m1-generic-training-dataset.md
+    branch: megaplan/builtin-training-m1-dataset
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true
+    prep_direction: >
+      Inspect astrid/packs/seinfeld/dataset_build, builtin.human_review,
+      builtin.youtube_audio, builtin.scenes, builtin.clip_extract,
+      builtin.visual_understand, builtin.video_understand, and
+      seinfeld.lora_train preflight. Focus on turning the existing Seinfeld
+      prototype into a generic built-in training dataset orchestrator without
+      broad unrelated Astrid refactors.
+    notes: >
+      Implement the contracts frozen in M0. This milestone should produce a
+      working video dataset flow with source/caption providers, scalable human
+      review, provenance/rights metadata, and ai-toolkit export, not the full
+      quality loop.
+
+  - label: m2a-cheap-filters-and-resume
+    idea: docs/megaplan/epics/builtin-training/briefs/m2a-cheap-filters-and-resume.md
+    branch: megaplan/builtin-training-m2a-filters
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    notes: >
+      Add cheap deterministic filters, review-only/skip-review/resume modes,
+      canonical state handling, stale-save detection, review batching/sampling,
+      cost preview, and offline fixture coverage.
+
+  - label: m2b-semantic-quality-and-topup
+    idea: docs/megaplan/epics/builtin-training/briefs/m2b-semantic-quality-and-topup.md
+    branch: megaplan/builtin-training-m2b-semantic-topup
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true
+    prep_direction: >
+      Inspect the filter-stage interface from M0/M2a and the concrete
+      visual_understand/video_understand/transcribe CLIs. Focus on semantic
+      filter caching, invalidation, top-up rounds, and quality reporting.
+    notes: >
+      Add semantic filtering, prompt/schema/media-hash invalidation, capped
+      top-up loops after review rejects, API budget/rate-limit enforcement, and
+      actionable dataset quality reports.
+
+  - label: m3-generic-training-run
+    idea: docs/megaplan/epics/builtin-training/briefs/m3-generic-training-run.md
+    branch: megaplan/builtin-training-m3-run
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true
+    prep_direction: >
+      Inspect astrid/packs/seinfeld/lora_train, aitoolkit_stage,
+      aitoolkit_train, lora_eval_grid, samples_collage, lora_register, and
+      external.runpod. Preserve existing RunPod/ai-toolkit behavior while
+      extracting the generic built-in training-run surface.
+    notes: >
+      Generalize the Seinfeld ai-toolkit LoRA training orchestrator into a
+      built-in training_run orchestrator for ai-toolkit LTX manifests produced
+      by m1/m2, with explicit cost budgets, spend confirmation, and RunPod
+      recovery/teardown state.
+
+  - label: m4-pack-migration-and-examples
+    idea: docs/megaplan/epics/builtin-training/briefs/m4-pack-migration-and-examples.md
+    branch: megaplan/builtin-training-m4-migration
+    profile: directed
+    robustness: full
+    depth: medium
+    vendor: codex
+    notes: >
+      Move Seinfeld and Always Sunny usage onto the built-in pipeline through
+      configs/examples, extract the Seinfeld script pipeline into a generic
+      built-in creative-writing/script module with presets, reconcile the tree
+      against the placement map, delete astrid/packs/seinfeld, and document the
+      end-to-end workflow.
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+
+driver:
+  stall_threshold: 5
+  max_iterations: 120
+  phase_timeout: 3600
+  status_timeout: 60
+  on_escalate: abort
+  robustness: full
+  auto_approve: true

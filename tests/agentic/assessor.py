@@ -24,8 +24,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-DEFAULT_MODEL = "deepseek-chat"  # DeepSeek V4 Pro is exposed as "deepseek-chat" on the API.
+DEFAULT_MODEL = "deepseek:deepseek-chat"  # DeepSeek V4 Pro is exposed as "deepseek-chat" on the API.
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
+FIREWORKS_BASE_URL = "https://api.fireworks.ai/inference/v1"
 DEFAULT_MAX_TOKENS = 16384
 RETRY_DELAYS_S = (2.0, 5.0, 12.0)
 
@@ -83,11 +84,9 @@ Rules:
 # Key sourcing
 # ---------------------------------------------------------------------------
 
-def _load_deepseek_key() -> str | None:
-    """Source DEEPSEEK_API_KEY from os.environ, falling back to a small
-    parser over ~/.hermes/.env. We DO NOT shell out — pure file read.
-    """
-    env_val = os.environ.get("DEEPSEEK_API_KEY")
+def _load_env_key(key_name: str) -> str | None:
+    """Source an API key from os.environ, falling back to ~/.hermes/.env."""
+    env_val = os.environ.get(key_name)
     if env_val:
         return env_val
     hermes_env = Path.home() / ".hermes" / ".env"
@@ -103,12 +102,42 @@ def _load_deepseek_key() -> str | None:
             if "=" not in line:
                 continue
             k, v = line.split("=", 1)
-            if k.strip() == "DEEPSEEK_API_KEY":
+            if k.strip() == key_name:
                 v = v.strip().strip('"').strip("'")
                 return v or None
     except Exception:
         return None
     return None
+
+
+def _load_deepseek_key() -> str | None:
+    """Backward-compatible helper for callers/tests that expect DeepSeek."""
+    return _load_env_key("DEEPSEEK_API_KEY")
+
+
+def _resolve_model_config(model: str | None) -> tuple[str, str, str, str]:
+    """Return (provider, api_model, base_url, key_name).
+
+    Accepted model specs:
+      - deepseek:deepseek-chat
+      - fireworks:accounts/fireworks/models/kimi-k2p5
+      - deepseek-chat (legacy shorthand, treated as DeepSeek)
+    """
+    raw = (model or os.environ.get("ASTRID_ASSESSOR_MODEL") or DEFAULT_MODEL).strip()
+    if ":" in raw:
+        provider, api_model = raw.split(":", 1)
+    else:
+        provider, api_model = "deepseek", raw
+    provider = provider.strip().lower()
+    api_model = api_model.strip()
+    if provider == "deepseek":
+        return provider, api_model, DEFAULT_BASE_URL, "DEEPSEEK_API_KEY"
+    if provider == "fireworks":
+        return provider, api_model, FIREWORKS_BASE_URL, "FIREWORKS_API_KEY"
+    raise ValueError(
+        "unsupported assessor model provider "
+        f"{provider!r}; use deepseek:<model> or fireworks:<model>"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +282,7 @@ def _schema_violation(error: str, raw: str, model: str, elapsed: float) -> dict[
 # Dispatch
 # ---------------------------------------------------------------------------
 
-def _dispatch_via_openai_sdk(api_key: str, model: str, system: str, user: str,
+def _dispatch_via_openai_sdk(api_key: str, base_url: str, model: str, system: str, user: str,
                              max_tokens: int) -> tuple[str | None, str | None, int]:
     """Returns (content, error_str, status_code). status_code may be 0 if
     we can't determine it (transport error)."""
@@ -262,7 +291,7 @@ def _dispatch_via_openai_sdk(api_key: str, model: str, system: str, user: str,
     except Exception as exc:
         return None, f"openai SDK import failed: {exc}", 0
     try:
-        client = OpenAI(base_url=DEFAULT_BASE_URL, api_key=api_key)
+        client = OpenAI(base_url=base_url, api_key=api_key)
         resp = client.chat.completions.create(
             model=model,
             temperature=0.0,
@@ -282,7 +311,7 @@ def _dispatch_via_openai_sdk(api_key: str, model: str, system: str, user: str,
         return None, f"{type(exc).__name__}: {exc}", status
 
 
-def _dispatch_via_requests(api_key: str, model: str, system: str, user: str,
+def _dispatch_via_requests(api_key: str, base_url: str, model: str, system: str, user: str,
                            max_tokens: int) -> tuple[str | None, str | None, int]:
     try:
         import requests  # type: ignore[import-untyped]
@@ -290,7 +319,7 @@ def _dispatch_via_requests(api_key: str, model: str, system: str, user: str,
         return None, f"requests import failed: {exc}", 0
     try:
         r = requests.post(
-            f"{DEFAULT_BASE_URL}/chat/completions",
+            f"{base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -319,7 +348,7 @@ def _dispatch_via_requests(api_key: str, model: str, system: str, user: str,
         return None, f"{type(exc).__name__}: {exc}", 0
 
 
-def _call_with_retry(api_key: str, model: str, system: str, user: str,
+def _call_with_retry(api_key: str, base_url: str, model: str, system: str, user: str,
                      max_tokens: int) -> tuple[str | None, str | None, int]:
     """Single dispatch with retry on 429/5xx and connection errors."""
     last_err: str | None = None
@@ -332,7 +361,7 @@ def _call_with_retry(api_key: str, model: str, system: str, user: str,
         dispatcher = _dispatch_via_requests
 
     for attempt in range(len(RETRY_DELAYS_S) + 1):
-        content, err, status = dispatcher(api_key, model, system, user, max_tokens)
+        content, err, status = dispatcher(api_key, base_url, model, system, user, max_tokens)
         if content is not None:
             return content, None, status
         last_err, last_status = err, status
@@ -355,16 +384,22 @@ def assess(
     evidence_pack: Path,
     rubric: dict,
     brief_text: str,
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
 ) -> dict[str, Any]:
     """Grade an evidence pack against a rubric. Always returns a
     schema-complete dict (never raises).
     """
     started = time.time()
-    api_key = _load_deepseek_key()
+    try:
+        provider, api_model, base_url, key_name = _resolve_model_config(model)
+    except ValueError as exc:
+        return _ungraded(str(exc), model or os.environ.get("ASTRID_ASSESSOR_MODEL") or DEFAULT_MODEL)
+
+    model_label = f"{provider}:{api_model}"
+    api_key = _load_env_key(key_name)
     if not api_key:
-        return _ungraded("DEEPSEEK_API_KEY missing", model)
+        return _ungraded(f"{key_name} missing", model_label)
 
     evidence_pack = Path(evidence_pack)
     if not evidence_pack.is_dir():
@@ -374,30 +409,30 @@ def assess(
     user_payload = _build_user_payload(evidence_pack, rubric, brief_text)
 
     content, err, status = _call_with_retry(
-        api_key, model, SYSTEM_PROMPT, user_payload, max_tokens
+        api_key, base_url, api_model, SYSTEM_PROMPT, user_payload, max_tokens
     )
     elapsed = time.time() - started
 
     if content is None:
         return _ungraded(
             f"dispatch failed (status={status}): {err}",
-            model, elapsed=elapsed,
+            model_label, elapsed=elapsed,
         )
 
     # Parse + schema check.
     try:
         parsed = json.loads(content)
     except json.JSONDecodeError as exc:
-        return _schema_violation(f"json parse error: {exc}", content, model, elapsed)
+        return _schema_violation(f"json parse error: {exc}", content, model_label, elapsed)
     if not isinstance(parsed, dict):
-        return _schema_violation("top-level JSON is not an object", content, model, elapsed)
+        return _schema_violation("top-level JSON is not an object", content, model_label, elapsed)
     missing = [k for k in REQUIRED_KEYS if k not in parsed]
     if missing:
         return _schema_violation(
-            f"missing required keys: {missing}", content, model, elapsed
+            f"missing required keys: {missing}", content, model_label, elapsed
         )
 
-    parsed["model"] = model
+    parsed["model"] = model_label
     parsed["elapsed_sec"] = round(elapsed, 2)
     return parsed
 
@@ -410,12 +445,21 @@ if __name__ == "__main__":
     ap.add_argument("evidence_pack")
     ap.add_argument("scenario_yaml")
     ap.add_argument("brief_md")
+    ap.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Assessor model, e.g. deepseek:deepseek-chat or "
+            "fireworks:accounts/fireworks/models/kimi-k2p5. "
+            "Defaults to ASTRID_ASSESSOR_MODEL or deepseek:deepseek-chat."
+        ),
+    )
     args = ap.parse_args()
 
     import yaml  # type: ignore[import-untyped]
     scen = yaml.safe_load(Path(args.scenario_yaml).read_text(encoding="utf-8"))
     rubric = scen.get("assessment") or {}
     brief = Path(args.brief_md).read_text(encoding="utf-8")
-    result = assess(Path(args.evidence_pack), rubric, brief)
+    result = assess(Path(args.evidence_pack), rubric, brief, model=args.model)
     json.dump(result, sys.stdout, indent=2, default=str)
     print()

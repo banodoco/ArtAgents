@@ -110,6 +110,61 @@ def _astrid(*args: str, env: dict[str, str] | None = None) -> subprocess.Complet
     )
 
 
+def _with_env(overrides: dict[str, str], fn):
+    """Run fn with temporary process env overrides."""
+    old: dict[str, str | None] = {k: os.environ.get(k) for k in overrides}
+    os.environ.update(overrides)
+    try:
+        return fn()
+    finally:
+        for key, value in old.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+def _prime_start_with_plan(slug: str, payload: dict[str, Any], env: dict[str, str]) -> None:
+    """Start a task run from an inline compiled plan.
+
+    This is intentionally narrow: it lets negative tests construct a precise
+    mid-run failure state without mutating the repo's checked-in
+    astrid/packs/*/build/*.json files.
+    """
+    orchestrator_id = str(payload.get("id") or "")
+    plan = payload.get("plan")
+    if not orchestrator_id or not isinstance(plan, dict):
+        raise ValueError("start_with_plan payload must be {id: ..., plan: {...}}")
+    if "." not in orchestrator_id:
+        raise ValueError("start_with_plan id must be qualified as <pack>.<name>")
+    pack, _, name = orchestrator_id.partition(".")
+    plan_root = Path(os.environ.get("TMPDIR", "/tmp")) / "astrid-agentic-inline-plans" / slug
+    build_dir = plan_root / pack / "build"
+    build_dir.mkdir(parents=True, exist_ok=True)
+    (build_dir / f"{name}.json").write_text(
+        json.dumps(plan, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    def _start() -> int:
+        from astrid.core.task.lifecycle import cmd_start
+
+        cwd_old = Path.cwd()
+        os.chdir(ASTRID_REPO_ROOT)
+        try:
+            return cmd_start(
+                [orchestrator_id, "--project", slug],
+                packs_root=plan_root,
+                projects_root=resolve_projects_root(),
+            )
+        finally:
+            os.chdir(cwd_old)
+
+    rc = _with_env(env, _start)
+    if rc != 0:
+        raise RuntimeError(f"prime start_with_plan {orchestrator_id}: rc={rc}")
+
+
 def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
     """Execute the scenario's priming steps. Always creates the project first;
     additional priming verbs are applied in order. A "primer" session is
@@ -128,7 +183,7 @@ def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
     # agent's actor identity (so reader-state scenarios work).
     primer_env: dict[str, str] = {}
     needs_session = any(
-        isinstance(s, dict) and next(iter(s)) in {"start", "ack"}
+        isinstance(s, dict) and next(iter(s)) in {"start", "start_with_plan", "ack"}
         for s in (scenario.get("priming") or [])
     )
     if needs_session:
@@ -156,6 +211,10 @@ def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
             res = _astrid("start", str(payload), "--project", slug, env=primer_env)
             if res.returncode != 0:
                 raise RuntimeError(f"prime start {payload}: {res.stderr}")
+        elif verb == "start_with_plan":
+            if not isinstance(payload, dict):
+                raise ValueError("start_with_plan payload must be a mapping")
+            _prime_start_with_plan(slug, payload, primer_env)
         elif verb == "ack":
             # payload is a list, each item either:
             #   - "step-id"         (plain ack; produces file must already exist or
