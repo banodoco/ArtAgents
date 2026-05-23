@@ -2,6 +2,7 @@ schema_version: 1
 id: file_summarizer
 name: File Summarizer
 version: 0.1.0
+visibility: hidden
 description: Pipelines for reading text files, producing attested JSON summaries with word/line/char counts and notes, and emitting a verdict.
 content:
   executors: executors

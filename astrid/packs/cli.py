@@ -10,11 +10,13 @@ requires a bound session.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
 from typing import Optional
 
+from astrid.core.pack import PackDefinition, discover_packs, load_pack_manifest, packs_root
 from astrid.packs.validate import validate_pack
 
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
@@ -124,6 +126,97 @@ def cmd_validate(argv: list[str]) -> int:
 
     resolved = pack_root.resolve()
     print(f"valid: {resolved}")
+    return 0
+
+
+def _pack_payload(pack: PackDefinition) -> dict:
+    return pack.to_dict()
+
+
+def _pack_category(pack: PackDefinition) -> str:
+    category = pack.metadata.get("category")
+    if isinstance(category, str):
+        return category
+    return ""
+
+
+def _effective_status(pack: PackDefinition) -> str:
+    if pack.agent.get("purpose") == "TODO: describe what this pack is for":
+        return "stub"
+    return pack.status
+
+
+def _filtered_packs(args: argparse.Namespace, *, include_hidden: bool | None = None) -> list[PackDefinition]:
+    show_hidden = bool(getattr(args, "show_hidden", False))
+    packs = list(discover_packs(packs_root(), include_hidden=show_hidden if include_hidden is None else include_hidden))
+    category = getattr(args, "category", None)
+    status = getattr(args, "status", None)
+    visibility = getattr(args, "visibility", None)
+    if category:
+        packs = [pack for pack in packs if _pack_category(pack) == category]
+    if status:
+        packs = [pack for pack in packs if _effective_status(pack) == status]
+    if visibility:
+        packs = [pack for pack in packs if pack.visibility == visibility]
+    return packs
+
+
+def _handle_list(args: argparse.Namespace) -> int:
+    packs = _filtered_packs(args)
+    if args.json:
+        print(json.dumps({"packs": [_pack_payload(pack) for pack in packs]}, indent=2, sort_keys=True))
+        return 0
+    for pack in packs:
+        print(f"{pack.id}\t{pack.name}\t{pack.version}\t{pack.description}")
+    return 0
+
+
+def _handle_inspect(args: argparse.Namespace) -> int:
+    packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
+    pack = packs.get(args.pack_id)
+    if pack is None:
+        print(f"packs inspect: unknown pack {args.pack_id!r}", file=sys.stderr)
+        return 1
+    payload = _pack_payload(pack)
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+    for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
+        print(f"{key}: {payload.get(key, '')}")
+    if pack.content:
+        print("content:")
+        for key, value in sorted(pack.content.items()):
+            print(f"  {key}: {value}")
+    if pack.agent:
+        print("agent:")
+        for key, value in sorted(pack.agent.items()):
+            print(f"  {key}: {value}")
+    return 0
+
+
+def _handle_status(args: argparse.Namespace) -> int:
+    packs = list(discover_packs(packs_root(), include_hidden=bool(args.show_hidden)))
+    rows: list[dict] = []
+    for pack in packs:
+        errors, warnings = validate_pack(pack.root)
+        payload = _pack_payload(pack)
+        payload["effective_status"] = _effective_status(pack)
+        payload["validation"] = {
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "error_messages": errors,
+            "warning_messages": warnings,
+        }
+        rows.append(payload)
+    if args.json:
+        print(json.dumps({"packs": rows}, indent=2, sort_keys=True))
+        return 0
+    for row in rows:
+        validation = row["validation"]
+        print(
+            f"{row['id']}\t{row['effective_status']}\t{row['visibility']}\t"
+            f"errors={validation['errors']}\twarnings={validation['warnings']}\t{row['description']}"
+        )
     return 0
 
 
@@ -270,6 +363,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--warnings", action="store_true", help="Also print non-fatal warnings."
     )
     validate_parser.set_defaults(handler=_handle_validate)
+
+    list_parser = subparsers.add_parser("list", help="List discovered packs.")
+    list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    list_parser.add_argument("--category", help="Filter by metadata.category.")
+    list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
+    list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
+    list_parser.set_defaults(handler=_handle_list)
+
+    inspect_parser = subparsers.add_parser("inspect", help="Inspect one pack.")
+    inspect_parser.add_argument("pack_id")
+    inspect_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    inspect_parser.set_defaults(handler=_handle_inspect)
+
+    status_parser = subparsers.add_parser("status", help="Validate and summarize discovered packs.")
+    status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
+    status_parser.set_defaults(handler=_handle_status)
 
     new_parser = subparsers.add_parser(
         "new", help="Create a new pack skeleton in the current directory."

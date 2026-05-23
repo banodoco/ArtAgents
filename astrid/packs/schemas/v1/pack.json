@@ -82,7 +82,15 @@
       "type": "array",
       "items": {"type": "string"}
     },
-    "astrid_version": {"type": "string"}
+    "astrid_version": {"type": "string"},
+    "status": {
+      "type": "string",
+      "enum": ["active", "deprecated", "stub", "experimental"]
+    },
+    "visibility": {
+      "type": "string",
+      "enum": ["visible", "hidden"]
+    }
   },
   "additionalProperties": false
 }

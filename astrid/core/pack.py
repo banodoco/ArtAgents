@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Literal
+
+import yaml
 
 PACK_MANIFEST_NAMES = ("pack.yaml", "pack.yml", "pack.json")
 EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
@@ -18,7 +20,7 @@ ELEMENT_KINDS: tuple[Literal["effects", "animations", "transitions"], ...] = (
     "effects", "animations", "transitions",
 )
 ElementKind = Literal["effects", "animations", "transitions"]
-_PACK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
+_PACK_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 class PackValidationError(ValueError):
@@ -33,15 +35,27 @@ class PackDefinition:
     root: Path
     manifest_path: Path
     metadata: dict[str, Any]
+    description: str = ""
+    content: dict[str, Any] = field(default_factory=dict)
+    agent: dict[str, Any] = field(default_factory=dict)
+    status: str = field(default="active")
+    visibility: str = field(default="visible")
+    schema_version: str = field(default="")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "name": self.name,
             "version": self.version,
+            "description": self.description,
             "root": str(self.root),
             "manifest_path": str(self.manifest_path),
             "metadata": dict(self.metadata),
+            "content": dict(self.content),
+            "agent": dict(self.agent),
+            "status": self.status,
+            "visibility": self.visibility,
+            "schema_version": self.schema_version,
         }
 
 
@@ -49,7 +63,29 @@ def packs_root() -> Path:
     return Path(__file__).resolve().parents[1] / "packs"
 
 
-def discover_packs(root: str | Path | None = None) -> tuple[PackDefinition, ...]:
+def ensure_local_pack(*, project_root: str | Path = None) -> Path:
+    """Create or return the ``local`` scratch pack under *project_root*.
+
+    When *project_root* is ``None``, the pack root is derived from
+    ``REPO_ROOT`` so the behaviour matches the old location in
+    ``element/registry.py``.
+    """
+    from astrid._paths import REPO_ROOT
+
+    root = Path(project_root) if project_root is not None else REPO_ROOT
+    pack_root = root / "astrid" / "packs" / "local"
+    pack_root.mkdir(parents=True, exist_ok=True)
+    manifest = pack_root / "pack.yaml"
+    if not manifest.exists():
+        manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
+    return pack_root
+
+
+def discover_packs(
+    root: str | Path | None = None,
+    *,
+    include_hidden: bool = False,
+) -> tuple[PackDefinition, ...]:
     source_root = Path(root) if root is not None else packs_root()
     if not source_root.is_dir():
         return ()
@@ -62,6 +98,8 @@ def discover_packs(root: str | Path | None = None) -> tuple[PackDefinition, ...]
         if manifest_path is None:
             continue
         pack = load_pack_manifest(manifest_path)
+        if pack.visibility == "hidden" and not include_hidden:
+            continue
         if pack.id in seen:
             raise PackValidationError(f"duplicate pack id {pack.id!r}: {seen[pack.id]} and {manifest_path}")
         seen[pack.id] = manifest_path
@@ -81,6 +119,15 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
     metadata = data.get("metadata", {})
     if not isinstance(metadata, dict):
         raise PackValidationError("pack.metadata must be an object")
+    content = data.get("content", {})
+    if not isinstance(content, dict):
+        raise PackValidationError("pack.content must be an object")
+    agent = data.get("agent", {})
+    if not isinstance(agent, dict):
+        raise PackValidationError("pack.agent must be an object")
+    status = _optional_string(data, "status", "pack.status", default="active")
+    visibility = _optional_string(data, "visibility", "pack.visibility", default="visible")
+    schema_version = str(data.get("schema_version", "")) if "schema_version" in data else ""
     return PackDefinition(
         id=pack_id,
         name=_optional_string(data, "name", "pack.name", default=pack_id),
@@ -88,6 +135,12 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
         root=root,
         manifest_path=manifest_path,
         metadata=dict(metadata),
+        description=_optional_string(data, "description", "pack.description", default=""),
+        content=dict(content),
+        agent=dict(agent),
+        status=status,
+        visibility=visibility,
+        schema_version=schema_version,
     )
 
 
@@ -128,23 +181,51 @@ def validate_element_pack_id(pack_id: str | None, pack: PackDefinition, *, eleme
 
 
 def iter_executor_roots(pack: PackDefinition) -> tuple[Path, ...]:
+    declared = _declared_content_root(pack, "executors")
+    if declared is not None:
+        return tuple(_direct_content_roots(declared, EXECUTOR_MANIFEST_NAMES))
     return _content_roots(pack.root, EXECUTOR_MANIFEST_NAMES, excluded_parts={"elements"})
 
 
 def iter_orchestrator_roots(pack: PackDefinition) -> tuple[Path, ...]:
+    declared = _declared_content_root(pack, "orchestrators")
+    if declared is not None:
+        return tuple(_direct_content_roots(declared, ORCHESTRATOR_MANIFEST_NAMES))
     return _content_roots(pack.root, ORCHESTRATOR_MANIFEST_NAMES, excluded_parts={"elements"})
 
 
 def iter_element_roots(pack: PackDefinition, *, kind: str | None = None) -> tuple[tuple[ElementKind, Path], ...]:
     kinds: Iterable[str] = ELEMENT_KINDS if kind is None else (kind,)
     roots: list[tuple[ElementKind, Path]] = []
+    elements_root = _declared_content_root(pack, "elements") or (pack.root / "elements")
     for element_kind in kinds:
         if element_kind not in ELEMENT_KINDS:
             raise PackValidationError(f"element kind must be one of {list(ELEMENT_KINDS)}")
-        kind_root = pack.root / "elements" / element_kind
+        kind_root = elements_root / element_kind
         if not kind_root.is_dir():
             continue
         roots.extend((element_kind, child) for child in sorted(kind_root.iterdir()) if child.is_dir())
+    return tuple(roots)
+
+
+def _declared_content_root(pack: PackDefinition, key: str) -> Path | None:
+    if not pack.content:
+        return None
+    value = pack.content.get(key)
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return (pack.root / value).resolve()
+
+
+def _direct_content_roots(root: Path, manifest_names: tuple[str, ...]) -> tuple[Path, ...]:
+    if not root.is_dir():
+        return ()
+    roots: list[Path] = []
+    for child in sorted(root.iterdir(), key=lambda path: path.name):
+        if not child.is_dir() or child.name.startswith(".") or child.name == "__pycache__":
+            continue
+        if any((child / name).is_file() for name in manifest_names):
+            roots.append(child.resolve())
     return tuple(roots)
 
 
@@ -181,6 +262,19 @@ def _load_manifest_payload(path: Path) -> Any:
             return json.loads(text)
         except json.JSONDecodeError as exc:
             raise PackValidationError(f"invalid JSON pack manifest {path}: {exc.msg}") from exc
+    # Try canonical YAML parsing first (handles both flat and nested manifests).
+    # Fall back to the legacy flat parser for manifests that yaml.safe_load cannot parse.
+    try:
+        data = yaml.safe_load(text)
+        if isinstance(data, dict):
+            if "schema_version" in data:
+                return data
+            try:
+                return _parse_flat_yaml(text, path=path)
+            except PackValidationError:
+                return data
+    except yaml.YAMLError:
+        pass
     return _parse_flat_yaml(text, path=path)
 
 
@@ -249,14 +343,15 @@ def _optional_string(data: dict[str, Any], key: str, path: str, *, default: str)
 
 
 def _validate_pack_id(value: str, path: str) -> None:
-    if not _PACK_ID_RE.match(value) or value in {".", ".."}:
-        raise PackValidationError(f"{path} must be a safe pack identifier")
+    if not _PACK_ID_RE.fullmatch(value):
+        raise PackValidationError(f"{path} must be a safe pack identifier matching ^[a-z][a-z0-9_]*$")
 
 
 __all__ = [
     "PackDefinition",
     "PackValidationError",
     "discover_packs",
+    "ensure_local_pack",
     "iter_element_roots",
     "iter_executor_roots",
     "iter_orchestrator_roots",

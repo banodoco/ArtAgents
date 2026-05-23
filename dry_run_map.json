@@ -1,0 +1,182 @@
+{
+  "meta": {
+    "description": "Dry-run classification of all packs and capabilities under astrid/packs/ for Milestone 3 Pack Migration and Cleanup.",
+    "generated_by": "T1 (CLASSIFY)",
+    "classification_rules": {
+      "builtin": "keep all capabilities",
+      "external": "keep pack, delete 4 Comfy wrappers (comfy_prompt_image, example_comfy_image, comfy_workflow_image, comfy_t2i)",
+      "iteration": "keep pack, delete iteration.clip_extract",
+      "upload": "keep all",
+      "seinfeld": "keep all — owned by builtin-training epic, do not touch",
+      "clip_tools": "hide entire pack",
+      "video_tools": "hide entire pack",
+      "file_summarizer": "hide entire pack",
+      "text_digest": "hide entire pack"
+    },
+    "sd2_note": "Only 4 scaffold packs exist to hide (clip_tools, video_tools, file_summarizer, text_digest). The brief's '5 duplicate scaffold packs' is a counting artifact — the 5th duplicate clip_extract location is iteration.clip_extract, handled by deleting just that executor.",
+    "sd1_note": "All 4 Comfy wrappers are deleted (comfy_prompt_image, example_comfy_image, comfy_workflow_image, comfy_t2i). All four are structurally identical thin wrappers around external.vibecomfy.run."
+  },
+  "packs": [
+    {
+      "pack_id": "builtin",
+      "visibility_action": "keep",
+      "visibility_rationale": "builtin pack — keep all per classification rules",
+      "capabilities": [
+        { "id": "builtin.animate_image", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator — needed for animation pipelines" },
+        { "id": "builtin.arrange", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.asset_cache", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.audio_understand", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.boundary_candidates", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.clip_extract", "kind": "executor", "action": "keep", "rationale": "Canonical clip_extract — this is the authoritative copy" },
+        { "id": "builtin.cut", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.editor_review", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.event_talks", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.foley_map", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.foley_review", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.generate_image", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.generate_image_openai", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.generate_video", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.html_canvas_effect", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.human_notes", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.human_review", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.hype", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.inspect_cut", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.iteration_video", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.logo_ideas", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.open_in_reigh", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.pool_build", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.pool_merge", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.publish", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.quality_zones", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.quote_scout", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.refine", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.reigh_data", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.render", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.scene_describe", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.scenes", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.search_loras", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.shots", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.spatial_audio_page", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.sprite_sheet", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.thumbnail_maker", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.tile_video", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.transcribe", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.triage", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.understand", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.validate", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.vary_grid", "kind": "orchestrator", "action": "keep", "rationale": "Builtin orchestrator" },
+        { "id": "builtin.video_understand", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.visual_understand", "kind": "executor", "action": "keep", "rationale": "Builtin executor" },
+        { "id": "builtin.youtube_audio", "kind": "executor", "action": "keep", "rationale": "Builtin executor" }
+      ]
+    },
+    {
+      "pack_id": "external",
+      "visibility_action": "keep",
+      "visibility_rationale": "External integrations pack — keep pack but delete 4 redundant Comfy wrappers per SD1",
+      "capabilities": [
+        { "id": "external.comfy_prompt_image", "kind": "executor", "action": "delete", "rationale": "SD1: Thin Comfy wrapper around external.vibecomfy.run — structurally identical to the other Comfy wrappers" },
+        { "id": "external.example_comfy_image", "kind": "executor", "action": "delete", "rationale": "SD1: Thin Comfy wrapper around external.vibecomfy.run — structurally identical to the other Comfy wrappers" },
+        { "id": "external.comfy_workflow_image", "kind": "executor", "action": "delete", "rationale": "SD1: Thin Comfy wrapper around external.vibecomfy.run — structurally identical to the other Comfy wrappers" },
+        { "id": "external.comfy_t2i", "kind": "executor", "action": "delete", "rationale": "SD1: Thin Comfy wrapper around external.vibecomfy.run — structurally identical to the other Comfy wrappers" },
+        { "id": "external.fal_foley", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — fal.ai Foley sound generation" },
+        { "id": "external.moirae", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration" },
+        { "id": "external.runpod.provision", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — RunPod provisioning" },
+        { "id": "external.runpod.exec", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — RunPod execution" },
+        { "id": "external.runpod.teardown", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — RunPod teardown" },
+        { "id": "external.runpod.session", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — RunPod session" },
+        { "id": "external.vibecomfy.run", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — VibeComfy workflow execution" },
+        { "id": "external.vibecomfy.validate", "kind": "executor", "action": "keep", "rationale": "Legitimate external integration — VibeComfy workflow validation" }
+      ]
+    },
+    {
+      "pack_id": "iteration",
+      "visibility_action": "keep",
+      "visibility_rationale": "Iteration workflow pack — keep pack but delete only the duplicate clip_extract executor",
+      "capabilities": [
+        { "id": "iteration.assemble", "kind": "executor", "action": "keep", "rationale": "Iteration workflow assembler — needed for iteration pipelines" },
+        { "id": "iteration.clip_extract", "kind": "executor", "action": "delete", "rationale": "Duplicate of builtin.clip_extract — the canonical copy lives in builtin/" },
+        { "id": "iteration.prepare", "kind": "executor", "action": "keep", "rationale": "Iteration workflow preparer — needed for iteration pipelines" }
+      ]
+    },
+    {
+      "pack_id": "upload",
+      "visibility_action": "keep",
+      "visibility_rationale": "Upload pack — keep all",
+      "capabilities": [
+        { "id": "upload.youtube", "kind": "executor", "action": "keep", "rationale": "YouTube upload integration — actively used" }
+      ]
+    },
+    {
+      "pack_id": "seinfeld",
+      "visibility_action": "keep",
+      "visibility_rationale": "Seinfeld scene generator — owned by builtin-training epic, untouchable",
+      "capabilities": [
+        { "id": "seinfeld.aitoolkit_stage", "kind": "executor", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.aitoolkit_train", "kind": "executor", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.dataset_build", "kind": "orchestrator", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.lora_eval_grid", "kind": "executor", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.lora_register", "kind": "executor", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.lora_train", "kind": "orchestrator", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.repo_setup", "kind": "executor", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" },
+        { "id": "seinfeld.script_pipeline", "kind": "executor", "action": "keep", "rationale": "Seinfeld training pipeline — owned by builtin-training epic" }
+      ]
+    },
+    {
+      "pack_id": "clip_tools",
+      "visibility_action": "hide",
+      "visibility_rationale": "SD2: Scaffold pack with duplicate clip_extract — hide entire pack (canonical clip_extract is builtin.clip_extract)",
+      "capabilities": [
+        { "id": "clip_tools.clip_extract", "kind": "executor", "action": "keep", "rationale": "Pack is hidden; executor stays in place but is excluded from discovery via visibility filtering" }
+      ]
+    },
+    {
+      "pack_id": "video_tools",
+      "visibility_action": "hide",
+      "visibility_rationale": "SD2: Scaffold pack with duplicate clip_extract — hide entire pack (canonical clip_extract is builtin.clip_extract)",
+      "capabilities": [
+        { "id": "video_tools.clip_extract", "kind": "executor", "action": "keep", "rationale": "Pack is hidden; executor stays in place but is excluded from discovery via visibility filtering" }
+      ]
+    },
+    {
+      "pack_id": "file_summarizer",
+      "visibility_action": "hide",
+      "visibility_rationale": "SD2: Scaffold pack with duplicate clip_extract — hide entire pack (canonical clip_extract is builtin.clip_extract)",
+      "capabilities": [
+        { "id": "file_summarizer.clip_extract", "kind": "executor", "action": "keep", "rationale": "Pack is hidden; executor stays in place but is excluded from discovery via visibility filtering" }
+      ]
+    },
+    {
+      "pack_id": "text_digest",
+      "visibility_action": "hide",
+      "visibility_rationale": "SD2: Scaffold pack with duplicate clip_extract — hide entire pack (canonical clip_extract is builtin.clip_extract)",
+      "capabilities": [
+        { "id": "text_digest.clip_extract", "kind": "executor", "action": "keep", "rationale": "Pack is hidden; executor stays in place but is excluded from discovery via visibility filtering" }
+      ]
+    }
+  ],
+  "summary": {
+    "total_packs": 9,
+    "packs_kept": 5,
+    "packs_hidden": 4,
+    "total_capabilities": 74,
+    "capabilities_kept": 69,
+    "capabilities_deleted": 5,
+    "breakdown": {
+      "builtin": { "capabilities": 46, "kept": 46, "deleted": 0 },
+      "external": { "capabilities": 12, "kept": 8, "deleted": 4 },
+      "iteration": { "capabilities": 3, "kept": 2, "deleted": 1 },
+      "upload": { "capabilities": 1, "kept": 1, "deleted": 0 },
+      "seinfeld": { "capabilities": 8, "kept": 8, "deleted": 0 },
+      "clip_tools": { "capabilities": 1, "kept": 1, "deleted": 0 },
+      "video_tools": { "capabilities": 1, "kept": 1, "deleted": 0 },
+      "file_summarizer": { "capabilities": 1, "kept": 1, "deleted": 0 },
+      "text_digest": { "capabilities": 1, "kept": 1, "deleted": 0 }
+    },
+    "post_cleanup_visible_capabilities": {
+      "note": "Visible = kept packs only (hidden packs excluded from discovery). Counts after deletions applied.",
+      "breakdown": "46 (builtin, all kept) + 8 (external, 4 Comfy wrappers deleted) + 2 (iteration, clip_extract deleted) + 1 (upload) + 8 (seinfeld, all kept) = 65",
+      "count": 65
+    }
+  }
+}

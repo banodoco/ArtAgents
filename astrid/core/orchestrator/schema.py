@@ -15,6 +15,7 @@ from astrid.contracts.schema import (
     PORT_REQUIRED_TYPES,
     CacheMode,
     CachePolicy,
+    CapabilityHandle,
     CommandSpec,
     IsolationMetadata,
     IsolationMode,
@@ -22,6 +23,8 @@ from astrid.contracts.schema import (
     OutputMode,
     Port,
     PortType,
+    Provenance,
+    SafetyDeclaration,
 )
 from typing import Literal as _Literal, TypeVar as _TypeVar, cast as _cast, get_args as _get_args
 
@@ -79,6 +82,57 @@ class OrchestratorDefinition:
 
     def to_json(self, *, indent: int | None = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+
+def to_capability_handle(definition: OrchestratorDefinition) -> CapabilityHandle:
+    """Adapt an ``OrchestratorDefinition`` into a ``CapabilityHandle``.
+
+    Field mapping mirrors the executor adapter:
+
+    * ``canonical_id`` — ``definition.id`` (qualified form ``pack.name``)
+    * ``local_id`` — the portion after the first dot in ``definition.id``
+    * ``pack_id`` — the portion before the first dot in ``definition.id``
+    * ``kind`` — ``definition.kind`` (preserved as-is)
+    * ``provenance`` — source derived from metadata, default ``"pack"``
+    * ``safety`` — network flag from ``definition.isolation.network``
+    """
+    parts = definition.id.split(".", 1)
+    pack_id = parts[0]
+    local_id = parts[1] if len(parts) > 1 else definition.id
+
+    metadata = definition.metadata
+    metadata_source = metadata.get("source")
+    provenance_source = str(metadata_source) if metadata_source else "pack"
+
+    forked_from = str(metadata.get("forked_from") or "")
+    upstream_version = str(metadata.get("upstream_version") or "")
+    compatibility_token = str(metadata.get("compatibility_token") or "")
+    local_edit_state = str(metadata.get("local_edit_state") or "clean")
+    override_target = str(metadata.get("override_target") or "")
+
+    return CapabilityHandle(
+        canonical_id=definition.id,
+        local_id=local_id,
+        pack_id=pack_id,
+        kind=definition.kind,
+        name=definition.name,
+        version=definition.version,
+        provenance=Provenance(
+            source=provenance_source,
+            forked_from=forked_from or None,
+            upstream_version=upstream_version or None,
+            compatibility_token=compatibility_token or None,
+        ),
+        safety=SafetyDeclaration(network=definition.isolation.network),
+        description=definition.description,
+        short_description=definition.short_description,
+        keywords=definition.keywords,
+        local_edit_state=local_edit_state,
+        override_target=override_target or None,
+        inputs=definition.inputs,
+        outputs=definition.outputs,
+    )
+
 
 def validate_orchestrator_definition(raw: Any) -> OrchestratorDefinition:
     if isinstance(raw, OrchestratorDefinition):
@@ -519,5 +573,6 @@ __all__ = [
     "Port",
     "RuntimeSpec",
     "load_orchestrator_manifest",
+    "to_capability_handle",
     "validate_orchestrator_definition",
 ]

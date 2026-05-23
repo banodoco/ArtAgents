@@ -12,7 +12,12 @@ from types import MappingProxyType
 from typing import Iterable, cast
 
 from astrid._paths import REPO_ROOT
-from astrid.core.pack import discover_packs, iter_element_roots, validate_element_pack_id
+from astrid.core.alias_resolver import (
+    AliasResolver,
+    create_shared_alias_resolver,
+    _register_pack_aliases,
+)
+from astrid.core.pack import discover_packs, ensure_local_pack, iter_element_roots, validate_element_pack_id
 
 from .schema import ELEMENT_KINDS, ElementDefinition, ElementKind, ElementValidationError, load_element_definition
 
@@ -40,8 +45,16 @@ class ElementConflict:
 class ElementRegistry:
     """Resolved element registry keyed by kind and element id."""
 
-    def __init__(self, elements: Iterable[ElementDefinition] = ()) -> None:
+    def __init__(
+        self,
+        elements: Iterable[ElementDefinition] = (),
+        *,
+        alias_resolver: AliasResolver | None = None,
+        override_store: "OverrideStore | None" = None,
+    ) -> None:
         self._all: dict[tuple[str, str], list[ElementDefinition]] = {}
+        self.alias_resolver = alias_resolver
+        self.override_store = override_store
         for element in elements:
             self.register(element)
 
@@ -54,9 +67,28 @@ class ElementRegistry:
     def get(self, kind: ElementKind, element_id: str) -> ElementDefinition:
         key = (kind, element_id)
         try:
-            return self._all[key][0]
+            definition = self._all[key][0]
         except KeyError as exc:
             raise KeyError(f"unknown {kind} element {element_id!r}") from exc
+
+        # Check override store for a remapped target.
+        if self.override_store is not None:
+            target_id = self.override_store.resolve(kind, element_id)
+            if target_id is not None and target_id != element_id:
+                # Validate that the override target exists.
+                target_key = (kind, target_id)
+                if target_key not in self._all:
+                    raise ElementRegistryError(
+                        f"override target {target_id!r} for {kind} {element_id!r} not found in registry"
+                    )
+                target_def = self._all[target_key][0]
+                # Annotate the returned definition with override_target metadata.
+                target_metadata = dict(target_def.metadata)
+                target_metadata["override_target"] = target_id
+                from dataclasses import replace as _replace
+                return _replace(target_def, metadata=target_metadata)
+
+        return definition
 
     def list(self, kind: ElementKind | None = None) -> tuple[ElementDefinition, ...]:
         if kind is not None and kind not in ELEMENT_KINDS:
@@ -105,7 +137,9 @@ def load_default_registry(
     project_root: str | Path = REPO_ROOT,
     include_missing_roots: bool = False,
 ) -> ElementRegistry:
-    registry = ElementRegistry()
+    resolver = create_shared_alias_resolver()
+    _register_pack_aliases(resolver, {})  # M1: no aliases yet
+    registry = ElementRegistry(alias_resolver=resolver)
     for element in load_pack_elements(project_root=project_root):
         registry.register(element)
     for source in default_sources(active_theme=active_theme, project_root=project_root):
@@ -168,15 +202,6 @@ def load_pack_elements(*, project_root: str | Path = REPO_ROOT) -> tuple[Element
             validate_element_pack_id(element.metadata.get("pack_id"), pack, element_root=root)
             elements.append(element)
     return tuple(elements)
-
-
-def ensure_local_pack(*, project_root: str | Path = REPO_ROOT) -> Path:
-    pack_root = Path(project_root) / "astrid" / "packs" / "local"
-    pack_root.mkdir(parents=True, exist_ok=True)
-    manifest = pack_root / "pack.yaml"
-    if not manifest.exists():
-        manifest.write_text("id: local\nname: Local Scratch Pack\nversion: 0.1.0\n", encoding="utf-8")
-    return pack_root
 
 
 def _rewrite_pack_id(element_root: Path, new_pack_id: str) -> None:

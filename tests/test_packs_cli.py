@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -133,6 +134,27 @@ class TestPacksValidateCLI(unittest.TestCase):
             cwd=str(_REPO_ROOT),
         )
         self.assertEqual(result.returncode, 0)
+
+    def test_packs_list_inspect_and_status_subcommands(self) -> None:
+        list_result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(list_result.returncode, 0, list_result.stderr)
+        listed = json.loads(list_result.stdout)
+        self.assertIn("builtin", {pack["id"] for pack in listed["packs"]})
+        builtin = next(pack for pack in listed["packs"] if pack["id"] == "builtin")
+        self.assertIn("content", builtin)
+        self.assertIn("agent", builtin)
+        self.assertEqual(builtin["status"], "active")
+        self.assertEqual(builtin["visibility"], "visible")
+
+        inspect_result = _run_packs("inspect", "builtin", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(inspect_result.returncode, 0, inspect_result.stderr)
+        inspected = json.loads(inspect_result.stdout)
+        self.assertEqual(inspected["id"], "builtin")
+
+        status_result = _run_packs("status", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(status_result.returncode, 0, status_result.stderr)
+        status = json.loads(status_result.stdout)
+        self.assertIn("validation", status["packs"][0])
 
     def test_validate_defaults_to_current_directory(self) -> None:
         """When no path is given, validate defaults to '.'."""

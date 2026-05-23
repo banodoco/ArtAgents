@@ -22,6 +22,7 @@ from .schema import (
     ElementDependencies,
     ElementValidationError,
     load_element_definition,
+    to_capability_handle,
     validate_element_definition,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "load_default_registry",
     "load_pack_elements",
     "load_element_definition",
+    "to_capability_handle",
     "validate_element_definition",
 ]

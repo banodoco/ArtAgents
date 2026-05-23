@@ -153,6 +153,8 @@ class PackValidator:
         """Run all validations. Returns list of error strings (empty = valid)."""
         self.errors = []
         self.warnings = []
+        self._capability_locations: dict[str, str] = {}
+        self._alias_targets: list[tuple[str, str, str]] = []
 
         pack_yaml = self.pack_root / "pack.yaml"
         if not pack_yaml.is_file():
@@ -192,6 +194,7 @@ class PackValidator:
 
         # Validate component manifests
         self._validate_components(content)
+        self._validate_alias_targets()
 
         return self.errors
 
@@ -319,6 +322,11 @@ class PackValidator:
 
     def _validate_content_roots(self, content: dict[str, Any]) -> None:
         """Verify that declared content root directories exist."""
+        supported = {"executors", "orchestrators", "elements", "schemas", "examples", "docs"}
+        for key in sorted(set(content) - supported):
+            self.warnings.append(
+                f"pack.yaml: unsupported content root {key!r}"
+            )
         for key in ("executors", "orchestrators", "elements", "schemas", "examples"):
             if key not in content:
                 continue
@@ -394,6 +402,10 @@ class PackValidator:
             version = self._validate_manifest(data, manifest_kind, rel)
             if version is None:
                 continue
+            component_id = data.get("id")
+            if isinstance(component_id, str):
+                self._register_capability_id(component_id, rel)
+                self._register_aliases(data, rel)
 
             # Check runtime entrypoint exists
             runtime = data.get("runtime", {})
@@ -447,7 +459,49 @@ class PackValidator:
                     continue
 
                 rel = self._rel(manifest_path)
-                self._validate_manifest(data, "element", rel)
+                version = self._validate_manifest(data, "element", rel)
+                if version is None:
+                    continue
+                element_id = data.get("id")
+                if isinstance(element_id, str):
+                    self._register_capability_id(f"{kind_dir.name}/{element_id}", rel)
+                    self._register_aliases(data, rel)
+
+    def _register_capability_id(self, capability_id: str, relpath: str) -> None:
+        existing = self._capability_locations.get(capability_id)
+        if existing is not None:
+            self.errors.append(
+                f"{relpath}: duplicate capability id {capability_id!r}; already declared in {existing}"
+            )
+            return
+        self._capability_locations[capability_id] = relpath
+
+    def _register_aliases(self, data: dict[str, Any], relpath: str) -> None:
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return
+        aliases = metadata.get("aliases", [])
+        if not isinstance(aliases, list):
+            self.errors.append(f"{relpath}: metadata.aliases must be an array")
+            return
+        for index, alias in enumerate(aliases):
+            if isinstance(alias, str):
+                self._alias_targets.append((relpath, f"metadata.aliases[{index}]", alias))
+            elif isinstance(alias, dict):
+                target = alias.get("canonical_id") or alias.get("target") or alias.get("id")
+                if isinstance(target, str):
+                    self._alias_targets.append((relpath, f"metadata.aliases[{index}]", target))
+                else:
+                    self.errors.append(f"{relpath}: metadata.aliases[{index}] must declare canonical_id")
+            else:
+                self.errors.append(f"{relpath}: metadata.aliases[{index}] must be a string or object")
+
+    def _validate_alias_targets(self) -> None:
+        for relpath, alias_path, target in self._alias_targets:
+            if target not in self._capability_locations:
+                self.errors.append(
+                    f"{relpath}: {alias_path} points to unknown capability id {target!r}"
+                )
 
     def _rel(self, path: Path) -> str:
         """Return a path relative to the pack root for error messages."""

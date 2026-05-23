@@ -10,10 +10,13 @@
     "pack_id": {"$ref": "_defs.json#/definitions/pack_id"},
     "metadata": {
       "type": "object",
-      "required": ["label"],
       "properties": {
-        "label": {"type": "string"}
-      }
+        "description": {"type": "string"},
+        "label": {"type": "string"},
+        "name": {"type": "string"},
+        "whenToUse": {"type": "string"}
+      },
+      "additionalProperties": true
     },
     "schema": {
       "type": "object"
@@ -30,7 +33,10 @@
     },
     "docs": {
       "type": "object"
-    }
+    },
+    "description": {"type": "string"},
+    "short_description": {"type": "string"},
+    "keywords": {"type": "array", "items": {"type": "string"}}
   },
   "additionalProperties": false
 }

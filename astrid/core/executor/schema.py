@@ -16,6 +16,7 @@ from astrid.contracts.schema import (
     PORT_REQUIRED_TYPES,
     CacheMode,
     CachePolicy,
+    CapabilityHandle,
     CommandSpec,
     IsolationMetadata,
     IsolationMode,
@@ -23,6 +24,8 @@ from astrid.contracts.schema import (
     OutputMode,
     Port as ExecutorPort,
     PortType,
+    Provenance,
+    SafetyDeclaration,
 )
 from astrid.timeline import ClipClassifiedKind
 
@@ -188,6 +191,56 @@ class ExecutorDefinition:
 
     def to_json(self, *, indent: int | None = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+
+def to_capability_handle(definition: ExecutorDefinition) -> CapabilityHandle:
+    """Adapt an ``ExecutorDefinition`` into a ``CapabilityHandle``.
+
+    Field mapping:
+
+    * ``canonical_id`` — ``definition.id`` (qualified form ``pack.name``)
+    * ``local_id`` — the portion after the first dot in ``definition.id``
+    * ``pack_id`` — the portion before the first dot in ``definition.id``
+    * ``kind`` — ``definition.kind`` (preserved as-is)
+    * ``provenance`` — source derived from metadata, default ``"pack"``
+    * ``safety`` — network flag from ``definition.isolation.network``
+    """
+    parts = definition.id.split(".", 1)
+    pack_id = parts[0]
+    local_id = parts[1] if len(parts) > 1 else definition.id
+
+    metadata = definition.metadata
+    metadata_source = metadata.get("source")
+    provenance_source = str(metadata_source) if metadata_source else "pack"
+
+    forked_from = str(metadata.get("forked_from") or "")
+    upstream_version = str(metadata.get("upstream_version") or "")
+    compatibility_token = str(metadata.get("compatibility_token") or "")
+    local_edit_state = str(metadata.get("local_edit_state") or "clean")
+    override_target = str(metadata.get("override_target") or "")
+
+    return CapabilityHandle(
+        canonical_id=definition.id,
+        local_id=local_id,
+        pack_id=pack_id,
+        kind=definition.kind,
+        name=definition.name,
+        version=definition.version,
+        provenance=Provenance(
+            source=provenance_source,
+            forked_from=forked_from or None,
+            upstream_version=upstream_version or None,
+            compatibility_token=compatibility_token or None,
+        ),
+        safety=SafetyDeclaration(network=definition.isolation.network),
+        description=definition.description,
+        short_description=definition.short_description,
+        keywords=definition.keywords,
+        local_edit_state=local_edit_state,
+        override_target=override_target or None,
+        inputs=definition.inputs,
+        outputs=definition.outputs,
+    )
 
 
 def validate_executor_definition(raw: Any) -> ExecutorDefinition:
@@ -1001,5 +1054,6 @@ __all__ = [
     "ExternalRuntimeSource",
     "load_executor_manifest",
     "load_executor_manifest_definitions",
+    "to_capability_handle",
     "validate_executor_definition",
 ]

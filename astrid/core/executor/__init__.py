@@ -46,6 +46,7 @@ from .schema import (
     IsolationMetadata,
     load_executor_manifest,
     load_executor_manifest_definitions,
+    to_capability_handle,
     validate_executor_definition,
 )
 
@@ -88,5 +89,6 @@ __all__ = [
     "load_folder_executor",
     "load_folder_executors",
     "run_executor",
+    "to_capability_handle",
     "validate_executor_definition",
 ]

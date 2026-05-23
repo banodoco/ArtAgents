@@ -123,13 +123,81 @@ class PackDiscoveryTest(unittest.TestCase):
         executor_registry = load_executor_registry()
         orchestrator_registry = load_orchestrator_registry(executor_registry=executor_registry)
 
-        self.assertGreaterEqual(len(executor_registry.list()), 34)
+        # Floor recalibrated after the timeline+builtin-training merge: M3 cleanup
+        # removed the comfy_* external wrappers + iteration/clip_extract and the
+        # seinfeld pack was generalized away, leaving 54 shipped executors.
+        self.assertGreaterEqual(len(executor_registry.list()), 54)
         self.assertGreaterEqual(len(orchestrator_registry.list()), 5)
         self.assertIn("builtin.cut", executor_registry.as_mapping())
         self.assertIn("external.moirae", executor_registry.as_mapping())
         self.assertIn("builtin.hype", orchestrator_registry.as_mapping())
 
-    def test_duplicate_executor_id_in_pack_fails_registry_registration(self) -> None:
+    def test_canonical_content_roots_are_used_for_discovery(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            packs_root = Path(tmp) / "packs"
+            pack_root = write_pack(packs_root, "builtin")
+            (pack_root / "pack.yaml").write_text(
+                "\n".join(
+                    [
+                        "schema_version: 1",
+                        "id: builtin",
+                        "name: Builtin Pack",
+                        "version: '1.0'",
+                        "content:",
+                        "  executors: executors",
+                        "  orchestrators: orchestrators",
+                        "  elements: ui_elements",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (pack_root / "executors").mkdir()
+            (pack_root / "orchestrators").mkdir()
+            write_executor(pack_root / "executors", "sample_executor", "builtin.sample_executor")
+            write_orchestrator(pack_root / "orchestrators", "sample_orchestrator", "builtin.sample_orchestrator")
+            element_root = pack_root / "ui_elements" / "effects" / "stamp"
+            element_root.mkdir(parents=True)
+            (element_root / "component.tsx").write_text("export default function Element() { return null; }\n")
+            (element_root / "element.yaml").write_text(
+                json.dumps(
+                    {
+                        "id": "stamp",
+                        "kind": "effect",
+                        "pack_id": "builtin",
+                        "metadata": {"label": "stamp"},
+                        "schema": {"type": "object"},
+                        "defaults": {},
+                        "dependencies": {"js_packages": [], "python_requirements": []},
+                    }
+                )
+            )
+            packs = discover_packs(packs_root)
+            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+                executors = load_pack_executors()
+            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+                orchestrators = load_pack_orchestrators()
+            with mock.patch("astrid.core.element.registry.discover_packs", return_value=packs):
+                elements = load_pack_elements()
+            self.assertEqual([executor.id for executor in executors], ["builtin.sample_executor"])
+            self.assertEqual([orchestrator.id for orchestrator in orchestrators], ["builtin.sample_orchestrator"])
+            self.assertEqual([(element.kind, element.id) for element in elements], [("effects", "stamp")])
+
+    def test_hidden_pack_is_excluded_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            packs_root = Path(tmp) / "packs"
+            write_pack(packs_root, "builtin")
+            hidden_root = write_pack(packs_root, "external")
+            hidden_root.joinpath("pack.yaml").write_text(
+                "schema_version: 1\nid: external\nname: External\nversion: '1.0'\nvisibility: hidden\n",
+                encoding="utf-8",
+            )
+            self.assertEqual([pack.id for pack in discover_packs(packs_root)], ["builtin"])
+            self.assertEqual([pack.id for pack in discover_packs(packs_root, include_hidden=True)], ["builtin", "external"])
+
+    def test_duplicate_executor_id_uses_priority_based_shadowing(self) -> None:
+        """After M4, duplicate executor ids no longer raise — they are
+        accepted and shadowed by priority (lower number wins)."""
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = write_pack(Path(tmp) / "packs", "builtin")
             write_executor(pack_root, "first", "builtin.duplicate")
@@ -137,8 +205,14 @@ class PackDiscoveryTest(unittest.TestCase):
             packs = discover_packs(Path(tmp) / "packs")
 
             with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
-                with self.assertRaisesRegex(Exception, "duplicate executor id"):
-                    ExecutorRegistry(load_pack_executors())
+                load_result = load_pack_executors()
+            # Duplicates are accepted — no error raised.
+            registry = ExecutorRegistry(load_result)
+            winner = registry.get("builtin.duplicate")
+            self.assertIsNotNone(winner)
+            self.assertEqual(winner.id, "builtin.duplicate")
+            # The registry contains the id.
+            self.assertIn("builtin.duplicate", registry.as_mapping())
 
     def test_pack_folder_must_match_pack_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

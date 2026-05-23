@@ -21,6 +21,9 @@ FIELD_WEIGHTS: dict[str, float] = {
     "short_description": 4.0,
     "binaries": 5.0,
     "description": 1.5,
+    "pack_id": 3.0,
+    "version": 2.0,
+    "category": 2.0,
 }
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")

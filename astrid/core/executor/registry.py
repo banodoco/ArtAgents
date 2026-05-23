@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Iterable
 
-from astrid.core.pack import discover_packs, iter_executor_roots, validate_content_id_in_pack
+from astrid._paths import REPO_ROOT
+from astrid.core.alias_resolver import (
+    AliasResolver,
+    create_shared_alias_resolver,
+    _register_pack_aliases,
+)
+from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
+from astrid.core.pack import discover_packs, ensure_local_pack, iter_executor_roots, validate_content_id_in_pack
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors
@@ -40,36 +49,108 @@ class ExecutorRegistryError(ExecutorValidationError):
 class ExecutorRegistry:
     """Small in-memory registry keyed by executor id."""
 
-    def __init__(self, executors: Iterable[ExecutorDefinition | dict[str, Any]] = ()) -> None:
-        self._executors: dict[str, ExecutorDefinition] = {}
+    def __init__(
+        self,
+        executors: Iterable[ExecutorDefinition | dict[str, Any]] = (),
+        *,
+        alias_resolver: AliasResolver | None = None,
+        override_store: "OverrideStore | None" = None,
+    ) -> None:
+        self._executors: dict[str, list[ExecutorDefinition]] = {}
+        self.alias_resolver = alias_resolver
+        self.override_store = override_store
         for executor in executors:
             self.register(executor)
 
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _resolve_entry(entry: list[ExecutorDefinition] | ExecutorDefinition) -> ExecutorDefinition:
+        """Return the winning definition from a storage entry.
+
+        Handles both list entries (from ``register()``) and scalar values
+        (from legacy code that assigns directly to ``_executors[id]``).
+        """
+        if isinstance(entry, list):
+            return entry[0]
+        return entry
+
+    @staticmethod
+    def _iter_entries(entry: list[ExecutorDefinition] | ExecutorDefinition) -> Iterable[ExecutorDefinition]:
+        """Yield all definitions from a storage entry (winner + shadowed)."""
+        if isinstance(entry, list):
+            yield from entry
+        else:
+            yield entry
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def register(self, executor: ExecutorDefinition | dict[str, Any]) -> ExecutorDefinition:
         definition = validate_executor_definition(executor)
-        if definition.id in self._executors:
-            raise ExecutorRegistryError(f"duplicate executor id {definition.id!r}")
-        self._executors[definition.id] = definition
+        priority = int(definition.metadata.get("priority", 30))
+        if definition.id not in self._executors:
+            self._executors[definition.id] = []
+        self._executors[definition.id].append(definition)
+        self._executors[definition.id].sort(
+            key=lambda d: int(d.metadata.get("priority", 30))
+        )
         return definition
 
     def get(self, executor_id: str) -> ExecutorDefinition:
         try:
-            return self._executors[executor_id]
+            definition = self._resolve_entry(self._executors[executor_id])
         except KeyError as exc:
             raise KeyError(f"unknown executor id {executor_id!r}") from exc
+
+        # Check override store for a remapped target.
+        if self.override_store is not None:
+            target_id = self.override_store.resolve("executor", executor_id)
+            if target_id is not None and target_id != executor_id:
+                # Validate that the override target exists.
+                if target_id not in self._executors:
+                    raise ExecutorRegistryError(
+                        f"override target {target_id!r} for executor {executor_id!r} not found in registry"
+                    )
+                target_def = self._resolve_entry(self._executors[target_id])
+                # Annotate the returned definition with override_target metadata.
+                target_metadata = dict(target_def.metadata)
+                target_metadata["override_target"] = target_id
+                return replace(target_def, metadata=target_metadata)
+
+        return definition
+
+    def _iter_all(self) -> Iterable[ExecutorDefinition]:
+        """Yield every registered definition (including shadowed)."""
+        for entry in self._executors.values():
+            yield from self._iter_entries(entry)
 
     def list(self, kind: str | None = None) -> tuple[ExecutorDefinition, ...]:
         if kind is not None and kind not in {"built_in", "external"}:
             raise ExecutorRegistryError("kind must be one of ['built_in', 'external']")
-        executors = self._executors.values()
+        # Winners only (first entry per id after priority sort).
+        executors = (self._resolve_entry(entry) for entry in self._executors.values())
         if kind is not None:
             executors = [executor for executor in executors if executor.kind == kind]
         return tuple(sorted(executors, key=lambda executor: executor.id))
 
     def validate_all(self) -> tuple[ExecutorDefinition, ...]:
-        for executor in self._executors.values():
+        # Validate winners only — shadowed entries intentionally not validated.
+        for executor in (self._resolve_entry(entry) for entry in self._executors.values()):
             validate_executor_definition(executor)
         self._validate_graph_references()
+        if self.alias_resolver is not None:
+            self.alias_resolver.validate_no_cycles()
+            # Cross-check: every alias must resolve to a known executor.
+            for alias, record in self.alias_resolver._aliases.items():
+                target = self.alias_resolver.resolve(alias)
+                if target not in self._executors:
+                    raise ExecutorRegistryError(
+                        f"alias {alias!r} resolves to unknown executor {target!r}"
+                    )
         return self.list()
 
     def to_dict(self, kind: str | None = None) -> dict[str, Any]:
@@ -79,21 +160,92 @@ class ExecutorRegistry:
         return json.dumps(self.to_dict(kind=kind), indent=indent, sort_keys=True)
 
     def as_mapping(self) -> MappingProxyType[str, ExecutorDefinition]:
-        return MappingProxyType(dict(self._executors))
+        # Winners only.
+        return MappingProxyType(
+            {eid: self._resolve_entry(entry) for eid, entry in self._executors.items()}
+        )
 
     def _validate_graph_references(self) -> None:
-        known_ids = set(self._executors)
-        for executor in self._executors.values():
+        known_ids = set(self._executors)  # keys are strings, unchanged
+        resolver = self.alias_resolver
+        # Winners only.
+        for executor in (self._resolve_entry(entry) for entry in self._executors.values()):
             for dependency in executor.graph.depends_on:
-                if dependency not in known_ids:
-                    raise ExecutorRegistryError(f"executor {executor.id!r} depends on unknown executor {dependency!r}")
-                if dependency == executor.id:
+                resolved = resolver.resolve(dependency) if resolver else dependency
+                if resolved not in known_ids:
+                    raise ExecutorRegistryError(f"executor {executor.id!r} depends on unknown executor {resolved!r}")
+                if resolved == executor.id:
                     raise ExecutorRegistryError(f"executor {executor.id!r} cannot depend on itself")
 
+    def fork(
+        self,
+        executor_id: str,
+        *,
+        project_root: str | Path,
+        overwrite: bool = False,
+        deep: bool = False,
+    ) -> Path:
+        """Fork *executor_id* into the local scratch pack under *project_root*.
 
-def load_default_registry(banodoco_config: BanodocoCatalogConfig | None = None) -> ExecutorRegistry:
-    registry = ExecutorRegistry()
-    for executor in load_pack_executors():
+        Returns the absolute path to the forked executor directory.
+        """
+        definition = self.get(executor_id)
+        local_id = executor_id.split(".", 1)[1] if "." in executor_id else executor_id
+        target = (Path(project_root) / "astrid" / "packs" / "local" / "executors" / local_id).resolve()
+
+        ensure_local_pack(project_root=project_root)
+
+        if target.exists() and not overwrite:
+            raise ExecutorRegistryError(
+                f"executor fork target already exists: {target}"
+            )
+
+        # Resolve content_root: prefer content_root (set by _attach_pack_metadata),
+        # fall back to executor_root (set by _attach_folder_metadata).
+        content_root_str = definition.metadata.get("content_root") or definition.metadata.get("executor_root")
+        if not content_root_str:
+            raise ExecutorRegistryError(
+                f"cannot fork executor {executor_id!r}: no content_root or executor_root in metadata"
+            )
+        content_root = Path(content_root_str)
+        if not content_root.is_dir():
+            raise ExecutorRegistryError(
+                f"cannot fork executor {executor_id!r}: content_root {content_root} is not a directory"
+            )
+
+        # Copy the content root to the target.
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(content_root, target)
+
+        # Rewrite the manifest id and add fork provenance.
+        _rewrite_executor_manifest_fork(target, local_id, forked_from=executor_id, upstream_version=definition.version)
+
+        # Persist fork state for local-edit detection.
+        write_fork_state(target, forked_from=executor_id, upstream_version=definition.version)
+
+        # Deep fork: recursively fork all depends_on executors.
+        if deep:
+            resolver = self.alias_resolver
+            already_forked: set[str] = {executor_id}
+            for dep_id in definition.graph.depends_on:
+                resolved = resolver.resolve(dep_id) if resolver else dep_id
+                if resolved not in already_forked:
+                    already_forked.add(resolved)
+                    self.fork(resolved, project_root=project_root, overwrite=overwrite, deep=True)
+
+        return target
+
+
+def load_default_registry(
+    banodoco_config: BanodocoCatalogConfig | None = None,
+    *,
+    project_root: str | Path = REPO_ROOT,
+) -> ExecutorRegistry:
+    resolver = create_shared_alias_resolver()
+    _register_pack_aliases(resolver, {})  # M1: no aliases yet
+    registry = ExecutorRegistry(alias_resolver=resolver)
+    for executor in load_pack_executors(project_root=project_root):
         registry.register(executor)
     if banodoco_config is not None and banodoco_config.enabled:
         for executor in load_banodoco_catalog_executors(banodoco_config):
@@ -102,21 +254,93 @@ def load_default_registry(banodoco_config: BanodocoCatalogConfig | None = None) 
     return registry
 
 
-def load_pack_executors() -> tuple[ExecutorDefinition, ...]:
-    executors: list[ExecutorDefinition] = []
+def load_pack_executors(*, project_root: str | Path = REPO_ROOT) -> tuple[ExecutorDefinition, ...]:
+    # Mirror load_pack_elements(): discover source-tree packs (excluding
+    # local), then conditionally discover the project-scoped local pack
+    # when the project root differs from the repository root.
+    repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
+    project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
+
+    packs: list = []
     for pack in discover_packs():
+        if pack.id == "local":
+            continue
+        packs.append(pack)
+    if project_pack_root != repo_pack_root and project_pack_root.is_dir():
+        for pack in discover_packs(project_pack_root):
+            if pack.id == "local":
+                packs.append(pack)
+
+    executors: list[ExecutorDefinition] = []
+    for pack in packs:
         for root in iter_executor_roots(pack):
             for executor in load_folder_executors(root):
                 validate_content_id_in_pack(executor.id, pack, content_type="executor")
-                executors.append(_attach_pack_metadata(executor, pack.id))
+                executors.append(_attach_pack_metadata(executor, pack.id, content_root=root))
     return tuple(executors)
 
 
-def _attach_pack_metadata(executor: ExecutorDefinition, pack_id: str) -> ExecutorDefinition:
+def _attach_pack_metadata(
+    executor: ExecutorDefinition,
+    pack_id: str,
+    *,
+    content_root: Path | None = None,
+) -> ExecutorDefinition:
     metadata = dict(executor.metadata)
     metadata["source"] = "pack"
     metadata["source_pack"] = pack_id
+    metadata["priority"] = 10 if pack_id == "local" else 30
+    if content_root is not None:
+        metadata["content_root"] = str(content_root)
+    # SD5: detect local edits and merge fork state for local pack only
+    if pack_id == "local" and content_root is not None:
+        fork_state = read_fork_state(content_root)
+        if fork_state is not None:
+            for key in ("forked_from", "upstream_version", "compatibility_token"):
+                if key in fork_state:
+                    metadata.setdefault(key, fork_state[key])
+        metadata["local_edit_state"] = detect_local_edits(
+            content_root, forked_from=metadata.get("forked_from", "")
+        )
     return validate_executor_definition(replace(executor, metadata=metadata))
+
+
+def _rewrite_executor_manifest_fork(
+    target: Path,
+    local_id: str,
+    *,
+    forked_from: str,
+    upstream_version: str,
+) -> None:
+    """Rewrite the executor manifest in *target* with the forked identity."""
+    EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
+    manifest_path = None
+    for name in EXECUTOR_MANIFEST_NAMES:
+        candidate = target / name
+        if candidate.is_file():
+            manifest_path = candidate
+            break
+
+    if manifest_path is None:
+        return  # No manifest to rewrite — executor was loaded via executor.py
+
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return  # Cannot parse, leave as-is
+
+    new_id = f"local.{local_id}"
+    data["id"] = new_id
+
+    # Merge fork provenance into metadata.
+    metadata = data.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+        data["metadata"] = metadata
+    metadata["forked_from"] = forked_from
+    metadata["upstream_version"] = upstream_version
+
+    manifest_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 __all__ = [

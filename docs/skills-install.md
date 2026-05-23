@@ -16,6 +16,26 @@ Each pack that wants to be installable contributes one file:
 astrid/packs/<pack>/skill/SKILL.md
 ```
 
+Discovery also understands canonical component roots declared in `pack.yaml`.
+If a pack declares `content.executors: executors` or
+`content.orchestrators: orchestrators`, Astrid will discover nested component
+skills at:
+
+```
+astrid/packs/<pack>/executors/<executor>/skill/SKILL.md
+astrid/packs/<pack>/orchestrators/<orchestrator>/skill/SKILL.md
+```
+
+Those nested descriptors use the qualified pack id
+`<pack>.<component_slug>`. Legacy flat component layouts are still scanned for
+packs without canonical `content` roots. Directories that contain a
+`skill/SKILL.md` but lack a `pack.yaml` fall back to Strategy 2 flat-walk
+discovery without error.
+
+Discovery skips packs with `status: deprecated` or `visibility: hidden`
+by default, unless the pack is explicitly requested. This keeps stale
+and development-only packs out of the agent's prompt context.
+
 The file is a Claude-Code-style skill: YAML frontmatter with at least `name` and `description`, followed by Markdown body content.
 
 ```markdown
@@ -103,3 +123,15 @@ Install state lives at `$XDG_STATE_HOME/astrid/skills.json` (default `~/.local/s
 ## Nudge
 
 If at least one harness is detected on disk and is missing one of the expected packs, Astrid prints a single-line nudge to stderr at most once every 7 days when you run any non-`skills` subcommand. The nudge is suppressed by `ASTRID_NO_NUDGE=1` or `--quiet`. The nudge is best-effort — it cannot break a real command.
+
+## Related Guides
+
+- [discovery-for-agents.md](discovery-for-agents.md) — The agent-facing
+  contract for discovering capabilities: `skills list`, search, and
+  `inspect --json`. Skills install is the delivery mechanism; discovery
+  describes what agents do with the installed skills.
+- [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —
+  How aliases, forks, and overrides interact with installed skills.
+  Installed skills always reflect the current resolution order; if an
+  override or fork changes which capability a name resolves to, the
+  installed SKILL.md content updates accordingly on next `sync`.

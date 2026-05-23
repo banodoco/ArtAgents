@@ -132,6 +132,58 @@ agent:
         self.assertEqual(errors, [])
 
 
+class TestLayoutValidation(MinimalPackTestCase):
+    def test_duplicate_capability_ids_are_errors(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_executor(root, "executors/first", "test_pack.duplicate")
+        self.write_valid_executor(root, "executors/second", "test_pack.duplicate")
+        errors, _ = validate_pack(root)
+        self.assertTrue(any("duplicate capability id" in error for error in errors), errors)
+
+    def test_alias_targets_must_exist(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors" / "test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+metadata:
+  aliases:
+    - canonical_id: test_pack.missing
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(any("unknown capability id" in error for error in errors), errors)
+
+    def test_unsupported_content_roots_warn(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  executors: executors
+  strange: strange
+agent:
+  purpose: Testing
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("unsupported content root" in warning for warning in warnings), warnings)
+
+
 class TestSchemaVersionErrors(MinimalPackTestCase):
     """Schema version validation edge cases."""
 

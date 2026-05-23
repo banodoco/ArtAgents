@@ -19,6 +19,12 @@ from typing import Iterable
 
 from astrid._paths import REPO_ROOT
 from astrid.core._search import short_description_or_truncated
+from astrid.core.pack import (
+    iter_executor_roots,
+    iter_orchestrator_roots,
+    load_pack_manifest,
+    pack_manifest_path,
+)
 
 PACKS_DIR = REPO_ROOT / "astrid" / "packs"
 
@@ -127,9 +133,25 @@ def list_skills(packs_dir: Path | None = None) -> list[SkillDescriptor]:
         if not pack_dir.is_dir():
             continue
 
+        manifest_path = pack_manifest_path(pack_dir)
+        pack = None
+        if manifest_path is not None:
+            try:
+                pack = load_pack_manifest(manifest_path)
+            except Exception:
+                pack = None
+        if pack is not None and (pack.status == "deprecated" or pack.visibility == "hidden"):
+            continue
+
         # Strategy 1: direct pack skill at astrid/packs/<pack>/skill/SKILL.md
         skill_md = pack_dir / "skill" / "SKILL.md"
-        _try_add_skill(descriptors, skill_md, pack_dir.name)
+        _try_add_skill(descriptors, skill_md, pack.id if pack is not None else pack_dir.name)
+        if pack is not None and pack.content:
+            for content_dir in (*iter_executor_roots(pack), *iter_orchestrator_roots(pack)):
+                nested_skill = content_dir / "skill" / "SKILL.md"
+                qualified_id = f"{pack.id}.{content_dir.name}"
+                _try_add_skill(descriptors, nested_skill, qualified_id)
+            continue
 
         # Strategy 2: nested executor/orchestrator skills
         # Walk pack_dir for child dirs that contain an executor.yaml or

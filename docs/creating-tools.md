@@ -119,6 +119,19 @@ must equal the owning pack's id (e.g. `builtin.cut` lives in `packs/builtin/`,
 `external.vibecomfy.run` lives in `packs/external/`). Element ids stay bare and
 are scoped by `kind` (`effects`, `animations`, `transitions`).
 
+Terminology note: pack placement, capability identity, aliases/deprecation,
+adapter versus default-enabled semantics, and local fork/override terminology
+are defined in `docs/megaplan/epics/pack-system/pack-contract.md`. Use that
+contract for identity questions; this guide only describes the current folder
+and authoring conventions.
+
+The authoritative layout for every pack is its `pack.yaml` manifest. The
+`content` roots declared there — `executors`, `orchestrators`, `elements` —
+are what the runtime and validation use. Folder scanning is a fallback for
+legacy packs without a `schema_version`; new packs must declare their layout
+explicitly. See [creating-packs.md](creating-packs.md) for the full pack
+authoring workflow and manifest schemas.
+
 Executor folders use:
 
 ```text
@@ -186,3 +199,24 @@ Run only the inspect command that matches the thing you created.
   declared in metadata.
 - Runtime outputs go under `runs/` or another ignored directory.
 - Focused tests cover registry discovery and the behavior that can break.
+
+## Related Guides
+
+- [discovery-for-agents.md](discovery-for-agents.md) — How agents discover
+  capabilities via `skills list`, search, and `inspect --json`.
+- [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —
+  Decision table for choosing between alias, fork, and override.
+- [personal-packs.md](personal-packs.md) — Scaffolding personal packs for
+  local experimentation.
+- [adapter-packs.md](adapter-packs.md) — Adapter pack conventions and
+  trust/ownership distinctions.
+- [update-workflow.md](update-workflow.md) — Detecting and managing local
+  edits with dirty check and fork.
+
+## Future Work
+
+- **Remote registry** — Publishing and discovering packs from outside the
+  repository.
+- **Dependency isolation** — Per-pack isolated dependency resolution.
+- **Semantic merge** — Three-way merge of upstream updates with local
+  forks and overrides.
