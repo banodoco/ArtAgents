@@ -1,0 +1,10 @@
+{
+  "confidence": 1.0,
+  "model": "fixture",
+  "raw_response": {
+    "fixture": true,
+    "source": "prebaked"
+  },
+  "schema_version": 1,
+  "text": "A minimal green-frame fixture video before review edits."
+}

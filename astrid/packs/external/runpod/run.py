@@ -15,7 +15,9 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import signal
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -106,6 +108,40 @@ def _host_hf_token_env_vars() -> dict[str, str]:
     """Return pod env vars sourced from the host process without inventing defaults."""
     token = os.environ.get("HF_TOKEN")
     return {"HF_TOKEN": token} if token else {}
+
+
+def _ssh_target_from_handle(handle: dict[str, Any]) -> tuple[str, str]:
+    """Return ``(user_host, port)`` from the persisted RunPod ssh field."""
+    ssh = str(handle.get("ssh") or "")
+    match = re.match(r"(\S+)\s+-p\s+(\d+)", ssh)
+    if not match:
+        raise ValueError(f"pod_handle ssh field is missing or invalid: {ssh!r}")
+    return match.group(1), match.group(2)
+
+
+def _build_scp_pull_command(
+    handle: dict[str, Any],
+    *,
+    remote_path: str,
+    local_dir: Path,
+    ssh_key: str | None = None,
+) -> list[str]:
+    """Build the SCP command used by ``external.runpod.run pull``."""
+    target, port = _ssh_target_from_handle(handle)
+    cmd = [
+        "scp",
+        "-r",
+        "-P",
+        port,
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        "IdentitiesOnly=yes",
+    ]
+    if ssh_key:
+        cmd.extend(["-i", ssh_key])
+    cmd.extend([f"{target}:{remote_path}", str(local_dir)])
+    return cmd
 
 
 # ---------------------------------------------------------------------------
@@ -343,7 +379,62 @@ def cmd_exec(args: argparse.Namespace, produces_dir: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 3. teardown
+# 3. pull artifacts
+# ---------------------------------------------------------------------------
+
+
+def cmd_pull(args: argparse.Namespace, produces_dir: Path) -> int:
+    """Pull files or directories from a provisioned pod using the saved handle."""
+    pod_handle_path = Path(args.pod_handle) if args.pod_handle else produces_dir / "pod_handle.json"
+    if not pod_handle_path.is_file():
+        print(f"ERROR: pod_handle.json not found at {pod_handle_path}", file=sys.stderr)
+        return 1
+
+    handle = json.loads(pod_handle_path.read_text(encoding="utf-8"))
+    local_dir = Path(args.local_dir) if args.local_dir else produces_dir / "artifact_dir"
+    local_dir.mkdir(parents=True, exist_ok=True)
+    remote_paths = list(args.remote_path or [])
+    if not remote_paths:
+        print("ERROR: at least one --remote-path is required", file=sys.stderr)
+        return 2
+
+    artifacts: list[dict[str, Any]] = []
+    for remote_path in remote_paths:
+        cmd = _build_scp_pull_command(
+            handle,
+            remote_path=remote_path,
+            local_dir=local_dir,
+            ssh_key=args.ssh_key,
+        )
+        print(f"$ {' '.join(cmd)}", file=sys.stderr)
+        rv = subprocess.run(cmd)
+        local_path = local_dir if remote_path.rstrip().endswith("/.") else local_dir / Path(remote_path.rstrip("/")).name
+        exists = local_path.exists()
+        artifacts.append(
+            {
+                "remote_path": remote_path,
+                "local_path": str(local_path),
+                "exists": exists,
+                "returncode": rv.returncode,
+                "command": cmd,
+            }
+        )
+        if rv.returncode != 0:
+            _write_json(produces_dir / "artifact_pull.json", {"status": "failed", "artifacts": artifacts})
+            print(f"ERROR: artifact pull failed for {remote_path} rc={rv.returncode}", file=sys.stderr)
+            return rv.returncode or 3
+        if not exists:
+            _write_json(produces_dir / "artifact_pull.json", {"status": "missing_local", "artifacts": artifacts})
+            print(f"ERROR: pulled artifact missing locally: {local_path}", file=sys.stderr)
+            return 3
+
+    _write_json(produces_dir / "artifact_pull.json", {"status": "ok", "artifacts": artifacts})
+    print(f"Pulled {len(artifacts)} artifact(s) into {local_dir}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# 4. teardown
 # ---------------------------------------------------------------------------
 
 
@@ -407,7 +498,7 @@ def cmd_teardown(args: argparse.Namespace, produces_dir: Path) -> int:
 
 
 # ---------------------------------------------------------------------------
-# 4. session  (provision → exec → teardown with try/finally)
+# 5. session  (provision → exec → teardown with try/finally)
 # ---------------------------------------------------------------------------
 
 
@@ -629,7 +720,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the argument parser for all four executor subcommands."""
+    """Build the argument parser for all executor subcommands."""
     parser = argparse.ArgumentParser(description="RunPod executor commands.")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -655,6 +746,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_exec.add_argument("--timeout", type=int, help="Execution timeout in seconds.")
     p_exec.add_argument("--upload-mode", choices=("sftp_walk", "tarball"), help="Upload mode.")
     p_exec.add_argument("--excludes", help="Comma-separated glob patterns to exclude from upload.")
+
+    # --- pull ---
+    p_pull = sub.add_parser("pull", help="Pull artifacts from an existing pod.")
+    p_pull.add_argument("--produces-dir", type=Path, required=True, help="Produces output directory.")
+    p_pull.add_argument("--pod-handle", help="Path to pod_handle.json (default: <produces-dir>/pod_handle.json).")
+    p_pull.add_argument("--remote-path", action="append", help="Remote file or directory to pull. Repeatable.")
+    p_pull.add_argument("--local-dir", help="Local destination directory.")
+    p_pull.add_argument("--ssh-key", help="Private SSH key path. Omit to use ssh-agent/default keys.")
 
     # --- teardown ---
     p_tear = sub.add_parser("teardown", help="Terminate a pod (idempotent).")
@@ -693,6 +792,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_provision(args, produces_dir)
     elif args.command == "exec":
         return cmd_exec(args, produces_dir)
+    elif args.command == "pull":
+        return cmd_pull(args, produces_dir)
     elif args.command == "teardown":
         return cmd_teardown(args, produces_dir)
     elif args.command == "session":

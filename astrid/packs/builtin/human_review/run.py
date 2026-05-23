@@ -19,8 +19,10 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
+
+from astrid.packs.builtin.dataset_build.state import read_review_state, write_review_state
 
 
 _GEMINI_SCHEMA_KEYS = {
@@ -28,6 +30,10 @@ _GEMINI_SCHEMA_KEYS = {
     "nullable", "format", "minimum", "maximum", "minItems", "maxItems",
     "minLength", "maxLength", "pattern", "anyOf", "oneOf", "allOf",
 }
+
+
+class StaleStateConflict(Exception):
+    """Raised when a save was based on an older review_state version."""
 
 
 def _pick_free_port() -> int:
@@ -66,6 +72,174 @@ def _validate_against_schema(body: dict, schema_path: Path) -> tuple[bool, str]:
         return True, ""
     except jsonschema.ValidationError as exc:
         return False, str(exc)
+
+
+def _read_json_file(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _filter_paginated_data(data_path: Path, query: dict[str, list[str]]) -> dict[str, Any]:
+    raw = _read_json_file(data_path)
+    items = raw.get("items", raw) if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        items = []
+    status = (query.get("status") or [""])[0]
+    if status:
+        items = [item for item in items if isinstance(item, dict) and item.get("review_status", item.get("status")) == status]
+    sampled = (query.get("sampled") or [""])[0]
+    if sampled:
+        items = [item for item in items if isinstance(item, dict) and _matches_sampled_filter(item, sampled)]
+    total = len(items)
+    offset = _non_negative_int((query.get("offset") or ["0"])[0], default=0)
+    limit = _non_negative_int((query.get("limit") or [str(total)])[0], default=total)
+    if limit == 0:
+        page_items: list[Any] = []
+    else:
+        page_items = items[offset:offset + limit]
+    return {
+        "items": page_items,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "status": status or None,
+        "sampled": sampled or None,
+    }
+
+
+def _non_negative_int(value: str, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(parsed, 0)
+
+
+def _is_dataset_diff_save(body: Any) -> bool:
+    return isinstance(body, dict) and "base_state_version" in body and "revisions" in body
+
+
+def _apply_dataset_diff_save(state_path: Path, body: dict[str, Any]) -> dict[str, Any]:
+    state = read_review_state(state_path)
+    base_version = int(body.get("base_state_version", -1))
+    current_version = int(state.get("state_version", 0))
+    if base_version != current_version:
+        raise StaleStateConflict(f"base_state_version {base_version} does not match current state_version {current_version}")
+    decisions = dict(state.get("review_decisions") or {})
+    for item_id, revision in _iter_revisions(body.get("revisions")):
+        existing = dict(decisions.get(item_id) or {})
+        decision = _normalize_decision(revision.get("decision", revision.get("review_status", existing.get("decision", "pending"))))
+        merged = {
+            "item_id": item_id,
+            "decision": decision,
+            "reject_reason": revision.get("reject_reason", existing.get("reject_reason")),
+            "edited_caption": revision.get("edited_caption", existing.get("edited_caption")),
+            "reviewed_at": revision.get("reviewed_at") or _now_iso(),
+            "reviewer_id": revision.get("reviewer_id", existing.get("reviewer_id", "human_review")),
+            "state_version": current_version + 1,
+        }
+        decisions[item_id] = merged
+    state["review_decisions"] = decisions
+    return write_review_state(state_path, state)
+
+
+def _apply_dataset_batch_save(state_path: Path, data_path: Path, body: dict[str, Any]) -> dict[str, Any]:
+    item_ids = _batch_item_ids(data_path, body)
+    if not item_ids:
+        raise ValueError("batch save matched no item_ids")
+    decision = _normalize_decision(body.get("decision", body.get("review_status", "pending")))
+    revisions = [
+        {
+            "item_id": item_id,
+            "decision": decision,
+            "reject_reason": body.get("reject_reason"),
+            "edited_caption": body.get("edited_caption"),
+            "reviewed_at": body.get("reviewed_at"),
+            "reviewer_id": body.get("reviewer_id", "human_review_batch"),
+        }
+        for item_id in item_ids
+    ]
+    return _apply_dataset_diff_save(
+        state_path,
+        {
+            "base_state_version": body.get("base_state_version"),
+            "revisions": revisions,
+        },
+    )
+
+
+def _batch_item_ids(data_path: Path, body: Mapping[str, Any]) -> list[str]:
+    item_ids = body.get("item_ids")
+    if isinstance(item_ids, list) and item_ids:
+        return [str(item_id) for item_id in item_ids if item_id is not None]
+    scope = str(body.get("scope", ""))
+    if scope != "filtered":
+        raise ValueError("batch save requires item_ids or scope='filtered'")
+    status = body.get("status")
+    filter_config = body.get("filter") if isinstance(body.get("filter"), Mapping) else {}
+    if status is None:
+        status = filter_config.get("status")
+    sampled = body.get("sampled")
+    if sampled is None:
+        sampled = filter_config.get("sampled")
+    items = _items_from_data(data_path)
+    if status:
+        items = [
+            item
+            for item in items
+            if str(item.get("review_status", item.get("status", ""))) == str(status)
+        ]
+    if sampled is not None and str(sampled) != "":
+        items = [item for item in items if _matches_sampled_filter(item, str(sampled))]
+    return [str(item["item_id"]) for item in items if item.get("item_id") is not None]
+
+
+def _items_from_data(data_path: Path) -> list[dict[str, Any]]:
+    raw = _read_json_file(data_path)
+    items = raw.get("items", raw) if isinstance(raw, dict) else raw
+    if not isinstance(items, list):
+        return []
+    return [dict(item) for item in items if isinstance(item, dict)]
+
+
+def _matches_sampled_filter(item: Mapping[str, Any], expected: str) -> bool:
+    normalized = str(expected).strip().lower()
+    if normalized not in {"true", "false", "1", "0", "yes", "no"}:
+        return True
+    marker = item.get("review_sampled")
+    if isinstance(marker, Mapping):
+        sampled = bool(marker.get("sampled", True))
+    elif marker is None:
+        sampled = True
+    else:
+        sampled = bool(marker)
+    expected_bool = normalized in {"true", "1", "yes"}
+    return sampled is expected_bool
+
+
+def _iter_revisions(revisions: Any):
+    if isinstance(revisions, dict):
+        for item_id, revision in revisions.items():
+            if isinstance(revision, dict):
+                yield str(item_id), revision
+        return
+    if isinstance(revisions, list):
+        for revision in revisions:
+            if isinstance(revision, dict) and revision.get("item_id") is not None:
+                yield str(revision["item_id"]), revision
+
+
+def _normalize_decision(value: Any) -> str:
+    if value in {"accepted", "accept", True}:
+        return "accept"
+    if value in {"rejected", "reject", False}:
+        return "reject"
+    return "pending"
+
+
+def _now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | None,
@@ -136,6 +310,9 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
 
             # /data.json
             if p == "/data.json":
+                if url.query:
+                    self._send_json(200, _filter_paginated_data(data_path, parse_qs(url.query)))
+                    return
                 self._serve_file(data_path, "application/json")
                 return
 
@@ -185,12 +362,57 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
                     self._send_json(400, {"error": "no_state", "detail": "--state not configured"})
                     return
                 try:
-                    json.loads(raw.decode("utf-8") or "{}")  # validate it's JSON
+                    body = json.loads(raw.decode("utf-8") or "{}")
                 except Exception as exc:
                     self._send_json(400, {"error": "bad_json", "detail": str(exc)})
                     return
-                _atomic_write(state_path, raw)
-                self._send(204)
+                if _is_dataset_diff_save(body):
+                    try:
+                        updated = _apply_dataset_diff_save(state_path, body)
+                    except StaleStateConflict as exc:
+                        self._send_json(409, {"error": "stale_state", "detail": str(exc)})
+                        return
+                    except Exception as exc:  # noqa: BLE001 - return JSON instead of killing handler thread
+                        self._send_json(400, {"error": "save_failed", "detail": str(exc)})
+                        return
+                    self._send_json(200, {"state_version": updated["state_version"], "updated_at": updated["updated_at"]})
+                    return
+                self._send_json(
+                    400,
+                    {
+                        "error": "diff_required",
+                        "detail": "/save requires a JSON object with base_state_version and revisions",
+                    },
+                )
+                return
+
+            if url.path == "/submit-batch":
+                if state_path is None:
+                    self._send_json(400, {"error": "no_state", "detail": "--state not configured"})
+                    return
+                try:
+                    body = json.loads(raw.decode("utf-8") or "{}")
+                except Exception as exc:
+                    self._send_json(400, {"error": "bad_json", "detail": str(exc)})
+                    return
+                if not isinstance(body, dict) or "base_state_version" not in body:
+                    self._send_json(
+                        400,
+                        {
+                            "error": "base_state_version_required",
+                            "detail": "/submit-batch requires base_state_version",
+                        },
+                    )
+                    return
+                try:
+                    updated = _apply_dataset_batch_save(state_path, data_path, body)
+                except StaleStateConflict as exc:
+                    self._send_json(409, {"error": "stale_state", "detail": str(exc)})
+                    return
+                except Exception as exc:  # noqa: BLE001 - return JSON instead of killing handler thread
+                    self._send_json(400, {"error": "batch_failed", "detail": str(exc)})
+                    return
+                self._send_json(200, {"state_version": updated["state_version"], "updated_at": updated["updated_at"]})
                 return
 
             if url.path == "/submit":

@@ -7,7 +7,7 @@ from typing import Any, Literal, get_args
 
 
 PortType = Literal[
-    "string", "path", "file", "directory", "json", "boolean", "number", "integer"
+    "string", "path", "file", "directory", "json", "boolean", "number", "integer", "html"
 ]
 OutputMode = Literal["mutate", "create", "create_or_replace"]
 CacheMode = Literal["none", "sentinel", "always_run"]

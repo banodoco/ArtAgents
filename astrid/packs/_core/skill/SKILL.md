@@ -310,6 +310,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `builtin.render` | Render a hype timeline to hype.mp4 through the Remotion compositor. |
 | `builtin.scene_describe` | Caption each detected scene with a vision model for downstream selection. |
 | `builtin.scenes` | Detect source-video scene boundaries with ffmpeg-driven analysis. |
+| `builtin.script_pipeline` | Generate short scripts through rough attempts, synthesis, style pass, and optional judging. |
 | `builtin.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |
 | `builtin.shots` | Slice scenes into shot windows for downstream pool building. |
 | `builtin.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
@@ -332,6 +333,7 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
 | `external.runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
 | `external.runpod.provision` | Provision a RunPod GPU pod and emit a pod handle for later exec/teardown. |
+| `external.runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
 | `external.runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
 | `external.runpod.teardown` | Terminate a RunPod pod. Idempotent. |
 | `external.vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
@@ -341,12 +343,6 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | `iteration.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
-| `seinfeld.aitoolkit_stage` | Generate ai-toolkit job config from manifest + vocabulary; upload to pod; start AI Toolkit UI on :8675. |
-| `seinfeld.aitoolkit_train` | Kick off ai-toolkit training on a pod and mirror remote logs locally. |
-| `seinfeld.lora_eval_grid` | Run baseline LTX + per-checkpoint inference samples, download MP4s, write static index.html viewer. |
-| `seinfeld.lora_register` | Pure-local: copy chosen .safetensors into registered/ and write registered_lora.json. |
-| `seinfeld.repo_setup` | Idempotent git submodule add + checkout of ostris/ai-toolkit for config-schema reference. |
-| `seinfeld.script_pipeline` | Generate Seinfeld-style short scene scripts through ideation, synthesis, and voice passes. |
 | `text_digest.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `text_review.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `upload.youtube` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
@@ -357,15 +353,15 @@ Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iterat
 | id | short_description |
 | --- | --- |
 | `builtin.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
+| `builtin.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `builtin.event_talks` | Orchestrate event-talk template, search, holding-screen, and render commands into a finished video. |
 | `builtin.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
 | `builtin.hype` | Run the canonical hype editing pipeline end-to-end (transcribe → cut → render → validate). |
 | `builtin.iteration_video` | Prepare an iteration graph, assemble render inputs, render through builtin.render, and finalize iteration video outputs. |
 | `builtin.logo_ideas` | Generate a grid of distinct logo concepts via Kimi K2 prompts + GPT Image 2 (or z-image) renders. |
 | `builtin.thumbnail_maker` | Plan source evidence and thumbnail generation candidates for a video/query pair. |
+| `builtin.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
 | `builtin.vary_grid` | Iterative grid editor: take an existing grid image and emit a new grid of variations via fal. |
-| `seinfeld.dataset_build` | Bucket-fill loop that builds the Seinfeld LoRA training set from YouTube. |
-| `seinfeld.lora_train` | Train an LTX 2.3 LoRA on the Seinfeld dataset via ai-toolkit on RunPod. |
 
 ### Elements
 

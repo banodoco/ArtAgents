@@ -1,0 +1,159 @@
+{
+  "created_at": "2026-05-21T00:00:00Z",
+  "dataset_id": "builtin-training-fixture",
+  "items": [
+    {
+      "acquired_at": "2026-05-21T00:00:00Z",
+      "bucket": "establishing",
+      "caption": {
+        "confidence": 1.0,
+        "model": "fixture",
+        "raw_response": {
+          "fixture": true,
+          "source": "prebaked"
+        },
+        "schema_version": 1,
+        "text": "A minimal black-frame fixture video for offline dataset tests."
+      },
+      "caption_file": "<RUN_DIR>/clips/item_c6e3d6b92824f535.caption.json",
+      "content_hash": "5f8475cba9e9d07791a8e1da87b2033c012abe1a1238a462788c60ffa00aafa2",
+      "duration_s": 2.0,
+      "filter_results": {
+        "bucket_judge_filter": {
+          "passed": true,
+          "reason": "fixture_accept",
+          "score": 0.99
+        },
+        "duration_filter": {
+          "passed": true,
+          "reason": "",
+          "score": 2.0
+        }
+      },
+      "item_id": "item_c6e3d6b92824f535",
+      "judge_result": {
+        "accept": true,
+        "bucket": "establishing",
+        "reason": "fixture_accept",
+        "score": 0.99
+      },
+      "media_path": "<RUN_DIR>/clips/item_c6e3d6b92824f535.mp4",
+      "media_type": "video",
+      "review_decision": {
+        "decision": "accept",
+        "edited_caption": null,
+        "item_id": "item_c6e3d6b92824f535",
+        "reject_reason": null,
+        "reviewed_at": "2026-05-21T00:00:00Z",
+        "reviewer_id": "fixture",
+        "state_version": 0
+      },
+      "review_status": "accepted",
+      "rights": {
+        "attribution": "Astrid fixture media",
+        "license": "fixture",
+        "restrictions": [],
+        "rights_status": "verified"
+      },
+      "source_id": "fixture_test_clip_01",
+      "source_metadata": {
+        "codec": "h264",
+        "duration_s": 2.0,
+        "file_size_bytes": 1848,
+        "fps": 5.0,
+        "resolution": {
+          "height": 64,
+          "width": 64
+        }
+      },
+      "source_type": "local_folder",
+      "source_url": "file://<REPO>/fixtures/builtin-training/media/test_clip_01.mp4"
+    },
+    {
+      "acquired_at": "2026-05-21T00:00:00Z",
+      "bucket": "establishing",
+      "caption": {
+        "confidence": 1.0,
+        "model": "fixture",
+        "raw_response": {
+          "fixture": true,
+          "source": "prebaked"
+        },
+        "schema_version": 1,
+        "text": "A reviewer-edited green-frame fixture caption for export."
+      },
+      "caption_file": "<RUN_DIR>/clips/item_aaad37dfa8c5d42a.caption.json",
+      "content_hash": "10a2c0d7464165171a677e3cd8fd36f7ad63c36ee28c2297e73d48502d87288a",
+      "duration_s": 2.0,
+      "filter_results": {
+        "bucket_judge_filter": {
+          "passed": true,
+          "reason": "fixture_accept",
+          "score": 0.97
+        },
+        "duration_filter": {
+          "passed": true,
+          "reason": "",
+          "score": 2.0
+        }
+      },
+      "item_id": "item_aaad37dfa8c5d42a",
+      "judge_result": {
+        "accept": true,
+        "bucket": "establishing",
+        "reason": "fixture_accept",
+        "score": 0.97
+      },
+      "media_path": "<RUN_DIR>/clips/item_aaad37dfa8c5d42a.mp4",
+      "media_type": "video",
+      "review_decision": {
+        "decision": "accept",
+        "edited_caption": "A reviewer-edited green-frame fixture caption for export.",
+        "item_id": "item_aaad37dfa8c5d42a",
+        "reject_reason": null,
+        "reviewed_at": "2026-05-21T00:00:00Z",
+        "reviewer_id": "fixture",
+        "state_version": 0
+      },
+      "review_status": "accepted",
+      "rights": {
+        "attribution": "Astrid fixture media",
+        "license": "fixture",
+        "restrictions": [],
+        "rights_status": "verified"
+      },
+      "source_id": "fixture_test_clip_03",
+      "source_metadata": {
+        "codec": "h264",
+        "duration_s": 2.0,
+        "file_size_bytes": 1854,
+        "fps": 5.0,
+        "resolution": {
+          "height": 64,
+          "width": 64
+        }
+      },
+      "source_type": "local_folder",
+      "source_url": "file://<REPO>/fixtures/builtin-training/media/test_clip_03.mp4"
+    }
+  ],
+  "manifest_adapter": "ai-toolkit-ltx",
+  "manifest_version": 1,
+  "media_type": "video",
+  "source_provider": "local_folder",
+  "stats": {
+    "buckets": {
+      "establishing": {
+        "accepted": 2,
+        "shortfall": 0,
+        "target": 2
+      }
+    },
+    "estimated_cost_usd": 0.0,
+    "total_accepted": 2,
+    "total_duration_s": 4.0,
+    "total_pending": 0,
+    "total_rejected": 1,
+    "total_sources": 3
+  }
+}

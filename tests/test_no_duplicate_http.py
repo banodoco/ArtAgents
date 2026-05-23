@@ -68,7 +68,8 @@ ALLOWLIST_URLLIB = {
     "astrid/packs/builtin/search_loras/run.py",
     "astrid/packs/builtin/sprite_sheet/run.py",
     "astrid/packs/builtin/asset_cache/run.py",
-    "astrid/packs/seinfeld/script_pipeline/run.py",
+    # seinfeld/script_pipeline was generalized into builtin/script_pipeline (builtin-training epic)
+    "astrid/packs/builtin/script_pipeline/run.py",
 }
 
 

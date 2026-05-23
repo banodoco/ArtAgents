@@ -1,0 +1,28 @@
+{
+  "clips": [
+    {
+      "bucket": "establishing",
+      "caption_file": "<RUN_DIR>/clips/item_c6e3d6b92824f535.caption.json",
+      "clip_file": "<RUN_DIR>/clips/item_c6e3d6b92824f535.mp4",
+      "clip_id": "item_c6e3d6b92824f535",
+      "content_hash": "5f8475cba9e9d07791a8e1da87b2033c012abe1a1238a462788c60ffa00aafa2",
+      "duration_s": 2.0,
+      "path": "<RUN_DIR>/clips/item_c6e3d6b92824f535.mp4",
+      "rights_status": "verified",
+      "source_url": "file://<REPO>/fixtures/builtin-training/media/test_clip_01.mp4"
+    },
+    {
+      "bucket": "establishing",
+      "caption_file": "<RUN_DIR>/clips/item_aaad37dfa8c5d42a.caption.json",
+      "clip_file": "<RUN_DIR>/clips/item_aaad37dfa8c5d42a.mp4",
+      "clip_id": "item_aaad37dfa8c5d42a",
+      "content_hash": "10a2c0d7464165171a677e3cd8fd36f7ad63c36ee28c2297e73d48502d87288a",
+      "duration_s": 2.0,
+      "path": "<RUN_DIR>/clips/item_aaad37dfa8c5d42a.mp4",
+      "rights_status": "verified",
+      "source_url": "file://<REPO>/fixtures/builtin-training/media/test_clip_03.mp4"
+    }
+  ],
+  "generated_at": "2026-05-21T00:00:00Z",
+  "source_manifest": "<RUN_DIR>/final.manifest.json"
+}

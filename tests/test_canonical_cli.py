@@ -40,6 +40,41 @@ class CanonicalCliTest(unittest.TestCase):
         self.assertNotIn("conductors", help_text)
         self.assertNotIn("performers", help_text)
 
+    def test_training_run_orchestrator_inspect_json(self) -> None:
+        result, stdout, stderr = self.capture(
+            orchestrators_cli.main, ["inspect", "builtin.training_run", "--json"]
+        )
+        self.assertEqual(result, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["id"], "builtin.training_run")
+        self.assertEqual(
+            payload["metadata"]["runtime_module"],
+            "astrid.packs.builtin.training_run.run",
+        )
+        self.assertEqual(payload["runtime"]["kind"], "command")
+        self.assertEqual(
+            payload["runtime"]["command"]["argv"][:3],
+            ["{python_exec}", "-m", "astrid.packs.builtin.training_run.run"],
+        )
+        self.assertEqual(
+            set(payload["child_executors"]),
+            {
+                "external.runpod.provision",
+                "external.runpod.exec",
+                "external.runpod.pull",
+                "external.runpod.teardown",
+                "builtin.human_review",
+            },
+        )
+
+    def test_training_run_orchestrator_top_level_inspect_json_without_session(self) -> None:
+        result, stdout, stderr = self.capture(
+            pipeline.main, ["orchestrators", "inspect", "builtin.training_run", "--json"]
+        )
+        self.assertEqual(result, 0, stderr)
+        payload = json.loads(stdout)
+        self.assertEqual(payload["id"], "builtin.training_run")
+
     def test_executors_json_uses_canonical_key(self) -> None:
         result, stdout, stderr = self.capture(executors_cli.main, ["list", "--json"])
         self.assertEqual(result, 0, stderr)

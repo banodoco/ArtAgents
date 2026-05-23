@@ -70,8 +70,9 @@ Out of scope:
 
 - `builtin.dataset_build` from M1.
 - Generic review UI and `builtin.human_review`.
-- `builtin.clip_extract`
 - `tests/`
+
+> **NOTE:** `builtin.clip_extract` does NOT exist in this checkout (M0 verified). Clip extraction is internal to `builtin.dataset_build`. Do not depend on a separate `builtin.clip_extract` executor.
 
 ## Anti-Scope
 

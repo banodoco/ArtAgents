@@ -96,6 +96,7 @@
           "provision",
           "exec",
           "teardown",
+          "pull",
           "session"
         ],
         "homepage": "https://github.com/peteromallet/runpod-lifecycle",
@@ -103,6 +104,7 @@
           "provision": true,
           "exec": true,
           "teardown": true,
+          "pull": true,
           "session": true
         },
         "nodes": [],
@@ -217,6 +219,7 @@
           "provision",
           "exec",
           "teardown",
+          "pull",
           "session"
         ],
         "homepage": "https://github.com/peteromallet/runpod-lifecycle",
@@ -224,6 +227,7 @@
           "provision": true,
           "exec": true,
           "teardown": true,
+          "pull": true,
           "session": true
         },
         "nodes": [],
@@ -238,6 +242,111 @@
       },
       "name": "RunPod Exec",
       "short_description": "Execute a script on an existing RunPod pod and download artifacts.",
+      "version": "0.1.0"
+    },
+    {
+      "cache": {
+        "mode": "none"
+      },
+      "command": {
+        "argv": [
+          "{python_exec}",
+          "-m",
+          "astrid.packs.external.runpod.run",
+          "pull",
+          "--produces-dir",
+          "{out}/produces"
+        ]
+      },
+      "conditions": [
+        {
+          "input": "pod_handle",
+          "kind": "requires_input"
+        }
+      ],
+      "description": "Pull one or more remote artifacts from an existing RunPod pod using pod_handle.json SSH details.",
+      "graph": {
+        "consumes": [
+          "pod_handle"
+        ],
+        "provides": [
+          "artifact_pull",
+          "artifact_dir"
+        ]
+      },
+      "id": "external.runpod.pull",
+      "inputs": [
+        {
+          "description": "Path to the pod_handle.json from a prior provision step.",
+          "name": "pod_handle",
+          "required": true,
+          "type": "file"
+        },
+        {
+          "description": "Remote file or directory to pull. Repeatable on the raw CLI.",
+          "name": "remote_path",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "description": "Local destination directory.",
+          "name": "local_dir",
+          "required": true,
+          "type": "path"
+        },
+        {
+          "description": "Optional private SSH key path.",
+          "name": "ssh_key",
+          "required": false,
+          "type": "file"
+        }
+      ],
+      "isolation": {
+        "mode": "subprocess",
+        "network": true,
+        "requirements": [
+          "runpod-lifecycle>=0.3"
+        ]
+      },
+      "keywords": [
+        "runpod",
+        "gpu",
+        "pull",
+        "scp",
+        "artifact",
+        "checkpoint"
+      ],
+      "kind": "external",
+      "metadata": {
+        "catalog_source": "none_declared",
+        "cli_module": "runpod_lifecycle.cli",
+        "command_names": [
+          "provision",
+          "exec",
+          "pull",
+          "teardown",
+          "session"
+        ],
+        "homepage": "https://github.com/peteromallet/runpod-lifecycle",
+        "network_behavior": {
+          "provision": true,
+          "exec": true,
+          "pull": true,
+          "teardown": true,
+          "session": true
+        },
+        "nodes": [],
+        "pack_id": "runpod",
+        "prompts": [],
+        "requirements": [
+          "runpod-lifecycle>=0.3"
+        ],
+        "requirements_source": "requirements.txt",
+        "runtime_file": "run.py",
+        "runtime_module": "astrid.packs.external.runpod.run"
+      },
+      "name": "RunPod Pull",
+      "short_description": "Pull artifacts from an existing RunPod pod into local storage.",
       "version": "0.1.0"
     },
     {
@@ -302,6 +411,7 @@
           "provision",
           "exec",
           "teardown",
+          "pull",
           "session"
         ],
         "homepage": "https://github.com/peteromallet/runpod-lifecycle",
@@ -309,6 +419,7 @@
           "provision": true,
           "exec": true,
           "teardown": true,
+          "pull": true,
           "session": true
         },
         "nodes": [],
@@ -460,6 +571,7 @@
           "provision",
           "exec",
           "teardown",
+          "pull",
           "session"
         ],
         "homepage": "https://github.com/peteromallet/runpod-lifecycle",
@@ -467,6 +579,7 @@
           "provision": true,
           "exec": true,
           "teardown": true,
+          "pull": true,
           "session": true
         },
         "nodes": [],
