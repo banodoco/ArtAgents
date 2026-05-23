@@ -6,10 +6,11 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, cast
 
-ELEMENT_KINDS = ("effects", "animations", "transitions")
-ElementKind = Literal["effects", "animations", "transitions"]
+# Single source of truth for element kinds lives in astrid.core.pack to avoid a
+# circular import (element.__init__ would import pack.py during schema load).
+from astrid.core.pack import ELEMENT_KINDS, ElementKind
 REQUIRED_ELEMENT_FILES = ("component.tsx", "element.yaml")
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
 _KIND_SINGULAR_TO_PLURAL = {"effect": "effects", "animation": "animations", "transition": "transitions"}
@@ -209,17 +210,17 @@ def _string_list(raw: Any, *, path: str) -> list[str]:
 
 def _normalize_kind(kind: str) -> ElementKind:
     if kind in ELEMENT_KINDS:
-        return kind  # type: ignore[return-value]
+        return cast(ElementKind, kind)
     plural = _KIND_SINGULAR_TO_PLURAL.get(kind)
     if plural is not None:
-        return plural  # type: ignore[return-value]
+        return cast(ElementKind, plural)
     raise ElementValidationError(f"element.kind must be one of {list(ELEMENT_KINDS)} (or singular variants)")
 
 
 def _validate_kind(kind: str) -> ElementKind:
     if kind not in ELEMENT_KINDS:
         raise ElementValidationError(f"element.kind must be one of {list(ELEMENT_KINDS)}")
-    return kind  # type: ignore[return-value]
+    return cast(ElementKind, kind)
 
 
 SHORT_DESCRIPTION_MAX_LEN = 120

@@ -60,7 +60,10 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
     # FLAG-P9-001: cmd_start must succeed even when ASTRID_AUTHOR_TEST=1.
     # Compile the demo pack first (cmd_start expects build/<orch>.json).
     from astrid.orchestrate.compile import compile_to_path
+    from astrid.core.project.project import create_project
     compile_to_path("demo.app", packs_root=packs)
+    # cmd_start requires the project to be registered before it accepts --project.
+    create_project(slug, root=tmp_projects_root, exist_ok=True)
 
     monkeypatch.setenv(ASTRID_ACTOR, "alice")
     monkeypatch.setenv(ASTRID_AUTHOR_TEST, "1")

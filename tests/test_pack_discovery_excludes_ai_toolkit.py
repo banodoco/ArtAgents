@@ -30,8 +30,11 @@ def test_iter_executor_roots_skips_ai_toolkit_upstream(tmp_path: Path) -> None:
     (real_dir / "executor.yaml").write_text("id: testpack.real\n")
 
     # Synthetic ai-toolkit submodule with its own executor.yaml that must
-    # NOT be discovered.
-    submodule_exec = pack_root / "ai_toolkit" / "upstream" / "examples" / "fake"
+    # NOT be discovered. Marked with .git like a real vendored submodule.
+    submodule_root = pack_root / "ai_toolkit" / "upstream"
+    submodule_root.mkdir(parents=True)
+    (submodule_root / ".git").write_text("gitdir: ../.git/modules/ai_toolkit/upstream\n")
+    submodule_exec = submodule_root / "examples" / "fake"
     submodule_exec.mkdir(parents=True)
     (submodule_exec / "executor.yaml").write_text("id: should.not.be.discovered\n")
 
@@ -51,7 +54,10 @@ def test_iter_orchestrator_roots_skips_ai_toolkit_upstream(tmp_path: Path) -> No
     real_orch.mkdir(parents=True)
     (real_orch / "orchestrator.yaml").write_text("id: testpack.real\n")
 
-    submodule_orch = pack_root / "ai_toolkit" / "upstream" / "orch"
+    submodule_root = pack_root / "ai_toolkit" / "upstream"
+    submodule_root.mkdir(parents=True)
+    (submodule_root / ".git").write_text("gitdir: ../.git/modules/ai_toolkit/upstream\n")
+    submodule_orch = submodule_root / "orch"
     submodule_orch.mkdir(parents=True)
     (submodule_orch / "orchestrator.yaml").write_text("id: should.not.be.discovered\n")
 

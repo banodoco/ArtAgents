@@ -1,0 +1,64 @@
+# Megaplan Cloud runner for the timeline-event-sourcing epic.
+#
+# Shared-dev-box pattern: same Railway service as other Astrid chains, but
+# distinct `chain_session` + `workspace` prefix so this chain doesn't collide
+# with concurrent chains targeting the same primary repo.
+#
+# Launch with:
+#   megaplan cloud deploy --cloud-yaml docs/megaplan/epics/timeline-event-sourcing/cloud.yaml
+#   megaplan cloud chain  --cloud-yaml docs/megaplan/epics/timeline-event-sourcing/cloud.yaml \
+#     docs/megaplan/epics/timeline-event-sourcing/chain.yaml
+
+provider: railway
+
+repo:
+  url: https://github.com/peteromallet/Astrid.git
+  branch: megaplan/git-backed-packs-chain-setup
+  workspace: /workspace/timeline-event-sourcing/astrid   # distinct from /workspace/astrid
+
+agents:
+  default: codex
+
+codex:
+  model: gpt-5.4
+  reasoning: medium
+
+mode: idle
+
+chain_session: timeline-event-sourcing
+
+megaplan:
+  ref: main
+
+resources:
+  volume: astrid-git-backed-packs-megaplan
+  port: 8080
+
+railway:
+  project: reigh-megaplan-dev
+  service: astrid-git-backed-packs
+  session: timeline-event-sourcing-attach
+
+toolchains:
+  - name: astrid-video-tools
+    install: |
+      RUN apt-get update \
+        && apt-get install -y --no-install-recommends ffmpeg unzip \
+        && rm -rf /var/lib/apt/lists/*
+  - name: shannon-runtime
+    install: |
+      RUN . "$NVM_DIR/nvm.sh" \
+        && npm install -g @dexh/shannon@0.0.2 \
+        && NVBIN=$(ls -d /root/.nvm/versions/node/*/bin | head -1) \
+        && ln -sf "$NVBIN/shannon" /usr/local/bin/shannon
+      RUN curl -fsSL https://bun.sh/install | bash \
+        && ln -sf /root/.bun/bin/bun /usr/local/bin/bun \
+        && bun --version
+
+secrets:
+  # Only list secrets we want this deploy to (re)upload. Other keys
+  # (GITHUB_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY,
+  # OPENAI_API_KEY) are already set on the shared Railway service from
+  # prior deploys and left untouched. See megaplan-cloud gotcha #5.
+  - DEEPSEEK_API_KEY
+  - FIREWORKS_API_KEY

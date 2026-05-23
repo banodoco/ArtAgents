@@ -40,6 +40,9 @@ def test_sprite_sheet_dry_run(capsys, tmp_path):
 
     assert code == 0
     payload = json.loads(capsys.readouterr().out)
+    assert payload["model"] == "gpt-image-2"
+    assert "background" not in payload
+    assert "output_format" not in payload
     assert payload["size"] == "1024x1024"
     assert payload["layout_guide"] == str(tmp_path / "layout_guide.png")
     assert payload["sprite_sheet"] == str(tmp_path / "sprite_sheet.png")
@@ -49,6 +52,48 @@ def test_sprite_sheet_dry_run(capsys, tmp_path):
     assert payload["web_dir"] == str(tmp_path / "web")
     assert "Grid: 2 columns by 2 rows" in payload["prompt"]
     assert "chroma-key background" in payload["prompt"]
+    assert "pixel-registered in the same place" in payload["prompt"]
+    assert "only the parts named by the animation should move" in payload["prompt"]
+    assert "no accidental camera movement" in payload["prompt"]
+    assert payload["reference_image"] is None
+
+
+def test_sprite_sheet_reference_image_dry_run(capsys, tmp_path):
+    reference = tmp_path / "reference.png"
+    write_layout_guide(reference, cols=1, rows=1, frame_width=128, frame_height=128)
+
+    code = main(
+        [
+            "--animation",
+            "pincer snap",
+            "--subject",
+            "blue crab mascot",
+            "--reference-image",
+            str(reference),
+            "--cols",
+            "2",
+            "--rows",
+            "2",
+            "--frame-width",
+            "512",
+            "--frame-height",
+            "512",
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--dry-run",
+        ]
+    )
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["endpoint"].endswith("/images/edits")
+    assert payload["model"] == "gpt-image-2"
+    assert "background" not in payload
+    assert "output_format" not in payload
+    assert payload["reference_image"] == str(reference.resolve())
+    assert "Use the provided reference image as the source of truth" in payload["prompt"]
+    assert "the character reference controls identity" in payload["prompt"]
+    assert "The torso/core/base must not bob" in payload["prompt"]
 
 
 def test_choose_layout_for_25_frames():

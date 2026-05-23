@@ -64,7 +64,7 @@ def test_step_dir_for_path_v2_supersede(tmp_path: Path) -> None:
     assert result == tmp_path / "demo" / "runs" / "run1" / "steps" / "s1" / "v2"
 
 
-def test_step_dir_for_path_rejects_missing_step_version(tmp_path: Path) -> None:
-    """step_version is required (no default)."""
-    with pytest.raises(TypeError):
-        step_dir_for_path("demo", "run1", ("s1",), root=tmp_path)  # type: ignore[call-arg]
+def test_step_dir_for_path_defaults_step_version_to_one(tmp_path: Path) -> None:
+    """step_version defaults to 1 when omitted (matches production contract)."""
+    result = step_dir_for_path("demo", "run1", ("s1",), root=tmp_path)
+    assert result == tmp_path / "demo" / "runs" / "run1" / "steps" / "s1" / "v1"

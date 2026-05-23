@@ -17,11 +17,18 @@ def test_two_concurrent_status_reads_ok(tmp_projects_root: Path) -> None:
     # Create a project with a plan and active run
     create_project(slug, root=tmp_projects_root)
     plan_path = tmp_projects_root / slug / "plan.json"
+    # Sprint-3 contract: plan version must be 2.
     plan_payload = {
         "plan_id": "p1",
-        "version": 1,
+        "version": 2,
         "steps": [
-            {"id": "step-1", "command": "python3 -c \"print('ok')\""},
+            {
+                "id": "step-1",
+                "kind": "code",
+                "adapter": "local",
+                "command": "python3 -c \"print('ok')\"",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+            },
         ],
     }
     plan_path.write_text(

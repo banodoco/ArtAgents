@@ -2,6 +2,13 @@
 
 Builds a fixed 3-6 prompt set from `vocabulary.yaml` (covering both scenes and at least two characters), runs baseline LTX inference plus inference with each checkpoint from `checkpoint_manifest.json` on the live pod via `external.runpod.exec`, downloads the MP4s into `eval_grid/baseline/` and `eval_grid/<step>/`, and writes a static `index.html` viewer that lays each prompt out as a row of side-by-side `<video>` tags. In `--smoke` mode runs only the 3-prompt baseline (no per-checkpoint comparison). This is the artifact the human reviews at the gate before picking a checkpoint.
 
+## Relationship to generate_image
+
+This pack is a **video** evaluation workflow that uses `external.runpod.exec`
+for LTX video inference.  It does **not** invoke `builtin.generate_image`
+(the new multi-backend image executor) or `builtin.generate_image_openai`
+(the OpenAI DALL-E executor).  It is an independent workflow and will remain so.
+
 **Invocation**:
 
 ```bash

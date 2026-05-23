@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Vary Grid orchestrator: slice an existing grid, pick cells, edit into a new grid via OpenAI gpt-image-2."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.vary_grid')
 import argparse
 import base64
 import json
@@ -14,17 +18,12 @@ from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.packs.builtin.generate_image.run import _candidate_env_files, _read_env_value
+from astrid.core.util.secrets import load_api_key
+from astrid.core.util.http import FAL_QUEUE_URL, HttpClient, default_client
 from astrid.packs.builtin.logo_ideas.run import (
     DEFAULT_FIREWORKS_MODEL,
-    FAL_QUEUE_URL,
     FIREWORKS_CHAT_URL,
-    _http_get_bytes,
-    _http_post_json,
-    call_fireworks_concepts,
     parse_concepts,
-    poll_fal_result,
-    submit_fal_job,
 )
 
 
@@ -34,19 +33,12 @@ DEFAULT_SIZE = "1024x1024"
 DEFAULT_QUALITY = "high"
 MAX_COUNT = 9
 
+_client = default_client()
+
 
 def _load_env_var(name: str, env_file: Path | None) -> str:
-    import os
-
-    value = os.environ.get(name, "").strip()
-    if value:
-        return value
-    tried: list[str] = [f"{name} environment variable"]
-    for candidate in _candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if value := _read_env_value(candidate, name):
-            return value
-    raise SystemExit(f"{name} not found. Tried: {', '.join(tried)}")
+    """Preserved wrapper for vary_grid's --env-file CLI surface (Sprint 01 reconciliation)."""
+    return load_api_key(name, env_file)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -198,7 +190,7 @@ def call_kimi_variations(
     }
     headers = {"authorization": f"Bearer {api_key}"}
     try:
-        return _http_post_json(FIREWORKS_CHAT_URL, headers, payload, timeout=180)
+        return _client.post_json(FIREWORKS_CHAT_URL, payload, headers=headers, timeout=180)
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
         raise SystemExit(f"Fireworks chat call failed ({exc.code}): {detail}") from exc
@@ -298,7 +290,12 @@ def call_fal_edit(
         "output_format": "jpeg" if output_format == "jpg" else output_format,
     }
     submission = submit_fal_job_edit(payload, api_key)
-    result = poll_fal_result(submission, api_key)
+    result = _client.poll_until(
+        submission["status_url"],
+        submission["response_url"],
+        headers={"authorization": f"Key {api_key}"},
+        max_wait_sec=300,
+    )
     return submission, result
 
 
@@ -306,7 +303,7 @@ def submit_fal_job_edit(payload: dict[str, Any], api_key: str) -> dict[str, Any]
     url = f"{FAL_QUEUE_URL}/{FAL_EDIT_MODEL_ID}"
     headers = {"authorization": f"Key {api_key}"}
     try:
-        return _http_post_json(url, headers, payload, timeout=120)
+        return _client.post_json(url, payload, headers=headers, timeout=120)
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
         raise SystemExit(f"fal submit failed ({exc.code}) for {FAL_EDIT_MODEL_ID}: {detail}") from exc
@@ -322,7 +319,7 @@ def save_fal_image(result: dict[str, Any], dest: Path) -> dict[str, Any]:
     url = first.get("url")
     if not url:
         raise SystemExit(f"fal image entry missing url: {first}")
-    raw = _http_get_bytes(url, timeout=180)
+    raw = _client.get_bytes(url, timeout=180)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(raw)
     return {

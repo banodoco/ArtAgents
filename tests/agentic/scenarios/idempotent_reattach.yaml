@@ -1,0 +1,99 @@
+name: idempotent_reattach
+tier: core
+description: |
+  Agent simulates the "fresh shell loses session binding" failure mode by
+  stripping `ASTRID_SESSION_ID` between commands (`env -u ASTRID_SESSION_ID`)
+  and re-attaching repeatedly to the same project. Each re-attach must reuse
+  the existing session and keep the agent in writer state — never demote to
+  reader, never require `astrid sessions takeover --force`. Failure mode probed:
+  pre-fix behaviour where every fresh-shell `attach` minted a new reader session
+  forcing the takeover dance.
+
+brief: idempotent_reattach.md
+
+priming:
+  - create_project: $SLUG
+
+target_orchestrator: builtin.agent_probe
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  # Machine-graded
+  - events_contain: run_completed
+  - no_aborts
+
+  # Subjective (graded from the agent's narrative report)
+  - subjective:
+      - every_reattach_said_session_reused
+      - never_needed_takeover_force
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+  - idempotency
+  - session_reuse
+  - attach
+
+assessment:
+  universal_checks: true
+  enforced:
+      - id: every_reattach_said_session_reused
+        question: |
+          On every re-attach after stripping ASTRID_SESSION_ID, did
+          `astrid attach` emit the "session reused" / existing-session
+          signal rather than minting a new session each time?
+        evidence: [stderr]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr shows multiple distinct `ASTRID_SESSION_ID=` values in
+          sequence with no "reused" marker — implying a new session was
+          minted on each attach.
+      - id: never_needed_takeover_force
+        question: |
+          Did the agent complete the scenario without invoking `astrid
+          sessions takeover --force` or any takeover at all?
+        evidence: [stderr, events]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr contains `sessions takeover` or events contain a
+          `takeover` event.
+      - id: stayed_in_writer_state
+        question: |
+          Did the agent's session remain in writer state throughout the
+          run (no demotion to reader, no `--reader` flag in attach,
+          successful acks throughout)?
+        evidence: [stderr, events]
+        grading: pass_fail
+        weight: 1
+        failure_mode: |
+          Stderr shows a reader-state warning from `astrid next`, or
+          events show a failed ack with lease epoch mismatch.
+      - id: completed_run_idempotently
+        question: |
+          Did the run reach `run_completed` despite the repeated
+          `env -u ASTRID_SESSION_ID` re-attach pattern between commands?
+        evidence: [events]
+        grading: pass_fail
+        weight: 1
+  graded:
+      - id: report_describes_idempotency
+        question: |
+          Does the report explicitly describe the re-attach idempotency
+          (the agent noticed every attach reused the existing session)?
+        evidence: [report]
+        grading: pass_fail
+        weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0

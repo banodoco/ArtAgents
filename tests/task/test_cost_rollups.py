@@ -153,7 +153,7 @@ def test_timeline_cost_excludes_aborted_by_default(
 
     mock_session = MagicMock()
     mock_session.project = cost_fixture["slug"]
-    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda: mock_session)
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
 
     args = argparse.Namespace(
         slug="cost-line",
@@ -175,7 +175,7 @@ def test_timeline_cost_includes_aborted_with_flag(
 
     mock_session = MagicMock()
     mock_session.project = cost_fixture["slug"]
-    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda: mock_session)
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
 
     args = argparse.Namespace(
         slug="cost-line",
@@ -197,7 +197,7 @@ def test_timeline_cost_json_output(
 
     mock_session = MagicMock()
     mock_session.project = cost_fixture["slug"]
-    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda: mock_session)
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
 
     args = argparse.Namespace(
         slug="cost-line",

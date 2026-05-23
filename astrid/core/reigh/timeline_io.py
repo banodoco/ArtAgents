@@ -1,13 +1,18 @@
-"""Versioned timeline read/write loop against reigh-data-fetch + RPC.
+"""Versioned timeline read/write loop against reigh-data-fetch + blob RPC.
 
-The ``save_timeline`` helper here is the canonical write path used by both the
-worker (T9) and the DataProvider write API (T6). It implements the
-optimistic-concurrency contract documented in
-``docs/integration_contracts.md``: load ``(timeline, config_version)`` via the
-``reigh-data-fetch`` Edge Function, apply a caller-supplied mutator, then call
-the ``update_timeline_config_versioned(p_timeline_id, p_expected_version,
+The ``save_timeline`` helper here is the legacy compatibility write path used
+by Astrid's current Reigh bridge surfaces. It implements the optimistic-
+concurrency contract documented in ``docs/integration_contracts.md``: load
+``(timeline, config_version)`` via the ``reigh-data-fetch`` Edge Function,
+apply a caller-supplied mutator, then call the
+``update_timeline_config_versioned(p_timeline_id, p_expected_version,
 p_config)`` RPC. On version-mismatch, re-load and re-apply the mutator up to
 ``retries`` times before raising :class:`TimelineVersionConflictError`.
+
+This remains a blob-save compatibility path, not Astrid's future event-first
+architecture. The provisional ``SupabaseBackend`` event-log contract lives in
+``astrid.core.timeline.eventlog`` and still depends on companion SQL/RPC work
+outside this repository.
 
 Auth scopes (FLAG-012 / SD-009): the worker write path uses ``service_role``
 auth so it can write any timeline once it has verified ownership separately;
@@ -19,29 +24,33 @@ choice; callers select the auth scheme.
 from __future__ import annotations
 
 import logging
+import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
 from astrid import timeline as timeline_mod
 
 from .errors import TimelineNotFoundError, TimelineVersionConflictError
-from .supabase_client import Auth, SupabaseHTTPError, post_json, rpc
+from .supabase_client import Auth, SupabaseHTTPError, get_json, post_json, rpc
 
 logger = logging.getLogger(__name__)
 
 
-TimelineConfig = dict[str, Any]
-Mutator = Callable[[TimelineConfig, int], TimelineConfig]
+# Local raw-payload alias for in-flight mutation. The rich TypedDict for
+# fully-validated timelines lives in astrid.timeline; this module operates on
+# the unvalidated POST/PATCH body before it has been schema-checked.
+RawTimelinePayload = dict[str, Any]
+Mutator = Callable[[RawTimelinePayload, int], RawTimelinePayload]
 
 
 @dataclass(frozen=True)
 class SaveResult:
-    timeline: TimelineConfig
+    timeline: RawTimelinePayload
     new_version: int
     attempts: int
 
 
-def _round_trip(payload: Mapping[str, Any]) -> TimelineConfig:
+def _round_trip(payload: Mapping[str, Any]) -> RawTimelinePayload:
     """Round-trip a fetched timeline through astrid.timeline so byte-equivalent
     allowlist parity stays intact."""
 
@@ -76,7 +85,7 @@ def fetch_timeline(
     timeline_id: str,
     auth: Auth,
     timeout: float = 60.0,
-) -> tuple[TimelineConfig, int]:
+) -> tuple[RawTimelinePayload, int]:
     """Call ``reigh-data-fetch`` and return ``(timeline_config, config_version)``."""
 
     payload = post_json(
@@ -139,7 +148,7 @@ def save_timeline(
     """Apply ``mutator`` to the timeline and persist via the versioned RPC.
 
     The mutator receives ``(current_config, current_version)`` and must return
-    a new ``TimelineConfig`` dict. On version-mismatch responses (HTTP 409 or
+    a new ``RawTimelinePayload`` dict. On version-mismatch responses (HTTP 409 or
     body markers like ``version_conflict`` / ``expected_version``), the helper
     re-fetches and re-applies the mutator. ``retries`` is the total attempt
     count (including the first one).
@@ -189,7 +198,7 @@ def save_timeline(
 
         new_config = mutator(config, current_version)
         if not isinstance(new_config, dict):
-            raise TypeError("save_timeline mutator must return a TimelineConfig dict")
+            raise TypeError("save_timeline mutator must return a RawTimelinePayload dict")
 
         storage_payload = _to_storage_payload(new_config)
         try:
@@ -247,3 +256,59 @@ def _extract_new_version(response: Any, *, fallback: int) -> int:
                 if isinstance(value, int):
                     return value
     return fallback
+
+
+# ---------------------------------------------------------------------------
+# Migration discovery helpers (SD3 — Reigh transport seam)
+# ---------------------------------------------------------------------------
+
+
+def list_timelines(
+    *,
+    supabase_url: str,
+    auth: Auth,
+    project_id: str | None = None,
+    timeout: float = 30.0,
+) -> list[dict[str, Any]]:
+    """List ``public.timelines`` rows via PostgREST GET.
+
+    Returns a list of row dicts (each with ``id``, ``project_id``,
+    ``config_version``).  When *project_id* is given, results are filtered
+    to that project.
+    """
+
+    base = supabase_url.rstrip("/")
+    endpoint = f"{base}/rest/v1/timelines?select=id,project_id,config_version"
+    if project_id:
+        endpoint += f"&project_id=eq.{urllib.parse.quote(project_id, safe='')}"
+
+    try:
+        result = get_json(endpoint, auth=auth, timeout=timeout)
+    except SupabaseHTTPError:
+        return []
+    if isinstance(result, list):
+        return [dict(row) for row in result if isinstance(row, dict)]
+    return []
+
+
+def timeline_has_events(
+    *,
+    supabase_url: str,
+    auth: Auth,
+    timeline_id: str,
+    timeout: float = 30.0,
+) -> bool:
+    """Check whether ``public.timeline_events`` has any rows for *timeline_id*."""
+
+    base = supabase_url.rstrip("/")
+    endpoint = (
+        f"{base}/rest/v1/timeline_events"
+        f"?timeline_id=eq.{urllib.parse.quote(timeline_id, safe='')}"
+        f"&limit=1&select=event_id"
+    )
+
+    try:
+        result = get_json(endpoint, auth=auth, timeout=timeout)
+    except SupabaseHTTPError:
+        return False
+    return isinstance(result, list) and len(result) > 0

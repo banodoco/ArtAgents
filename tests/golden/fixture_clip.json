@@ -1,0 +1,242 @@
+{
+  "description": "Golden fixture: clip.* event family (added, removed, moved, retimed, swapped, replaced, text_set, annotated)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNP",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP0",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-1",
+        "kind": "visual",
+        "asset_id": "asset-a",
+        "position": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNQ",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP1",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-2",
+        "kind": "audio",
+        "asset_id": "asset-b",
+        "position": {
+          "mode": "after",
+          "ref_clip_id": "clip-1"
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNR",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP2",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "clip-3",
+        "kind": "visual",
+        "asset_id": "asset-c",
+        "position": {
+          "mode": "index",
+          "index": 0
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNS",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP3",
+      "kind": "clip.moved",
+      "payload": {
+        "clip_id": "clip-3",
+        "position": {
+          "mode": "after",
+          "ref_clip_id": "clip-2"
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNT",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:04:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP4",
+      "kind": "clip.retimed",
+      "payload": {
+        "clip_id": "clip-1",
+        "start": 2.5,
+        "duration": 10.0
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNV",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:05:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP5",
+      "kind": "clip.swapped",
+      "payload": {
+        "clip_a_id": "clip-1",
+        "clip_b_id": "clip-2"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNW",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:06:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP6",
+      "kind": "clip.replaced",
+      "payload": {
+        "clip_id": "clip-3",
+        "with_asset_id": "asset-d"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNX",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:07:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP7",
+      "kind": "clip.text_set",
+      "payload": {
+        "clip_id": "clip-1",
+        "text": "Hello world"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNY",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:08:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP8",
+      "kind": "clip.annotated",
+      "payload": {
+        "clip_id": "clip-2",
+        "note": "background music"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNZ",
+      "timeline_id": "2705378f-b20a-4cc1-b41b-8e967cc3a153",
+      "ts": "2026-01-01T00:09:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVP9",
+      "kind": "clip.removed",
+      "payload": {
+        "clip_id": "clip-3"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "clips": [
+      {
+        "id": "clip-2",
+        "kind": "audio",
+        "asset_id": "asset-b",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": "background music"
+      },
+      {
+        "id": "clip-1",
+        "kind": "visual",
+        "asset_id": "asset-a",
+        "start": 2.5,
+        "duration": 10.0,
+        "text": "Hello world",
+        "note": ""
+      }
+    ]
+  }
+}

@@ -6,16 +6,14 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.element.registry import ElementRegistry, ElementSource, load_default_registry, load_source_elements
-from astrid.core.element.schema import ELEMENT_KINDS, REQUIRED_ELEMENT_FILES
+from astrid.core.element.schema import ELEMENT_KINDS, REQUIRED_ELEMENT_FILES, ElementKind
 
 TOOLS_DIR = REPO_ROOT
 THEMES_ROOT = WORKSPACE_ROOT / "themes"
-
-ElementKind = Literal["effects", "animations", "transitions"]
 
 
 def _initial_active_theme() -> Path | None:

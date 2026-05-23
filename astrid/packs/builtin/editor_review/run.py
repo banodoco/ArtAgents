@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Rendered-cut editor review helpers."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.editor_review')
 import argparse
 import json
 import re

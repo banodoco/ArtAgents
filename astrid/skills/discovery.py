@@ -1,8 +1,13 @@
-"""Walk astrid/packs/*/skill/SKILL.md and yield SkillDescriptors.
+"""Walk astrid/packs/*/skill/SKILL.md and nested executor/orchestrator skill dirs.
 
 A "skill" here is a Claude-style frontmatter document (`name`, `description`)
 plus the directory it lives in. Hermes-only extras live under an optional
 `metadata.hermes.*` block in the same file; Claude/Codex ignore unknown keys.
+
+Discovery strategy:
+  1. Direct pack skills: astrid/packs/<pack>/skill/SKILL.md
+  2. Nested executor/orchestrator skills: astrid/packs/<pack>/<content>/skill/SKILL.md
+     where <content> has an executor.yaml/orchestrator.yaml manifest.
 """
 
 from __future__ import annotations
@@ -63,6 +68,56 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return data, body
 
 
+_CONTENT_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json",
+                            "orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
+
+
+def _is_content_dir(path: Path) -> bool:
+    """Return True if *path* contains an executor or orchestrator manifest."""
+    if not path.is_dir():
+        return False
+    for name in _CONTENT_MANIFEST_NAMES:
+        if (path / name).is_file():
+            return True
+    return False
+
+
+def _try_add_skill(
+    descriptors: list[SkillDescriptor],
+    skill_md: Path,
+    pack_id: str,
+) -> None:
+    """Parse *skill_md* and append a SkillDescriptor if valid."""
+    if not skill_md.is_file():
+        return
+    try:
+        text = skill_md.read_text(encoding="utf-8")
+    except OSError:
+        return
+    front, body = _parse_frontmatter(text)
+    name = str(front.get("name") or pack_id)
+    description = str(front.get("description") or "")
+    short = short_description_or_truncated(
+        short=str(front.get("short_description") or ""),
+        description=description,
+    )
+    hermes_meta = {}
+    metadata = front.get("metadata") or {}
+    if isinstance(metadata, dict) and isinstance(metadata.get("hermes"), dict):
+        hermes_meta = dict(metadata["hermes"])
+    descriptors.append(
+        SkillDescriptor(
+            pack_id=pack_id,
+            name=name,
+            description=description,
+            short_description=short,
+            skill_dir=skill_md.parent,
+            skill_md=skill_md,
+            hermes_metadata=hermes_meta,
+        )
+    )
+
+
 def list_skills(packs_dir: Path | None = None) -> list[SkillDescriptor]:
     base = packs_dir or PACKS_DIR
     descriptors: list[SkillDescriptor] = []
@@ -71,36 +126,26 @@ def list_skills(packs_dir: Path | None = None) -> list[SkillDescriptor]:
     for pack_dir in sorted(base.iterdir()):
         if not pack_dir.is_dir():
             continue
+
+        # Strategy 1: direct pack skill at astrid/packs/<pack>/skill/SKILL.md
         skill_md = pack_dir / "skill" / "SKILL.md"
-        if not skill_md.is_file():
-            continue
-        try:
-            text = skill_md.read_text(encoding="utf-8")
-        except OSError:
-            continue
-        front, body = _parse_frontmatter(text)
-        name = str(front.get("name") or pack_dir.name)
-        description = str(front.get("description") or "")
-        # Reuse the canonical short blurb shape from the discovery layer.
-        short = short_description_or_truncated(
-            short=str(front.get("short_description") or ""),
-            description=description,
-        )
-        hermes_meta = {}
-        metadata = front.get("metadata") or {}
-        if isinstance(metadata, dict) and isinstance(metadata.get("hermes"), dict):
-            hermes_meta = dict(metadata["hermes"])
-        descriptors.append(
-            SkillDescriptor(
-                pack_id=pack_dir.name,
-                name=name,
-                description=description,
-                short_description=short,
-                skill_dir=skill_md.parent,
-                skill_md=skill_md,
-                hermes_metadata=hermes_meta,
-            )
-        )
+        _try_add_skill(descriptors, skill_md, pack_dir.name)
+
+        # Strategy 2: nested executor/orchestrator skills
+        # Walk pack_dir for child dirs that contain an executor.yaml or
+        # orchestrator.yaml manifest.  Those are content dirs (e.g.,
+        # generate_image, clip_extract).  If they have a skill/SKILL.md,
+        # register it with the fully qualified pack_id.
+        for content_dir in sorted(pack_dir.iterdir()):
+            if not content_dir.is_dir() or content_dir.name.startswith("."):
+                continue
+            if content_dir.name in ("skill", "elements", "golden", "fixtures", "__pycache__"):
+                continue
+            if _is_content_dir(content_dir):
+                nested_skill = content_dir / "skill" / "SKILL.md"
+                qualified_id = f"{pack_dir.name}.{content_dir.name}"
+                _try_add_skill(descriptors, nested_skill, qualified_id)
+
     return descriptors
 
 

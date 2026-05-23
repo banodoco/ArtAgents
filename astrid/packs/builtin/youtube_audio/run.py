@@ -1,7 +1,11 @@
 """Download a YouTube video's audio (MP3) or video (MP4) — via search or direct URL."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.youtube_audio')
 import argparse
 import shutil
 import subprocess
@@ -17,7 +21,7 @@ def _die(msg: str, code: int = 2) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     src = parser.add_mutually_exclusive_group(required=True)
-    src.add_argument("--query", help="YouTube search query; the top hit is used.")
+    src.add_argument("--query", help="YouTube search query; the top hit is used. If this is a direct http(s) URL, it is downloaded directly.")
     src.add_argument("--url", help="Direct YouTube URL; skips search.")
     parser.add_argument(
         "--mode",
@@ -65,7 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     output_template = str(out.with_suffix(f".%(ext)s"))
-    target = args.url if args.url else f"ytsearch1:{args.query}"
+    if args.url:
+        target = args.url
+    elif args.query and args.query.startswith(("http://", "https://")):
+        target = args.query
+    else:
+        target = f"ytsearch1:{args.query}"
 
     cmd = ["yt-dlp", "--no-warnings", "--output", output_template]
     if args.mode == "audio":

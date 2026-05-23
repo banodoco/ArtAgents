@@ -25,6 +25,7 @@ instead of leaking a confusing stderr message from cmd_next.
 from __future__ import annotations
 
 import io
+import os
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional, Sequence
@@ -39,8 +40,12 @@ from astrid.core.task.lifecycle import cmd_next
 
 
 def _resolve_session_slug() -> Optional[str]:
+    # T9 / FLAG-S1-003: read slug from ASTRID_TASK_PROJECT env so the
+    # file-bound .astrid-session fallback can resolve when the hook is
+    # invoked in a fresh terminal that lost ASTRID_SESSION_ID.
+    _env_slug = os.environ.get("ASTRID_TASK_PROJECT") or None
     try:
-        session = resolve_current_session()
+        session = resolve_current_session(slug=_env_slug)
     except SessionBindingError:
         return None
     if session is None:

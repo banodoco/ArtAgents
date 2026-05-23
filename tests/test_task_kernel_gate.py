@@ -153,9 +153,9 @@ def test_phase_1_top_level_events_keep_bare_id_payload_shape(tmp_projects_root: 
     events = read_events(d2.events_path)
     leaf_events = [e for e in events if e["kind"] in ("step_dispatched", "step_completed")]
     for event in leaf_events:
-        # Phase 1 wire shape: top-level steps use the bare id, no slashes.
-        assert "/" not in event["plan_step_id"]
-    ids = sorted({e["plan_step_id"] for e in leaf_events})
+        # Phase 1 wire shape: top-level steps emit single-segment plan_step_path lists.
+        assert len(event["plan_step_path"]) == 1
+    ids = sorted({e["plan_step_path"][0] for e in leaf_events})
     assert ids == ["s1", "s2"]
     # No nested_entered/nested_exited events for a flat Phase-1 plan.
     assert not any(e["kind"] in ("nested_entered", "nested_exited") for e in events)

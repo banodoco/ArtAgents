@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.packs.builtin.logo_ideas import run as logo_ideas
+from astrid.core.util.http import HttpClient
+from astrid.core.util import secrets
 
 
 class LogoIdeasParserTest(unittest.TestCase):
@@ -240,16 +242,16 @@ class DryRunSmokeTest(unittest.TestCase):
 
     def _patch_network(self):
         boom_post = mock.patch.object(
-            logo_ideas, "_http_post_json", side_effect=AssertionError("network call in dry-run")
+            HttpClient, "post_json", side_effect=AssertionError("network call in dry-run")
         )
         boom_get = mock.patch.object(
-            logo_ideas, "_http_get_json", side_effect=AssertionError("network call in dry-run")
+            HttpClient, "get_json", side_effect=AssertionError("network call in dry-run")
         )
         boom_get_bytes = mock.patch.object(
-            logo_ideas, "_http_get_bytes", side_effect=AssertionError("network call in dry-run")
+            HttpClient, "get_bytes", side_effect=AssertionError("network call in dry-run")
         )
         boom_env = mock.patch.object(
-            logo_ideas, "_load_env_var", side_effect=AssertionError("env lookup in dry-run")
+            secrets, "load_api_key", side_effect=AssertionError("env lookup in dry-run")
         )
         for patcher in (boom_post, boom_get, boom_get_bytes, boom_env):
             patcher.start()

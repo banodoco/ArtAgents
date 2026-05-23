@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Prepare provenance, quality, summaries, and ordering for iteration videos."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('iteration.prepare')
 import argparse
 import concurrent.futures
 import json

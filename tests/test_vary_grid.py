@@ -98,9 +98,9 @@ class DryRunSmokeTest(unittest.TestCase):
         return path
 
     def _patch_network(self):
-        for fn in ("_http_post_json",):
+        for fn in ("post_json", "get_bytes", "poll_until"):
             patcher = mock.patch.object(
-                vary_grid, fn, side_effect=AssertionError("network call in dry-run")
+                vary_grid._client, fn, side_effect=AssertionError("network call in dry-run")
             )
             patcher.start()
             self.addCleanup(patcher.stop)

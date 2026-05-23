@@ -1,0 +1,98 @@
+{
+  "description": "Golden fixture: theme.* event family (set, overridden)",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KPD",
+      "timeline_id": "5f75f185-240e-44b0-9805-3631ee03d2c1",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPH",
+      "kind": "theme.set",
+      "payload": {
+        "theme_id": "cinematic-dark"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KPE",
+      "timeline_id": "5f75f185-240e-44b0-9805-3631ee03d2c1",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPJ",
+      "kind": "theme.overridden",
+      "payload": {
+        "override_id": "visual",
+        "value": {
+          "color_palette": "muted"
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KPF",
+      "timeline_id": "5f75f185-240e-44b0-9805-3631ee03d2c1",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPK",
+      "kind": "theme.overridden",
+      "payload": {
+        "override_id": "voice",
+        "value": {
+          "style": "narrator"
+        }
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ3G0A5FDPNQN9D7KPG",
+      "timeline_id": "5f75f185-240e-44b0-9805-3631ee03d2c1",
+      "ts": "2026-01-01T00:03:00Z",
+      "actor": {
+        "type": "system",
+        "id": "test-fixture",
+        "display": "test-fixture"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ3G0A5FDPNQN9D7KPM",
+      "kind": "theme.set",
+      "payload": {
+        "theme_id": "bright-pop"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "theme": "bright-pop",
+    "theme_overrides": {
+      "visual": {
+        "color_palette": "muted"
+      },
+      "voice": {
+        "style": "narrator"
+      }
+    }
+  }
+}

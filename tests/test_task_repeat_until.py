@@ -92,15 +92,15 @@ def test_repeat_until_verifier_passes_advances_when_check_passes(tmp_projects_ro
     d1 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
     assert d1.iteration == 1
     sd1 = step_dir_for_path("demo", "run-1", d1.plan_step_path, iteration=1, root=tmp_projects_root)
-    sd1.mkdir(parents=True, exist_ok=True)
-    (sd1 / "out.json").write_text("garbage", encoding="utf-8")
+    (sd1 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd1 / "produces" / "out.json").write_text("garbage", encoding="utf-8")
     task_gate.record_dispatch_complete(d1, 0)
 
     d2 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
     assert d2.iteration == 2
     sd2 = step_dir_for_path("demo", "run-1", d2.plan_step_path, iteration=2, root=tmp_projects_root)
-    sd2.mkdir(parents=True, exist_ok=True)
-    (sd2 / "out.json").write_text('{"ok": 1}', encoding="utf-8")
+    (sd2 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd2 / "produces" / "out.json").write_text('{"ok": 1}', encoding="utf-8")
     task_gate.record_dispatch_complete(d2, 0)
 
     d_next = task_gate.gate_command("demo", "echo done", ["echo", "done"], root=tmp_projects_root)
@@ -128,8 +128,8 @@ def test_repeat_until_max_exhaust_fail_raises(tmp_projects_root: Path) -> None:
     for i in (1, 2):
         d = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
         sd = step_dir_for_path("demo", "run-1", d.plan_step_path, iteration=i, root=tmp_projects_root)
-        sd.mkdir(parents=True, exist_ok=True)
-        (sd / "out.json").write_text("garbage", encoding="utf-8")
+        (sd / "produces").mkdir(parents=True, exist_ok=True)
+        (sd / "produces" / "out.json").write_text("garbage", encoding="utf-8")
         task_gate.record_dispatch_complete(d, 0)
 
     with pytest.raises(task_gate.TaskRunGateError) as excinfo:
@@ -165,8 +165,8 @@ def test_repeat_until_max_exhaust_escalate_parks_for_attested_override(
     for i in (1, 2):
         d = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
         sd = step_dir_for_path("demo", "run-1", d.plan_step_path, iteration=i, root=tmp_projects_root)
-        sd.mkdir(parents=True, exist_ok=True)
-        (sd / "out.json").write_text("garbage", encoding="utf-8")
+        (sd / "produces").mkdir(parents=True, exist_ok=True)
+        (sd / "produces" / "out.json").write_text("garbage", encoding="utf-8")
         task_gate.record_dispatch_complete(d, 0)
 
     # Next call should park on host/exhaust-override; an ack with --actor advances.
@@ -194,8 +194,8 @@ def test_iteration_env_var_propagates_to_subprocess(tmp_projects_root: Path) -> 
     d1 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
     assert child_subprocess_env().get(TASK_ITERATION_ENV) == "001"
     sd1 = step_dir_for_path("demo", "run-1", d1.plan_step_path, iteration=1, root=tmp_projects_root)
-    sd1.mkdir(parents=True, exist_ok=True)
-    (sd1 / "out.json").write_text("garbage", encoding="utf-8")
+    (sd1 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd1 / "produces" / "out.json").write_text("garbage", encoding="utf-8")
     task_gate.record_dispatch_complete(d1, 0)
 
     d2 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)

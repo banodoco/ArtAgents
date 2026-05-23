@@ -139,9 +139,15 @@ class CutTimelineResumeTest(unittest.TestCase):
         source_dir = self.copy_examples()
         timeline_path = source_dir / "hype.timeline.json"
         metadata_path = source_dir / "hype.metadata.json"
+        timeline_payload = json.loads(timeline_path.read_text(encoding="utf-8"))
+        # Use a clip id that actually exists in the current example timeline.
+        # The legacy "clip_001"/"clip_999" naming drifted after the example
+        # was rewritten to use semantic clip ids (src_open, brand_wordmark, ...).
+        live_clip_id = timeline_payload["clips"][0]["id"]
         metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         metadata["generated_at"] = "2025-01-01T00:00:00Z"
-        metadata["clips"]["clip_001"]["pick_rationale"] = "Keep this rationale."
+        metadata.setdefault("clips", {})
+        metadata["clips"][live_clip_id] = {"pick_rationale": "Keep this rationale."}
         metadata["clips"]["clip_999"] = {"pick_rationale": "orphan"}
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
@@ -150,7 +156,7 @@ class CutTimelineResumeTest(unittest.TestCase):
 
         self.assertEqual(result, 0)
         updated = json.loads((out_dir / "hype.metadata.json").read_text(encoding="utf-8"))
-        self.assertEqual(updated["clips"]["clip_001"]["pick_rationale"], "Keep this rationale.")
+        self.assertEqual(updated["clips"][live_clip_id]["pick_rationale"], "Keep this rationale.")
         self.assertNotIn("clip_999", updated["clips"])
         self.assertEqual(updated["sources"], metadata["sources"])
         self.assertNotEqual(updated["generated_at"], metadata["generated_at"])

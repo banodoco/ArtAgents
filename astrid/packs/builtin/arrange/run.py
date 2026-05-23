@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Claude-powered arrangement composer over a brief-agnostic source pool."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.arrange')
 import argparse
 import hashlib
 import json

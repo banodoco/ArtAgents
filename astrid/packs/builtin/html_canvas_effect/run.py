@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Scaffold a local Remotion HtmlInCanvas effect element."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.html_canvas_effect')
 import argparse
 import json
 import re

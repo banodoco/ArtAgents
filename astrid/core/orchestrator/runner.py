@@ -25,7 +25,7 @@ from astrid.core.project.run import (
 from astrid.threads import wrapper as thread_wrapper
 
 from .registry import OrchestratorRegistry, load_default_registry
-from .schema import OrchestratorDefinition, OrchestratorValidationError
+from .schema import OrchestratorDefinition, OrchestratorKind, OrchestratorValidationError, RuntimeKind
 
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
@@ -97,8 +97,8 @@ class OrchestratorPlan:
 @dataclass(frozen=True)
 class OrchestratorRunResult:
     orchestrator_id: str
-    kind: str
-    runtime_kind: str
+    kind: OrchestratorKind
+    runtime_kind: RuntimeKind
     command: tuple[str, ...] = ()
     planned_commands: tuple[tuple[str, ...], ...] = ()
     cwd: str | None = None
@@ -172,7 +172,7 @@ def _request_argv_for_gate(request: OrchestratorRunRequest) -> tuple[str, ...]:
 
 
 def _run_orchestrator_inner(request: OrchestratorRunRequest, orchestrator: OrchestratorDefinition) -> OrchestratorRunResult:
-    values = _request_values(request)
+    values = _request_values(request, orchestrator)
     _validate_out_requirement(orchestrator, request)
     _validate_required_inputs(orchestrator, values)
     if orchestrator.runtime.kind == "python":
@@ -185,7 +185,7 @@ def _run_orchestrator_inner(request: OrchestratorRunRequest, orchestrator: Orche
 def build_orchestrator_command(request: OrchestratorRunRequest, registry: OrchestratorRegistry | None = None) -> tuple[str, ...]:
     active_registry = registry or load_default_registry()
     orchestrator = active_registry.get(request.orchestrator_id)
-    values = _request_values(request)
+    values = _request_values(request, orchestrator)
     _validate_out_requirement(orchestrator, request)
     _validate_required_inputs(orchestrator, values)
     if orchestrator.runtime.kind != "command":
@@ -237,7 +237,13 @@ def _run_command_orchestrator(
     completed = subprocess.run(
         list(command),
         cwd=cwd,
-        env={**os.environ, **env, **_project_subprocess_env(request), **thread_wrapper.subprocess_env()},
+        env={
+            **os.environ,
+            **env,
+            **_project_subprocess_env(request),
+            **thread_wrapper.subprocess_env(),
+            "ASTRID_INTERNAL_INVOCATION": "1",
+        },
         check=False,
     )
     return OrchestratorRunResult(
@@ -564,8 +570,11 @@ def _uses_placeholder(value: str, placeholder: str) -> bool:
     return placeholder in _PLACEHOLDER_RE.findall(value)
 
 
-def _request_values(request: OrchestratorRunRequest) -> dict[str, Any]:
+def _request_values(request: OrchestratorRunRequest, orchestrator: OrchestratorDefinition) -> dict[str, Any]:
     values = dict(request.inputs)
+    for port in orchestrator.inputs:
+        if port.default is not None and port.name not in values:
+            values[port.name] = port.default
     if request.brief is not None and "brief" not in values:
         values["brief"] = request.brief
     if request.python_exec is not None and "python_exec" not in values:

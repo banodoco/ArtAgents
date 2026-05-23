@@ -52,7 +52,9 @@ GATED_INVOCATIONS = [
     pytest.param(["doctor"], id="doctor"),
     pytest.param(["setup"], id="setup"),
     pytest.param(["start", "pack.thing", "--project", "demo"], id="start"),
-    pytest.param(["next", "--project", "demo"], id="next"),
+    # `next` is intentionally NOT in this list as of #13 — it's the universal
+    # port-of-call and ALWAYS returns rc=0 with a state-derived hint,
+    # including when unbound. See `test_unbound_next_prints_discovery_hint`.
     pytest.param(["ack", "step", "--project", "demo", "--decision", "approve"], id="ack"),
     pytest.param(["abort", "--project", "demo"], id="abort"),
     pytest.param(["projects", "show", "--project", "demo"], id="projects-show"),
@@ -78,13 +80,23 @@ def test_every_gated_verb_errors_without_session(
     assert "astrid attach" in stderr
 
 
-def test_unbound_project_command_suggests_concrete_attach(
+def test_unbound_next_prints_discovery_hint(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`astrid next` (with or without --project) when unbound is rc=0 and
+    prints a state-derived hint. Universal port-of-call (#13): `next` is
+    never an error; it always tells the agent the single next action.
+    """
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc, _stdout, stderr = _run_pipeline(["next", "--project", "demo"])
-    assert rc == 2
-    assert "astrid attach demo" in stderr
+    rc, stdout, _stderr = _run_pipeline(["next", "--project", "demo"])
+    assert rc == 0
+    assert "no session bound" in stdout
+    assert "astrid attach demo" in stdout
+
+    rc2, stdout2, _stderr2 = _run_pipeline(["next"])
+    assert rc2 == 0
+    assert "no session bound" in stdout2
+    assert "astrid attach" in stdout2
 
 
 # ----- allowlisted verbs run without a session --------------------------

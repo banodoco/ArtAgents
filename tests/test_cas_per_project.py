@@ -57,8 +57,9 @@ def _run_one_step(tmp_projects_root: Path, slug: str, payload: bytes) -> None:
 
     decision = task_gate.gate_command(slug, "echo go", ["echo", "go"], root=tmp_projects_root)
     step_dir = step_dir_for_path(slug, run_id, ("step-1",), root=tmp_projects_root)
-    step_dir.mkdir(parents=True, exist_ok=True)
-    (step_dir / "out.json").write_bytes(payload)
+    produces_dir = step_dir / "produces"
+    produces_dir.mkdir(parents=True, exist_ok=True)
+    (produces_dir / "out.json").write_bytes(payload)
     task_gate.record_dispatch_complete(decision, 0)
 
 

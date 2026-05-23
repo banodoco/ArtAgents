@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Build standardized visual-review candidate frame sets around event talk boundaries."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.boundary_candidates')
 import argparse
 import json
 from pathlib import Path

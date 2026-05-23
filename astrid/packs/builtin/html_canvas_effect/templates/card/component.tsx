@@ -64,15 +64,17 @@ const CanvasCard = ({params}: {params: EffectParams}): ReactElement => {
   );
 };
 
-export default function HtmlCanvasEffect(props: {
-  clip: any;
-  params: unknown;
-  theme: unknown;
-  fps: number;
-}): ReactElement {
+import {
+  type ElementComponentProps,
+  narrowParams,
+} from '../../../elements/_shared/contracts';
+
+export default function HtmlCanvasEffect(
+  props: ElementComponentProps,
+): ReactElement {
   const frame = useCurrentFrame();
   const {width: compositionWidth, height: compositionHeight} = useVideoConfig();
-  const params = (props.params ?? {}) as EffectParams;
+  const params = narrowParams<EffectParams>(props.params);
   const width = params.width ?? Math.min(900, compositionWidth);
   const height = params.height ?? Math.min(520, compositionHeight);
   const opacity = interpolate(frame, [0, 12], [0, 1], {

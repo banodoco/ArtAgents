@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Render a static review page pairing each tile clip with its Foley audio."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.foley_review')
 import argparse
 import html
 import json

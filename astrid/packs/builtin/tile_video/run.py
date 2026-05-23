@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Tile a video into an MxN grid of overlapping spatial crops."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.tile_video')
 import argparse
 import json
 import re

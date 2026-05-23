@@ -17,7 +17,7 @@ import shlex
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Literal, NoReturn, Sequence
 
 from astrid.core.project.paths import project_dir
 from astrid.core.task.active_run import read_active_run
@@ -107,6 +107,12 @@ class GateDecision:
     step_version: int = 1
     adapter: str | None = None
     pid: int | None = None
+    # Only populated by _dispatch_attested path; code-step rewinds go through
+    # the event log only. See FLAG-S1-005 (correctness-2 / callers-2): we MUST
+    # NOT populate this from record_dispatch_complete — code-step rewinds are
+    # intentionally NOT surfaced through cmd_ack's 'ack accepted but produces
+    # check failed' branch (category error).
+    inline_check_result: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -273,10 +279,44 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                             frames[-1].child_index += 1
                             pending[-1] = None
         elif kind in ("step_completed", "step_attested", "step_skipped"):
+            # #20 fix — repeat.until cursor stall: when the topmost frame is
+            # an iteration frame whose body is already exhausted (typically
+            # because the body's step_attested + produces_check_passed
+            # already advanced its child_index), and a NEW step_attested for
+            # a different step arrives (e.g. the host's sibling like
+            # `finalize`), the prior code blocked at "top.child_index >= len"
+            # and silently dropped the event. The iter frame was popped by
+            # _finalize_cursor only AFTER the replay loop ended, by which
+            # time the sibling's step_attested was already lost. The cursor
+            # then stalled forever on the host's sibling.
+            #
+            # Fix: pop exhausted iter frames inline first, advancing the
+            # host's child_index, THEN re-evaluate against the (now parent)
+            # frame. Item frames are excluded — they're popped by their
+            # specific item_* events, not by sibling step_attested.
+            while (
+                len(frames) > 1
+                and frames[-1].repeat_step_id is not None
+                and frames[-1].item_id is None
+                and frames[-1].child_index >= len(frames[-1].plan.steps)
+            ):
+                frames.pop()
+                pending.pop()
+                frames[-1].child_index += 1
+                pending[-1] = None
             top = frames[-1]
             if top.child_index >= len(top.plan.steps):
                 continue
             step = top.plan.steps[top.child_index]
+            # T1 / FLAG-S1-001: a for_each host's autoclose step_attested can
+            # arrive *after* item_attested already advanced child_index past
+            # the host. Verify the event's step path matches the current
+            # child before consuming it as an advance signal — otherwise the
+            # autoclose silently skips past the host's sibling.
+            event_path = _path_str_from_event(event)
+            expected_path = STEP_PATH_SEP.join(list(top.path_prefix) + [step.id])
+            if event_path and event_path != expected_path:
+                continue
             produces = getattr(step, "produces", ())
             # Skipped steps bypass produces-check gating entirely — the
             # cursor advances on the skip event without waiting for any
@@ -741,7 +781,7 @@ def _resolve_for_each_items(
                 recovery=f"astrid abort --project {slug}",
             )
         try:
-            payload = json.loads((prior_step_dir / produces_entry.path).read_text(encoding="utf-8"))
+            payload = json.loads((prior_step_dir / "produces" / produces_entry.path).read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
             raise TaskRunGateError(
                 reason=f"for_each.from cannot read produces JSON: {exc}",
@@ -904,8 +944,8 @@ def _dispatch_code(
                 step_version=step_version,
             )
         if isinstance(latest, dict) and latest.get("kind") == "produces_check_failed":
-            dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
             apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
+            dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
             return _code_decision(
                 run_id=run_id,
                 slug=slug,
@@ -923,8 +963,8 @@ def _dispatch_code(
             )
         _reject(slug, "incoming command does not match plan[cursor]", abort=False)
 
-    dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
     apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
+    dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
     return _code_decision(
         run_id=run_id,
         slug=slug,
@@ -1050,6 +1090,18 @@ def _dispatch_attested(
     if is_author_test_mode():
         event["source"] = "author_test"
     append_event(events_path, event)
+    # FLAG-S1-001 / all_locations-3: after appending item_attested, route
+    # through the centralized autoclose helper. Any future site that emits
+    # item_attested MUST also call this helper, or for_each host closure
+    # silently regresses (see T1 / SD-001 / SD-004).
+    if item_id is not None:
+        _maybe_autoclose_for_each_host(
+            events_path=events_path,
+            path_tuple=path_tuple,
+            project_root=project_root,
+            slug=slug,
+            run_id=run_id,
+        )
     decision = GateDecision(
         active=True,
         run_id=run_id,
@@ -1067,7 +1119,23 @@ def _dispatch_attested(
         step_version=step.version,
     )
     if step.produces:
+        # FLAG-S1-005: detect a fresh produces_check_failed pair attributable
+        # to this dispatch by scanning the events tail appended during
+        # _run_inline_checks. We deliberately do NOT push this responsibility
+        # into _run_inline_checks itself, because that helper is also called
+        # from record_dispatch_complete (code-step path) where we MUST NOT
+        # surface the result through GateDecision.inline_check_result.
+        pre_inline = read_events(events_path) if events_path.exists() else []
+        pre_inline_count = len(pre_inline)
         _run_inline_checks(decision, step.produces)
+        new_tail = read_events(events_path)[pre_inline_count:]
+        for ev in new_tail:
+            if isinstance(ev, dict) and ev.get("kind") == "produces_check_failed":
+                name = str(ev.get("produces_name") or "")
+                reason = str(ev.get("reason") or "")
+                import dataclasses as _dc
+                decision = _dc.replace(decision, inline_check_result=(name, reason))
+                break
     if iteration is not None:
         feedback = _extract_iterate_feedback(args.evidence)
         if feedback is not None:
@@ -1081,6 +1149,90 @@ def _dispatch_attested(
                 ),
             )
     return decision
+
+
+def _maybe_autoclose_for_each_host(
+    *,
+    events_path: Path,
+    path_tuple: tuple[str, ...],
+    project_root: Path,
+    slug: str,
+    run_id: str,
+) -> None:
+    """Append a synthetic ``step_attested`` for a for_each host once all items
+    are attested. SD-001: attestor is always ``system`` / ``gate.autoclose``
+    (never inherits from the closing item). SD-004: optional bodies / any
+    prior ``item_skipped`` event are loud failures, not silent.
+
+    See FLAG-S1-001 / FLAG-S1-004. Single emit site is in ``_dispatch_attested``
+    immediately after the ``item_attested`` ``append_event``; if another
+    ``item_attested`` emit path appears later, it MUST route through this
+    helper too or for_each closure regresses.
+    """
+    plan_path = project_root / "plan.json"
+    try:
+        plan = load_plan(plan_path)
+    except Exception:
+        return
+    host_step = None
+    for tup, s in iter_steps_with_path(plan):
+        if tup == path_tuple:
+            host_step = s
+            break
+    if host_step is None or not isinstance(getattr(host_step, "repeat", None), RepeatForEach):
+        return
+    if host_step.optional:
+        raise AssertionError(
+            "for_each autoclose: optional body bodies not yet supported (FLAG-S1-004 / SD-004)"
+        )
+    events = read_events(events_path) if events_path.exists() else []
+    path_list = list(path_tuple)
+    item_attested_count = 0
+    has_host_step_attested = False
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = ev.get("kind")
+        if kind == "item_skipped" and ev.get("plan_step_path") == path_list:
+            raise AssertionError(
+                "for_each autoclose: optional body bodies not yet supported (FLAG-S1-004 / SD-004)"
+            )
+        if kind == "item_attested" and ev.get("plan_step_path") == path_list:
+            item_attested_count += 1
+        if kind == "step_attested":
+            ev_id = ev.get("plan_step_id")
+            if ev_id == STEP_PATH_SEP.join(path_tuple):
+                has_host_step_attested = True
+    if has_host_step_attested:
+        return
+    # Resolve expected total: prefer for_each_expanded (covers items_source='from'),
+    # fall back to static items declared on the host.
+    expected_total: int | None = None
+    for ev in events:
+        if (
+            isinstance(ev, dict)
+            and ev.get("kind") == "for_each_expanded"
+            and ev.get("plan_step_path") == path_list
+        ):
+            raw = ev.get("item_ids") or []
+            if isinstance(raw, list):
+                expected_total = len(raw)
+                break
+    if expected_total is None:
+        repeat = host_step.repeat
+        if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
+            expected_total = len(repeat.items)
+    if expected_total is None or item_attested_count != expected_total:
+        return
+    auto_event = make_step_attested_event(
+        STEP_PATH_SEP.join(path_tuple),
+        "system",
+        "gate.autoclose",
+        ("auto-close: all items attested",),
+    )
+    if is_author_test_mode():
+        auto_event["source"] = "author_test"
+    append_event(events_path, auto_event)
 
 
 def _extract_iterate_feedback(evidence: tuple[str, ...]) -> str | None:
@@ -1179,7 +1331,7 @@ def validate_attested_identity(
     step: Step,
     args: AttestedArgs,
     run_started_actor: str | None,
-) -> tuple[str, str]:
+) -> tuple[Literal["agent", "actor"], str]:
     if args.agent is None and args.actor is None:
         _reject(slug, "attested step requires --agent or --actor", abort=False)
     if args.agent is not None and args.actor is not None:
@@ -1187,7 +1339,7 @@ def validate_attested_identity(
     if step.ack.kind == "agent":
         if args.agent is None:
             _reject(slug, "attested step ack.kind=agent requires --agent", abort=False)
-        return "agent", args.agent  # type: ignore[return-value]
+        return "agent", args.agent
     # ack.kind == "actor"
     if args.actor is None:
         _reject(slug, "attested step ack.kind=actor requires --actor", abort=False)
@@ -1195,7 +1347,7 @@ def validate_attested_identity(
         # Author-test mode: skip ASTRID_ACTOR-match and self-ack checks so the
         # harness can drive attestations under a synthetic actor. Canonical kind
         # ("actor") is preserved — author-test provenance rides on event["source"].
-        return "actor", args.actor  # type: ignore[return-value]
+        return "actor", args.actor
     if task_actor_env() != args.actor:
         _reject(slug, "attested --actor does not match ASTRID_ACTOR env", abort=False)
     # FLAG-005: self-ack rejection only applies to actor attestations because agents
@@ -1207,7 +1359,7 @@ def validate_attested_identity(
         and task_actor_env() == args.actor
     ):
         _reject(slug, "self-ack rejected", abort=False)
-    return "actor", args.actor  # type: ignore[return-value]
+    return "actor", args.actor
 
 
 def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
@@ -1364,8 +1516,9 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
         item_id=decision.item_id,
         root=projects_root,
     )
+    produces_root = step_dir / "produces"
     for entry in produces:
-        artifact_path = step_dir / entry.path
+        artifact_path = produces_root / entry.path
         result = entry.check.run(artifact_path)
         if not result.ok:
             append_event(
@@ -1475,6 +1628,6 @@ def _find_run_started_actor(events: Sequence[dict[str, Any]]) -> str | None:
     return None
 
 
-def _reject(slug: str, reason: str, *, abort: bool) -> None:
+def _reject(slug: str, reason: str, *, abort: bool) -> NoReturn:
     verb = "abort" if abort else "next"
     raise TaskRunGateError(reason=reason, recovery=f"astrid {verb} --project {slug}")

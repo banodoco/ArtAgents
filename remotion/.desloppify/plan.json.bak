@@ -1,0 +1,292 @@
+{
+  "version": 8,
+  "created": "2026-05-15T23:49:54+00:00",
+  "updated": "2026-05-15T23:49:54+00:00",
+  "queue_order": [
+    "subjective::abstraction_fitness",
+    "subjective::ai_generated_debt",
+    "subjective::api_surface_coherence",
+    "subjective::authorization_consistency",
+    "subjective::contract_coherence",
+    "subjective::convention_outlier",
+    "subjective::cross_module_architecture",
+    "subjective::dependency_health",
+    "subjective::design_coherence",
+    "subjective::error_consistency",
+    "subjective::high_level_elegance",
+    "subjective::incomplete_migration",
+    "subjective::initialization_coupling",
+    "subjective::logic_clarity",
+    "subjective::low_level_elegance",
+    "subjective::mid_level_elegance",
+    "subjective::naming_quality",
+    "subjective::package_organization",
+    "subjective::test_strategy",
+    "subjective::type_safety"
+  ],
+  "deferred": [],
+  "skipped": {},
+  "active_cluster": null,
+  "overrides": {
+    "test_coverage::src/types.generated.ts": {
+      "issue_id": "test_coverage::src/types.generated.ts",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/test_coverage",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "test_coverage::src/Root.tsx": {
+      "issue_id": "test_coverage::src/Root.tsx",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/test_coverage",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "test_coverage::remotion.config.ts": {
+      "issue_id": "test_coverage::remotion.config.ts",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/test_coverage",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "test_coverage::src/fonts.ts": {
+      "issue_id": "test_coverage::src/fonts.ts",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/test_coverage",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::abstraction_fitness": {
+      "issue_id": "subjective::abstraction_fitness",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::ai_generated_debt": {
+      "issue_id": "subjective::ai_generated_debt",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::api_surface_coherence": {
+      "issue_id": "subjective::api_surface_coherence",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::authorization_consistency": {
+      "issue_id": "subjective::authorization_consistency",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::contract_coherence": {
+      "issue_id": "subjective::contract_coherence",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::convention_outlier": {
+      "issue_id": "subjective::convention_outlier",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::cross_module_architecture": {
+      "issue_id": "subjective::cross_module_architecture",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::dependency_health": {
+      "issue_id": "subjective::dependency_health",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::design_coherence": {
+      "issue_id": "subjective::design_coherence",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::error_consistency": {
+      "issue_id": "subjective::error_consistency",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::high_level_elegance": {
+      "issue_id": "subjective::high_level_elegance",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::incomplete_migration": {
+      "issue_id": "subjective::incomplete_migration",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::initialization_coupling": {
+      "issue_id": "subjective::initialization_coupling",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::logic_clarity": {
+      "issue_id": "subjective::logic_clarity",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::low_level_elegance": {
+      "issue_id": "subjective::low_level_elegance",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::mid_level_elegance": {
+      "issue_id": "subjective::mid_level_elegance",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::naming_quality": {
+      "issue_id": "subjective::naming_quality",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::package_organization": {
+      "issue_id": "subjective::package_organization",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::test_strategy": {
+      "issue_id": "subjective::test_strategy",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    },
+    "subjective::type_safety": {
+      "issue_id": "subjective::type_safety",
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "cluster": "auto/initial-review",
+      "updated_at": "2026-05-15T23:49:54+00:00"
+    }
+  },
+  "clusters": {
+    "auto/test_coverage": {
+      "name": "auto/test_coverage",
+      "description": "Fix 4 test coverage issues",
+      "issue_ids": [
+        "test_coverage::src/types.generated.ts",
+        "test_coverage::src/Root.tsx",
+        "test_coverage::remotion.config.ts",
+        "test_coverage::src/fonts.ts"
+      ],
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "updated_at": "2026-05-15T23:49:54+00:00",
+      "auto": true,
+      "cluster_key": "detector::test_coverage",
+      "action": "add tests for untested production modules \u2014 prioritize by import count",
+      "execution_status": "review",
+      "user_modified": false,
+      "action_type": "refactor",
+      "execution_policy": "planned_only"
+    },
+    "auto/initial-review": {
+      "name": "auto/initial-review",
+      "description": "Initial review of 20 unscored subjective dimensions",
+      "issue_ids": [
+        "subjective::abstraction_fitness",
+        "subjective::ai_generated_debt",
+        "subjective::api_surface_coherence",
+        "subjective::authorization_consistency",
+        "subjective::contract_coherence",
+        "subjective::convention_outlier",
+        "subjective::cross_module_architecture",
+        "subjective::dependency_health",
+        "subjective::design_coherence",
+        "subjective::error_consistency",
+        "subjective::high_level_elegance",
+        "subjective::incomplete_migration",
+        "subjective::initialization_coupling",
+        "subjective::logic_clarity",
+        "subjective::low_level_elegance",
+        "subjective::mid_level_elegance",
+        "subjective::naming_quality",
+        "subjective::package_organization",
+        "subjective::test_strategy",
+        "subjective::type_safety"
+      ],
+      "created_at": "2026-05-15T23:49:54+00:00",
+      "updated_at": "2026-05-15T23:49:54+00:00",
+      "auto": true,
+      "cluster_key": "subjective::unscored",
+      "action": "desloppify review --prepare --dimensions abstraction_fitness,ai_generated_debt,api_surface_coherence,authorization_consistency,contract_coherence,convention_outlier,cross_module_architecture,dependency_health,design_coherence,error_consistency,high_level_elegance,incomplete_migration,initialization_coupling,logic_clarity,low_level_elegance,mid_level_elegance,naming_quality,package_organization,test_strategy,type_safety",
+      "execution_status": "review",
+      "user_modified": false,
+      "action_type": "manual_fix",
+      "execution_policy": "planned_only"
+    }
+  },
+  "superseded": {},
+  "promoted_ids": [],
+  "plan_start_scores": {
+    "strict": 18.0,
+    "overall": 18.0,
+    "objective": 71.9,
+    "verified": 71.9
+  },
+  "refresh_state": {
+    "lifecycle_phase": "review_initial"
+  },
+  "execution_log": [
+    {
+      "timestamp": "2026-05-15T23:49:54+00:00",
+      "action": "sync_subjective",
+      "issue_ids": [],
+      "cluster_name": null,
+      "actor": "system",
+      "note": null,
+      "detail": {
+        "changes": true
+      }
+    },
+    {
+      "timestamp": "2026-05-15T23:49:54+00:00",
+      "action": "auto_cluster",
+      "issue_ids": [],
+      "cluster_name": null,
+      "actor": "system",
+      "note": null,
+      "detail": {
+        "changes": true
+      }
+    },
+    {
+      "timestamp": "2026-05-15T23:49:54+00:00",
+      "action": "sync_lifecycle_phase",
+      "issue_ids": [],
+      "cluster_name": null,
+      "actor": "system",
+      "note": null,
+      "detail": {
+        "phase": "review_initial"
+      }
+    },
+    {
+      "timestamp": "2026-05-15T23:49:54+00:00",
+      "action": "seed_start_scores",
+      "issue_ids": [],
+      "cluster_name": null,
+      "actor": "system",
+      "note": null,
+      "detail": {}
+    }
+  ],
+  "epic_triage_meta": {},
+  "commit_log": [],
+  "uncommitted_issues": [],
+  "commit_tracking_branch": null,
+  "scan_count_at_plan_start": 1
+}

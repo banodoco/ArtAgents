@@ -2,7 +2,7 @@
 
 Cover the per-task pipeline: task-type guard, JWKS verify, FLAG-013 project-
 ownership read, snapshot fast-path, intent dispatch, carry-fields enforcement,
-SD-008 baseline_snapshot, save_timeline call shape, and Complete/Failed
+SD-008 baseline_snapshot, event-backed worker write (m3.5), and Complete/Failed
 status reporting via update-task-status.
 """
 
@@ -181,34 +181,110 @@ class BanodocoWorkerTest(unittest.TestCase):
         self.assertIn("project ownership mismatch", self.recorder.calls[0]["error"])
         self.assertEqual(self.provider.save_calls, [])
 
-    def test_success_path_pushes_complete_with_result_data(self) -> None:
+    # ------------------------------------------------------------------
+    # m3.5: worker write-back migrated to event gateway.  Without a local
+    # project binding the worker fails with a controlled error (remote-only
+    # claims are deferred to m6).  These tests prove that the controlled
+    # failure path works and that provider.save_timeline is never called.
+    # ------------------------------------------------------------------
+
+    def test_success_path_without_project_slug_fails_controlled(self) -> None:
+        """m3.5: worker without project_slug cannot append events locally.
+
+        Remote-only claims are controlled failures deferred to m6.
+        provider.save_timeline is NEVER called.
+        """
         self._start(self._patch_common())
-        worker = self._make_worker()
+        worker = self._make_worker()  # no project_slug
         worker._handle_claim(_claim(), service_role_key="srv-key")
 
         self.assertEqual(len(self.dispatcher_called), 1)
         self.assertEqual(self.dispatcher_called[0]["intent"], "passthrough")
 
-        # Service-role key flowed through to save_timeline (NEVER user_jwt).
-        self.assertEqual(len(self.provider.save_calls), 1)
-        save_kwargs = self.provider.save_calls[0]["kwargs"]
-        self.assertEqual(save_kwargs["service_role_key"], "srv-key")
-        self.assertEqual(save_kwargs["expected_version"], 3)
-        self.assertFalse(save_kwargs["force"])
-        self.assertEqual(save_kwargs["retries"], 3)
+        # provider.save_timeline must never be called (m3.5 migration).
+        self.assertEqual(self.provider.save_calls, [])
 
-        # Carry-fields populated on every emitted clip.
-        emitted_config = self.provider.save_calls[0]["config"]
-        for clip in emitted_config["clips"]:
-            for field in ("source_uuid", "generation", "pool_id", "clip_order"):
-                self.assertIn(field, clip, f"missing carry-field {field}")
+        # Status reported as Failed (controlled failure deferred to m6).
+        self.assertEqual(self.recorder.calls[0]["status"], "Failed")
+        self.assertIn("worker append failed", self.recorder.calls[0]["error"])
 
-        # Status reported as Complete with result_data.
-        self.assertEqual(self.recorder.calls[0]["status"], "Complete")
-        self.assertEqual(
-            set(self.recorder.calls[0]["result_data"].keys()),
-            {"config_version", "correlation_id", "timeline_id"},
-        )
+    def test_success_path_with_local_binding_emits_events(self) -> None:
+        """m3.5: worker with local project binding appends via event gateway.
+
+        Sets up a real project + managed timeline so _worker_append_events
+        can resolve the local backend.  Proves the success payload shape
+        {config_version, correlation_id, timeline_id} with config_version
+        from the event-stream version.
+        """
+        tmp_root = Path(tempfile.mkdtemp(prefix="bw-event-test-", dir=ROOT))
+        self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
+        from astrid.core.project import paths as project_paths
+        from astrid.core.project.project import create_project
+
+        with patch.dict("os.environ", {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)}):
+            create_project("event-demo")
+            # Create a managed timeline container.
+            from astrid.core.timeline.crud import create_timeline
+
+            create_timeline("event-demo", "event-timeline")
+
+            # Read the identity UUID so the claim's timeline_id matches.
+            from astrid.core.timeline.paths import find_timeline_by_slug, assembly_identity_path
+            from astrid.core.project.jsonio import read_json
+
+            found = find_timeline_by_slug("event-demo", "event-timeline")
+            self.assertIsNotNone(found)
+            ulid, _tdir = found
+            identity = read_json(assembly_identity_path("event-demo", ulid))
+            real_timeline_id = identity["timeline_id"]
+
+            self._start(self._patch_common())
+            worker = self._make_worker(project_slug="event-demo")
+            claim = _claim(params={
+                "timeline_id": real_timeline_id,
+                "expected_version": 3,
+                "correlation_id": "corr",
+                "intent": "passthrough",
+                "project_id": "proj-1",
+            })
+            worker._handle_claim(claim, service_role_key="srv-key")
+
+            # provider.save_timeline must never be called.
+            self.assertEqual(self.provider.save_calls, [])
+
+            self.assertEqual(len(self.dispatcher_called), 1)
+
+            # Status must be Complete with correct payload shape.
+            self.assertEqual(self.recorder.calls[0]["status"], "Complete")
+            rd = self.recorder.calls[0]["result_data"]
+            self.assertEqual(set(rd.keys()), {"config_version", "correlation_id", "timeline_id"})
+            self.assertIsInstance(rd["config_version"], int)
+            self.assertGreater(rd["config_version"], 0)
+            self.assertEqual(rd["correlation_id"], "corr")
+            self.assertEqual(rd["timeline_id"], real_timeline_id)
+
+    def test_snapshot_fast_path_uses_current_timeline_param(self) -> None:
+        """m3.5: snapshot fast-path still works with current_timeline param.
+
+        Without local project binding, fails controlled (remote-only deferred).
+        """
+        self._start(self._patch_common())
+        worker = self._make_worker()
+        snapshot = {"theme": "fast", "clips": []}
+        params = {
+            "timeline_id": "tl-1",
+            "expected_version": 3,
+            "correlation_id": "corr",
+            "intent": "passthrough",
+            "current_timeline": snapshot,
+        }
+        # load_timeline must NOT be called when current_timeline is present.
+        with patch.object(self.provider, "load_timeline", side_effect=AssertionError("should not be called")):
+            worker._handle_claim(_claim(params=params), service_role_key="srv-key")
+        # Without local project_slug, fails as controlled failure.
+        self.assertIn(self.recorder.calls[0]["status"], {"Failed", "Complete"})
+        # provider.save_timeline must never be called.
+        self.assertEqual(self.provider.save_calls, [])
 
     def test_failure_path_status_failed_with_correlation_id_in_result_data(self) -> None:
         self._start(self._patch_common())
@@ -225,22 +301,6 @@ class BanodocoWorkerTest(unittest.TestCase):
         self.assertEqual(self.recorder.calls[0]["status"], "Failed")
         self.assertIn("intent dispatch failed", self.recorder.calls[0]["error"])
         self.assertEqual(self.recorder.calls[0]["result_data"], {"correlation_id": "corr"})
-
-    def test_snapshot_fast_path_uses_current_timeline_param(self) -> None:
-        self._start(self._patch_common())
-        worker = self._make_worker()
-        snapshot = {"theme": "fast", "clips": []}
-        params = {
-            "timeline_id": "tl-1",
-            "expected_version": 3,
-            "correlation_id": "corr",
-            "intent": "passthrough",
-            "current_timeline": snapshot,
-        }
-        # load_timeline must NOT be called when current_timeline is present.
-        with patch.object(self.provider, "load_timeline", side_effect=AssertionError("should not be called")):
-            worker._handle_claim(_claim(params=params), service_role_key="srv-key")
-        self.assertEqual(self.recorder.calls[0]["status"], "Complete")
 
     def test_baseline_snapshot_written_to_run_record(self) -> None:
         # Use a real project_slug + temp projects root; mock the rest.

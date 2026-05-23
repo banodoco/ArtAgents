@@ -90,7 +90,13 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
 
 
 def _attach_args(**kw: object) -> argparse.Namespace:
-    defaults = {"project": "demo", "timeline": None, "session": None, "as_agent": None}
+    defaults = {
+        "project": "demo",
+        "timeline": None,
+        "session": None,
+        "as_agent": None,
+        "fresh": False,
+    }
     defaults.update(kw)
     return argparse.Namespace(**defaults)
 
@@ -134,7 +140,16 @@ def test_tab_restart_and_re_export_restores_session(
 def test_session_file_survives_arbitrary_subsequent_attaches(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Attaching a SECOND session in a new tab must NOT delete the first one."""
+    """Attach is now IDEMPOTENT for the same (slug, agent_id) pair (#19).
+
+    Pre-#19 each attach created a fresh session id; the test asserted
+    sid_b != sid_a and that BOTH files existed. With idempotency, the
+    second attach REUSES the first session (no new file written), which is
+    the right behavior for the dominant probe-reported friction case
+    ("new shell → attach → reader → takeover --force"). The test now
+    asserts: (1) sid is stable across re-attaches by the same actor, and
+    (2) --fresh forces a new session id.
+    """
 
     _seed_project(env["projects"], "demo")
     buf_a = StringIO()
@@ -144,13 +159,20 @@ def test_session_file_survives_arbitrary_subsequent_attaches(
     buf_b = StringIO()
     cli.cmd_attach(_attach_args(), out=buf_b)
     sid_b = _parse_sid(buf_b.getvalue())
-    assert sid_b != sid_a
+    # Idempotency: the second attach reused the first session.
+    assert sid_b == sid_a
+    assert "session reused" in buf_b.getvalue()
 
-    # Both files still on disk.
+    # File for the original session is still on disk.
     assert (env["home"] / "sessions" / f"{sid_a}.json").exists()
-    assert (env["home"] / "sessions" / f"{sid_b}.json").exists()
 
     # And tab A's binding is restorable.
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, sid_a)
     restored = resolve_current_session()
     assert restored is not None and restored.id == sid_a
+
+    # `--fresh` forces a new session id even for the same (slug, agent_id).
+    buf_c = StringIO()
+    cli.cmd_attach(_attach_args(fresh=True), out=buf_c)
+    sid_c = _parse_sid(buf_c.getvalue())
+    assert sid_c != sid_a

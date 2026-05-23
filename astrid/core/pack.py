@@ -6,13 +6,18 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 
 PACK_MANIFEST_NAMES = ("pack.yaml", "pack.yml", "pack.json")
 EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
 ORCHESTRATOR_MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
-ELEMENT_KINDS = ("effects", "animations", "transitions")
-ElementKind = str
+# Authoritative element-kind contract (mirrored as a Literal in
+# astrid.core.element.schema; kept here too because pack.py is loaded
+# before element/__init__.py and importing from there causes a cycle).
+ELEMENT_KINDS: tuple[Literal["effects", "animations", "transitions"], ...] = (
+    "effects", "animations", "transitions",
+)
+ElementKind = Literal["effects", "animations", "transitions"]
 _PACK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_-]*$")
 
 
@@ -123,11 +128,11 @@ def validate_element_pack_id(pack_id: str | None, pack: PackDefinition, *, eleme
 
 
 def iter_executor_roots(pack: PackDefinition) -> tuple[Path, ...]:
-    return _content_roots(pack.root, EXECUTOR_MANIFEST_NAMES, excluded_parts={"elements", "ai_toolkit"})
+    return _content_roots(pack.root, EXECUTOR_MANIFEST_NAMES, excluded_parts={"elements"})
 
 
 def iter_orchestrator_roots(pack: PackDefinition) -> tuple[Path, ...]:
-    return _content_roots(pack.root, ORCHESTRATOR_MANIFEST_NAMES, excluded_parts={"elements", "ai_toolkit"})
+    return _content_roots(pack.root, ORCHESTRATOR_MANIFEST_NAMES, excluded_parts={"elements"})
 
 
 def iter_element_roots(pack: PackDefinition, *, kind: str | None = None) -> tuple[tuple[ElementKind, Path], ...]:
@@ -144,13 +149,26 @@ def iter_element_roots(pack: PackDefinition, *, kind: str | None = None) -> tupl
 
 
 def _content_roots(root: Path, manifest_names: tuple[str, ...], *, excluded_parts: set[str]) -> tuple[Path, ...]:
+    vendored = _vendored_subdirs(root)
     roots = {
         path.parent.resolve()
         for manifest_name in manifest_names
         for path in root.rglob(manifest_name)
-        if "__pycache__" not in path.parts and excluded_parts.isdisjoint(path.relative_to(root).parts)
+        if "__pycache__" not in path.parts
+        and excluded_parts.isdisjoint(path.relative_to(root).parts)
+        and not any(parent in vendored for parent in path.parents)
     }
     return tuple(sorted(roots))
+
+
+def _vendored_subdirs(root: Path) -> set[Path]:
+    # Any subdirectory containing a .git entry is a vendored submodule/clone;
+    # its manifests belong to the upstream project, not this pack.
+    return {
+        marker.parent.resolve()
+        for marker in root.rglob(".git")
+        if marker.parent != root
+    }
 
 
 def _load_manifest_payload(path: Path) -> Any:

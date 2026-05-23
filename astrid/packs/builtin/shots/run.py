@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Extract representative still frames for each scene from a source video and record their paths and timestamps in JSON output."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.shots')
 import argparse
 import json
 import subprocess

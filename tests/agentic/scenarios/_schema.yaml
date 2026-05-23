@@ -1,0 +1,131 @@
+# Scenario schema for tests/agentic.
+#
+# This is documentation, not a runnable scenario. Every YAML under scenarios/
+# (except files starting with _) must conform to the keys below. The auditor
+# refuses to run a scenario that fails schema validation.
+
+# REQUIRED
+name: snake_case_identifier              # also the file name (without .yaml)
+tier: core | discovery | authoring | recovery | forensics | meta
+description: |
+  One paragraph stating the agent-facing failure mode this scenario probes.
+  This goes into the report so future maintainers understand intent.
+
+# REQUIRED — what the agent's brief tells them
+brief: brief_filename.md                 # in tests/agentic/briefs/
+# Variables auto-substituted into the brief at run-time:
+#   $SLUG        — the project slug (unique per agent run)
+#   $AGENT_ID    — the agent identity (e.g. ds-probe-v9-cold-1)
+#   $RUN_TAG     — the run tag for this batch
+#   $TARGET_ORCH — if `target_orchestrator` is set below
+
+# OPTIONAL — pre-staging done before the agent runs
+priming:
+  - create_project: $SLUG                # always do this implicitly; included for clarity
+  - start: builtin.agent_probe           # start a specific orchestrator
+  - ack:                                 # ack these steps as a "primer" actor
+      - baseline_write
+      - summarize
+  # Add more priming verbs as needed:
+  #   - touch: <file-path>               # touch a file mtime
+  #   - write: { path: ..., content: ... }
+  #   - start_with_plan:                 # start from an inline compiled plan
+  #       id: builtin.synthetic
+  #       plan: { plan_id: builtin.synthetic, version: 2, steps: [...] }
+  #   - env: { KEY: value }
+
+# OPTIONAL — declare an orchestrator this scenario expects the agent to use
+target_orchestrator: builtin.hype        # surfaces in `tool_used` criterion
+
+# REQUIRED — at least one agent
+agents:
+  - model: claude                        # claude | deepseek-v4-pro | kimi-k2p5
+    count: 3                             # parallel runs (variance control)
+    subagent_type: general-purpose       # for Claude only; ignored elsewhere
+
+# REQUIRED — at least one criterion
+acceptance:
+  # Machine-graded (parsed from events.jsonl)
+  - events_contain: run_completed
+  - events_contain_count: { kind: step_attested, min: 3 }
+  - no_aborts                            # zero run_aborted events
+  - leaf_count_complete: 6
+  - tool_used: builtin.hype              # specific orchestrator was started
+  - no_cross_project_binding             # session never resolved to a sibling slug
+
+  # Subjective (graded by a checker LLM from the agent's narrative report)
+  - subjective:
+      - did_search_before_authoring
+      - found_existing_pack
+      - completed_without_external_help
+
+# OPTIONAL — budget per agent
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+# OPTIONAL — tags for filtering (`runner.py --tag skill_trigger`)
+tags:
+  - skill_trigger
+  - vague_request
+
+# REQUIRED — three-tier assessment model (v10 prep sprint)
+#
+# Every signal in the rubric falls into one of three buckets:
+#
+#   enforced  — load-bearing contracts (binary, gate the test).
+#               Only 1–3 questions per scenario. Examples:
+#               invoked_via_canonical_cli, produced_required_artifact,
+#               did_not_invoke_forbidden_path.
+#
+#   graded    — semantic quality the assessor can judge (scalar 0.0–1.0).
+#               Contributes to `quality_score`, never gates. Examples:
+#               report_section_N_substantive, chose_right_tool_first,
+#               discovery_path_was_efficient.
+#
+#   observed  — telemetry / metadata (integer or string, never gates).
+#               Examples: shell_calls_count,
+#               canonical_bypass_form.
+#
+# The principle: a measurement is only as strict as its job demands.
+# Contracts deserve hard rejection; quality deserves grading; telemetry
+# deserves recording. Mixing them into one pass/fail destroys signal.
+#
+assessment:
+  universal_checks: true                 # run universal checks (report hygiene,
+                                         # canonical-bypass detection, etc.)
+  enforced:
+    - id: invoked_via_canonical_cli
+      question: |
+        Did the agent invoke the tool via the canonical `astrid ... run`
+        surface rather than `python -m astrid.packs.X.run`?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Stderr shows direct python -m invocation of a pack run.py module.
+
+  graded:
+    - id: chose_right_tool_first
+      question: |
+        Did the agent discover and select the canonical tool before
+        attempting ad-hoc solutions?
+      evidence: [stderr, report]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Agent wrote custom ffmpeg/shell scripts before running any
+        `astrid executors search` or `astrid orchestrators list`.
+
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    # Authoring scenarios also include:
+    # - id: canonical_bypass_form
+    #   question: "If a canonical-bypass was detected, what form did it take?"
+    #   evidence: [stderr]
+    #   grading: text
+    #   weight: 0

@@ -25,6 +25,13 @@ The output is one grid PNG. Slice it again, pick a cell, vary again — that's t
 - `--env-file` — env file with `FIREWORKS_API_KEY` and `OPENAI_API_KEY`.
 - `--dry-run` — write the plan + ref crops, skip both API calls.
 
+## Relationship to generate_image
+
+This pack uses its own direct fal API + Fireworks pipeline.  It does **not**
+route through `builtin.generate_image` (the new multi-backend executor) or
+`builtin.generate_image_openai` (the OpenAI DALL-E executor).  It is an
+independent workflow for image variation grids and will remain so.
+
 ## Env
 
 - `FAL_KEY` — required for the image-edits call.

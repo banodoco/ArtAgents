@@ -1,481 +1,622 @@
 #!/usr/bin/env python3
-"""Generate image files with OpenAI GPT Image models."""
+"""Generate images from text prompts using local (vibecomfy) or cloud (fal) backends.
+
+
+v2: model → mode → backend taxonomy.  ``--mode`` is required (SD-005).
+Backend dispatch goes through ``BackendAdapter`` (SD-004).
+Features are validated per-mode (SD-003).
+"""
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.generate_image')
 import argparse
-import base64
 import hashlib
 import json
-import os
-from pathlib import Path
-import re
-import subprocess
+import logging
+import random
 import sys
-import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
-from astrid.audit import AuditContext
-from astrid.threads.variants import write_sidecar as write_variant_sidecar
+from astrid.core.generation.backends import (
+    BackendAdapter,
+    FalBackend,
+    GenerationResult,
+    VibeComfyBackend,
+)
+from astrid.core.model_catalog.registry import ModelRegistry
 
-API_URL = "https://api.openai.com/v1/images/generations"
-DEFAULT_MODEL = "gpt-image-2"
-DEFAULT_SIZE = "1024x1024"
-DEFAULT_QUALITY = "medium"
-DEFAULT_FORMAT = "png"
-
-QUALITIES = {"low", "medium", "high", "auto"}
-FORMATS = {"png", "jpeg", "jpg", "webp"}
-BACKGROUNDS = {"opaque", "auto", "transparent"}
-MODERATION = {"auto", "low"}
-
-PRESETS: dict[str, dict[str, Any]] = {
-    "saint-peter-of-banodoco": {
-        "prompt": (
-            "An illuminated medieval manuscript page depicting Saint Peter of Banodoco, "
-            "patron of file-based pipelines, haloed in glowing unix prompts, quill in "
-            "hand inscribing ffmpeg incantations. Tiny familiar spirits labelled REIGH, "
-            "LOTA, and MOIRAE peer over his shoulders. Gold leaf, vellum, Celtic "
-            "knotwork border."
-        ),
-        "open_result": True,
-    },
-}
-
-GPT_IMAGE_2_MIN_PIXELS = 655_360
-GPT_IMAGE_2_MAX_PIXELS = 8_294_400
-GPT_IMAGE_2_MAX_EDGE = 3840
-GPT_IMAGE_2_MAX_RATIO = 3.0
+logger = logging.getLogger(__name__)
 
 
-def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
+# ---------------------------------------------------------------------------
+# Prompt helpers
+# ---------------------------------------------------------------------------
 
 
-def _warn(message: str) -> None:
-    print(f"Warning: {message}", file=sys.stderr)
+def _load_prompts(path: Path, model: str, mode: str) -> list[dict[str, Any]]:
+    """Load generation requests from a JSON or JSONL file.
 
+    Each line is a JSON object that may override ``prompt``, ``seed``,
+    ``count``, ``size``, ``negative_prompt``, ``image_ref``, ``strength``,
+    ``guidance_scale``, ``steps``, and ``model``.  A bare JSON array is
+    also accepted.
 
-def _read_env_value(env_path: Path, key: str) -> str:
-    if not env_path.is_file():
-        return ""
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        env_key, env_value = line.split("=", 1)
-        if env_key.strip() == key:
-            return env_value.strip().strip('"').strip("'")
-    return ""
-
-
-def _candidate_env_files(env_file: Path | None) -> list[Path]:
-    candidates: list[Path] = []
-    if env_file is not None:
-        candidates.append(env_file)
-    repo_root = Path(__file__).resolve().parents[3]
-    workspace = repo_root.parent
-    candidates.extend(
-        [
-            Path.cwd() / "this.env",
-            Path.cwd() / ".env",
-            Path(__file__).resolve().parent / "this.env",
-            Path(__file__).resolve().parent / ".env",
-            repo_root / "this.env",
-            repo_root / ".env",
-            workspace / "this.env",
-            workspace / ".env",
-            workspace / "reigh-app" / "this.env",
-            workspace / "reigh-app" / ".env",
-            workspace / "reigh-worker" / "this.env",
-            workspace / "reigh-worker" / ".env",
-            workspace / "reigh-worker-orchestrator" / "this.env",
-            workspace / "reigh-worker-orchestrator" / ".env",
-            Path.home() / "this.env",
-            Path.home() / ".env",
-            Path.home() / ".codex" / "this.env",
-            Path.home() / ".codex" / ".env",
-            Path.home() / ".claude" / "this.env",
-            Path.home() / ".claude" / ".env",
-            Path.home() / ".hermes" / "this.env",
-            Path.home() / ".hermes" / ".env",
-        ]
-    )
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(resolved)
-    return unique
-
-
-def load_api_key(env_file: Path | None = None) -> str:
-    if key := os.environ.get("OPENAI_API_KEY", "").strip():
-        return key
-    tried: list[str] = ["OPENAI_API_KEY environment variable"]
-    for candidate in _candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if key := _read_env_value(candidate, "OPENAI_API_KEY"):
-            return key
-    raise SystemExit(f"OPENAI_API_KEY not found. Tried: {', '.join(tried)}")
-
-
-def _normalize_format(value: str) -> str:
-    fmt = value.lower()
-    if fmt not in FORMATS:
-        _die("--output-format must be png, jpeg, jpg, or webp")
-    return "jpeg" if fmt == "jpg" else fmt
-
-
-def _parse_size(size: str) -> tuple[int, int] | None:
-    match = re.fullmatch(r"([1-9][0-9]*)x([1-9][0-9]*)", size)
-    if not match:
-        return None
-    return int(match.group(1)), int(match.group(2))
-
-
-def _validate_size(size: str, model: str) -> None:
-    if size == "auto":
-        return
-    if model != "gpt-image-2":
-        if size not in {"1024x1024", "1536x1024", "1024x1536"}:
-            _die("For models before gpt-image-2, size must be 1024x1024, 1536x1024, 1024x1536, or auto.")
-        return
-    parsed = _parse_size(size)
-    if parsed is None:
-        _die("size must be auto or WIDTHxHEIGHT, for example 1024x1024")
-    width, height = parsed
-    if width % 16 or height % 16:
-        _die("gpt-image-2 size width and height must be multiples of 16px")
-    if max(width, height) > GPT_IMAGE_2_MAX_EDGE:
-        _die("gpt-image-2 size maximum edge length is 3840px")
-    if max(width, height) / min(width, height) > GPT_IMAGE_2_MAX_RATIO:
-        _die("gpt-image-2 size long edge to short edge ratio must not exceed 3:1")
-    pixels = width * height
-    if pixels < GPT_IMAGE_2_MIN_PIXELS or pixels > GPT_IMAGE_2_MAX_PIXELS:
-        _die("gpt-image-2 size total pixels must be between 655,360 and 8,294,400")
-
-
-def _validate_payload(payload: dict[str, Any]) -> None:
-    model = str(payload["model"])
-    if not model.startswith("gpt-image-"):
-        _die("--model must be a GPT Image model, for example gpt-image-2")
-    n = int(payload["n"])
-    if n < 1 or n > 10:
-        _die("--n must be between 1 and 10")
-    _validate_size(str(payload["size"]), model)
-    if payload["quality"] not in QUALITIES:
-        _die("--quality must be low, medium, high, or auto")
-    if payload.get("background") and payload["background"] not in BACKGROUNDS:
-        _die("--background must be opaque, auto, or transparent")
-    if model == "gpt-image-2" and payload.get("background") == "transparent":
-        _die("gpt-image-2 does not support transparent backgrounds; use opaque/auto or explicitly choose an older supported model")
-    if payload.get("moderation") and payload["moderation"] not in MODERATION:
-        _die("--moderation must be auto or low")
-    compression = payload.get("output_compression")
-    if compression is not None and not (0 <= int(compression) <= 100):
-        _die("--output-compression must be between 0 and 100")
-
-
-def _normalize_job(item: Any, index: int) -> dict[str, Any]:
-    if isinstance(item, str):
-        prompt = item.strip()
-        if not prompt:
-            _die(f"Empty prompt at item {index}")
-        return {"prompt": prompt}
-    if isinstance(item, dict) and str(item.get("prompt", "")).strip():
-        return dict(item)
-    _die(f"Invalid prompt item {index}; expected string or object with prompt")
-    return {}
-
-
-def _load_prompts(path: Path) -> list[dict[str, Any]]:
-    if not path.is_file():
-        _die(f"Prompts file not found: {path}")
+    Per-entry ``model`` overrides must include an explicit ``mode`` field
+    matching CLI ``--mode`` or be rejected (SD-005, FLAG-004).
+    """
     text = path.read_text(encoding="utf-8").strip()
-    if not text:
-        _die(f"Prompts file is empty: {path}")
-    if path.suffix.lower() == ".json":
+    if text.startswith("["):
         data = json.loads(text)
-        if not isinstance(data, list):
-            _die("JSON prompts file must contain an array")
-        return [_normalize_job(item, index + 1) for index, item in enumerate(data)]
-    jobs: list[dict[str, Any]] = []
-    for line_no, raw in enumerate(text.splitlines(), start=1):
-        line = raw.strip()
-        if not line or line.startswith("#"):
+        if isinstance(data, list):
+            return _normalise_prompts(data, model, mode)
+        raise SystemExit(f"{path}: top-level JSON must be an array or JSONL")
+
+    entries: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
             continue
-        if line.startswith("{") or line.startswith('"'):
-            jobs.append(_normalize_job(json.loads(line), line_no))
-        else:
-            jobs.append({"prompt": line})
-    if not jobs:
-        _die("No prompts found")
-    return jobs
+        entries.append(json.loads(line))
+    if not entries:
+        raise SystemExit(f"{path}: no valid entries found")
+    return _normalise_prompts(entries, model, mode)
 
 
-def _slugify(text: str) -> str:
-    value = re.sub(r"[^a-zA-Z0-9]+", "-", text.strip().lower()).strip("-")
-    return value[:64] or "image"
-
-
-def _output_paths(out_dir: Path, prompt: str, fmt: str, job_index: int, n: int, explicit_out: str | None) -> list[Path]:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ext = "." + fmt
-    if explicit_out:
-        base = Path(explicit_out)
-        if not base.suffix:
-            base = base.with_suffix(ext)
-        base = out_dir / base.name
-    else:
-        base = out_dir / f"{job_index:03d}-{_slugify(prompt)}{ext}"
-    if n == 1:
-        return [base]
-    return [base.with_name(f"{base.stem}-{i}{base.suffix}") for i in range(1, n + 1)]
-
-
-def _call_image_api(payload: dict[str, Any], api_key: str, timeout: int) -> dict[str, Any]:
-    request = Request(
-        API_URL,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        _die(f"OpenAI API error {exc.code}: {detail}")
-    except URLError as exc:
-        _die(f"Network error: {exc}")
-    return {}
-
-
-def _write_images(response: dict[str, Any], paths: list[Path], force: bool) -> list[str]:
-    written: list[str] = []
-    for item, path in zip(response.get("data") or [], paths):
-        image_b64 = item.get("b64_json")
-        if not image_b64:
-            _warn(f"No b64_json returned for {path}")
-            continue
-        if path.exists() and not force:
-            _die(f"Output exists: {path} (use --force to overwrite)")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(base64.b64decode(image_b64))
-        print(f"Wrote {path}")
-        written.append(str(path))
-    return written
-
-
-def _jobs_from_args(args: argparse.Namespace) -> list[dict[str, Any]]:
-    jobs = [{"prompt": prompt} for prompt in args.prompt or []]
-    if args.prompts_file:
-        jobs.extend(_load_prompts(args.prompts_file))
-    if not jobs and args.preset:
-        preset = PRESETS.get(args.preset)
-        if preset is None:
-            _die(f"Unknown preset {args.preset!r}; available: {', '.join(sorted(PRESETS))}")
-        jobs.append({"prompt": preset["prompt"]})
-    if not jobs:
-        _die("Provide --prompt, --prompts-file, or --preset")
-    return jobs
-
-
-def _open_first_rendered(out_dir: Path) -> None:
-    rendered = sorted(out_dir.glob("*.png")) + sorted(out_dir.glob("*.jpeg")) + sorted(out_dir.glob("*.webp"))
-    if not rendered:
-        print("No image was rendered; nothing to open.", file=sys.stderr)
-        return
-    target = rendered[0]
-    print(f"Opening {target}")
-    subprocess.run(["open", str(target)], check=False)
-
-
-def generate(args: argparse.Namespace) -> int:
-    jobs = _jobs_from_args(args)
-    api_key = "" if args.dry_run else load_api_key(args.env_file)
-    out_dir = args.out_dir
-    default_format = _normalize_format(args.output_format)
-    manifest: list[dict[str, Any]] = []
-    variant_artifacts: list[dict[str, Any]] = []
-    audit = AuditContext.from_env()
-    run_id = os.environ.get("ASTRID_RUN_ID", "").strip()
-
-    for index, job in enumerate(jobs, start=1):
-        prompt = str(job["prompt"]).strip()
-        payload = {
-            "model": job.get("model", args.model),
-            "prompt": prompt,
-            "n": int(job.get("n", args.n)),
-            "size": job.get("size", args.size),
-            "quality": job.get("quality", args.quality),
-            "output_format": _normalize_format(str(job.get("output_format", default_format))),
-            "output_compression": job.get("output_compression", args.output_compression),
-            "background": job.get("background", args.background),
-            "moderation": job.get("moderation", args.moderation),
-        }
-        payload = {key: value for key, value in payload.items() if value is not None}
-        _validate_payload(payload)
-        paths = _output_paths(out_dir, prompt, payload["output_format"], index, int(payload["n"]), job.get("out"))
-
-        if args.dry_run:
-            print(json.dumps({"endpoint": API_URL, "outputs": [str(path) for path in paths], **payload}, indent=2))
-            continue
-
-        print(f"[{index}/{len(jobs)}] Calling {payload['model']} for {payload['n']} image(s)", file=sys.stderr)
-        started = time.time()
-        response = _call_image_api(payload, api_key, args.timeout)
-        print(f"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s", file=sys.stderr)
-        written = _write_images(response, paths, args.force)
-        variant_artifacts.extend(
-            _variant_artifacts_for_generated_images(
-                run_id=run_id,
-                prompt_index=index,
-                prompt=prompt,
-                payload=payload,
-                response=response,
-                paths=written,
-            )
-        )
-        if audit is not None:
-            prompt_id = audit.register_prompt_ref(
-                prompt=prompt,
-                label=f"Image prompt {index}",
-                stage="generate_image",
-                metadata={key: value for key, value in payload.items() if key != "prompt"},
-            )
-            output_ids = [
-                audit.register_asset(
-                    kind="generated_image",
-                    path=output,
-                    label=Path(output).name,
-                    parents=[prompt_id],
-                    stage="generate_image",
-                    metadata={
-                        "model": payload.get("model"),
-                        "size": payload.get("size"),
-                        "quality": payload.get("quality"),
-                        "output_format": payload.get("output_format"),
-                        "created": response.get("created"),
-                    },
-                )
-                for output in written
-            ]
-            audit.register_node(
-                stage="generate_image",
-                label=f"Generate image job {index}",
-                parents=[prompt_id],
-                outputs=output_ids,
-                metadata={"model": payload.get("model"), "n": payload.get("n"), "usage": response.get("usage")},
-            )
-        manifest.append(
-            {
-                "prompt": prompt,
-                "request": {key: value for key, value in payload.items() if key != "prompt"},
-                "outputs": written,
-                "usage": response.get("usage"),
-                "created": response.get("created"),
-            }
-        )
-
-    if args.manifest and not args.dry_run:
-        args.manifest.parent.mkdir(parents=True, exist_ok=True)
-        args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        if audit is not None:
-            audit.register_asset(
-                kind="image_manifest",
-                path=args.manifest,
-                label="Generated image manifest",
-                stage="generate_image",
-                metadata={"jobs": len(manifest)},
-            )
-        print(f"Wrote {args.manifest}")
-    if not args.dry_run:
-        write_variant_sidecar(out_dir, variant_artifacts)
-
-    if args.preset and not args.dry_run and not args.no_open:
-        preset = PRESETS.get(args.preset)
-        if preset and preset.get("open_result"):
-            _open_first_rendered(out_dir)
-    return 0
-
-
-def _variant_artifacts_for_generated_images(
-    *,
-    run_id: str,
-    prompt_index: int,
-    prompt: str,
-    payload: dict[str, Any],
-    response: dict[str, Any],
-    paths: list[str],
+def _normalise_prompts(
+    raw: list[dict[str, Any]], model: str, mode: str
 ) -> list[dict[str, Any]]:
-    if not paths:
-        return []
-    group = hashlib.sha256(f"{run_id}:{prompt_index}".encode("utf-8")).hexdigest()[:16]
-    artifacts = []
-    for output_index, path in enumerate(paths, start=1):
-        artifacts.append(
-            {
-                "path": path,
-                "role": "variant",
-                "group": group,
-                "group_index": output_index,
-                "duration": None,
-                "variant_meta": {
-                    "prompt": prompt,
-                    "prompt_index": prompt_index,
-                    "output_index": output_index,
-                    "model": payload.get("model"),
-                    "size": payload.get("size"),
-                    "quality": payload.get("quality"),
-                    "output_format": payload.get("output_format"),
-                    "created": response.get("created"),
-                },
-            }
+    """Ensure every entry has a ``prompt`` and a ``model`` key.
+
+    Per-entry ``model`` overrides are validated for mode consistency
+    (FLAG-004): a ``mode`` field matching CLI ``--mode`` is required.
+    """
+    result: list[dict[str, Any]] = []
+    for i, entry in enumerate(raw):
+        if "prompt" not in entry:
+            raise SystemExit(
+                f"Entry {i} in prompts file is missing required 'prompt' key"
+            )
+        entry.setdefault("model", model)
+
+        # FLAG-004: per-entry model override must have explicit mode field
+        # matching CLI --mode (or no override at all).
+        entry_model = entry.get("model", model)
+        if entry_model != model:
+            entry_mode = entry.get("mode")
+            if entry_mode is None:
+                raise SystemExit(
+                    f"Entry {i} overrides model to {entry_model!r} but "
+                    f"has no 'mode' field.  Per-entry model overrides must "
+                    f"include 'mode' matching CLI --mode ({mode!r})."
+                )
+            if entry_mode != mode:
+                raise SystemExit(
+                    f"Entry {i} has mode {entry_mode!r} which does not match "
+                    f"CLI --mode {mode!r}.  Per-entry model overrides must "
+                    f"use the same mode."
+                )
+
+        result.append(entry)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Feature validation (per-mode — SD-003)
+# ---------------------------------------------------------------------------
+
+
+def _check_required(
+    mode_spec: Any,
+    mode_name: str,
+    model_id: str,
+    args: argparse.Namespace,
+) -> None:
+    """Hard-fail if any feature in *mode_spec.requires* is missing from *args*."""
+    missing: list[str] = []
+    for req in mode_spec.requires:
+        if req == "prompt":
+            if not (
+                getattr(args, "prompt", None)
+                or getattr(args, "prompts_file", None)
+            ):
+                missing.append("prompt")
+        elif req == "image_ref":
+            if not getattr(args, "image_ref", None):
+                missing.append("image_ref")
+        elif req == "strength":
+            if getattr(args, "strength", None) is None:
+                missing.append("strength")
+        elif req == "guidance_scale":
+            if getattr(args, "guidance_scale", None) is None:
+                missing.append("guidance_scale")
+        elif req == "steps":
+            if getattr(args, "steps", None) is None:
+                missing.append("steps")
+        elif req == "seed":
+            if getattr(args, "seed", None) is None:
+                missing.append("seed")
+        elif req == "size":
+            if not getattr(args, "size", None):
+                missing.append("size")
+        elif req == "negative_prompt":
+            if not getattr(args, "negative_prompt", None):
+                missing.append("negative_prompt")
+        elif req == "count":
+            if not getattr(args, "count", None):
+                missing.append("count")
+
+    if missing:
+        raise SystemExit(
+            f"model {model_id!r} mode {mode_name!r} requires: "
+            f"{', '.join(sorted(missing))}. "
+            f"Provide {'it' if len(missing) == 1 else 'them'} "
+            f"and retry."
         )
-    return artifacts
+
+
+def _drop_unsupported(
+    mode_spec: Any,
+    mode_name: str,
+    model_id: str,
+    args: argparse.Namespace,
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Drop caller-supplied features absent from *mode_spec.supports*.
+
+    Returns ``(warnings, dropped_features)`` — both lists of canonical
+    feature names.  The caller's *args* are mutated in-place (the dropped
+    feature is set to ``None``).
+    """
+    checks: list[tuple[str, str]] = [
+        ("negative_prompt", "negative_prompt"),
+        ("image_ref", "image_ref"),
+        ("strength", "strength"),
+        ("guidance_scale", "guidance_scale"),
+        ("steps", "steps"),
+        ("count", "count"),
+        ("size", "size"),
+        ("seed", "seed"),
+    ]
+    warnings: list[dict[str, str]] = []
+    dropped: list[str] = []
+    for attr, feat in checks:
+        val = getattr(args, attr, None)
+        if val is None:
+            continue
+        if feat not in mode_spec.supports:
+            warnings.append(
+                {
+                    "feature": feat,
+                    "reason": (
+                        f"not supported by model {model_id!r} "
+                        f"mode {mode_name!r}"
+                    ),
+                }
+            )
+            setattr(args, attr, None)
+            dropped.append(feat)
+    return warnings, dropped
+
+
+# ---------------------------------------------------------------------------
+# Seed resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_seed(requested: int | None, index: int) -> int:
+    """Return ``requested + index`` if *requested* is set, else a random seed."""
+    if requested is not None:
+        return requested + index
+    return random.randint(0, 2**31 - 1)
+
+
+# ---------------------------------------------------------------------------
+# Manifest emission
+# ---------------------------------------------------------------------------
+
+
+def _build_manifest(
+    args: argparse.Namespace,
+    entry: Any,
+    mode_name: str,
+    model_actual: str,
+    outputs: list[dict[str, Any]],
+    seed: int,
+    warnings: list[dict[str, str]],
+    dropped_features: list[str],
+    image_ref_resolved: str | None,
+    prompt_text: str | None,
+    cost_usd: float | None,
+    duration_ms: int,
+    request_id: str | None,
+    source_urls: list[str] | None,
+    applied_features: list[str],
+) -> dict[str, Any]:
+    """Build the canonical manifest dict (20-manifest-schema.md v2)."""
+    request: dict[str, Any] = {
+        "prompt": prompt_text or getattr(args, "prompt", None),
+        "negative_prompt": getattr(args, "negative_prompt", None),
+        "seed": seed,
+        "count": max(1, args.count or 1),
+        "size": getattr(args, "size", None),
+        "image_ref_resolved": image_ref_resolved,
+    }
+    manifest: dict[str, Any] = {
+        "schema_version": 2,
+        "modality": entry.modality,
+        "model": entry.id,
+        "mode_used": mode_name,
+        "model_actual": model_actual,
+        "execution": args.execution,
+        "request": request,
+        "outputs": outputs,
+        "seed": seed,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": warnings,
+    }
+    if dropped_features:
+        manifest["dropped_features"] = dropped_features
+    if applied_features:
+        manifest["applied_features"] = applied_features
+    if cost_usd is not None:
+        manifest["cost_usd"] = cost_usd
+    if duration_ms:
+        manifest["duration_ms"] = duration_ms
+    if request_id:
+        manifest["request_id"] = request_id
+    if source_urls:
+        manifest["source_urls"] = source_urls
+    return manifest
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Generate images with OpenAI GPT Image models.")
-    add = parser.add_argument
-    add("--prompt", action="append", help="Prompt; repeat for multiple prompts.")
-    add("--prompts-file", type=Path, help="Text, JSON, or JSONL prompt list.")
-    add(
-        "--preset",
-        choices=sorted(PRESETS),
-        help="Use a canned prompt + behaviour preset (e.g. saint-peter-of-banodoco). "
-        "If no --prompt or --prompts-file is given, the preset's prompt is used.",
+    p = argparse.ArgumentParser(
+        description="Generate images from text prompts via local or cloud backends.",
     )
-    add("--no-open", action="store_true", help="Suppress opening the rendered image for presets that auto-open.")
-    add("--model", default=DEFAULT_MODEL)
-    add("--n", type=int, default=1, help="Images per prompt.")
-    add("--size", default=DEFAULT_SIZE)
-    add("--quality", default=DEFAULT_QUALITY)
-    add("--output-format", default=DEFAULT_FORMAT)
-    add("--output-compression", type=int)
-    add("--background", choices=sorted(BACKGROUNDS))
-    add("--moderation", choices=sorted(MODERATION))
-    add("--out-dir", type=Path, default=Path("output/gpt-image"))
-    add("--manifest", type=Path, default=Path("output/gpt-image/manifest.json"))
-    add("--env-file", type=Path)
-    add("--timeout", type=int, default=180)
-    add("--force", action="store_true")
-    add("--dry-run", action="store_true")
-    return parser
+    p.add_argument(
+        "--mode",
+        required=True,
+        choices=["t2i", "i2i", "edit", "inpaint", "outpaint", "upscale"],
+        help="Generation mode: t2i (text-to-image), i2i (image-to-image), "
+        "edit (instruction-guided edit), inpaint, outpain, upscale.  "
+        "Only t2i, i2i, edit are wired this sprint (SD-005).",
+    )
+    prompt_group = p.add_mutually_exclusive_group()
+    prompt_group.add_argument(
+        "--prompt",
+        help="Text prompt for generation.",
+    )
+    prompt_group.add_argument(
+        "--prompts-file",
+        type=Path,
+        help="JSONL file of prompts (one object per line).",
+    )
+    p.add_argument(
+        "--model",
+        required=True,
+        help="Model ID from the registry (e.g. 'z-image', 'flux-dev').",
+    )
+    p.add_argument(
+        "--image-ref",
+        dest="image_ref",
+        help="Reference image path or URL for i2i/edit modes.",
+    )
+    p.add_argument(
+        "--execution",
+        required=True,
+        choices=["local", "cloud"],
+        help="Backend: 'local' (vibecomfy) or 'cloud' (fal).",
+    )
+    p.add_argument(
+        "--count",
+        type=int,
+        default=1,
+        help="Number of images to generate (default 1).",
+    )
+    p.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Deterministic seed (base_seed + i for sequential images).",
+    )
+    p.add_argument(
+        "--negative-prompt",
+        dest="negative_prompt",
+        help="Text describing what to avoid.",
+    )
+    p.add_argument(
+        "--size",
+        help="Output dimensions, e.g. '1024x1024' or fal size preset.",
+    )
+    p.add_argument(
+        "--strength",
+        type=float,
+        default=None,
+        help="Denoising strength for i2i mode (0.0-1.0).",
+    )
+    p.add_argument(
+        "--guidance-scale",
+        type=float,
+        dest="guidance_scale",
+        default=None,
+        help="Classifier-free guidance scale.",
+    )
+    p.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="Number of sampling steps.",
+    )
+    p.add_argument(
+        "--out",
+        type=Path,
+        default=Path.cwd() / "generated_output",
+        help="Output directory (default: ./generated_output).",
+    )
+    p.add_argument(
+        "--env-file",
+        type=Path,
+        help="Env file holding FAL_KEY (for cloud execution).",
+    )
+    return p
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    return generate(args)
+
+    mode_name: str = args.mode  # SD-005: explicit --mode required
+
+    # --- load registry -------------------------------------------------------
+    try:
+        registry = ModelRegistry.load_default()
+    except Exception as exc:
+        print(f"Failed to load model registry: {exc}", file=sys.stderr)
+        return 1
+
+    # --- validate (model, mode) pair exists ----------------------------------
+    try:
+        entry, mode_spec = registry.get_by_mode(args.model, mode_name)
+    except KeyError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+
+    # --- check backend availability for --execution --------------------------
+    if not registry.backend_available(args.model, mode_name, args.execution):
+        available = ", ".join(sorted(mode_spec.backends))
+        print(
+            f"Error: model {args.model!r} mode {mode_name!r} has no "
+            f"{args.execution!r} backend. Available backends: {available}",
+            file=sys.stderr,
+        )
+        return 1
+
+    # --- validate required mode features (hard-fail BEFORE loop) -------------
+    _check_required(mode_spec, mode_name, args.model, args)
+
+    # --- drop unsupported features (warn, never fail) ------------------------
+    warnings, dropped_features = _drop_unsupported(
+        mode_spec, mode_name, args.model, args
+    )
+
+    # --- setup output directory ----------------------------------------------
+    out = args.out.expanduser().resolve()
+    images_dir = out / "images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- load prompts --------------------------------------------------------
+    if args.prompts_file:
+        prompts = _load_prompts(args.prompts_file, args.model, mode_name)
+    else:
+        if not args.prompt:
+            print(
+                "Error: either --prompt or --prompts-file is required.",
+                file=sys.stderr,
+            )
+            return 1
+        prompts = [{"prompt": args.prompt, "model": args.model}]
+
+    # --- build adapter (SD-004: dispatch through BackendAdapter) -------------
+    adapter: BackendAdapter
+    if args.execution == "cloud":
+        adapter = FalBackend(env_file=args.env_file)
+    else:
+        adapter = VibeComfyBackend()
+
+    # --- resolve image_ref path (for manifest tracking) ----------------------
+    image_ref_resolved: str | None = None
+    if args.image_ref:
+        ref = args.image_ref
+        ref_path = Path(ref)
+        if ref_path.exists():
+            image_ref_resolved = str(ref_path.resolve())
+        else:
+            image_ref_resolved = ref
+
+    # --- sequential N=1 generation loop -------------------------------------
+    all_outputs: list[dict[str, Any]] = []
+    count = max(1, args.count or 1)
+    prompt_text: str | None = None
+    final_seed: int = 0
+    model_actual: str = ""
+    cost_usd: float | None = None
+    duration_ms: int = 0
+    request_id: str | None = None
+    source_urls: list[str] | None = None
+    all_applied_features: list[str] = []
+
+    for i in range(count):
+        # Determine the prompt entry for this iteration
+        if args.prompts_file:
+            prompt_entry = prompts[i % len(prompts)]
+            prompt_text = prompt_entry["prompt"]
+
+            # Per-entry model override — re-validate (model, mode, backend)
+            entry_override_model: str = prompt_entry.get("model", args.model)
+            if entry_override_model != args.model:
+                # Mode field already validated in _normalise_prompts
+                # (FLAG-004): skip row with warning if override fails validation
+                skip_reason: str | None = None
+                try:
+                    entry, mode_spec = registry.get_by_mode(
+                        entry_override_model, mode_name
+                    )
+                except KeyError as exc:
+                    skip_reason = str(exc)
+                if skip_reason is None and not registry.backend_available(
+                    entry_override_model, mode_name, args.execution
+                ):
+                    available = ", ".join(sorted(mode_spec.backends))
+                    skip_reason = (
+                        f"model {entry_override_model!r} mode "
+                        f"{mode_name!r} has no {args.execution!r} backend. "
+                        f"Available: {available}"
+                    )
+                if skip_reason is not None:
+                    print(
+                        f"Warning: skipping row {i} ({prompt_text!r}): "
+                        f"{skip_reason}",
+                        file=sys.stderr,
+                    )
+                    continue
+
+                # Re-validate features for the overridden model's mode.
+                # Check that row-supplied values satisfy the override
+                # model's mode.requires (DEBT-134).
+                row_missing: list[str] = []
+                for req in mode_spec.requires:
+                    if req == "prompt":
+                        if not prompt_text:
+                            row_missing.append("prompt")
+                    elif req == "image_ref":
+                        row_ref = prompt_entry.get("image_ref", args.image_ref)
+                        if not row_ref:
+                            row_missing.append("image_ref")
+                    elif req == "strength":
+                        row_strength = prompt_entry.get("strength", args.strength)
+                        if row_strength is None:
+                            row_missing.append("strength")
+                if row_missing:
+                    print(
+                        f"Warning: skipping row {i} ({prompt_text!r}): "
+                        f"override model {entry_override_model!r} mode "
+                        f"{mode_name!r} requires "
+                        f"{', '.join(sorted(row_missing))}",
+                        file=sys.stderr,
+                    )
+                    continue
+
+                # Drop unsupported features for the override model
+                extra_warns, extra_drops = _drop_unsupported(
+                    mode_spec, mode_name, entry_override_model, args
+                )
+                warnings.extend(extra_warns)
+                dropped_features.extend(extra_drops)
+
+            seed = _resolve_seed(prompt_entry.get("seed", args.seed), i)
+            neg = prompt_entry.get("negative_prompt", args.negative_prompt)
+            sz = prompt_entry.get("size", args.size)
+            ref = prompt_entry.get("image_ref", args.image_ref)
+            strength = prompt_entry.get("strength", args.strength)
+            guidance_scale = prompt_entry.get(
+                "guidance_scale", args.guidance_scale
+            )
+            steps = prompt_entry.get("steps", args.steps)
+        else:
+            prompt_text = args.prompt
+            seed = _resolve_seed(args.seed, i)
+            neg = args.negative_prompt
+            sz = args.size
+            ref = args.image_ref
+            strength = args.strength
+            guidance_scale = args.guidance_scale
+            steps = args.steps
+
+        # --- build canonical params dict for adapter -------------------------
+        params: dict[str, Any] = {}
+        if prompt_text:
+            params["prompt"] = prompt_text
+        if neg:
+            params["negative_prompt"] = neg
+        params["seed"] = seed
+        if sz:
+            params["size"] = sz
+        if ref:
+            params["image_ref"] = ref
+        if strength is not None:
+            params["strength"] = strength
+        if guidance_scale is not None:
+            params["guidance_scale"] = guidance_scale
+        if steps is not None:
+            params["steps"] = steps
+        params["count"] = 1  # N=1 per loop iteration
+
+        # --- dispatch to adapter (SD-004) ------------------------------------
+        result: GenerationResult = adapter.generate(
+            entry=entry,
+            mode=mode_name,
+            params=params,
+            out_dir=images_dir,
+        )
+
+        # Convert GenerationResult to manifest output dicts
+        for img_path in result.image_paths:
+            content_hash = (
+                "sha256:"
+                + hashlib.sha256(img_path.read_bytes()).hexdigest()
+            )
+            rel = str(img_path.relative_to(out))
+            output_entry: dict[str, Any] = {
+                "path": rel,
+                "content_hash": content_hash,
+                "bytes": img_path.stat().st_size,
+            }
+            all_outputs.append(output_entry)
+
+        final_seed = result.seed_used
+        model_actual = result.model_actual
+        cost_usd = result.cost_usd
+        duration_ms = result.duration_ms
+        request_id = result.request_id
+        source_urls = result.source_urls
+        if result.applied_features:
+            all_applied_features = list(result.applied_features)
+
+    # --- emit manifest -------------------------------------------------------
+    manifest = _build_manifest(
+        args,
+        entry,
+        mode_name,
+        model_actual,
+        all_outputs,
+        final_seed,
+        warnings,
+        dropped_features,
+        image_ref_resolved,
+        prompt_text,
+        cost_usd,
+        duration_ms,
+        request_id,
+        source_urls,
+        all_applied_features,
+    )
+    manifest_path = out / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(f"manifest={manifest_path}")
+    return 0
 
 
 if __name__ == "__main__":

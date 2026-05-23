@@ -1,0 +1,103 @@
+name: cross_pack_composition
+tier: discovery
+description: |
+  Agent receives a multi-step request implying two stages: transcribe and
+  edit-to-hype-reel. The naive read is "I need two tools: transcribe +
+  hype". The correct Astrid answer is "just run `builtin.hype` — it
+  already runs transcribe internally". Failure mode probed: agent
+  composes a redundant pipeline (transcribe then hype with --skip-transcribe
+  flags or duplicate work) because the hype skill doc didn't make the
+  inclusion obvious, OR the agent runs only transcribe and stops short.
+
+brief: cross_pack_composition.md
+
+priming:
+  - create_project: $SLUG
+
+target_orchestrator: builtin.hype
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  # Machine-graded. Discovery-tier scenario: the signal we care about
+  # is the *composition decision* (one invocation of `builtin.hype`,
+  # not two separate stages). A `--dry-run` against a placeholder
+  # video is enough to demonstrate that — we don't require the
+  # downstream pipeline to actually finish on synthetic input.
+  - no_aborts
+  - tool_used: builtin.hype
+  # Subjective
+  - subjective:
+      - discovered_hype_includes_transcribe
+      - composed_correctly
+      - read_hype_skill
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+  - skill_trigger
+  - composition
+  - discovery
+
+assessment:
+  universal_checks: true
+  enforced:
+      - id: composed_correctly
+        question: |
+          Did the agent invoke `builtin.hype` exactly once for the
+          composed pipeline (not transcribe-then-hype, not duplicate
+          runs)?
+        evidence: [stderr, events]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Stderr shows back-to-back `executors run builtin.transcribe`
+          AND `orchestrators run builtin.hype` invocations on the same
+          media.
+      - id: invoked_via_canonical_cli
+        question: |
+          Did the agent invoke hype via `astrid orchestrators run
+          builtin.hype` rather than `python -m astrid.packs.builtin.hype`
+          or a direct import?
+        evidence: [stderr]
+        grading: pass_fail
+        weight: 2
+  graded:
+      - id: discovered_hype_includes_transcribe
+        question: |
+          Did the agent discover (and call out explicitly in their
+          narrative) that `builtin.hype` already runs `builtin.transcribe`
+          internally, rather than treating them as two separate stages?
+        evidence: [report, stderr]
+        grading: pass_fail
+        weight: 2
+        failure_mode: |
+          Report or stderr describes a two-stage pipeline
+          (transcribe -> hype) without acknowledging the implicit
+          composition.
+      - id: read_hype_skill
+        question: |
+          Did the agent read the hype STAGE/SKILL doc (via `astrid
+          orchestrators inspect builtin.hype`, or reading STAGE.md
+          directly) BEFORE running it?
+        evidence: [stderr, report]
+        grading: pass_fail
+        weight: 1
+      - id: report_shape_intact
+        question: |
+          Does the report contain each numbered section the brief asked
+          for, including the composition decision rationale?
+        evidence: [report]
+        grading: pass_fail
+        weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0

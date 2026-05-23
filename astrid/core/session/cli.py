@@ -57,6 +57,7 @@ from astrid.core.task.events import EVENTS_FILENAME, read_events
 # Tests assert on these literal strings; keep them stable.
 
 ATTACH_HEADER = "session created"
+ATTACH_HEADER_REUSED = "session reused (idempotent re-attach)"
 EXPORT_LINE_TEMPLATE = "export ASTRID_SESSION_ID={sid}"
 TAKEOVER_HINT_READER = "another session ({writer}) holds this run; take over with: astrid sessions takeover {run_id}"
 TAKEOVER_HINT_ORPHAN = "lease is orphan-pending; claim it with: astrid sessions takeover {run_id}"
@@ -112,6 +113,62 @@ def _list_session_files() -> list[Session]:
         except Exception:  # noqa: BLE001 — corrupt files surface in cmd_status
             continue
     return sessions
+
+
+def _find_reusable_session(slug: str, agent_id: str) -> Session | None:
+    """Find a prior session for ``(slug, agent_id)`` that's safe to reuse.
+
+    Reuse is the idempotency primitive for `astrid attach` (#19/#23). The v3
+    DS probe found that 4/5 agents hit the "new shell → attach → reader → ...
+    → takeover --force" dance every time they reconnected. v4's idem probe
+    found the initial fix (#19) was a no-op under realistic conditions
+    because the warmth check fired BEFORE the lease-ownership check — and an
+    actively-acking agent leaves the run permanently warm. The actor was
+    treated as a stranger every time.
+
+    Reordered decision (#23):
+
+      1. If there's no active run → any matching session is reusable.
+      2. If the lease is held by one of OUR candidate sessions → reuse it.
+         This is the agent reconnecting to their own active work. Warmth is
+         not a concern — they ARE the warm writer.
+      3. If the lease is orphan (no holder): reuse most-recent IF not warm.
+         A warm orphan means someone is mid-write without a lease record
+         (rare but unsafe to steal).
+      4. If the lease is held by a different actor: do NOT reuse. Caller
+         falls through to fresh-session and (if applicable) takeover.
+
+    Returns the most-recently-used reusable session, or None.
+    """
+    candidates = [
+        s for s in _list_session_files()
+        if s.project == slug and s.agent_id == agent_id
+    ]
+    if not candidates:
+        return None
+    candidate_ids = {s.id for s in candidates}
+    on_disk_run_id = read_current_run(slug)
+    if on_disk_run_id is None:
+        # No active run — any matching session is reusable; pick most recent.
+        return sorted(candidates, key=lambda s: s.last_used_at or "", reverse=True)[0]
+    run_dir = project_dir(slug) / "runs" / on_disk_run_id
+    lease = read_lease(run_dir)
+    attached = lease.get("attached_session_id")
+    # (2) Lease held by us → always reuse. Don't gate on warmth: the actor's
+    # own recent writes are why the run is warm.
+    if isinstance(attached, str) and attached in candidate_ids:
+        for s in candidates:
+            if s.id == attached:
+                return s
+    # (3) Orphan lease → safe to reuse only if the run isn't warm. A warm
+    # orphan is the rare case where some process is writing without holding
+    # the lease record; better to fail closed and let `--fresh` resolve it.
+    if attached is None:
+        if _is_target_warm(run_dir):
+            return None
+        return sorted(candidates, key=lambda s: s.last_used_at or "", reverse=True)[0]
+    # (4) Lease held by a different actor → defer to takeover flow.
+    return None
 
 
 def _last_event_ts(run_dir: Path) -> str | None:
@@ -220,6 +277,38 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                 print("no projects discovered under the projects root", file=sys.stderr)
                 print("create one with: astrid projects create <slug>", file=sys.stderr)
             return 2
+        # Idempotency (#19): reuse a prior session for (slug, agent_id) when
+        # safe, skipping the timeline-resolution / new-session branch entirely.
+        # Killing the new-shell → reader → takeover dance was the dominant ask
+        # from the v3 DS probe (4/5 reports).
+        _reusable = (
+            None
+            if getattr(args, "fresh", False)
+            else _find_reusable_session(slug, agent_id)
+        )
+        if _reusable is not None:
+            from astrid.core.session.binding import SESSION_FILE_NAME as _SF
+            refreshed = _reusable.with_changes(last_used_at=_now_iso())
+            refreshed.to_json(session_path(refreshed.id))
+            # File-bound session pointer (T9 / FLAG-S1-003).
+            try:
+                session_file = project_dir(slug) / _SF
+                session_file.parent.mkdir(parents=True, exist_ok=True)
+                session_file.write_text(f"{refreshed.id}\n", encoding="utf-8")
+                try:
+                    session_file.chmod(0o600)
+                except OSError:
+                    pass
+            except OSError:
+                pass
+            print(ATTACH_HEADER_REUSED, file=out)
+            print(f"export ASTRID_SESSION_ID={refreshed.id}", file=out)
+            print(f"project: {refreshed.project}", file=out)
+            print(f"timeline: {refreshed.timeline or '(none)'}", file=out)
+            print(f"run: {refreshed.run_id or '(none)'}", file=out)
+            print(f"role: {refreshed.role}", file=out)
+            return 0
+
         sid = generate_ulid()
         # Resolve timeline: explicit flag → project default → prompt / error.
         resolved_timeline_id: str | None = None
@@ -338,6 +427,25 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
             role=role,
         )
         session.to_json(session_path(sid))
+        # T9 / FLAG-S1-003: write a file-bound session pointer so subsequent
+        # CLI calls in the same project survive ASTRID_SESSION_ID being lost
+        # between terminal invocations. Mode 0o600 to prevent other-user
+        # readability. .astrid-session is gitignored.
+        try:
+            from astrid.core.session.binding import SESSION_FILE_NAME as _SF
+            _attach_proj_root = project_dir(slug)
+            _attach_proj_root.mkdir(parents=True, exist_ok=True)
+            _session_pointer = _attach_proj_root / _SF
+            _session_pointer.write_text(
+                f"{ASTRID_SESSION_ID_ENV}={sid}\n", encoding="utf-8"
+            )
+            try:
+                import os as _os
+                _os.chmod(_session_pointer, 0o600)
+            except OSError:
+                pass
+        except Exception:
+            pass
         if getattr(args, "set_default", False):
             set_default_project(
                 slug,
@@ -416,6 +524,9 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
     if out is None:
         out = sys.stdout
     try:
+        # T9 / FLAG-S1-003: INTENTIONALLY env-only (no slug=). This verb
+        # diagnoses env-binding by surface; masking the env with a file
+        # fallback would defeat its purpose.
         current = resolve_current_session()
     except SessionBindingError as exc:
         print(f"takeover: {exc}", file=sys.stderr)
@@ -502,6 +613,9 @@ def cmd_status(args: argparse.Namespace, *, out: Any = None) -> int:
     if out is None:
         out = sys.stdout
     try:
+        # T9 / FLAG-S1-003: INTENTIONALLY env-only (no slug=). `session
+        # status` reports on the live env binding; pulling a file fallback
+        # would mask the unbound-state it exists to surface.
         session = resolve_current_session()
     except SessionBindingError as exc:
         print(f"status: {exc}", file=sys.stderr)
@@ -556,8 +670,17 @@ def _print_discovery_hints(*, out: Any) -> None:
 
 
 def _render_bound_status(session: Session, *, out: Any) -> int:
-    identity = read_identity()
-    agent_id = identity.agent_id if identity else session.agent_id
+    # Fix 2 (v6 dogfood): the per-tab `--as agent:<slug>` override is
+    # written to ``session.agent_id`` at attach time and IS the per-tab
+    # identity. Previously this preferred the on-disk identity record
+    # (e.g., ``codex-1``), which silently masked the override — an agent
+    # that ran ``attach --as agent:foo`` would see ``status`` report
+    # ``agent: codex-1``. Trust the session record; fall back to the
+    # on-disk identity only when the session has no agent_id pinned.
+    agent_id = session.agent_id
+    if not agent_id:
+        identity = read_identity()
+        agent_id = identity.agent_id if identity else session.agent_id
     # Try to pick up an on-disk run_id update (auto-rebind preview without
     # actually mutating the session file — that's WriterContext's job).
     on_disk_run_id = read_current_run(session.project)
@@ -688,6 +811,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         dest="user_default",
         help="With --default, write the user-wide default instead of the workspace default.",
+    )
+    attach.add_argument(
+        "--fresh",
+        action="store_true",
+        help=(
+            "Force a new session id even when a reusable session exists for "
+            "this (project, agent) pair. By default attach is idempotent and "
+            "reuses prior sessions; --fresh opts out."
+        ),
     )
     attach.set_defaults(handler=cmd_attach)
 

@@ -11,8 +11,10 @@ Coverage:
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
+import shutil
 import sys
 import unittest
 from pathlib import Path
@@ -221,6 +223,228 @@ class CLIStartupRejectionTest(unittest.TestCase):
             ])
             self.assertEqual(rc, 1)
             request.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: prove publish is a read-only consumer of local canonical
+# state.  Remote Supabase uploads and submit_import() are m6 scope — the
+# m3.5 contract only requires that publish does NOT write assembly.json,
+# hype.timeline.json, arrangement blobs, or any other local canonical file.
+# ---------------------------------------------------------------------------
+
+
+class PublishLocalReadOnlyRegressionTest(unittest.TestCase):
+    """Prove ``builtin.publish`` remains a read consumer for local canonical
+    state.  It must not write ``assembly.json``, ``hype.timeline.json``,
+    arrangement blobs, or any other local timeline-container file.
+
+    These tests mock every remote side-effect (asset upload, version fetch,
+    timeline-import) and verify that local files are never mutated and no
+    new canonical files appear in the workspace.
+    """
+
+    def setUp(self):
+        self.tmpdir = ROOT / "tests" / "fixtures" / "publish-readonly"
+        self.tmpdir.mkdir(parents=True, exist_ok=True)
+
+        # Minimal valid timeline config the validator accepts.
+        self.timeline_payload = {
+            "theme": "banodoco-default",
+            "tracks": [
+                {"id": "v1", "kind": "visual", "label": "Source"},
+                {"id": "a1", "kind": "audio", "label": "Audio"},
+            ],
+            "clips": [
+                {
+                    "id": "clip_main",
+                    "track": "v1",
+                    "at": 0.0,
+                    "asset": "main",
+                    "from": 0.0,
+                    "to": 10.0,
+                },
+            ],
+        }
+
+        self.assets_payload = {
+            "assets": {
+                "main": {
+                    "url": "https://cdn.example.com/main.mp4",
+                    "duration": 10.0,
+                    "type": "video",
+                },
+            },
+        }
+
+        self.timeline_path = self.tmpdir / "hype.timeline.json"
+        self.assets_path = self.tmpdir / "hype.assets.json"
+
+        self.timeline_path.write_text(json.dumps(self.timeline_payload), encoding="utf-8")
+        self.assets_path.write_text(json.dumps(self.assets_payload), encoding="utf-8")
+
+        self.timeline_mtime_before = self.timeline_path.stat().st_mtime
+        self.assets_mtime_before = self.assets_path.stat().st_mtime
+        self.timeline_hash_before = hashlib.sha256(
+            self.timeline_path.read_bytes()
+        ).hexdigest()
+        self.assets_hash_before = hashlib.sha256(
+            self.assets_path.read_bytes()
+        ).hexdigest()
+
+        # Snapshot all files in the tmpdir before the run so we can detect
+        # any new files created during publish.
+        self.files_before = set(
+            p.relative_to(self.tmpdir) for p in self.tmpdir.rglob("*") if p.is_file()
+        )
+
+        def _cleanup():
+            shutil.rmtree(str(self.tmpdir), ignore_errors=True)
+
+        self.addCleanup(_cleanup)
+
+    def _env(self):
+        """Return the minimal env dict publish needs to get past startup."""
+        return {
+            "REIGH_USER_TOKEN": _make_jwt({"sub": "user-abc", "aud": "authenticated"}),
+            "REIGH_SUPABASE_URL": "https://example.supabase.co",
+        }
+
+    def _success_response(self):
+        """Return a mocked 200 HTTP response from timeline-import."""
+        return publish.HttpResponse(
+            status=200,
+            headers={},
+            body=json.dumps({"ok": True, "config_version": 1, "created": True}).encode(),
+        )
+
+    def test_publish_does_not_mutate_source_timeline_file(self):
+        """After a successful publish run the source timeline file must be
+        byte-identical to its pre-run state."""
+        with mock.patch.dict(os.environ, self._env(), clear=True), \
+             mock.patch.object(publish, "_request") as request:
+            request.return_value = self._success_response()
+            rc = publish.main([
+                "--project-id", "00000000-0000-0000-0000-000000000000",
+                "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                "--timeline-file", str(self.timeline_path),
+            ])
+        self.assertEqual(rc, 0)
+
+        self.assertEqual(
+            self.timeline_path.stat().st_mtime,
+            self.timeline_mtime_before,
+            "publish mutated the source timeline file (mtime changed)",
+        )
+        self.assertEqual(
+            hashlib.sha256(self.timeline_path.read_bytes()).hexdigest(),
+            self.timeline_hash_before,
+            "publish mutated the source timeline file (hash changed)",
+        )
+
+    def test_publish_does_not_mutate_source_assets_file(self):
+        """After a successful publish run the source assets file must be
+        byte-identical to its pre-run state."""
+        with mock.patch.dict(os.environ, self._env(), clear=True), \
+             mock.patch.object(publish, "_request") as request:
+            request.return_value = self._success_response()
+            rc = publish.main([
+                "--project-id", "00000000-0000-0000-0000-000000000000",
+                "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                "--timeline-file", str(self.timeline_path),
+            ])
+        self.assertEqual(rc, 0)
+
+        self.assertEqual(
+            self.assets_path.stat().st_mtime,
+            self.assets_mtime_before,
+            "publish mutated the source assets file (mtime changed)",
+        )
+        self.assertEqual(
+            hashlib.sha256(self.assets_path.read_bytes()).hexdigest(),
+            self.assets_hash_before,
+            "publish mutated the source assets file (hash changed)",
+        )
+
+    def test_publish_does_not_create_assembly_json(self):
+        """Publish must never create an ``assembly.json`` locally."""
+        with mock.patch.dict(os.environ, self._env(), clear=True), \
+             mock.patch.object(publish, "_request") as request:
+            request.return_value = self._success_response()
+            rc = publish.main([
+                "--project-id", "00000000-0000-0000-0000-000000000000",
+                "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                "--timeline-file", str(self.timeline_path),
+            ])
+        self.assertEqual(rc, 0)
+
+        for candidate in [
+            self.tmpdir / "assembly.json",
+            self.tmpdir / "assembly.jsonl",
+            self.tmpdir.parent / "assembly.json",
+            self.timeline_path.parent / "assembly.json",
+        ]:
+            self.assertFalse(
+                candidate.exists(),
+                f"publish created unexpected canonical file: {candidate}",
+            )
+
+    def test_publish_does_not_create_arrangement_blobs(self):
+        """Publish must never write arrangement blobs."""
+        with mock.patch.dict(os.environ, self._env(), clear=True), \
+             mock.patch.object(publish, "_request") as request:
+            request.return_value = self._success_response()
+            rc = publish.main([
+                "--project-id", "00000000-0000-0000-0000-000000000000",
+                "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                "--timeline-file", str(self.timeline_path),
+            ])
+        self.assertEqual(rc, 0)
+
+        files_now = set(
+            p.relative_to(self.tmpdir) for p in self.tmpdir.rglob("*") if p.is_file()
+        )
+        new_files = files_now - self.files_before
+        self.assertEqual(
+            new_files,
+            set(),
+            f"publish created unexpected files: {new_files}",
+        )
+
+    def test_publish_does_not_write_hype_timeline_json(self):
+        """Publish must never overwrite or recreate ``hype.timeline.json``
+        locally — it only reads it."""
+        with mock.patch.dict(os.environ, self._env(), clear=True), \
+             mock.patch.object(publish, "_request") as request:
+            request.return_value = self._success_response()
+            rc = publish.main([
+                "--project-id", "00000000-0000-0000-0000-000000000000",
+                "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                "--timeline-file", str(self.timeline_path),
+            ])
+        self.assertEqual(rc, 0)
+
+        # The file still exists (it should) but must be byte-identical.
+        self.assertTrue(self.timeline_path.exists())
+        self.assertEqual(
+            hashlib.sha256(self.timeline_path.read_bytes()).hexdigest(),
+            self.timeline_hash_before,
+        )
+
+    def test_publish_never_calls_save_timeline(self):
+        """Publish must never call ``astrid.timeline.save_timeline`` — it is
+        a read consumer of local canonical state."""
+        with mock.patch.dict(os.environ, self._env(), clear=True), \
+             mock.patch.object(publish, "_request") as request, \
+             mock.patch("astrid.timeline.save_timeline",
+                        side_effect=AssertionError(
+                            "publish called save_timeline — write bypass!")) as _:
+            request.return_value = self._success_response()
+            rc = publish.main([
+                "--project-id", "00000000-0000-0000-0000-000000000000",
+                "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                "--timeline-file", str(self.timeline_path),
+            ])
+        self.assertEqual(rc, 0)
 
 
 if __name__ == "__main__":

@@ -237,6 +237,9 @@ class DataProviderSurfaceTest(unittest.TestCase):
         for forbidden in ("save_waveform", "save_profile", "load_profile"):
             self.assertNotIn(forbidden, present, f"{forbidden} must not be present")
 
+    def test_provider_docstring_marks_blob_rpc_as_legacy_compatibility(self) -> None:
+        self.assertIn("compatibility-only wrappers", SupabaseDataProvider.__doc__ or "")
+
 
 if __name__ == "__main__":
     unittest.main()

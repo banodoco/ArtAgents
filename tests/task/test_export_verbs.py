@@ -153,7 +153,7 @@ def test_timeline_export_excludes_aborted_by_default(
 
     mock_session = MagicMock()
     mock_session.project = timeline_fixture["slug"]
-    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda: mock_session)
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
 
     out_path = tmp_projects_root / "bundle.tar.gz"
     args = argparse.Namespace(
@@ -199,7 +199,7 @@ def test_timeline_export_includes_aborted_with_flag(
 
     mock_session = MagicMock()
     mock_session.project = timeline_fixture["slug"]
-    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda: mock_session)
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
 
     out_path = tmp_projects_root / "bundle-with-aborted.tar.gz"
     args = argparse.Namespace(

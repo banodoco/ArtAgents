@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Query a video-native Gemini model against source video windows."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.video_understand')
 import argparse
 import json
 import subprocess
@@ -237,6 +241,26 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     client = build_gemini_client(args.env_file)
+    active_schema = RESPONSE_SCHEMA
+    if getattr(args, "response_schema", None):
+        schema_path = args.response_schema.expanduser()
+        if not schema_path.is_file():
+            print(f"Error: --response-schema file not found: {schema_path}", file=sys.stderr)
+            return 2
+        loaded = json.loads(schema_path.read_text(encoding="utf-8"))
+        # Accept either a raw schema or {name, schema, strict?} wrapper (parallels visual_understand).
+        active_schema = loaded.get("schema", loaded) if isinstance(loaded, dict) else loaded
+        # Gemini's response_schema validator is strict — it rejects top-level keys
+        # outside its allow-list (no $schema, $comment, additionalProperties, x_*, …).
+        # Strip them to keep schemas that work cross-vendor.
+        if isinstance(active_schema, dict):
+            _GEMINI_TOP_KEYS = {
+                "type", "properties", "required", "items", "enum", "description",
+                "nullable", "format", "minimum", "maximum", "minItems", "maxItems",
+                "minLength", "maxLength", "pattern", "anyOf", "oneOf", "allOf",
+            }
+            active_schema = {k: v for k, v in active_schema.items() if k in _GEMINI_TOP_KEYS}
+
     results: list[dict[str, Any]] = []
     for model in models:
         for window in extracted:
@@ -254,7 +278,7 @@ def run(args: argparse.Namespace) -> int:
                     model=model,
                     video_path=video_path,
                     prompt=prompt,
-                    response_schema=RESPONSE_SCHEMA,
+                    response_schema=active_schema,
                 )
                 result = {
                     "model": model,
@@ -303,6 +327,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("--compare-model", action="append", default=[], help="Additional Gemini model to query against the same windows.")
     add("--out-dir", type=Path, default=Path("runs/video-understanding"))
     add("--out", type=Path, help="Optional JSON result path.")
+    add("--response-schema", type=Path,
+        help="Optional path to a JSON schema file. When provided, replaces the default editorial RESPONSE_SCHEMA — the model is constrained to emit JSON matching this schema (Gemini response_schema). File may be a raw schema or {name, schema, strict?} (parallels visual_understand --response-schema).")
     add("--env-file", type=Path)
     add("--timeout", type=int, default=300, help="Reserved for parity with other understanding tools.")
     add("--force", action="store_true")

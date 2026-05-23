@@ -4,8 +4,9 @@ The parallel placement schema (build_project_timeline / build_placement /
 validate_project_timeline / validate_placement / validate_reference / REF_KINDS
 / source_ref / run_ref / TIMELINE_SCHEMA_VERSION) was removed when AA collapsed
 onto reigh-app's canonical ``timelines`` rows. Timeline reads/writes now go
-through ``astrid.core.reigh.SupabaseDataProvider``; the local provenance
-cache (sources/, runs/, project.json) is what survives.
+through ``astrid.core.reigh.SupabaseDataProvider`` as a legacy compatibility
+bridge; the local provenance cache (sources/, runs/, project.json) is what
+survives.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id
 
@@ -93,12 +95,22 @@ def build_run_record(
     artifacts: dict[str, Any] | None = None,
     created_at: str | None = None,
     timeline_id: str | None = None,
+    timeline_slug: str | None = None,
+    timeline_event_stream_id: str | None = None,
+    timeline_binding_mode: str | None = None,
 ) -> dict[str, Any]:
     now = created_at or utc_now_iso()
+    merged_metadata = dict(metadata or {})
+    if timeline_slug is not None:
+        merged_metadata["timeline_slug"] = timeline_slug
+    if timeline_event_stream_id is not None:
+        merged_metadata["timeline_event_stream_id"] = timeline_event_stream_id
+    if timeline_binding_mode is not None:
+        merged_metadata["timeline_binding_mode"] = timeline_binding_mode
     payload: dict[str, Any] = {
         "artifacts": dict(artifacts or {}),
         "created_at": now,
-        "metadata": dict(metadata or {}),
+        "metadata": merged_metadata,
         "project_slug": validate_project_slug(project_slug),
         "run_id": validate_run_id(run_id),
         "schema_version": RUN_SCHEMA_VERSION,
@@ -187,6 +199,23 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
         else:
             from astrid.core.timeline.paths import validate_timeline_ulid
             payload["timeline_id"] = validate_timeline_ulid(tid)
+    # Validate managed timeline binding metadata sub-keys (m3.5).
+    meta = payload.get("metadata", {})
+    if isinstance(meta, dict):
+        if "timeline_slug" in meta:
+            from astrid.core.timeline.paths import validate_timeline_slug
+            meta["timeline_slug"] = validate_timeline_slug(meta["timeline_slug"])
+        if "timeline_event_stream_id" in meta:
+            meta["timeline_event_stream_id"] = _require_uuid_str(
+                meta["timeline_event_stream_id"], "run.metadata.timeline_event_stream_id"
+            )
+        if "timeline_binding_mode" in meta:
+            mode = meta["timeline_binding_mode"]
+            if mode not in ("managed", "unmanaged"):
+                raise ProjectValidationError(
+                    f"run.metadata.timeline_binding_mode must be 'managed' or 'unmanaged', got {mode!r}"
+                )
+        payload["metadata"] = meta
     payload.setdefault("created_at", utc_now_iso())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
@@ -266,3 +295,14 @@ def _require_number(raw: Any, path: str) -> int | float:
     if not isinstance(raw, (int, float)) or isinstance(raw, bool):
         raise ProjectValidationError(f"{path} must be a number")
     return raw
+
+
+def _require_uuid_str(value: object, field: str) -> str:
+    """Validate that *value* is a valid UUID string."""
+    if not isinstance(value, str):
+        raise ProjectValidationError(f"{field} must be a UUID string")
+    try:
+        UUID(value)
+    except ValueError as exc:
+        raise ProjectValidationError(f"{field} must be a UUID string") from exc
+    return value

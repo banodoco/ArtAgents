@@ -246,25 +246,6 @@ agent:
             f"Expected missing name error, got: {errors}",
         )
 
-    def test_executor_missing_runtime(self) -> None:
-        root = self.make_pack_root()
-        self.write_valid_pack(root)
-        _write(
-            root / "executors" / "bad_exec" / "executor.yaml",
-            """schema_version: 1
-id: test_pack.bad_exec
-name: Bad Executor
-version: 0.1.0
-""",
-        )
-        _write(root / "executors" / "bad_exec" / "run.py", "# side effect\n")
-        errors, _ = validate_pack(root)
-        self.assertGreater(len(errors), 0)
-        self.assertTrue(
-            any("runtime" in e.lower() for e in errors),
-            f"Expected missing runtime error, got: {errors}",
-        )
-
     def test_executor_missing_runtime_entrypoint(self) -> None:
         root = self.make_pack_root()
         self.write_valid_pack(root)

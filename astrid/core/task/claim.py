@@ -45,13 +45,15 @@ def _read_lease_epoch(run_dir: Path) -> int:
     return int(payload.get("writer_epoch", 0))
 
 
-def _resolve_session_identity() -> tuple[str, str, str]:
+def _resolve_session_identity(slug: str | None = None) -> tuple[str, str, str]:
     """Resolve the current session's identity.
 
     Returns ``(agent_id, actor_name, role)``. ``actor_name`` is the human
     name if the session has one, otherwise ``None``-equivalent (empty string).
+    T9 / FLAG-S1-003: pass ``slug`` so file-bound .astrid-session fallback
+    can resolve when ``ASTRID_SESSION_ID`` is lost between terminal calls.
     """
-    session = resolve_current_session()
+    session = resolve_current_session(slug=slug)
     if session is None:
         return "", "", ""
     return session.agent_id, "", session.role
@@ -130,8 +132,10 @@ def _resolve_claim_identity(args) -> tuple[str, str]:
     """Return ``(claimed_by, claimed_by_kind)`` from args or session default."""
     if args.for_claim is not None:
         return _parse_for_flag(args.for_claim)
-    # Default: current session identity.
-    agent_id, _actor_name, _role = _resolve_session_identity()
+    # Default: current session identity. T9: plumb slug from --project.
+    agent_id, _actor_name, _role = _resolve_session_identity(
+        slug=getattr(args, "project", None)
+    )
     if agent_id:
         return agent_id, "agent"
     _print_err(
@@ -142,9 +146,10 @@ def _resolve_claim_identity(args) -> tuple[str, str]:
     return "", ""  # unreachable
 
 
-def _check_session_writable() -> None:
-    """Reject read-only sessions with a clear error."""
-    session = resolve_current_session()
+def _check_session_writable(slug: str | None = None) -> None:
+    """Reject read-only sessions with a clear error. T9: pass slug for file
+    fallback when ``ASTRID_SESSION_ID`` is unset (FLAG-S1-003)."""
+    session = resolve_current_session(slug=slug)
     if session is None:
         _print_err("claim: no session bound; run `astrid attach <project>` first")
         sys.exit(1)
@@ -172,7 +177,7 @@ def cmd_claim(argv: Sequence[str], *, projects_root: Path | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    _check_session_writable()
+    _check_session_writable(slug=getattr(args, "project", None))
 
     slug = validate_project_slug(args.project)
     run_id = validate_run_id(args.run_id)
@@ -216,7 +221,7 @@ def cmd_unclaim(argv: Sequence[str], *, projects_root: Path | None = None) -> in
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    _check_session_writable()
+    _check_session_writable(slug=getattr(args, "project", None))
 
     slug = validate_project_slug(args.project)
     run_id = validate_run_id(args.run_id)

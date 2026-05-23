@@ -1,0 +1,81 @@
+{
+  "description": "Golden fixture: fresh created timeline \u2014 bare first domain event on empty assembly (no timeline.imported). Lifecycle events are no-ops.",
+  "events": [
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVN8",
+      "timeline_id": "61cc811f-b989-41ae-8209-b8319bc9bad6",
+      "ts": "2026-01-01T00:00:00Z",
+      "actor": {
+        "type": "human",
+        "id": "creator",
+        "display": "Creator"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVNB",
+      "kind": "timeline.created",
+      "payload": {
+        "timeline_id": "61cc811f-b989-41ae-8209-b8319bc9bad6",
+        "slug": "my-timeline",
+        "name": "My Timeline"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVN9",
+      "timeline_id": "61cc811f-b989-41ae-8209-b8319bc9bad6",
+      "ts": "2026-01-01T00:01:00Z",
+      "actor": {
+        "type": "human",
+        "id": "creator",
+        "display": "Creator"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVNC",
+      "kind": "clip.added",
+      "payload": {
+        "clip_id": "intro",
+        "kind": "visual",
+        "asset_id": "intro.mp4",
+        "position": null
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    },
+    {
+      "event_id": "01KS4ZQKZ23VKZE6GZZ665PVNA",
+      "timeline_id": "61cc811f-b989-41ae-8209-b8319bc9bad6",
+      "ts": "2026-01-01T00:02:00Z",
+      "actor": {
+        "type": "human",
+        "id": "creator",
+        "display": "Creator"
+      },
+      "prev_hash": null,
+      "hash": "01KS4ZQKZ23VKZE6GZZ665PVND",
+      "kind": "timeline.renamed",
+      "payload": {
+        "old_slug": "my-timeline",
+        "new_slug": "my-cool-timeline"
+      },
+      "expected_version": null,
+      "schema_version": 2,
+      "txn_id": null
+    }
+  ],
+  "expected_assembly": {
+    "clips": [
+      {
+        "id": "intro",
+        "kind": "visual",
+        "asset_id": "intro.mp4",
+        "start": 0.0,
+        "duration": 0.0,
+        "text": "",
+        "note": ""
+      }
+    ]
+  }
+}

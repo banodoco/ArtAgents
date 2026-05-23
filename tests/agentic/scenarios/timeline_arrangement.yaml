@@ -1,0 +1,67 @@
+name: timeline_arrangement
+tier: core
+description: |
+  Agent exercises timeline arrangement replacement verb
+  (arrangement.replaced). Asserts the edit verb appends an event
+  envelope and read-only commands do not mutate the event log.
+
+brief: timeline_arrangement.md
+
+priming:
+  - create_project: $SLUG
+
+target_orchestrator: builtin.hype
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  - no_aborts
+  - events_contain: arrangement.replaced
+  - no_cross_project_binding
+  - subjective:
+      - exercised_arrangement_verb
+      - verified_event_log
+      - confirmed_read_only_no_mutation
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 10
+
+tags:
+  - timeline
+  - arrangement
+  - edit_verb
+
+assessment:
+  universal_checks: true
+  enforced:
+    - id: invoked_via_canonical_cli
+      question: "Did the agent use canonical CLI surface?"
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+    - id: event_log_contains_edit_verbs
+      question: "Does assembly.jsonl contain an arrangement.replaced event?"
+      evidence: [project_tree, report]
+      grading: pass_fail
+      weight: 2
+    - id: read_only_no_mutation
+      question: "Did read-only commands leave the event log unchanged?"
+      evidence: [stderr, project_tree, report]
+      grading: pass_fail
+      weight: 1
+  graded:
+    - id: report_shape_intact
+      question: "Does the report contain the required sections?"
+      evidence: [report]
+      grading: pass_fail
+      weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make?"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0

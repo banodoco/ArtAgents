@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from astrid.packs.builtin.generate_image.run import load_api_key, main
+from astrid.core.util.secrets import load_api_key
+from astrid.packs.builtin.generate_image_openai.run import main
 from astrid.utilities.llm_clients import _load_api_key
 
 
@@ -51,7 +52,7 @@ def test_load_api_key_reads_this_env_by_default(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     (tmp_path / "this.env").write_text("OPENAI_API_KEY=from-this-env\n", encoding="utf-8")
 
-    assert load_api_key() == "from-this-env"
+    assert load_api_key("OPENAI_API_KEY") == "from-this-env"
 
 
 def test_load_api_key_prefers_process_env(monkeypatch, tmp_path):
@@ -59,7 +60,7 @@ def test_load_api_key_prefers_process_env(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "from-process-env")
     (tmp_path / "this.env").write_text("OPENAI_API_KEY=from-this-env\n", encoding="utf-8")
 
-    assert load_api_key() == "from-process-env"
+    assert load_api_key("OPENAI_API_KEY") == "from-process-env"
 
 
 def test_llm_client_key_loader_reads_this_env(monkeypatch, tmp_path):

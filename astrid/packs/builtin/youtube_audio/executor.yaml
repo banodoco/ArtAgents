@@ -11,13 +11,7 @@
       "name": "query",
       "type": "string",
       "required": false,
-      "description": "Free-text YouTube search query (top hit is used). Mutually exclusive with url."
-    },
-    {
-      "name": "url",
-      "type": "string",
-      "required": false,
-      "description": "Direct YouTube URL. Mutually exclusive with query."
+      "description": "Free-text YouTube search query (top hit is used), or a direct http(s) YouTube URL."
     },
     {
       "name": "mode",
@@ -28,17 +22,17 @@
   ],
   "outputs": [
     {
-      "name": "audio",
+      "name": "media",
       "type": "file",
       "placeholder": "output",
-      "description": "MP3 audio extracted from the top YouTube result.",
+      "description": "Downloaded media file: MP3 in audio mode or MP4 in video mode.",
       "mode": "create_or_replace"
     }
   ],
   "graph": {
     "consumes": [],
     "depends_on": [],
-    "provides": ["audio"]
+    "provides": ["media"]
   },
   "isolation": {
     "mode": "subprocess",

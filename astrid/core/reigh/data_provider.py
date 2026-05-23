@@ -24,6 +24,11 @@ tuple (``"user_jwt" | "pat" | "service_role"``) for non-worker callers, falling
 back to ``service_role_key`` only when ``auth`` is omitted. The worker passes
 ``service_role_key``; the CLI / ``open_in_reigh`` should pass ``auth=("user_jwt",
 token)`` or ``auth=("pat", token)`` instead.
+
+This DataProvider is still the legacy compatibility bridge for blob-RPC writes
+into Reigh. It is not evidence that Astrid's event-first Supabase contract is
+fully landed; that companion migration remains deferred to the owning SQL and
+web-app repositories.
 """
 
 from __future__ import annotations
@@ -38,7 +43,7 @@ from . import env as reigh_env
 from . import timeline_io
 from .errors import TimelineNotFoundError
 from .supabase_client import Auth, SupabaseHTTPError, post_json
-from .timeline_io import Mutator, SaveResult, TimelineConfig
+from .timeline_io import Mutator, RawTimelinePayload as TimelineConfig, SaveResult
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +54,9 @@ class SupabaseDataProvider:
 
     Construct with explicit URLs/tokens, or rely on ``from_env()`` to derive
     them from the standard ``REIGH_*`` env vars.
+
+    Write methods here remain compatibility-only wrappers around
+    ``timeline_io.save_timeline`` and related blob-oriented endpoints.
     """
 
     supabase_url: str

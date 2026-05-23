@@ -120,7 +120,7 @@ def _record(
         "run_id": run_id,
         "thread_id": thread_id,
         "parent_run_ids": parent_run_ids or [],
-        "executor_id": "builtin.generate_image",
+        "executor_id": "builtin.generate_image_openai",
         "orchestrator_id": None,
         "kind": "executor",
         "status": "succeeded",

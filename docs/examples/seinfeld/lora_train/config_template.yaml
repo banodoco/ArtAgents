@@ -15,6 +15,7 @@ config:
         type: lora
         linear: 32
         linear_alpha: 32
+        layer_offloading: true
       save:
         dtype: float16
         save_every: 250
@@ -25,30 +26,47 @@ config:
           caption_dropout_rate: 0.0
           shuffle_tokens: false
           cache_latents_to_disk: true
+          cache_latents: false
+          cache_text_embeddings: true
           resolution:
             - 512
             - 768
           bucketing: true
-          num_frames: 121
+          auto_frame_count: true
           fps: 24
+          do_audio: true
+          audio_preserve_pitch: true
       train:
         batch_size: 1
         steps: "{{steps}}"
-        gradient_accumulation_steps: 4
+        gradient_accumulation: 4
         train_unet: true
         train_text_encoder: false
         gradient_checkpointing: true
         noise_scheduler: flowmatch
         optimizer: adamw8bit
-        lr: 2.0e-5
+        lr: 1.0e-4
         ema_config:
           use_ema: false
         dtype: bf16
         seed: "{{seed}}"
+        skip_first_sample: true
+        disable_sampling: true
+        cache_text_embeddings: true
+        content_or_style: balanced
+        timestep_type: shift
       model:
         name_or_path: "{{base_model}}"
         arch: "ltx2.3"
         quantize: true
+        is_ltx: true
+        qtype: qfloat8
+        quantize_te: true
+        qtype_te: qfloat8
+        low_vram: true
+        layer_offloading: true
+        layer_offloading_transformer_percent: 1.0
+        layer_offloading_text_encoder_percent: 1.0
       sample:
         sampler: flowmatch
         sample_every: 250

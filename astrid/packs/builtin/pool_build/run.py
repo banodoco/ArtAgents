@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Deterministic pool.json construction from triage, descriptions, and quotes."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.pool_build')
 import argparse
 import json
 import re

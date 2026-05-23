@@ -42,6 +42,7 @@ class ManualAdapter:
         step_dir = _step_dir(run_ctx)
         step_dir.mkdir(parents=True, exist_ok=True)
         dispatch_path = step_dir / "dispatch.json"
+        started_at = _utc_now_iso()
         payload: dict[str, object] = {
             "step_id": step.id,
             "step_version": run_ctx.step_version,
@@ -49,14 +50,14 @@ class ManualAdapter:
             "adapter": "manual",
             "assignee": step.assignee,
             "requires_ack": step.requires_ack,
-            "dispatched_at": _utc_now_iso(),
+            "dispatched_at": started_at,
         }
         if step.instructions is not None:
             payload["instructions"] = step.instructions
         if step.ack is not None:
             payload["ack"] = {"kind": step.ack.kind}
         dispatch_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        return DispatchResult(status="dispatched", started_at=payload["dispatched_at"])  # type: ignore[arg-type]
+        return DispatchResult(status="dispatched", started_at=started_at)
 
     def poll(self, step: Step, run_ctx: RunContext) -> PollResult:
         completion = _read_completion(_step_dir(run_ctx))

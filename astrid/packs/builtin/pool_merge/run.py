@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Merge generative effect catalog entries into pool.json."""
+
 # extends prior plan Step 10
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.pool_merge')
 import argparse
 import json
 from datetime import datetime, timezone

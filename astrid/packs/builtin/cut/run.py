@@ -1,8 +1,20 @@
 #!/usr/bin/env python3
-"""Assemble selected source-video ranges into hype-cut planning files and optional rendered outputs using transcript, scene, and shot inputs."""
+"""Assemble selected source-video ranges into hype-cut planning files and optional rendered outputs using transcript, scene, and shot inputs.
+
+.. note::
+
+    This module produces **standalone** ``hype.timeline.json`` artifacts for
+    the Remotion renderer.  These are NOT project-timeline containers
+    (``assembly.json`` / ``assembly.jsonl``).  Migrating cut/hype clip assembly
+    to emit ``clip.*`` events through the project-timeline ``EventLogBackend``
+    is deferred to **m3.5** (pack/worker write-path sweep)."""
+
 
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.cut')
 import argparse
 import csv
 import hashlib
@@ -78,7 +90,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Render backend. remotion (default) uses tools/remotion/.",
     )
     parser.add_argument("--render", action="store_true", help="Render clips and concat them into hype.mp4.")
+    # Managed binding seam (m3.5): when both --project and --timeline-slug are
+    # present, the pack writes canonical timeline events through the event gateway.
+    # Without these flags, the pack runs in unmanaged artifact mode (writes
+    # run-local compatibility outputs only).  --timeline-id is intentionally NOT
+    # added here -- it is reserved for executor UUID mode.
+    parser.add_argument("--project", help="Project slug for managed canonical writes. When combined with --timeline-slug, timeline mutations emit events through the gateway.")
+    parser.add_argument("--timeline-slug", help="Timeline slug within the project for managed canonical writes.")
+    parser.add_argument(
+        "--actor-via",
+        type=json.loads,
+        default=None,
+        help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
+    )
     return parser
+
+def _is_managed_mode(args: argparse.Namespace) -> bool:
+    """Return True when the pack is invoked with both --project and --timeline-slug.
+
+    Managed mode: canonical timeline mutations emit events through the event
+    gateway.  Unmanaged mode (default): writes run-local compatibility outputs
+    only.
+    """
+    return bool(getattr(args, "project", None) and getattr(args, "timeline_slug", None))
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -486,6 +520,13 @@ def build_multitrack_timeline(
     theme_dir: Path | None = None,
     theme_slug: str | None = None,
 ) -> TimelineConfig:
+    """Build a standalone Remotion timeline from arrangement + pool data.
+
+    Returns a ``TimelineConfig`` that is serialized as ``hype.timeline.json`` — a
+    **standalone** render artefact, not a project-timeline container.  Migration
+    to emit ``clip.*`` events through the project-timeline ``EventLogBackend`` is
+    deferred to **m3.5**.
+    """
     clips: list[dict[str, Any]] = []
     if primary_asset is None and "rant" in registry["assets"]:
         clips.append(
@@ -1054,11 +1095,67 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     print(f"wrote {summary}")
     return 0
 
+
+def _emit_cut_managed_events(
+    args: argparse.Namespace, timeline: dict[str, Any],
+    *, actor_via: Any | None = None,
+) -> int:
+    """Emit arrangement.replaced event through the pack write gateway.
+
+    Called when cut runs in managed mode (--project + --timeline-slug).
+    Emits events before compatibility outputs are written.  The gateway
+    handles bootstrap only for true-legacy timelines (no identity
+    sidecar); created timelines accept bare first domain events.  After
+    appending, ``assembly.json`` is regenerated from the canonical
+    event stream.
+
+    When *actor_via* is provided (e.g. from ``--actor-via`` JSON), it is
+    chained as ``actor.via`` to preserve upstream human/agent/orchestrator
+    provenance on the emitted events.
+    """
+    import time as _time
+
+    from astrid.core.timeline._edit_helpers import pack_write_gateway
+    from astrid.core.timeline.events.schema import TimelineActor
+
+    actor = TimelineActor(
+        type="system",
+        id=f"builtin.cut:{hash(str(_time.time()))}",
+        display="builtin.cut",
+        via=[actor_via] if actor_via is not None else None,
+    )
+    events = [
+        {
+            "kind": "arrangement.replaced",
+            "payload": {"arrangement": dict(timeline)},
+        }
+    ]
+    result = pack_write_gateway(
+        project_slug=args.project,
+        timeline_slug=args.timeline_slug,
+        timeline_ulid="",  # resolved by gateway from slug
+        timeline_event_stream_id="",  # resolved by gateway
+        events=events,
+        actor=actor,
+    )
+    return result.new_version
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     global _FFPROBE_VERBOSE
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    # m3.5 managed binding seam: detect managed vs unmanaged mode.
+    managed = _is_managed_mode(args)
+    if managed:
+        # Managed mode: canonical mutations will route through the event gateway
+        # (T10).  For now, validate that both flags are present.
+        print(f"cut: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
+    else:
+        # Unmanaged mode: writes run-local compatibility outputs only.
+        if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
+            raise SystemExit("--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode")
     if args.timeline is not None:
         return run_resume_mode(args)
     theme_path = _resolve_theme_path(args.theme)
@@ -1186,6 +1283,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     edl_path = write_edl(edl_rows, out_dir, asset_paths, asset_urls)
     timeline_path = out_dir / "hype.timeline.json"
+    # m3.5 managed mode: emit events through the gateway before writing
+    # compatibility outputs.
+    if managed:
+        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
+
+        actor_via_raw = getattr(args, "actor_via", None)
+        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
+        _emit_cut_managed_events(args, timeline, actor_via=actor_via)
     save_timeline(timeline, timeline_path)
     save_registry(registry, assets_path)
     save_metadata(meta, metadata_path)

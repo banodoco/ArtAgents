@@ -106,13 +106,44 @@ def _write_plan(tmp_path: Path, payload: dict) -> Path:
     return p
 
 
-def test_load_plan_rejects_non_v2(tmp_path: Path) -> None:
+def test_load_plan_rejects_non_v2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unshimmed_validate_plan
+) -> None:
+    """Production load_plan must reject v1 plans.
+
+    The conftest installs a session-wide v1->v2 auto-migration shim on
+    _validate_plan so legacy fixtures keep working. This test asserts the
+    *production* (un-shimmed) contract — that real callers see a hard
+    TaskPlanError on legacy v1 — by temporarily restoring the original
+    validator (handed back via the ``unshimmed_validate_plan`` fixture).
+    """
+    from astrid.core.task import plan as plan_mod
+
+    monkeypatch.setattr(plan_mod, "_validate_plan", unshimmed_validate_plan)
+
     plan_path = _write_plan(tmp_path, {
         "plan_id": "p1", "version": 1,
         "steps": [{"id": "s1", "command": "echo"}],
     })
     with pytest.raises(TaskPlanError, match="version must be 2"):
         load_plan(plan_path)
+
+
+def test_load_plan_accepts_v1_via_test_shim(tmp_path: Path) -> None:
+    """Document the conftest shim's behavior: under tests, v1 auto-migrates.
+
+    This is the inverse of test_load_plan_rejects_non_v2 — it locks in the
+    fact that within the pytest session the auto-migration shim turns a v1
+    payload into a valid v2 TaskPlan. If this ever fails, either the shim
+    was removed or the migration script changed; both should be intentional.
+    """
+    plan_path = _write_plan(tmp_path, {
+        "plan_id": "p1", "version": 1,
+        "steps": [{"id": "s1", "command": "echo"}],
+    })
+    plan = load_plan(plan_path)
+    assert plan.version == 2
+    assert plan.steps[0].id == "s1"
 
 
 def test_load_plan_accepts_v2(tmp_path: Path) -> None:

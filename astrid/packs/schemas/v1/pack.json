@@ -1,38 +1,88 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://astrid.dev/schemas/packs/v1/pack.json",
-  "title": "Astrid Pack Manifest",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "pack.json",
   "type": "object",
-  "required": ["schema_version", "id", "name", "version", "agent"],
-  "additionalProperties": false,
+  "required": ["schema_version", "id", "name", "version"],
   "properties": {
-    "schema_version": {"type": "number", "const": 1},
-    "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
-    "name": {"type": "string", "minLength": 1},
-    "version": {"type": "string", "minLength": 1},
+    "schema_version": {"type": "integer"},
+    "id": {"$ref": "_defs.json#/definitions/pack_id"},
+    "name": {"type": "string"},
+    "version": {"$ref": "_defs.json#/definitions/version_string"},
     "description": {"type": "string"},
     "content": {
       "type": "object",
-      "additionalProperties": false,
       "properties": {
         "executors": {"type": "string"},
         "orchestrators": {"type": "string"},
         "elements": {"type": "string"},
         "schemas": {"type": "string"},
-        "examples": {"type": "string"}
+        "examples": {"type": "string"},
+        "docs": {"type": "string"}
       }
     },
     "docs": {
-      "type": "object",
-      "additionalProperties": {"type": "string"}
+      "type": "object"
     },
     "agent": {
       "type": "object",
-      "required": ["purpose"],
-      "additionalProperties": true,
       "properties": {
-        "purpose": {"type": "string", "minLength": 1}
+        "purpose": {"type": "string"},
+        "entrypoints": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "normal_entrypoints": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "do_not_use_for": {"type": "string"},
+        "required_context": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
       }
-    }
-  }
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "required": {"type": "boolean"},
+          "description": {"type": "string"}
+        },
+        "required": ["name"]
+      }
+    },
+    "dependencies": {
+      "type": "object",
+      "properties": {
+        "python": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "npm": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "system": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "keywords": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "astrid_version": {"type": "string"}
+  },
+  "additionalProperties": false
 }

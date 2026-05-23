@@ -111,8 +111,12 @@ def test_session_bound_resolution_wins(tmp_path: Path, monkeypatch) -> None:
     _, projects = setup_run(
         tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r3", project="p"
     )
-    expected = _capture_cmd_next("p", projects)
 
+    # Reader-state detection (#18) requires a writer session for cmd_next to
+    # print step instructions; #13 requires session-bound state for the
+    # discovery hint NOT to fire. Both sides of the equality check must run
+    # under the same writer-bound state — set it up BEFORE capturing
+    # `expected` so both invocations exercise the same code path.
     write_identity(Identity(agent_id="hook-test", created_at="2026-01-01T00:00:00Z"))
     sessions_dir().mkdir(parents=True, exist_ok=True)
     session = Session(
@@ -126,7 +130,15 @@ def test_session_bound_resolution_wins(tmp_path: Path, monkeypatch) -> None:
         role="writer",
     )
     session.to_json(session_path(session.id))
+    import json
+    lease_path = projects / "p" / "runs" / "r3" / "lease.json"
+    if lease_path.is_file():
+        lease = json.loads(lease_path.read_text(encoding="utf-8"))
+        lease["attached_session_id"] = session.id
+        lease_path.write_text(json.dumps(lease) + "\n", encoding="utf-8")
     monkeypatch.setenv("ASTRID_SESSION_ID", session.id)
+
+    expected = _capture_cmd_next("p", projects)
 
     # cwd is unrelated; session-bound discovery should still find slug 'p'.
     unrelated = tmp_path / "unrelated"

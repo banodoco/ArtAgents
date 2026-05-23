@@ -19,7 +19,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, Literal, TypedDict, Union
+from typing import Any, List, Literal, TypedDict, Union, cast
 
 try:
     from banodoco_timeline_schema import (
@@ -137,7 +137,7 @@ TrackBlendMode = Literal[
     "darken", "lighten", "soft-light", "hard-light",
 ]
 BUILTIN_CLIP_TYPES = ("media", "hold", "text", "effect-layer")
-ClipType = str
+ClipType = Literal["media", "hold", "text", "effect-layer"]
 TextAlignment = Literal["left", "center", "right"]
 AudioBindingSource = Literal["bass", "mid", "treble", "amplitude"]
 
@@ -457,31 +457,19 @@ def _known_timeline_payload(config: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in config.items() if key in _TIMELINE_TOP_ALLOWED}
 
 def _effect_ids(theme: str | None = None) -> set[str]:
-    try:
-        from astrid.core.element import catalog as effects_catalog
-    except ImportError:
-        from astrid.core.element import catalog as effects_catalog  # type: ignore[no-redef]
+    from astrid.core.element import catalog as effects_catalog
     return set(effects_catalog.list_effect_ids(theme=theme))
 
 def _animation_ids() -> set[str]:
-    try:
-        from astrid.core.element import catalog as effects_catalog
-    except ImportError:
-        from astrid.core.element import catalog as effects_catalog  # type: ignore[no-redef]
+    from astrid.core.element import catalog as effects_catalog
     return set(effects_catalog.list_animation_ids())
 
 def _transition_ids() -> set[str]:
-    try:
-        from astrid.core.element import catalog as effects_catalog
-    except ImportError:
-        from astrid.core.element import catalog as effects_catalog  # type: ignore[no-redef]
+    from astrid.core.element import catalog as effects_catalog
     return set(effects_catalog.list_transition_ids())
 
 def _animation_meta(animation_id: str) -> dict[str, Any]:
-    try:
-        from astrid.core.element import catalog as effects_catalog
-    except ImportError:
-        from astrid.core.element import catalog as effects_catalog  # type: ignore[no-redef]
+    from astrid.core.element import catalog as effects_catalog
     try:
         return effects_catalog.read_animation_meta(animation_id)
     except Exception:
@@ -554,15 +542,11 @@ def _validate_effect_params(effect_id: str, params: Any, path: str, theme: str |
     for phase in ("entrance", "sustain", "exit"):
         if phase in params:
             _validate_animation_reference_list(params[phase], phase, f"{path}.{phase}", known_animation_ids)
+    from astrid.core.element import catalog as effects_catalog
     try:
-        from astrid.core.element import catalog as effects_catalog
-        import jsonschema  # type: ignore[import-not-found]
+        import jsonschema
     except ImportError:
-        try:
-            from astrid.core.element import catalog as effects_catalog  # type: ignore[no-redef]
-            import jsonschema  # type: ignore[import-not-found,no-redef]
-        except ImportError:
-            return
+        return
     schema = effects_catalog.read_effect_schema(effect_id, theme=theme)
     jsonschema.validate(_schema_params_for_animation_refs(schema, params), schema)
 
@@ -800,16 +784,18 @@ class Timeline:
 
     @property
     def clips(self) -> list[TimelineClip]:
-        return self._data.setdefault("clips", [])  # type: ignore[return-value]
+        # setdefault returns the dict's `Any` value type because TimelineConfig
+        # is a `total=False` TypedDict; the cast names the validated shape.
+        return cast(list[TimelineClip], self._data.setdefault("clips", []))
 
     @property
     def tracks(self) -> list[TrackDefinition]:
-        return self._data.setdefault("tracks", [])  # type: ignore[return-value]
+        return cast(list[TrackDefinition], self._data.setdefault("tracks", []))
 
     @property
     def theme_overrides(self) -> ThemeOverrides | None:
         value = self._data.get("theme_overrides")
-        return value if isinstance(value, dict) else None  # type: ignore[return-value]
+        return cast(ThemeOverrides, value) if isinstance(value, dict) else None
 
     @property
     def generation_defaults(self) -> dict[str, Any] | None:
@@ -824,7 +810,7 @@ class Timeline:
     @property
     def output(self) -> TimelineOutput | None:
         value = self._data.get("output")
-        return value if isinstance(value, dict) else None  # type: ignore[return-value]
+        return cast(TimelineOutput, value) if isinstance(value, dict) else None
 
     def classified_clips(
         self,
@@ -842,7 +828,7 @@ class Timeline:
         return TimelineRenderView(self, default_theme=default_theme)
 
     def to_config(self) -> TimelineConfig:
-        return copy.deepcopy(self._data)  # type: ignore[return-value]
+        return cast(TimelineConfig, copy.deepcopy(self._data))
 
     def to_json_data(self) -> dict[str, Any]:
         payload = copy.deepcopy(self._data)
@@ -937,7 +923,7 @@ def save_timeline(config: TimelineConfig, path: Path) -> None:
 def load_registry(path: Path) -> AssetRegistry:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     validate_registry(data)
-    return data  # type: ignore[return-value]
+    return cast(AssetRegistry, data)
 
 def save_registry(registry: AssetRegistry, path: Path) -> None:
     validate_registry(registry)
@@ -946,7 +932,7 @@ def save_registry(registry: AssetRegistry, path: Path) -> None:
 def load_metadata(path: Path) -> PipelineMetadata:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     validate_metadata(data)
-    return data  # type: ignore[return-value]
+    return cast(PipelineMetadata, data)
 
 def save_metadata(meta: PipelineMetadata, path: Path) -> None:
     validate_metadata(meta)
@@ -955,7 +941,7 @@ def save_metadata(meta: PipelineMetadata, path: Path) -> None:
 def load_pool(path: Path) -> Pool:
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     validate_pool(data)
-    return data  # type: ignore[return-value]
+    return cast(Pool, data)
 
 def save_pool(pool: Pool, path: Path) -> None:
     validate_pool(pool)
@@ -999,7 +985,7 @@ def load_arrangement(
     validate_arrangement(data, pool_ids)
     if migrated:
         _write_json(Path(path), data)
-    return data  # type: ignore[return-value]
+    return cast(Arrangement, data)
 
 def save_arrangement(arrangement: Arrangement, path: Path, pool_ids: set[str] | None = None) -> None:
     validate_arrangement(arrangement, pool_ids)

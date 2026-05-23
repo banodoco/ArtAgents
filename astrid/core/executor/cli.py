@@ -86,8 +86,10 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Project identifier. A project slug runs in cache-only/offline mode "
             "(local sources/ + runs/ provenance). A reigh-app project UUID "
-            "(8-4-4-4-12 hex) routes the post-run timeline through "
-            "SupabaseDataProvider; pair with --timeline-id."
+            "(8-4-4-4-12 hex) runs in UUID handoff mode: the executor completes "
+            "locally, emits bridge metadata, and does NOT push to Supabase. "
+            "Pair with --timeline-id. The actual Supabase push is deferred to m6 "
+            "(open_in_reigh bridge replay)."
         ),
     )
     run_parser.add_argument(
@@ -98,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument(
         "--service-role",
         action="store_true",
-        help="Worker-only escape hatch when pushing back via SupabaseDataProvider.",
+        help="Worker-only escape hatch for service-role authenticated operations (Supabase push deferred to m6).",
     )
     run_parser.add_argument("--input", action="append", default=[], metavar="NAME=VALUE", help="Executor input value; may be repeated.")
     run_parser.add_argument("--brief", help="Brief path for built-in pipeline context synthesis.")
@@ -242,16 +244,36 @@ def _scaffold_component(
     created.append(str(stage_md_path.relative_to(pack_root)))
 
     # --- 6. Validate the pack after scaffolding --------------------------------
+    # We only fail when errors involve the JUST-scaffolded file. Pre-existing
+    # pack-level issues (other components missing schema_version, stale
+    # element manifests, etc.) get surfaced as warnings so they don't mask
+    # the scaffold success and don't block the agent from making forward
+    # progress. The dogfood found that the pack-author schema (used here)
+    # and the runtime registry schema diverge — runtime-form executors that
+    # the registry accepts as `kind/command/inputs` look "unknown" to the
+    # pack-author schema. Use `astrid executors validate <id>` separately
+    # for the authoritative runtime check.
     errors, warnings = validate_pack(pack_root)
-    if errors:
+    component_rel = str(component_dir.relative_to(pack_root))
+    own_errors = [err for err in errors if component_rel in str(err)]
+    foreign_errors = [err for err in errors if component_rel not in str(err)]
+    if own_errors:
         print(
             f"{_cli_prefix}: scaffolded {component_type} fails validation "
-            f"({len(errors)} error(s))",
+            f"({len(own_errors)} error(s))",
             file=sys.stderr,
         )
-        for err in errors:
+        for err in own_errors:
             print(f"  {err}", file=sys.stderr)
         return 1
+    if foreign_errors:
+        print(
+            f"{_cli_prefix}: pre-existing pack issues (not from this scaffold; "
+            f"surfaced as a warning):",
+            file=sys.stderr,
+        )
+        for err in foreign_errors:
+            print(f"  {err}", file=sys.stderr)
 
     # --- 7. Report ------------------------------------------------------------
     for rel in created:
@@ -279,36 +301,79 @@ _EXECUTOR_YAML_TEMPLATE = """\
 schema_version: 1
 id: {qualified_id}
 name: {slug}
+kind: built_in
 version: 0.1.0
-description: \"TODO: describe what this executor does.\"
+description: "TODO: describe what this executor does."
+short_description: "TODO: one-line summary used in `astrid executors list`."
+keywords: []
 
-runtime:
-  type: python-cli
-  entrypoint: run.py
-  callable: main
+# Declared inputs the runner will substitute into command.argv at dispatch.
+# Each input becomes a `{{name}}` placeholder. Add more as needed; common
+# types: string, path, integer, number, boolean, json.
+inputs:
+  - name: input_arg
+    type: string
+    required: true
+    description: "TODO: describe this input."
+
+# Declared outputs the runner expects to find on disk after the command
+# completes. {{out}} is the run's output directory (resolved at runtime).
+outputs:
+  - name: result
+    type: file
+    path_template: "{{out}}/result.json"
+
+# command.argv runs the runtime as a subprocess. Placeholders in braces are
+# substituted from the inputs / outputs / runtime context. {{python_exec}}
+# resolves to the interpreter; add `--project {{project}}` if you want the
+# executor to participate in task-mode gating.
+command:
+  argv:
+    - "{{python_exec}}"
+    - "-m"
+    - "astrid.packs.{pack}.executors.{slug}.run"
+    - "--input"
+    - "{{input_arg}}"
+    - "--out"
+    - "{{out}}"
 """
 
 _RUN_PY_TEMPLATE = """\
-\"\"\"{qualified_id} — {component_type} runtime entrypoint.
+\"\"\"{qualified_id} — executor runtime entrypoint.
 
-Implement your {component_type} logic here. The function named ``main`` (or
-whatever you set for ``runtime.callable`` in the manifest) is the entrypoint.
+Invoked as a subprocess by the Astrid runtime per the `command.argv`
+declared in executor.yaml. Argv parsing is the executor's responsibility;
+the runtime supplies the substituted argv (one input at a time as
+declared in the manifest's `inputs:` block, plus `--out <run-dir>`).
+
+Implement `main(argv)` to do the work, write artifacts to {{out}}, and
+return an integer exit code (0 on success).
 \"\"\"
 
+from __future__ import annotations
 
-def main(*, inputs: dict, outputs: dict, **kwargs) -> int:
-    \"\"\"Entrypoint for {qualified_id}.
+import argparse
+import sys
+from pathlib import Path
 
-    Args:
-        inputs: Dict of resolved input values (name → path/value).
-        outputs: Dict to populate with output values (name → path/value).
-        **kwargs: Runtime context (project, brief, etc.).
 
-    Returns:
-        Exit code (0 on success, non-zero on failure).
-    \"\"\"
-    # TODO: implement your logic here
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="{qualified_id}")
+    parser.add_argument("--input", required=True, help="TODO: describe this input.")
+    parser.add_argument("--out", required=True, help="Output directory.")
+    args = parser.parse_args(argv)
+
+    out_dir = Path(args.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # TODO: implement your logic here. Write artifacts under out_dir.
+    # Example: (out_dir / "result.json").write_text('{{"input": "{{}}"}}'.format(args.input))
+
     return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 """
 
 _STAGE_MD_TEMPLATE = """\
@@ -357,7 +422,8 @@ def _cmd_list(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
             print(f"{executor.id}\t{executor.kind}\t{executor.name}")
         else:
             short = short_description_or_truncated(executor.short_description, executor.description)
-            print(f"{executor.id}\t{executor.kind}\t{executor.name}\t{short}")
+            invoke = _format_invocation_hint("executors", executor.id, executor.inputs)
+            print(f"{executor.id}\t{executor.kind}\t{executor.name}\t{short}\t{invoke}")
     return 0
 
 
@@ -419,6 +485,7 @@ def _cmd_inspect(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         print(f"cache_sentinels: {', '.join(executor.cache.sentinels)}")
     if executor.isolation.binaries:
         print(f"binaries: {', '.join(executor.isolation.binaries)}")
+    _print_invocation_example("executors", executor.id, executor.inputs)
     _print_active_thread_footer()
     return 0
 
@@ -513,11 +580,10 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         print(json.dumps(dict(result.payload), separators=(",", ":"), sort_keys=True))
     rc = int(result.returncode or 0)
     if rc == 0 and project_uuid is not None and not args.dry_run:
-        rc = _push_run_to_supabase(
+        rc = _emit_uuid_handoff_metadata(
             project_id=project_uuid,
             timeline_id=args.timeline_id,
             out_dir=Path(args.out),
-            service_role=bool(getattr(args, "service_role", False)),
         )
     return rc
 
@@ -533,51 +599,43 @@ def _project_uuid_or_none(value: str | None) -> str | None:
     return value if _UUID_RE.match(value) else None
 
 
-def _push_run_to_supabase(
+def _emit_uuid_handoff_metadata(
     *,
     project_id: str,
     timeline_id: str,
     out_dir: Path,
-    service_role: bool,
 ) -> int:
-    """Push the run's hype.timeline.json (if produced) via SupabaseDataProvider."""
+    """Emit bridge/handoff metadata for UUID-mode runs (m3.5).
 
+    UUID mode is a handoff contract: the local executor completes, produces
+    explicit bridge metadata, and does NOT call SupabaseDataProvider.save_timeline().
+    The actual Supabase push is deferred to m6 (open_in_reigh bridge replay).
+
+    When hype.timeline.json is present, emit JSON handoff metadata on stdout
+    so downstream tooling can pick up the bridge intent.  When it is absent,
+    log and return 0 (non-producing runs are valid handoffs).
+    """
     timeline_path = out_dir / "hype.timeline.json"
     if not timeline_path.is_file():
         print(
-            f"executors: --project {project_id} requested but {timeline_path} not produced by run; skipping push",
+            f"executors: --project {project_id} UUID mode: {timeline_path} not produced; "
+            f"handoff complete (no timeline to bridge)",
             file=sys.stderr,
         )
         return 0
 
-    from astrid.core.reigh import env as reigh_env
-    from astrid.core.reigh.data_provider import SupabaseDataProvider
-    from astrid.timeline import Timeline
-
-    timeline_blob = Timeline.load(timeline_path).to_json_data()
-    provider = SupabaseDataProvider.from_env()
-    if service_role:
-        auth = ("service_role", reigh_env.resolve_service_role_key())
-    else:
-        auth = ("pat", reigh_env.resolve_pat())
-    _, current_version = provider.load_timeline(project_id, timeline_id)
-
-    def _mutator(_config, _version):
-        return timeline_blob
-
-    result = provider.save_timeline(
-        timeline_id,
-        _mutator,
-        project_id=project_id,
-        auth=auth,
-        expected_version=current_version,
-        retries=3,
-        force=False,
-    )
-    print(
-        f"pushed timeline {timeline_id} project_id={project_id} "
-        f"new_version={result.new_version} attempts={result.attempts}"
-    )
+    import time as _time
+    handoff = {
+        "bridge": "executor-uuid-mode",
+        "schema_version": 1,
+        "project_id": project_id,
+        "timeline_id": timeline_id,
+        "out_dir": str(out_dir.resolve()),
+        "timeline_path": str(timeline_path.resolve()),
+        "note": "Bridge metadata for m6 replay.  Replay via open_in_reigh after m6 Supabase RPC exists.",
+        "emitted_at": _time.time(),
+    }
+    print(json.dumps(handoff, separators=(",", ":"), sort_keys=True))
     return 0
 
 
@@ -629,6 +687,57 @@ def _parse_input_values(raw_values: list[str]) -> dict[str, str]:
 def _require_qualified_id(value: str, label: str) -> None:
     if "." not in value or any(not part for part in value.split(".")):
         raise ValueError(f"{label} must be qualified as <pack>.<name>")
+
+
+def _example_path_for_port(port: Any) -> str:
+    """Fix 6: render a plausible ``<path>`` placeholder for an input port.
+
+    Uses the port name as the filename so the example looks like a real
+    invocation; the suffix is best-effort based on the port type (image →
+    .png, video → .mp4, audio → .wav, text → .txt, otherwise no suffix).
+    """
+    type_to_ext = {
+        "image": ".png",
+        "video": ".mp4",
+        "audio": ".wav",
+        "text": ".txt",
+        "json": ".json",
+        "directory": "",
+        "dir": "",
+    }
+    port_type = getattr(port, "type", None) or ""
+    suffix = type_to_ext.get(str(port_type).lower(), "")
+    return f"/path/to/{port.name}{suffix}"
+
+
+def _format_invocation_hint(verb: str, qid: str, inputs: tuple[Any, ...]) -> str:
+    parts = [f"astrid {verb} run {qid}"]
+    required = [port for port in inputs if getattr(port, "required", False)]
+    for port in required[:3]:
+        flag = str(getattr(port, "name", "input")).replace("_", "-")
+        parts.append(f"--{flag} <path>")
+    if len(required) > 3:
+        parts.append("...")
+    return " ".join(parts)
+
+
+def _print_invocation_example(verb: str, qid: str, inputs: tuple[Any, ...]) -> None:
+    """Fix 6 (v6 dogfood): the v5 cross-report flagged that agents read
+    inputs/outputs from ``inspect`` and then guessed at the
+    ``--input <port>=<path>`` syntax from ``run --help``. Append a
+    synthesized example to the inspect output so the wiring is explicit.
+
+    ``verb`` is ``"executors"`` or ``"orchestrators"``.
+    """
+    print()
+    print("Example:")
+    parts = [f"  astrid {verb} run {qid}"]
+    for port in inputs:
+        if not getattr(port, "required", False):
+            continue
+        parts.append(f"--input {port.name}={_example_path_for_port(port)}")
+    parts.append("--out /path/to/output")
+    print(" ".join(parts))
 
 
 def _print_ports(label: str, ports: tuple[Any, ...]) -> None:

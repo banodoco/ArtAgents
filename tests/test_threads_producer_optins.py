@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrid.packs.builtin.generate_image.run import _variant_artifacts_for_generated_images
+from astrid.packs.builtin.generate_image_openai.run import _variant_artifacts_for_generated_images
 from astrid.packs.builtin.logo_ideas.run import _variant_artifacts_for_logo_ideas
 
 
@@ -45,7 +45,7 @@ def test_logo_ideas_variant_artifact_metadata() -> None:
 def test_only_allowed_run_py_files_opt_into_variants() -> None:
     repo = Path(__file__).resolve().parents[1]
     allowed = {
-        repo / "astrid" / "executors" / "generate_image" / "run.py",
+        repo / "astrid" / "executors" / "generate_image_openai" / "run.py",
         repo / "astrid" / "orchestrators" / "logo_ideas" / "run.py",
     }
     offenders = []

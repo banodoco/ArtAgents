@@ -3,242 +3,248 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Seinfeld Dataset Review</title>
+<title>Dataset Review</title>
 <style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;align-items:center;overflow:hidden}
-#filters{width:100%;max-width:960px;padding:10px 16px;display:flex;gap:6px;align-items:center;flex-shrink:0;border-bottom:1px solid #1a1a1a;margin-bottom:8px;background:#000;position:relative;z-index:2}
-#filters button{padding:6px 14px;border:1px solid #333;background:#0f0f0f;color:#999;border-radius:4px;cursor:pointer;font-size:12px;font-family:inherit}
-#filters button:hover{background:#1a1a1a;color:#ddd}
-#filters button.active{background:#2a2a2a;color:#fff;border-color:#666}
-#filters .count{color:#666;font-size:11px;margin-left:auto}
-#vid-container{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;width:100%;max-width:960px}
-video{max-width:100%;max-height:70vh;border-radius:4px}
-#info{width:100%;max-width:960px;padding:12px 16px;display:flex;flex-direction:column;gap:6px}
-#caption{font-size:15px;line-height:1.4;color:#ddd;min-height:42px}
-#confidence{font-size:13px;color:#888}
-#progress{font-size:13px;color:#666;display:flex;justify-content:space-between}
-#status{color:#ff0}
-#reject-tags{font-size:12px;color:#f66;min-height:18px}
-#shortcuts{font-size:11px;color:#444;padding:0 16px 12px;width:100%;max-width:960px;display:flex;gap:16px;flex-wrap:wrap}
-#buttons{width:100%;max-width:960px;padding:8px 16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-#buttons button{padding:8px 14px;border:1px solid #555;background:#1a1a1a;color:#ddd;border-radius:4px;cursor:pointer;font-size:13px;font-family:inherit}
-#buttons button:hover{background:#2a2a2a}
-#buttons button.accept{border-color:#4a4;color:#7e7}
-#buttons button.reject{border-color:#a44;color:#f99}
-#buttons button.reason{font-size:11px;padding:6px 10px}
-#buttons button.submit{margin-left:auto;background:#2a3;color:#fff;border-color:#3b4}
-#buttons button.submit:hover{background:#3b4}
-#edit-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10;flex-direction:column;align-items:center;justify-content:center;padding:24px}
-#edit-overlay textarea{width:100%;max-width:640px;height:200px;background:#222;color:#fff;border:1px solid #555;padding:12px;font-size:14px;font-family:inherit;resize:vertical;border-radius:4px}
-#edit-overlay .btns{margin-top:12px;display:flex;gap:12px}
-#edit-overlay button{padding:8px 20px;border:none;border-radius:4px;cursor:pointer;font-size:14px}
-#save-edit{background:#4a4}
-#cancel-edit{background:#555;color:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:#0b0b0b;color:#f4f4f4;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+button,select,textarea{font:inherit}
+#topbar{position:sticky;top:0;z-index:5;background:#0b0b0bf2;border-bottom:1px solid #242424;backdrop-filter:blur(12px)}
+#topbar-inner{max-width:1180px;margin:0 auto;padding:12px 16px;display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center}
+#filters{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+#filters button,#submit{border:1px solid #353535;background:#151515;color:#a8a8a8;border-radius:6px;padding:7px 12px;cursor:pointer}
+#filters button:hover,#submit:hover{background:#1e1e1e;color:#fff}
+#filters button.active{background:#e8e2ce;color:#151515;border-color:#e8e2ce}
+#counts{font-size:12px;color:#8f8f8f;justify-self:end;white-space:nowrap}
+#submit{background:#1f3b2b;border-color:#366447;color:#d8ffe4}
+#status{max-width:1180px;margin:0 auto;padding:0 16px 10px;color:#8f8f8f;font-size:12px}
+#list{max-width:1180px;margin:0 auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.empty{padding:48px 16px;text-align:center;color:#888;border:1px dashed #333;border-radius:8px}
+.card{display:grid;grid-template-columns:minmax(280px,420px) 1fr;gap:14px;background:#121212;border:1px solid #252525;border-radius:8px;padding:12px}
+.card.accept{border-color:#29553a;background:#101a13}
+.card.reject{border-color:#5e2d2d;background:#1a1010}
+.media{display:flex;flex-direction:column;gap:8px;min-width:0}
+video{width:100%;aspect-ratio:16/9;object-fit:contain;background:#000;border-radius:6px;border:1px solid #202020}
+.meta{display:flex;gap:8px;flex-wrap:wrap;color:#858585;font-size:12px;line-height:1.35}
+.main{min-width:0;display:flex;flex-direction:column;gap:10px}
+.row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.id{font-weight:650;color:#f1f1f1;overflow-wrap:anywhere}
+.pill{font-size:12px;border:1px solid #363636;border-radius:999px;padding:3px 8px;color:#aaa;background:#171717}
+.pill.pending{color:#e8e2ce;border-color:#695f3b}
+.pill.accept{color:#8ff0a4;border-color:#386846}
+.pill.reject{color:#ff9a9a;border-color:#733838}
+.caption{width:100%;min-height:72px;resize:vertical;background:#0b0b0b;color:#e8e8e8;border:1px solid #303030;border-radius:6px;padding:9px 10px;line-height:1.35}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.actions button{border:1px solid #383838;background:#181818;color:#ddd;border-radius:6px;padding:8px 11px;cursor:pointer}
+.actions button:hover{background:#242424}
+.actions button.yes{border-color:#3f704a;color:#a7f3b4}
+.actions button.no{border-color:#7a3b3b;color:#ffabab}
+.actions button.clear{color:#aaa}
+.actions button.selected.yes{background:#21462a;color:#dcffe3}
+.actions button.selected.no{background:#4a2020;color:#ffe1e1}
+.reason{background:#111;color:#ddd;border:1px solid #353535;border-radius:6px;padding:8px;min-width:150px}
+@media(max-width:760px){
+  #topbar-inner{grid-template-columns:1fr}
+  #counts{justify-self:start}
+  .card{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body>
-<div id="filters">
-<button data-filter="pending" class="active" id="flt-pending">Pending</button>
-<button data-filter="accepted" id="flt-accepted">Accepted</button>
-<button data-filter="rejected" id="flt-rejected">Rejected</button>
-<button data-filter="all" id="flt-all">All</button>
-<span class="count" id="flt-counts"></span>
+<div id="topbar">
+  <div id="topbar-inner">
+    <div id="filters">
+      <button data-filter="all" class="active">All</button>
+      <button data-filter="pending">Pending</button>
+      <button data-filter="accepted">Accepted</button>
+      <button data-filter="rejected">Rejected</button>
+      <button id="submit">Submit</button>
+    </div>
+    <div id="counts"></div>
+  </div>
+  <div id="status">Loading...</div>
 </div>
-<div id="vid-container"><video id="vid" controls autoplay loop muted></video></div>
-<div id="info">
-<div id="caption">Loading...</div>
-<div id="confidence"></div>
-<div id="progress"><span id="prog-text"></span><span id="status"></span></div>
-<div id="reject-tags"></div>
-</div>
-<div id="buttons">
-<button class="accept" id="btn-accept">✓ Accept (Y)</button>
-<button class="reject" id="btn-reject">✗ Reject (N)</button>
-<button id="btn-back">← Back</button>
-<button class="reason" id="btn-r1">1: watermark</button>
-<button class="reason" id="btn-r2">2: wrong_scene</button>
-<button class="reason" id="btn-r3">3: wrong_char</button>
-<button class="reason" id="btn-r4">4: bad_motion</button>
-<button id="btn-edit">E: edit caption</button>
-<button class="submit" id="btn-submit">Submit (Enter)</button>
-</div>
-<div id="shortcuts">
-<span>Y/Space/→ Accept</span><span>N/X Reject</span><span>← Back</span>
-<span>1 watermark</span><span>2 wrong_scene</span><span>3 wrong_ch</span><span>4 bad_motion</span>
-<span>E edit</span><span>Enter submit</span>
-</div>
-<div id="edit-overlay">
-<textarea id="edit-ta"></textarea>
-<div class="btns"><button id="save-edit">Save (Esc)</button><button id="cancel-edit">Cancel</button></div>
-</div>
+<main id="list"></main>
 <script>
 const token = new URLSearchParams(location.search).get('token') || '';
 const S = id => document.getElementById(id);
-const REASONS = {1:'watermark',2:'wrong_scene',3:'wrong_character',4:'bad_motion'};
-let clips=[], visibleClips=[], decisions={}, cursor=0, lastReject=null, saveTimer=null, filter='pending';
+const REASONS = ['', 'watermark', 'wrong_scene', 'wrong_character', 'bad_motion'];
+let clips = [];
+let decisions = {};
+let filter = 'all';
+let saveTimer = null;
 
-function hdr(){ return {'X-Session-Token':token,'Content-Type':'application/json'}; }
-
-function clipMatchesFilter(c, f){
-  const d = decisions[c.id];
-  if(f==='all') return true;
-  if(f==='pending') return !d;
-  if(f==='accepted') return d && d.decision==='accept';
-  if(f==='rejected') return d && d.decision==='reject';
-  return true;
+function headers(){ return {'X-Session-Token': token, 'Content-Type': 'application/json'}; }
+function clipSrc(c){ return '/clips/' + encodeURIComponent(c.bucket) + '/' + encodeURIComponent(c.id) + '.mp4'; }
+function stateOf(c){ return decisions[c.id]?.decision || 'pending'; }
+function matches(c){
+  const s = stateOf(c);
+  return filter === 'all' || (filter === 'pending' && s === 'pending') || (filter === 'accepted' && s === 'accept') || (filter === 'rejected' && s === 'reject');
 }
-
-function rebuildVisible(){
-  visibleClips = clips.filter(c=>clipMatchesFilter(c, filter));
-}
-
-function updateCounts(){
-  let pend=0, acc=0, rej=0;
+function counts(){
+  let pending = 0, accepted = 0, rejected = 0;
   for(const c of clips){
-    const d=decisions[c.id];
-    if(!d) pend++;
-    else if(d.decision==='accept') acc++;
-    else if(d.decision==='reject') rej++;
+    const s = stateOf(c);
+    if(s === 'accept') accepted++;
+    else if(s === 'reject') rejected++;
+    else pending++;
   }
-  S('flt-counts').textContent = `${pend} pending · ${acc} accepted · ${rej} rejected`;
+  return {pending, accepted, rejected};
 }
-
-function setFilter(f){
-  filter = f;
-  for(const b of document.querySelectorAll('#filters button')){
-    b.classList.toggle('active', b.dataset.filter===f);
-  }
-  const prevId = visibleClips[cursor]?.id;
-  rebuildVisible();
-  // Try to keep the same clip in view if it still matches; otherwise reset to start.
-  const idx = prevId ? visibleClips.findIndex(c=>c.id===prevId) : -1;
-  cursor = idx>=0 ? idx : 0;
+function labelFor(s){
+  if(s === 'accept') return 'Accepted';
+  if(s === 'reject') return 'Rejected';
+  return 'Pending';
+}
+function saveNow(){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    fetch('/save', {method:'POST', headers:headers(), body:JSON.stringify({decisions})})
+      .then(r => {
+        S('status').textContent = r.ok ? 'Saved' : 'Save failed';
+      })
+      .catch(() => { S('status').textContent = 'Save failed'; });
+  }, 200);
+}
+function setDecision(id, decision){
+  const existing = decisions[id] || {};
+  decisions[id] = {
+    decision,
+    reject_reason: decision === 'reject' ? (existing.reject_reason || null) : null,
+    edited_caption: existing.edited_caption || null,
+    reviewed_at: new Date().toISOString()
+  };
+  saveNow();
   render();
 }
-
-async function init(){
-  const d = await fetch('/data.json').then(r=>r.json());
-  clips = d.clips || d;
-  try {
-    const r = await fetch('/state.json?token='+token);
-    if(r.ok){ const s=await r.json(); Object.assign(decisions,s.decisions||{}); }
-  }catch(e){}
-  rebuildVisible();
-  cursor = 0;
-  for(const b of document.querySelectorAll('#filters button')){
-    b.addEventListener('click',()=>setFilter(b.dataset.filter));
-  }
+function clearDecision(id){
+  delete decisions[id];
+  saveNow();
   render();
 }
-
+function setReason(id, value){
+  const existing = decisions[id] || {decision:'reject', reject_reason:null, edited_caption:null};
+  decisions[id] = {
+    decision: 'reject',
+    reject_reason: value || null,
+    edited_caption: existing.edited_caption || null,
+    reviewed_at: new Date().toISOString()
+  };
+  saveNow();
+  renderCounts();
+  const card = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
+  if(card){
+    card.classList.remove('accept');
+    card.classList.add('reject');
+    const pill = card.querySelector('.pill');
+    if(pill){ pill.className = 'pill reject'; pill.textContent = 'Rejected'; }
+    card.querySelector('.yes')?.classList.remove('selected');
+    card.querySelector('.no')?.classList.add('selected');
+  }
+}
+function setCaption(id, value){
+  const existing = decisions[id] || {decision:'reject', reject_reason:null, edited_caption:null};
+  decisions[id] = {
+    decision: existing.decision || 'reject',
+    reject_reason: existing.reject_reason || null,
+    edited_caption: value.trim() || null,
+    reviewed_at: new Date().toISOString()
+  };
+  saveNow();
+  renderCounts();
+}
+function renderCounts(){
+  const c = counts();
+  S('counts').textContent = `${c.pending} pending · ${c.accepted} accepted · ${c.rejected} rejected · ${clips.length} total`;
+}
 function render(){
-  updateCounts();
-  if(!clips.length){ S('caption').textContent='No clips to review.'; S('vid').removeAttribute('src'); S('prog-text').textContent=''; S('status').textContent=''; S('reject-tags').textContent=''; S('confidence').textContent=''; return; }
-  if(!visibleClips.length){
-    S('vid').removeAttribute('src');
-    S('caption').textContent = `No clips match filter: ${filter}.`;
-    S('confidence').textContent = '';
-    const reviewed = Object.keys(decisions).length;
-    S('prog-text').textContent = reviewed+' / '+clips.length+' reviewed';
-    S('status').textContent = reviewed===clips.length ? 'All reviewed | Press Enter to submit' : '';
-    S('reject-tags').textContent = '';
+  renderCounts();
+  for(const b of document.querySelectorAll('#filters button[data-filter]')){
+    b.classList.toggle('active', b.dataset.filter === filter);
+  }
+  const visible = clips.filter(matches);
+  const list = S('list');
+  list.innerHTML = '';
+  S('status').textContent = visible.length ? `${visible.length} visible` : 'No clips match this filter';
+  if(!visible.length){
+    list.innerHTML = '<div class="empty">No clips match this filter.</div>';
     return;
   }
-  if(cursor>=visibleClips.length) cursor = visibleClips.length-1;
-  if(cursor<0) cursor = 0;
-  const c=visibleClips[cursor], d=decisions[c.id];
-  S('vid').src = '/clips/'+c.bucket+'/'+c.id+'.mp4';
-  S('caption').textContent = d?.edited_caption || c.caption || '';
-  S('confidence').textContent = 'Judge confidence: '+(c.judge_confidence!=null ? (c.judge_confidence*100).toFixed(0)+'%' : 'N/A');
-  const reviewed = Object.keys(decisions).length;
-  S('prog-text').textContent = `${cursor+1} / ${visibleClips.length} in view · ${reviewed} / ${clips.length} reviewed`;
-  S('status').textContent = d ? (d.decision==='accept' ? '✓ Accepted' : '✗ Rejected: '+(d.reject_reason||'')) : '— Pending';
-  S('reject-tags').textContent = d?.reject_reason ? 'Last reject reason: '+d.reject_reason : '';
-  if(reviewed===clips.length) S('status').textContent += ' | Press Enter to submit';
+  const frag = document.createDocumentFragment();
+  for(const c of visible){
+    const d = decisions[c.id] || {};
+    const s = stateOf(c);
+    const card = document.createElement('article');
+    card.className = 'card ' + (s === 'accept' ? 'accept' : s === 'reject' ? 'reject' : '');
+    card.dataset.id = c.id;
+    const confidence = c.judge_confidence != null ? Math.round(c.judge_confidence * 100) + '% confidence' : 'unscored';
+    const duration = c.duration_s != null ? Number(c.duration_s).toFixed(1) + 's' : '';
+    card.innerHTML = `
+      <div class="media">
+        <video controls preload="metadata" src="${clipSrc(c)}"></video>
+        <div class="meta">
+          <span>${c.source_title || c.source_slug || c.bucket || ''}</span>
+          <span>${duration}</span>
+          <span>${confidence}</span>
+        </div>
+      </div>
+      <div class="main">
+        <div class="row">
+          <span class="id">${c.id}</span>
+          <span class="pill ${s === 'accept' ? 'accept' : s === 'reject' ? 'reject' : 'pending'}">${labelFor(s)}</span>
+        </div>
+        <textarea class="caption" aria-label="Caption">${d.edited_caption || c.caption || ''}</textarea>
+        <div class="actions">
+          <button class="yes ${s === 'accept' ? 'selected' : ''}" type="button">Yes</button>
+          <button class="no ${s === 'reject' ? 'selected' : ''}" type="button">No</button>
+          <select class="reason" aria-label="Reject reason">
+            ${REASONS.map(r => `<option value="${r}" ${d.reject_reason === r ? 'selected' : ''}>${r || 'No reason'}</option>`).join('')}
+          </select>
+          <button class="clear" type="button">Pending</button>
+        </div>
+      </div>`;
+    card.querySelector('.yes').addEventListener('click', () => setDecision(c.id, 'accept'));
+    card.querySelector('.no').addEventListener('click', () => setDecision(c.id, 'reject'));
+    card.querySelector('.clear').addEventListener('click', () => clearDecision(c.id));
+    card.querySelector('.reason').addEventListener('change', e => setReason(c.id, e.target.value));
+    card.querySelector('.caption').addEventListener('input', e => setCaption(c.id, e.target.value));
+    frag.appendChild(card);
+  }
+  list.appendChild(frag);
 }
-
-function decide(action){
-  const c=visibleClips[cursor]; if(!c) return;
-  const now=new Date().toISOString();
-  decisions[c.id] = {decision:action, reject_reason:null, edited_caption:null, reviewed_at:now};
-  if(action==='reject') lastReject=c.id;
-  save();
-  // If the just-decided clip no longer matches the active filter, drop it
-  // from the visible list and keep cursor in place (next item slides in).
-  if(!clipMatchesFilter(c, filter)){
-    visibleClips.splice(cursor, 1);
-    // cursor stays — clamped in render()
-    render();
-  } else {
-    advance();
+async function submitAll(){
+  const c = counts();
+  if(c.pending && !confirm(c.pending + ' clips are still pending. Submit anyway?')) return;
+  for(const clip of clips){
+    if(!decisions[clip.id]){
+      decisions[clip.id] = {decision:'reject', reject_reason:null, edited_caption:null, reviewed_at:new Date().toISOString()};
+    }
+  }
+  const body = {decisions, completed_at: new Date().toISOString()};
+  const r = await fetch('/submit', {method:'POST', headers:headers(), body:JSON.stringify(body)});
+  if(r.ok){
+    S('status').textContent = 'Submitted';
+    document.body.insertAdjacentHTML('beforeend','<div style="position:fixed;right:16px;bottom:16px;background:#163a22;color:#dcffe3;border:1px solid #3b7a4d;border-radius:8px;padding:12px 14px">Review submitted</div>');
+  }else{
+    const e = await r.json().catch(() => ({}));
+    alert('Submit failed: ' + (e.detail || e.error || r.status));
   }
 }
-
-function advance(){ if(cursor<visibleClips.length-1){ cursor++; render(); } else { render(); } }
-function back(){ if(cursor>0){ cursor--; render(); } }
-function save(){ clearTimeout(saveTimer); saveTimer=setTimeout(()=>fetch('/save',{method:'POST',headers:hdr(),body:JSON.stringify({decisions})}),250); }
-
-function tagReason(code){
-  if(!lastReject || !decisions[lastReject] || decisions[lastReject].decision!=='reject') return;
-  decisions[lastReject].reject_reason = REASONS[code];
-  save(); render();
-}
-
-function openEdit(){
-  const c=visibleClips[cursor]; if(!c) return;
-  const d=decisions[c.id];
-  S('edit-overlay').style.display='flex';
-  S('edit-ta').value = d?.edited_caption || c.caption || '';
-  S('edit-ta').focus();
-}
-function closeEdit(saveEdit){
-  const c=visibleClips[cursor];
-  if(saveEdit && c){
-    const val=S('edit-ta').value.trim();
-    if(!decisions[c.id]) decisions[c.id]={decision:'reject',reject_reason:null,edited_caption:val||null,reviewed_at:new Date().toISOString()};
-    else decisions[c.id].edited_caption = val||null;
-    save();
+async function init(){
+  const data = await fetch('/data.json').then(r => r.json());
+  clips = data.clips || data;
+  try{
+    const r = await fetch('/state.json?token=' + token);
+    if(r.ok){
+      const state = await r.json();
+      decisions = state.decisions || {};
+    }
+  }catch(e){}
+  for(const b of document.querySelectorAll('#filters button[data-filter]')){
+    b.addEventListener('click', () => { filter = b.dataset.filter; render(); });
   }
-  S('edit-overlay').style.display='none';
+  S('submit').addEventListener('click', submitAll);
   render();
 }
-
-async function submitAll(){
-  const unreviewed=clips.filter(c=>!decisions[c.id]);
-  if(unreviewed.length && !confirm(unreviewed.length+' clips unreviewed. Submit anyway?')) return;
-  for(const c of clips){ if(!decisions[c.id]) decisions[c.id]={decision:'reject',reject_reason:null,edited_caption:null,reviewed_at:new Date().toISOString()}; }
-  const body={decisions,completed_at:new Date().toISOString()};
-  const r=await fetch('/submit',{method:'POST',headers:hdr(),body:JSON.stringify(body)});
-  if(r.ok){ document.body.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-size:18px;color:#4a4">Review submitted — you may close this tab.</div>'; }
-  else{ const e=await r.json(); alert('Submit failed: '+(e.detail||e.error||'Unknown error')); }
-}
-
-document.addEventListener('keydown',e=>{
-  if(S('edit-overlay').style.display==='flex'){
-    if(e.key==='Escape'){ closeEdit(false); e.preventDefault(); }
-    else if(e.key==='Enter' && e.ctrlKey){ closeEdit(true); e.preventDefault(); }
-    return;
-  }
-  const k=e.key;
-  if(k==='y'||k==='Y'||k===' '||k==='ArrowRight'){ decide('accept'); e.preventDefault(); }
-  else if(k==='n'||k==='N'||k==='x'||k==='X'){ decide('reject'); e.preventDefault(); }
-  else if(k==='ArrowLeft'){ back(); e.preventDefault(); }
-  else if(k>='1'&&k<='4'){ tagReason(parseInt(k)); e.preventDefault(); }
-  else if(k==='e'||k==='E'){ openEdit(); e.preventDefault(); }
-  else if(k==='Enter'){ submitAll(); e.preventDefault(); }
-});
-S('save-edit').addEventListener('click',()=>closeEdit(true));
-S('cancel-edit').addEventListener('click',()=>closeEdit(false));
-S('btn-accept').addEventListener('click',()=>decide('accept'));
-S('btn-reject').addEventListener('click',()=>decide('reject'));
-S('btn-back').addEventListener('click',back);
-S('btn-r1').addEventListener('click',()=>tagReason(1));
-S('btn-r2').addEventListener('click',()=>tagReason(2));
-S('btn-r3').addEventListener('click',()=>tagReason(3));
-S('btn-r4').addEventListener('click',()=>tagReason(4));
-S('btn-edit').addEventListener('click',openEdit);
-S('btn-submit').addEventListener('click',submitAll);
 init();
 </script>
 </body>

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Fetch canonical Reigh project data through the reigh-app Edge Function."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.reigh_data')
 import argparse
 import json
 import sys

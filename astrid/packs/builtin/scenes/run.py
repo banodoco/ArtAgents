@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Detect scene boundaries from a source video and write scene timing data to JSON and CSV files for downstream shot and cut selection."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.scenes')
 import argparse
 import csv
 import json

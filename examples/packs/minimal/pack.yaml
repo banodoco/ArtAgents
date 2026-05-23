@@ -1,0 +1,20 @@
+schema_version: 1
+id: minimal
+name: Minimal Example Pack
+version: 0.1.0
+description: A minimal external pack fixture for install and validation tests.
+
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+
+agent:
+  purpose: Demonstrates the minimal structure required for a valid external pack.
+  entrypoints:
+    - validate
+    - install
+
+docs:
+  readme: README.md
+  agents: AGENTS.md

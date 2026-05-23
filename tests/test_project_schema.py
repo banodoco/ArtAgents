@@ -51,7 +51,7 @@ def test_project_helpers_resolve_env_root_and_write_deterministic_json(tmp_path:
 
 
 def test_create_project_does_not_write_timeline_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """T10 invariant: timeline.json is no longer written; sources/ + runs/ still are."""
+    """T10 invariant: project creation stays local-only; Reigh blob writes remain a legacy compatibility bridge."""
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -178,3 +178,136 @@ def test_legacy_project_json_without_default_timeline_id_still_validates() -> No
     validated = validate_project(legacy)
     assert "default_timeline_id" not in validated
     assert validated["slug"] == "demo"
+
+
+# ── T3: run-record ULID contract and new metadata keys ────────────────────
+
+
+def test_run_timeline_id_must_be_valid_ulid() -> None:
+    """run.timeline_id stays a ULID-only field; non-ULID strings are rejected."""
+
+    from astrid.threads.ids import generate_ulid
+
+    valid_ulid = generate_ulid()
+    record = build_run_record("demo", "01HXYZ", timeline_id=valid_ulid)
+    assert record["timeline_id"] == valid_ulid
+
+    # Invalid shapes must raise (ProjectPathError from validate_timeline_ulid,
+    # wrapped via build_run_record → validate_timeline_ulid).
+    from astrid.core.project.paths import ProjectPathError
+
+    with pytest.raises(ProjectPathError, match="timeline ULID"):
+        build_run_record("demo", "01HXYZ", timeline_id="not-a-ulid")
+    with pytest.raises(ProjectPathError, match="timeline ULID"):
+        build_run_record("demo", "01HXYZ", timeline_id="")
+
+
+def test_managed_binding_metadata_round_trip() -> None:
+    """metadata.timeline_slug, timeline_event_stream_id, timeline_binding_mode round-trip."""
+
+    from uuid import uuid4
+
+    event_stream_id = str(uuid4())
+    record = build_run_record(
+        "demo",
+        "01HXYZ",
+        timeline_slug="my-cut-v1",
+        timeline_event_stream_id=event_stream_id,
+        timeline_binding_mode="managed",
+    )
+    meta = record["metadata"]
+    assert meta["timeline_slug"] == "my-cut-v1"
+    assert meta["timeline_event_stream_id"] == event_stream_id
+    assert meta["timeline_binding_mode"] == "managed"
+
+    # Round-trip through validate_run_record.
+    validated = validate_run_record(record)
+    assert validated["metadata"]["timeline_slug"] == "my-cut-v1"
+    assert validated["metadata"]["timeline_event_stream_id"] == event_stream_id
+    assert validated["metadata"]["timeline_binding_mode"] == "managed"
+
+    # timeline_id is still absent (ULID-only, not required).
+    assert "timeline_id" not in validated
+
+
+def test_managed_binding_metadata_with_timeline_id_round_trip() -> None:
+    """Both timeline_id (ULID) and binding metadata coexist correctly."""
+
+    from astrid.threads.ids import generate_ulid
+    from uuid import uuid4
+
+    ulid = generate_ulid()
+    event_stream_id = str(uuid4())
+    record = build_run_record(
+        "demo",
+        "01HXYZ",
+        timeline_id=ulid,
+        timeline_slug="my-cut-v2",
+        timeline_event_stream_id=event_stream_id,
+        timeline_binding_mode="managed",
+    )
+    assert record["timeline_id"] == ulid
+    meta = record["metadata"]
+    assert meta["timeline_slug"] == "my-cut-v2"
+    assert meta["timeline_event_stream_id"] == event_stream_id
+    assert meta["timeline_binding_mode"] == "managed"
+
+
+def test_legacy_run_without_binding_metadata_validates() -> None:
+    """Runs written before m3.5 lack timeline_slug/event_stream_id/binding_mode in metadata."""
+
+    record = build_run_record("demo", "01HXYZ", status="prepared")
+    assert "timeline_slug" not in record["metadata"]
+    assert "timeline_event_stream_id" not in record["metadata"]
+    assert "timeline_binding_mode" not in record["metadata"]
+    validated = validate_run_record(record)
+    assert validated["status"] == "prepared"
+
+
+def test_managed_binding_mode_must_be_known() -> None:
+    """timeline_binding_mode must be 'managed' or 'unmanaged'."""
+
+    from uuid import uuid4
+
+    event_stream_id = str(uuid4())
+    record = build_run_record(
+        "demo",
+        "01HXYZ",
+        timeline_slug="my-cut-v3",
+        timeline_event_stream_id=event_stream_id,
+        timeline_binding_mode="unmanaged",
+    )
+    assert record["metadata"]["timeline_binding_mode"] == "unmanaged"
+
+    # Invalid mode via direct metadata injection (bypass build for validation-only test).
+    record_bad = build_run_record("demo", "01HXYZ")
+    record_bad["metadata"]["timeline_binding_mode"] = "garbage"
+    record_bad["metadata"]["timeline_slug"] = "my-cut-v3"
+    record_bad["metadata"]["timeline_event_stream_id"] = event_stream_id
+    with pytest.raises(ProjectValidationError, match="timeline_binding_mode"):
+        validate_run_record(record_bad)
+
+
+def test_managed_binding_event_stream_id_must_be_valid_uuid() -> None:
+    """timeline_event_stream_id must be a valid UUID string."""
+
+    record = build_run_record("demo", "01HXYZ")
+    record["metadata"]["timeline_slug"] = "my-cut-v4"
+    record["metadata"]["timeline_event_stream_id"] = "not-a-uuid"
+    record["metadata"]["timeline_binding_mode"] = "managed"
+    with pytest.raises(ProjectValidationError, match="timeline_event_stream_id"):
+        validate_run_record(record)
+
+
+def test_managed_binding_slug_must_be_valid() -> None:
+    """timeline_slug must pass validate_timeline_slug."""
+
+    from uuid import uuid4
+    from astrid.core.project.paths import ProjectPathError
+
+    record = build_run_record("demo", "01HXYZ")
+    record["metadata"]["timeline_slug"] = "NOT VALID"
+    record["metadata"]["timeline_event_stream_id"] = str(uuid4())
+    record["metadata"]["timeline_binding_mode"] = "managed"
+    with pytest.raises(ProjectPathError):
+        validate_run_record(record)

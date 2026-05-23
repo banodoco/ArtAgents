@@ -27,14 +27,32 @@ if "ASTRID_TIMELINE_COMPOSITION_SRC" not in os.environ:
     atexit.register(lambda: shutil.rmtree(_package_src, ignore_errors=True))
 
 
+# v10 prep (Fix #1, brief caveat): each pack's ``run.py`` now calls
+# ``guard_canonical_entrypoint()`` at module-top, so any test that imports
+# ``astrid.packs.<X>.run`` would otherwise exit with code 2. Set the marker
+# env var once at conftest load so test collection (and any internal
+# import chain that brushes a pack's run module) flows through cleanly.
+# Production callers continue to set this in the subprocess env via the
+# canonical runners.
+os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
+
+
 # Sprint 3 test-only shim: auto-migrate v1 plan dicts to v2 inside _validate_plan
-# so legacy fixtures keep working without per-test schema rewrites.
+# so legacy fixtures keep working without per-test schema rewrites. The original
+# (un-shimmed) validator is captured below in ``_UNSHIMMED_VALIDATE_PLAN`` so
+# the ``unshimmed_validate_plan`` fixture can hand it back to tests that need
+# to assert the production v2-strict contract.
+_UNSHIMMED_VALIDATE_PLAN: Any = None
+
+
 def _install_v1_plan_migration_shim() -> None:
+    global _UNSHIMMED_VALIDATE_PLAN
     import importlib.util
     import sys as _sys
     from astrid.core.task import plan as _plan_mod
 
     _orig_validate = _plan_mod._validate_plan
+    _UNSHIMMED_VALIDATE_PLAN = _orig_validate
     _migrate_module_path = (
         Path(__file__).resolve().parent.parent
         / "scripts" / "migrations" / "sprint-3" / "migrate_plans.py"
@@ -66,6 +84,17 @@ def _install_v1_plan_migration_shim() -> None:
 
 
 _install_v1_plan_migration_shim()
+
+
+@pytest.fixture
+def unshimmed_validate_plan():
+    """Return the original ``_validate_plan`` captured before the v1->v2 shim.
+
+    Tests asserting the production v2-strict contract use this together with
+    ``monkeypatch.setattr`` to bypass the conftest auto-migration shim.
+    """
+
+    return _UNSHIMMED_VALIDATE_PLAN
 
 
 # ---------------------------------------------------------------------------

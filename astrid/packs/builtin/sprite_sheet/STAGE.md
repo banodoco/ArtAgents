@@ -10,6 +10,18 @@ python3 -m astrid executors inspect builtin.sprite_sheet
 python3 -m astrid executors run builtin.sprite_sheet --out runs/sprites/wave --input animation=wave --input subject="neon courier" --dry-run
 ```
 
+To preserve a specific character or object, pass a reference image. The
+executor sends the reference image to the image-edit endpoint, keeps grid
+instructions in the prompt, then uses the existing slice/preview/export path:
+
+```bash
+python3 -m astrid executors run builtin.sprite_sheet \
+  --out runs/sprites/crab-pincer \
+  --input animation="right claw pincer open-close snap loop" \
+  --input subject="blue circuit crab mascot" \
+  --input reference_image=refs/crab.png
+```
+
 Requires image API credentials for generation and `ffmpeg` for slicing/preview
 exports.
 

@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """Build a self-contained HTML page that plays a video with spatial Foley audio."""
 
+
 from __future__ import annotations
 
+
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+guard_canonical_entrypoint('builtin.spatial_audio_page')
 import argparse
 import json
 import shutil

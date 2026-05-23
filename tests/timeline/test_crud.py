@@ -4,9 +4,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
+from astrid.core.timeline.eventlog import (
+    EventLogBackend,
+    LocalFsBackend,
+    SupabaseBackend,
+)
+from astrid.core.timeline.eventlog.types import (
+    EventLogMissingConfigError,
+    EventLogUnsupportedRpcError,
+    SupabaseEventLogOptions,
+)
+from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.crud import (
     TimelineCrudError,
     create_timeline,
@@ -18,8 +30,8 @@ from astrid.core.timeline.crud import (
     show_timeline,
     tombstone_timeline,
 )
-from astrid.core.timeline.paths import timelines_dir
-from astrid.threads.ids import generate_ulid, is_ulid
+from astrid.core.timeline.paths import assembly_identity_path
+from astrid.threads.ids import is_ulid
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +87,22 @@ class TestCreateTimeline:
         display = Display.from_json(tdir / "display.json")
         assert display.slug == "primary"
         assert display.name == "Primary Timeline"
+
+    def test_writes_eventlog_identity_sidecar_for_new_timelines(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "primary", name="Primary Timeline")
+        ulid = result["ulid"]
+
+        identity_path = assembly_identity_path("demo", ulid, root=project_tree)
+        assert identity_path.is_file()
+
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        assert identity["schema_version"] == 1
+        assert identity["timeline_ulid"] == ulid
+        assert identity["backend"] == "local_fs"
+        assert identity["provenance"] == "created"
+        assert isinstance(identity["created_at"], str)
+        assert identity["created_at"]
+        assert str(UUID(identity["timeline_id"])) == identity["timeline_id"]
 
     def test_refuses_duplicate_slug(self, project_tree: Path) -> None:
         create_timeline("demo", "primary")
@@ -179,6 +207,199 @@ class TestRenameTimeline:
     def test_refuses_missing_slug(self, project_tree: Path) -> None:
         with pytest.raises(TimelineCrudError, match="not found"):
             rename_timeline("demo", "nonexistent", "new")
+
+    def test_appends_rename_event_before_legacy_rewrite(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        rename_timeline(
+            "demo",
+            "alpha",
+            "beta",
+            actor=TimelineActor(type="agent", id="codex:test"),
+        )
+
+        backend = LocalFsBackend(
+            timeline_id=identity["timeline_id"],
+            timeline_home=project_tree / "demo" / "timelines" / ulid,
+        )
+        events = backend.read_events()
+        assert events[-1].kind == "timeline.renamed"
+        assert events[-1].payload.old_slug == "alpha"
+        assert events[-1].payload.new_slug == "beta"
+        assert events[-1].actor.id == "codex:test"
+
+    def test_append_failure_leaves_legacy_display_untouched(self, project_tree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        create_timeline("demo", "alpha")
+        before = show_timeline("demo", "alpha")
+        assert before is not None
+
+        def _boom(*args: object, **kwargs: object) -> object:
+            raise RuntimeError("append failed")
+
+        monkeypatch.setattr(LocalFsBackend, "append_event", _boom)
+
+        with pytest.raises(RuntimeError, match="append failed"):
+            rename_timeline("demo", "alpha", "beta")
+
+        after = show_timeline("demo", "alpha")
+        assert after is not None
+        assert after["display"].slug == "alpha"
+
+    def test_rename_uses_system_actor_fallback(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        rename_timeline("demo", "alpha", "beta")
+
+        backend = LocalFsBackend(
+            timeline_id=identity["timeline_id"],
+            timeline_home=project_tree / "demo" / "timelines" / ulid,
+        )
+        event = backend.read_events()[-1]
+        assert event.actor.type == "system"
+        assert event.actor.id == "timeline-crud:rename"
+
+    def test_rename_uses_selected_backend_construction_seam(
+        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        create_timeline("demo", "alpha")
+        seen: dict[str, object] = {}
+
+        class RecordingBackend:
+            def backend_name(self) -> str:
+                return "local_fs"
+
+            def append_event(
+                self,
+                timeline_id: str,
+                kind: str,
+                payload: dict[str, object],
+                *,
+                actor: TimelineActor,
+                expected_version: int | None = None,
+                txn_id: str | None = None,
+            ) -> object:
+                seen["timeline_id"] = timeline_id
+                seen["kind"] = kind
+                seen["payload"] = payload
+                seen["actor"] = actor
+                seen["expected_version"] = expected_version
+                seen["txn_id"] = txn_id
+                return object()
+
+        def fake_select(
+            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None
+        ) -> tuple[object, EventLogBackend]:
+            seen["timeline_id"] = timeline_id
+            seen["timeline_home"] = timeline_home
+            seen["preferred_backend"] = preferred_backend
+            return (
+                type("Stream", (), {"backend": "local_fs"})(),
+                RecordingBackend(),
+            )
+
+        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
+
+        result = rename_timeline(
+            "demo",
+            "alpha",
+            "beta",
+            actor=TimelineActor(type="agent", id="maker"),
+        )
+
+        assert result["slug"] == "beta"
+        assert seen["kind"] == "timeline.renamed"
+        assert seen["payload"] == {"old_slug": "alpha", "new_slug": "beta"}
+        assert isinstance(seen["actor"], TimelineActor)
+        assert seen["timeline_home"] is not None
+        assert seen["preferred_backend"] == "local_fs"
+
+    def test_rename_rejects_malformed_identity_backend(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity_path = assembly_identity_path("demo", ulid, root=project_tree)
+        identity = json.loads(identity_path.read_text(encoding="utf-8"))
+        identity["backend"] = {"bad": "shape"}
+        identity_path.write_text(json.dumps(identity), encoding="utf-8")
+
+        with pytest.raises(TimelineCrudError, match="malformed backend"):
+            rename_timeline("demo", "alpha", "beta")
+
+    def test_rename_rejects_explicit_supabase_backend_without_config(
+        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        def fake_select(
+            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None
+        ) -> tuple[object, EventLogBackend]:
+            assert timeline_id == identity["timeline_id"]
+            return (
+                type("Stream", (), {"backend": "supabase"})(),
+                SupabaseBackend(timeline_id=timeline_id),
+            )
+
+        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
+
+        with pytest.raises(EventLogMissingConfigError, match="SupabaseBackend"):
+            rename_timeline("demo", "alpha", "beta")
+
+    def test_rename_rejects_configured_supabase_backend_without_transport(
+        self, project_tree: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = create_timeline("demo", "alpha")
+        ulid = result["ulid"]
+        identity = json.loads(
+            assembly_identity_path("demo", ulid, root=project_tree).read_text(encoding="utf-8")
+        )
+
+        def fake_select(
+            *, timeline_id: str, timeline_home: str | Path | None = None, preferred_backend: str | None = None,
+            supabase_options: SupabaseEventLogOptions | None = None
+        ) -> tuple[object, EventLogBackend]:
+            assert timeline_id == identity["timeline_id"]
+            assert supabase_options is not None
+            return (
+                type("Stream", (), {"backend": "supabase"})(),
+                SupabaseBackend(
+                    timeline_id=timeline_id,
+                    supabase_url=supabase_options.url,
+                    auth_token=supabase_options.auth_token,
+                    enabled=True,
+                    verified_subject=supabase_options.verified_subject,
+                    actor_id=supabase_options.actor_id,
+                    actor_display=supabase_options.actor_display,
+                    rpc_append_name=supabase_options.rpc_append_name,
+                ),
+            )
+
+        monkeypatch.setattr("astrid.core.timeline.crud.select_timeline_backend", fake_select)
+
+        with pytest.raises(EventLogUnsupportedRpcError, match="append_timeline_event_v2"):
+            rename_timeline(
+                "demo",
+                "alpha",
+                "beta",
+                supabase_options=SupabaseEventLogOptions(
+                    url="https://example.supabase.co",
+                    auth_token="pat-token",
+                    verified_subject="user-1",
+                    actor_id="agent:codex",
+                    actor_display="Codex",
+                    rpc_append_name="append_timeline_event_v2",
+                ),
+            )
 
 
 # ---------------------------------------------------------------------------

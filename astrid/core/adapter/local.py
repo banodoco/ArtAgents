@@ -109,12 +109,13 @@ class LocalAdapter:
             except ValueError:
                 returncode = None
 
-        # Produces checks: every declared produces.path must exist (non-empty file).
+        # Produces checks: every declared produces.path must exist (non-empty file)
+        # under the canonical ``step_dir/produces/<path>`` layout (hype-spike G2).
         produces_root = step_dir / "produces"
         missing: list[str] = []
         for entry in step.produces:
-            candidate = produces_root / entry.path
-            if not candidate.exists() or candidate.stat().st_size == 0:
+            artifact = produces_root / entry.path
+            if not artifact.exists() or artifact.stat().st_size == 0:
                 missing.append(entry.path)
 
         cost = _read_cost_sidecar(step_dir)

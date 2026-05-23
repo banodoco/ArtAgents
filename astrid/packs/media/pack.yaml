@@ -1,0 +1,11 @@
+schema_version: 1
+id: media
+name: Media
+version: 0.1.0
+description: Media processing tools, currently providing lossless video clip extraction via ffmpeg stream copy.
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+agent:
+  purpose: "Use when you need to trim a segment from a video file quickly and losslessly (ffmpeg -ss/-t/-c copy)."

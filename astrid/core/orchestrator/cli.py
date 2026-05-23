@@ -74,7 +74,25 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("orchestrator_id", nargs="?")
     validate_parser.set_defaults(handler=_cmd_validate)
 
-    run_parser = subparsers.add_parser("run", help="Run or dry-run one orchestrator.")
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Run or dry-run one orchestrator.",
+        description=(
+            "Run or dry-run one orchestrator.\n\n"
+            "Orchestrators with a command runtime (most built-ins like builtin.hype) "
+            "accept their pack-specific arguments via passthrough AFTER a literal `--`:\n\n"
+            "    astrid orchestrators run <id> --project <slug> -- --pack-arg <value> ...\n\n"
+            "To discover an orchestrator's pack-specific args:\n"
+            "  1. `astrid orchestrators inspect <id>` shows declared inputs and the\n"
+            "     runtime invocation pattern.\n"
+            "  2. For built-ins, the pack's run.py module accepts `--help` directly:\n"
+            "     `python3 -m astrid.packs.<pack>.<orch>.run --help`\n\n"
+            "Anything before `--` is consumed by this CLI gateway; anything after is "
+            "forwarded verbatim to the pack runtime (substituted into the runtime's "
+            "{orchestrator_args} placeholder)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     run_parser.add_argument("orchestrator_id")
     run_parser.add_argument("--out", help="Output directory for runtime placeholders.")
     run_parser.add_argument("--project", help="Project slug for a persistent project run.")
@@ -178,8 +196,11 @@ def _cmd_list(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
         if no_describe:
             print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}")
         else:
+            from astrid.core.executor.cli import _format_invocation_hint
+
             short = short_description_or_truncated(orchestrator.short_description, orchestrator.description)
-            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}")
+            invoke = _format_invocation_hint("orchestrators", orchestrator.id, orchestrator.inputs)
+            print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}\t{invoke}")
     return 0
 
 
@@ -238,8 +259,31 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
         print(f"child_executors: {', '.join(orchestrator.child_executors)}")
     if orchestrator.child_orchestrators:
         print(f"child_orchestrators: {', '.join(orchestrator.child_orchestrators)}")
+    # Fix 6 (v6 dogfood): show a concrete example invocation when the
+    # orchestrator declares input ports. The `command` block below also
+    # synthesises an invocation snippet for the `{orchestrator_args}`
+    # passthrough case, but plain `--input <port>=<path>` wiring needs its
+    # own example so agents don't guess at the flag shape from `run --help`.
+    if orchestrator.inputs:
+        from astrid.core.executor.cli import _print_invocation_example
+        _print_invocation_example("orchestrators", orchestrator.id, orchestrator.inputs)
     if orchestrator.runtime.command is not None:
         print(f"command: {shlex.join(orchestrator.runtime.command.argv)}")
+        # Invocation hint (#36): agents repeatedly missed that the `{orchestrator_args}`
+        # placeholder is filled by a `--` passthrough. Spell it out explicitly so
+        # they don't fall back to `python3 -m astrid.packs.X.run` (which skips
+        # task-mode and means events.jsonl never lands a run_started).
+        argv = orchestrator.runtime.command.argv
+        if any("{orchestrator_args}" in part for part in argv):
+            example_args = "<pack-args>"
+            # Show the pack's --help one-liner so agents can discover args.
+            module = orchestrator.metadata.get("runtime_module") if orchestrator.metadata else None
+            print()
+            print("invocation:")
+            print(f"  astrid orchestrators run {orchestrator.id} --project <slug> -- {example_args}")
+            if module:
+                print(f"  # discover pack args: python3 -m {module} --help")
+            print("  # anything after `--` is forwarded verbatim to the pack runtime.")
     _print_active_thread_footer()
     return 0
 
