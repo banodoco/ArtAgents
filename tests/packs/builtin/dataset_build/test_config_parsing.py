@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from astrid.packs.builtin.dataset_build.config import (
+from astrid.packs.builtin.orchestrators.dataset_build.config import (
     MISSING_SCHEMA_VERSION_SOURCE,
     MISSING_SCHEMA_VERSION_WARNING,
     BudgetPreflightError,

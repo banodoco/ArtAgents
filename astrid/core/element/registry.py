@@ -136,11 +136,17 @@ def load_default_registry(
     active_theme: str | Path | None = None,
     project_root: str | Path = REPO_ROOT,
     include_missing_roots: bool = False,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = True,
 ) -> ElementRegistry:
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, {})  # M1: no aliases yet
     registry = ElementRegistry(alias_resolver=resolver)
-    for element in load_pack_elements(project_root=project_root):
+    for element in load_pack_elements(
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+    ):
         registry.register(element)
     for source in default_sources(active_theme=active_theme, project_root=project_root):
         if not source.root.exists():
@@ -166,7 +172,12 @@ def default_sources(*, active_theme: str | Path | None = None, project_root: str
     return tuple(sources)
 
 
-def load_pack_elements(*, project_root: str | Path = REPO_ROOT) -> tuple[ElementDefinition, ...]:
+def load_pack_elements(
+    *,
+    project_root: str | Path = REPO_ROOT,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = True,
+) -> tuple[ElementDefinition, ...]:
     from .schema import ELEMENT_MANIFEST_NAMES
 
     # The `local` scratch pack is project-scoped (gitignored) — load it from
@@ -185,6 +196,31 @@ def load_pack_elements(*, project_root: str | Path = REPO_ROOT) -> tuple[Element
         for pack in discover_packs(project_pack_root):
             if pack.id == "local":
                 packs.append(pack)
+
+    # Additional pack roots: extra roots + installed packs (PR #8 operational layer)
+    if extra_pack_roots or include_installed:
+        _discover_root = Path(project_root) if project_root != REPO_ROOT else REPO_ROOT
+        for extra_root in extra_pack_roots:
+            extra_path = Path(extra_root)
+            if not extra_path.is_absolute():
+                extra_path = (_discover_root / extra_path).resolve()
+            if extra_path.is_dir():
+                for pack in discover_packs(extra_path):
+                    if pack.id == "local":
+                        continue
+                    packs.append(pack)
+        if include_installed:
+            from astrid.core.pack_store import installed_pack_roots
+            from astrid.core.pack import load_pack_manifest, pack_manifest_path as _pmp
+
+            for installed_root in installed_pack_roots():
+                if installed_root.is_dir():
+                    mp = _pmp(installed_root)
+                    if mp is not None:
+                        pack = load_pack_manifest(mp)
+                        if pack.id == "local":
+                            continue
+                        packs.append(pack)
 
     elements: list[ElementDefinition] = []
     for pack in packs:

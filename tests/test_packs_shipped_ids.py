@@ -65,6 +65,12 @@ class ShippedPackAlignmentTest(unittest.TestCase):
                     )
                     or str(executor.metadata["executor_root"]).rstrip("/").endswith(
                         f"astrid/packs/{pack}/{executor_id.split('.', 1)[1]}"
+                    )
+                    or str(executor.metadata["executor_root"]).rstrip("/").endswith(
+                        f"astrid/packs/{pack}/executors/{executor_id.split('.', 1)[1].split('.')[0]}"
+                    )
+                    or str(executor.metadata["executor_root"]).rstrip("/").endswith(
+                        f"astrid/packs/{pack}/executors/{executor_id.split('.', 1)[1]}"
                     ),
                     f"executor_root for {executor_id} did not land under packs/{pack}/",
                 )

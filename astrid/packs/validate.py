@@ -21,6 +21,13 @@ import jsonschema
 import yaml
 from referencing import Registry, Resource
 
+from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
+from astrid.core.pack import (
+    EXECUTOR_MANIFEST_NAMES,
+    ORCHESTRATOR_MANIFEST_NAMES,
+    pack_manifest_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -156,20 +163,27 @@ class PackValidator:
         self._capability_locations: dict[str, str] = {}
         self._alias_targets: list[tuple[str, str, str]] = []
 
-        pack_yaml = self.pack_root / "pack.yaml"
-        if not pack_yaml.is_file():
-            self.errors.append(f"{self._rel(pack_yaml)}: pack.yaml not found")
+        # Check .no-pack marker — explicit opt-out, skip silently
+        if (self.pack_root / ".no-pack").exists():
             return self.errors
 
-        # Parse pack.yaml
-        pack_data = self._load_yaml(pack_yaml)
+        manifest_path = pack_manifest_path(self.pack_root)
+        if manifest_path is None:
+            self.errors.append(
+                f"{self._rel(self.pack_root)}: pack manifest not found "
+                f"(pack.yaml, pack.yml, or pack.json)"
+            )
+            return self.errors
+
+        # Parse pack manifest
+        pack_data = self._load_yaml(manifest_path)
         if pack_data is None:
             return self.errors  # parse error already recorded
         self._pack_data = pack_data
 
         # Check schema_version and validate against JSON Schema
         version = self._validate_manifest(
-            pack_data, "pack", self._rel(pack_yaml)
+            pack_data, "pack", self._rel(manifest_path)
         )
         if version is None:
             return self.errors  # schema_version error already recorded
@@ -192,11 +206,27 @@ class PackValidator:
                     f"{self._rel(doc_path)}: recommended file not found"
                 )
 
-        # Validate component manifests
+        # Validate component manifests and detect stray manifests
         self._validate_components(content)
+        self._check_stray_manifests(content)
         self._validate_alias_targets()
 
+        # Semantic checks for secrets and dependencies
+        self._validate_secrets(pack_data)
+        self._validate_dependencies(pack_data)
+
         return self.errors
+
+    @property
+    def pack_data(self) -> Optional[dict[str, Any]]:
+        """Return the parsed pack manifest data if validation succeeded.
+
+        Returns ``None`` if validation has not run, failed, or the manifest
+        could not be parsed.
+        """
+        if self.errors:
+            return None
+        return self._pack_data
 
     def _load_yaml(self, path: Path) -> Optional[dict[str, Any]]:
         """Load a YAML file with safe_load. Returns None on error."""
@@ -355,6 +385,19 @@ class PackValidator:
         if self._pack_data is None:
             return
 
+        # Sprint 9 portfolio rationalization: flat layout (content.<key> ==
+        # '.') is now a hard validation error.  Every shipped pack must
+        # declare a subdirectory for its components (e.g.
+        # ``executors: executors``).
+        for content_key in ("executors", "orchestrators"):
+            value = content.get(content_key)
+            if isinstance(value, str) and value.strip() == ".":
+                self.errors.append(
+                    f"{self._rel(self.pack_root / 'pack.yaml')}: "
+                    f"content.{content_key} is '.' (flat layout) — migrate "
+                    f"to a subdirectory like '{content_key}'"
+                )
+
         # Executors
         exec_root_rel = content.get("executors", "executors")
         if isinstance(exec_root_rel, str) and exec_root_rel.strip():
@@ -380,17 +423,37 @@ class PackValidator:
         self, root_dir: Path, manifest_kind: str
     ) -> None:
         """Validate all component directories under a content root."""
-        manifest_name = f"{manifest_kind}.yaml"
+        # Map manifest_kind to the tuple of allowed manifest names
+        if manifest_kind == "executor":
+            manifest_names = EXECUTOR_MANIFEST_NAMES
+        elif manifest_kind == "orchestrator":
+            manifest_names = ORCHESTRATOR_MANIFEST_NAMES
+        else:
+            # Fallback for unknown kinds — preserve old behaviour
+            manifest_names = (f"{manifest_kind}.yaml",)
+
         for comp_dir in sorted(root_dir.iterdir()):
             if not comp_dir.is_dir() or comp_dir.name.startswith("."):
                 continue
             if comp_dir.name == "__pycache__":
                 continue
+            # Explicit opt-out marker for shared-code directories that live
+            # alongside executor manifests (e.g. external/executors/runpod
+            # holds a shared run.py imported by multiple sibling manifests).
+            if (comp_dir / ".no-executor").exists():
+                continue
 
-            manifest_path = comp_dir / manifest_name
-            if not manifest_path.is_file():
+            # Try each allowed extension; use the first found
+            manifest_path: Path | None = None
+            for name in manifest_names:
+                candidate = comp_dir / name
+                if candidate.is_file():
+                    manifest_path = candidate
+                    break
+
+            if manifest_path is None:
                 self.errors.append(
-                    f"{self._rel(manifest_path)}: {manifest_kind} manifest not found"
+                    f"{self._rel(comp_dir)}: {manifest_kind} manifest not found"
                 )
                 continue
 
@@ -447,10 +510,17 @@ class PackValidator:
                 if elem_dir.name == "__pycache__":
                     continue
 
-                manifest_path = elem_dir / "element.yaml"
-                if not manifest_path.is_file():
+                # Try each allowed extension; use the first found
+                manifest_path: Path | None = None
+                for name in ELEMENT_MANIFEST_NAMES:
+                    candidate = elem_dir / name
+                    if candidate.is_file():
+                        manifest_path = candidate
+                        break
+
+                if manifest_path is None:
                     self.errors.append(
-                        f"{self._rel(manifest_path)}: element manifest not found"
+                        f"{self._rel(elem_dir)}: element manifest not found"
                     )
                     continue
 
@@ -466,6 +536,23 @@ class PackValidator:
                 if isinstance(element_id, str):
                     self._register_capability_id(f"{kind_dir.name}/{element_id}", rel)
                     self._register_aliases(data, rel)
+
+                # Check component.tsx exists
+                component_tsx = elem_dir / "component.tsx"
+                if not component_tsx.is_file():
+                    self.errors.append(
+                        f"{rel}: element missing component.tsx"
+                    )
+
+                # Check pack_id matches owning pack
+                element_pack_id = data.get("pack_id")
+                owning_pack_id = self._pack_data.get("id") if self._pack_data else None
+                if isinstance(element_pack_id, str) and isinstance(owning_pack_id, str):
+                    if element_pack_id != owning_pack_id:
+                        self.errors.append(
+                            f"{rel}: element declares pack_id {element_pack_id!r} "
+                            f"but pack id is {owning_pack_id!r}"
+                        )
 
     def _register_capability_id(self, capability_id: str, relpath: str) -> None:
         existing = self._capability_locations.get(capability_id)
@@ -503,6 +590,65 @@ class PackValidator:
                     f"{relpath}: {alias_path} points to unknown capability id {target!r}"
                 )
 
+    def _validate_secrets(self, data: dict[str, Any]) -> None:
+        """Run semantic secret checks and append warnings."""
+        self.warnings.extend(_check_semantic_secrets(data))
+
+    def _validate_dependencies(self, data: dict[str, Any]) -> None:
+        """Run semantic dependency checks and append warnings."""
+        self.warnings.extend(_check_semantic_deps(data))
+
+    def _check_stray_manifests(self, content: dict[str, Any]) -> None:
+        """Detect manifests outside declared content roots and report as stray."""
+        # Build a set of declared root directories (resolved absolute paths)
+        declared_roots: set[Path] = set()
+        _CONTENT_KEYS = ("executors", "orchestrators", "elements")
+        for key in _CONTENT_KEYS:
+            root_rel = content.get(key)
+            if isinstance(root_rel, str) and root_rel.strip():
+                declared_roots.add((self.pack_root / root_rel).resolve())
+
+        # Scan the pack root for component manifests (executor.yaml/orchestrator.yaml/element.yaml)
+        # but only one level deep — we're looking for manifests accidentally placed
+        # in directories that are NOT under declared content roots.
+        _MANIFEST_NAMES = (
+            "executor.yaml", "executor.yml", "executor.json",
+            "orchestrator.yaml", "orchestrator.yml", "orchestrator.json",
+            "element.yaml", "element.yml", "element.json",
+        )
+        try:
+            for child in sorted(self.pack_root.iterdir()):
+                if not child.is_dir() or child.name.startswith("."):
+                    continue
+                if child.name == "__pycache__":
+                    continue
+                # Skip the declared content root directories themselves
+                if child.resolve() in declared_roots:
+                    continue
+                # Check if any child of this directory is within a declared root
+                child_is_under_declared = any(
+                    child.resolve() == dr or str(child.resolve()).startswith(str(dr) + "/")
+                    for dr in declared_roots
+                )
+                if child_is_under_declared:
+                    continue
+                # Check for stray manifests
+                for mf_name in _MANIFEST_NAMES:
+                    if (child / mf_name).is_file():
+                        self.warnings.append(
+                            f"{self._rel(child / mf_name)}: stray manifest outside declared content roots"
+                        )
+                        break  # one warning per directory
+                # Check for legacy .py files
+                for py_name in ("executor.py", "orchestrator.py"):
+                    if (child / py_name).is_file():
+                        self.warnings.append(
+                            f"{self._rel(child / py_name)}: stray runtime file outside declared content roots"
+                        )
+                        break
+        except OSError:
+            pass
+
     def _rel(self, path: Path) -> str:
         """Return a path relative to the pack root for error messages."""
         try:
@@ -530,8 +676,302 @@ def json_loads(text: str) -> Any:
     return _json.loads(text)
 
 
+# ---------------------------------------------------------------------------
+# Semantic check helpers (shared by PackValidator and extract_trust_summary)
+# ---------------------------------------------------------------------------
+
+
+def _check_semantic_secrets(data: dict[str, Any]) -> list[str]:
+    """Check secrets declarations for semantic issues.
+
+    Returns a list of warning strings.  Does **not** abort validation;
+    problems are surfaced as warnings so the pack is still installable.
+
+    Checks:
+    * Every secret dict has a non-empty ``name`` string.
+    * Required secrets have ``required: true`` stated.
+    * Optional secrets (required absent or false) include a meaningful
+      description.
+    """
+    warnings: list[str] = []
+    secrets_raw = data.get("secrets")
+    if not isinstance(secrets_raw, list):
+        return warnings
+
+    for idx, s_obj in enumerate(secrets_raw):
+        if not isinstance(s_obj, dict):
+            warnings.append(
+                f"secrets[{idx}]: not a mapping, skipping"
+            )
+            continue
+
+        name = s_obj.get("name")
+        if not name or not isinstance(name, str) or not name.strip():
+            warnings.append(
+                f"secrets[{idx}]: empty or missing secret name"
+            )
+            continue
+
+        name_str = name.strip()
+        required = s_obj.get("required", False)
+        description = s_obj.get("description")
+
+        if required:
+            # Required secret — ensure required is actually True
+            if required is not True:
+                warnings.append(
+                    f"secret '{name_str}': declared as required but "
+                    f"'required' value is {required!r} (expected true)"
+                )
+        else:
+            # Optional secret — should have a meaningful description
+            if not description or not isinstance(description, str) or not description.strip():
+                warnings.append(
+                    f"secret '{name_str}': optional secret has no description"
+                )
+
+    return warnings
+
+
+def _check_semantic_deps(data: dict[str, Any]) -> list[str]:
+    """Check dependency declarations for likely-broken patterns.
+
+    Returns a list of warning strings.  Does **not** abort validation.
+
+    Checks:
+    * ``python`` entries are well-formed pip requirement strings.
+    * ``npm`` entries follow ``name`` or ``name@version`` format.
+    * ``system`` entries are single-word command names.
+    """
+    warnings: list[str] = []
+    deps = data.get("dependencies")
+    if not isinstance(deps, dict):
+        return warnings
+
+    # Python deps — must be non-empty and look like pip requirements
+    python_deps = deps.get("python")
+    if isinstance(python_deps, list):
+        for idx, d in enumerate(python_deps):
+            if not isinstance(d, str) or not d.strip():
+                warnings.append(f"dependencies.python[{idx}]: empty entry")
+            elif not _re.match(r"^[A-Za-z0-9_.-]+(\s*[><=!~]+\s*[A-Za-z0-9_.*-]+)*(\s*;\s*.*)?$", d.strip()):
+                # Broad regex: package name optionally followed by version spec
+                warnings.append(
+                    f"dependencies.python[{idx}]: '{d}' does not look like "
+                    f"a pip requirement"
+                )
+
+    # npm deps — name or name@version
+    npm_deps = deps.get("npm")
+    if isinstance(npm_deps, list):
+        for idx, d in enumerate(npm_deps):
+            if not isinstance(d, str) or not d.strip():
+                warnings.append(f"dependencies.npm[{idx}]: empty entry")
+            elif not _re.match(r"^@?[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?(@[A-Za-z0-9_.-]+)?$", d.strip()):
+                warnings.append(
+                    f"dependencies.npm[{idx}]: '{d}' does not look like "
+                    f"an npm package specifier"
+                )
+
+    # system deps — must be single-word command names
+    system_deps = deps.get("system")
+    if isinstance(system_deps, list):
+        for idx, d in enumerate(system_deps):
+            if not isinstance(d, str) or not d.strip():
+                warnings.append(f"dependencies.system[{idx}]: empty entry")
+            elif not _re.match(r"^[A-Za-z0-9_.-]+$", d.strip()):
+                warnings.append(
+                    f"dependencies.system[{idx}]: '{d}' does not look like "
+                    f"a system command name"
+                )
+
+    return warnings
+
+
+# ---------------------------------------------------------------------------
+# Trust summary extraction (used by install.py for dry-run/display)
+# ---------------------------------------------------------------------------
+
+
+def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
+    """Extract a trust-summary dict from a pack root directory.
+
+    Reads the pack manifest with ``yaml.safe_load`` and returns a
+    dictionary with keys: pack_id, name, version, schema_version,
+    source_path, component_counts, entrypoints, declared_secrets,
+    dependencies, docs, and warnings.
+
+    Does **not** run full schema validation — this is a lightweight
+    extraction intended for dry-run and install-summary display.
+    """
+    root = Path(pack_root).resolve()
+    manifest_path = pack_manifest_path(root)
+    if manifest_path is None:
+        raise ValidationError(f"No pack manifest found in {root}")
+
+    # Determine format
+    if manifest_path.suffix == ".json":
+        try:
+            data = _json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception as e:
+            raise ValidationError(f"Failed to parse {manifest_path}: {e}") from e
+    else:
+        try:
+            data = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as e:
+            raise ValidationError(f"Failed to parse {manifest_path}: {e}") from e
+
+    if not isinstance(data, dict):
+        raise ValidationError(f"Pack manifest {manifest_path} is not a mapping")
+
+    pack_id = data.get("id", root.name)
+    name = data.get("name", pack_id)
+    version = data.get("version", "0.0.0")
+    schema_version = data.get("schema_version", "unknown")
+
+    # Component counts
+    content = data.get("content", {}) if isinstance(data.get("content"), dict) else {}
+    component_counts: dict[str, int] = {}
+    for key in ("executors", "orchestrators", "elements"):
+        comp_root_rel = content.get(key) if isinstance(content, dict) else None
+        if isinstance(comp_root_rel, str) and comp_root_rel.strip():
+            comp_dir = root / comp_root_rel
+            if comp_dir.is_dir():
+                count = sum(1 for child in comp_dir.iterdir() if child.is_dir() and not child.name.startswith("."))
+                component_counts[key] = count
+            else:
+                component_counts[key] = 0
+        else:
+            component_counts[key] = 0
+
+    # Entrypoints — prefer normal_entrypoints, fall back to entrypoints
+    agent = data.get("agent", {}) if isinstance(data.get("agent"), dict) else {}
+    normal_entrypoints: list[str] = []
+    if isinstance(agent.get("normal_entrypoints"), list):
+        normal_entrypoints = [str(ep) for ep in agent["normal_entrypoints"] if ep]
+    entrypoints: list[str] = []
+    if isinstance(agent.get("entrypoints"), list):
+        entrypoints = [str(ep) for ep in agent["entrypoints"] if ep]
+    # Prefer canonical field
+    display_entrypoints = normal_entrypoints if normal_entrypoints else entrypoints
+
+    # Declared secrets — handle both old and new formats
+    secrets_raw = data.get("secrets")
+    secrets_list: list[str] = []
+    if isinstance(secrets_raw, list):
+        # New format: list of {name, required, description}
+        for s_obj in secrets_raw:
+            if isinstance(s_obj, dict) and s_obj.get("name"):
+                name_val = str(s_obj["name"])
+                req = " (required)" if s_obj.get("required") else ""
+                desc = s_obj.get("description", "")
+                label = f"{name_val}{req}"
+                if desc:
+                    label += f": {desc}"
+                secrets_list.append(label)
+    elif isinstance(secrets_raw, dict):
+        # Old format: dict with 'required' list
+        declared_secrets: list[str] = []
+        if isinstance(secrets_raw.get("required"), list):
+            declared_secrets = [str(s) for s in secrets_raw["required"] if s]
+        secrets_list = declared_secrets
+
+    # Dependencies — handle both old and new formats
+    deps_raw = data.get("dependencies", {}) if isinstance(data.get("dependencies"), dict) else {}
+    dependencies: list[str] = []
+    # New format: object with python/npm/system keys
+    for eco in ("python", "npm", "system"):
+        eco_deps = deps_raw.get(eco) if isinstance(deps_raw, dict) else None
+        if isinstance(eco_deps, list):
+            for d in eco_deps:
+                if d:
+                    dependencies.append(f"{eco}:{d}")
+    # Old format: packs list
+    if isinstance(deps_raw.get("packs"), list):
+        for d in deps_raw["packs"]:
+            if d and str(d) not in dependencies:
+                dependencies.append(str(d))
+    # Structured dependencies as dict
+    dependencies_struct: dict[str, list[str]] = {}
+    for eco in ("python", "npm", "system"):
+        eco_deps = deps_raw.get(eco) if isinstance(deps_raw, dict) else None
+        if isinstance(eco_deps, list):
+            dependencies_struct[eco] = [str(d) for d in eco_deps if d]
+
+    # Docs
+    docs = data.get("docs", {}) if isinstance(data.get("docs"), dict) else {}
+    doc_info: dict[str, str | None] = {}
+    if isinstance(docs, dict):
+        for doc_key in ("readme", "agents", "stage"):
+            val = docs.get(doc_key)
+            doc_info[doc_key] = str(val) if val else None
+    else:
+        doc_info = {"readme": None, "agents": None, "stage": None}
+
+    # Warnings
+    warnings: list[str] = []
+
+    # Check AGENTS.md and README.md
+    for doc_name in ("AGENTS.md", "README.md"):
+        if not (root / doc_name).is_file():
+            warnings.append(f"Recommended file not found: {doc_name}")
+
+    # Check declared content roots exist
+    for key, comp_root_rel in content.items():
+        if isinstance(comp_root_rel, str):
+            declared_path = root / comp_root_rel
+            if not declared_path.exists():
+                warnings.append(f"Declared content root does not exist: {comp_root_rel}")
+
+    # Semantic warnings for secrets and dependencies
+    warnings.extend(_check_semantic_secrets(data))
+    warnings.extend(_check_semantic_deps(data))
+
+    # New agent fields
+    do_not_use_for = str(agent.get("do_not_use_for")) if agent.get("do_not_use_for") else None
+    required_context: list[str] = []
+    if isinstance(agent.get("required_context"), list):
+        required_context = [str(rc) for rc in agent["required_context"] if rc]
+
+    # Keywords and capabilities from manifest
+    keywords: list[str] = []
+    kw_raw = data.get("keywords")
+    if isinstance(kw_raw, list):
+        keywords = [str(k) for k in kw_raw if k]
+
+    capabilities: list[str] = []
+    cap_raw = data.get("capabilities")
+    if isinstance(cap_raw, list):
+        capabilities = [str(c) for c in cap_raw if c]
+
+    # astrid_version from manifest
+    astrid_version = data.get("astrid_version")
+
+    return {
+        "pack_id": pack_id,
+        "name": name,
+        "version": version,
+        "schema_version": schema_version,
+        "source_path": str(root),
+        "component_counts": component_counts,
+        "entrypoints": display_entrypoints,
+        "normal_entrypoints": normal_entrypoints,
+        "declared_secrets": secrets_list,
+        "dependencies": dependencies,
+        "dependencies_struct": dependencies_struct,
+        "docs": doc_info,
+        "warnings": warnings,
+        "do_not_use_for": do_not_use_for,
+        "required_context": required_context,
+        "keywords": keywords,
+        "capabilities": capabilities,
+        "astrid_version": astrid_version,
+    }
+
+
 __all__ = [
     "PackValidator",
     "ValidationError",
     "validate_pack",
+    "extract_trust_summary",
 ]

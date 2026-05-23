@@ -108,7 +108,7 @@ def test_no_urllib_in_pack_run_py() -> None:
 
 def test_logo_ideas_dry_run(tmp_path: Path) -> None:
     """logo_ideas --dry-run succeeds without import errors."""
-    from astrid.packs.builtin.logo_ideas.run import main
+    from astrid.packs.builtin.orchestrators.logo_ideas.run import main
 
     out = tmp_path / "logo_out"
     code = main(

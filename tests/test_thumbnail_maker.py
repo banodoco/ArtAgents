@@ -1,6 +1,6 @@
 import unittest
 
-from astrid.packs.builtin.thumbnail_maker import run as thumbnail_maker
+from astrid.packs.builtin.orchestrators.thumbnail_maker import run as thumbnail_maker
 
 
 class ThumbnailMakerTest(unittest.TestCase):

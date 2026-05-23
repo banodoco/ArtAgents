@@ -4,7 +4,7 @@ import json
 import urllib.parse
 from pathlib import Path
 
-from astrid.packs.builtin.search_loras import run as search_loras
+from astrid.packs.builtin.executors.search_loras import run as search_loras
 
 
 class _FakeResponse:

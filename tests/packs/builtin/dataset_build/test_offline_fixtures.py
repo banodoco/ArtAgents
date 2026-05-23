@@ -8,16 +8,16 @@ from typing import Any
 import jsonschema
 from referencing import Registry, Resource
 
-from astrid.packs.builtin.dataset_build import run as dataset_run
-from astrid.packs.builtin.dataset_build.items import make_candidate_item
-from astrid.packs.builtin.dataset_build.media import ffprobe_metadata
-from astrid.packs.builtin.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
-from astrid.packs.builtin.dataset_build.state import read_review_state, set_status
+from astrid.packs.builtin.orchestrators.dataset_build import run as dataset_run
+from astrid.packs.builtin.orchestrators.dataset_build.items import make_candidate_item
+from astrid.packs.builtin.orchestrators.dataset_build.media import ffprobe_metadata
+from astrid.packs.builtin.orchestrators.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
+from astrid.packs.builtin.orchestrators.dataset_build.state import read_review_state, set_status
 
 
 ROOT = Path(__file__).resolve().parents[4]
 FIXTURE_ROOT = ROOT / "fixtures" / "builtin-training"
-RUNTIME_SCHEMAS = ROOT / "astrid" / "packs" / "builtin" / "dataset_build" / "schemas"
+RUNTIME_SCHEMAS = ROOT / "astrid" / "packs" / "builtin" / "orchestrators" / "dataset_build" / "schemas"
 FROZEN_CONTRACTS = ROOT / "docs" / "megaplan" / "epics" / "builtin-training" / "contracts"
 FROZEN_SCHEMAS = FROZEN_CONTRACTS / "schemas"
 FROZEN_FIXTURES = FROZEN_CONTRACTS / "fixtures"

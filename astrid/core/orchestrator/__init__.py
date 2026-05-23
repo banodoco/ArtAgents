@@ -2,6 +2,7 @@
 
 from .api import OrchestratorSpec, orchestrator
 from .folder import load_folder_orchestrator, load_folder_orchestrators
+from .plan_v2 import PlanStep, PlanV2, build_step_command, emit_plan_json, make_produces
 from .registry import (
     OrchestratorRegistry,
     OrchestratorRegistryError,
@@ -17,6 +18,11 @@ from .runner import (
     OrchestratorRunnerError,
     build_orchestrator_command,
     run_orchestrator,
+)
+from .runtime import (
+    OrchestratorRuntimeResolutionError,
+    resolve_orchestrator_runtime,
+    resolve_python_module_from_file,
 )
 from .schema import (
     CachePolicy,
@@ -45,18 +51,26 @@ __all__ = [
     "OrchestratorRunRequest",
     "OrchestratorRunResult",
     "OrchestratorRunnerError",
+    "OrchestratorRuntimeResolutionError",
     "OrchestratorSpec",
     "OrchestratorValidationError",
     "Output",
+    "PlanStep",
+    "PlanV2",
     "Port",
     "RuntimeSpec",
     "build_orchestrator_command",
+    "build_step_command",
+    "emit_plan_json",
     "load_default_registry",
-    "load_pack_orchestrators",
     "load_folder_orchestrator",
     "load_folder_orchestrators",
     "load_orchestrator_manifest",
+    "load_pack_orchestrators",
+    "make_produces",
     "orchestrator",
+    "resolve_orchestrator_runtime",
+    "resolve_python_module_from_file",
     "run_orchestrator",
     "to_capability_handle",
     "validate_orchestrator_definition",

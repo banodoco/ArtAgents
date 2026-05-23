@@ -6,8 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from astrid.packs.builtin.training_run.defaults import AI_TOOLKIT_LTX_DEFAULTS, RUNPOD_LTX_DEFAULTS
-from astrid.packs.builtin.training_run.config import load_training_run_config
+from astrid.packs.builtin.orchestrators.training_run.defaults import AI_TOOLKIT_LTX_DEFAULTS, RUNPOD_LTX_DEFAULTS
+from astrid.packs.builtin.orchestrators.training_run.config import load_training_run_config
 
 
 ROOT = Path(__file__).resolve().parents[4]

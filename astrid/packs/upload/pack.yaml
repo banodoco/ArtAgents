@@ -2,3 +2,6 @@ id: upload
 schema_version: 1
 name: Astrid Upload
 version: 1.0.0
+content:
+  executors: executors
+  orchestrators: orchestrators

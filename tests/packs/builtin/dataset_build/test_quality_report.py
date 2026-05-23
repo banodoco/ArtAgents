@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from astrid.packs.builtin.dataset_build.reports.quality_report import build_quality_report
+from astrid.packs.builtin.orchestrators.dataset_build.reports.quality_report import build_quality_report
 
 
 def test_quality_report_contains_required_sections() -> None:

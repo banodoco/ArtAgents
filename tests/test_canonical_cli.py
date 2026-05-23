@@ -56,12 +56,12 @@ class CanonicalCliTest(unittest.TestCase):
         self.assertEqual(payload["id"], "builtin.training_run")
         self.assertEqual(
             payload["metadata"]["runtime_module"],
-            "astrid.packs.builtin.training_run.run",
+            "astrid.packs.builtin.orchestrators.training_run.run",
         )
         self.assertEqual(payload["runtime"]["kind"], "command")
         self.assertEqual(
             payload["runtime"]["command"]["argv"][:3],
-            ["{python_exec}", "-m", "astrid.packs.builtin.training_run.run"],
+            ["{python_exec}", "-m", "astrid.packs.builtin.orchestrators.training_run.run"],
         )
         self.assertEqual(
             set(payload["child_executors"]),
@@ -132,7 +132,7 @@ class CanonicalCliTest(unittest.TestCase):
             ["run", "builtin.render", "--out", "runs/example", "--brief", "brief.txt", "--dry-run"],
         )
         self.assertEqual(result, 0, stderr)
-        self.assertIn("astrid.packs.builtin.render.run", stdout)
+        self.assertIn("astrid.packs.builtin.executors.render.run", stdout)
 
     def test_pipeline_dispatches_canonical_cli_modules(self) -> None:
         with mock.patch.object(orchestrators_cli, "main", return_value=61) as main:

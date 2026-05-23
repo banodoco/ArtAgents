@@ -9,10 +9,10 @@ from typing import Any
 import yaml
 import pytest
 
-from astrid.packs.builtin.dataset_build import run as dataset_run
-from astrid.packs.builtin.dataset_build.items import config_hash, make_candidate_item
-from astrid.packs.builtin.dataset_build.state import make_initial_state, read_review_state, set_status, write_review_state
-from astrid.packs.builtin.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
+from astrid.packs.builtin.orchestrators.dataset_build import run as dataset_run
+from astrid.packs.builtin.orchestrators.dataset_build.items import config_hash, make_candidate_item
+from astrid.packs.builtin.orchestrators.dataset_build.state import make_initial_state, read_review_state, set_status, write_review_state
+from astrid.packs.builtin.orchestrators.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
 
 
 def _config(tmp_path: Path, media_dir: Path) -> Path:

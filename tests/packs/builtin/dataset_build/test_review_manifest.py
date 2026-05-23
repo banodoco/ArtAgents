@@ -6,16 +6,16 @@ from typing import Any
 
 import pytest
 
-from astrid.packs.builtin.dataset_build.manifest import build_canonical_manifest, validate_schema, write_canonical_manifest
-from astrid.packs.builtin.dataset_build.manifest_adapters import get_manifest_adapter
-from astrid.packs.builtin.dataset_build.manifest_adapters.ai_toolkit_ltx import AiToolkitLtxAdapter
-from astrid.packs.builtin.dataset_build.review import (
+from astrid.packs.builtin.orchestrators.dataset_build.manifest import build_canonical_manifest, validate_schema, write_canonical_manifest
+from astrid.packs.builtin.orchestrators.dataset_build.manifest_adapters import get_manifest_adapter
+from astrid.packs.builtin.orchestrators.dataset_build.manifest_adapters.ai_toolkit_ltx import AiToolkitLtxAdapter
+from astrid.packs.builtin.orchestrators.dataset_build.review import (
     apply_review_decisions,
     write_human_review_final,
     write_initial_review_state,
     write_review_data,
 )
-from astrid.packs.builtin.dataset_build.state import read_review_state
+from astrid.packs.builtin.orchestrators.dataset_build.state import read_review_state
 
 
 def _item(tmp_path: Path, item_id: str, *, bucket: str = "wide") -> dict[str, Any]:

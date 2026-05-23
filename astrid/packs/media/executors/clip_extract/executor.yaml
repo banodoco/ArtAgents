@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "media.clip_extract",
   "name": "Clip Extract",
   "kind": "built_in",

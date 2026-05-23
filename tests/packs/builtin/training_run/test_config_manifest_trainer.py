@@ -9,15 +9,15 @@ from typing import Callable
 import pytest
 import yaml
 
-from astrid.packs.builtin.training_run.config import (
+from astrid.packs.builtin.orchestrators.training_run.config import (
     TrainingRunSecretError,
     TrainingRunSpendConfirmationError,
     load_training_run_config,
     preflight_secrets,
     preflight_training_run,
 )
-from astrid.packs.builtin.training_run.manifest_input import TrainingManifestError, normalize_ai_toolkit_manifest
-from astrid.packs.builtin.training_run.trainer_adapters import get_trainer_adapter
+from astrid.packs.builtin.orchestrators.training_run.manifest_input import TrainingManifestError, normalize_ai_toolkit_manifest
+from astrid.packs.builtin.orchestrators.training_run.trainer_adapters import get_trainer_adapter
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 

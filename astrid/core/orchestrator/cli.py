@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         registry = load_default_registry(
             banodoco_config=_banodoco_config_from_args(args),
             project_root=project_root,
+            extra_pack_roots=tuple(args.pack_root),
         )
         registry.override_store = override_store
         return int(args.handler(args, registry))
@@ -58,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="List, inspect, validate, and run Astrid orchestrators.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover orchestrators from; may be repeated.")
     parser.add_argument("--banodoco-agent-orchestrators", action="store_true", help="Opt in to loading orchestrators from the Banodoco website catalog.")
     parser.add_argument("--banodoco-catalog-url", help="Banodoco website catalog Edge Function URL.")
     parser.add_argument("--banodoco-cache-dir", help="Cache directory for git-backed Banodoco orchestrators.")
@@ -209,13 +211,42 @@ def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
 
     Short-circuits before ``load_default_registry()`` — never imports pack code.
     """
-    from astrid.core.executor.cli import _scaffold_component
+    from astrid.core.executor.cli import (
+        _QID_RE,
+        _TEST_RUN_PY_TEMPLATE,
+        _scaffold_component,
+    )
+
+    qualified_id: str = args.qualified_id
+
+    # Validate early so we can safely split for the plan-template format.
+    if not _QID_RE.fullmatch(qualified_id):
+        print(
+            f"orchestrators new: qualified id {qualified_id!r} must be "
+            f"'<pack>.<slug>' with letters/digits/underscore",
+            file=sys.stderr,
+        )
+        return 2
+
+    pack, slug = qualified_id.split(".", 1)
 
     return _scaffold_component(
-        qualified_id=args.qualified_id,
+        qualified_id=qualified_id,
         component_type="orchestrator",
         yaml_template=_ORCHESTRATOR_YAML_TEMPLATE,
         run_py_template=_RUN_PY_TEMPLATE,
+        extra_files={
+            "plan_template.py": _ORCHESTRATOR_PLAN_TEMPLATE.format(
+                qualified_id=qualified_id,
+                pack=pack,
+                slug=slug,
+            ),
+            "tests/__init__.py": "",
+            "tests/test_run.py": _TEST_RUN_PY_TEMPLATE.format(
+                qualified_id=qualified_id,
+                component_type="orchestrator",
+            ),
+        },
     )
 
 
@@ -257,6 +288,82 @@ def main(*, inputs: dict, outputs: dict, **kwargs) -> int:
     \"\"\"
     # TODO: implement your orchestration logic here
     return 0
+"""
+
+
+_ORCHESTRATOR_PLAN_TEMPLATE = """\
+# {qualified_id} — plan v2 template
+#
+# This file defines ``build_plan_v2``, the function that produces the plan
+# dict emitted by the orchestrator runner.  Import helpers from
+# ``astrid.core.orchestrator.plan_v2`` so you don't need to copy-paste the
+# emit / step-command / produces boilerplate into your pack.
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from typing import Any
+
+from astrid.core.orchestrator.plan_v2 import (
+    emit_plan_json,
+    build_step_command,
+    make_produces,
+)
+
+
+def build_plan_v2(
+    *,
+    python_exec: str,
+    run_root: str | Path,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    \"\"\"Return a minimal valid plan-v2 dict.
+
+    This stub produces a single ``adapter: local`` step.  Replace the
+    placeholder command and expand the step list to match your pipeline.
+    \"\"\"
+    run_root = Path(run_root)
+
+    # TODO: replace this placeholder with your real step command.
+    # Use ``build_step_command`` or construct the command string directly.
+    step_id = \"hello\"
+    command = f\"{{python_exec}} -c 'print(\\\"hello from {{qualified_id}}\\\")' --out {{run_root}}/steps/{{step_id}}/v1/produces\"
+
+    plan: dict[str, Any] = {{
+        \"plan_id\": \"{qualified_id}\",
+        \"version\": 2,
+        \"steps\": [
+            {{
+                \"id\": step_id,
+                \"adapter\": \"local\",
+                \"command\": command,
+                \"produces\": {{
+                    # TODO: replace with your real produces path(s).
+                    \"hello_output\": {{
+                        \"path\": \"hello.txt\",
+                        \"check\": {{
+                            \"check_id\": \"file_nonempty\",
+                            \"params\": {{}},
+                            \"sentinel\": False,
+                        }},
+                    }}
+                }},
+            }}
+        ],
+    }}
+    return plan
+
+
+if __name__ == \"__main__\":
+    # Quick smoke-test: build a plan and emit it to a temp path.
+    import tempfile
+
+    run_root = Path(tempfile.mkdtemp(prefix=\"plan-test-\"))
+    plan = build_plan_v2(python_exec=sys.executable, run_root=run_root)
+    plan_path = run_root / \"plan.json\"
+    emit_plan_json(plan, plan_path)
+    print(f\"plan emitted to {{plan_path}}\")
 """
 
 

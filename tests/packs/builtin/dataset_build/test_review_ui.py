@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-UI_ROOT = Path("astrid/packs/builtin/dataset_build/review_ui")
+UI_ROOT = Path("astrid/packs/builtin/orchestrators/dataset_build/review_ui")
 APP_JS = UI_ROOT / "app.js"
 INDEX_HTML = UI_ROOT / "index.html"
 

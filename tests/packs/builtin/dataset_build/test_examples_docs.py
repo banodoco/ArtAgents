@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from astrid.packs.builtin.dataset_build.config import load_dataset_config
+from astrid.packs.builtin.orchestrators.dataset_build.config import load_dataset_config
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -11,7 +11,7 @@ EXAMPLE_CONFIG = ROOT / "examples" / "configs" / "dataset" / "seinfeld-dataset.y
 ALWAYS_SUNNY_CONFIG = ROOT / "examples" / "configs" / "dataset" / "always-sunny-dataset.yaml"
 MIGRATION_DOC = ROOT / "docs" / "builtin-dataset-build.md"
 TRAINING_WORKFLOW_DOC = ROOT / "docs" / "examples" / "training-workflow.md"
-BUILTIN_PACKAGE = ROOT / "astrid" / "packs" / "builtin" / "dataset_build"
+BUILTIN_PACKAGE = ROOT / "astrid" / "packs" / "builtin" / "orchestrators" / "dataset_build"
 ORCHESTRATOR = BUILTIN_PACKAGE / "orchestrator.yaml"
 SEINFELD_ARCHIVE = ROOT / "docs" / "examples" / "seinfeld"
 

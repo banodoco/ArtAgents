@@ -12,12 +12,12 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from astrid.packs.builtin.cut.run import build_parser as cut_build_parser
-from astrid.packs.builtin.cut.run import _is_managed_mode as cut_is_managed
-from astrid.packs.builtin.refine.run import build_parser as refine_build_parser
-from astrid.packs.builtin.refine.run import _is_managed_mode as refine_is_managed
-from astrid.packs.iteration.assemble.run import build_parser as assemble_build_parser
-from astrid.packs.iteration.assemble.run import _is_managed_mode as assemble_is_managed
+from astrid.packs.builtin.executors.cut.run import build_parser as cut_build_parser
+from astrid.packs.builtin.executors.cut.run import _is_managed_mode as cut_is_managed
+from astrid.packs.builtin.executors.refine.run import build_parser as refine_build_parser
+from astrid.packs.builtin.executors.refine.run import _is_managed_mode as refine_is_managed
+from astrid.packs.iteration.executors.assemble.run import build_parser as assemble_build_parser
+from astrid.packs.iteration.executors.assemble.run import _is_managed_mode as assemble_is_managed
 
 
 class ManagedBindingParserTests(unittest.TestCase):
@@ -160,10 +160,10 @@ class HypeSubprocessCallerTests(unittest.TestCase):
     # --------------------------------------------------------------
     def test_append_managed_binding_with_managed_args(self):
         """_append_managed_binding appends --project and --timeline-slug."""
-        from astrid.packs.builtin.hype.run import _append_managed_binding
+        from astrid.packs.builtin.orchestrators.hype.run import _append_managed_binding
 
         args = self._make_args(project="my-proj", timeline_slug="my-tl")
-        cmd = ["python3", "-m", "astrid.packs.builtin.cut.run", "--pool", "p.json"]
+        cmd = ["python3", "-m", "astrid.packs.builtin.executors.cut.run", "--pool", "p.json"]
         result = _append_managed_binding(args, cmd)
 
         self.assertIn("--project", result)
@@ -178,7 +178,7 @@ class HypeSubprocessCallerTests(unittest.TestCase):
 
     def test_append_managed_binding_without_project(self):
         """_append_managed_binding does nothing when project is None."""
-        from astrid.packs.builtin.hype.run import _append_managed_binding
+        from astrid.packs.builtin.orchestrators.hype.run import _append_managed_binding
 
         args = self._make_args(project=None, timeline_slug="my-tl")
         cmd = ["python3", "--flag"]
@@ -190,7 +190,7 @@ class HypeSubprocessCallerTests(unittest.TestCase):
 
     def test_append_managed_binding_without_timeline_slug(self):
         """_append_managed_binding does nothing when timeline_slug is None."""
-        from astrid.packs.builtin.hype.run import _append_managed_binding
+        from astrid.packs.builtin.orchestrators.hype.run import _append_managed_binding
 
         args = self._make_args(project="my-proj", timeline_slug=None)
         cmd = ["python3", "--flag"]
@@ -202,7 +202,7 @@ class HypeSubprocessCallerTests(unittest.TestCase):
 
     def test_append_managed_binding_without_both(self):
         """_append_managed_binding does nothing when both are None."""
-        from astrid.packs.builtin.hype.run import _append_managed_binding
+        from astrid.packs.builtin.orchestrators.hype.run import _append_managed_binding
 
         args = self._make_args(project=None, timeline_slug=None)
         cmd = ["python3", "--flag"]
@@ -213,7 +213,7 @@ class HypeSubprocessCallerTests(unittest.TestCase):
 
     def test_append_managed_binding_returns_same_list(self):
         """_append_managed_binding returns the mutated list (same object)."""
-        from astrid.packs.builtin.hype.run import _append_managed_binding
+        from astrid.packs.builtin.orchestrators.hype.run import _append_managed_binding
 
         args = self._make_args(project="proj", timeline_slug="tl")
         cmd = ["base-cmd"]
@@ -225,7 +225,7 @@ class HypeSubprocessCallerTests(unittest.TestCase):
     # --------------------------------------------------------------
     def test_build_pool_cut_cmd_includes_managed_binding(self):
         """build_pool_cut_cmd includes --project and --timeline-slug when managed."""
-        from astrid.packs.builtin.hype.run import build_pool_cut_cmd
+        from astrid.packs.builtin.orchestrators.hype.run import build_pool_cut_cmd
 
         args = self._make_args(project="my-proj", timeline_slug="my-tl")
         cmd = build_pool_cut_cmd(args)
@@ -244,7 +244,7 @@ class HypeSubprocessCallerTests(unittest.TestCase):
 
     def test_build_pool_cut_cmd_excludes_managed_binding_when_unmanaged(self):
         """build_pool_cut_cmd does NOT include --project/--timeline-slug when unmanaged."""
-        from astrid.packs.builtin.hype.run import build_pool_cut_cmd
+        from astrid.packs.builtin.orchestrators.hype.run import build_pool_cut_cmd
 
         args = self._make_args(project=None, timeline_slug=None)
         cmd = build_pool_cut_cmd(args)

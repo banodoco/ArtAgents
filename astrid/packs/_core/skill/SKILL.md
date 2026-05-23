@@ -360,7 +360,6 @@ orchestrator, or element manifests.
 | `builtin.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `builtin.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
 | `builtin.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
-| `builtin.clip_extract` | Extract a clip segment from a video using ffmpeg. |
 | `builtin.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
 | `builtin.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
 | `builtin.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
@@ -395,7 +394,6 @@ orchestrator, or element manifests.
 | `builtin.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
 | `builtin.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
 | `builtin.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
-| `external.comfy_t2i_ds1` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
 | `external.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
 | `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
 | `external.runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |

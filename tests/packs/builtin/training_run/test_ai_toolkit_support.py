@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from astrid.packs.builtin.dataset_build.interfaces import ArtifactPullResult, RemoteExecResult, RunPodHandle
-from astrid.packs.builtin.training_run.ai_toolkit.register import register_checkpoint
-from astrid.packs.builtin.training_run.ai_toolkit.stage import preflight_stage_inputs, stage_training_inputs
+from astrid.packs.builtin.orchestrators.dataset_build.interfaces import ArtifactPullResult, RemoteExecResult, RunPodHandle
+from astrid.packs.builtin.orchestrators.training_run.ai_toolkit.register import register_checkpoint
+from astrid.packs.builtin.orchestrators.training_run.ai_toolkit.stage import preflight_stage_inputs, stage_training_inputs
 
 
 class RecordingStageRemote:
