@@ -20,6 +20,7 @@ from astrid.core.task.events import (
     _read_lease_epoch,
     append_event_locked,
 )
+from astrid.core.util.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ POD_HANDLE_FILENAME = "pod_handle.json"
 
 def _utc_now_iso() -> str:
     """Return current UTC timestamp in ISO 8601."""
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 def collect_handles(projects_root: Path) -> list[tuple[Path, dict[str, Any]]]:

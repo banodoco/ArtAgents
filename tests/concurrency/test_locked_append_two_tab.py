@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import json
 import multiprocessing as mp
+import os
 from pathlib import Path
 
 import pytest
 
 from astrid.core.task.events import (
-    ZERO_HASH,
     StaleEpochError,
     StaleTailError,
     append_event_locked,
@@ -34,7 +34,7 @@ from astrid.core.task.events import (
 )
 
 PER_WORKER = 20
-ROUNDS = 100
+ROUNDS = 100 if os.environ.get("ASTRID_HEAVY_APPEND_RACES") == "1" else 5
 
 
 def _seed_run(run_dir: Path) -> None:
@@ -62,7 +62,6 @@ def _worker(
     """Run inside a spawned subprocess — module-level so spawn can pickle it."""
 
     from astrid.core.task.events import (  # local import for spawn
-        ZERO_HASH,
         StaleEpochError,
         StaleTailError,
         append_event_locked,

@@ -13,7 +13,6 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +72,9 @@ NONE_PLACEHOLDER = "(none)"
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    from astrid.core.util.time import utc_now_iso
+
+    return utc_now_iso()
 
 
 def _parse_agent_override(raw: str) -> str:

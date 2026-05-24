@@ -11,10 +11,9 @@ from hashlib import sha256
 from json import loads
 from pathlib import Path
 
+from astrid._paths import REPO_ROOT
+
 from .schema import ExecutorDefinition, ExecutorValidationError
-
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class ExecutorInstallError(ExecutorValidationError):

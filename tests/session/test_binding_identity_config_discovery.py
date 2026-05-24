@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -13,24 +14,6 @@ from astrid.core.session import binding, config, constants, discovery, identity,
 from astrid.core.session.identity import Identity, IdentityError
 from astrid.core.session.lease import write_lease_init
 from astrid.core.session.model import Session
-
-
-def _seed_session(astrid_home: Path, *, sid: str = "S-TEST", project: str = "demo") -> Session:
-    sessions = astrid_home / "sessions"
-    sessions.mkdir(parents=True, exist_ok=True)
-    sess = Session(
-        id=sid,
-        project=project,
-        timeline=None,
-        run_id=None,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-    )
-    sess.to_json(sessions / f"{sid}.json")
-    return sess
-
 
 # ----- binding -----------------------------------------------------------
 
@@ -46,10 +29,10 @@ def test_resolve_current_session_returns_none_when_empty(monkeypatch: pytest.Mon
 
 
 def test_resolve_current_session_loads_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mint_session: Any
 ) -> None:
     monkeypatch.setenv(paths.ASTRID_HOME_ENV, str(tmp_path))
-    sess = _seed_session(tmp_path, sid="S-LOAD")
+    sess = mint_session(tmp_path, sid="S-LOAD", project="demo", run_id=None)
     monkeypatch.setenv(binding.ASTRID_SESSION_ID_ENV, "S-LOAD")
     loaded = binding.resolve_current_session()
     assert loaded is not None
@@ -86,8 +69,10 @@ def test_is_writer_for_matches_lease(tmp_path: Path) -> None:
     assert binding.is_writer_for(other, run_dir) is False
 
 
-def test_current_run_dir_returns_none_when_run_id_unset(tmp_path: Path) -> None:
-    sess = _seed_session(tmp_path, sid="S-2")
+def test_current_run_dir_returns_none_when_run_id_unset(
+    tmp_path: Path, mint_session: Any
+) -> None:
+    sess = mint_session(tmp_path, sid="S-2", project="demo", run_id=None)
     assert binding.current_run_dir(sess) is None
 
 

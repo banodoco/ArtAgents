@@ -18,7 +18,6 @@ from __future__ import annotations
 import fcntl
 import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +31,7 @@ from astrid.core.task.events import (
     _read_tail_hash,  # noqa: PLC2701
     append_event_locked,
 )
+from astrid.core.util.time import utc_now_iso
 
 LEASE_DEFAULTS: dict[str, Any] = {
     "writer_epoch": 0,
@@ -282,7 +282,7 @@ def _normalize_lease(data: dict[str, Any], lease_path: Path) -> dict[str, Any]:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 # Silence the static checker — these are deliberate internal-API reuses.

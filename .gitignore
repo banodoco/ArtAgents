@@ -50,14 +50,21 @@ cache/
 # Agentic test artifacts (regenerated per-run, not source)
 tests/agentic/reports/
 tests/agentic/__pycache__/
+agentic-*.report.md
+report-*.md
+M5_TEST_STATUS.md
+dry_run_map.json
+plan_v1.revised.md
 
 # Local workspace/tool state
 .DS_Store
 .tmp/
 .claude/
+.desloppify/
 .megaplan/
 .compactify/
 .megaplan-worktrees/
+*.bak
 
 # Local scratch pack (gitignored)
 /astrid/packs/local/
@@ -70,4 +77,3 @@ plan_revision.json
 
 # Astrid file-bound session pointer (T9 / FLAG-S1-003)
 .astrid-session
-

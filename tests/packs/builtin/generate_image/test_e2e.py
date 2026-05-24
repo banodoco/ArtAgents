@@ -465,7 +465,7 @@ def _comfyui_binary_present() -> bool:
 
 @pytest.mark.skipif(not _vibecomfy_importable(), reason="vibecomfy not importable")
 @pytest.mark.skipif(not _comfyui_binary_present(), reason="comfyui binary not on PATH")
-def test_e2e_local_smoke(tmp_path: Path) -> None:
+def test_e2e_local_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Smoke test: execution=local with z-image t2i mode runs without crashing."""
     from astrid.packs.builtin.generate_image.run import main
 
@@ -480,7 +480,12 @@ def test_e2e_local_smoke(tmp_path: Path) -> None:
             "--seed", "1",
         ]
     )
-    assert code in (0, 1)
+    captured = capsys.readouterr()
+    manifest_path = out / "manifest.json"
+    assert code == 0, captured.err
+    assert captured.err == ""
+    assert captured.out == f"manifest={manifest_path.resolve()}\n"
+    assert manifest_path.is_file()
 
 
 # ---------------------------------------------------------------------------

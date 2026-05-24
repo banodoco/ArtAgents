@@ -3,7 +3,7 @@
   "$id": "executor.json",
   "type": "object",
   "description": "Pack-author schema for executor manifests. Updated to match what the runtime registry (astrid/core/executor/schema.py) actually consumes — the prior schema required a `runtime` block that nothing read and rejected the `command`/`inputs`/`outputs` fields every real executor uses.",
-  "required": ["id", "name", "version"],
+  "required": ["schema_version", "id", "name", "version"],
   "properties": {
     "schema_version": {"type": "integer"},
     "id": {"$ref": "_defs.json#/definitions/qualified_id"},
@@ -16,7 +16,9 @@
     "runtime": {
       "oneOf": [
         {"$ref": "_defs.json#/definitions/runtime_python_cli"},
-        {"$ref": "_defs.json#/definitions/runtime_command"}
+        {"$ref": "_defs.json#/definitions/runtime_python"},
+        {"$ref": "_defs.json#/definitions/runtime_command"},
+        {"$ref": "_defs.json#/definitions/runtime_command_legacy"}
       ]
     },
     "command": {
@@ -25,7 +27,9 @@
         "argv": {"type": "array", "items": {"type": "string"}},
         "cwd": {"type": "string"},
         "env": {"type": "object"}
-      }
+      },
+      "required": ["argv"],
+      "additionalProperties": false
     },
     "inputs": {
       "type": "array",
@@ -36,8 +40,10 @@
           "type": {"type": "string"},
           "required": {"type": "boolean"},
           "default": {},
-          "description": {"type": "string"}
-        }
+          "description": {"type": "string"},
+          "placeholder": {"type": "string"}
+        },
+        "required": ["name"]
       }
     },
     "outputs": {
@@ -47,9 +53,13 @@
         "properties": {
           "name": {"type": "string"},
           "type": {"type": "string"},
+          "mode": {"type": "string"},
           "path_template": {"type": "string"},
+          "extension": {"type": "string"},
+          "placeholder": {"type": "string"},
           "description": {"type": "string"}
-        }
+        },
+        "required": ["name"]
       }
     },
     "cache": {"type": "object"},

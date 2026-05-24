@@ -11,7 +11,9 @@ from typing import Any, cast
 # Single source of truth for element kinds lives in astrid.core.pack to avoid a
 # circular import (element.__init__ would import pack.py during schema load).
 from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
+from astrid.core.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import ELEMENT_KINDS, ElementKind
+
 REQUIRED_ELEMENT_FILES = ("component.tsx", "element.yaml")
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
 _KIND_SINGULAR_TO_PLURAL = {"effect": "effects", "animation": "animations", "transition": "transitions"}
@@ -234,14 +236,10 @@ def _element_manifest_path(root: Path) -> Path | None:
 
 
 def _read_manifest(path: Path) -> dict[str, Any]:
-    text = path.read_text(encoding="utf-8")
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise ElementValidationError(f"{path}: invalid manifest JSON: {exc.msg}") from exc
-    if not isinstance(data, dict):
-        raise ElementValidationError(f"{path} must contain an object")
-    return data
+        return load_manifest_mapping(path, manifest_kind="element")
+    except ManifestParseError as exc:
+        raise ElementValidationError(f"{path}: {exc}") from exc
 
 
 def _parse_dependencies(raw: Any, *, path: str) -> ElementDependencies:

@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "builtin.html_canvas_effect",
   "name": "HTML Canvas Effect",
   "kind": "built_in",

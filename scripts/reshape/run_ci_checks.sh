@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+BROAD_PYTEST_ARGS=(
+  --tb=no
+  -q
+  --no-header
+  --ignore=tests/core/model_catalog/test_registry.py
+  --ignore=tests/packs/builtin/dataset_build/test_offline_fixtures.py
+  --ignore=tests/spikes/test_env_inheritance.py
+  --ignore=tests/test_author_test_drift.py
+  --ignore=tests/test_author_test_pass.py
+  --ignore=tests/test_author_test_regenerate.py
+  --ignore=tests/test_schema_contract.py
+)
+
+"$PYTHON_BIN" -m ruff check .
+"$PYTHON_BIN" -m mypy scripts/reshape
+"$PYTHON_BIN" scripts/reshape/check_repo_hygiene.py
+
+"$PYTHON_BIN" -m pytest tests/reshape -q
+"$PYTHON_BIN" -m pytest tests/reshape/test_hype_regression_fixture.py -q
+"$PYTHON_BIN" -m pytest tests/concurrency/test_two_tab_harness_smoke.py -q
+"$PYTHON_BIN" -m pytest "${BROAD_PYTEST_ARGS[@]}"

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
 from typing import Any, Callable
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.session.paths import identity_path
+from astrid.core.util.time import utc_now_iso
 
 _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
@@ -23,7 +23,7 @@ class IdentityError(ValueError):
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 @dataclass(frozen=True)

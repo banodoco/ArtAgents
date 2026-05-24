@@ -10,11 +10,11 @@ guard_canonical_entrypoint('builtin.scenes')
 import argparse
 import csv
 import json
-import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
 from ....audit import register_outputs
+from astrid.core.util.media import ffprobe_duration_seconds
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,22 +56,7 @@ def timecode_seconds(value: Any) -> float:
 
 
 def probe_duration(video_path: Path) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(result.stdout.strip())
+    return ffprobe_duration_seconds(video_path)
 
 
 def detect_scenes(video_path: Path, threshold: float) -> list[dict[str, float | int]]:
@@ -130,7 +115,9 @@ def write_outputs(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    from ..asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+    from ..asset_cache import run as asset_cache
+
+    args.video = Path(asset_cache.resolve_input(args.video, want="path"))
 
     video_path = args.video.resolve()
     if not video_path.is_file():
