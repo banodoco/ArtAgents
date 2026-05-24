@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 import pytest
 
@@ -11,14 +12,17 @@ from astrid.core.orchestrator import runner as orchestrator_runner
 from astrid.core.orchestrator.runner import OrchestratorRunRequest
 from astrid.core.project.project import create_project
 from astrid.core.project.run import ProjectRunContext, ProjectRunError, finalize_project_run, prepare_project_run
+from astrid.core.project.run import write_run_record
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
+from astrid.core.timeline.crud import create_timeline
 from astrid.packs.builtin.hype import run as hype_run
 
 
 def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
     tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    create_project("demo", root=tmp_projects_root)
+    timeline_id = _seed_project_with_timeline(tmp_projects_root, "demo")
+    _seed_parent_run(tmp_projects_root, "demo", "task-run-1", timeline_id)
     _set_task_env(monkeypatch, project="demo", run_id="task-run-1", step_id="step-1")
 
     context = prepare_project_run("demo", root=tmp_projects_root)
@@ -27,12 +31,14 @@ def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
     assert context.run_id == "task-run-1"
     assert not context.run_json_path.exists()
     assert context.record["status"] == "attached"
+    assert context.record["timeline_id"] == timeline_id
     assert context.record["metadata"]["attached_to_task_run"] is True
     assert context.record["metadata"]["task_step_id"] == "step-1"
 
 
 def test_task_env_second_step_reuses_same_parent_run_dir(tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    create_project("demo", root=tmp_projects_root)
+    timeline_id = _seed_project_with_timeline(tmp_projects_root, "demo")
+    _seed_parent_run(tmp_projects_root, "demo", "task-run-1", timeline_id)
     _set_task_env(monkeypatch, project="demo", run_id="task-run-1", step_id="step-1")
     first = prepare_project_run("demo", root=tmp_projects_root)
     monkeypatch.setenv(TASK_STEP_ID_ENV, "step-2")
@@ -63,17 +69,25 @@ def test_task_env_missing_step_id_rejects(tmp_projects_root: Path, monkeypatch: 
 
 
 def test_env_unset_standalone_path_still_writes_run_json(tmp_projects_root: Path) -> None:
-    create_project("demo", root=tmp_projects_root)
+    timeline_id = _seed_project_with_timeline(tmp_projects_root, "demo")
 
     context = prepare_project_run("demo", root=tmp_projects_root, run_id="standalone-run")
 
     assert context.run_root == tmp_projects_root / "demo" / "runs" / "standalone-run"
     assert context.run_json_path.is_file()
     assert context.record["status"] == "prepared"
+    assert context.record["timeline_id"] == timeline_id
+    manifest = json.loads(
+        (tmp_projects_root / "demo" / "timelines" / timeline_id / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "standalone-run" in manifest["contributing_runs"]
 
 
 def test_attached_hype_artifacts_mirror_under_step_produces(tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    create_project("demo", root=tmp_projects_root)
+    timeline_id = _seed_project_with_timeline(tmp_projects_root, "demo")
+    _seed_parent_run(tmp_projects_root, "demo", "task-run-1", timeline_id)
     _set_task_env(monkeypatch, project="demo", run_id="task-run-1", step_id="step-1")
     context = prepare_project_run("demo", root=tmp_projects_root)
     artifact_root = tmp_projects_root / "artifacts"
@@ -125,3 +139,21 @@ def _set_task_env(monkeypatch: pytest.MonkeyPatch, *, project: str, run_id: str,
     monkeypatch.setenv(TASK_RUN_ID_ENV, run_id)
     monkeypatch.setenv(TASK_PROJECT_ENV, project)
     monkeypatch.setenv(TASK_STEP_ID_ENV, step_id)
+
+
+def _seed_project_with_timeline(root: Path, project: str) -> str:
+    create_project(project, root=root)
+    timeline = create_timeline(project, "main", is_default=True, root=root)
+    return str(timeline["ulid"])
+
+
+def _seed_parent_run(root: Path, project: str, run_id: str, timeline_id: str) -> None:
+    write_run_record(
+        project,
+        run_id,
+        root=root,
+        tool_id="demo.parent",
+        kind="orchestrator",
+        status="prepared",
+        timeline_id=timeline_id,
+    )

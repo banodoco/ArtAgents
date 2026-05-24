@@ -37,7 +37,7 @@
       "payload": {
         "track_id": "track-2",
         "kind": "audio",
-        "label": null
+        "label": "Audio"
       },
       "expected_version": null,
       "schema_version": 2,
@@ -85,6 +85,7 @@
     }
   ],
   "expected_assembly": {
+    "clips": [],
     "tracks": [
       {
         "id": "track-1",

@@ -54,7 +54,7 @@ def track_add(
         track_id: Unique track identifier (UUID recommended for new tracks).
         kind: Track kind — ``"visual"`` or ``"audio"`` only.
               Captions remain visual tracks with a ``"captions"`` label.
-        label: Optional human-readable label.
+        label: Required human-readable label.
         actor: Who performed the action (defaults to a system actor).
         expected_version: Optional CAS guard (enforced in m5).
         txn_id: Optional transaction id (enforced in m5).
@@ -66,8 +66,8 @@ def track_add(
         raise TimelineEditError("track_id must be a non-empty string")
     if kind not in {"visual", "audio"}:
         raise TimelineEditError(f"kind must be 'visual' or 'audio', got {kind!r}")
-    if label is not None and (not isinstance(label, str) or not label.strip()):
-        raise TimelineEditError("label must be a non-empty string when provided")
+    if not isinstance(label, str) or not label.strip():
+        raise TimelineEditError("label must be a non-empty string")
 
     act = actor or _default_actor("track_add")
     event = backend.append_event(

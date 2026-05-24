@@ -12,20 +12,20 @@ Profile: `partnered/full/medium`. Estimated effort: 2-3 human-weeks.
 
 1. **`builtin.cut` wholesale timeline writes.**
    - Touchpoints: `astrid/packs/builtin/cut/run.py:1028`, `astrid/packs/builtin/cut/run.py:1193`.
-   - Replace `save_timeline` canonical writes with event emission. Expected event kinds: `timeline.imported` for initial constructed timelines when no prior event stream exists, `arrangement.replaced` for full arrangement/config replacement, and the finer `clip.*`, `track.*`, `audio.*`, `effect.*`, `transition.*`, `theme.*`, and `pool.*` events where cut already has semantic intent.
+   - Replace `save_timeline` canonical writes with event emission. Expected event kinds: `timeline.imported` for initial constructed timelines when no prior event stream exists, `timeline.config_replaced` for full raw TimelineConfig replacement, and the finer `clip.*`, `track.*`, `audio.*`, `effect.*`, `transition.*`, `theme.*`, and `pool.*` events where cut already has semantic intent.
    - Actor: `system` actor such as `"builtin.cut:<run_id>"`, with optional `actor.via` when invoked by an agent or human-driven orchestrator.
 2. **`builtin.refine` timeline and arrangement writes.**
    - Touchpoints: `astrid/packs/builtin/refine/run.py:575`, `astrid/packs/builtin/refine/run.py:542`.
-   - Replace `save_timeline` and `save_arrangement` canonical writes with `arrangement.replaced` when the refine output is coarse-grained, or semantic clip/effect/track events when the refine step can name the edit.
+   - Replace `save_timeline` and `save_arrangement` canonical writes with `timeline.config_replaced` when the refine output is coarse-grained, or semantic clip/effect/track events when the refine step can name the edit.
    - Actor: `agent` when an agent chose/refined the edit, otherwise `system` `"builtin.refine:<run_id>"`; carry human/agent provenance in `actor.via`.
 3. **`iteration.assemble` two-file timeline writes.**
    - Touchpoints: `astrid/packs/iteration/assemble/run.py:108`, `astrid/packs/iteration/assemble/run.py:109`.
-   - Emit events for both generated timeline files before writing derived compatibility outputs. Expected event kinds: `timeline.imported` for lineage seed, `arrangement.replaced`, and relevant `clip.*` / `track.*` / `audio.*` events.
+   - Emit events for both generated timeline files before writing derived compatibility outputs. Expected event kinds: `timeline.imported` for lineage seed, `timeline.config_replaced`, and relevant `clip.*` / `track.*` / `audio.*` events.
    - Actor: `system` `"iteration.assemble:<thread_or_run_id>"`.
 4. **`builtin.hype` arrangement and `hype.timeline.json` paths.**
    - Touchpoint: `astrid/packs/builtin/hype/run.py`, including direct `load_arrangement` / `save_arrangement` calls and 14+ references to `hype.timeline.json`.
    - Route canonical mutations through event APIs; keep `hype.timeline.json` as a read/write compatibility projection only while m4/m8 consumers still require it.
-   - Expected event kinds: `arrangement.replaced`, `clip.*`, `track.*`, `audio.*`, `pool.*`, and `theme.*` as applicable to the concrete hype stage.
+   - Expected event kinds: `timeline.config_replaced`, `clip.*`, `track.*`, `audio.*`, `pool.*`, and `theme.*` as applicable to the concrete hype stage.
    - Actor: proximate writer wins. Human-launched CLI runs use `human`; agent/orchestrator-launched hype uses `agent`; internal stage rewrites use `system` with `actor.via`.
 5. **`open_in_reigh` LocalFs -> Supabase bridge.**
    - Touchpoint: `astrid/packs/builtin/open_in_reigh/run.py:193`.
@@ -39,7 +39,7 @@ Profile: `partnered/full/medium`. Estimated effort: 2-3 human-weeks.
 7. **Banodoco worker generation write-back.**
    - Touchpoint: `astrid/core/worker/banodoco_worker.py:344`.
    - Replace `provider.save_timeline` after generation tasks with event appends through the selected backend.
-   - Expected event kinds: use semantic generated edit kinds where available (`clip.added`, `clip.replaced`, `asset`/pool events from m3), or `arrangement.replaced` for coarse generation outputs.
+   - Expected event kinds: use semantic generated edit kinds where available (`clip.added`, `clip.replaced`, `asset`/pool events from m3), or `timeline.config_replaced` for coarse generation outputs.
    - Actor: `system` `"banodoco_worker:claim:<task_id>"` or equivalent, with `actor.via` preserving the user/agent task initiator.
 
 ## Anti-scope
@@ -54,13 +54,13 @@ Profile: `partnered/full/medium`. Estimated effort: 2-3 human-weeks.
 
 - Pack and worker writes use `EventLogBackend`; they do not write `assembly.jsonl` directly.
 - Every pack/worker event has an actor matching the m1 schema. The proximate writer wins; upstream human/agent provenance goes in `actor.via`.
-- `arrangement.replaced` is allowed as a migration bridge for coarse pack outputs, but planners must prefer semantic m2/m3 events where the pack already knows the edit.
+- `arrangement.replaced` is migration-only legacy. Coarse pack outputs use `timeline.config_replaced`; planners must prefer semantic m2/m3 events where the pack already knows the edit.
 - Compatibility outputs are derived surfaces. A pack may refresh them only after appending events and only through the projection/helper path designed for m4.
 - `open_in_reigh` is the named cross-boundary bridge; other packs must not invent LocalFs-to-Supabase blob copy paths.
 
 ## Open Questions
 
-- Which pack outputs can be decomposed cleanly into semantic m2/m3 events versus requiring `arrangement.replaced`?
+- Which pack outputs can be decomposed cleanly into semantic m2/m3 events versus requiring `timeline.config_replaced`?
 - Should bridge replay preserve original event ids or create new Supabase event ids with source-event metadata?
 - How should pack run ids be normalized for actor ids when a pack is invoked outside task-mode?
 - Do pack-produced assets need stable `asset_ref` payloads before all URL-stability decisions are resolved in m6/m9?

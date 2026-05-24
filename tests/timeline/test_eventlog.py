@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import multiprocessing
 from pathlib import Path
-from uuid import UUID
 
 import pytest
 
@@ -114,11 +113,11 @@ def test_local_fs_backend_rebuilds_head_when_cache_is_missing_or_stale(project_t
     assert repaired.last_hash == event.hash
 
 
-def test_local_fs_backend_bootstraps_legacy_with_imported_event(project_tree: Path) -> None:
+def test_local_fs_backend_rejects_legacy_bootstrap(project_tree: Path) -> None:
     legacy_home = timeline_dir("demo", "01J00000000000000000000000", root=project_tree)
     legacy_home.mkdir(parents=True, exist_ok=True)
     (legacy_home / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
+        json.dumps({"clips": [], "tracks": []}), encoding="utf-8"
     )
     (legacy_home / "manifest.json").write_text(
         json.dumps(
@@ -144,18 +143,16 @@ def test_local_fs_backend_bootstraps_legacy_with_imported_event(project_tree: Pa
     )
 
     backend = LocalFsBackend(timeline_id="00000000-0000-0000-0000-000000000000", timeline_home=legacy_home)
-    backend.append_event(
-        "00000000-0000-0000-0000-000000000000",
-        "timeline.renamed",
-        {"old_slug": "legacy", "new_slug": "legacy-v2"},
-        actor=TimelineActor(type="system", id="migration:test"),
-    )
+    with pytest.raises(EventLogError, match="legacy bootstrap is disabled"):
+        backend.append_event(
+            "00000000-0000-0000-0000-000000000000",
+            "timeline.renamed",
+            {"old_slug": "legacy", "new_slug": "legacy-v2"},
+            actor=TimelineActor(type="system", id="migration:test"),
+        )
 
-    events = backend.read_events()
-    assert [event.kind for event in events] == ["timeline.imported", "timeline.renamed"]
-    identity = json.loads((legacy_home / "assembly.identity.json").read_text(encoding="utf-8"))
-    assert identity["provenance"] == "imported"
-    assert str(UUID(identity["timeline_id"])) == identity["timeline_id"]
+    assert backend.read_events() == []
+    assert not (legacy_home / "assembly.identity.json").exists()
 
 
 def test_local_fs_backend_verify_chain_detects_tampering(project_tree: Path) -> None:
@@ -287,11 +284,11 @@ def test_local_fs_backend_serializes_concurrent_process_appends(project_tree: Pa
     assert backend.head().event_count == 4
 
 
-def test_local_fs_backend_serializes_concurrent_first_write_bootstrap(project_tree: Path) -> None:
+def test_local_fs_backend_concurrent_legacy_first_write_rejects_without_bootstrap(project_tree: Path) -> None:
     legacy_home = timeline_dir("demo", "01J00000000000000000000001", root=project_tree)
     legacy_home.mkdir(parents=True, exist_ok=True)
     (legacy_home / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
+        json.dumps({"clips": [], "tracks": []}), encoding="utf-8"
     )
     (legacy_home / "manifest.json").write_text(
         json.dumps(
@@ -328,17 +325,15 @@ def test_local_fs_backend_serializes_concurrent_first_write_bootstrap(project_tr
         proc.start()
     for proc in procs:
         proc.join(5)
-        assert proc.exitcode == 0
+        assert proc.exitcode != 0
 
     backend = LocalFsBackend(
         timeline_id="00000000-0000-0000-0000-000000000000",
         timeline_home=legacy_home,
     )
     events = backend.read_events()
-    assert [event.kind for event in events].count("timeline.imported") == 1
-    assert [event.kind for event in events].count("timeline.renamed") == 2
-    identity = json.loads((legacy_home / "assembly.identity.json").read_text(encoding="utf-8"))
-    assert identity["provenance"] == "imported"
+    assert events == []
+    assert not (legacy_home / "assembly.identity.json").exists()
 
 
 def test_show_timeline_repairs_missing_display_from_eventlog(project_tree: Path) -> None:
@@ -462,7 +457,7 @@ def test_history_formatting_includes_backend_timeline_version_event_actor_kind(
     backend.append_event(
         identity["timeline_id"],
         "clip.added",
-        {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+        {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
         actor=TimelineActor(type="agent", id="alice:session-1", display="alice"),
     )
 
@@ -494,12 +489,12 @@ def test_who_edited_actor_rollup_aggregation(project_tree: Path) -> None:
 
     backend.append_event(
         identity["timeline_id"], "clip.added",
-        {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+        {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
         actor=alice,
     )
     backend.append_event(
         identity["timeline_id"], "clip.added",
-        {"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+        {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None},
         actor=bob,
     )
     backend.append_event(
@@ -538,7 +533,7 @@ def test_verify_chain_tamper_detection_on_localfs(project_tree: Path) -> None:
     backend.append_event(
         identity["timeline_id"],
         "clip.added",
-        {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+        {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
         actor=TimelineActor(type="agent", id="test"),
     )
 

@@ -182,7 +182,7 @@ class TestErasurePreview:
 
         e1 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
@@ -192,7 +192,7 @@ class TestErasurePreview:
         )
         e3 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c2", "kind": "visual", "asset_id": "a2"},
+            {"clip_id": "c2", "kind": "visual", "track_id": "visual", "asset_id": "a2"},
             actor=_ACTOR,
         )
 
@@ -227,7 +227,7 @@ class TestErasurePreview:
         backend = LocalFsBackend(timeline_id=tid, timeline_home=home)
         backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -258,12 +258,12 @@ class TestErasureApply:
 
         e1 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c2", "kind": "visual", "asset_id": "a2"},
+            {"clip_id": "c2", "kind": "visual", "track_id": "visual", "asset_id": "a2"},
             actor=_ACTOR,
         )
         e3 = backend.append_event(
@@ -313,7 +313,7 @@ class TestErasureApply:
 
         e1 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -359,7 +359,7 @@ class TestErasureApply:
 
         e1 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
@@ -369,7 +369,7 @@ class TestErasureApply:
         )
         e3 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c2", "kind": "visual", "asset_id": "a2"},
+            {"clip_id": "c2", "kind": "visual", "track_id": "visual", "asset_id": "a2"},
             actor=_ACTOR,
         )
 
@@ -406,7 +406,7 @@ class TestErasureApply:
 
         e1 = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -452,7 +452,7 @@ class TestErasureApply:
 
         original_event = backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -572,7 +572,7 @@ class TestSelectorSafety:
         backend = LocalFsBackend(timeline_id=tid, timeline_home=home)
         backend.append_event(
             tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -613,7 +613,7 @@ class TestErasureImportMetadataPreservation:
             ts="2026-05-21T00:00:00Z",
             actor=_ACTOR,
             kind="clip.added",
-            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            payload={"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             source_backend="supabase",
             source_timeline_id=str(uuid4()),
             source_event_id="SRC001",

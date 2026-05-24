@@ -32,6 +32,7 @@ def app(): return [code("step_a", argv=["echo", "x"])]
 def test_start_writes_active_run_with_correct_hash(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "app", _BODY_CODE, "demo.app")
     create_project("p", root=projects)
+    create_timeline("p", "main", root=projects, is_default=True)
     bind_writer_session(projects, "p")
     rc = cmd_start(
         ["demo.app", "--project", "p", "--name", "r1"],
@@ -49,6 +50,7 @@ def test_start_writes_active_run_with_correct_hash(tmp_path: Path) -> None:
 def test_events_jsonl_first_line_is_run_started(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "app", _BODY_CODE, "demo.app")
     create_project("p", root=projects)
+    create_timeline("p", "main", root=projects, is_default=True)
     bind_writer_session(projects, "p")
     cmd_start(["demo.app", "--project", "p", "--name", "r2"], packs_root=packs, projects_root=projects)
     events_path = projects / "p" / "runs" / "r2" / "events.jsonl"
@@ -62,6 +64,7 @@ def test_events_jsonl_first_line_is_run_started(tmp_path: Path) -> None:
 def test_agent_md_includes_preamble(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "app", _BODY_CODE, "demo.app")
     create_project("p", root=projects)
+    create_timeline("p", "main", root=projects, is_default=True)
     bind_writer_session(projects, "p")
     cmd_start(["demo.app", "--project", "p", "--name", "r3"], packs_root=packs, projects_root=projects)
     agent_md = (projects / "p" / "runs" / "r3" / "AGENT.md").read_text(encoding="utf-8")
@@ -73,6 +76,7 @@ def test_agent_md_includes_preamble(tmp_path: Path) -> None:
 def test_second_start_rejected_with_recovery(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "app", _BODY_CODE, "demo.app")
     create_project("p", root=projects)
+    create_timeline("p", "main", root=projects, is_default=True)
     bind_writer_session(projects, "p")
     cmd_start(["demo.app", "--project", "p", "--name", "r4"], packs_root=packs, projects_root=projects)
     err = io.StringIO()
@@ -96,6 +100,7 @@ def test_missing_build_json_prints_compile_recovery(tmp_path: Path) -> None:
     projects.mkdir()
     make_pack(packs, "demo", "uncompiled", _BODY_CODE.replace("demo.app", "demo.uncompiled"))
     create_project("q", root=projects)
+    create_timeline("q", "main", root=projects, is_default=True)
     bind_writer_session(projects, "q")
     err = io.StringIO()
     with redirect_stderr(err), redirect_stdout(io.StringIO()):
@@ -108,12 +113,13 @@ def test_missing_build_json_prints_compile_recovery(tmp_path: Path) -> None:
     assert "astrid author compile demo.uncompiled" in err.getvalue()
 
 
-def test_start_requires_explicit_timeline_when_default_sentinel_is_none(
+def test_start_rejects_multiple_timelines_when_default_sentinel_is_none(
     tmp_path: Path,
 ) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "app", _BODY_CODE, "demo.app")
     create_project("p", root=projects)
     create_timeline("p", "primary", root=projects)
+    create_timeline("p", "secondary", root=projects)
     bind_writer_session(projects, "p")
 
     err = io.StringIO()
@@ -125,7 +131,8 @@ def test_start_requires_explicit_timeline_when_default_sentinel_is_none(
         )
 
     assert rc == 1
-    assert "No default timeline; pass --timeline <slug>. Available:" in err.getvalue()
+    assert "has no default timeline and 2 live timelines" in err.getvalue()
+    assert "timelines set-default" in err.getvalue()
     assert not (projects / "p" / "runs" / "r-no-default").exists()
 
 

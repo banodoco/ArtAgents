@@ -19,6 +19,7 @@ from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session
 from astrid.core.session.paths import session_path
 from astrid.core.task.lifecycle import cmd_start
+from astrid.core.timeline.crud import create_timeline
 from astrid.orchestrate.compile import compile_to_path
 
 
@@ -113,6 +114,7 @@ def setup_run(
     """
     packs, projects = setup_packs_and_compile(tmp_path, pack, module_name, body, qualified_id)
     create_project(project, root=projects, exist_ok=True)
+    create_timeline(project, "main", root=projects, is_default=True)
     bind_writer_session(projects, project)
     os.environ["ASTRID_ACTOR"] = start_actor
     with redirect_stdout(io.StringIO()):

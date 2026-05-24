@@ -212,7 +212,7 @@ def _worker_append_events(
     """Append worker-generated timeline mutations through the local event gateway.
 
     Attempts to resolve a local project-timeline binding for the remote
-    timeline.  When successful, appends ``arrangement.replaced`` events via
+    timeline.  When successful, appends ``timeline.config_replaced`` events via
     ``pack_write_gateway`` and returns the new event-stream version.
 
     Remote-only claims (no local project_slug, or no matching local timeline)
@@ -236,6 +236,7 @@ def _worker_append_events(
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.paths import find_timeline_by_event_stream_id
     from astrid.core.timeline.events.schema import TimelineActor
+    from astrid import timeline as timeline_contract
 
     # Resolve a local timeline slug from the remote timeline_id (event-stream UUID).
     found = find_timeline_by_event_stream_id(project_slug, timeline_id)
@@ -267,12 +268,13 @@ def _worker_append_events(
     new_config = mutator(snapshot_payload, 0)
     if not isinstance(new_config, dict):
         raise RuntimeError("worker mutator did not return a dict")
+    new_config = timeline_contract.canonical_timeline_config(new_config)
 
-    # Emit arrangement.replaced as a coarse event (finer events deferred to m6).
+    # Emit the validated full TimelineConfig replacement surface.
     events = [
         {
-            "kind": "arrangement.replaced",
-            "payload": {"arrangement": new_config},
+            "kind": "timeline.config_replaced",
+            "payload": {"config": new_config},
         }
     ]
 

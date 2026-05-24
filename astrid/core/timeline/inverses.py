@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
 
+from astrid import timeline as timeline_contract
+
 from .events.schema import (
     ArrangementReplacedPayload,
     AudioBoundPayload,
@@ -28,6 +30,7 @@ from .events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
+    ClipRetrackedPayload,
     ClipRetimedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
@@ -40,6 +43,7 @@ from .events.schema import (
     PoolAssetScoredPayload,
     ThemeOverriddenPayload,
     ThemeSetPayload,
+    TimelineConfigReplacedPayload,
     TimelineEvent,
     TrackAddedPayload,
     TrackRemovedPayload,
@@ -173,8 +177,12 @@ def _inverse_clip_removed(
             position = {"mode": "index", "index": removed_index}
         inverse = {
             "clip_id": clip_id,
-            "kind": removed_clip.get("kind", "visual"),
-            "asset_id": removed_clip.get("asset_id", ""),
+            "kind": removed_clip.get("kind")
+            or ("text" if removed_clip.get("clipType") == "text" else "visual"),
+            "track_id": removed_clip.get("track", "visual"),
+            "asset_id": removed_clip.get("asset")
+            or removed_clip.get("asset_id")
+            or clip_id,
         }
         if position:
             inverse["position"] = position
@@ -217,6 +225,35 @@ def _inverse_clip_moved(
             },
         )
     return _non_invertible(event, before, after, "clip.moved payload not available")
+
+
+@_register("clip.retracked")
+def _inverse_clip_retracked(
+    event: TimelineEvent,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> InverseRequest:
+    """Inverse of clip.retracked: restore the clip's previous track."""
+    payload = event.payload
+    if isinstance(payload, ClipRetrackedPayload):
+        before_clips = before.get("clips", []) if isinstance(before, dict) else []
+        for clip in before_clips:
+            if isinstance(clip, dict) and clip.get("id") == payload.clip_id:
+                previous_track = clip.get("track")
+                if isinstance(previous_track, str) and previous_track:
+                    return InverseRequest(
+                        invertible=True,
+                        inverse_kind="clip.retracked",
+                        inverse_payload={
+                            "clip_id": payload.clip_id,
+                            "track_id": previous_track,
+                        },
+                    )
+        return _non_invertible(
+            event, before, after,
+            f"clip {payload.clip_id!r} not found in prior projection state"
+        )
+    return _non_invertible(event, before, after, "clip.retracked payload not available")
 
 
 @_register("clip.retimed")
@@ -766,6 +803,42 @@ def _inverse_arrangement_replaced(
             inverse_payload={"arrangement": dict(before_arrangement) if isinstance(before_arrangement, dict) else {}},
         )
     return _non_invertible(event, before, after, "arrangement.replaced payload not available")
+
+
+# ============================================================================
+# timeline.config_replaced inverse
+# ============================================================================
+
+
+@_register("timeline.config_replaced")
+def _inverse_timeline_config_replaced(
+    event: TimelineEvent,
+    before: dict[str, Any],
+    after: dict[str, Any],
+) -> InverseRequest:
+    """Inverse of timeline.config_replaced: restore the prior raw TimelineConfig."""
+    payload = event.payload
+    if not isinstance(payload, TimelineConfigReplacedPayload):
+        return _non_invertible(
+            event,
+            before,
+            after,
+            "timeline.config_replaced payload not available",
+        )
+    try:
+        config = timeline_contract.validate_timeline_config_for_container(before)
+    except ValueError as exc:
+        return _non_invertible(
+            event,
+            before,
+            after,
+            f"prior projection is not a valid TimelineConfig: {exc}",
+        )
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="timeline.config_replaced",
+        inverse_payload={"config": config},
+    )
 
 
 # ============================================================================

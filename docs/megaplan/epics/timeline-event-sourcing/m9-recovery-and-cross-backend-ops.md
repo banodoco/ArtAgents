@@ -15,11 +15,11 @@ Profile: `partnered/full/medium`. Estimated effort: 2-3 human-weeks.
 2. **Recovery to anchor.**
    - `astrid timelines recover <slug-or-id> --to-event <id>`
    - `astrid timelines recover <slug-or-id> --to-snapshot <id>`
-   Recovery emits `timeline.recovered` with the target anchor, reason, and actor. It resets the projected head to the chosen event/snapshot without deleting historical events.
+   Recovery emits `timeline.recovered` with the target anchor, reason, actor, and validated raw `TimelineConfig` replacement. Event recovery replays the anchor first; snapshot recovery must match the replayed anchor projection before append. It resets the projected head to the chosen event/snapshot without deleting historical events.
 3. **Branching.**
    - `astrid timelines branch <slug> --from <event-id> --as <new-slug>`
    - `astrid timelines branches <slug>`
-   Branch creates a new timeline from the projected state at the chosen event. It emits a `timeline.branched_from` event on the source timeline so branches are enumerable through a reverse index.
+   Branch creates a new timeline from the validated raw `TimelineConfig` projected state at the chosen event. It emits a `timeline.branched_from` event on the source timeline so branches are enumerable through a reverse index.
 4. **Undo.**
    - `astrid timelines undo <slug>`
    Undo emits inverse semantic events where defined. For non-reversible kinds it emits `timeline.reverted` with `{target_event_id, projected_before, projected_after, reason}` or a narrower payload chosen by the planner.
@@ -37,11 +37,12 @@ Define inverse behavior for every m2/m3 event kind before implementation:
 - `clip.added` -> `clip.removed`
 - `clip.removed` -> `clip.added` when prior payload/projection contains enough clip data; otherwise `timeline.reverted`
 - `clip.moved` -> `clip.moved` back to previous position
+- `clip.retracked` -> `clip.retracked` back to the previous track
 - `clip.retimed` -> `clip.retimed` to previous timing
 - `clip.swapped` -> `clip.swapped` with the same pair
 - `clip.replaced` -> `clip.replaced` with previous asset
 - `clip.text_set` -> `clip.text_set` with previous text
-- `clip.annotated` -> remove or restore prior annotation according to payload history
+- `clip.annotated` is non-container metadata; it does not mutate `TimelineConfig`
 - `transition.set` -> previous `transition.set` or `transition.removed`
 - `transition.removed` -> `transition.set` when prior transition is known
 - `effect.added` -> `effect.removed`
@@ -56,7 +57,8 @@ Define inverse behavior for every m2/m3 event kind before implementation:
 - `pool.asset_added` -> `pool.asset_removed`
 - `pool.asset_removed` -> `pool.asset_added` when prior asset metadata is known
 - `pool.asset_scored` -> `pool.asset_scored` with previous score
-- `arrangement.replaced` -> `timeline.reverted` unless prior semantic diff is available
+- `arrangement.replaced` -> migration-only legacy handling; runtime full replacement uses `timeline.config_replaced`
+- `timeline.config_replaced` -> `timeline.config_replaced` with the prior validated raw TimelineConfig
 
 Lifecycle events require explicit rules:
 
@@ -82,7 +84,7 @@ Lifecycle events require explicit rules:
 - Should push/pull preserve original `event_id` values or create new ids with `source_event_id` metadata when crossing backends?
 - What query language is acceptable for `timeline.erased` selection without making accidental broad erasure easy?
 - Which lifecycle event fields are personal data under the project's policy and may need additional redaction?
-- Should `recover --to-snapshot` trust backend snapshots directly or re-verify against full replay before appending `timeline.recovered`?
+- Resolved in Sprint 2 container work: `recover --to-snapshot` re-verifies against full replay and rejects snapshots whose raw `TimelineConfig` digest does not match the replayed anchor projection before appending `timeline.recovered`.
 
 ## Constraints
 

@@ -7,23 +7,24 @@ You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
 Simulate a "runaway agent" scenario: you (as the agent) added many bad clip events
 to a timeline, and now you must undo them all via mass-undo.
 
-1. Create a timeline: `astrid timelines create --name "Mass Undo Test" --slug mass-undo-test`
-2. Add 10 clip events as the "runaway" actor:
+1. Create a timeline: `astrid timelines create mass-undo-test --name "Mass Undo Test"`
+2. Add a visual track: `astrid timelines track add mass-undo-test --kind visual --track-id visual --label Visual`
+3. Add 10 clip events as the "runaway" actor:
    ```
-   astrid timelines clip add --to mass-undo-test --kind visual --asset-id img1 --clip-id bad-clip-1 --actor-prefix runaway
+   astrid timelines clip add mass-undo-test --kind visual --asset bad-clip-1 --track visual
    ... (repeat for bad-clip-2 through bad-clip-10)
    ```
-3. Preview mass-undo (no writes): filter by actor prefix "runaway" and verify the preview
+4. Preview mass-undo (no writes): filter by actor prefix "agent:" and verify the preview
    lists exactly 10 events to undo.
    ```
-   astrid timelines mass-undo mass-undo-test --actor-prefix runaway --since 2020-01-01T00:00:00Z
+   astrid timelines mass-undo mass-undo-test --actor-prefix agent: --since 2020-01-01T00:00:00Z
    ```
-4. Execute mass-undo with --yes:
+5. Execute mass-undo with --yes:
    ```
-   astrid timelines mass-undo mass-undo-test --actor-prefix runaway --since 2020-01-01T00:00:00Z --yes
+   astrid timelines mass-undo mass-undo-test --actor-prefix agent: --since 2020-01-01T00:00:00Z --yes
    ```
-5. Verify the event log contains both the original clip.added events AND clip.removed inverses.
-6. Run `astrid timelines show mass-undo-test --verify` to confirm chain integrity.
+6. Verify the event log contains both the original clip.added events AND clip.removed inverses.
+7. Run `astrid timelines show mass-undo-test --verify` to confirm chain integrity.
 
 ## Constraints
 

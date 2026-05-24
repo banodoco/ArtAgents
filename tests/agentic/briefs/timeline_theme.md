@@ -8,8 +8,8 @@ Exercise the timeline theme edit verbs (`theme.set`, `theme.overridden`)
 through the canonical `astrid timelines` CLI surface:
 
 1. Create a timeline in `$SLUG`
-2. Set a theme: `astrid timelines theme set --to <timeline> --theme-id dark`
-3. Override a theme value: `astrid timelines theme override --to <timeline> --override-id dark.colors --value '{"bg":"#111"}'`
+2. Set a theme: `astrid timelines theme set <timeline> --theme dark`
+3. Override a theme value: `astrid timelines theme override <timeline> --override-id visual --value '{"colors":{"bg":"#111"}}'`
 4. Verify `assembly.jsonl` contains `theme.set` and `theme.overridden` events
 5. Confirm read-only commands do not append events
 

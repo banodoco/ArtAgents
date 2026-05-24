@@ -36,8 +36,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "intro",
-        "kind": "visual",
-        "asset_id": "intro.mp4",
+        "kind": "visual", "track_id": "visual", "asset_id": "intro.mp4",
         "position": null
       },
       "expected_version": null,
@@ -69,13 +68,12 @@
     "clips": [
       {
         "id": "intro",
-        "kind": "visual",
-        "asset_id": "intro.mp4",
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": ""
+        "at": 0.0,
+        "track": "visual",
+        "clipType": "media",
+        "asset": "intro.mp4"
       }
-    ]
+    ],
+    "tracks": []
   }
 }

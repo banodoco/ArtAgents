@@ -65,9 +65,11 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
     # Compile the demo pack first (cmd_start expects build/<orch>.json).
     from astrid.orchestrate.compile import compile_to_path
     from astrid.core.project.project import create_project
+    from astrid.core.timeline.crud import create_timeline
     compile_to_path("demo.app", packs_root=packs)
     # cmd_start requires the project to be registered before it accepts --project.
     create_project(slug, root=tmp_projects_root, exist_ok=True)
+    create_timeline(slug, "main", is_default=True, root=tmp_projects_root)
     bind_writer_session(tmp_projects_root, slug)
 
     monkeypatch.setenv(ASTRID_ACTOR, "alice")

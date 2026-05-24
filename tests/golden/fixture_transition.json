@@ -15,8 +15,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-a",
-        "kind": "visual",
-        "asset_id": "asset-1",
+        "kind": "visual", "track_id": "visual", "asset_id": "asset-1",
         "position": null
       },
       "expected_version": null,
@@ -37,8 +36,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-b",
-        "kind": "visual",
-        "asset_id": "asset-2",
+        "kind": "visual", "track_id": "visual", "asset_id": "asset-2",
         "position": {
           "mode": "after",
           "ref_clip_id": "clip-a"
@@ -95,22 +93,19 @@
     "clips": [
       {
         "id": "clip-a",
-        "kind": "visual",
-        "asset_id": "asset-1",
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": ""
+        "at": 0.0,
+        "track": "visual",
+        "clipType": "media",
+        "asset": "asset-1"
       },
       {
         "id": "clip-b",
-        "kind": "visual",
-        "asset_id": "asset-2",
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": ""
+        "at": 0.0,
+        "track": "visual",
+        "clipType": "media",
+        "asset": "asset-2"
       }
-    ]
+    ],
+    "tracks": []
   }
 }

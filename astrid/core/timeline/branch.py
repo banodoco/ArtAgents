@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.project.schema import utc_now_iso
 
@@ -155,9 +156,14 @@ def create_branch_timeline(
             ),
         )
 
-    # 3. Project source to anchor event
+    # 3. Project source to anchor event and validate the replayed anchor as
+    # the raw TimelineConfig that will seed the branch.
     try:
-        anchor_projection = replay_projection(source_backend, stop_at_event_id=from_event_id)
+        anchor_projection = _validate_branch_seed_config(
+            replay_projection(source_backend, stop_at_event_id=from_event_id),
+            event_id=from_event_id,
+            label="replayed branch anchor projection",
+        )
     except ProjectionError:
         raise
     except Exception as exc:
@@ -354,17 +360,27 @@ def _summarize_projection(assembly: dict[str, Any]) -> dict[str, Any]:
     """Build a lightweight summary of the projected assembly for audit output."""
     clips = assembly.get("clips", [])
     tracks = assembly.get("tracks", [])
-    pool = assembly.get("pool", {})
 
     return {
         "clip_count": len(clips) if isinstance(clips, list) else 0,
         "track_count": len(tracks) if isinstance(tracks, list) else 0,
-        "pool_asset_count": (
-            len(pool.get("entries", []))
-            if isinstance(pool, dict)
-            else 0
-        ),
     }
+
+
+def _validate_branch_seed_config(
+    config: dict[str, Any],
+    *,
+    event_id: str,
+    label: str,
+) -> dict[str, Any]:
+    try:
+        return timeline_contract.validate_timeline_config_for_container(config)
+    except Exception as exc:
+        raise ProjectionError(
+            event_id=event_id,
+            kind="(branch-anchor)",
+            reason=f"{label} is not a valid raw TimelineConfig: {exc}",
+        ) from exc
 
 
 def _write_branch_display(tdir: Path, slug: str) -> None:

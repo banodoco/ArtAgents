@@ -106,6 +106,7 @@
       "payload": {
         "clip_id": "new-clip",
         "kind": "visual",
+        "track_id": "legacy-track-1",
         "asset_id": "new-asset.mp4",
         "position": {
           "mode": "after",
