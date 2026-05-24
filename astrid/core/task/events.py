@@ -13,6 +13,23 @@ production hot path uses :func:`append_event_locked` which relies on the
 tail-hash CAS for integrity (DEC-007 / FLAG-019 — events do not store a
 ``prev_hash`` field, so a v3-style "re-verify the last link" is not
 expressible without reading the full chain).
+
+Writer-boundary note: this module is intentionally session-free transport.
+Normal production task-run writes must enter through
+``astrid.core.session.writer.WriterContext.append()``. The only production
+same-lock exception is lease takeover/orphan-claim emission in
+``astrid.core.session.lease``: it writes the takeover event while holding the
+same flock that mutates ``writer_epoch`` so the ownership change and its
+observability event stay atomic. Tests, migrations, and non-task event
+backends may use the raw helpers when explicitly allowlisted.
+
+Approved transport use:
+  * Normal task-run mutations: ``WriterContext.append()`` only.
+  * Raw locked helper: this module's transport, ``WriterContext.append()``,
+    and the RunPod sweeper's documented hard-mode exception.
+  * In-handle helper: same-flock lease takeover/orphan recovery only.
+  * ``append_event()``: legacy test/migration compatibility only. It is
+    guarded at runtime and must not be called by production task-run code.
 """
 
 from __future__ import annotations
@@ -23,7 +40,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from astrid.core.util.time import utc_now_iso
 
@@ -31,6 +48,7 @@ ZERO_HASH = "sha256:" + "0" * 64
 
 LEASE_FILENAME = "lease.json"
 EVENTS_FILENAME = "events.jsonl"
+LEGACY_APPEND_EVENT_ALLOW_ENV = "ASTRID_ALLOW_LEGACY_APPEND_EVENT"
 
 _TAIL_SEEK_INITIAL_WINDOW = 4096
 
@@ -170,13 +188,54 @@ def append_event_locked(
     return stored
 
 
+def append_event_to_locked_handle(
+    handle: BinaryIO,
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    """Append ``event`` using an already-locked ``events.jsonl`` handle.
+
+    This is the intentionally session-free same-lock escape hatch for lease
+    takeover/orphan emissions. Callers must already hold ``LOCK_EX`` on the
+    supplied events file and must have performed any lease mutation/fencing
+    checks required for their operation.
+    """
+
+    tail_hash = _read_tail_hash(handle)
+    stored = dict(event)
+    stored.pop("hash", None)
+    stored["hash"] = _event_hash(tail_hash, stored)
+
+    line = (
+        json.dumps(
+            stored,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    handle.seek(0, os.SEEK_END)
+    handle.write(line)
+    handle.flush()
+    os.fsync(handle.fileno())
+    return stored
+
+
 def append_event(path: str | Path, event: dict[str, Any]) -> dict[str, Any]:
-    """Test/migration only. Production code MUST use WriterContext.
+    """Legacy test/migration wrapper. Production code MUST use WriterContext.
 
     Reads the current ``(writer_epoch, tail_hash)`` from disk and calls
     :func:`append_event_locked` once. Raises :class:`StaleTailError` /
     :class:`StaleEpochError` / :class:`NotWriterError` with no retry.
     """
+
+    if not _legacy_append_event_allowed():
+        raise EventLogError(
+            "append_event() is a legacy test/migration helper. "
+            "Production task-run writes must use WriterContext.append(); "
+            "test/migration callers must run under pytest or set "
+            f"{LEGACY_APPEND_EVENT_ALLOW_ENV}=1."
+        )
 
     events_path = Path(path)
     run_dir = events_path.parent
@@ -185,13 +244,38 @@ def append_event(path: str | Path, event: dict[str, Any]) -> dict[str, Any]:
     # the lock and CAS-checks. This pre-read just supplies an "expected"
     # value so the contract shape matches the locked helper.
     pre_tail = _peek_tail_hash(events_path)
-    pre_epoch = _read_lease_epoch(lease_path)
+    try:
+        pre_epoch = _read_lease_epoch(lease_path)
+    except EventLogError as exc:
+        if _legacy_append_event_pytest_seed_without_lease(exc):
+            pre_epoch = None
+        else:
+            raise
     return append_event_locked(
         run_dir,
         event,
         expected_writer_epoch=pre_epoch,
         expected_prev_hash=pre_tail,
     )
+
+
+def _legacy_append_event_allowed() -> bool:
+    if os.environ.get(LEGACY_APPEND_EVENT_ALLOW_ENV) == "1":
+        return True
+    return "PYTEST_CURRENT_TEST" in os.environ
+
+
+def _legacy_append_event_pytest_seed_without_lease(exc: EventLogError) -> bool:
+    """Keep old unit-test event seeding working without weakening production.
+
+    The environment override is reserved for deliberate migration/debug use and
+    remains strict. Only pytest's implicit allow path can bypass a missing
+    lease, and only for missing lease state; malformed leases still fail.
+    """
+
+    if os.environ.get(LEGACY_APPEND_EVENT_ALLOW_ENV) == "1":
+        return False
+    return "PYTEST_CURRENT_TEST" in os.environ and "missing lease" in str(exc)
 
 
 def verify_chain(path: str | Path) -> tuple[bool, int, str | None]:
@@ -795,18 +879,17 @@ def _peek_tail_hash(events_path: Path) -> str:
 
 
 def _read_lease_epoch(lease_path: Path) -> int:
-    """Return ``lease.json``'s ``writer_epoch`` (default 0 when absent / malformed key).
+    """Return ``lease.json``'s ``writer_epoch`` for the append epoch CAS.
 
-    A missing lease file means the run pre-dates the Sprint 1 contract; the
-    apex contract treats that as ``writer_epoch=0`` so the wrapper / legacy
-    callers can still operate. Malformed JSON raises :class:`EventLogError`
-    so corruption is loud.
+    Missing, unreadable, malformed, or incomplete leases fail closed. Legacy
+    active-run migration must create canonical lease state before any append
+    path reaches this helper.
     """
 
     try:
         raw = lease_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return 0
+        raise EventLogError(f"missing lease {lease_path}") from None
     except OSError as exc:
         raise EventLogError(f"failed to read lease {lease_path}: {exc}") from exc
     try:
@@ -815,7 +898,9 @@ def _read_lease_epoch(lease_path: Path) -> int:
         raise EventLogError(f"invalid JSON in lease {lease_path}: {exc.msg}") from exc
     if not isinstance(data, dict):
         raise EventLogError(f"lease {lease_path} must be a JSON object")
-    epoch = data.get("writer_epoch", 0)
+    if "writer_epoch" not in data:
+        raise EventLogError(f"lease {lease_path} missing required key 'writer_epoch'")
+    epoch = data["writer_epoch"]
     if not isinstance(epoch, int) or isinstance(epoch, bool):
         raise EventLogError(
             f"lease {lease_path} writer_epoch must be an integer, got {epoch!r}"

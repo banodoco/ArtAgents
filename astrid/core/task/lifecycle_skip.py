@@ -18,14 +18,13 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir, validate_project_slug
-from astrid.core.task.active_run import read_active_run
+from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.events import (
     EventLogError,
-    LEASE_FILENAME,
     StaleEpochError,
     StaleTailError,
-    append_event_locked,
     make_item_skipped_event,
     make_step_skipped_event,
     read_events,
@@ -40,23 +39,6 @@ from astrid.core.task.plan import (
 
 def _print_err(msg: str) -> None:
     print(msg, file=sys.stderr)
-
-
-def _read_lease_epoch_safe(lease_path: Path) -> int | None:
-    """Best-effort read of the current writer_epoch from lease.json."""
-    import json as _json
-    try:
-        if lease_path.exists():
-            payload = _json.loads(lease_path.read_text(encoding="utf-8"))
-            return int(payload.get("writer_epoch", 0))
-    except Exception:
-        return None
-    return None
-
-
-def _read_tail_hash_safe(events_path: Path) -> str:
-    from astrid.core.task.events import _peek_tail_hash
-    return _peek_tail_hash(events_path)
 
 
 def _resolve_frontier_step(plan, events):
@@ -130,7 +112,7 @@ def cmd_skip(
         _print_err(f"skip: {exc}")
         return 1
 
-    active_run = read_active_run(slug, root=projects_root)
+    active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         _print_err(
             f"skip: no active run for project {slug!r}; "
@@ -202,18 +184,9 @@ def cmd_skip(
             reason=args.reason,
         )
 
-    # Append under the writer epoch + tail-hash CAS, mirroring cmd_ack's
-    # locking pattern (lifecycle_ack.py imports the underlying lock).
-    lease_path = run_dir / LEASE_FILENAME
-    expected_epoch = _read_lease_epoch_safe(lease_path)
-    expected_prev_hash = _read_tail_hash_safe(events_path)
     try:
-        append_event_locked(
-            run_dir,
-            event,
-            expected_writer_epoch=expected_epoch,
-            expected_prev_hash=expected_prev_hash,
-        )
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(event)
     except StaleEpochError as exc:
         _print_err(
             f"skip: stale writer_epoch ({exc}); re-run after the active "

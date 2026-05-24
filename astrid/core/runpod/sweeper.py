@@ -6,25 +6,18 @@ import asyncio
 import json
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.core.session.lease import read_lease
-from astrid.core.task.events import (
-    EVENTS_FILENAME,
-    LEASE_FILENAME,
-    StaleTailError,
-    _peek_tail_hash,
-    _read_lease_epoch,
-    append_event_locked,
-)
+from astrid.core.session.lease import LeaseError, read_lease
+from astrid.core.session.writer import writer_context_for_project
 from astrid.core.util.time import utc_now_iso
 
 logger = logging.getLogger(__name__)
 
 POD_HANDLE_FILENAME = "pod_handle.json"
+RUNPOD_SWEEPER_AUDIT_FILENAME = "runpod_sweeper_audit.jsonl"
 
 
 def _utc_now_iso() -> str:
@@ -87,6 +80,33 @@ def _derive_run_dir(handle_path: Path, projects_root: Path) -> Path | None:
     return run_dir if run_dir.is_dir() else None
 
 
+def _append_hard_sweep_audit(
+    projects_root: Path,
+    *,
+    handle_path: Path,
+    run_dir: Path,
+    event: dict[str, Any],
+) -> None:
+    """Record hard-mode sweeps in a non-task audit ledger.
+
+    Hard mode is allowed to bypass live-session/idle policy for pod cleanup,
+    but it must not bypass task-run writer authentication. The audit file sits
+    at the projects root rather than in ``runs/<id>/events.jsonl`` so it cannot
+    be mistaken for a task-run mutation.
+    """
+
+    audit_event = {
+        **event,
+        "task_event": False,
+        "run_dir": str(run_dir),
+        "handle_path": str(handle_path),
+    }
+    audit_path = projects_root / RUNPOD_SWEEPER_AUDIT_FILENAME
+    audit_path.parent.mkdir(parents=True, exist_ok=True)
+    with audit_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(audit_event, sort_keys=True, separators=(",", ":")) + "\n")
+
+
 def _rebuild_config(handle: dict[str, Any]) -> Any:
     """Reconstruct a ``RunPodConfig`` from a pod_handle dict."""
     from runpod_lifecycle import RunPodConfig
@@ -124,8 +144,8 @@ def sweep(
         ``"default"`` — safe: only terminate pods whose ``terminate_at`` has
         passed, the owning run has no live session, and the pod is idle.
         ``"hard"`` — bypass live-session and idle checks; still requires
-        ``terminate_at`` passed.  Uses ``expected_writer_epoch=None`` when
-        appending events.
+        ``terminate_at`` passed. Hard-mode observations are written to the
+        projects-root sweeper audit log, not the task-run event ledger.
     dry_run:
         When ``True``, report what *would* be terminated but do not
         actually call the RunPod API.
@@ -194,26 +214,28 @@ async def _sweep_async(
             summary["details"].append(detail)
             continue
 
-        # 3. Default-mode checks
-        if mode == "default":
-            # 3a. Live session check
-            try:
-                lease = read_lease(run_dir)
-            except Exception as exc:
-                detail["reason"] = f"failed to read lease: {exc}"
-                summary["errors"] += 1
-                summary["details"].append(detail)
-                continue
+        # 3. Canonical lease validation. Even hard mode only bypasses the
+        # live-writer/idle policy; it must not append into a run whose lease
+        # state is missing or malformed.
+        try:
+            lease = read_lease(run_dir)
+        except LeaseError as exc:
+            detail["reason"] = f"failed to read lease: {exc}"
+            summary["errors"] += 1
+            summary["details"].append(detail)
+            continue
 
+        # 4. Default-mode checks
+        if mode == "default":
             attached = lease.get("attached_session_id")
-            epoch = lease.get("writer_epoch", 0)
+            epoch = lease["writer_epoch"]
             if attached and isinstance(epoch, int) and epoch > 0:
                 detail["reason"] = f"live session {attached!r} (writer_epoch={epoch}) — skipping"
                 summary["skipped"] += 1
                 summary["details"].append(detail)
                 continue
 
-            # 3b. Pod idle check
+            # 4b. Pod idle check
             try:
                 config = _rebuild_config(handle)
                 pod: Pod = await discovery.get_pod(pod_id, config, name=handle.get("name"))
@@ -236,6 +258,18 @@ async def _sweep_async(
                 continue
 
         # 4. Terminate the pod
+        default_writer = None
+        if mode == "default" and not dry_run:
+            try:
+                slug = run_dir.parent.parent.name
+                with writer_context_for_project(slug, root=projects_root) as writer:
+                    default_writer = writer
+            except Exception as exc:
+                detail["reason"] = f"writer auth failed before termination: {exc}"
+                summary["errors"] += 1
+                summary["details"].append(detail)
+                continue
+
         if dry_run:
             detail["action"] = "would_terminate"
             detail["reason"] = "dry-run: would terminate"
@@ -277,51 +311,23 @@ async def _sweep_async(
 
         if mode == "default":
             try:
-                events_path = run_dir / EVENTS_FILENAME
-                pre_tail = _peek_tail_hash(events_path)
-                pre_epoch = _read_lease_epoch(run_dir / LEASE_FILENAME)
-                append_event_locked(
-                    run_dir,
-                    event,
-                    expected_writer_epoch=pre_epoch,
-                    expected_prev_hash=pre_tail,
-                )
+                assert default_writer is not None
+                default_writer.append(event)
             except Exception as exc:
                 detail["reason"] = f"terminated but event append failed: {exc}"
                 summary["errors"] += 1
                 summary["details"].append(detail)
                 continue
         else:
-            # --hard mode: bounded retry on StaleTailError
-            appended = False
-            last_exc: Exception | None = None
-            for attempt in range(3):
-                try:
-                    events_path = run_dir / EVENTS_FILENAME
-                    pre_tail = _peek_tail_hash(events_path)
-                    append_event_locked(
-                        run_dir,
-                        event,
-                        expected_writer_epoch=None,
-                        expected_prev_hash=pre_tail,
-                    )
-                    appended = True
-                    break
-                except StaleTailError:
-                    if attempt < 2:
-                        backoff = 2**attempt
-                        time.sleep(backoff)
-                    last_exc = StaleTailError(
-                        expected=pre_tail, actual="<concurrent-writer>"
-                    )
-                except Exception as exc:
-                    last_exc = exc
-                    break
-
-            if not appended:
-                detail["reason"] = (
-                    f"terminated but event append failed after 3 retries: {last_exc}"
+            try:
+                _append_hard_sweep_audit(
+                    projects_root,
+                    handle_path=handle_path,
+                    run_dir=run_dir,
+                    event=event,
                 )
+            except Exception as exc:
+                detail["reason"] = f"terminated but hard-mode audit append failed: {exc}"
                 summary["errors"] += 1
                 summary["details"].append(detail)
                 continue

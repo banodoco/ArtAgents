@@ -11,7 +11,12 @@ STOP-LINE behavior:
   continue migrating the rest.
 * Lease-first ordering: ``lease.json`` is written FIRST (atomic) then
   ``current_run.json`` (atomic) then ``active_run.json`` is deleted. The
-  run's ``events.jsonl`` bytes are NEVER touched.
+  run's ``events.jsonl`` bytes are NEVER touched, and the resulting run must
+  still be mutated through normal writer-owned session commands.
+* Post-migration recovery starts with ``astrid status`` for detail or
+  ``astrid next`` for the one legal action. Do not resurrect
+  ``active_run.json`` or hand-edit ``current_run.json`` / ``lease.json`` to
+  bind a shell; use ``astrid attach`` or ``astrid sessions takeover``.
 
 Audit logs land in a per-invocation tempfile (path printed to stderr at
 exit). Idempotent: a project that already has ``current_run.json`` (and no

@@ -9,22 +9,13 @@ under Sprint 1's writer_epoch CAS (apex contract preserved).
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 from typing import Sequence
 
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.session.binding import resolve_current_session
-from astrid.core.session.model import SessionRole
-from astrid.core.task.active_run import read_active_run
-from astrid.core.task.events import (
-    EVENTS_FILENAME,
-    LEASE_FILENAME,
-    append_event_locked,
-    read_events,
-)
-from astrid.core.task.plan import STEP_PATH_SEP
+from astrid.core.session.writer import writer_context_for_project
 
 CLAIM_KIND = "claim"
 UNCLAIM_KIND = "unclaim"
@@ -32,17 +23,6 @@ UNCLAIM_KIND = "unclaim"
 
 def _print_err(msg: str) -> None:
     print(msg, file=sys.stderr)
-
-
-def _read_lease_epoch(run_dir: Path) -> int:
-    lease_path = run_dir / LEASE_FILENAME
-    if not lease_path.exists():
-        return 0
-    try:
-        payload = json.loads(lease_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return 0
-    return int(payload.get("writer_epoch", 0))
 
 
 def _resolve_session_identity(slug: str | None = None) -> tuple[str, str, str]:
@@ -93,17 +73,6 @@ def _make_unclaim_event(
         "writer_epoch": writer_epoch,
         "ts": _utc_now_iso(),
     }
-
-
-def _emit(run_dir: Path, event: dict, expected_epoch: int) -> dict:
-    from astrid.core.task.events import _peek_tail_hash
-    prev_hash = _peek_tail_hash(run_dir / EVENTS_FILENAME)
-    return append_event_locked(
-        run_dir,
-        event,
-        expected_writer_epoch=expected_epoch,
-        expected_prev_hash=prev_hash,
-    )
 
 
 def _parse_for_flag(for_value: str) -> tuple[str, str]:
@@ -188,16 +157,15 @@ def cmd_claim(argv: Sequence[str], *, projects_root: Path | None = None) -> int:
         return 1
 
     claimed_by, claimed_by_kind = _resolve_claim_identity(args)
-    epoch = _read_lease_epoch(run_dir)
-    event = _make_claim_event(
-        args.step,
-        claimed_by=claimed_by,
-        claimed_by_kind=claimed_by_kind,
-        writer_epoch=epoch,
-    )
-
     try:
-        _emit(run_dir, event, epoch)
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            event = _make_claim_event(
+                args.step,
+                claimed_by=claimed_by,
+                claimed_by_kind=claimed_by_kind,
+                writer_epoch=writer.expected_writer_epoch,
+            )
+            writer.append(event)
     except Exception as exc:
         _print_err(f"claim: event-append failed: {exc}")
         return 1
@@ -232,16 +200,15 @@ def cmd_unclaim(argv: Sequence[str], *, projects_root: Path | None = None) -> in
         return 1
 
     unclaimed_by, unclaimed_by_kind = _resolve_claim_identity(args)
-    epoch = _read_lease_epoch(run_dir)
-    event = _make_unclaim_event(
-        args.step,
-        unclaimed_by=unclaimed_by,
-        unclaimed_by_kind=unclaimed_by_kind,
-        writer_epoch=epoch,
-    )
-
     try:
-        _emit(run_dir, event, epoch)
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            event = _make_unclaim_event(
+                args.step,
+                unclaimed_by=unclaimed_by,
+                unclaimed_by_kind=unclaimed_by_kind,
+                writer_epoch=writer.expected_writer_epoch,
+            )
+            writer.append(event)
     except Exception as exc:
         _print_err(f"unclaim: event-append failed: {exc}")
         return 1

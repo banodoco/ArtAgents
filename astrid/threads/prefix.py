@@ -1,4 +1,4 @@
-"""User-facing thread prefix formatting."""
+"""User-facing non-binding lineage prefix formatting."""
 
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ def format_prefix_lines(
     variants: int | None = None,
     variants_message: str | None = None,
 ) -> list[str]:
-    label = decision.label.strip() or "Astrid thread"
+    label = decision.label.strip() or "Astrid lineage"
     run_part = f"run #{decision.run_number}" if decision.run_number else "run"
-    lines = [f"[thread] {label} · {run_part} · {decision.thread_id}"]
+    lines = [f"[lineage] {label} · {run_part} · {decision.thread_id}"]
     if variants is not None:
-        message = variants_message or f"requested {variants}; use `thread keep` after reviewing outputs."
+        message = variants_message or f"requested {variants}; record keepers only as non-binding lineage after reviewing outputs."
         lines.append(f"[variants] {message}")
     elif variants_message:
         lines.append(f"[variants] {variants_message}")

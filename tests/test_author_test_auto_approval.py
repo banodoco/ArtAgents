@@ -15,9 +15,13 @@ active_run.json/plan.json by hand.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _lifecycle_fixtures import bind_writer_session  # noqa: E402
 
 from astrid.core.task.env import ASTRID_ACTOR, ASTRID_AUTHOR_TEST
 from astrid.core.task.events import read_events
@@ -64,6 +68,7 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
     compile_to_path("demo.app", packs_root=packs)
     # cmd_start requires the project to be registered before it accepts --project.
     create_project(slug, root=tmp_projects_root, exist_ok=True)
+    bind_writer_session(tmp_projects_root, slug)
 
     monkeypatch.setenv(ASTRID_ACTOR, "alice")
     monkeypatch.setenv(ASTRID_AUTHOR_TEST, "1")

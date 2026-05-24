@@ -17,6 +17,25 @@ from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.identity import Identity, write_identity
 from astrid.core.session.model import Session
 
+# Settled Sprint 1 unbound contract. The implementation may temporarily carry
+# compatibility exceptions during migration, but the final gate must match this
+# list exactly: help/version, status, next, attach, projects ls/create/default,
+# sessions ls, and sessions takeover.
+EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
+    ("-h",),
+    ("--help",),
+    ("help",),
+    ("--version",),
+    ("status",),
+    ("next",),
+    ("attach",),
+    ("projects", "ls"),
+    ("projects", "create"),
+    ("projects", "default"),
+    ("sessions", "ls"),
+    ("sessions", "takeover"),
+)
+
 
 @pytest.fixture
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
@@ -43,6 +62,14 @@ def _run_pipeline(argv: list[str]) -> tuple[int, str, str]:
             # outcome.
             rc = int(exc.code) if isinstance(exc.code, int) else 2
     return rc, out.getvalue(), err.getvalue()
+
+
+def _action_lines(output: str) -> list[str]:
+    return [
+        line.strip()
+        for line in output.splitlines()
+        if line.strip().startswith("astrid ")
+    ]
 
 
 # ----- gated verbs error without a session ------------------------------
@@ -75,6 +102,7 @@ def test_every_gated_verb_errors_without_session(
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, _stdout, stderr = _run_pipeline(argv)
     assert rc == 2
+    assert stderr.splitlines()[0] == "first recovery action: astrid status"
     assert "no session bound" in stderr
     assert "astrid status" in stderr
     assert "astrid attach" in stderr
@@ -91,17 +119,44 @@ def test_unbound_next_prints_discovery_hint(
     rc, stdout, stderr = _run_pipeline(["next", "--project", "demo"])
     assert rc == 0
     assert stderr == ""
-    assert "session bound to 'demo', but no active task run" in stdout
-    assert "astrid start <orchestrator-id> --project demo" in stdout
+    assert "no session bound" in stdout
+    assert _action_lines(stdout) == ["astrid attach demo"]
 
     rc2, stdout2, stderr2 = _run_pipeline(["next"])
     assert rc2 == 0
     assert stderr2 == ""
     assert "no session bound" in stdout2
-    assert "astrid attach" in stdout2
+    assert _action_lines(stdout2) == ["astrid projects create <slug>"]
 
 
-# ----- allowlisted verbs run without a session --------------------------
+def test_unbound_gate_uses_the_frozen_allowlist_table() -> None:
+    assert pipeline.SPRINT1_UNBOUND_ALLOWLIST_CONTRACT == EXPECTED_SPRINT1_UNBOUND_ALLOWLIST
+    for allowed in EXPECTED_SPRINT1_UNBOUND_ALLOWLIST:
+        assert pipeline._verb_is_unbound_allowlisted(list(allowed))
+
+
+def test_stop_line_unbound_gate_has_no_transitional_extras() -> None:
+    transitional_extras = [
+        ["init"],
+        ["packs", "validate"],
+        ["packs", "install"],
+        ["models", "validate"],
+        ["models", "doctor"],
+        ["runpod", "volumes", "ls"],
+        ["author", "test", "pack.thing", "--project", "demo"],
+        ["sessions", "detach"],
+        ["executors", "inspect", "builtin.render"],
+        ["orchestrators", "inspect", "builtin.hype"],
+        ["elements", "inspect", "effects", "text-card"],
+        ["timelines", "ls"],
+    ]
+    still_allowed = [
+        argv for argv in transitional_extras if pipeline._verb_is_unbound_allowlisted(argv)
+    ]
+    assert still_allowed == []
+
+
+# ----- unbound verbs -----------------------------------------------------
 
 
 def test_allowlist_status_runs_without_session(
@@ -214,14 +269,25 @@ def test_allowlist_help_runs_without_session(
     assert "Astrid command gateway" in stdout
 
 
-def test_subcommand_help_runs_without_session(
+def test_allowlist_version_runs_without_session(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    rc, stdout, stderr = _run_pipeline(["--version"])
+    assert rc == 0
+    assert stdout == "astrid\n"
+    assert stderr == ""
+
+
+def test_non_allowlisted_subcommand_help_is_blocked_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, stdout, stderr = _run_pipeline(["projects", "--help"])
-    assert rc == 0
-    assert "no session bound" not in stderr
-    assert "Create, inspect, and manage persistent Astrid projects" in stdout
+    assert rc == 2
+    assert stdout == ""
+    assert stderr.splitlines()[0] == "first recovery action: astrid status"
+    assert "no session bound" in stderr
 
 
 def test_status_help_runs_without_rendering_live_status(
@@ -235,15 +301,33 @@ def test_status_help_runs_without_rendering_live_status(
     assert stderr == ""
 
 
-def test_author_test_with_project_bypasses_gate(
+def test_unbound_sessions_takeover_reaches_takeover_handler(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.session import cli as session_cli
+
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    def fake_takeover(args: object) -> int:
+        assert getattr(args, "target") == "RUN-1"
+        return 77
+
+    monkeypatch.setattr(session_cli, "cmd_sessions_takeover", fake_takeover)
+    rc, stdout, stderr = _run_pipeline(["sessions", "takeover", "RUN-1"])
+    assert rc == 77
+    assert stdout == ""
+    assert stderr == ""
+
+
+def test_author_test_with_project_is_blocked_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, stdout, stderr = _run_pipeline(["author", "test", "pack.thing", "--project", "demo"])
     assert rc == 2
     assert stdout == ""
-    assert "astrid author test: error: the following arguments are required: --fixture" in stderr
-    assert "no session bound" not in stderr
+    assert stderr.splitlines()[0] == "first recovery action: astrid status"
+    assert "no session bound" in stderr
 
 
 def test_bound_session_lets_gated_verb_through(

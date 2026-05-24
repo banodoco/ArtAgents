@@ -1,5 +1,11 @@
 # Thread / Variant / Iteration-Video Layer — Design Context
 
+> Retired context: this document records a pre-Sprint-1 design sketch. It is
+> not current agent guidance. Runtime session binding now goes through
+> `astrid status`, `astrid next`, `astrid attach`, and session-owned task-run
+> writers. Preserved thread/variant concepts are non-binding lineage utilities
+> for iteration workflows only.
+
 This document captures the design decisions converged on for adding a creative-iteration tracking layer to Astrid. It is the input to a sprint plan; it is not itself the sprint plan.
 
 The layer adds three things on top of the existing executor/orchestrator/elements model:
@@ -20,13 +26,13 @@ The whole system exists to support one killer demo: open a finished artifact, se
 
 ## Settled Decisions
 
-- **SD-001** — Use the noun `thread` for a creative pursuit, not `workstream`/`session`/`pursuit`. The name appears in every `[thread]` prefix line and must match the creator's mental model. _load_bearing: true_
+- **SD-001** — Use the noun `thread` for a creative pursuit, not `workstream`/`session`/`pursuit`. The name appears in every `[lineage]` prefix line and must match the creator's mental model. _load_bearing: true_
   Rationale: chosen after explicit subagent debate; matches creator language ("pull on this thread"); short to type; the git overload is tolerable in the creative-tools domain.
 
 - **SD-002** — Tags-not-folders: every run writes a `runs/<slug>/run.json` with a `thread_id` field. The `runs/` directory stays flat. Re-grouping (split/merge/attach) is a metadata edit, never a `mv` operation. _load_bearing: true_
   Rationale: coupling physical layout to logical grouping makes re-attribution destructive and breaks path references in older timelines. Identity is by ULID, never by path.
 
-- **SD-003** — A single index file `.astrid/threads.json` holds the thread map and `active_thread_id` pointer. All updates go through `fcntl.flock` on a sidecar lock file plus atomic write (tmp + fsync + `os.replace`), with a rotated `.bak`. _load_bearing: true_
+- **SD-003** — A single index file `.astrid/threads.json` holds the thread map and `current_lineage_id` pointer. All updates go through `fcntl.flock` on a sidecar lock file plus atomic write (tmp + fsync + `os.replace`), with a rotated `.bak`. _load_bearing: true_
   Rationale: parallel runs must not lose updates; the index is small enough that single-file is correct.
 
 - **SD-004** — IDs are 26-char Crockford ULIDs (`run_id`, `thread_id`, `group_id`), monotonic within a process. References between records are always by ULID, never by path or label. _load_bearing: true_
@@ -36,10 +42,10 @@ The whole system exists to support one killer demo: open a finished artifact, se
   Rationale: temporal parentage lies during interleaved work; causal parentage is reconstructible and honest.
 
 - **SD-006** — Auto-attribute decision function, evaluated at run start under the lock:
-  1. Explicit `--thread <id>` or `@new` / `@none` wins.
+  1. Explicit `--lineage-ref <id>` or `@new` / `@none` wins.
   2. **Lineage inference**: if any input arg points inside `runs/<R>/`, inherit `R`'s thread.
-  3. Else active pointer is `open` → join.
-  4. Else active is `archived` and within `IDLE_REOPEN_WINDOW` (default 48h) → reopen and join.
+  3. Else current lineage pointer is `open` → join.
+  4. Else current is `archived` and within `IDLE_REOPEN_WINDOW` (default 48h) → reopen and join.
   5. Else create new thread.
   _load_bearing: true_
   Rationale: lineage inference is the highest-ROI auto-attribution improvement; it removes a whole class of mis-grouping when the agent works across shells.
@@ -81,9 +87,9 @@ The whole system exists to support one killer demo: open a finished artifact, se
 
 - **SD-017** — Agent gesture surface for variants — exactly five commands, one of which is mandatory-per-attempt:
   ```
-  thread keep <run-id>:<n>[,<n>]      # mandatory when variants exist
-  thread keep <run-id>:none           # explicit dismiss (silences the [variants] nag)
-  thread group <run-id> <run-id> ...  # post-hoc retroactive grouping
+  lineage select <run-id>:<n>[,<n>]      # mandatory when variants exist
+  lineage select <run-id>:none           # explicit dismiss (silences the [variants] nag)
+  lineage group <run-id> <run-id> ...  # post-hoc retrocurrent grouping
   --variants N                        # request a sibling group up front
   --from <run-id>:<n>                 # consume a specific variant; defaults to most-recent kept in thread
   ```
@@ -91,8 +97,8 @@ The whole system exists to support one killer demo: open a finished artifact, se
 
 - **SD-018** — Runner-emitted prefix lines on every `executors run` and `orchestrators run` invocation, written to stdout BEFORE the rest of the command output (so the agent sees them in tool result):
   ```
-  [thread]   <label> · run #N · parent #M[:vK]
-  [variants] run #N produced K siblings — none kept (use: thread keep N:K)   # only when unresolved variants exist
+  [lineage]   <label> · run #N · parent #M[:vK]
+  [variants] run #N produced K siblings — none kept (use: lineage select N:K)   # only when unresolved variants exist
   ```
   Plus tiered Notice / Warn lines for first-run-of-process, gap >1h, brief novelty, auto-reopen of archived thread. _load_bearing: true_
   Rationale: the agent's working memory is the previous tool's stdout; thread state must be in that stream every turn.
@@ -150,10 +156,10 @@ The whole system exists to support one killer demo: open a finished artifact, se
 
 - **SD-033** — In-flight reaper: any run start scans `runs/*/run.json` for records with `ended_at: null` whose owning process is gone (PID stamped at begin). Marks them `returncode: -1, ended_at: <now>, status: "orphaned"`. Lazy, runs at most once per process. _load_bearing: true_
 
-- **SD-034** — Backwards compatibility is mandatory. Existing `runs/*/` directories without `run.json` continue to work unmodified. `python3 -m astrid thread backfill` scans, computes hashes, and adopts orphan dirs into auto-named threads (clustered by hash-graph connected components, not mtime). All existing tests must pass without modification. _load_bearing: true_
+- **SD-034** — Backwards compatibility is mandatory. Existing `runs/*/` directories without `run.json` continue to work unmodified. `python3 -m astrid lineage backfill` scans, computes hashes, and adopts orphan dirs into auto-named threads (clustered by hash-graph connected components, not mtime). All existing tests must pass without modification. _load_bearing: true_
 
 - **SD-035** — Sprint phasing constraints (load-bearing for the planner):
-  - **Week 1 (days 1–5) is the data layer.** Thread schema, locking, atomic write, `run_executor` wrapper, auto-attribute, prefix lines, `thread {new, list, show, archive, reopen}` CLI, variants (`role`/`group`/`selections.jsonl`/`groups.json`/`chosen_from_groups`), `[variants]` nag, `thread keep`, executor patches, brief snapshotting, in-flight reaper, provenance block in `hype.metadata.json`, `preview_modes`/`duration` on artifacts. **All metadata fields in SD-008 must ship by end of week 1**, because every run after sprint day 1 either has them or doesn't, forever.
+  - **Week 1 (days 1–5) is the data layer.** Thread schema, locking, atomic write, `run_executor` wrapper, auto-attribute, prefix lines, `thread {new, list, show, archive, reopen}` CLI, variants (`role`/`group`/`selections.jsonl`/`groups.json`/`chosen_from_groups`), `[variants]` nag, `lineage select`, executor patches, brief snapshotting, in-flight reaper, provenance block in `hype.metadata.json`, `preview_modes`/`duration` on artifacts. **All metadata fields in SD-008 must ship by end of week 1**, because every run after sprint day 1 either has them or doesn't, forever.
   - **Week 2 (days 6–10) is the iteration video MVP.** `iteration.collect`, `iteration.summarize`, `iteration.score`, `iteration.assemble`, `builtin.iteration_video`, HTML report, quality floor, modality registry framework with **3 renderers only** (`image_grid`, `audio_waveform`, `generic_card`), `inspect` subcommand, end-to-end demo render against an existing thread (`runs/astrid_logo_v3` is a known-good fixture).
   _load_bearing: true_
 
@@ -182,22 +188,22 @@ The whole system exists to support one killer demo: open a finished artifact, se
   - All existing pytest tests pass without modification
   _load_bearing: true_
 
-- **SD-038** — Documentation deliverables for week-1 ship: `docs/threads.md` (one global doc explaining the model), one paragraph appended to `SKILL.md` instructing agents to run `thread show @active` at session start, footer line in `executors inspect` / `orchestrators inspect` output naming the active thread. **No per-tool `STAGE.md` is modified.** _load_bearing: true_
+- **SD-038** — Documentation deliverables for week-1 ship: `docs/threads.md` (one global doc explaining the model), one paragraph appended to `SKILL.md` instructing agents to run `astrid status` at session start, footer line in `executors inspect` / `orchestrators inspect` output naming the lineage marker. **No per-tool `STAGE.md` is modified.** _load_bearing: true_
 
 - **SD-039** — Schema versioning: `run.json`, `threads.json`, `selections.jsonl`, `groups.json`, and the `provenance` block all carry `schema_version: int`. Readers accept current and N-1; writers always write current; one-time migration runs on first read at upgrade time, with `.bak`. _load_bearing: true_
 
 - **SD-040** — All paths in persisted JSON are repo-relative or content-addressed. No absolute paths. This makes thread export/sharing (a future feature) work for free as long as we hold the line now. _load_bearing: true_
 
-- **SD-041** — Privacy / redaction policy. Briefs and prompts may contain PII or NDA-bound content. Today everything is plaintext under `runs/` and gets stamped into `run.json` and `external_service_calls`. The sprint must (a) document that `runs/` is gitignored and treated as local-only; (b) define a `secret`-prefixed env var convention that strips matching values from `cli_args_redacted`; (c) add a `--no-content` flag to `thread show` and the iteration-video HTML report that displays only hashes and labels for sensitive content. **Briefs themselves are not redacted by default** — the user opts in by placing them under `runs/<slug>/private/` (a documented convention). _load_bearing: true_
+- **SD-041** — Privacy / redaction policy. Briefs and prompts may contain PII or NDA-bound content. Today everything is plaintext under `runs/` and gets stamped into `run.json` and `external_service_calls`. The sprint must (a) document that `runs/` is gitignored and treated as local-only; (b) define a `secret`-prefixed env var convention that strips matching values from `cli_args_redacted`; (c) add a `--no-content` flag to `lineage inspect` and the iteration-video HTML report that displays only hashes and labels for sensitive content. **Briefs themselves are not redacted by default** — the user opts in by placing them under `runs/<slug>/private/` (a documented convention). _load_bearing: true_
   Rationale: a thread is a creative artifact a user may want to share; the moment sharing exists, redaction must already work or the data is poisoned.
 
-- **SD-042** — Concurrent variant-selection semantics. Two agents (or two terminals) may `thread keep` the same group with conflicting choices simultaneously. The append-only `selections.jsonl` makes this safe but the rule must be **explicitly documented for agents in `SKILL.md` and in the `[variants]` line help text**: "selections are append-only; the most recent write is authoritative on read; prior selections are preserved as history but do not affect current keepers." No locking on selection writes (the file is per-thread + append-only + line-buffered, so atomic appends are safe). _load_bearing: true_
+- **SD-042** — Concurrent variant-selection semantics. Two agents (or two terminals) may `lineage select` the same group with conflicting choices simultaneously. The append-only `selections.jsonl` makes this safe but the rule must be **explicitly documented for agents in `SKILL.md` and in the `[variants]` line help text**: "selections are append-only; the most recent write is authoritative on read; prior selections are preserved as history but do not affect current keepers." No locking on selection writes (the file is per-thread + append-only + line-buffered, so atomic appends are safe). _load_bearing: true_
 
 - **SD-043** — Iteration-video cost guardrail. A 47-iteration thread generates ~47 `builtin.understand` calls in `iteration.summarize`. At realistic per-call costs ($0.005–$0.10) this is $0.25–$5 per render, which is fine — but a thread with 500 iterations or repeated re-renders is not. The sprint must (a) cap `iteration.summarize` at `max_iterations` (default 200, configurable, with a clear refusal message above the cap); (b) cache summaries by `(run_id, summarizer_model_version)` keyed in `.astrid/iteration_cache/` so re-renders only summarize new iterations; (c) surface estimated cost in `iteration_video inspect` output **before** the agent commits to a render. _load_bearing: true_
   Rationale: silent cost blowups erode trust; the agent must see the bill before incurring it.
 
 - **SD-044** — Recorded tradeoffs (for future readers, not load-bearing). Two design choices were debated and settled but the alternatives are worth preserving so future maintainers don't relitigate:
-  - **Scalar `thread_id` vs pure DAG-derived membership.** Settled as scalar (per SD-002 / SD-008) because (i) root runs with no consumed artifacts have no causal edge and need *some* attribution mechanism; (ii) membership lookups are O(1) field reads instead of graph traversals, which matters for the per-run `[thread]` prefix line; (iii) the agent's mental model needs a name to grab. The DAG (via `parent_run_ids` + `chosen_from_groups`) is preserved alongside the scalar and powers `thread doctor` heuristics, but membership is the scalar. If true multi-thread membership is ever needed (a single run that's a first-class member of two threads), this will need to flip.
+  - **Scalar `thread_id` vs pure DAG-derived membership.** Settled as scalar (per SD-002 / SD-008) because (i) root runs with no consumed artifacts have no causal edge and need *some* attribution mechanism; (ii) membership lookups are O(1) field reads instead of graph traversals, which matters for the per-run `[lineage]` prefix line; (iii) the agent's mental model needs a name to grab. The DAG (via `parent_run_ids` + `chosen_from_groups`) is preserved alongside the scalar and powers `thread doctor` heuristics, but membership is the scalar. If true multi-thread membership is ever needed (a single run that's a first-class member of two threads), this will need to flip.
   - **`thread` vs other nouns** (`pursuit`, `take`, `session`, `workstream`). Settled as `thread` because creators already say "pull on this thread" and the term appears in every prefix line where shortness matters. Git overload exists but is tolerable in the creative-tools domain. If git terminology bleeds in heavily (e.g., agents start typing `git thread` by mistake), revisit.
   _load_bearing: false_
 
@@ -217,7 +223,7 @@ These are not settled; the sprint plan should make a call:
 These items appear in earlier discussion and Settled Decisions but are **explicitly deferred to a v1.5 follow-up sprint**. The criterion for deferral is *complexity in agent interactions or data shapes that adds little return for v1*. Each is reachable later without migration pain because the data shapes that survive are supersets of the trimmed shapes.
 
 - **DEF-1 — Warn tier brief-novelty.** Implement only the Notice tier in v1 (first-run-of-process, gap >1h, cwd change, auto-reopen of archived thread). Defer Warn brief-novelty heuristic (Levenshtein distance against prior briefs) to v1.5 when there's real corpus to tune the threshold against. Removes a noisy line class agents would learn to ignore.
-- **DEF-2 — `[thread-health]` smell line on `thread list`.** Detection-only nudge. Adds a parseable output format. Defer; the underlying data is still captured.
+- **DEF-2 — `[thread-health]` smell line on `lineage list`.** Detection-only nudge. Adds a parseable output format. Defer; the underlying data is still captured.
 - **DEF-3 — `[hint]` line for sequential same-executor fan-out.** Soft nudge. Adds another output format. Defer.
 - **DEF-4 — Four `role` values trimmed to two.** Ship `role: variant` and `role: other` (default) in v1. The `manifest` and `index` values are vocabulary an agent must learn for zero behavior change in v1. Add the finer enum when there's a consumer that branches on it.
 - **DEF-5 — `preview_modes` array on `output_artifacts`.** Drop the field for v1. With three renderers in v1, dispatch by `kind` alone is sufficient. Add the field when there's a renderer demanding multi-mode disambiguation (e.g., a 3D renderer offering both turntable and wireframe).
@@ -228,7 +234,7 @@ These items appear in earlier discussion and Settled Decisions but are **explici
 - **DEF-10 — `host_id` field.** No v1 or v2 consumer (cross-machine sync is not on the roadmap). Drop the field. Add when a consumer arrives.
 
 **Net effect on the agent's interaction surface:**
-- 2 stdout line formats instead of 5 (`[thread]`, `[variants]`, optional `Notice:`).
+- 2 stdout line formats instead of 5 (`[lineage]`, `[variants]`, optional `Notice:`).
 - 2 `role` values instead of 4.
 - 5 fields per `output_artifact` instead of 7.
 - 3 fields per `external_service_call` instead of 6.

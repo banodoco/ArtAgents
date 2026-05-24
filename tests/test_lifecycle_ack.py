@@ -24,7 +24,6 @@ from astrid.core.task.events import (
 )
 from astrid.core.task.lifecycle import cmd_ack
 
-
 _ATTESTED_REVIEW = '''from astrid.orchestrate import orchestrator, attested
 @orchestrator("demo.review")
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="actor")]
@@ -59,6 +58,79 @@ def _ack(packs: Path, projects: Path, *args: str) -> tuple[int, str, str]:
     with redirect_stdout(buf), redirect_stderr(err):
         rc = cmd_ack(list(args), projects_root=projects)
     return rc, buf.getvalue(), err.getvalue()
+
+
+def _replace_lease_writer(run_dir: Path, writer_id: str | None) -> None:
+    lease_path = run_dir / "lease.json"
+    lease = json.loads(lease_path.read_text(encoding="utf-8"))
+    lease["attached_session_id"] = writer_id
+    lease_path.write_text(json.dumps(lease), encoding="utf-8")
+
+
+def test_stop_line_reader_retry_ack_does_not_mutate_events(tmp_path: Path) -> None:
+    packs, projects = setup_run(
+        tmp_path,
+        "demo",
+        "with_produces",
+        _ATTESTED_PRODUCES,
+        "demo.with_produces",
+        run_id="rsr",
+    )
+    os.environ["ASTRID_ACTOR"] = "alice"
+    run_dir = projects / "p" / "runs" / "rsr"
+    events_path = run_dir / "events.jsonl"
+    append_event(events_path, make_step_attested_event("review", "actor", "alice", ()))
+    append_event(
+        events_path,
+        make_produces_check_failed_event(
+            ("review",), "out", check_id="json_file:v1", reason="missing"
+        ),
+    )
+    _replace_lease_writer(run_dir, "SOME-OTHER-WRITER")
+    before = events_path.read_bytes()
+
+    rc, _out, err = _ack(
+        packs,
+        projects,
+        "review",
+        "--project",
+        "p",
+        "--decision",
+        "retry",
+        "--actor",
+        "alice",
+    )
+
+    assert rc != 0
+    assert "writer" in err.lower() or "session" in err.lower()
+    assert events_path.read_bytes() == before
+
+
+def test_stop_line_reader_iterate_ack_does_not_mutate_events(tmp_path: Path) -> None:
+    packs, projects = setup_run(tmp_path, "demo", "iter", _ITER, "demo.iter", run_id="rsi")
+    os.environ["ASTRID_ACTOR"] = "alice"
+    run_dir = projects / "p" / "runs" / "rsi"
+    events_path = run_dir / "events.jsonl"
+    _replace_lease_writer(run_dir, "SOME-OTHER-WRITER")
+    before = events_path.read_bytes()
+
+    rc, _out, err = _ack(
+        packs,
+        projects,
+        "review",
+        "--project",
+        "p",
+        "--decision",
+        "iterate",
+        "--actor",
+        "alice",
+        "--feedback",
+        "try again",
+    )
+
+    assert rc != 0
+    assert "writer" in err.lower() or "session" in err.lower()
+    assert events_path.read_bytes() == before
 
 
 def test_a_approve_attested_review_sh_writes_step_attested(tmp_path: Path) -> None:

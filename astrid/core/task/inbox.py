@@ -22,10 +22,10 @@ import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
+from astrid.core.project.current_run import clear_current_run, read_current_run
 from astrid.core.project.paths import project_dir
-from astrid.core.task.active_run import clear_active_run
+from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.events import (
-    append_event,
     make_cursor_rewind_event,
     make_item_skipped_event,
     make_run_aborted_event,
@@ -411,11 +411,21 @@ def consume_inbox_entry(
     )
 
     if entry.decision == "abort":
-        append_event(
-            events_path,
-            make_run_aborted_event(run_id, reason=f"inbox abort by {entry.submitted_by}"),
-        )
-        clear_active_run(slug, root=projects_root)
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_run_aborted_event(run_id, reason=f"inbox abort by {entry.submitted_by}")
+            )
+        current_run_id = read_current_run(slug, root=projects_root)
+        clear_current_run(slug, root=projects_root)
+        if current_run_id is not None:
+            try:
+                from astrid.core.session.lease import release_writer_lease
+
+                release_writer_lease(
+                    project_dir(slug, root=projects_root) / "runs" / current_run_id
+                )
+            except FileNotFoundError:
+                pass
         _move_to(entry.path, consumed_dir)
         return True
 
@@ -482,7 +492,8 @@ def consume_inbox_entry(
                 actor_id=entry.submitted_by,
                 reason=f"inbox skip by {entry.submitted_by}",
             )
-        append_event(events_path, skip_event)
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(skip_event)
         _move_to(entry.path, consumed_dir)
         return True
 
@@ -569,10 +580,8 @@ def consume_inbox_entry(
         _LOGGER.warning("inbox: rejecting %s: %s", entry.path.name, exc.reason)
         _move_to(entry.path, rejected_dir)
         return False
-    append_event(
-        events_path,
-        make_cursor_rewind_event(peek.path_tuple, reason="inbox retry"),
-    )
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_cursor_rewind_event(peek.path_tuple, reason="inbox retry"))
     _move_to(entry.path, consumed_dir)
     return True
 

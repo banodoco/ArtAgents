@@ -40,7 +40,9 @@ discover. Discovery runs in two tiers:
 
 1. **session-bound resolution** (Sprint 1) — if ``ASTRID_SESSION_ID`` is
    set and resolves to a session record whose ``project`` has a live
-   ``current_run.json`` + ``lease.json`` pair, that's the active run.
+   ``current_run.json`` + ``lease.json`` pair, that's the active run. This is
+   the normal path; it preserves writer ownership and lets `astrid next`
+   print the one legal action for the bound run.
 2. **cwd-ancestor walk** — climb from the current working directory up
    through its parents; if any ancestor `D` is a direct child of the
    projects root and contains `current_run.json` (the Sprint 1
@@ -54,9 +56,11 @@ discover. Discovery runs in two tiers:
    every supported workflow.
 
 For each discovered slug (sorted), the hook re-prints `astrid next`
-output (the prohibition preamble plus the current step) so Claude Code
-re-injects it into the next turn. If no slugs are discovered the hook exits
-silently with status 0 — your normal Claude Code sessions are unaffected.
+output (the Sprint 1 preamble plus the current legal action) so Claude Code
+re-injects it into the next turn. The hook is read-side guidance: it does not
+claim writer ownership, advance epochs, or append task events. If no slugs are
+discovered the hook exits silently with status 0 — your normal Claude Code
+sessions are unaffected.
 
 When the agent is running with `ASTRID_SESSION_ID` exported, the hook works
 from any cwd because session-bound resolution wins regardless of working

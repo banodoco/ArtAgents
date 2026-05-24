@@ -7,6 +7,7 @@ from __future__ import annotations
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('builtin.thumbnail_maker')
 import argparse
+import datetime as dt
 import hashlib
 import json
 import math
@@ -21,7 +22,6 @@ from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2, em
 from astrid.packs.builtin.asset_cache import run as asset_cache
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.core.task.events import append_event
 from astrid.core.project.run import (
     ProjectRunError,
     finalize_project_run,
@@ -273,10 +273,16 @@ def _write_run_json(args: argparse.Namespace) -> None:
         run_json.write_text(json.dumps(fields, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _append_run_started(run_root: Path) -> None:
-    import datetime as dt
-    ev = {"kind": "run_started", "ts": dt.datetime.now(dt.timezone.utc).isoformat()}
-    append_event(run_root / "events.jsonl", ev)
+def _append_pack_run_started(run_root: Path) -> None:
+    """Append a pack-local audit event, not a task-run ledger entry."""
+    events_path = run_root / "pack_events.jsonl"
+    ev: dict[str, Any] = {
+        "kind": "pack_run_started",
+        "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(ev, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def run_orchestrator(args: argparse.Namespace) -> int:
@@ -300,7 +306,7 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     plan_hash = compute_plan_hash(plan_path)
 
     _write_run_json(args)
-    _append_run_started(args.out)
+    _append_pack_run_started(args.out)
 
     if args.dry_run:
         print(f"thumbnail_maker: plan emitted to {plan_path} (plan_hash={plan_hash})")

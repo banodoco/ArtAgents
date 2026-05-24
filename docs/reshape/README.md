@@ -35,9 +35,10 @@ existing long-lived branch `reshape-s0-prerequisites` as the canonical branch.
 
 Rollback and inventory cover the same declared multi-root state surface:
 
-- The projects root: legacy `active_run.json` when present, current
-  `current_run.json`, per-run `lease.json`, per-run `events.jsonl`, timelines,
-  `plan.json`, `audit/ledger.jsonl`, `hype.plan.json`, and `_llm_debug/`.
+- The projects root: legacy `active_run.json` only as migration input when
+  present, current `current_run.json`, per-run `lease.json`, per-run
+  `events.jsonl`, timelines, `plan.json`, `audit/ledger.jsonl`,
+  `hype.plan.json`, and `_llm_debug/`.
 - The repo root rollback subset: `.astrid/threads.json`,
   `.astrid/threads/**/groups.json`, `.astrid/threads/**/selections.jsonl`, and
   discovered `.astrid.variants.json` sidecars.

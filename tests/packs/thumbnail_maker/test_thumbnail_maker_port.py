@@ -101,6 +101,21 @@ def test_emit_plan_json_writes_valid_json(tmp_path: Path) -> None:
     assert len(loaded["steps"]) == 5
 
 
+def test_pack_run_started_log_is_non_task_audit_log(tmp_path: Path) -> None:
+    """The pack runner must not create a task-run ``events.jsonl`` ledger."""
+    from astrid.packs.builtin.thumbnail_maker import run as thumbnail_maker_run
+
+    thumbnail_maker_run._append_pack_run_started(tmp_path)
+
+    assert not (tmp_path / "events.jsonl").exists()
+    log_path = tmp_path / "pack_events.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["kind"] == "pack_run_started"
+    assert "hash" not in event
+
+
 def test_plan_is_round_trip_stable(tmp_path: Path) -> None:
     """The emitted plan loads cleanly through ``load_plan``."""
     from astrid.packs.builtin.thumbnail_maker.plan_template import (

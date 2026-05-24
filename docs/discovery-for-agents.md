@@ -9,6 +9,14 @@ manifests. Never inspect `astrid/packs/` directory trees, guess ids from
 filenames, or import Python modules directly. The pack system owns discovery;
 agents consume it.
 
+Capability discovery is session-gated. From a cold shell, run
+`python3 -m astrid next` for exactly one legal action, or `python3 -m astrid
+status` for the read-side breadcrumb. Attach before running `skills list`,
+capability `list`, `search`, or `inspect` commands. The unbound CLI surface is
+intentionally narrow: help/version, `status`, `next`, `attach`, `projects
+ls`, `projects create`, `projects default`, `sessions ls`, and `sessions
+takeover`.
+
 Every discoverable capability (executor, orchestrator, element) belongs to a
 pack and is exposed through a consistent list/search/inspect surface with a
 `--json` flag for machine consumption.
@@ -25,6 +33,14 @@ See the formal vocabulary in
 | Element | `elements` | Reusable render building block (effect, animation) | `effects/text-card` |
 
 ## Step-by-Step Discovery Flow
+
+If the session is not already bound, bootstrap first:
+
+```bash
+python3 -m astrid next
+python3 -m astrid status
+python3 -m astrid attach <project>
+```
 
 ### 1. List available skills (optional bootstrap)
 

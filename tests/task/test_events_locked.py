@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.task.events import (
+    EventLogError,
     ZERO_HASH,
     StaleEpochError,
     StaleTailError,
@@ -91,6 +92,18 @@ def test_stale_epoch_rejection(tmp_path: Path) -> None:
     assert exc_info.value.actual == 5
     assert "4" in str(exc_info.value)
     assert "5" in str(exc_info.value)
+
+
+def test_missing_lease_rejects_epoch_checked_append(tmp_path: Path) -> None:
+    with pytest.raises(EventLogError, match="missing lease"):
+        append_event_locked(
+            tmp_path,
+            {"kind": "a", "i": 1},
+            expected_writer_epoch=0,
+            expected_prev_hash=ZERO_HASH,
+        )
+    events_path = tmp_path / "events.jsonl"
+    assert not events_path.exists() or events_path.read_bytes() == b""
 
 
 def test_succeeds_after_epoch_bump(tmp_path: Path) -> None:

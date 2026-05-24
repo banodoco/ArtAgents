@@ -26,7 +26,13 @@ class PipelineDispatchAliasTest(unittest.TestCase):
     def test_elements_dispatches_before_pipeline_validation(self) -> None:
         from astrid.core.element import cli as elements_cli
 
-        with mock.patch.object(elements_cli, "main", return_value=31) as elements_main:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch.object(elements_cli, "main", return_value=31) as elements_main,
+        ):
             self.assertEqual(pipeline.main(["elements", "list"]), 31)
             elements_main.assert_called_once_with(["list"])
 
@@ -41,11 +47,23 @@ class PipelineDispatchAliasTest(unittest.TestCase):
     def test_doctor_and_setup_dispatch_before_legacy_validation(self) -> None:
         from astrid import doctor, setup_cli
 
-        with mock.patch.object(doctor, "main", return_value=41) as doctor_main:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch.object(doctor, "main", return_value=41) as doctor_main,
+        ):
             self.assertEqual(pipeline.main(["doctor", "--help"]), 41)
             doctor_main.assert_called_once_with(["--help"])
 
-        with mock.patch.object(setup_cli, "main", return_value=42) as setup_main:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch.object(setup_cli, "main", return_value=42) as setup_main,
+        ):
             self.assertEqual(pipeline.main(["setup", "--help"]), 42)
             setup_main.assert_called_once_with(["--help"])
 
@@ -53,15 +71,33 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         from astrid.packs.builtin.publish import run as publish
         from astrid.packs.upload.youtube import run as publish_youtube
 
-        with mock.patch.object(publish, "main", return_value=51) as publish_main:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch.object(publish, "main", return_value=51) as publish_main,
+        ):
             self.assertEqual(pipeline.main(["publish", "--help"]), 51)
             publish_main.assert_called_once_with(["--help"])
 
-        with mock.patch.object(publish_youtube, "main", return_value=52) as youtube_main:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch.object(publish_youtube, "main", return_value=52) as youtube_main,
+        ):
             self.assertEqual(pipeline.main(["publish-youtube", "--help"]), 52)
             youtube_main.assert_called_once_with(["--help"])
 
-        with mock.patch.object(publish_youtube, "main", return_value=53) as youtube_main:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch.object(publish_youtube, "main", return_value=53) as youtube_main,
+        ):
             self.assertEqual(pipeline.main(["upload-youtube", "--help"]), 53)
             youtube_main.assert_called_once_with(["--help"])
 
@@ -72,7 +108,13 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         stdout = io.StringIO()
         try:
             sys.argv = ["python3 -m astrid", "elements", "list", "--kind", "effects"]
-            with contextlib.redirect_stdout(stdout):
+            with (
+                mock.patch(
+                    "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                    return_value=object(),
+                ),
+                contextlib.redirect_stdout(stdout),
+            ):
                 with self.assertRaises(SystemExit) as raised:
                     runpy.run_module("astrid", run_name="__main__")
         finally:

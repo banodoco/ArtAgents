@@ -10,8 +10,14 @@ from unittest.mock import patch
 import pytest
 
 from astrid.core.adapter.remote_artifact_fetch import FetchResult
+from astrid.core.project.current_run import write_current_run
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.lease import write_lease_init
+from astrid.core.session.model import Session, now_iso
+from astrid.core.session.paths import session_path
+from astrid.core.task.events import append_event, read_events
 from astrid.core.task.lifecycle import cmd_step_retry_fetch
-from astrid.core.task.plan import ProducesEntry, Step, Check, TaskPlan
+from astrid.core.task.plan import ProducesEntry, Step, Check, TaskPlan, compute_plan_hash
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +86,35 @@ def _build_synthetic_run(
 
     # Write events.jsonl (events use plan_step_path as list)
     events_path = run_dir / "events.jsonl"
+    sid = "S-RETRY-FETCH"
+    import os
+
+    os.environ[ASTRID_SESSION_ID_ENV] = sid
+    try:
+        sess = Session.from_json(session_path(sid)).with_changes(
+            project=slug, run_id=run_id, last_used_at=now_iso()
+        )
+    except Exception:
+        sess = Session(
+            id=sid,
+            project=slug,
+            agent_id="retry-fetch-test",
+            attached_at="2026-05-11T00:00:00Z",
+            last_used_at="2026-05-11T00:00:00Z",
+            role="writer",
+            timeline=None,
+            run_id=run_id,
+        )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
+    plan_hash = (
+        compute_plan_hash(proj_root / "plan.json")
+        if (proj_root / "plan.json").exists()
+        else ""
+    )
+    write_lease_init(run_dir, session_id=sid, plan_hash=plan_hash)
+    write_current_run(slug, run_id, root=tmp_path / "projects")
     events = [
         {"kind": "run_started", "run_id": run_id, "ts": "2025-01-01T00:00:00Z"},
         {
@@ -120,9 +155,10 @@ def _build_synthetic_run(
             "ts": "2025-01-01T00:00:03Z",
         })
 
-    events_path.write_text(
-        "\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8"
-    )
+    if events_path.exists():
+        events_path.unlink()
+    for event in events:
+        append_event(events_path, event)
 
     # Write a run.json (needed by current run detection)
     run_json = {"run_id": run_id, "created_at": "2025-01-01T00:00:00Z"}
@@ -166,27 +202,14 @@ def test_retry_fetch_round_trip_missing_to_completed(
         return_value=proj_root,
     ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
         "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
-    ), patch(
-        "astrid.core.task.lifecycle.append_event"
-    ) as mock_append:
+    ):
         rc = cmd_step_retry_fetch(
             ["render", "--project", slug, "--run", run_id],
             projects_root=tmp_path / "projects",
         )
 
     assert rc == 0
-    # Should emit step_completed event
-    assert mock_append.call_count >= 1
-    # Verify at least one call has kind="step_completed"
-    found_completed = False
-    for call_obj in mock_append.call_args_list:
-        args_tuple = call_obj.args if hasattr(call_obj, 'args') else ()
-        if len(args_tuple) > 1:
-            event = args_tuple[1]
-            if isinstance(event, dict) and event.get("kind") == "step_completed":
-                found_completed = True
-                break
-    assert found_completed, f"Expected step_completed event, got calls: {mock_append.call_args_list}"
+    assert any(event.get("kind") == "step_completed" for event in read_events(run_dir / "events.jsonl"))
 
 
 @patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")
@@ -212,9 +235,7 @@ def test_retry_fetch_still_missing_stays_awaiting(
         return_value=proj_root,
     ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
         "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
-    ), patch(
-        "astrid.core.task.lifecycle.append_event"
-    ) as mock_append:
+    ):
         rc = cmd_step_retry_fetch(
             ["render", "--project", slug, "--run", run_id],
             projects_root=tmp_path / "projects",
@@ -223,15 +244,7 @@ def test_retry_fetch_still_missing_stays_awaiting(
     # Returns 1 because step is still awaiting_fetch
     assert rc == 1
     # But it still emits step_awaiting_fetch event
-    found_awaiting = False
-    for call_obj in mock_append.call_args_list:
-        args_tuple = call_obj.args if hasattr(call_obj, 'args') else ()
-        if len(args_tuple) > 1:
-            event = args_tuple[1]
-            if isinstance(event, dict) and event.get("kind") == "step_awaiting_fetch":
-                found_awaiting = True
-                break
-    assert found_awaiting, f"Expected step_awaiting_fetch event, got: {mock_append.call_args_list}"
+    assert any(event.get("kind") == "step_awaiting_fetch" for event in read_events(run_dir / "events.jsonl"))
 
 
 # ---------------------------------------------------------------------------
@@ -337,26 +350,13 @@ def test_retry_fetch_emits_run_completed_when_all_done(
         return_value=proj_root,
     ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
         "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
-    ), patch(
-        "astrid.core.task.lifecycle.append_event"
-    ) as mock_append:
+    ):
         rc = cmd_step_retry_fetch(
             ["render", "--project", slug, "--run", run_id],
             projects_root=tmp_path / "projects",
         )
 
     assert rc == 0
-    # Should emit step_completed and run_completed events
-    found_step_completed = False
-    found_run_completed = False
-    for call_obj in mock_append.call_args_list:
-        args_tuple = call_obj.args if hasattr(call_obj, 'args') else ()
-        if len(args_tuple) > 1:
-            event = args_tuple[1]
-            if isinstance(event, dict):
-                if event.get("kind") == "step_completed":
-                    found_step_completed = True
-                if event.get("kind") == "run_completed":
-                    found_run_completed = True
-    assert found_step_completed, f"Expected step_completed, got: {mock_append.call_args_list}"
-    assert found_run_completed, f"Expected run_completed, got: {mock_append.call_args_list}"
+    events = read_events(run_dir / "events.jsonl")
+    assert any(event.get("kind") == "step_completed" for event in events)
+    assert any(event.get("kind") == "run_completed" for event in events)

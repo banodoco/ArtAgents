@@ -102,6 +102,21 @@ def test_emit_plan_json_writes_valid_json(tmp_path: Path) -> None:
     assert len(loaded["steps"]) == 4
 
 
+def test_pack_run_started_log_is_non_task_audit_log(tmp_path: Path) -> None:
+    """The pack runner must not create a task-run ``events.jsonl`` ledger."""
+    from astrid.packs.builtin.event_talks import run as event_talks_run
+
+    event_talks_run._append_pack_run_started(tmp_path)
+
+    assert not (tmp_path / "events.jsonl").exists()
+    log_path = tmp_path / "pack_events.jsonl"
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    event = json.loads(lines[0])
+    assert event["kind"] == "pack_run_started"
+    assert "hash" not in event
+
+
 def test_consumes_populated() -> None:
     """The plan template includes source media in its ``consumes`` list."""
     from astrid.packs.builtin.event_talks.plan_template import build_plan_v2

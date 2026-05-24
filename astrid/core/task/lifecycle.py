@@ -30,6 +30,7 @@ from astrid.core.project.paths import (
 from astrid.core.project.current_run import (
     clear_current_run,
     read_current_run,
+    read_current_run_state,
     write_current_run,
 )
 from astrid.core.session.lease import (
@@ -37,19 +38,11 @@ from astrid.core.session.lease import (
     release_writer_lease,
     write_lease_init,
 )
-# Backward-compat shim: gate.py and lifecycle_ack.py still import these via
-# astrid.core.task.active_run during the T9 migration window. The shim
-# writes the new on-disk shape internally.
-from astrid.core.task.active_run import (
-    clear_active_run,
-    read_active_run,
-    write_active_run,
-)
+from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.env import task_actor_env
 from astrid.core.task.events import (
     EventLogError,
     _run_is_complete,
-    append_event,
     make_run_aborted_event,
     make_run_completed_event,
     make_run_started_event,
@@ -247,29 +240,10 @@ def cmd_start(
         from astrid.core.timeline.crud import list_timelines
         available = list_timelines(slug, root=projects_root)
         if available:
-            # Fix 5 (v6 dogfood): when exactly one timeline exists, auto-
-            # select it instead of bailing — the previous behaviour forced
-            # agents to re-issue the command with the obvious flag value.
-            # Multi-timeline projects still require explicit selection.
-            if len(available) == 1:
-                only = available[0]
-                found = find_timeline_by_slug(slug, only.slug, root=projects_root)
-                if found is None:
-                    _print_err(
-                        f"start: timeline {only.slug!r} not found in project {slug!r}"
-                    )
-                    return 1
-                timeline_id = found[0]
-                timeline_slug = only.slug
-                _print_err(
-                    f"(auto-selected only timeline {timeline_slug!r}; "
-                    f"pass --timeline explicitly to override)"
-                )
-            else:
-                _print_err("No default timeline; pass --timeline <slug>. Available:")
-                for ts in available:
-                    _print_err(f"  {ts.slug}  ({ts.name})")
-                return 1
+            _print_err("No default timeline; pass --timeline <slug>. Available:")
+            for ts in available:
+                _print_err(f"  {ts.slug}  ({ts.name})")
+            return 1
         else:
             _print_err(
                 f"start: no timelines exist for project {slug!r}; "
@@ -330,7 +304,8 @@ def cmd_start(
 
     events_path = run_dir / "events.jsonl"
     actor = task_actor_env()
-    append_event(events_path, make_run_started_event(run_id, plan_hash, actor=actor))
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_run_started_event(run_id, plan_hash, actor=actor))
 
     agent_md = _AGENT_MD_TEMPLATE.format(
         preamble=PROHIBITION_PREAMBLE,
@@ -379,8 +354,8 @@ def cmd_abort(
         return 0
 
     run_dir = project_dir(slug, root=projects_root) / "runs" / run_id
-    events_path = run_dir / "events.jsonl"
-    append_event(events_path, make_run_aborted_event(run_id, reason=args.reason))
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_run_aborted_event(run_id, reason=args.reason))
     # DEC-010: clear the pointer AND release the writer lease so the run
     # is fully detached. A follow-up takeover would now see the lease as
     # orphan-pending.
@@ -498,7 +473,7 @@ def cmd_status(
         _print_err(f"status: {exc}")
         return 1
 
-    active_run = read_active_run(slug, root=projects_root)
+    active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         _print_err(
             f"status: no active run for project {slug!r}; "
@@ -849,7 +824,8 @@ def _emit_run_completed_if_needed(
             return True
     if not _run_is_complete(plan, events):
         return False
-    append_event(events_path, make_run_completed_event(run_id))
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_run_completed_event(run_id))
     # Release the active-run pointer so the project is free for the next
     # orchestrator. Idempotent guard: only the first call gets past the
     # early-return above, so this fires exactly once per run.
@@ -1004,10 +980,10 @@ def _print_next_unbound_hint(
     *,
     target_slug: str | None = None,
 ) -> None:
-    """Universal port-of-call (#13): no session bound. Print exactly the
-    single legal next command, plus a short discovery list. Mirrors the
-    style of `astrid status` (no args) so an agent who knows only
-    `astrid next` lands here cleanly.
+    """Universal port-of-call (#13): no session bound.
+
+    Print exactly one legal next command. Broader discovery belongs to
+    ``astrid status``; ``next`` is the action surface.
 
     When ``target_slug`` is set (caller passed ``--project <slug>``), the
     hint targets that specific slug instead of listing discovered projects.
@@ -1016,33 +992,32 @@ def _print_next_unbound_hint(
     automation that grep stderr keep matching.
     """
     if target_slug:
-        print(
-            f"no session bound — run `astrid status` to confirm, then "
-            f"`astrid attach {target_slug}` to bind this tab."
-        )
+        action = f"astrid attach {target_slug}"
+        print("no session bound.")
         print()
-        print(f"  astrid attach {target_slug}")
-        print()
-        print("after attach, `astrid next` will tell you the next legal action.")
+        print("next:")
+        print(f"  {action}")
         return
 
     slugs = _list_project_slugs(projects_root)
-    print("no session bound — run `astrid status` to list projects, "
-          "then `astrid attach <project>` to bind this tab.")
-    print()
-    if slugs:
-        print("attach an existing project:")
-        for s in slugs[:6]:
-            print(f"  astrid attach {s}")
-        if len(slugs) > 6:
-            print(f"  ({len(slugs) - 6} more — `astrid projects ls` for the full list)")
+    action: str
+    try:
+        from astrid.core.session.config import resolve_default_project
+        default = resolve_default_project()
+    except Exception:
+        default = None
+    if default and default in slugs:
+        action = "astrid attach"
+    elif len(slugs) == 1:
+        action = f"astrid attach {slugs[0]}"
+    elif slugs:
+        action = "astrid status"
     else:
-        print("no projects exist yet — create one:")
-        print("  astrid projects create <slug>")
-        print("then:")
-        print("  astrid attach <slug>")
+        action = "astrid projects create <slug>"
+    print("no session bound.")
     print()
-    print("after attach, `astrid next` will tell you the next legal action.")
+    print("next:")
+    print(f"  {action}")
 
 
 def _print_next_no_run_hint(slug: str, projects_root: Optional[Path]) -> None:
@@ -1232,17 +1207,14 @@ def cmd_next(
     except SessionBindingError as exc:
         _print_err(f"next: {exc}")
         return 1
-    # Only print the unbound discovery hint when truly unbound:
-    # neither a session resolved (env or file-fallback) NOR an explicit
-    # --project. With --project but no session, fall through — an active
-    # run may still exist on disk and the agent can proceed without a
-    # session (e.g. test harnesses, scripted recovery).
-    if session is None and not explicit_project and slug is None:
-        _print_next_unbound_hint(projects_root, target_slug=None)
-        return 0
-    if session is None and slug is None:
-        # explicit_project was False AND no slug auto-discovered: print hint.
-        _print_next_unbound_hint(projects_root, target_slug=None)
+    # No resolved session means no task-run action is legal yet. Even with
+    # --project, print the single attach action instead of inspecting run
+    # state anonymously.
+    if session is None:
+        _print_next_unbound_hint(
+            projects_root,
+            target_slug=slug if explicit_project else None,
+        )
         return 0
     if slug is None and session is not None:
         slug = session.project
@@ -1253,7 +1225,7 @@ def cmd_next(
         _print_err(f"next: {exc}")
         return 1
 
-    active_run = read_active_run(slug, root=projects_root)
+    active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         # SESSION BOUND, NO RUN: print orchestrator suggestions + the
         # exact `astrid start` template the agent should type next.
@@ -1401,7 +1373,8 @@ def cmd_next(
                 actor_id="cli",
                 reason=args.reason,
             )
-            append_event(events_path, skip_event)
+            with writer_context_for_project(slug, root=projects_root) as writer:
+                writer.append(skip_event)
             print(f"skipped {STEP_PATH_SEP.join(peek.path_tuple)}")
             events = read_events(events_path)
             peek = peek_current_step(
@@ -1819,35 +1792,36 @@ def cmd_step_retry_fetch(
 
     if fetch_result.status == "completed":
         path_str = STEP_PATH_SEP.join(target_path)
-        append_event(
-            events_path,
-            make_step_completed_event(
-                path_str,
-                0,
-                adapter="remote-artifact",
-            ),
-        )
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_step_completed_event(
+                    path_str,
+                    0,
+                    adapter="remote-artifact",
+                )
+            )
         print(f"step {step_id}: all artifacts fetched")
 
         events_after = read_events(events_path)
         plan_after = load_plan(plan_path)
         if _run_is_complete(plan_after, events_after):
-            append_event(events_path, make_run_completed_event(run_id))
+            with writer_context_for_project(slug, root=projects_root) as writer:
+                writer.append(make_run_completed_event(run_id))
             print(f"run {run_id}: completed")
         return 0
 
     if fetch_result.status == "awaiting_fetch":
         path_str = STEP_PATH_SEP.join(target_path)
-        append_event(
-            events_path,
-            make_step_awaiting_fetch_event(
-                path_str,
-                missing=list(fetch_result.missing),
-                mismatched=list(fetch_result.mismatched),
-                reason=fetch_result.reason,
-                adapter="remote-artifact",
-            ),
-        )
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_step_awaiting_fetch_event(
+                    path_str,
+                    missing=list(fetch_result.missing),
+                    mismatched=list(fetch_result.mismatched),
+                    reason=fetch_result.reason,
+                    adapter="remote-artifact",
+                )
+            )
         _print_err(
             f"step {step_id}: still awaiting_fetch: "
             f"missing={fetch_result.missing}, mismatched={fetch_result.mismatched}"

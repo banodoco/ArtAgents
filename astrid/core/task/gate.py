@@ -18,8 +18,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
+from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir
-from astrid.core.task.active_run import read_active_run
+from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision
 from astrid.core.task.cas import intern, link_into_produces
 from astrid.core.task.env import (
     apply_task_run_env,
@@ -28,7 +29,6 @@ from astrid.core.task.env import (
     task_actor_env,
 )
 from astrid.core.task.events import (
-    append_event,
     canonical_event_json,
     make_cursor_rewind_event,
     make_for_each_expanded_event,
@@ -572,7 +572,7 @@ def gate_command(
     root: str | Path | None = None,
     reentry: bool = False,
 ) -> GateDecision:
-    active_run = read_active_run(slug, root=root)
+    active_run = read_current_run_state(slug, root=root)
     if active_run is None:
         if not is_in_task_run(slug):
             return GateDecision(active=False)
@@ -603,10 +603,12 @@ def gate_command(
     # Auto-traverse: nested_entered/exited for nested plans; iteration_started/
     # for_each_expanded/item_started for repeat hosts. We loop until we land on a
     # dispatchable leaf (CodeStep or AttestedStep) inside the appropriate frame.
+    with writer_context_for_project(slug, root=root) as writer:
+        pass
     events_view = list(events)
 
     def _gate_append(ev: dict[str, Any]) -> None:
-        append_event(events_path, ev)
+        writer.append(ev)
         events_view.append(ev)
 
     leaf = _auto_traverse_to_leaf(
@@ -642,6 +644,10 @@ def gate_command(
             project_root=project_root,
             iteration=iteration,
             item_id=item_id,
+            append_fn=writer.append,
+            session=writer.session,
+            run_dir=writer.run_dir,
+            writer_epoch_at_dispatch=writer.expected_writer_epoch,
         )
     if is_attested_kind(current_step):
         return _dispatch_attested(
@@ -656,6 +662,10 @@ def gate_command(
             project_root=project_root,
             iteration=iteration,
             item_id=item_id,
+            append_fn=writer.append,
+            session=writer.session,
+            run_dir=writer.run_dir,
+            writer_epoch_at_dispatch=writer.expected_writer_epoch,
         )
     raise TaskRunGateError(
         reason=f"unexpected step kind: {type(current_step).__name__}",
@@ -903,6 +913,10 @@ def _dispatch_code(
     project_root: Path,
     iteration: int | None = None,
     item_id: str | None = None,
+    append_fn: Callable[[dict[str, Any]], Any],
+    session: Any = None,
+    run_dir: Path | None = None,
+    writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
     if command != step.command:
         _reject(slug, "incoming command does not match plan[cursor]", abort=False)
@@ -938,10 +952,15 @@ def _dispatch_code(
                 item_id=item_id,
                 adapter=step.adapter,
                 step_version=step_version,
+                session=session,
+                run_dir=run_dir,
+                writer_epoch_at_dispatch=writer_epoch_at_dispatch,
             )
         if isinstance(latest, dict) and latest.get("kind") == "produces_check_failed":
             apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
-            dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
+            dispatch_result = _adapter_dispatch(
+                adapter, step, run_ctx, path_str, command, append_fn
+            )
             return _code_decision(
                 run_id=run_id,
                 slug=slug,
@@ -956,11 +975,16 @@ def _dispatch_code(
                 adapter=step.adapter,
                 step_version=step_version,
                 pid=dispatch_result.pid if dispatch_result else None,
+                session=session,
+                run_dir=run_dir,
+                writer_epoch_at_dispatch=writer_epoch_at_dispatch,
             )
         _reject(slug, "incoming command does not match plan[cursor]", abort=False)
 
     apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
-    dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
+    dispatch_result = _adapter_dispatch(
+        adapter, step, run_ctx, path_str, command, append_fn
+    )
     return _code_decision(
         run_id=run_id,
         slug=slug,
@@ -975,6 +999,9 @@ def _dispatch_code(
         adapter=step.adapter,
         step_version=step_version,
         pid=dispatch_result.pid if dispatch_result else None,
+        session=session,
+        run_dir=run_dir,
+        writer_epoch_at_dispatch=writer_epoch_at_dispatch,
     )
 
 
@@ -984,7 +1011,7 @@ def _adapter_dispatch(
     run_ctx,
     path_str: str,
     command: str,
-    events_path: Path,
+    append_fn: Callable[[dict[str, Any]], Any],
 ):
     """Call adapter.dispatch() and emit step_dispatched. Returns DispatchResult or None on reject."""
     result = adapter.dispatch(step, run_ctx)
@@ -997,7 +1024,7 @@ def _adapter_dispatch(
         step_version=run_ctx.step_version,
         pid=result.pid,
     )
-    append_event(events_path, dispatched)
+    append_fn(dispatched)
     return result
 
 
@@ -1016,6 +1043,9 @@ def _code_decision(
     adapter: str | None = None,
     step_version: int = 1,
     pid: int | None = None,
+    session: Any = None,
+    run_dir: Path | None = None,
+    writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
     return GateDecision(
         active=True,
@@ -1033,6 +1063,10 @@ def _code_decision(
         adapter=adapter,
         step_version=step_version,
         pid=pid,
+        run_dir=run_dir,
+        writer_epoch_at_dispatch=writer_epoch_at_dispatch,
+        session_id=getattr(session, "id", None),
+        session=session,
     )
 
 
@@ -1061,6 +1095,10 @@ def _dispatch_attested(
     project_root: Path,
     iteration: int | None = None,
     item_id: str | None = None,
+    append_fn: Callable[[dict[str, Any]], Any],
+    session: Any = None,
+    run_dir: Path | None = None,
+    writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
     matched, args = match_attested_command(command, step.command)
     if not matched:
@@ -1085,7 +1123,7 @@ def _dispatch_attested(
         event = make_step_attested_event(path_str, attestor_kind, attestor_id, args.evidence)
     if is_author_test_mode():
         event["source"] = "author_test"
-    append_event(events_path, event)
+    append_fn(event)
     # FLAG-S1-001 / all_locations-3: after appending item_attested, route
     # through the centralized autoclose helper. Any future site that emits
     # item_attested MUST also call this helper, or for_each host closure
@@ -1097,6 +1135,7 @@ def _dispatch_attested(
             project_root=project_root,
             slug=slug,
             run_id=run_id,
+            append_fn=append_fn,
         )
     decision = GateDecision(
         active=True,
@@ -1113,6 +1152,10 @@ def _dispatch_attested(
         item_id=item_id,
         adapter=step.adapter,
         step_version=step.version,
+        run_dir=run_dir,
+        writer_epoch_at_dispatch=writer_epoch_at_dispatch,
+        session_id=getattr(session, "id", None),
+        session=session,
     )
     if step.produces:
         # FLAG-S1-005: detect a fresh produces_check_failed pair attributable
@@ -1136,8 +1179,7 @@ def _dispatch_attested(
         feedback = _extract_iterate_feedback(args.evidence)
         if feedback is not None:
             write_iteration_feedback(decision, feedback)
-            append_event(
-                events_path,
+            append_fn(
                 make_iteration_failed_event(
                     path_tuple,
                     iteration,
@@ -1154,6 +1196,7 @@ def _maybe_autoclose_for_each_host(
     project_root: Path,
     slug: str,
     run_id: str,
+    append_fn: Callable[[dict[str, Any]], Any],
 ) -> None:
     """Append a synthetic ``step_attested`` for a for_each host once all items
     are attested. SD-001: attestor is always ``system`` / ``gate.autoclose``
@@ -1228,7 +1271,7 @@ def _maybe_autoclose_for_each_host(
     )
     if is_author_test_mode():
         auto_event["source"] = "author_test"
-    append_event(events_path, auto_event)
+    append_fn(auto_event)
 
 
 def _extract_iterate_feedback(evidence: tuple[str, ...]) -> str | None:
@@ -1363,6 +1406,19 @@ def validate_attested_identity(
     return "actor", args.actor
 
 
+def _append_via_decision(decision: GateDecision, event: dict[str, Any]) -> dict[str, Any]:
+    if decision.session is None:
+        raise TaskRunGateError(
+            reason="writer session missing for task-run mutation",
+            recovery=f"astrid attach {decision.slug or '<project>'}",
+        )
+    with writer_context_from_decision(
+        decision,
+        root=decision.project_root.parent if decision.project_root is not None else None,
+    ) as writer:
+        return writer.append(event)
+
+
 def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
@@ -1399,8 +1455,8 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
         if step is not None and step.requires_ack:
             return
         if complete_result.status == "failed":
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_step_failed_event(
                     decision.plan_step_id,
                     complete_result.returncode,
@@ -1411,8 +1467,8 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
             )
         elif complete_result.status == "awaiting_fetch":
             missing, mismatched = _read_awaiting_fetch_items(run_ctx)
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_step_awaiting_fetch_event(
                     decision.plan_step_id,
                     missing=missing,
@@ -1422,8 +1478,8 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
                 ),
             )
         else:
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_step_completed_event(
                     decision.plan_step_id,
                     returncode if returncode != -1 else (complete_result.returncode or 0),
@@ -1433,8 +1489,8 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
             )
     else:
         # Legacy path: no adapter info on decision — use raw returncode.
-        append_event(
-            decision.events_path,
+        _append_via_decision(
+            decision,
             make_step_completed_event(decision.plan_step_id, returncode),
         )
 
@@ -1522,8 +1578,8 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
         artifact_path = produces_root / entry.path
         result = entry.check.run(artifact_path)
         if not result.ok:
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_produces_check_failed_event(
                     decision.plan_step_path,
                     entry.name,
@@ -1532,8 +1588,8 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
                 ),
             )
             if decision.iteration is not None:
-                append_event(
-                    decision.events_path,
+                _append_via_decision(
+                    decision,
                     make_iteration_failed_event(
                         decision.plan_step_path,
                         decision.iteration,
@@ -1541,8 +1597,8 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
                     ),
                 )
             else:
-                append_event(
-                    decision.events_path,
+                _append_via_decision(
+                    decision,
                     make_cursor_rewind_event(
                         decision.plan_step_path,
                         reason=f"produces check failed: {entry.name}",
@@ -1550,8 +1606,8 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
                 )
             return False
         cas_sha256 = _intern_produces_artifact(decision, artifact_path)
-        append_event(
-            decision.events_path,
+        _append_via_decision(
+            decision,
             make_produces_check_passed_event(
                 decision.plan_step_path,
                 entry.name,
@@ -1581,8 +1637,8 @@ def record_step_attested(
     """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
-    append_event(
-        decision.events_path,
+    _append_via_decision(
+        decision,
         make_step_attested_event(decision.plan_step_id, attestor_kind, attestor_id, evidence),
     )
 
@@ -1591,8 +1647,8 @@ def record_nested_entered(decision: GateDecision, child_plan_hash: str) -> None:
     """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
-    append_event(
-        decision.events_path,
+    _append_via_decision(
+        decision,
         make_nested_entered_event(decision.plan_step_id, child_plan_hash),
     )
 
@@ -1601,8 +1657,8 @@ def record_nested_exited(decision: GateDecision, returncode: int) -> None:
     """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
-    append_event(
-        decision.events_path,
+    _append_via_decision(
+        decision,
         make_nested_exited_event(decision.plan_step_id, returncode),
     )
 
