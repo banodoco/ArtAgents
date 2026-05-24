@@ -1,4 +1,14 @@
-{"actor":"author_test","kind":"run_started","plan_hash":"sha256:a13780f702d3a31a9fa7c137ea64f09a56b2d2035c7ac111f46e049db41a388f"}
+{"actor":"author_test","kind":"run_started","plan_hash":"sha256:b0b9aae7dd6573eb1b6625da32b08610fb3ee03716901a9bc731f5857a5d68f3"}
 {"adapter":"local","command":"python3 -c 'print('\"'\"'ok'\"'\"')'","kind":"step_dispatched","plan_step_path":["noop"],"step_version":1}
 {"adapter":"local","kind":"step_completed","plan_step_path":["noop"],"returncode":0}
 {"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"review","source":"author_test"}
+{"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"verdict","source":"author_test"}
+{"cas_sha256":"61d9fcd63a54f2fa7c9e83db72806b71cfca6f04c19a08e7d87c9c6649871904","check_id":"json_file","kind":"produces_check_passed","plan_step_path":["verdict"],"produces_name":"verdict"}
+{"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"final_verdict","source":"author_test"}
+{"cas_sha256":"61d9fcd63a54f2fa7c9e83db72806b71cfca6f04c19a08e7d87c9c6649871904","check_id":"json_file","kind":"produces_check_passed","plan_step_path":["final_verdict"],"produces_name":"verdict"}
+{"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"closing_verdict","source":"author_test"}
+{"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"end_verdict","source":"author_test"}
+{"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"terminal_verdict","source":"author_test"}
+{"cas_sha256":"61d9fcd63a54f2fa7c9e83db72806b71cfca6f04c19a08e7d87c9c6649871904","check_id":"json_file","kind":"produces_check_passed","plan_step_path":["terminal_verdict"],"produces_name":"verdict"}
+{"attestor_id":"author_test","attestor_kind":"actor","evidence":[],"kind":"step_attested","plan_step_id":"ultimate_verdict","source":"author_test"}
+{"cas_sha256":"61d9fcd63a54f2fa7c9e83db72806b71cfca6f04c19a08e7d87c9c6649871904","check_id":"json_file","kind":"produces_check_passed","plan_step_path":["ultimate_verdict"],"produces_name":"verdict"}

@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from astrid.core.project.project import create_project
 from astrid.core.task.active_run import read_active_run
 from astrid.core.task.env import (
     ASTRID_ACTOR,
@@ -33,7 +34,6 @@ from astrid.core.task.gate import (
     peek_current_step,
     record_dispatch_complete,
 )
-from astrid.core.project.project import create_project
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.lifecycle_ack import cmd_ack
 from astrid.core.task.plan import (
@@ -41,8 +41,8 @@ from astrid.core.task.plan import (
     is_attested_kind,
     is_code_kind,
     load_plan,
+    step_dir_for_path,
 )
-
 
 _MAX_ITERATIONS = 200
 
@@ -59,6 +59,27 @@ _MANAGED_ENV_VARS = (
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
 )
+
+
+def _seed_author_test_produces(*, slug: str, run_id: str, step, path_tuple, projects_root: Path) -> None:
+    """Create minimal declared outputs for auto-approved author-test steps."""
+    for produced in getattr(step, "produces", ()) or ():
+        target = (
+            step_dir_for_path(
+                slug,
+                run_id,
+                path_tuple,
+                step_version=step.version,
+                root=projects_root,
+            )
+            / "produces"
+            / produced.path
+        )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.suffix == ".json":
+            target.write_text('{"verdict":"ship"}\n', encoding="utf-8")
+        else:
+            target.write_text("ship\n", encoding="utf-8")
 
 
 def _snapshot_env(names: tuple[str, ...]) -> dict[str, Optional[str]]:
@@ -156,6 +177,13 @@ def run_fixture(
                 continue
 
             if is_attested_kind(step):
+                _seed_author_test_produces(
+                    slug=project_slug,
+                    run_id=run_id,
+                    step=step,
+                    path_tuple=peek.path_tuple,
+                    projects_root=projects_root,
+                )
                 if step.ack is not None and step.ack.kind == "agent":
                     flag_pair = ["--agent", "author_test"]
                 else:

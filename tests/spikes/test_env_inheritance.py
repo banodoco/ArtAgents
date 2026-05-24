@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -298,9 +299,17 @@ def test_concurrent_futures_processpoolexecutor_path() -> None:
     os.environ[SESSION_ID_ENV] = TEST_SESSION_ID
 
     try:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_ppe_worker)
-            observed = future.result(timeout=5.0)
+        try:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(_ppe_worker)
+                observed = future.result(timeout=5.0)
+        except (NotImplementedError, PermissionError) as exc:
+            import pytest
+
+            pytest.skip(
+                "ProcessPoolExecutor cannot start in this environment "
+                f"({type(exc).__name__}: {exc})"
+            )
 
         preserved = observed == TEST_SESSION_ID
         report["ProcessPoolExecutor"] = {
