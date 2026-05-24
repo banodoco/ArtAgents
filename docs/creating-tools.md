@@ -8,6 +8,11 @@ Start with the highest-level command that fits the user request. For normal
 video creation, run an orchestrator through `python3 -m astrid` instead of
 chaining internal executors by hand.
 
+Astrid commands are session-gated. If the shell is not already bound to a
+project session, run `python3 -m astrid next` for the one legal next action or
+`python3 -m astrid status` for the read-side breadcrumb, then attach before
+using registry discovery or tool creation commands.
+
 Do not chain pipeline internals by hand unless you are debugging one specific
 stage. Source-analysis executors intentionally pass file artifacts such as
 transcripts, scenes, quote candidates, pools, timelines, and assets. Those files
@@ -38,9 +43,10 @@ Before adding anything, follow this order. Move to the next step only when the
 previous one cannot satisfy the request.
 
 1. **Try to compose existing executors.** Run `python3 -m astrid executors
-   list` and `inspect` the likely candidates. If a workflow can be built by
-   wiring existing executors together, write *only* an orchestrator that calls
-   them. Do not duplicate logic that already lives in an executor.
+   search <terms>` or `list` after attaching, then `inspect` the likely
+   candidates. If a workflow can be built by wiring existing executors
+   together, write *only* an orchestrator that calls them. Do not duplicate
+   logic that already lives in an executor.
 2. **Create the missing executors.** Each new executor must do exactly one
    concrete unit of work — independently runnable, inspectable, testable. Keep
    it narrow: one network call, one transformation, one artifact in / one
@@ -181,13 +187,15 @@ Copy the closest template and replace the placeholder identifiers:
 Then run:
 
 ```bash
+python3 -m astrid next
 python3 -m astrid doctor
 python3 -m astrid executors inspect builtin.example --json
 python3 -m astrid orchestrators inspect builtin.example --json
 python3 -m astrid elements inspect effects example-card --json
 ```
 
-Run only the inspect command that matches the thing you created.
+Run `next` only when you need to bind or re-orient, and run only the inspect
+command that matches the thing you created.
 
 ## Review Checklist
 

@@ -336,9 +336,9 @@ def _enforce_quality_floor(quality: Mapping[str, Any], *, force: bool) -> None:
             continue
         run_id = item.get("run_id")
         if run_id:
-            commands.append(f"python3 -m astrid thread backfill  # unresolved producer {run_id}")
-    detail = "\n".join(commands) if commands else "python3 -m astrid thread backfill"
-    raise AssembleError(f"data_quality {data_quality:.3f} is below {QUALITY_FLOOR:.1f}; run:\n{detail}\nUse --force to assemble anyway.")
+            commands.append(f"restore or regenerate lineage for unresolved producer {run_id}")
+    detail = "\n".join(commands) if commands else "restore or regenerate missing lineage inputs"
+    raise AssembleError(f"data_quality {data_quality:.3f} is below {QUALITY_FLOOR:.1f}; {detail}. Use --force to assemble anyway.")
 
 
 def _clip_for_artifact(

@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import json
 import sys
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
+from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.events import (
     EVENTS_FILENAME,
-    LEASE_FILENAME,
-    append_event_locked,
     read_events,
 )
 from astrid.core.task.plan import (
@@ -324,32 +322,10 @@ def _run_dir(slug: str, run_id: str, root: str | Path | None) -> Path:
     return project_dir(slug, root=root) / "runs" / run_id
 
 
-def _read_lease_epoch(run_dir: Path) -> int:
-    lease_path = run_dir / LEASE_FILENAME
-    if not lease_path.exists():
-        raise TaskPlanError(f"lease not found at {lease_path}")
-    try:
-        payload = json.loads(lease_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise TaskPlanError(f"malformed lease.json at {lease_path}: {exc}") from exc
-    return int(payload.get("writer_epoch", 0))
-
-
 def _load_effective_plan(run_dir: Path) -> tuple[TaskPlan, list[dict[str, Any]]]:
     plan = load_plan(run_dir / "plan.json")
     events = read_events(run_dir / EVENTS_FILENAME)
     return apply_mutations(plan, events), events
-
-
-def _emit(run_dir: Path, event: dict[str, Any], expected_epoch: int) -> dict[str, Any]:
-    from astrid.core.task.events import _peek_tail_hash
-    prev_hash = _peek_tail_hash(run_dir / EVENTS_FILENAME)
-    return append_event_locked(
-        run_dir,
-        event,
-        expected_writer_epoch=expected_epoch,
-        expected_prev_hash=prev_hash,
-    )
 
 
 def _print_err(msg: str) -> None:
@@ -358,30 +334,43 @@ def _print_err(msg: str) -> None:
 
 def _validate_and_emit(
     run_dir: Path,
+    slug: str,
+    projects_root: Path | None,
+    run_id: str,
     prior_plan: TaskPlan,
     proposed_plan: TaskPlan,
     *,
     diff: dict[str, Any],
     actor: str,
-    expected_epoch: int,
 ) -> int:
     try:
-        validate_mutation(
-            prior_plan,
-            proposed_plan,
-            lease_epoch_actual=_read_lease_epoch(run_dir),
-            lease_epoch_expected=expected_epoch,
-        )
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            if writer.session.run_id != run_id:
+                _print_err(
+                    f"plan: run {run_id!r} is not the active writer run "
+                    f"({writer.session.run_id!r})"
+                )
+                return 1
+            validate_mutation(
+                prior_plan,
+                proposed_plan,
+                lease_epoch_actual=writer.expected_writer_epoch,
+                lease_epoch_expected=writer.expected_writer_epoch,
+            )
+            event = _make_plan_mutated_event(
+                actor=actor,
+                writer_epoch=writer.expected_writer_epoch,
+                diff=diff,
+            )
+            writer.append(event)
+            emitted_epoch = writer.expected_writer_epoch
     except MutationInvariantError as exc:
         _print_err(f"plan: rejected at {exc.invariant_id} ({exc.element}): {exc.reason}")
         return 1
-    event = _make_plan_mutated_event(actor=actor, writer_epoch=expected_epoch, diff=diff)
-    try:
-        _emit(run_dir, event, expected_epoch)
-    except Exception as exc:  # StaleTailError / StaleEpochError / EventLogError
+    except Exception as exc:  # StaleTailError / StaleEpochError / EventLogError / auth
         _print_err(f"plan: event-append failed: {exc}")
         return 1
-    print(f"plan_mutated [{diff.get('op')}] emitted at writer_epoch={expected_epoch}")
+    print(f"plan_mutated [{diff.get('op')}] emitted at writer_epoch={emitted_epoch}")
     return 0
 
 
@@ -422,8 +411,8 @@ def _dispatch_add(args, projects_root: Path | None) -> int:
 
     actor = args.actor or f"agent:{slug}"
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, actor=actor,
     )
 
 
@@ -456,8 +445,8 @@ def cmd_plan_edit_step(argv: Sequence[str], *, projects_root: Path | None = None
 
     actor = args.actor or f"agent:{slug}"
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, actor=actor,
     )
 
 
@@ -485,8 +474,8 @@ def cmd_plan_remove_step(argv: Sequence[str], *, projects_root: Path | None = No
 
     actor = args.actor or f"agent:{slug}"
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, actor=actor,
     )
 
 
@@ -535,8 +524,8 @@ def cmd_plan_supersede_step(argv: Sequence[str], *, projects_root: Path | None =
 
     actor = args.actor or f"agent:{slug}"
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, actor=actor,
     )
 
 

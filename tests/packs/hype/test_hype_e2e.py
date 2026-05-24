@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -33,6 +34,10 @@ from astrid.core.task.plan import (
     compute_plan_hash,
     load_plan,
 )
+from astrid.core.project.current_run import write_current_run
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.model import Session
+from astrid.core.session.paths import session_path
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +113,24 @@ def _write_step_event(events_path: Path, event: dict) -> None:
     line = json.dumps(event, sort_keys=True, ensure_ascii=False)
     with open(events_path, "a", encoding="utf-8") as f:
         f.write(line + "\n")
+
+
+def _bind_hype_session(projects_root: Path, slug: str, run_id: str, sid: str) -> None:
+    os.environ[ASTRID_SESSION_ID_ENV] = sid
+    sess = Session(
+        id=sid,
+        project=slug,
+        agent_id="hype-test",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        run_id=run_id,
+    )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
+    write_current_run(slug, run_id, root=projects_root)
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +258,7 @@ def test_dynamic_add_step_shot_count_discovery(tmp_path: Path) -> None:
 
     # Seed the run with a lease so add-step can validate
     from astrid.core.session.lease import write_lease_init
+    _bind_hype_session(tmp_path / "projects", "demo", "run-hype-1", "test-session-1")
     write_lease_init(run_dir, session_id="test-session-1", plan_hash="")
 
     # Seed the first event using ``append_event`` so the hash chain is valid.
@@ -287,6 +311,7 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
     proj_root, run_dir, _, _ = _build_synthetic_hype_run(tmp_path)
 
     from astrid.core.session.lease import write_lease_init
+    _bind_hype_session(tmp_path / "projects", "demo", "run-hype-1", "test-session-2")
     write_lease_init(run_dir, session_id="test-session-2", plan_hash="")
 
     # Seed the first event with the hash chain intact.

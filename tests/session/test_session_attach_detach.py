@@ -121,7 +121,7 @@ def test_attach_without_project_rejects_missing_default(
     assert "astrid attach demo --default" in captured.err
 
 
-def test_attach_uses_only_timeline_when_no_default_timeline(
+def test_attach_requires_explicit_timeline_when_default_sentinel_is_none(
     env: dict[str, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
     from astrid.core.project.project import create_project
@@ -132,9 +132,9 @@ def test_attach_uses_only_timeline_when_no_default_timeline(
     buf = StringIO()
     rc = cli.cmd_attach(_args(), out=buf)
     captured = capsys.readouterr()
-    assert rc == 0
-    assert "Using only timeline: main" in captured.err
-    assert "timeline: main" in buf.getvalue()
+    assert rc == 2
+    assert "no default timeline; pass --timeline <slug>" in captured.err
+    assert not (env["projects"] / "demo" / cli.SESSION_FILE_NAME).exists()
 
 
 def test_attach_with_default_flag_writes_workspace_default(

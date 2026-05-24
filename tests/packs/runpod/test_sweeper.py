@@ -10,10 +10,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from astrid.core.project.current_run import write_current_run
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.model import Session
+from astrid.core.session.paths import session_path
 from astrid.core.runpod.sweeper import (
     POD_HANDLE_FILENAME,
+    RUNPOD_SWEEPER_AUDIT_FILENAME,
     _derive_run_dir,
     collect_handles,
+)
+
+SPRINT1_STOP_LINE_XFAIL = pytest.mark.xfail(
+    strict=True,
+    reason="Sprint 1 stop-line: default sweeps must not raw-append into task runs",
 )
 
 
@@ -60,7 +70,9 @@ def _write_lease(base_dir: Path, project: str, run_id: str, lease: dict) -> None
     """Write a lease.json into a run directory."""
     run_dir = base_dir / project / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "lease.json").write_text(json.dumps(lease))
+    payload = {"writer_epoch": 0, "attached_session_id": None, "plan_hash": ""}
+    payload.update(lease)
+    (run_dir / "lease.json").write_text(json.dumps(payload))
 
 
 def _write_events(base_dir: Path, project: str, run_id: str, events: list[dict]) -> None:
@@ -80,6 +92,26 @@ def _write_events(base_dir: Path, project: str, run_id: str, events: list[dict])
         prev_hash = stored["hash"]
 
     (run_dir / EVENTS_FILENAME).write_text("\n".join(lines) + "\n")
+
+
+def _bind_sweeper_session(base_dir: Path, project: str, run_id: str, sid: str) -> None:
+    import os
+
+    os.environ[ASTRID_SESSION_ID_ENV] = sid
+    sess = Session(
+        id=sid,
+        project=project,
+        agent_id="sweeper-test",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        run_id=run_id,
+    )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
+    write_current_run(project, run_id, root=base_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +283,7 @@ def test_sweeper_default_terminate_idle_pod(sweeper_projects_root: Path) -> None
         "attached_session_id": None,
     })
 
-    # Pre-seed events.jsonl so append_event_locked has a chain to CAS against
+    # Pre-seed events.jsonl so the writer-authenticated append has a chain.
     _write_events(sweeper_projects_root, "proj", "run-idle", [
         {"kind": "run_started", "ts": "2024-01-01T00:00:00Z"},
     ])
@@ -344,9 +376,10 @@ def test_sweeper_emits_pod_terminated_event(sweeper_projects_root: Path) -> None
     """Sweeper appends pod_terminated_by_sweep events to events.jsonl."""
     handle = _make_handle(pod_id="pod-event-test")
     _write_handle_tree(sweeper_projects_root, "proj", "run-event", "step-1", handle)
+    _bind_sweeper_session(sweeper_projects_root, "proj", "run-event", "S-SWEEP-EVENT")
     _write_lease(sweeper_projects_root, "proj", "run-event", {
         "writer_epoch": 0,
-        "attached_session_id": None,
+        "attached_session_id": "S-SWEEP-EVENT",
     })
 
     # Pre-seed events.jsonl
@@ -389,8 +422,99 @@ def test_sweeper_emits_pod_terminated_event(sweeper_projects_root: Path) -> None
             del os.environ["RUNPOD_API_KEY"]
 
 
-def test_sweeper_hard_emits_event_with_epoch_none(sweeper_projects_root: Path) -> None:
-    """--hard mode emits pod_terminated_by_sweep with expected_writer_epoch=None."""
+def test_stop_line_default_sweep_requires_writer_auth_before_event_append(
+    sweeper_projects_root: Path,
+) -> None:
+    handle = _make_handle(pod_id="pod-stop-line")
+    _write_handle_tree(sweeper_projects_root, "proj", "run-stop", "step-1", handle)
+    _write_lease(
+        sweeper_projects_root,
+        "proj",
+        "run-stop",
+        {"writer_epoch": 0, "attached_session_id": None},
+    )
+    _write_events(
+        sweeper_projects_root,
+        "proj",
+        "run-stop",
+        [{"kind": "run_started", "ts": "2024-01-01T00:00:00Z"}],
+    )
+    events_path = sweeper_projects_root / "proj" / "runs" / "run-stop" / "events.jsonl"
+    before = events_path.read_bytes()
+
+    mock_pod = MagicMock()
+    mock_pod.is_idle = AsyncMock(return_value=True)
+
+    import os
+
+    os.environ["RUNPOD_API_KEY"] = "test-key-rpa_0000000000000000000000000000000000000000000000"
+    try:
+        with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
+             patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
+             patch("runpod_lifecycle.RunPodConfig", MagicMock()):
+            from astrid.core.runpod.sweeper import sweep as run_sweep
+
+            summary = run_sweep(sweeper_projects_root, mode="default", dry_run=False)
+            assert summary["terminated"] == 0
+            assert summary["errors"] >= 1
+            assert events_path.read_bytes() == before
+    finally:
+        if os.environ.get("RUNPOD_API_KEY") == "test-key-rpa_0000000000000000000000000000000000000000000000":
+            del os.environ["RUNPOD_API_KEY"]
+
+
+def test_sweeper_missing_lease_fails_before_termination_or_append(
+    sweeper_projects_root: Path,
+) -> None:
+    handle = _make_handle(pod_id="pod-missing-lease")
+    _write_handle_tree(sweeper_projects_root, "proj", "run-missing-lease", "step-1", handle)
+    _write_events(
+        sweeper_projects_root,
+        "proj",
+        "run-missing-lease",
+        [{"kind": "run_started", "ts": "2024-01-01T00:00:00Z"}],
+    )
+    events_path = sweeper_projects_root / "proj" / "runs" / "run-missing-lease" / "events.jsonl"
+    before = events_path.read_bytes()
+
+    from astrid.core.runpod.sweeper import sweep as run_sweep
+
+    summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
+    assert summary["terminated"] == 0
+    assert summary["errors"] == 1
+    assert "missing lease" in summary["details"][0]["reason"]
+    assert events_path.read_bytes() == before
+
+
+def test_sweeper_malformed_lease_fails_before_termination_or_append(
+    sweeper_projects_root: Path,
+) -> None:
+    handle = _make_handle(pod_id="pod-malformed-lease")
+    _write_handle_tree(sweeper_projects_root, "proj", "run-malformed-lease", "step-1", handle)
+    run_dir = sweeper_projects_root / "proj" / "runs" / "run-malformed-lease"
+    (run_dir / "lease.json").write_text("not-json", encoding="utf-8")
+    _write_events(
+        sweeper_projects_root,
+        "proj",
+        "run-malformed-lease",
+        [{"kind": "run_started", "ts": "2024-01-01T00:00:00Z"}],
+    )
+    events_path = run_dir / "events.jsonl"
+    before = events_path.read_bytes()
+
+    from astrid.core.runpod.sweeper import sweep as run_sweep
+
+    summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
+    assert summary["terminated"] == 0
+    assert summary["errors"] == 1
+    assert "invalid JSON" in summary["details"][0]["reason"]
+    assert events_path.read_bytes() == before
+
+
+def test_sweeper_hard_records_non_task_audit_without_task_event_append(
+    sweeper_projects_root: Path,
+) -> None:
+    """--hard mode records cleanup without bypassing task-run writer auth."""
     handle = _make_handle(pod_id="pod-hard-event")
     _write_handle_tree(sweeper_projects_root, "proj", "run-hard-event", "step-1", handle)
     _write_lease(sweeper_projects_root, "proj", "run-hard-event", {
@@ -402,6 +526,8 @@ def test_sweeper_hard_emits_event_with_epoch_none(sweeper_projects_root: Path) -
     _write_events(sweeper_projects_root, "proj", "run-hard-event", [
         {"kind": "run_started", "ts": "2024-01-01T00:00:00Z"},
     ])
+    events_path = sweeper_projects_root / "proj" / "runs" / "run-hard-event" / "events.jsonl"
+    before = events_path.read_bytes()
 
     import os
     os.environ["RUNPOD_API_KEY"] = "test-key-rpa_0000000000000000000000000000000000000000000000"
@@ -410,19 +536,21 @@ def test_sweeper_hard_emits_event_with_epoch_none(sweeper_projects_root: Path) -
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
             from astrid.core.runpod.sweeper import sweep as run_sweep
-            from astrid.core.task.events import EVENTS_FILENAME
 
             summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
             assert summary["terminated"] == 1
 
-            events_path = sweeper_projects_root / "proj" / "runs" / "run-hard-event" / EVENTS_FILENAME
-            lines = events_path.read_text().strip().split("\n")
-            sweeper_events = [json.loads(line) for line in lines if "sweep" in line]
-            assert len(sweeper_events) >= 1
-            sweeper_event = sweeper_events[0]
-            assert sweeper_event["kind"] == "pod_terminated_by_sweep"
-            assert sweeper_event["mode"] == "hard"
-            assert "hash" in sweeper_event
+            assert events_path.read_bytes() == before
+            audit_path = sweeper_projects_root / RUNPOD_SWEEPER_AUDIT_FILENAME
+            lines = audit_path.read_text(encoding="utf-8").strip().split("\n")
+            assert len(lines) == 1
+            audit_event = json.loads(lines[0])
+            assert audit_event["kind"] == "pod_terminated_by_sweep"
+            assert audit_event["mode"] == "hard"
+            assert audit_event["task_event"] is False
+            assert audit_event["pod_id"] == "pod-hard-event"
+            assert audit_event["run_dir"].endswith("/proj/runs/run-hard-event")
+            assert "hash" not in audit_event
     finally:
         if os.environ.get("RUNPOD_API_KEY") == "test-key-rpa_0000000000000000000000000000000000000000000000":
             del os.environ["RUNPOD_API_KEY"]
@@ -433,8 +561,8 @@ def test_sweeper_hard_emits_event_with_epoch_none(sweeper_projects_root: Path) -
 # ---------------------------------------------------------------------------
 
 
-def test_sweeper_hard_hash_chain_integrity(sweeper_projects_root: Path) -> None:
-    """--hard mode events maintain hash-chain integrity."""
+def test_sweeper_hard_preserves_task_hash_chain(sweeper_projects_root: Path) -> None:
+    """--hard mode leaves the task-run event hash chain untouched."""
     handle = _make_handle(pod_id="pod-chain-test")
     _write_handle_tree(sweeper_projects_root, "proj", "run-chain", "step-1", handle)
     _write_lease(sweeper_projects_root, "proj", "run-chain", {
@@ -459,10 +587,13 @@ def test_sweeper_hard_hash_chain_integrity(sweeper_projects_root: Path) -> None:
 
             run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
 
-            # Verify the full chain is intact
+            # Verify the full task-run chain is intact and unchanged by hard mode.
             events_path = sweeper_projects_root / "proj" / "runs" / "run-chain" / EVENTS_FILENAME
             ok, bad_idx, err = verify_chain(events_path)
             assert ok, f"Chain broken at event {bad_idx}: {err}"
+            assert len(events_path.read_text(encoding="utf-8").strip().split("\n")) == 2
+            audit_path = sweeper_projects_root / RUNPOD_SWEEPER_AUDIT_FILENAME
+            assert audit_path.is_file()
     finally:
         if os.environ.get("RUNPOD_API_KEY") == "test-key-rpa_0000000000000000000000000000000000000000000000":
             del os.environ["RUNPOD_API_KEY"]

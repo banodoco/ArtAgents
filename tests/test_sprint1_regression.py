@@ -19,6 +19,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
@@ -277,7 +278,13 @@ class TestCLIDispatchRegression(unittest.TestCase):
         from astrid import pipeline
         stdout = io.StringIO()
         import contextlib
-        with contextlib.redirect_stdout(stdout):
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
             rc = pipeline.main(["orchestrators", "list"])
         self.assertEqual(rc, 0)
 
@@ -285,14 +292,24 @@ class TestCLIDispatchRegression(unittest.TestCase):
         from astrid import pipeline
         stdout = io.StringIO()
         import contextlib
-        with contextlib.redirect_stdout(stdout):
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
             rc = pipeline.main(["executors", "list"])
         self.assertEqual(rc, 0)
 
     def test_packs_validate_dispatch_works(self) -> None:
         from astrid import pipeline
         examples_minimal = Path(__file__).resolve().parent.parent / "examples" / "packs" / "minimal"
-        rc = pipeline.main(["packs", "validate", str(examples_minimal)])
+        with mock.patch(
+            "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+            return_value=object(),
+        ):
+            rc = pipeline.main(["packs", "validate", str(examples_minimal)])
         self.assertEqual(rc, 0)
 
 

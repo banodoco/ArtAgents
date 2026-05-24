@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import pytest
 from astrid.core.project import paths as project_paths
 from astrid.core.session import paths as session_paths
 from astrid.core.session.lease import (
+    LeaseError,
     bump_epoch_and_swap_session,
     read_lease,
     release_writer_lease,
@@ -19,6 +21,7 @@ from astrid.core.session.model import Session
 from astrid.core.session.writer import (
     NoRunBoundError,
     WriterContext,
+    open_task_run_writer,
     writer_context_from_decision,
 )
 from astrid.core.task.events import (
@@ -59,6 +62,22 @@ def test_writer_context_happy_path_appends(
     assert events[0]["kind"] == "test"
 
 
+def test_open_task_run_writer_captures_authenticated_lease_state(
+    env: dict[str, Path], mint_session: Any, seed_project_run: Any
+) -> None:
+    sess = mint_session(env["home"], sid="S-1", project="demo", run_id="01RUN")
+    run_dir = seed_project_run(
+        env["projects"], "demo", "01RUN", writer_session_id=sess.id
+    )
+
+    writer = open_task_run_writer(sess)
+
+    assert writer.session.id == sess.id
+    assert writer.run_dir == run_dir
+    assert writer.expected_writer_epoch == 0
+    assert writer.plan_hash == read_lease(run_dir)["plan_hash"]
+
+
 # ----- writer-auth -------------------------------------------------------
 
 
@@ -84,6 +103,56 @@ def test_writer_context_refuses_reader_session(
     assert exc_info.value.writer_id == "S-WRITER"
     # events.jsonl unchanged.
     assert (run_dir / "events.jsonl").read_bytes() == pre_bytes
+
+
+def test_stop_line_writer_context_missing_lease_is_hard_failure(
+    env: dict[str, Path], mint_session: Any, seed_project_run: Any
+) -> None:
+    sess = mint_session(env["home"], sid="S-WRITER", project="demo", run_id="01RUN")
+    run_dir = seed_project_run(
+        env["projects"], "demo", "01RUN", writer_session_id=sess.id
+    )
+    (run_dir / "lease.json").unlink()
+    before = (run_dir / "events.jsonl").read_bytes()
+
+    with pytest.raises(LeaseError):
+        with WriterContext(sess) as ctx:
+            ctx.append({"kind": "should-not-write"})
+
+    assert (run_dir / "events.jsonl").read_bytes() == before
+
+
+def test_stop_line_writer_context_migrates_legacy_state_before_writer_auth() -> None:
+    source = inspect.getsource(open_task_run_writer)
+    before_lease_read = source.split("read_lease", 1)[0]
+    assert "migrate" in before_lease_read.lower()
+    assert "active_run" in before_lease_read
+
+
+def test_writer_context_migrates_legacy_active_run_before_writer_auth(
+    env: dict[str, Path], mint_session: Any
+) -> None:
+    from astrid.core.project.current_run import read_current_run
+
+    sess = mint_session(env["home"], sid="S-MIGRATE", project="demo", run_id=None)
+    project = env["projects"] / "demo"
+    run_dir = project / "runs" / "01RUN"
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").touch()
+    (project / "active_run.json").write_text(
+        json.dumps({"run_id": "01RUN", "plan_hash": "sha256:legacy"}),
+        encoding="utf-8",
+    )
+
+    with WriterContext(sess, root=env["projects"]) as ctx:
+        assert ctx.session.run_id == "01RUN"
+        ctx.append({"kind": "after-legacy-migration"})
+
+    assert read_current_run("demo", root=env["projects"]) == "01RUN"
+    lease = read_lease(run_dir)
+    assert lease["attached_session_id"] == sess.id
+    assert lease["plan_hash"] == "sha256:legacy"
+    assert not (project / "active_run.json").exists()
 
 
 def test_orphan_pending_session_refused_then_takeover_promotes(
@@ -123,17 +192,31 @@ def test_stale_epoch_surfaces_when_takeover_intervenes(
     run_dir = seed_project_run(
         env["projects"], "demo", "01RUN", writer_session_id=a.id
     )
+    lease_path = run_dir / "lease.json"
+    lease = json.loads(lease_path.read_text(encoding="utf-8"))
+    lease["timeline_id"] = "01HTIMELINEPASSTHROUGH"
+    lease["future_metadata"] = {"kept": True}
+    lease_path.write_text(json.dumps(lease), encoding="utf-8")
     with WriterContext(a) as ctx:
         # Simulate a competing tab winning takeover.
         bump_epoch_and_swap_session(
             run_dir, new_session_id="S-B", prev_session_id=a.id, reason="test"
         )
+        after_takeover_events = (run_dir / "events.jsonl").read_bytes()
         # The takeover event itself succeeded under its own flock; A's
         # captured epoch (0) no longer matches lease (now 1).
         with pytest.raises(StaleEpochError) as exc_info:
             ctx.append({"kind": "should-reject"})
         assert exc_info.value.expected == 0
         assert exc_info.value.actual == 1
+        assert (run_dir / "events.jsonl").read_bytes() == after_takeover_events
+        ok, bad_idx, err = verify_chain(run_dir / "events.jsonl")
+        assert ok, f"chain broken at event {bad_idx}: {err}"
+        updated_lease = read_lease(run_dir)
+        assert updated_lease["attached_session_id"] == "S-B"
+        assert updated_lease["writer_epoch"] == 1
+        assert updated_lease["timeline_id"] == "01HTIMELINEPASSTHROUGH"
+        assert updated_lease["future_metadata"] == {"kept": True}
 
 
 def test_stale_tail_surfaces_when_external_appender_wins_race(

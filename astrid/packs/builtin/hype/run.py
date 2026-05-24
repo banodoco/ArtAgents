@@ -46,12 +46,11 @@ from ....core.project.run import (
     bind_managed_timeline,
     finalize_project_run,
     prepare_project_run,
-    project_thread_env,
+    project_run_env,
     reject_project_with_out,
 )
 from ....core.task import env as task_env
 from ....core.task import gate as task_gate
-from ....threads.wrapper import subprocess_env as thread_subprocess_env
 
 
 STEP_ORDER = (
@@ -1162,7 +1161,6 @@ def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
                 env[PARENT_IDS_ENV] = ",".join(parent_ids)
         if getattr(args, "no_audit", False):
             env["ASTRID_AUDIT_DISABLED"] = "1"
-        env.update(thread_subprocess_env())
         process = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -1823,8 +1821,8 @@ def _prepare_project_main(argv: list[str]) -> tuple[Any | None, list[str]]:
 
 
 def _set_project_env() -> dict[str, str | None]:
-    prior = {key: os.environ.get(key) for key in project_thread_env()}
-    os.environ.update(project_thread_env())
+    prior = {key: os.environ.get(key) for key in project_run_env()}
+    os.environ.update(project_run_env())
     return prior
 
 

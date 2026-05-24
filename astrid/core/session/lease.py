@@ -11,6 +11,19 @@ loses a takeover race is rejected at append time, not silently committed.
 Takeover/orphan-claim/release ALL acquire the same ``fcntl.flock(LOCK_EX)``
 on ``events.jsonl`` that :func:`append_event_locked` uses — this is what
 serializes a takeover against an in-flight append.
+
+Implementation contract:
+
+* Lease rewrites must start from the normalized current lease and update only
+  the keys owned by the operation. Preserve passthrough metadata such as
+  ``timeline_id``, ``plan_hash``, and unknown future fields across takeover,
+  orphan claim, and release.
+* Takeover and orphan-claim helpers are the only production task-run write path
+  allowed to emit an event outside ``WriterContext.append()``. They do it
+  while holding the same events-file flock as the lease rewrite.
+* Warm-target refusal must be computed from pre-touch file state. Do not
+  create or touch ``events.jsonl`` before deciding whether the target is warm;
+  touching first can make a cold run look live and block legitimate takeover.
 """
 
 from __future__ import annotations
@@ -18,18 +31,16 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
 from astrid.core.project.jsonio import write_json_atomic
+from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
 from astrid.core.task.events import (
     EVENTS_FILENAME,
     LEASE_FILENAME,
-    ZERO_HASH,
-    EventLogError,
-    _event_hash,  # noqa: PLC2701 -- internal hash helper reused on purpose
-    _read_tail_hash,  # noqa: PLC2701
-    append_event_locked,
+    append_event_to_locked_handle,
 )
 from astrid.core.util.time import utc_now_iso
 
@@ -44,14 +55,32 @@ class LeaseError(RuntimeError):
     """Raised when the lease file is malformed or operation preconditions fail."""
 
 
+class LeaseRecoveryHintError(LeaseError):
+    """Lease precondition failure with an operator-facing recovery hint."""
+
+    def __init__(self, message: str, *, recovery_hint: str) -> None:
+        self.recovery_hint = recovery_hint
+        super().__init__(f"{message} ({recovery_hint})")
+
+
 def read_lease(run_dir: str | Path) -> dict[str, Any]:
-    """Return the lease dict; defaults when the file is absent."""
+    """Return the normalized lease dict.
+
+    Missing, unreadable, malformed, or incomplete canonical leases are hard
+    errors. The only approved missing-lease recovery path is the explicit
+    legacy active-run migration that writes a lease before writer auth.
+    """
 
     lease_path = Path(run_dir) / LEASE_FILENAME
     try:
         raw = lease_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return dict(LEASE_DEFAULTS)
+        raise LeaseError(
+            f"missing lease {lease_path}; recovery: migrate legacy active_run.json "
+            "or start/take over a run to create canonical lease state"
+        )
+    except OSError as exc:
+        raise LeaseError(f"unreadable lease {lease_path}: {exc}") from exc
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -95,6 +124,7 @@ def bump_epoch_and_swap_session(
     new_session_id: str,
     prev_session_id: str | None,
     reason: str,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Atomically bump ``writer_epoch`` and swap the lease writer.
 
@@ -114,48 +144,30 @@ def bump_epoch_and_swap_session(
     events_path = run_path / EVENTS_FILENAME
     lease_path = run_path / LEASE_FILENAME
     run_path.mkdir(parents=True, exist_ok=True)
-    events_path.touch(exist_ok=True)
 
     with events_path.open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
+            _raise_if_events_file_warm(handle, force=force, operation="takeover")
             current = _read_lease_under_lock(lease_path)
             prev_epoch = current["writer_epoch"]
             new_epoch = prev_epoch + 1
-            updated = {
-                "writer_epoch": new_epoch,
-                "attached_session_id": new_session_id,
-                "plan_hash": current["plan_hash"],
-            }
+            prev_writer = current["attached_session_id"]
+            updated = dict(current)
+            updated["writer_epoch"] = new_epoch
+            updated["attached_session_id"] = new_session_id
             write_json_atomic(lease_path, updated)
 
-            tail_hash = _read_tail_hash(handle)
             takeover_event = {
                 "kind": "takeover",
-                "prev_session": prev_session_id,
+                "prev_session": prev_writer if prev_writer is not None else prev_session_id,
                 "new_session": new_session_id,
                 "prev_epoch": prev_epoch,
                 "new_epoch": new_epoch,
                 "reason": reason,
                 "ts": _utc_now_iso(),
             }
-            # Recompute the new event line ourselves and write it under the
-            # already-held lock; we cannot reenter append_event_locked because
-            # it would try to re-acquire the same flock on the same fd. The
-            # CAS checks it performs are already satisfied here (we read the
-            # tail under the lock; we just wrote the lease with new_epoch),
-            # so this is the locked-append contract executed inline.
-            stored = dict(takeover_event)
-            stored.pop("hash", None)
-            stored["hash"] = _event_hash(tail_hash, stored)
-            line = (
-                json.dumps(stored, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-                + "\n"
-            ).encode("utf-8")
-            handle.seek(0, os.SEEK_END)
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
+            append_event_to_locked_handle(handle, takeover_event)
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
@@ -166,6 +178,7 @@ def claim_orphan_lease(
     run_dir: str | Path,
     *,
     new_session_id: str,
+    force: bool = False,
 ) -> dict[str, Any]:
     """Claim a lease whose ``attached_session_id`` is ``None``.
 
@@ -178,27 +191,25 @@ def claim_orphan_lease(
     events_path = run_path / EVENTS_FILENAME
     lease_path = run_path / LEASE_FILENAME
     run_path.mkdir(parents=True, exist_ok=True)
-    events_path.touch(exist_ok=True)
 
     with events_path.open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
+            _raise_if_events_file_warm(handle, force=force, operation="orphan claim")
             current = _read_lease_under_lock(lease_path)
             if current["attached_session_id"] is not None:
-                raise LeaseError(
+                raise LeaseRecoveryHintError(
                     "claim_orphan_lease requires lease.attached_session_id == None; "
-                    f"current writer is {current['attached_session_id']!r}"
+                    f"current writer is {current['attached_session_id']!r}",
+                    recovery_hint="use sessions takeover --force for an attached writer",
                 )
             prev_epoch = current["writer_epoch"]
             new_epoch = prev_epoch + 1
-            updated = {
-                "writer_epoch": new_epoch,
-                "attached_session_id": new_session_id,
-                "plan_hash": current["plan_hash"],
-            }
+            updated = dict(current)
+            updated["writer_epoch"] = new_epoch
+            updated["attached_session_id"] = new_session_id
             write_json_atomic(lease_path, updated)
 
-            tail_hash = _read_tail_hash(handle)
             event = {
                 "kind": "takeover",
                 "prev_session": None,
@@ -208,21 +219,33 @@ def claim_orphan_lease(
                 "reason": "orphan-claim",
                 "ts": _utc_now_iso(),
             }
-            stored = dict(event)
-            stored.pop("hash", None)
-            stored["hash"] = _event_hash(tail_hash, stored)
-            line = (
-                json.dumps(stored, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-                + "\n"
-            ).encode("utf-8")
-            handle.seek(0, os.SEEK_END)
-            handle.write(line)
-            handle.flush()
-            os.fsync(handle.fileno())
+            append_event_to_locked_handle(handle, event)
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     return updated
+
+
+def _raise_if_events_file_warm(handle: Any, *, force: bool, operation: str) -> None:
+    """Refuse warm takeover/orphan mutation while holding the events lock.
+
+    The check uses the locked file descriptor's current stat. Opening an absent
+    events file creates an empty file, but empty files are cold by contract; a
+    real warm signal requires existing event bytes with a recent mtime.
+    """
+
+    if force:
+        return
+    stat = os.fstat(handle.fileno())
+    if stat.st_size <= 0:
+        return
+    age = time.time() - stat.st_mtime
+    if age < STUCK_NO_EVENT_SECONDS:
+        raise LeaseRecoveryHintError(
+            f"{operation} refused because target wrote within the last "
+            f"{STUCK_NO_EVENT_SECONDS}s",
+            recovery_hint="confirm the previous writer is dead, then re-run with --force",
+        )
 
 
 def release_writer_lease(run_dir: str | Path) -> dict[str, Any]:
@@ -232,17 +255,13 @@ def release_writer_lease(run_dir: str | Path) -> dict[str, Any]:
     events_path = run_path / EVENTS_FILENAME
     lease_path = run_path / LEASE_FILENAME
     run_path.mkdir(parents=True, exist_ok=True)
-    events_path.touch(exist_ok=True)
 
     with events_path.open("a+b") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             current = _read_lease_under_lock(lease_path)
-            updated = {
-                "writer_epoch": current["writer_epoch"],
-                "attached_session_id": None,
-                "plan_hash": current["plan_hash"],
-            }
+            updated = dict(current)
+            updated["attached_session_id"] = None
             write_json_atomic(lease_path, updated)
         finally:
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
@@ -254,7 +273,12 @@ def _read_lease_under_lock(lease_path: Path) -> dict[str, Any]:
     try:
         raw = lease_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return dict(LEASE_DEFAULTS)
+        raise LeaseError(
+            f"missing lease {lease_path}; recovery: migrate legacy active_run.json "
+            "or start/take over a run to create canonical lease state"
+        )
+    except OSError as exc:
+        raise LeaseError(f"unreadable lease {lease_path}: {exc}") from exc
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -265,8 +289,11 @@ def _read_lease_under_lock(lease_path: Path) -> dict[str, Any]:
 
 
 def _normalize_lease(data: dict[str, Any], lease_path: Path) -> dict[str, Any]:
-    out = dict(LEASE_DEFAULTS)
-    out.update(data)
+    missing = [key for key in LEASE_DEFAULTS if key not in data]
+    if missing:
+        joined = ", ".join(missing)
+        raise LeaseError(f"lease {lease_path} missing required key(s): {joined}")
+    out = dict(data)
     epoch = out["writer_epoch"]
     if not isinstance(epoch, int) or isinstance(epoch, bool):
         raise LeaseError(f"lease {lease_path} writer_epoch must be an int, got {epoch!r}")
@@ -283,8 +310,3 @@ def _normalize_lease(data: dict[str, Any], lease_path: Path) -> dict[str, Any]:
 
 def _utc_now_iso() -> str:
     return utc_now_iso()
-
-
-# Silence the static checker — these are deliberate internal-API reuses.
-_ = ZERO_HASH
-_ = EventLogError

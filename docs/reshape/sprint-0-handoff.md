@@ -31,9 +31,10 @@ repository already has a local branch named `reshape`, which blocks the
 
 Sprint 0 rollback and inventory intentionally cover the same multi-root state:
 
-- Projects-root state: legacy `active_run.json` when present,
-  `current_run.json`, per-run `lease.json`, per-run `events.jsonl`, timelines,
-  `plan.json`, `audit/ledger.jsonl`, `hype.plan.json`, and `_llm_debug/`.
+- Projects-root state: legacy `active_run.json` only as migration input when
+  present, `current_run.json`, per-run `lease.json`, per-run `events.jsonl`,
+  timelines, `plan.json`, `audit/ledger.jsonl`, `hype.plan.json`, and
+  `_llm_debug/`.
 - Repo-root rollback subset: `.astrid/threads.json`,
   `.astrid/threads/**/groups.json`, `.astrid/threads/**/selections.jsonl`, and
   discovered `.astrid.variants.json` sidecars.

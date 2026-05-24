@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Astrid top-level command gateway.
 
-Sprint 1 wires the session CLI gate: every verb outside the unbound
-allowlist requires ``ASTRID_SESSION_ID`` to resolve to a valid session
-record. Unbound callers are pointed at ``astrid attach <project>``.
+Sprint 1 wires the session CLI gate: every verb outside the accepted unbound
+allowlist requires ``ASTRID_SESSION_ID`` or a project ``.astrid-session`` file
+to resolve to a valid session record. Unbound callers are pointed first at
+``astrid status`` so they can attach deliberately.
 
-The unbound allowlist mirrors the brief: ``attach``, ``status``,
-``projects ls``, ``projects create``, ``sessions ls``,
-``sessions takeover``, ``sessions detach``, ``init`` (first-run
-bootstrap), and the help flags. ``author test --project <slug>`` is also
-a documented exception so workflow tests can run without an operator
-session.
+The settled Sprint 1 allowlist is recorded in
+``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: help/version, ``status``,
+``next``, ``attach``, ``projects ls``, ``projects create``,
+``projects default``, ``sessions ls``, and ``sessions takeover``. Unbound
+``sessions takeover`` is legal only because it must bootstrap or select a
+concrete caller session before it mutates the target lease; anonymous takeover
+is outside the contract.
 
 Subcommands dispatch to focused module CLIs. Brief / video flags fall
 through to the ``builtin.hype`` orchestrator resolved through the
@@ -51,33 +53,33 @@ LIFECYCLE_VERBS = {
 }
 
 
-# Sprint 1 session-gate allowlist. A first-token (or two-token) match against
-# this set lets the verb run without a bound session. Everything else needs
-# ``ASTRID_SESSION_ID`` to resolve to a session record.
-_UNBOUND_TOP_LEVEL = {
-    "attach",
-    "status",
-    "sessions",  # sub-verbs handled below
-    "init",
-    "packs",  # packs validate / packs new are builder-facing and sessionless
-    "models",  # `astrid models list` is discoverability-only, no session needed
-    # Universal port-of-call (#13): `astrid next` always prints exactly one
-    # legal action regardless of bound/unbound state. From cold it dispatches
-    # to the attach/create discovery hint inside cmd_next itself.
-    "next",
-    "-h",
-    "--help",
-    "help",
-}
-_UNBOUND_PROJECTS_SUBVERBS = {"ls", "create", "default"}
-_UNBOUND_SESSIONS_SUBVERBS = {"ls", "takeover", "detach"}
-_UNBOUND_DISCOVERY_SUBVERBS = {"inspect", "search"}
+# Canonical accepted unbound contract for Sprint 1. The gate implementation
+# below is deliberately table-driven: do not add ad hoc unbound exceptions
+# outside this tuple.
+SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
+    ("-h",),
+    ("--help",),
+    ("help",),
+    ("--version",),
+    ("status",),
+    ("next",),
+    ("attach",),
+    ("projects", "ls"),
+    ("projects", "create"),
+    ("projects", "default"),
+    ("sessions", "ls"),
+    ("sessions", "takeover"),
+)
+_SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
 
 def main(argv: list[str] | None = None) -> int:
     raw = sys.argv[1:] if argv is None else list(argv)
     if raw and raw[0] in {"-h", "--help", "help"}:
         _print_entrypoint_help()
+        return 0
+    if raw and raw[0] == "--version":
+        print("astrid")
         return 0
     # Nudge runs once per CLI invocation, before the command itself, but never
     # for the `skills` subcommand (would be silly) or help. Cheap state-file
@@ -119,7 +121,7 @@ def main(argv: list[str] | None = None) -> int:
                 on_auto_resolve=_nudge,
             )
         except SessionBindingError as exc:
-            print(f"session: {exc}", file=sys.stderr)
+            _print_unbound_gate_recovery(f"session: {exc}")
             return 2
         if session is None:
             project_hint = _extract_project_slug(raw)
@@ -128,10 +130,9 @@ def main(argv: list[str] | None = None) -> int:
                 if project_hint
                 else "`astrid attach <project>`"
             )
-            print(
+            _print_unbound_gate_recovery(
                 f"no session bound — run `astrid status` to list projects, then {attach_hint} "
-                "(or `astrid attach` if a default project is configured)",
-                file=sys.stderr,
+                "(or `astrid attach` if a default project is configured)"
             )
             return 2
 
@@ -162,91 +163,30 @@ def main(argv: list[str] | None = None) -> int:
             returncode = _dispatch(raw)
         return returncode
     finally:
-        # T9 extends GateDecision with a `.session` field so the post-dispatch
-        # record helpers can flow through a fresh WriterContext. Until that
-        # lands, guard the wrapper with hasattr() so existing callers that
-        # don't carry a session keep working unchanged.
-        if hasattr(decision, "session") and getattr(decision, "session", None) is not None:
-            from .core.session.writer import writer_context_from_decision
-
-            try:
-                with writer_context_from_decision(decision):
-                    task_gate.record_dispatch_complete(decision, returncode)
-            except Exception:
-                # Fall back to the unwrapped path on any writer-auth failure;
-                # T9's lifecycle migration is the layer that makes this hard.
-                task_gate.record_dispatch_complete(decision, returncode)
-        else:
-            task_gate.record_dispatch_complete(decision, returncode)
+        task_gate.record_dispatch_complete(decision, returncode)
 
 
 def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
     """Decide whether the invocation may run without a bound session.
 
-    The allowlist is the canonical Sprint 1 set (brief §CLI gate):
-
-    * ``attach``, ``init``, ``-h`` / ``--help`` (full-verb).
-    * ``status`` — both the new session breadcrumb (no ``--project``) and
-      the legacy ``astrid status --project <slug>``.
-    * ``projects ls``, ``projects create``, and ``projects default``.
-    * ``sessions ls`` / ``sessions takeover`` / ``sessions detach``.
-    * ``author test --project <slug>`` — documented exception for the
-      workflow test runner.
+    The final Sprint 1 contract is ``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT``.
+    Exact top-level entries match one token; exact subcommand entries match
+    their listed prefix. No other discovery, setup, task, RunPod, or builder
+    verb is sessionless.
     """
 
     if not raw:
         return True  # empty argv → entrypoint help
 
-    top = raw[0]
-    if "-h" in raw or "--help" in raw:
-        return True
-    # 'packs' is builder-facing and sessionless (T5).
-    # 'models' is discoverability-only, no session needed.
-    if top in {"attach", "init", "status", "packs", "models"}:
-        return True
-    # Universal port-of-call (#13): `astrid next` is the agent's one-stop
-    # discovery verb. When unbound, cmd_next itself dispatches to the
-    # attach/create hint — no early gate rejection.
-    if top == "next":
-        return True
-    # FLAG-S1-002: executors new / orchestrators new are builder-facing
-    # scaffold commands that short-circuit before registry loading (T6).
-    if top in ("executors", "orchestrators") and len(raw) >= 2 and raw[1] == "new":
-        return True
-    # Capability metadata inspection is read-only discovery. Keep run/install
-    # paths session-gated, but allow agents and CI to inspect definitions before
-    # a project session has been attached.
-    if (
-        top in ("executors", "orchestrators", "elements")
-        and len(raw) >= 2
-        and raw[1] in _UNBOUND_DISCOVERY_SUBVERBS
-    ):
-        return True
-    if top == "projects" and len(raw) >= 2 and raw[1] in _UNBOUND_PROJECTS_SUBVERBS:
-        return True
-    if top == "timelines" and len(raw) >= 2 and raw[1] == "ls":
-        return True
-    if top == "sessions" and len(raw) >= 2 and raw[1] in _UNBOUND_SESSIONS_SUBVERBS:
-        return True
-    if top == "runpod":
-        # --help anywhere in the runpod subcommand tree is always allowed.
-        if "--help" in raw or "-h" in raw or len(raw) == 1:
+    for allowed in _SPRINT1_UNBOUND_ALLOWLIST:
+        if tuple(raw[: len(allowed)]) == allowed:
             return True
-        # `runpod volumes ls/create` and `runpod ensure-storage` operate on RunPod
-        # cloud state only — no Astrid run/lease/event mutation, so unbound is fine.
-        if len(raw) >= 2 and raw[1] == "volumes":
-            return True
-        if len(raw) >= 2 and raw[1] == "ensure-storage":
-            return True
-        # `runpod sweep` writes pod_terminated_by_sweep events to owning runs'
-        # events.jsonl — requires a bound session per the S4 brief.
-        return False
-    # `author test --project <slug>` exception. The orchestrate.cli wires the
-    # `test` sub-verb regardless of whether a session is bound, so we open the
-    # gate explicitly to match.
-    if top == "author" and "test" in raw[1:] and "--project" in raw:
-        return True
     return False
+
+
+def _print_unbound_gate_recovery(message: str) -> None:
+    print("first recovery action: astrid status", file=sys.stderr)
+    print(message, file=sys.stderr)
 
 
 def _dispatch(raw: list[str]) -> int:

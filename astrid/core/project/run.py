@@ -63,7 +63,7 @@ def reject_project_with_out(project: str | None, out: str | Path | None) -> None
         raise ProjectRunError("--project cannot be combined with --out; project runs own their output directory")
 
 
-def project_thread_env() -> dict[str, str]:
+def project_run_env() -> dict[str, str]:
     return {PROJECT_RUN_ENV: "1"}
 
 
@@ -396,7 +396,7 @@ __all__ = [
     "load_run_record",
     "mirror_hype_artifacts",
     "prepare_project_run",
-    "project_thread_env",
+    "project_run_env",
     "redact_cli_args",
     "reject_project_with_out",
     "require_run_record",

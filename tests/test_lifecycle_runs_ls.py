@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _lifecycle_fixtures import setup_packs_and_compile  # noqa: E402
+from _lifecycle_fixtures import bind_writer_session, setup_packs_and_compile  # noqa: E402
 
 from astrid.core.task.lifecycle import cmd_abort, cmd_runs_ls, cmd_start
 from astrid.core.project.project import create_project
@@ -33,6 +33,7 @@ def app(): return [code("b1", argv=["echo","b1"])]
 
 def _start_one(packs: Path, projects: Path, qid: str, project: str, run_id: str) -> None:
     create_project(project, root=projects, exist_ok=True)
+    bind_writer_session(projects, project)
     with redirect_stdout(io.StringIO()):
         cmd_start([qid, "--project", project, "--name", run_id], packs_root=packs, projects_root=projects)
 

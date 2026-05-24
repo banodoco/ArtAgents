@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from astrid.core.project import paths as project_paths
+from astrid.core.project.project import create_project
 from astrid.core.session import cli, paths as session_paths
+from astrid.core.session import config
 from astrid.core.session.identity import read_identity
+from astrid.core.task import lifecycle
 
 
 @pytest.fixture
@@ -38,6 +42,7 @@ def test_status_does_not_bootstrap_when_identity_absent(
     assert cli.FIRST_RUN_PROMPT_HEADER not in output
     assert cli.STATUS_UNBOUND_HEADER in output
     assert read_identity() is None
+    assert not (env["home"] / "sessions").exists()
 
 
 def test_status_does_not_bootstrap_when_identity_present(
@@ -60,3 +65,43 @@ def test_status_does_not_bootstrap_when_identity_present(
     rc = cli.cmd_status(argparse.Namespace(), out=StringIO())
     assert rc == 0
     assert called["yes"] is False
+
+
+def test_status_with_default_project_does_not_auto_attach(
+    env: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    create_project("demo")
+    config.set_default_project("demo")
+
+    buf = StringIO()
+    rc = cli.cmd_status(argparse.Namespace(), out=buf)
+
+    assert rc == 0
+    assert "default project: demo" in buf.getvalue()
+    assert "astrid attach              # attach default project" in buf.getvalue()
+    assert not (env["projects"] / "demo" / cli.SESSION_FILE_NAME).exists()
+    assert not (env["home"] / "sessions").exists()
+
+
+def test_unbound_next_prints_one_action_without_bootstrapping(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("builtins.input", lambda _prompt: pytest.fail("next prompted"))
+
+    buf = StringIO()
+    with redirect_stdout(buf):
+        rc = lifecycle.cmd_next([], projects_root=env["projects"])
+
+    assert rc == 0
+    out = buf.getvalue()
+    actions = [
+        line.strip()
+        for line in out.splitlines()
+        if line.strip().startswith("astrid ")
+    ]
+    assert actions == ["astrid projects create <slug>"]
+    assert read_identity() is None
+    assert not (env["home"] / "sessions").exists()

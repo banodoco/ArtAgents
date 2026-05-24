@@ -55,17 +55,38 @@ class ActiveRunError(ValueError):
     """Retained for backward compatibility with pre-Sprint-1 callers."""
 
 
+def _session_id_for_legacy_write(slug: str, run_id: str) -> str:
+    """Best-effort bridge for legacy test/helper callers of write_active_run.
+
+    The shim itself is deprecated, but many fixtures still use it to seed an
+    active run. When a current session is already bound, keep the seeded lease
+    usable by rebinding that session record to the requested project/run.
+    """
+
+    import os
+
+    from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+    from astrid.core.session.model import Session, now_iso
+    from astrid.core.session.paths import session_path
+
+    sid = os.environ.get(ASTRID_SESSION_ID_ENV)
+    if not sid:
+        return "legacy"
+    try:
+        sess = Session.from_json(session_path(sid))
+        sess = sess.with_changes(project=slug, run_id=run_id, last_used_at=now_iso())
+        sess.to_json(session_path(sid))
+    except Exception:
+        return sid
+    return sess.id
+
+
 def read_active_run(slug: str, *, root: str | Path | None = None) -> dict[str, str] | None:
     """Return ``{run_id, plan_hash}`` by reading current_run.json + lease.json."""
 
-    _, read_current_run, _, read_lease, _, _ = _lazy_imports()
-    run_id = read_current_run(slug, root=root)
-    if run_id is None:
-        return None
-    run_dir = project_dir(slug, root=root) / "runs" / run_id
-    lease = read_lease(run_dir)
-    plan_hash = lease.get("plan_hash") or ""
-    return {"run_id": run_id, "plan_hash": plan_hash}
+    from astrid.core.project.current_run import read_current_run_state
+
+    return read_current_run_state(slug, root=root)
 
 
 def write_active_run(
@@ -88,10 +109,13 @@ def write_active_run(
     _, _, write_current_run, _, _, write_lease_init = _lazy_imports()
     run_dir = project_dir(slug, root=root) / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
-    # ``'legacy'`` as the lease session marker: pre-Sprint-1 callers don't
-    # carry a Session; WriterContext-aware callers should call
-    # write_lease_init(session_id=session.id) explicitly.
-    write_lease_init(run_dir, session_id="legacy", plan_hash=plan_hash)
+    # Prefer an existing bound session when legacy fixtures/helpers have one;
+    # otherwise fall back to the historical marker for truly sessionless callers.
+    write_lease_init(
+        run_dir,
+        session_id=_session_id_for_legacy_write(slug, run_id),
+        plan_hash=plan_hash,
+    )
     write_current_run(slug, run_id, root=root)
     return {"run_id": run_id, "plan_hash": plan_hash}
 

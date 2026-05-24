@@ -84,7 +84,11 @@ def _taker(barrier, run_dir_str: str, queue) -> None:
     run_dir = Path(run_dir_str)
     barrier.wait()
     updated = bump_epoch_and_swap_session(
-        run_dir, new_session_id="S-NEW", prev_session_id="S-WRITER", reason="race"
+        run_dir,
+        new_session_id="S-NEW",
+        prev_session_id="S-WRITER",
+        reason="race",
+        force=True,
     )
     queue.put({"epoch_after": updated["writer_epoch"]})
 
@@ -154,7 +158,11 @@ def test_stale_writer_post_takeover_is_rejected(tmp_path: Path) -> None:
 
     # Take over.
     bump_epoch_and_swap_session(
-        run_dir, new_session_id="S-NEW", prev_session_id="S-WRITER", reason="explicit"
+        run_dir,
+        new_session_id="S-NEW",
+        prev_session_id="S-WRITER",
+        reason="explicit",
+        force=True,
     )
 
     # Stale writer (still believes epoch=0, last tail = ev1["hash"]) fires

@@ -12,12 +12,14 @@ import pytest
 from astrid.core.project import paths as project_paths
 from astrid.core.session import cli
 from astrid.core.session import paths as session_paths
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV, SESSION_FILE_NAME
 from astrid.core.session.identity import Identity, write_identity
 from astrid.core.session.lease import (
     read_lease,
     release_writer_lease,
 )
+from astrid.core.session.model import Session
+from astrid.core.session.paths import session_path
 from astrid.core.task.events import ZERO_HASH, append_event_locked, read_events
 
 
@@ -31,13 +33,125 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
 
 
 def test_takeover_requires_caller_to_be_bound(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc = cli.cmd_sessions_takeover(
         argparse.Namespace(target="01RUN", force=False), out=StringIO()
     )
+    captured = capsys.readouterr()
     assert rc == 2
+    assert "first recovery action: astrid status" in captured.err
+    assert not (env["home"] / "sessions").exists()
+
+
+def test_stop_line_unbound_takeover_bootstraps_concrete_session(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    seed_project_run: Any,
+) -> None:
+    run_dir = seed_project_run(env["projects"], "demo", "01RUN", writer_session_id="S-PREV")
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    )
+
+    assert rc == 0
+    lease = read_lease(run_dir)
+    assert isinstance(lease["attached_session_id"], str)
+    assert lease["attached_session_id"]
+    assert lease["attached_session_id"] != "S-PREV"
+    session = Session.from_json(session_path(lease["attached_session_id"]))
+    assert session.project == "demo"
+    assert session.run_id == "01RUN"
+    assert session.role == "writer"
+    assert (
+        (env["projects"] / "demo" / SESSION_FILE_NAME).read_text(encoding="utf-8")
+        == f"{ASTRID_SESSION_ID_ENV}={session.id}\n"
+    )
+    events = read_events(run_dir / "events.jsonl")
+    assert events[-1]["kind"] == "takeover"
+    assert events[-1]["new_session"] == session.id
+
+
+def test_unbound_takeover_by_target_session_bootstraps_before_mutation(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    mint_session: Any,
+    seed_project_run: Any,
+) -> None:
+    run_dir = seed_project_run(env["projects"], "demo", "01RUN", writer_session_id="S-PREV")
+    mint_session(
+        env["home"],
+        "S-PREV",
+        project="demo",
+        run_id="01RUN",
+        agent_id="other-agent",
+    )
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="S-PREV", force=True), out=StringIO()
+    )
+
+    assert rc == 0
+    lease = read_lease(run_dir)
+    assert lease["attached_session_id"] != "S-PREV"
+    session = Session.from_json(session_path(lease["attached_session_id"]))
+    assert session.run_id == "01RUN"
+    assert session.role == "writer"
+
+
+def test_unbound_takeover_ambiguous_run_fails_before_session_or_lease_mutation(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    seed_project_run: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_a = seed_project_run(env["projects"], "demo-a", "01RUN", writer_session_id="S-A")
+    run_b = seed_project_run(env["projects"], "demo-b", "01RUN", writer_session_id="S-B")
+    before_a = (run_a / "lease.json").read_bytes()
+    before_b = (run_b / "lease.json").read_bytes()
+    events_a = (run_a / "events.jsonl").read_bytes()
+    events_b = (run_b / "events.jsonl").read_bytes()
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "first recovery action: astrid status" in captured.err
+    assert "ambiguous" in captured.err
+    assert (run_a / "lease.json").read_bytes() == before_a
+    assert (run_b / "lease.json").read_bytes() == before_b
+    assert (run_a / "events.jsonl").read_bytes() == events_a
+    assert (run_b / "events.jsonl").read_bytes() == events_b
+    assert not (env["home"] / "sessions").exists()
+
+
+def test_unbound_takeover_target_session_without_run_fails_before_session_creation(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    mint_session: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    mint_session(env["home"], "S-DETACHED", project="demo", run_id=None)
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="S-DETACHED", force=True), out=StringIO()
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "first recovery action: astrid status" in captured.err
+    assert "not bound to a run" in captured.err
+    assert len(list((env["home"] / "sessions").glob("*.json"))) == 1
 
 
 def test_takeover_orphan_path_claims_lease_and_bumps_epoch(
@@ -154,3 +268,51 @@ def test_takeover_unknown_target_errors(
         argparse.Namespace(target="NONEXISTENT", force=False), out=StringIO()
     )
     assert rc == 2
+
+
+def test_takeover_missing_lease_errors_without_appending(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    mint_session: Any,
+    seed_project_run: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = seed_project_run(env["projects"], writer_session_id="S-PREV")
+    before = (run_dir / "events.jsonl").read_bytes()
+    (run_dir / "lease.json").unlink()
+    caller = mint_session(env["home"], "S-NEW", project="demo", run_id="01RUN")
+    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "cannot read canonical lease" in captured.err
+    assert "missing lease" in captured.err
+    assert (run_dir / "events.jsonl").read_bytes() == before
+
+
+def test_takeover_malformed_lease_errors_with_distinct_message(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    mint_session: Any,
+    seed_project_run: Any,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run_dir = seed_project_run(env["projects"], writer_session_id="S-PREV")
+    before = (run_dir / "events.jsonl").read_bytes()
+    (run_dir / "lease.json").write_text("not-json", encoding="utf-8")
+    caller = mint_session(env["home"], "S-NEW", project="demo", run_id="01RUN")
+    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    )
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert "cannot read canonical lease" in captured.err
+    assert "invalid JSON" in captured.err
+    assert (run_dir / "events.jsonl").read_bytes() == before

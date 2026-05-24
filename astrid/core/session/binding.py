@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable
 
 from astrid.core.project.paths import project_dir
 from astrid.core.session.lease import read_lease
@@ -35,8 +34,9 @@ SESSION_FILE_NAME = ".astrid-session"
 #   - tests/test_task_hook_stop.py (env-binding round-trip)
 #   - tests/spikes/test_env_inheritance.py (env-inheritance spike — must
 #     stay env-only by design or the spike's invariant is meaningless)
-#   - astrid/core/session/cli.py:cmd_takeover (`session takeover`) — masks
-#     the env-binding bug it diagnoses; explicit env-only by design
+#   - astrid/core/session/cli.py:cmd_takeover (`session takeover`) — starts
+#     env-only so it can distinguish bound takeover from the explicit
+#     unbound bootstrap path; filesystem fallback would mask that branch
 #   - astrid/core/session/cli.py:cmd_takeover detach branch (~:505) — same
 # `resolve_current_session` MUST NEVER walk the filesystem to discover the
 # slug; callers that have a slug in hand pass it; callers that don't get

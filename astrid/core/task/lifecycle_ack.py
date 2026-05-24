@@ -33,10 +33,11 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir, validate_project_slug
-from astrid.core.task.active_run import read_active_run
+from astrid.core.session.writer import NoRunBoundError, writer_context_for_project
 from astrid.core.task.events import (
-    append_event,
+    EventLogError,
     make_cursor_rewind_event,
     make_iteration_failed_event,
     read_events,
@@ -170,7 +171,7 @@ def cmd_ack(
         _print_err(f"ack: {exc}")
         return 1
 
-    active_run = read_active_run(slug, root=projects_root)
+    active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         _print_err(
             f"ack: no active run for project {slug!r}; "
@@ -182,18 +183,6 @@ def cmd_ack(
     proj_root = project_dir(slug, root=projects_root)
     plan_path = proj_root / "plan.json"
     events_path = proj_root / "runs" / run_id / "events.jsonl"
-
-    # --- Read writer_epoch for stale-ack rejection (Sprint 3 T16) ---
-    from astrid.core.task.events import LEASE_FILENAME
-    import json as _json
-    lease_path = proj_root / "runs" / run_id / LEASE_FILENAME
-    writer_epoch: int | None = None
-    try:
-        if lease_path.exists():
-            lease_payload = _json.loads(lease_path.read_text(encoding="utf-8"))
-            writer_epoch = int(lease_payload.get("writer_epoch", 0))
-    except Exception:
-        pass  # defensive: epoch check is best-effort
 
     plan = load_plan(plan_path)
     events = read_events(events_path)
@@ -354,10 +343,12 @@ def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -
         )
         return 1
 
-    append_event(
-        events_path,
-        make_cursor_rewind_event(peek.path_tuple, reason="ack retry"),
-    )
+    try:
+        with writer_context_for_project(slug, root=proj_root.parent) as writer:
+            writer.append(make_cursor_rewind_event(peek.path_tuple, reason="ack retry"))
+    except (EventLogError, NoRunBoundError, RuntimeError) as exc:
+        _print_err(f"ack retry: event append failed: {exc}")
+        return 1
     print(f"retry queued for {STEP_PATH_SEP.join(peek.path_tuple)}")
     return 0
 
@@ -422,12 +413,16 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
         events_path=events_path,
     )
     write_iteration_feedback(decision, args.feedback)
-    append_event(
-        events_path,
-        make_iteration_failed_event(
-            peek.path_tuple, peek.iteration, reason="iterate_feedback"
-        ),
-    )
+    try:
+        with writer_context_for_project(slug, root=proj_root.parent) as writer:
+            writer.append(
+                make_iteration_failed_event(
+                    peek.path_tuple, peek.iteration, reason="iterate_feedback"
+                )
+            )
+    except (EventLogError, NoRunBoundError, RuntimeError) as exc:
+        _print_err(f"ack iterate: event append failed: {exc}")
+        return 1
     print(
         f"iteration {peek.iteration} marked failed; feedback recorded for "
         f"{STEP_PATH_SEP.join(peek.path_tuple)}"

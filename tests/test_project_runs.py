@@ -43,7 +43,7 @@ def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_coll
     assert not (repo / ".astrid" / "threads.json").exists()
 
 
-def test_executor_legacy_out_still_writes_thread_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_executor_legacy_out_no_longer_writes_thread_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
@@ -55,10 +55,8 @@ def test_executor_legacy_out_still_writes_thread_record(tmp_path: Path, monkeypa
     result = run_executor(ExecutorRunRequest("test.writer", out=out), registry)
 
     assert result.returncode == 0
-    record = _read_json(out / "run.json")
-    assert record["kind"] == "executor"
-    assert record["status"] == "succeeded"
-    assert (repo / ".astrid" / "threads.json").exists()
+    assert not (out / "run.json").exists()
+    assert not (repo / ".astrid" / "threads.json").exists()
     assert not (tmp_path / "projects").exists()
 
 
@@ -126,6 +124,7 @@ def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_
 
 def test_project_run_rejects_project_plus_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    _clear_thread_env(monkeypatch)
     create_project("demo")
     registry = ExecutorRegistry([_writer_executor("test.writer")])
 

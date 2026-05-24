@@ -123,9 +123,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--dry-run", action="store_true", help="Plan commands without executing command runtimes.")
     run_parser.add_argument("--python-exec", help="Python executable for {python_exec} placeholders.")
     run_parser.add_argument("--verbose", action="store_true", help="Set verbose runtime context.")
-    run_parser.add_argument("--thread", help="Thread id, @new, or @none for this run.")
-    run_parser.add_argument("--variants", type=int, help="Request a sibling variant count for variant-aware producers.")
-    run_parser.add_argument("--from", dest="from_ref", help="Consume a specific prior run or variant, e.g. <run-id>:<n>.")
     run_parser.set_defaults(handler=_cmd_run)
 
     new_parser = subparsers.add_parser("new", help="Scaffold a new orchestrator in an existing pack.")
@@ -409,7 +406,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
             if module:
                 print(f"  # discover pack args: python3 -m {module} --help")
             print("  # anything after `--` is forwarded verbatim to the pack runtime.")
-    _print_active_thread_footer()
     return 0
 
 
@@ -457,9 +453,6 @@ def _cmd_run(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
         dry_run=bool(args.dry_run),
         python_exec=args.python_exec,
         verbose=bool(args.verbose),
-        thread=args.thread,
-        variants=args.variants,
-        from_ref=args.from_ref,
     )
     result = run_orchestrator(request, registry)
     _print_run_result(result)
@@ -517,27 +510,6 @@ def _print_outputs(orchestrator: OrchestratorDefinition) -> None:
     for output in orchestrator.outputs:
         placeholder = f", placeholder={output.placeholder}" if output.placeholder else ""
         print(f"  - {output.name} ({output.type}, {output.mode}{placeholder})")
-
-
-def _print_active_thread_footer() -> None:
-    try:
-        import os
-
-        from astrid._paths import REPO_ROOT
-        from astrid.threads.index import ThreadIndexStore
-
-        index = ThreadIndexStore(Path(os.environ.get("ASTRID_REPO_ROOT", REPO_ROOT))).read()
-    except Exception:
-        print("active_thread: unavailable")
-        print("thread_details: python3 -m astrid thread show @active")
-        return
-    active = index.get("active_thread_id")
-    thread = index.get("threads", {}).get(active) if isinstance(active, str) else None
-    if isinstance(thread, dict):
-        print(f"active_thread: {thread.get('label') or 'unlabeled'} ({active})")
-    else:
-        print("active_thread: none")
-    print("thread_details: python3 -m astrid thread show @active")
 
 
 def _cmd_override(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:

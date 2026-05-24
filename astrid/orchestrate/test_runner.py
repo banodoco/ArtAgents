@@ -15,8 +15,12 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from astrid.core.project.current_run import read_current_run_state
+from astrid.core.project.paths import PROJECTS_ROOT_ENV
 from astrid.core.project.project import create_project
-from astrid.core.task.active_run import read_active_run
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.model import Session
+from astrid.core.session.paths import ASTRID_HOME_ENV, session_path
 from astrid.core.task.env import (
     ASTRID_ACTOR,
     ASTRID_AUTHOR_TEST,
@@ -51,6 +55,9 @@ _MAX_ITERATIONS = 200
 # so a fixture replay never leaks task-run state into the surrounding test
 # process or shell.
 _MANAGED_ENV_VARS = (
+    ASTRID_HOME_ENV,
+    ASTRID_SESSION_ID_ENV,
+    PROJECTS_ROOT_ENV,
     ASTRID_AUTHOR_TEST,
     ASTRID_ACTOR,
     TASK_RUN_ID_ENV,
@@ -59,6 +66,26 @@ _MANAGED_ENV_VARS = (
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
 )
+
+
+def _bind_author_test_session(project_slug: str, projects_root: Path) -> None:
+    sid = f"S-author-test-{project_slug}"
+    os.environ[ASTRID_HOME_ENV] = str(projects_root / ".astrid-author-test")
+    os.environ[PROJECTS_ROOT_ENV] = str(projects_root)
+    os.environ[ASTRID_SESSION_ID_ENV] = sid
+    sess = Session(
+        id=sid,
+        project=project_slug,
+        agent_id="author_test",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        run_id=None,
+    )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
 
 
 def _seed_author_test_produces(*, slug: str, run_id: str, step, path_tuple, projects_root: Path) -> None:
@@ -121,6 +148,7 @@ def run_fixture(
         # before it will accept --project. Idempotent so a fixture-supplied
         # project.json is preserved.
         create_project(project_slug, root=projects_root, exist_ok=True)
+        _bind_author_test_session(project_slug, projects_root)
 
         rc = cmd_start(
             [qualified_id, "--project", project_slug, "--name", run_id],
@@ -136,7 +164,7 @@ def run_fixture(
         events_path = project_root / "runs" / run_id / "events.jsonl"
 
         for _ in range(_MAX_ITERATIONS):
-            active = read_active_run(project_slug, root=projects_root)
+            active = read_current_run_state(project_slug, root=projects_root)
             if active is None:
                 break
             plan = load_plan(plan_path)

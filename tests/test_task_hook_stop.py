@@ -86,6 +86,7 @@ def test_unrelated_cwd_no_session_is_silent_noop(tmp_path: Path) -> None:
     _, projects = setup_run(
         tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r1", project="p"
     )
+    os.environ.pop("ASTRID_SESSION_ID", None)
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
     rc, out, err = _capture_hook(cwd=unrelated, projects_root=projects)
