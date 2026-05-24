@@ -7,6 +7,7 @@ from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.task.plan import CostEntry, Step
+from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.util.time import utc_now_milliseconds
 
 
@@ -56,7 +57,7 @@ class ManualAdapter:
             payload["instructions"] = step.instructions
         if step.ack is not None:
             payload["ack"] = {"kind": step.ack.kind}
-        dispatch_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        write_json_sidecar(dispatch_path, payload)
         return DispatchResult(status="dispatched", started_at=started_at)
 
     def poll(self, step: Step, run_ctx: RunContext) -> PollResult:
@@ -87,8 +88,24 @@ class ManualAdapter:
                     )
 
         cost = _read_cost(completion)
-        if completion.get("status") == "failed":
+        status = completion.get("status")
+        if status not in {"completed", "failed"}:
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason="manual completion status missing or unknown",
+                cost=cost,
+            )
+        if status == "failed":
             return CompleteResult(status="failed", returncode=None, reason=str(completion.get("reason", "manual completion reported failure")), cost=cost)
+        missing = _missing_declared_produces(step, step_dir)
+        if missing:
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason=f"produces check failed: missing {missing!r}",
+                cost=cost,
+            )
         return CompleteResult(status="completed", cost=cost)
 
 
@@ -103,6 +120,16 @@ def _read_completion(step_dir: Path) -> dict[str, object] | None:
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def _missing_declared_produces(step: Step, step_dir: Path) -> list[str]:
+    produces_root = step_dir / "produces"
+    missing: list[str] = []
+    for entry in step.produces:
+        artifact = produces_root / entry.path
+        if not artifact.exists() or artifact.stat().st_size == 0:
+            missing.append(entry.path)
+    return missing
 
 
 def _read_cost(payload: dict[str, object]) -> CostEntry | None:

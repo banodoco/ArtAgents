@@ -22,9 +22,9 @@ _BODY_AGENT = '''from astrid.orchestrate import orchestrator, attested
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="agent")]
 '''
 
-_BODY_ACTOR = '''from astrid.orchestrate import orchestrator, attested
-@orchestrator("demo.review_actor")
-def main(): return [attested("review", command="ok.sh", instructions="confirm", ack="actor")]
+_BODY_HUMAN = '''from astrid.orchestrate import orchestrator, attested
+@orchestrator("demo.review_human")
+def main(): return [attested("review", command="ok.sh", instructions="confirm", ack="human")]
 '''
 
 
@@ -80,11 +80,11 @@ def test_step_id_mismatch_leaves_file_in_place(tmp_path: Path) -> None:
     assert len(list(rejected_dir.iterdir())) == 1
 
 
-def test_approve_on_actor_step_quarantined_to_rejected(
+def test_approve_on_human_step_quarantined_to_rejected(
     tmp_path: Path, caplog
 ) -> None:
     packs, projects = setup_run(
-        tmp_path, "demo", "review_actor", _BODY_ACTOR, "demo.review_actor",
+        tmp_path, "demo", "review_human", _BODY_HUMAN, "demo.review_human",
         run_id="r-stale-b",
     )
     run_dir = projects / "p" / "runs" / "r-stale-b"
@@ -93,7 +93,7 @@ def test_approve_on_actor_step_quarantined_to_rejected(
 
     inbox_file = _drop(
         run_dir,
-        "actor-approve.json",
+        "human-approve.json",
         {
             "step_id": "review",
             "decision": "approve",
@@ -116,7 +116,7 @@ def test_approve_on_actor_step_quarantined_to_rejected(
     assert len(list(rejected_dir.iterdir())) == 1
     assert not inbox_file.exists()
     assert any(
-        "ack.kind=actor" in record.message for record in caplog.records
+        "ack.kind=human" in record.message for record in caplog.records
     )
 
 

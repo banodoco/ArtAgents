@@ -1,4 +1,4 @@
-"""T12: cmd_start writes active_run.json + AGENT.md + run_started; second
+"""T12: cmd_start writes active_run.json + AGENT.md + plan_initialized; second
 start rejected; missing build/<name>.json prints compile recovery + rc=1.
 """
 
@@ -9,8 +9,6 @@ import json
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
-
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import bind_writer_session, make_pack, setup_packs_and_compile  # noqa: E402
@@ -47,7 +45,7 @@ def test_start_writes_active_run_with_correct_hash(tmp_path: Path) -> None:
     assert active["plan_hash"] == plan_hash
 
 
-def test_events_jsonl_first_line_is_run_started(tmp_path: Path) -> None:
+def test_events_jsonl_starts_with_plan_initialized_then_run_started(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "app", _BODY_CODE, "demo.app")
     create_project("p", root=projects)
     create_timeline("p", "main", root=projects, is_default=True)
@@ -56,9 +54,14 @@ def test_events_jsonl_first_line_is_run_started(tmp_path: Path) -> None:
     events_path = projects / "p" / "runs" / "r2" / "events.jsonl"
     lines = events_path.read_text(encoding="utf-8").splitlines()
     assert lines, "events.jsonl must have at least one line"
+    assert len(lines) >= 2
     first = json.loads(lines[0])
-    assert first["kind"] == "run_started"
+    second = json.loads(lines[1])
+    assert first["kind"] == "plan_initialized"
     assert first["run_id"] == "r2"
+    assert first["plan"]["version"] == 2
+    assert second["kind"] == "run_started"
+    assert second["run_id"] == "r2"
 
 
 def test_agent_md_includes_preamble(tmp_path: Path) -> None:

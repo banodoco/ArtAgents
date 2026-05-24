@@ -23,8 +23,8 @@ def test_two_step_plan_drives_kernel_end_to_end(tmp_projects_root: Path) -> None
         "plan_id": "p1",
         "version": 2,
         "steps": [
-            {"id": "step-1", "kind": "code", "adapter": "local", "command": "python3 -c \"print('ok')\"", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
-            {"id": "step-2", "kind": "code", "adapter": "local", "command": "python3 -c \"print('ok')\"", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
+            {"id": "step-1", "adapter": "local", "command": "python3 -c \"print('ok')\"", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
+            {"id": "step-2", "adapter": "local", "command": "python3 -c \"print('ok')\"", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
         ],
     }
     plan_path.write_text(json.dumps(plan_payload), encoding="utf-8")

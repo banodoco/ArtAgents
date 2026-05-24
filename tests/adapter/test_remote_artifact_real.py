@@ -21,6 +21,10 @@ from astrid.core.task.plan import (
     Step,
 )
 
+pytestmark = pytest.mark.skip(
+    reason="Sprint 5a real remote-artifact adapter tests are quarantined during Sprint 3"
+)
+
 
 @pytest.fixture
 def adapter() -> RemoteArtifactAdapter:

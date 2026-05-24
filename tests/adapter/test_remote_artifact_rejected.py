@@ -12,24 +12,12 @@ import pytest
 from astrid.core.adapter import RunContext
 from astrid.core.task.plan import Step
 
-# Sprint 5a: the remote-artifact stub has been replaced by the real adapter.
-# The deferral symbols (REMOTE_ARTIFACT_DEFERRAL, RemoteArtifactDeferralError,
-# _deferral_message) no longer exist. This test file is replaced by
-# test_remote_artifact_real.py in T12.
-try:
-    from astrid.core.adapter.remote_artifact import (  # noqa: F401
-        REMOTE_ARTIFACT_DEFERRAL,
-        RemoteArtifactAdapter,
-        RemoteArtifactDeferralError,
-        _deferral_message,
-    )
-except ImportError:
-    import pytest  # noqa: F401
-    pytest.skip(
-        "remote-artifact stub removed in Sprint 5a T4; "
-        "replaced by test_remote_artifact_real.py (T12)",
-        allow_module_level=True,
-    )
+from astrid.core.adapter.remote_artifact import (
+    REMOTE_ARTIFACT_DEFERRAL,
+    RemoteArtifactAdapter,
+    RemoteArtifactDeferralError,
+    _deferral_message,
+)
 
 
 @pytest.fixture
@@ -55,15 +43,15 @@ def test_deferral_message_exact_string() -> None:
     """Verify the deferral message is exactly the string from the brief."""
     msg = _deferral_message("test-step")
     expected = (
-        "astrid start / astrid next: step 'test-step' declares adapter 'remote-artifact'; "
-        "not yet implemented (Sprint 5a). Use --adapter local or manual."
+        "remote-artifact is reserved for Sprint 5a and is runtime-disabled in "
+        "Sprint 3; use adapter 'local' or 'manual' for this run. step='test-step'"
     )
     assert msg == expected
 
 
 def test_remote_artifact_deferral_constant() -> None:
-    """REMOTE_ARTIFACT_DEFERRAL is the template constant (with {step_id} placeholder)."""
-    assert "{step_id}" in REMOTE_ARTIFACT_DEFERRAL
+    """REMOTE_ARTIFACT_DEFERRAL is the shared Sprint 5a quarantine text."""
+    assert "remote-artifact is reserved for Sprint 5a" in REMOTE_ARTIFACT_DEFERRAL
     assert "Sprint 5a" in REMOTE_ARTIFACT_DEFERRAL
 
 
@@ -74,7 +62,7 @@ def test_dispatch_raises_deferral_error(adapter: RemoteArtifactAdapter, tmp_path
         adapter.dispatch(step, ctx)
     assert "remote-artifact" in str(exc.value)
     assert "Sprint 5a" in str(exc.value)
-    assert "Use --adapter local or manual" in str(exc.value)
+    assert "local" in str(exc.value)
 
 
 def test_poll_raises_deferral_error(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:

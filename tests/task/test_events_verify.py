@@ -174,14 +174,12 @@ def test_strict_mode_with_clean_plan(
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo one",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
             },
             {
                 "id": "s2",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo two",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -213,7 +211,6 @@ def test_strict_mode_with_clean_plan(
                 "after": "s1",
                 "step": {
                     "id": "s3",
-                    "kind": "code",
                     "adapter": "local",
                     "command": "echo three",
                     "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -261,7 +258,6 @@ def test_strict_mode_with_invalid_mutation(
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo one",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -290,7 +286,6 @@ def test_strict_mode_with_invalid_mutation(
                 "after": "s1",
                 "step": {
                     "id": "s1",  # duplicate — should fail I1
-                    "kind": "code",
                     "adapter": "local",
                     "command": "echo duplicate",
                     "cost": {"amount": 0, "currency": "USD", "source": "local"},

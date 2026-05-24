@@ -2,6 +2,17 @@
 
 from .api import OrchestratorSpec, orchestrator
 from .folder import load_folder_orchestrator, load_folder_orchestrators
+from .plan_template import (
+    build_group_template,
+    build_leaf_template,
+    build_plan_template,
+    cost_entry,
+    emit_plan_json,
+    file_output,
+    repeat_for_each_from,
+    repeat_for_each_items,
+    repeat_until,
+)
 from .registry import (
     OrchestratorRegistry,
     OrchestratorRegistryError,
@@ -51,12 +62,21 @@ __all__ = [
     "Port",
     "RuntimeSpec",
     "build_orchestrator_command",
+    "build_group_template",
+    "build_leaf_template",
+    "build_plan_template",
+    "cost_entry",
+    "emit_plan_json",
+    "file_output",
     "load_default_registry",
     "load_pack_orchestrators",
     "load_folder_orchestrator",
     "load_folder_orchestrators",
     "load_orchestrator_manifest",
     "orchestrator",
+    "repeat_for_each_from",
+    "repeat_for_each_items",
+    "repeat_until",
     "run_orchestrator",
     "to_capability_handle",
     "validate_orchestrator_definition",

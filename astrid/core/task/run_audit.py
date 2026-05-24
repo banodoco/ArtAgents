@@ -9,9 +9,15 @@ import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from astrid.core.project.paths import project_dir, resolve_projects_root, validate_project_slug
+from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.task.events import read_events, verify_chain
-from astrid.core.task.plan import STEP_PATH_SEP, CostEntry, Step, load_plan
+from astrid.core.task.plan import load_plan
+from astrid.core.task.plan_verbs import (
+    PLAN_MUTATED_KIND,
+    apply_mutations,
+    initial_plan_from_events,
+    initial_plan_hash_from_events,
+)
 
 
 def cmd_run_show(
@@ -45,13 +51,14 @@ def cmd_run_show(
     plan_path = proj_root / "plan.json"
 
     events = read_events(events_path) if events_path.exists() else []
-    plan = load_plan(plan_path) if plan_path.exists() else None
+    cached_plan = load_plan(plan_path) if plan_path.exists() else None
+    plan = apply_mutations(cached_plan, events) if cached_plan is not None else initial_plan_from_events(events)
 
     # Run status
     run_status = _run_status(events)
 
     # Plan info
-    plan_hash_val = plan.plan_id if plan else "unknown"
+    plan_hash_val = initial_plan_hash_from_events(events) or "unknown"
     initial_steps = len(plan.steps) if plan else 0
     mutation_count = sum(1 for e in events if e.get("kind") in {"plan_mutated"})
     skipped_steps = sum(
@@ -446,12 +453,7 @@ def cmd_events_verify(
     events = read_events(events_path)
     n_events = len(events)
 
-    # Extract plan_hash from run_started event
-    plan_hash = "unknown"
-    for e in events:
-        if e.get("kind") == "run_started":
-            plan_hash = str(e.get("plan_hash", "unknown"))
-            break
+    plan_hash = initial_plan_hash_from_events(events) or "unknown"
 
     if not ok:
         if line_idx == -1:
@@ -468,16 +470,14 @@ def cmd_events_verify(
             print("strict: plan.json not found; cannot validate mutations")
         else:
             try:
-                from astrid.core.task.plan_verbs import (
-                    PLAN_MUTATED_KIND,
-                    _apply_diff as plan_apply_diff,
-                )
+                from astrid.core.task.plan_verbs import _apply_diff as plan_apply_diff
                 from astrid.core.task.validator import (
                     MutationInvariantError,
                     validate_mutation,
                 )
 
-                plan = load_plan(plan_path)
+                cached_plan = load_plan(plan_path)
+                plan = initial_plan_from_events(events) or cached_plan
                 current = plan
                 mutation_events = [
                     e for e in events if e.get("kind") == PLAN_MUTATED_KIND

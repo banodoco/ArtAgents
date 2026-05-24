@@ -27,7 +27,6 @@ def test_two_concurrent_status_reads_ok(tmp_projects_root: Path) -> None:
         "steps": [
             {
                 "id": "step-1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "python3 -c \"print('ok')\"",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},

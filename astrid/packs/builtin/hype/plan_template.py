@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
 from typing import Any
 
+from astrid.core.orchestrator.plan_template import (
+    build_group_template,
+    build_leaf_template,
+    build_plan_template,
+    cost_entry,
+    emit_plan_json,
+    file_output,
+    repeat_for_each_from,
+)
 
 def build_plan_v2(
     *,
@@ -43,157 +51,64 @@ def build_plan_v2(
     cmd_render = _build_render_cmd(python_exec, run_root)
     cmd_validate = _build_validate_cmd(python_exec, run_root)
 
-    plan: dict[str, Any] = {
-        "plan_id": plan_id,
-        "version": 2,
-        "steps": [
-            {
-                "id": "hype",
-                "adapter": "local",
-                "re_export": {
+    children = [
+        build_leaf_template(
+            "transcribe",
+            command=cmd_transcribe,
+            produces=[file_output("transcript_output", "transcript.json")],
+            cost=cost_entry(0.002, source="gemini"),
+        ),
+        build_leaf_template(
+            "scenes",
+            command=cmd_scenes,
+            produces=[file_output("scenes_list", "scenes.json")],
+            cost=cost_entry(0.005, source="gemini"),
+        ),
+        build_leaf_template(
+            "cut",
+            command=cmd_cut,
+            repeat=repeat_for_each_from("scenes.produces.scenes_list"),
+            produces=[file_output("timeline_output", "hype.timeline.json")],
+            cost=cost_entry(0.010, source="claude"),
+        ),
+        build_leaf_template(
+            "render",
+            command=cmd_render,
+            produces=[file_output("video_output", "hype.mp4")],
+            cost=cost_entry(0.50, source="runpod"),
+        ),
+        build_leaf_template(
+            "editor_review",
+            adapter="manual",
+            command="editor-review",
+            instructions=(
+                "Review the rendered video at render/v1/produces/hype.mp4. "
+                "Approve with 'astrid ack editor_review --decision approve' "
+                "or request changes with 'astrid ack editor_review --decision revise'."
+            ),
+            produces=[file_output("review_output", "editor_review.json")],
+        ),
+        build_leaf_template(
+            "validate",
+            command=cmd_validate,
+            produces=[file_output("validation_output", "validation.json")],
+        ),
+    ]
+    return build_plan_template(
+        plan_id=plan_id,
+        steps=[
+            build_group_template(
+                "hype",
+                re_export={
                     "final_video": "render.produces.video_output",
                     "timeline": "cut.produces.timeline_output",
                     "transcript": "transcribe.produces.transcript_output",
                     "scenes": "scenes.produces.scenes_list",
                 },
-                "children": [
-                    {
-                        "id": "transcribe",
-                        "adapter": "local",
-                        "command": cmd_transcribe,
-                        "produces": {
-                            "transcript_output": {
-                                "path": "transcript.json",
-                                "check": {
-                                    "check_id": "file_nonempty",
-                                    "params": {},
-                                    "sentinel": False,
-                                },
-                            }
-                        },
-                        "cost": {
-                            "amount": 0.002,
-                            "currency": "USD",
-                            "source": "gemini",
-                        },
-                    },
-                    {
-                        "id": "scenes",
-                        "adapter": "local",
-                        "command": cmd_scenes,
-                        "produces": {
-                            "scenes_list": {
-                                "path": "scenes.json",
-                                "check": {
-                                    "check_id": "file_nonempty",
-                                    "params": {},
-                                    "sentinel": False,
-                                },
-                            }
-                        },
-                        "cost": {
-                            "amount": 0.005,
-                            "currency": "USD",
-                            "source": "gemini",
-                        },
-                    },
-                    {
-                        "id": "cut",
-                        "adapter": "local",
-                        "command": cmd_cut,
-                        "repeat": {
-                            "for_each": {
-                                "from": "scenes.produces.scenes_list"
-                            }
-                        },
-                        "produces": {
-                            "timeline_output": {
-                                "path": "hype.timeline.json",
-                                "check": {
-                                    "check_id": "file_nonempty",
-                                    "params": {},
-                                    "sentinel": False,
-                                },
-                            }
-                        },
-                        "cost": {
-                            "amount": 0.010,
-                            "currency": "USD",
-                            "source": "claude",
-                        },
-                    },
-                    {
-                        "id": "render",
-                        "adapter": "local",
-                        "command": cmd_render,
-                        "produces": {
-                            "video_output": {
-                                "path": "hype.mp4",
-                                "check": {
-                                    "check_id": "file_nonempty",
-                                    "params": {},
-                                    "sentinel": False,
-                                },
-                            }
-                        },
-                        "cost": {
-                            "amount": 0.50,
-                            "currency": "USD",
-                            "source": "runpod",
-                        },
-                    },
-                    {
-                        "id": "editor_review",
-                        "adapter": "manual",
-                        "command": "editor-review",
-                        "instructions": (
-                            "Review the rendered video at render/v1/produces/hype.mp4. "
-                            "Approve with 'astrid ack editor_review --decision approve' "
-                            "or request changes with 'astrid ack editor_review --decision revise'."
-                        ),
-                        "produces": {
-                            "review_output": {
-                                "path": "editor_review.json",
-                                "check": {
-                                    "check_id": "file_nonempty",
-                                    "params": {},
-                                    "sentinel": False,
-                                },
-                            }
-                        },
-                    },
-                    {
-                        "id": "validate",
-                        "adapter": "local",
-                        "command": cmd_validate,
-                        "produces": {
-                            "validation_output": {
-                                "path": "validation.json",
-                                "check": {
-                                    "check_id": "file_nonempty",
-                                    "params": {},
-                                    "sentinel": False,
-                                },
-                            }
-                        },
-                    },
-                ],
-            }
+                children=children,
+            )
         ],
-    }
-    return plan
-
-
-def emit_plan_json(plan: dict[str, Any], path: str | Path) -> None:
-    """Write a plan dict as canonical JSON to *path*.
-
-    Round-trips through :func:`astrid.core.task.plan.compute_plan_hash`
-    (stable v2 hash). Uses ``canonical_event_json``-style sorted keys.
-    """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(plan, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    path.write_text(payload, encoding="utf-8")
+    )
 
 
 def _build_transcribe_cmd(

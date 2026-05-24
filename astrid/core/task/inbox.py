@@ -51,7 +51,7 @@ CONSUMED_DIR_NAME = ".consumed"
 REJECTED_DIR_NAME = ".rejected"
 
 _VALID_DECISIONS = ("approve", "retry", "abort", "skip")
-_VALID_SUBMITTED_BY_KINDS = ("agent", "actor")
+_VALID_SUBMITTED_BY_KINDS = ("agent", "human")
 
 _LOGGER = logging.getLogger("astrid.core.task.inbox")
 
@@ -132,12 +132,14 @@ def _parse_entry(file_path: Path, raw: dict) -> InboxEntry:
     submitted_by_kind = raw.get("submitted_by_kind")
     if submitted_by_kind is None:
         raise InboxValidationError(
-            "submitted_by_kind is required (must be 'agent' or 'actor'); "
+            "submitted_by_kind is required (must be 'agent' or 'human'); "
             "missing identity — entry will be rejected"
         )
+    if submitted_by_kind == "actor":
+        submitted_by_kind = "human"
     if submitted_by_kind not in _VALID_SUBMITTED_BY_KINDS:
         raise InboxValidationError(
-            f"submitted_by_kind must be 'agent' or 'actor', got {submitted_by_kind!r}"
+            f"submitted_by_kind must be 'agent' or 'human', got {submitted_by_kind!r}"
         )
 
     # --- Optional fields ---
@@ -396,9 +398,11 @@ def consume_inbox_entry(
 
     plan = load_plan(plan_path)
     events = read_events(events_path)
+    from astrid.core.task.plan_verbs import apply_mutations
+    effective_plan = apply_mutations(plan, events)
 
     # --- Stale-entry check (before cursor check) ---
-    is_stale, stale_reason = _compute_stale(plan, events, entry, run_dir)
+    is_stale, stale_reason = _compute_stale(effective_plan, events, entry, run_dir)
     if is_stale:
         _LOGGER.warning(
             "inbox: rejecting %s as stale: %s", entry.path.name, stale_reason
@@ -407,7 +411,7 @@ def consume_inbox_entry(
         return False
 
     peek = peek_current_step(
-        plan, events, slug, project_root=project_root, run_id=run_id
+        effective_plan, events, slug, project_root=project_root, run_id=run_id
     )
 
     if entry.decision == "abort":
@@ -433,7 +437,7 @@ def consume_inbox_entry(
         # Resolve the cursor frontier step (un-traversed — group steps with
         # optional=True must be skippable as a unit, mirroring cmd_skip).
         from astrid.core.task.gate import derive_cursor as _derive_cursor
-        cursor = _derive_cursor(plan, events)
+        cursor = _derive_cursor(effective_plan, events)
         if cursor.pinned_failure is not None or cursor.at_root_done:
             _LOGGER.warning(
                 "inbox: rejecting %s: run is exhausted, nothing to skip",
@@ -460,6 +464,15 @@ def consume_inbox_entry(
             )
             _move_to(entry.path, rejected_dir)
             return False
+        if entry.step_version != cur_step.version:
+            _LOGGER.warning(
+                "inbox: rejecting %s: step_version v%s does not match cursor v%s",
+                entry.path.name,
+                entry.step_version,
+                cur_step.version,
+            )
+            _move_to(entry.path, rejected_dir)
+            return False
         if entry.item_id is not None:
             repeat = getattr(cur_step, "repeat", None)
             from astrid.core.task.plan import RepeatForEach as _RepeatForEach
@@ -476,6 +489,7 @@ def consume_inbox_entry(
                 actor_kind=entry.submitted_by_kind or "agent",
                 actor_id=entry.submitted_by,
                 reason=f"inbox skip by {entry.submitted_by}",
+                step_version=cur_step.version,
             )
         else:
             if not cur_step.optional:
@@ -491,6 +505,7 @@ def consume_inbox_entry(
                 actor_kind=entry.submitted_by_kind or "agent",
                 actor_id=entry.submitted_by,
                 reason=f"inbox skip by {entry.submitted_by}",
+                step_version=cur_step.version,
             )
         with writer_context_for_project(slug, root=projects_root) as writer:
             writer.append(skip_event)
@@ -522,14 +537,20 @@ def consume_inbox_entry(
         )
         return False
 
-    if entry.step_version != 1:
-        # Versioned entry: verify the cursor version matches.
-        pass  # Cursor version tracking lands fully in T14; for now tolerate any version.
+    if entry.step_version != peek.step.version:
+        _LOGGER.warning(
+            "inbox: rejecting %s: step_version v%s does not match cursor v%s",
+            entry.path.name,
+            entry.step_version,
+            peek.step.version,
+        )
+        _move_to(entry.path, rejected_dir)
+        return False
 
     if entry.decision == "approve":
-        if peek.step.ack.kind == "actor":
+        if peek.step.ack.kind == "human":
             _LOGGER.warning(
-                "inbox: skipping %s: ack.kind=actor not supported by inbox protocol "
+                "inbox: skipping %s: ack.kind=human not supported by inbox protocol "
                 "(use astrid ack ...)",
                 entry.path.name,
             )
@@ -552,7 +573,7 @@ def consume_inbox_entry(
         return True
 
     # retry
-    latest = _latest_event_for_path(events, peek.path_tuple)
+    latest = _latest_event_for_path(events, peek.path_tuple, step_version=peek.step.version)
     if not isinstance(latest, dict) or latest.get("kind") != "produces_check_failed":
         _LOGGER.warning(
             "inbox: skipping %s: retry requires latest event to be produces_check_failed",
@@ -568,7 +589,6 @@ def consume_inbox_entry(
         return False
     args = AttestedArgs(
         agent=entry.submitted_by,
-        actor=None,
         evidence=entry.evidence,
         item=entry.item_id,
     )
@@ -581,17 +601,30 @@ def consume_inbox_entry(
         _move_to(entry.path, rejected_dir)
         return False
     with writer_context_for_project(slug, root=projects_root) as writer:
-        writer.append(make_cursor_rewind_event(peek.path_tuple, reason="inbox retry"))
+        writer.append(
+            make_cursor_rewind_event(
+                peek.path_tuple,
+                reason="inbox retry",
+                step_version=peek.step.version,
+                dispatch_event_hash=latest.get("dispatch_event_hash")
+                if isinstance(latest.get("dispatch_event_hash"), str)
+                else None,
+            )
+        )
     _move_to(entry.path, consumed_dir)
     return True
 
 
-def _latest_event_for_path(events, path_tuple: tuple[str, ...]):
+def _latest_event_for_path(events, path_tuple: tuple[str, ...], *, step_version: int | None = None):
     path_str = STEP_PATH_SEP.join(path_tuple)
     path_list = list(path_tuple)
     for ev in reversed(events):
         if not isinstance(ev, dict):
             continue
+        if step_version is not None:
+            raw_version = ev.get("step_version", 1)
+            if not isinstance(raw_version, int) or isinstance(raw_version, bool) or raw_version != step_version:
+                continue
         if ev.get("plan_step_id") == path_str:
             return ev
         if ev.get("plan_step_path") == path_list:

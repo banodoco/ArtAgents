@@ -217,7 +217,7 @@ def run_fixture(
                 if step.ack is not None and step.ack.kind == "agent":
                     flag_pair = ["--agent", "author_test"]
                 else:
-                    flag_pair = ["--actor", "author_test"]
+                    flag_pair = ["--human", "author_test"]
                 rc = cmd_ack(
                     [
                         path_str,

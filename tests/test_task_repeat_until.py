@@ -29,22 +29,24 @@ def test_repeat_until_user_approves_appends_cumulative_feedback(
     tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "attested",
+                "id": "host",
+                "adapter": "manual",
                 "command": "ack --project demo --step host",
                 "instructions": "review",
-                "ack": {"kind": "actor"},
+                "ack": {"kind": "human"},
+                "requires_ack": True,
                 "repeat": {"until": "user_approves", "max_iterations": 3, "on_exhaust": "fail"},
             },
-            {"id": "next", "kind": "code", "command": "echo done"},
+            {"id": "next", "adapter": "local", "command": "echo done"},
         ],
     }
     _setup(tmp_projects_root, plan)
     monkeypatch.setenv(ASTRID_ACTOR, "alice")
 
     # Iter 1: iterate with 'more energy'
-    cmd1 = 'ack --project demo --step host --actor alice --evidence iterate_feedback=more_energy'
+    cmd1 = 'ack --project demo --step host --human alice --evidence iterate_feedback=more_energy'
     d1 = task_gate.gate_command("demo", cmd1, cmd1.split(), root=tmp_projects_root)
     assert d1.iteration == 1
     feedback_path1 = step_dir_for_path("demo", "run-1", ("host",), iteration=1, root=tmp_projects_root) / "feedback.json"
@@ -52,7 +54,7 @@ def test_repeat_until_user_approves_appends_cumulative_feedback(
     assert json.loads(feedback_path1.read_text(encoding="utf-8")) == ["more_energy"]
 
     # Iter 2: iterate with 'less reverb' — cumulative feedback grows
-    cmd2 = 'ack --project demo --step host --actor alice --evidence iterate_feedback=less_reverb'
+    cmd2 = 'ack --project demo --step host --human alice --evidence iterate_feedback=less_reverb'
     d2 = task_gate.gate_command("demo", cmd2, cmd2.split(), root=tmp_projects_root)
     assert d2.iteration == 2
     feedback_path2 = step_dir_for_path("demo", "run-1", ("host",), iteration=2, root=tmp_projects_root) / "feedback.json"
@@ -60,7 +62,7 @@ def test_repeat_until_user_approves_appends_cumulative_feedback(
     assert json.loads(feedback_path2.read_text(encoding="utf-8")) == ["more_energy", "less_reverb"]
 
     # Iter 3: approve (no iterate_feedback evidence) — host advances
-    cmd3 = 'ack --project demo --step host --actor alice'
+    cmd3 = 'ack --project demo --step host --human alice'
     d3 = task_gate.gate_command("demo", cmd3, cmd3.split(), root=tmp_projects_root)
     assert d3.iteration == 3
 
@@ -77,13 +79,13 @@ def test_repeat_until_user_approves_appends_cumulative_feedback(
 
 def test_repeat_until_verifier_passes_advances_when_check_passes(tmp_projects_root: Path) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "produces": {"out": {"path": "out.json", "check": {"check_id": "json_file", "params": {}, "sentinel": False}}},
                 "repeat": {"until": "verifier_passes", "max_iterations": 2, "on_exhaust": "fail"},
             },
-            {"id": "next", "kind": "code", "command": "echo done"},
+            {"id": "next", "adapter": "local", "command": "echo done"},
         ],
     }
     _setup(tmp_projects_root, plan)
@@ -114,9 +116,9 @@ def test_repeat_until_verifier_passes_advances_when_check_passes(tmp_projects_ro
 
 def test_repeat_until_max_exhaust_fail_raises(tmp_projects_root: Path) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "produces": {"out": {"path": "out.json", "check": {"check_id": "json_file", "params": {}, "sentinel": False}}},
                 "repeat": {"until": "verifier_passes", "max_iterations": 2, "on_exhaust": "fail"},
             },
@@ -150,13 +152,13 @@ def test_repeat_until_max_exhaust_escalate_parks_for_attested_override(
     tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "produces": {"out": {"path": "out.json", "check": {"check_id": "json_file", "params": {}, "sentinel": False}}},
                 "repeat": {"until": "verifier_passes", "max_iterations": 2, "on_exhaust": "escalate"},
             },
-            {"id": "next", "kind": "code", "command": "echo done"},
+            {"id": "next", "adapter": "local", "command": "echo done"},
         ],
     }
     _setup(tmp_projects_root, plan)
@@ -169,8 +171,8 @@ def test_repeat_until_max_exhaust_escalate_parks_for_attested_override(
         (sd / "produces" / "out.json").write_text("garbage", encoding="utf-8")
         task_gate.record_dispatch_complete(d, 0)
 
-    # Next call should park on host/exhaust-override; an ack with --actor advances.
-    override_cmd = "ack --project demo --step host/exhaust-override --actor alice"
+    # Next call should park on host/exhaust-override; an ack with --human advances.
+    override_cmd = "ack --project demo --step host/exhaust-override --human alice"
     d3 = task_gate.gate_command("demo", override_cmd, override_cmd.split(), root=tmp_projects_root)
     assert d3.step_kind == "attested"
     assert d3.plan_step_id == "host/exhaust-override"
@@ -181,9 +183,9 @@ def test_repeat_until_max_exhaust_escalate_parks_for_attested_override(
 
 def test_iteration_env_var_propagates_to_subprocess(tmp_projects_root: Path) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "produces": {"out": {"path": "out.json", "check": {"check_id": "json_file", "params": {}, "sentinel": False}}},
                 "repeat": {"until": "verifier_passes", "max_iterations": 2, "on_exhaust": "fail"},
             },
@@ -200,3 +202,146 @@ def test_iteration_env_var_propagates_to_subprocess(tmp_projects_root: Path) -> 
 
     d2 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
     assert child_subprocess_env().get(TASK_ITERATION_ENV) == "002"
+
+
+def test_repeat_until_leaf_expression_advances_only_when_json_matches(tmp_projects_root: Path) -> None:
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "host",
+                "adapter": "local",
+                "command": "echo go",
+                "produces": {
+                    "verdict": {
+                        "path": "review.json",
+                        "check": {"check_id": "file_nonempty", "params": {}, "sentinel": False},
+                    }
+                },
+                "repeat": {
+                    "until": 'host.produces.verdict.status == "approved"',
+                    "max_iterations": 3,
+                    "on_exhaust": "fail",
+                },
+            },
+            {"id": "next", "adapter": "local", "command": "echo done"},
+        ],
+    }
+    _setup(tmp_projects_root, plan)
+
+    d1 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    assert d1.iteration == 1
+    sd1 = step_dir_for_path("demo", "run-1", d1.plan_step_path, iteration=1, root=tmp_projects_root)
+    (sd1 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd1 / "produces" / "review.json").write_text('{"status": "revise"}', encoding="utf-8")
+    task_gate.record_dispatch_complete(d1, 0)
+
+    d2 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    assert d2.plan_step_id == "host"
+    assert d2.iteration == 2
+    sd2 = step_dir_for_path("demo", "run-1", d2.plan_step_path, iteration=2, root=tmp_projects_root)
+    (sd2 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd2 / "produces" / "review.json").write_text('{"status": "approved"}', encoding="utf-8")
+    task_gate.record_dispatch_complete(d2, 0)
+
+    d_next = task_gate.gate_command("demo", "echo done", ["echo", "done"], root=tmp_projects_root)
+    assert d_next.plan_step_id == "next"
+    kinds = [e["kind"] for e in read_events(_events_path(tmp_projects_root, "demo", "run-1"))]
+    assert kinds.count("iteration_failed") == 1
+    assert kinds.count("iteration_started") == 2
+
+
+def test_repeat_until_group_expression_resolves_re_exported_descendant_json(
+    tmp_projects_root: Path,
+) -> None:
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "editor_review",
+                "children": [
+                    {
+                        "id": "review",
+                        "adapter": "local",
+                        "command": "echo review",
+                        "produces": {
+                            "verdict": {
+                                "path": "editor_review.json",
+                                "check": {"check_id": "file_nonempty", "params": {}, "sentinel": False},
+                            }
+                        },
+                    }
+                ],
+                "repeat": {
+                    "until": 'editor_review.produces.verdict.status == "approved"',
+                    "max_iterations": 2,
+                    "on_exhaust": "fail",
+                },
+                "re_export": {"verdict": "review.produces.verdict"},
+            },
+            {"id": "next", "adapter": "local", "command": "echo done"},
+        ],
+    }
+    _setup(tmp_projects_root, plan)
+
+    d1 = task_gate.gate_command("demo", "echo review", ["echo", "review"], root=tmp_projects_root)
+    assert d1.plan_step_path == ("editor_review", "review")
+    assert d1.iteration == 1
+    sd1 = step_dir_for_path("demo", "run-1", d1.plan_step_path, iteration=1, root=tmp_projects_root)
+    (sd1 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd1 / "produces" / "editor_review.json").write_text('{"status": "revise"}', encoding="utf-8")
+    task_gate.record_dispatch_complete(d1, 0)
+
+    d2 = task_gate.gate_command("demo", "echo review", ["echo", "review"], root=tmp_projects_root)
+    assert d2.plan_step_path == ("editor_review", "review")
+    assert d2.iteration == 2
+    sd2 = step_dir_for_path("demo", "run-1", d2.plan_step_path, iteration=2, root=tmp_projects_root)
+    (sd2 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd2 / "produces" / "editor_review.json").write_text('{"status": "approved"}', encoding="utf-8")
+    task_gate.record_dispatch_complete(d2, 0)
+
+    d_next = task_gate.gate_command("demo", "echo done", ["echo", "done"], root=tmp_projects_root)
+    assert d_next.plan_step_id == "next"
+
+
+def test_repeat_until_expression_malformed_json_fails_closed(tmp_projects_root: Path) -> None:
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "host",
+                "adapter": "local",
+                "command": "echo go",
+                "produces": {
+                    "verdict": {
+                        "path": "review.json",
+                        "check": {"check_id": "file_nonempty", "params": {}, "sentinel": False},
+                    }
+                },
+                "repeat": {
+                    "until": 'host.produces.verdict.status == "approved"',
+                    "max_iterations": 2,
+                    "on_exhaust": "fail",
+                },
+            }
+        ],
+    }
+    _setup(tmp_projects_root, plan)
+
+    d1 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    sd1 = step_dir_for_path("demo", "run-1", d1.plan_step_path, iteration=1, root=tmp_projects_root)
+    (sd1 / "produces").mkdir(parents=True, exist_ok=True)
+    (sd1 / "produces" / "review.json").write_text("{not json", encoding="utf-8")
+    task_gate.record_dispatch_complete(d1, 0)
+
+    d2 = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    assert d2.iteration == 2
+    failures = [
+        e for e in read_events(_events_path(tmp_projects_root, "demo", "run-1"))
+        if e.get("kind") == "iteration_failed"
+    ]
+    assert len(failures) == 1
+    assert "repeat.until unresolved" in failures[0]["reason"]

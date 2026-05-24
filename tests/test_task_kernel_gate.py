@@ -164,7 +164,8 @@ def test_phase_1_top_level_events_keep_bare_id_payload_shape(tmp_projects_root: 
 def _write_plan(tmp_projects_root: Path, steps: list[dict[str, str]]) -> tuple[str, ...]:
     create_project("demo", root=tmp_projects_root)
     plan_path = tmp_projects_root / "demo" / "plan.json"
-    plan_path.write_text(json.dumps({"plan_id": "p1", "version": 1, "steps": steps}), encoding="utf-8")
+    normalized = [{"adapter": "local", **step} for step in steps]
+    plan_path.write_text(json.dumps({"plan_id": "p1", "version": 2, "steps": normalized}), encoding="utf-8")
     return tuple(step["command"] for step in steps)
 
 

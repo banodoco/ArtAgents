@@ -338,11 +338,36 @@ def read_events(path: str | Path) -> list[dict[str, Any]]:
         raise EventLogError(f"failed to read {events_path}: {exc}") from exc
 
 
+def _canonical_identity(kind: str, identity: str) -> str:
+    if kind == "system":
+        return "system"
+    if kind == "actor":
+        kind = "human"
+    if kind not in {"agent", "human"}:
+        raise ValueError(f"identity kind must be 'system', 'agent', or 'human', got {kind!r}")
+    if not identity:
+        raise ValueError(f"{kind} identity must be non-empty")
+    return f"{kind}:{identity}"
+
+
+def _canonical_kind(kind: str, *, allow_system: bool = False) -> str:
+    if kind == "actor":
+        return "human"
+    allowed = {"agent", "human"}
+    if allow_system:
+        allowed.add("system")
+    if kind not in allowed:
+        expected = "', '".join(sorted(allowed))
+        raise ValueError(f"identity kind must be one of '{expected}', got {kind!r}")
+    return kind
+
+
 def make_run_started_event(
     run_id: str,
     plan_hash: str,
     *,
     actor: str | None = None,
+    started_by: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "kind": "run_started",
@@ -350,9 +375,25 @@ def make_run_started_event(
         "run_id": run_id,
         "ts": _utc_now_iso(),
     }
-    if actor is not None:
-        payload["actor"] = actor
+    if started_by is None and actor is not None:
+        started_by = _canonical_identity("human", actor)
+    if started_by is not None:
+        payload["started_by"] = started_by
     return payload
+
+
+def make_plan_initialized_event(
+    run_id: str,
+    plan: dict[str, Any],
+    plan_hash: str,
+) -> dict[str, Any]:
+    return {
+        "kind": "plan_initialized",
+        "run_id": run_id,
+        "plan_hash": plan_hash,
+        "plan": plan,
+        "ts": _utc_now_iso(),
+    }
 
 
 def make_run_aborted_event(run_id: str, *, reason: str | None = None) -> dict[str, Any]:
@@ -396,6 +437,8 @@ def make_step_completed_event(
     *,
     cost: dict[str, Any] | None = None,
     adapter: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_completed`` event.  *None-valued kwargs are OMITTED* (never ``null``)."""
     payload: dict[str, Any] = {
@@ -408,6 +451,10 @@ def make_step_completed_event(
         payload["cost"] = cost
     if adapter is not None:
         payload["adapter"] = adapter
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
     return payload
 
 
@@ -418,6 +465,8 @@ def make_step_failed_event(
     reason: str | None = None,
     cost: dict[str, Any] | None = None,
     adapter: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_failed`` event.  *None-valued kwargs are OMITTED* (never ``null``)."""
     payload: dict[str, Any] = {
@@ -433,6 +482,10 @@ def make_step_failed_event(
         payload["cost"] = cost
     if adapter is not None:
         payload["adapter"] = adapter
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
     return payload
 
 
@@ -443,6 +496,8 @@ def make_step_awaiting_fetch_event(
     mismatched: list[str],
     reason: str | None = None,
     adapter: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_awaiting_fetch`` event after partial artifact fetch.
 
@@ -460,6 +515,10 @@ def make_step_awaiting_fetch_event(
         payload["reason"] = reason
     if adapter is not None:
         payload["adapter"] = adapter
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
     return payload
 
 
@@ -477,8 +536,12 @@ def make_step_attested_event(
     attestor_kind: str,
     attestor_id: str,
     evidence: tuple[str, ...] = (),
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    attestor_kind = _canonical_kind(attestor_kind, allow_system=True)
+    payload: dict[str, Any] = {
+        "attestor": _canonical_identity(attestor_kind, attestor_id),
         "attestor_id": attestor_id,
         "attestor_kind": attestor_kind,
         "evidence": list(evidence),
@@ -486,6 +549,9 @@ def make_step_attested_event(
         "plan_step_id": plan_step_path,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_step_skipped_event(
@@ -494,23 +560,26 @@ def make_step_skipped_event(
     actor_kind: str,
     actor_id: str,
     reason: str | None = None,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_skipped`` event for an ``optional=True`` step.
 
     *None-valued kwargs (reason) are OMITTED* (never ``null``), matching the
     convention used by ``make_step_completed_event`` and friends.
     """
-    if actor_kind not in ("agent", "actor"):
-        raise ValueError(f"actor_kind must be 'agent' or 'actor', got {actor_kind!r}")
+    actor_kind = _canonical_kind(actor_kind)
     payload: dict[str, Any] = {
-        "actor_id": actor_id,
-        "actor_kind": actor_kind,
         "kind": "step_skipped",
         "plan_step_path": path.split("/") if "/" in path else [path],
+        "skipped_by": _canonical_identity(actor_kind, actor_id),
+        "skipped_by_id": actor_id,
+        "skipped_by_kind": actor_kind,
         "ts": _utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
+    if step_version is not None:
+        payload["step_version"] = step_version
     return payload
 
 
@@ -521,22 +590,25 @@ def make_item_skipped_event(
     actor_kind: str,
     actor_id: str,
     reason: str | None = None,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
     """Emit an ``item_skipped`` event for one iteration of a for_each host
     whose body is ``optional=True``. Mirrors :func:`make_item_attested_event`.
     """
-    if actor_kind not in ("agent", "actor"):
-        raise ValueError(f"actor_kind must be 'agent' or 'actor', got {actor_kind!r}")
+    actor_kind = _canonical_kind(actor_kind)
     payload: dict[str, Any] = {
-        "actor_id": actor_id,
-        "actor_kind": actor_kind,
         "item_id": item_id,
         "kind": "item_skipped",
         "plan_step_path": list(plan_step_path),
+        "skipped_by": _canonical_identity(actor_kind, actor_id),
+        "skipped_by_id": actor_id,
+        "skipped_by_kind": actor_kind,
         "ts": _utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
+    if step_version is not None:
+        payload["step_version"] = step_version
     return payload
 
 
@@ -564,6 +636,8 @@ def make_produces_check_passed_event(
     *,
     check_id: str,
     cas_sha256: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     event: dict[str, Any] = {
         "check_id": check_id,
@@ -574,6 +648,10 @@ def make_produces_check_passed_event(
     }
     if cas_sha256 is not None:
         event["cas_sha256"] = cas_sha256
+    if step_version is not None:
+        event["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        event["dispatch_event_hash"] = dispatch_event_hash
     return event
 
 
@@ -583,8 +661,10 @@ def make_produces_check_failed_event(
     *,
     check_id: str,
     reason: str,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "check_id": check_id,
         "kind": "produces_check_failed",
         "plan_step_path": list(plan_step_path),
@@ -592,6 +672,11 @@ def make_produces_check_failed_event(
         "reason": reason,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
+    return payload
 
 
 def make_iteration_started_event(
@@ -611,14 +696,18 @@ def make_iteration_failed_event(
     iteration: int,
     *,
     reason: str,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "iteration": int(iteration),
         "kind": "iteration_failed",
         "plan_step_path": list(plan_step_path),
         "reason": reason,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_iteration_exhausted_event(
@@ -639,39 +728,54 @@ def make_iteration_exhausted_event(
 def make_for_each_expanded_event(
     plan_step_path: tuple[str, ...],
     item_ids: tuple[str, ...],
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "item_ids": list(item_ids),
         "kind": "for_each_expanded",
         "plan_step_path": list(plan_step_path),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_item_started_event(
     plan_step_path: tuple[str, ...],
     item_id: str,
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "item_id": item_id,
         "kind": "item_started",
         "plan_step_path": list(plan_step_path),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_item_completed_event(
     plan_step_path: tuple[str, ...],
     item_id: str,
     returncode: int,
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "item_id": item_id,
         "kind": "item_completed",
         "plan_step_path": list(plan_step_path),
         "returncode": int(returncode),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_item_attested_event(
@@ -681,8 +785,11 @@ def make_item_attested_event(
     attestor_kind: str,
     attestor_id: str,
     evidence: tuple[str, ...] = (),
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    attestor_kind = _canonical_kind(attestor_kind, allow_system=True)
+    payload: dict[str, Any] = {
+        "attestor": _canonical_identity(attestor_kind, attestor_id),
         "attestor_id": attestor_id,
         "attestor_kind": attestor_kind,
         "evidence": list(evidence),
@@ -691,19 +798,29 @@ def make_item_attested_event(
         "plan_step_path": list(plan_step_path),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_cursor_rewind_event(
     plan_step_path: tuple[str, ...],
     *,
     reason: str,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "kind": "cursor_rewind",
         "plan_step_path": list(plan_step_path),
         "reason": reason,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
+    return payload
 
 
 def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
@@ -714,22 +831,15 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
     without terminal follow-up.
     """
     # Lazy import to avoid circular dependency with plan.py.
-    from astrid.core.task.plan import Step  # noqa: PLC0415
+    from astrid.core.task.plan import STEP_PATH_SEP, iter_steps_with_path  # noqa: PLC0415
 
-    # Collect all leaf step ids from the plan.
-    leaf_ids: set[str] = set()
-
-    def _collect_leaves(steps: tuple[Step, ...]) -> None:
-        for step in steps:
-            if step.children is None:
-                leaf_ids.add(step.id)
-            else:
-                _collect_leaves(step.children)
-
+    leaves: list[tuple[str, int]] = []
     if hasattr(plan, "steps") and plan.steps is not None:
-        _collect_leaves(plan.steps)
+        for path_tuple, step in iter_steps_with_path(plan):
+            if step.children is None:
+                leaves.append((STEP_PATH_SEP.join(path_tuple), step.version))
 
-    if not leaf_ids:
+    if not leaves:
         return False
 
     # Map step path -> latest event kind for terminal checks.
@@ -752,31 +862,44 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
         "step_attested",
         "step_awaiting_fetch",
     }
-    latest_by_path: dict[str, str] = {}
+    latest_by_path: dict[tuple[str, int], str] = {}
+    latest_dispatch_version_by_path: dict[str, int] = {}
     for event in events:
         kind = event.get("kind")
         if not isinstance(kind, str):
             continue
         if kind not in _LIFECYCLE_KINDS:
             continue
+        raw_version = event.get("step_version")
         path_list = event.get("plan_step_path")
         if isinstance(path_list, list) and path_list:
             path_str = "/".join(str(p) for p in path_list)
-            latest_by_path[path_str] = kind
+            if isinstance(raw_version, int) and not isinstance(raw_version, bool) and raw_version >= 1:
+                step_version = raw_version
+            else:
+                step_version = latest_dispatch_version_by_path.get(path_str, 1)
+            if kind == "step_dispatched":
+                latest_dispatch_version_by_path[path_str] = step_version
+            latest_by_path[(path_str, step_version)] = kind
             continue
         legacy_id = event.get("plan_step_id")
         if isinstance(legacy_id, str) and legacy_id:
-            latest_by_path[legacy_id] = kind
+            if isinstance(raw_version, int) and not isinstance(raw_version, bool) and raw_version >= 1:
+                step_version = raw_version
+            else:
+                step_version = latest_dispatch_version_by_path.get(legacy_id, 1)
+            if kind == "step_dispatched":
+                latest_dispatch_version_by_path[legacy_id] = step_version
+            latest_by_path[(legacy_id, step_version)] = kind
 
-    for leaf_id in leaf_ids:
-        # Find latest event whose path matches this leaf id.
-        # Events use plan_step_path which is a list; the last element
-        # is typically the step's own id for leaf steps.
-        latest_kind: str | None = None
-        for path_str, kind in latest_by_path.items():
-            parts = path_str.split("/")
-            if parts and parts[-1] == leaf_id:
-                latest_kind = kind
+    for path_str, step_version in leaves:
+        latest_kind = latest_by_path.get((path_str, step_version))
+        if latest_kind is None and STEP_PATH_SEP in path_str:
+            # Legacy synthetic tests and pre-path event logs may record only
+            # the leaf id. Prefer the exact path above; this fallback keeps
+            # old unambiguous logs readable without allowing a stale version
+            # to satisfy a superseded step.
+            latest_kind = latest_by_path.get((path_str.rsplit(STEP_PATH_SEP, 1)[-1], step_version))
 
         if latest_kind is None:
             # No event at all for this leaf — not terminal.
@@ -944,6 +1067,7 @@ __all__ = [
     "make_nested_exited_event",
     "make_produces_check_failed_event",
     "make_produces_check_passed_event",
+    "make_plan_initialized_event",
     "make_run_aborted_event",
     "make_run_completed_event",
     "make_run_started_event",

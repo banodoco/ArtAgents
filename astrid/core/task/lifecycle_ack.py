@@ -9,18 +9,19 @@ budget. Implements the ack decision matrix per the Phase 5 brief:
   literal remainder to ``step.command`` for authored commands like
   ``review.sh``. Calls ``gate_command`` + ``record_dispatch_complete``.
   (FLAG-P5-001.)
-- ``approve`` on a CodeStep cursor: rejected. Code steps advance via the
+- ``approve`` on an automatically completing leaf cursor: rejected. Those steps advance via the
   printed argv, not via ``ack``.
-- ``retry``: only valid on an AttestedStep cursor whose latest event for
+- ``retry``: only valid on an attested leaf cursor whose latest event for
   the path is ``produces_check_failed``. Calls ``validate_attested_identity``
   BEFORE mutating events, then appends ``cursor_rewind`` so the next
   ``next`` re-dispatches. (FLAG-P5-002.)
-- ``iterate``: only valid on an AttestedStep cursor whose host has
-  ``repeat.until.condition == 'user_approves'``. Requires non-empty
-  ``--feedback``. Calls ``validate_attested_identity`` BEFORE mutating
-  events, then ``write_iteration_feedback`` (cumulative ledger) and
-  appends ``iteration_failed`` so the next ``next`` enters iteration N+1.
-  (FLAG-P5-002.)
+- ``iterate``: legacy compatibility for attested leaf cursors whose migrated
+  host still has ``repeat.until.condition == 'user_approves'``. New v2
+  expression repeats are driven by produced JSON and do not use this branch.
+  Requires non-empty ``--feedback``. Calls ``validate_attested_identity``
+  BEFORE mutating events, then ``write_iteration_feedback`` (cumulative
+  ledger) and appends ``iteration_failed`` so the next ``next`` enters
+  iteration N+1. (FLAG-P5-002.)
 - ``abort``: administrative — delegates to ``cmd_abort`` and skips identity
   validation entirely.
 """
@@ -55,6 +56,7 @@ from astrid.core.task.gate import (
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatUntil,
+    is_legacy_repeat_until_condition,
     is_attested_kind,
     is_code_kind,
     is_group_step,
@@ -84,12 +86,16 @@ def _find_step_by_path(plan, path_tuple):
     return next((s for s in steps if s.id == path_tuple[-1]), None)
 
 
-def _latest_event_for_path(events, path_tuple):
+def _latest_event_for_path(events, path_tuple, *, step_version: int | None = None):
     path_str = STEP_PATH_SEP.join(path_tuple)
     path_list = list(path_tuple)
     for ev in reversed(events):
         if not isinstance(ev, dict):
             continue
+        if step_version is not None:
+            raw_version = ev.get("step_version", 1)
+            if not isinstance(raw_version, int) or isinstance(raw_version, bool) or raw_version != step_version:
+                continue
         if ev.get("plan_step_id") == path_str:
             return ev
         if ev.get("plan_step_path") == path_list:
@@ -100,6 +106,10 @@ def _latest_event_for_path(events, path_tuple):
 def _run_started_actor(events) -> Optional[str]:
     for ev in events:
         if isinstance(ev, dict) and ev.get("kind") == "run_started":
+            started_by = ev.get("started_by")
+            if isinstance(started_by, str) and started_by.startswith("human:"):
+                return started_by[len("human:"):]
+            # Legacy read compatibility for pre-T5 run_started events.
             actor = ev.get("actor")
             return actor if isinstance(actor, str) else None
     return None
@@ -146,8 +156,8 @@ def cmd_ack(
         help="repeatable; evidence path or sentinel",
     )
     identity = parser.add_mutually_exclusive_group(required=True)
-    identity.add_argument("--agent", default=None, help="agent id (mutually exclusive with --actor)")
-    identity.add_argument("--actor", default=None, help="actor name (mutually exclusive with --agent)")
+    identity.add_argument("--agent", default=None, help="agent id (mutually exclusive with --human)")
+    identity.add_argument("--human", default=None, help="human name (mutually exclusive with --agent)")
     parser.add_argument("--feedback", default=None, help="iterate feedback (required for --decision=iterate)")
     parser.add_argument("--item", default=None, help="for_each item id")
     try:
@@ -156,11 +166,11 @@ def cmd_ack(
         return _system_exit_code(exc)
 
     # --- Function-boundary identity assertion (Sprint 3 T16) ---
-    # argparse `required=True` catches the CLI case.  This assertion catches
-    # Python callers that synthesize Namespace(agent=None, actor=None) directly.
-    if args.agent is None and args.actor is None:
+    # argparse `required=True` catches the CLI case. This assertion catches
+    # Python callers that synthesize Namespace(agent=None, human=None) directly.
+    if args.agent is None and args.human is None:
         _print_err(
-            "ack: --agent <id> or --actor <name> is required "
+            "ack: --agent <id> or --human <name> is required "
             "(no anonymous acks — Sprint 3 T16)"
         )
         return 1
@@ -245,8 +255,8 @@ def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
     parts: list[str] = shlex.split(peek.step.command)
     if args.agent:
         parts += ["--agent", args.agent]
-    if args.actor:
-        parts += ["--actor", args.actor]
+    if args.human:
+        parts += ["--human", args.human]
     for ev in args.evidence:
         parts += ["--evidence", ev]
     if args.item:
@@ -319,7 +329,7 @@ def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -
     # FLAG-P5-002: validate identity BEFORE mutating events.
     attested_args = AttestedArgs(
         agent=args.agent,
-        actor=args.actor,
+        human=args.human,
         evidence=tuple(args.evidence),
         item=args.item,
     )
@@ -334,7 +344,7 @@ def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -
         _print_err(f"ack retry: {exc.reason}; recovery: {exc.recovery}")
         return 1
 
-    latest = _latest_event_for_path(events, peek.path_tuple)
+    latest = _latest_event_for_path(events, peek.path_tuple, step_version=peek.step.version)
     if not isinstance(latest, dict) or latest.get("kind") != "produces_check_failed":
         _print_err(
             "ack retry: only valid after a verifier failure (the latest event "
@@ -345,7 +355,16 @@ def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -
 
     try:
         with writer_context_for_project(slug, root=proj_root.parent) as writer:
-            writer.append(make_cursor_rewind_event(peek.path_tuple, reason="ack retry"))
+            writer.append(
+                make_cursor_rewind_event(
+                    peek.path_tuple,
+                    reason="ack retry",
+                    step_version=peek.step.version,
+                    dispatch_event_hash=latest.get("dispatch_event_hash")
+                    if isinstance(latest.get("dispatch_event_hash"), str)
+                    else None,
+                )
+            )
     except (EventLogError, NoRunBoundError, RuntimeError) as exc:
         _print_err(f"ack retry: event append failed: {exc}")
         return 1
@@ -364,7 +383,7 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
     # FLAG-P5-002: validate identity BEFORE mutating events.
     attested_args = AttestedArgs(
         agent=args.agent,
-        actor=args.actor,
+        human=args.human,
         evidence=tuple(args.evidence),
         item=args.item,
     )
@@ -387,6 +406,7 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
     if (
         host is None
         or not isinstance(host_repeat, RepeatUntil)
+        or not is_legacy_repeat_until_condition(host_repeat.condition)
         or host_repeat.condition != "user_approves"
     ):
         condition = (
@@ -395,7 +415,7 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
             else "<no repeat>"
         )
         _print_err(
-            "ack iterate: only valid for repeat.until.condition='user_approves' "
+            "ack iterate: only valid for legacy repeat.until.condition='user_approves' "
             f"(host condition={condition!r})"
         )
         return 1
@@ -411,13 +431,17 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
         plan_step_path=peek.path_tuple,
         iteration=peek.iteration,
         events_path=events_path,
+        step_version=peek.step.version,
     )
     write_iteration_feedback(decision, args.feedback)
     try:
         with writer_context_for_project(slug, root=proj_root.parent) as writer:
             writer.append(
                 make_iteration_failed_event(
-                    peek.path_tuple, peek.iteration, reason="iterate_feedback"
+                    peek.path_tuple,
+                    peek.iteration,
+                    reason="iterate_feedback",
+                    step_version=peek.step.version,
                 )
             )
     except (EventLogError, NoRunBoundError, RuntimeError) as exc:
