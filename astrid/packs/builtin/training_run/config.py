@@ -10,6 +10,8 @@ from typing import Any, Mapping
 
 import jsonschema
 
+from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency
@@ -75,6 +77,7 @@ def load_training_run_config(path: str | Path) -> ParsedTrainingRunConfig:
     data = _load_mapping(config_path)
     _validate_schema(data)
     resolved = _resolve_paths(data, config_path.parent)
+    _validate_storage_contract(resolved)
     return ParsedTrainingRunConfig(
         data=resolved,
         path=config_path,
@@ -160,6 +163,20 @@ def _validate_schema(config: Mapping[str, Any]) -> None:
         path = ".".join(str(part) for part in exc.path)
         prefix = f"{path}: " if path else ""
         raise TrainingRunConfigError(prefix + exc.message) from exc
+
+
+def _validate_storage_contract(config: Mapping[str, Any]) -> None:
+    compute = config.get("compute") if isinstance(config.get("compute"), Mapping) else {}
+    if str(compute.get("backend") or "") != "runpod":
+        return
+    if not bool(compute.get("storage_required")):
+        return
+    if str(compute.get("storage_name") or "").strip():
+        return
+    raise TrainingRunConfigError(
+        "compute.storage_name is required when compute.storage_required is true for RunPod training. "
+        + ENSURE_STORAGE_HINT
+    )
 
 
 def _resolve_paths(config: Mapping[str, Any], base_dir: Path) -> dict[str, Any]:

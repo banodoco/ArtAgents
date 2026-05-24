@@ -91,7 +91,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -214,7 +214,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -319,7 +319,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -406,7 +406,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -566,7 +566,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",

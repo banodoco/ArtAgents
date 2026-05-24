@@ -102,6 +102,11 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         1,
         "pipeline_dispatch_complete_caller",
     ),
+    CallSite(
+        "astrid/core/runpod/sweeper.py",
+        "append_runpod_sweeper_event",
+        "append_event_locked",
+    ): (1, "runpod_sweeper_owned_event_append"),
 }
 
 EXPECTED_LEASE_REWRITE_CALLS = {
@@ -157,6 +162,11 @@ APPROVED_PRODUCTION_APPEND_EVENT_LOCKED_CALLS: dict[CallSite, str] = {
         "append_event",
         "append_event_locked",
     ): "guarded_legacy_test_migration_wrapper",
+    CallSite(
+        "astrid/core/runpod/sweeper.py",
+        "append_runpod_sweeper_event",
+        "append_event_locked",
+    ): "runpod_sweeper_owned_event_append",
 }
 
 APPROVED_PRODUCTION_IN_HANDLE_APPEND_CALLS: dict[CallSite, str] = {
@@ -206,9 +216,9 @@ EXPECTED_PACK_LOCAL_LOG_WRITES = {
 EXPECTED_RUNPOD_NON_TASK_AUDIT_WRITES = {
     CallSite(
         "astrid/core/runpod/sweeper.py",
-        "_append_hard_sweep_audit",
+        "_append_sweep_audit",
         "handle.write",
-    ): (1, "runpod_hard_mode_sweeper_audit_log_non_task"),
+    ): (1, "runpod_sweeper_supplemental_audit_log_non_task"),
 }
 
 EXPECTED_ACTIVE_RUN_SHIM_DEFS = {
@@ -460,7 +470,7 @@ def test_builtin_pack_local_logs_are_classified_non_task() -> None:
     assert pack_append_calls == {}
 
 
-def test_runpod_hard_mode_audit_log_is_classified_non_task() -> None:
+def test_runpod_sweeper_supplemental_audit_writes_are_classified_non_task() -> None:
     actual_writes = _collect_calls(watched={"handle.write", "fh.write"})
     relevant_writes = Counter(
         {
@@ -476,12 +486,33 @@ def test_runpod_hard_mode_audit_log_is_classified_non_task() -> None:
         }
     )
 
+
+def test_runpod_sweeper_event_append_is_classified() -> None:
+    actual_writes = _collect_calls(watched={"handle.write", "fh.write"})
+    runpod_direct_writes = {
+        site: count
+        for site, count in actual_writes.items()
+        if site.path == "astrid/core/runpod/sweeper.py"
+    }
+    assert runpod_direct_writes == Counter(
+        {
+            site: count_and_category[0]
+            for site, count_and_category in EXPECTED_RUNPOD_NON_TASK_AUDIT_WRITES.items()
+        }
+    )
+
     runpod_raw_task_appends = {
         site: count
         for site, count in _collect_calls(watched={"append_event_locked"}).items()
         if site.path == "astrid/core/runpod/sweeper.py"
     }
-    assert runpod_raw_task_appends == {}
+    assert runpod_raw_task_appends == {
+        CallSite(
+            "astrid/core/runpod/sweeper.py",
+            "append_runpod_sweeper_event",
+            "append_event_locked",
+        ): 1
+    }
 
 
 def test_active_run_and_lease_rewriter_definitions_are_named() -> None:
