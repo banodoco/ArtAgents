@@ -47,7 +47,7 @@ def _seed_timeline(
     tdir = projects_root / project_slug / "timelines" / ulid
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
+        json.dumps({"clips": [], "tracks": []}), encoding="utf-8"
     )
     (tdir / "manifest.json").write_text(
         json.dumps(

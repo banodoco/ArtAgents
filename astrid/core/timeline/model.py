@@ -1,4 +1,4 @@
-"""Timeline data models: Assembly, Manifest, Display, FinalOutput."""
+"""Timeline data models: Manifest, Display, FinalOutput, and raw TimelineConfig I/O."""
 
 from __future__ import annotations
 
@@ -6,8 +6,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.paths import ProjectPathError
+from astrid.core.project.paths import ProjectPathError, validate_run_id
 from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid import timeline as timeline_contract
 
 from .paths import validate_timeline_slug, validate_timeline_ulid
 
@@ -32,36 +33,35 @@ def _validate_ulid(value: str) -> str:
         raise TimelineValidationError(str(exc)) from exc
 
 
-@dataclass(frozen=True)
-class Assembly:
-    """Editable assembly (mirrors reigh-app's TimelineConfig)."""
+def _validate_run_ref(value: str) -> str:
+    try:
+        return validate_run_id(value)
+    except ProjectPathError as exc:
+        raise TimelineValidationError(str(exc)) from exc
 
-    schema_version: int
-    assembly: dict[str, Any]
 
-    def to_json_obj(self) -> dict[str, Any]:
-        return {"schema_version": self.schema_version, "assembly": dict(self.assembly)}
+def validate_timeline_config_json(raw: Any) -> dict[str, Any]:
+    """Return a canonical raw TimelineConfig suitable for ``assembly.json``."""
+    try:
+        return timeline_contract.canonical_timeline_config(raw)
+    except ValueError as exc:
+        raise TimelineValidationError(str(exc)) from exc
 
-    def write(self, path: str | Path) -> None:
-        write_json_atomic(path, self.to_json_obj())
 
-    @classmethod
-    def from_json(cls, path: str | Path) -> "Assembly":
-        return cls.from_dict(read_json(path))
+def read_timeline_config_json(path: str | Path) -> dict[str, Any]:
+    """Read a raw TimelineConfig from *path*.
 
-    @classmethod
-    def from_dict(cls, raw: Any) -> "Assembly":
-        if not isinstance(raw, dict):
-            raise TimelineValidationError("assembly must be an object")
-        version = raw.get("schema_version")
-        if version != TIMELINE_SCHEMA_VERSION:
-            raise TimelineValidationError(
-                f"assembly.schema_version must be {TIMELINE_SCHEMA_VERSION}, got {version!r}"
-            )
-        assembly = raw.get("assembly")
-        if not isinstance(assembly, dict):
-            raise TimelineValidationError("assembly.assembly must be an object")
-        return cls(schema_version=TIMELINE_SCHEMA_VERSION, assembly=dict(assembly))
+    ``assembly.json`` is no longer wrapped in ``{schema_version, assembly}``;
+    callers receive the validated TimelineConfig directly.
+    """
+    return validate_timeline_config_json(read_json(path))
+
+
+def write_timeline_config_json(path: str | Path, config: Any) -> dict[str, Any]:
+    """Validate and atomically write a raw TimelineConfig to *path*."""
+    canonical = validate_timeline_config_json(config)
+    write_json_atomic(path, canonical)
+    return canonical
 
 
 @dataclass(frozen=True)
@@ -138,7 +138,7 @@ class FinalOutput:
         if not isinstance(from_run, str):
             raise TimelineValidationError("final_output.from_run must be a string")
         if from_run:  # empty string is allowed (no run bound)
-            _validate_ulid(from_run)
+            _validate_run_ref(from_run)
         return cls(
             ulid=ulid,
             path=path_str,
@@ -192,7 +192,7 @@ class Manifest:
         for item in contributing_runs:
             if not isinstance(item, str):
                 raise TimelineValidationError("manifest.contributing_runs items must be strings")
-            _validate_ulid(item)
+            _validate_run_ref(item)
         raw_outputs = raw.get("final_outputs", [])
         if not isinstance(raw_outputs, list):
             raise TimelineValidationError("manifest.final_outputs must be a list")

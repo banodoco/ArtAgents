@@ -6,8 +6,9 @@ event through ``EventLogBackend.append_event(...)``, and returns the
 ``TimelineEvent``.
 
 Audio bind/unbind targets the clip's ``asset_id`` field — the renderable
-timeline clip asset relationship.  Arrangement-level audio
-(``audio_source.pool_id``) stays with ``arrangement.replaced``.
+timeline clip asset relationship.  Full renderable TimelineConfig changes
+belong to ``timeline.config_replaced`` rather than the legacy arrangement
+replacement surface.
 """
 
 from __future__ import annotations

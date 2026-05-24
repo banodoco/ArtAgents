@@ -15,16 +15,15 @@ conform to these rules exactly.
 - `timeline_id` is a UUID string.
 - `actor` is an object with `type`, `id`, and optional `display` / `via`.
 
-## Current m4 semantics
+## Current runtime semantics
 
-- Only true-legacy timelines (no identity sidecar, compatibility files
-  present) bootstrap on first append with `timeline.imported`.  Created
-  timelines with provenance `"created"` accept bare first domain events
-  (no `timeline.imported`).
+- Runtime append paths require an identity sidecar. Legacy timelines with only
+  compatibility files fail closed; run the Sprint 2 migration scripts before
+  appending events.
 - Local read repair is intentionally fail-closed when an eventlog exists but
   the identity sidecar or projection cannot materialize a valid display state.
-- Display read repair projects `timeline.imported`, `timeline.created`,
-  `timeline.renamed`, `timeline.default_set`, and `timeline.deleted`.
+- Display read repair projects `timeline.created`, `timeline.renamed`,
+  `timeline.default_set`, and `timeline.deleted`.
   `timeline.tombstoned` is schema-defined but an intentional assembly no-op
   in m4.
 - Assembly read repair (`load_assembly_json_with_repair()`) regenerates
@@ -49,7 +48,8 @@ This spec documents the implementation actually shipped in Python m4.
 
 | kind | schema-defined | projected (display) | projected (assembly) | backend-enforced today | emitted by CRUD/CLI today |
 | --- | --- | --- | --- | --- | --- |
-| `timeline.imported` | yes | yes | yes (seeds assembly) | yes, via `LocalFsBackend` bootstrap on first append for true legacy timelines only | no |
+| `timeline.imported` | yes | migration-only legacy | migration-only legacy (runtime projection rejects it) | no; runtime bootstrap is disabled | no |
+| `timeline.config_replaced` | yes | no-op | yes (validated raw TimelineConfig full replacement) | no special backend rule | no |
 | `timeline.created` | yes | yes | no-op | no | no |
 | `timeline.renamed` | yes | yes | no-op | no special backend rule | yes, `rename_timeline()` only |
 | `timeline.default_set` | yes | yes | no-op | no | no |
@@ -68,8 +68,11 @@ The deferred lifecycle behaviors are load-bearing for milestone close-out:
   `timeline.deleted`.
 - `timeline.deleted` only affects projection/enforcement when it is already
   present in an event stream from some other producer or fixture.
-- Assembly projection covers every domain event kind from m1-m3 (clip,
-  transition, effect, theme, track, audio, pool, arrangement) and is
+- Assembly projection covers TimelineConfig-native domain event kinds from
+  m1-m3 (clip add/remove/move/retrack/retime/swap/replace/text, transition,
+  effect, theme, track, audio). Non-container read-model metadata such as
+  `clip.annotated` and `pool.*` is a projection no-op; migration-only
+  `arrangement.replaced` is rejected at runtime. Projection output is
   regenerated from the canonical event stream on every Astrid-owned read
   and export entry point.
 
@@ -79,7 +82,7 @@ The deferred lifecycle behaviors are load-bearing for milestone close-out:
 
 | kind | schema-defined | purpose |
 | --- | --- | --- |
-| `timeline.recovered` | yes | Recovery operation: restores projected state to a prior anchor event or snapshot. |
+| `timeline.recovered` | yes | Recovery operation: restores projected state to a prior anchor event or snapshot with a validated raw `TimelineConfig` replacement payload. |
 | `timeline.reverted` | yes | Non-reversible undo fallback: records target event and before/after projections. |
 | `timeline.branched_from` | yes | Branch provenance: emitted on source timeline when a branch is successfully created. |
 | `timeline.erased` | yes | Audit/control event: describes an erasure operation (selector, reason, policy_ref, affected events). |
@@ -129,4 +132,3 @@ are omitted from canonical JSON when `None`:
 Import metadata is validated: `source_backend` must be non-empty,
 `source_timeline_id` must be a valid UUID, `source_event_id` must be non-empty,
 `source_version` must be an integer, and `source_hash` must be non-empty.
-

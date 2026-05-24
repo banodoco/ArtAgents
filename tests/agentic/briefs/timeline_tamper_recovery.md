@@ -8,12 +8,12 @@ Simulate a tamper/bad-edit recovery scenario: a timeline has been corrupted by
 a bad actor who tampered with event payloads in the JSONL file. You must detect,
 erase, and recover.
 
-1. Create a timeline: `astrid timelines create --name "Recovery Test" --slug recovery-test`
+1. Create a timeline: `astrid timelines create recovery-test --name "Recovery Test"`
 2. Add several good events to establish a known-good anchor:
    ```
-   astrid timelines clip add --to recovery-test --kind visual --asset-id img1 --clip-id good-1
-   astrid timelines track add --to recovery-test --kind visual --track-id t1
-   astrid timelines theme set --to recovery-test --theme-id default
+   astrid timelines track add recovery-test --kind visual --track-id visual --label Visual
+   astrid timelines clip add recovery-test --kind visual --asset good-1 --track visual
+   astrid timelines theme set recovery-test --theme default
    ```
 3. Verify the chain is clean: `astrid timelines show recovery-test --verify`
 4. Simulate tampering: directly edit the `<project>/timelines/<ulid>/assembly.jsonl`

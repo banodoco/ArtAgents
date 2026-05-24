@@ -85,6 +85,8 @@
     }
   ],
   "expected_assembly": {
+    "clips": [],
+    "tracks": [],
     "theme": "bright-pop",
     "theme_overrides": {
       "visual": {

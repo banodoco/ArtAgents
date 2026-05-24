@@ -9,15 +9,12 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.schema import utc_now_iso
 from astrid.core.timeline.events.schema import (
-    EVENT_SCHEMA_VERSION,
     TimelineActor,
     TimelineEvent,
-    TimelineImportedPayload,
     canonical_json_bytes,
     with_event_hash,
 )
@@ -50,51 +47,11 @@ class LocalFsBackend:
         *,
         actor: TimelineActor,
     ) -> tuple[str, dict[str, Any]]:
-        """Bootstrap a true-legacy timeline (no identity sidecar) into the
-        event-sourced model.
-
-        Synthesises a ``timeline.imported`` event from the compatibility
-        files on disk, writes the identity sidecar with provenance
-        ``"imported"``, and returns ``(timeline_id, identity_dict)``.
-
-        After this call the caller can resolve the backend normally and
-        append domain events.
-
-        Raises ``EventLogError`` when the compatibility files cannot be
-        read or the identity cannot be written.
-        """
-        self.timeline_home.mkdir(parents=True, exist_ok=True)
-        imported_event = self._build_imported_event(actor=actor, prev_hash=None)
-        identity = self._write_imported_identity(imported_event.timeline_id)
-
-        # Write the imported event into the event log.
-        created = not self.events_path.exists()
-        try:
-            fd = os.open(
-                self.events_path, os.O_CREAT | os.O_APPEND | os.O_RDWR, 0o644
-            )
-        except OSError as exc:
-            raise EventLogError(
-                f"failed to open {self.events_path}: {exc}"
-            ) from exc
-
-        try:
-            with os.fdopen(fd, "a+b", closefd=True) as handle:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-                try:
-                    self._append_line_locked(handle, imported_event)
-                    head = self._rebuild_head_locked()
-                    self._write_head_atomic(head)
-                finally:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        except OSError as exc:
-            raise EventLogError(
-                f"failed to write imported event to {self.events_path}: {exc}"
-            ) from exc
-
-        if created:
-            _fsync_dir(self.timeline_home)
-        return imported_event.timeline_id, identity
+        """Legacy bootstrap is no longer a runtime conversion surface."""
+        raise EventLogError(
+            "runtime legacy bootstrap is disabled; run the Sprint 2 migration "
+            "script before appending to legacy assembly.json timelines"
+        )
 
     def append_event(
         self,
@@ -125,22 +82,14 @@ class LocalFsBackend:
                     identity = self._load_identity_locked()
                     tail = self._read_tail_event_locked(handle)
                     locked_head = self._rebuild_head_locked()
-                    bootstrap_events: list[TimelineEvent] = []
                     prev_hash = tail.hash if tail is not None else None
 
                     if identity is None:
-                        imported_event = self._build_imported_event(actor=actor, prev_hash=prev_hash)
-                        bootstrap_events.append(imported_event)
-                        identity = self._write_imported_identity(imported_event.timeline_id)
-                        prev_hash = imported_event.hash
-                        locked_head = EventLogHead(
-                            timeline_id=imported_event.timeline_id,
-                            last_event_id=imported_event.event_id,
-                            last_hash=imported_event.hash,
-                            event_count=1,
-                            version=1,
+                        raise EventLogError(
+                            "timeline identity sidecar is missing; runtime "
+                            "legacy bootstrap is disabled. Run the Sprint 2 "
+                            "migration script before appending events."
                         )
-                        tail = imported_event
 
                     if tail is not None and tail.kind == "timeline.deleted":
                         raise EventLogError(
@@ -170,9 +119,7 @@ class LocalFsBackend:
                         txn_id=txn_id,
                     )
                     event = with_event_hash(event, prev_hash=prev_hash)
-                    to_write = [*bootstrap_events, event]
-                    for item in to_write:
-                        self._append_line_locked(handle, item)
+                    self._append_line_locked(handle, event)
                     head = self._rebuild_head_locked()
                     self._write_head_atomic(head)
                 finally:
@@ -384,18 +331,6 @@ class LocalFsBackend:
             raise EventLogError(f"{self.identity_path} must contain a JSON object")
         return raw
 
-    def _write_imported_identity(self, timeline_id: str) -> dict[str, Any]:
-        payload = {
-            "schema_version": EVENT_SCHEMA_VERSION,
-            "timeline_id": timeline_id,
-            "timeline_ulid": self.timeline_home.name,
-            "backend": "local_fs",
-            "provenance": "imported",
-            "created_at": utc_now_iso(),
-        }
-        write_json_atomic(self.identity_path, payload)
-        return payload
-
     def _read_tail_event_locked(self, handle: Any) -> TimelineEvent | None:
         handle.seek(0)
         last = b""
@@ -471,23 +406,6 @@ class LocalFsBackend:
             raise EventLogError(f"invalid JSON in {self.events_path}: {exc.msg}") from exc
         except OSError as exc:
             raise EventLogError(f"failed to read {self.events_path}: {exc}") from exc
-
-    def _build_imported_event(self, *, actor: TimelineActor, prev_hash: str | None) -> TimelineEvent:
-        snapshot: dict[str, Any] = {}
-        for name in ("display.json", "manifest.json", "assembly.json"):
-            path = self.timeline_home / name
-            if not path.is_file():
-                continue
-            snapshot[name] = read_json(path)
-        imported = TimelineEvent.new(
-            timeline_id=str(uuid4()),
-            ts=utc_now_iso(),
-            actor=actor,
-            kind="timeline.imported",
-            payload=TimelineImportedPayload(snapshot=snapshot, source="legacy_local"),
-            prev_hash=prev_hash,
-        )
-        return with_event_hash(imported, prev_hash=prev_hash)
 
     def repair_erasure(
         self,

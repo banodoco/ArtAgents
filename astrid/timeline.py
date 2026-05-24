@@ -11,6 +11,7 @@ types, transition validation, effect-id registry checks) is Banodoco-only.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import sys
@@ -355,6 +356,8 @@ class PipelineMetadata(TypedDict):
 # swaps to/from `"from"` at the JSON boundary. Every other field is 1:1 with TS.
 _FROM_ALIAS = ("from_", "from")
 _TIMELINE_TOP_ALLOWED = frozenset({"theme", "theme_overrides", "generation_defaults", "clips", "tracks", "pinnedShotGroups", "output"})
+_TIMELINE_CONTAINER_REQUIRED = frozenset({"clips", "tracks"})
+_LEGACY_CONTAINER_KEYS = frozenset({"schema_version", "assembly", "pool", "arrangement"})
 _THEME_OVERRIDES_ALLOWED = frozenset({"visual", "generation", "voice", "audio", "pacing"})
 _CLIP_ALLOWED = frozenset(
     {
@@ -455,6 +458,53 @@ def _normalize_clip_for_validation(clip: dict[str, Any]) -> dict[str, Any]:
 
 def _known_timeline_payload(config: Mapping[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in config.items() if key in _TIMELINE_TOP_ALLOWED}
+
+def _json_safe_copy(value: Any) -> Any:
+    """Return a deep JSON-compatible copy using the persisted serialization contract."""
+    return json.loads(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False))
+
+def canonical_empty_timeline() -> TimelineConfig:
+    """Return the canonical empty raw TimelineConfig runtime container."""
+    config = {"tracks": [], "clips": []}
+    return validate_timeline_config_for_container(config)
+
+def validate_timeline_config_for_container(config: Any) -> TimelineConfig:
+    """Validate and return a JSON-safe copy of a raw TimelineConfig container.
+
+    Runtime timeline containers are the raw renderable TimelineConfig shape.  This
+    stricter surface rejects legacy wrapper/read-model keys that the looser render
+    validator intentionally ignores for compatibility with old artifacts.
+    """
+    if not isinstance(config, Mapping):
+        raise ValueError("TimelineConfig container must be a JSON object")
+    data = copy.deepcopy(dict(config))
+    legacy_keys = sorted(key for key in data if key in _LEGACY_CONTAINER_KEYS)
+    if legacy_keys:
+        raise ValueError(
+            "TimelineConfig container must be raw; legacy wrapper/read-model keys "
+            f"are not allowed: {legacy_keys}"
+        )
+    _raise_unknown_keys("TimelineConfig container", data, _TIMELINE_TOP_ALLOWED)
+    missing = sorted(key for key in _TIMELINE_CONTAINER_REQUIRED if key not in data)
+    if missing:
+        raise ValueError(f"TimelineConfig container missing required key(s): {missing}")
+    validate_timeline(data)
+    return cast(TimelineConfig, _json_safe_copy(data))
+
+def canonical_timeline_config(config: Any) -> TimelineConfig:
+    """Return validated TimelineConfig data in a stable JSON-object order."""
+    data = validate_timeline_config_for_container(config)
+    return cast(TimelineConfig, _json_safe_copy(data))
+
+def timeline_config_digest(config: Any) -> str:
+    """Return a stable sha256 digest for a validated TimelineConfig container."""
+    data = canonical_timeline_config(config)
+    encoded = json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+def timeline_configs_equal(left: Any, right: Any) -> bool:
+    """Compare two TimelineConfig containers after validation and canonicalization."""
+    return canonical_timeline_config(left) == canonical_timeline_config(right)
 
 def _effect_ids(theme: str | None = None) -> set[str]:
     from astrid.core.element import catalog as effects_catalog

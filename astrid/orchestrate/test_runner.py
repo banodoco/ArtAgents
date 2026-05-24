@@ -18,6 +18,7 @@ from typing import Optional
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import PROJECTS_ROOT_ENV
 from astrid.core.project.project import create_project
+from astrid.core.timeline.crud import create_timeline
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session
 from astrid.core.session.paths import ASTRID_HOME_ENV, session_path
@@ -148,6 +149,7 @@ def run_fixture(
         # before it will accept --project. Idempotent so a fixture-supplied
         # project.json is preserved.
         create_project(project_slug, root=projects_root, exist_ok=True)
+        create_timeline(project_slug, "main", root=projects_root, is_default=True)
         _bind_author_test_session(project_slug, projects_root)
 
         rc = cmd_start(

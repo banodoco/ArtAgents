@@ -214,224 +214,21 @@ def import_from_legacy_local(
     actor: Any,
     run_ts: str | None = None,
 ) -> dict[str, Any]:
-    """Idempotently import a legacy-local timeline into the event log.
+    """Reject runtime legacy-local conversion.
 
-    (a) When the event log is empty, reads ``assembly.json`` from
-        *timeline_home*, appends exactly one ``timeline.imported`` event
-        with ``source='legacy_local'`` and the snapshot containing the
-        assembly blob, and writes progress artifacts under
-        ``runs/migrations/<timestamp>/``.
-
-    (b) Verifies projection parity: ``project_to_assembly(backend.read_events())``
-        must equal the legacy ``assembly.json`` body.  Returns a result
-        dict with ``ok``, ``parity_ok``, ``event_id``, etc.
-
-    (c) No-op rerun: when the first event in the log is already a
-        ``timeline.imported`` event with ``source='legacy_local'`` **and**
-        projection parity holds, this function returns immediately without
-        appending any new events.
-
-    (d) Progress files are written under ``runs/migrations/<timestamp>/``,
-        never inside the source timeline directory.
-
-    Source blobs are **never** mutated — only the event log and progress
-    artifacts are written.
-
-    Parameters
-    ----------
-    backend:
-        A ``LocalFsBackend`` instance pointed at *timeline_home*.
-    timeline_home:
-        Path to the timeline directory (must contain ``assembly.json``).
-    actor:
-        ``TimelineActor`` recorded on the imported event.
-    run_ts:
-        Optional timestamp string for the migration run directory.
-        Defaults to the current Unix timestamp.
-
-    Returns
-    -------
-    dict
-        Keys: ``ok`` (bool), ``imported`` (bool), ``event_id`` (str|None),
-        ``parity_ok`` (bool | None), ``detail`` (str).
+    Historical ``assembly.json`` wrappers and old full-state snapshots are
+    decoded only by ``scripts/migrations/sprint-2``. This runtime entry point is
+    retained as a compatibility import surface, but it must fail closed instead
+    of appending ``timeline.imported`` or unwrapping legacy blobs.
     """
-    import time as _time
-    import json as _json
-
-    from astrid.core.project.jsonio import read_json
-    from astrid.core.timeline.projection import project_to_assembly
-    from astrid.core.timeline.events.schema import (
-        TimelineImportedPayload,
-        TimelineEvent,
-    )
-
-    ts = run_ts if run_ts is not None else str(int(_time.time()))
-
-    # ------------------------------------------------------------------
-    # 1. Read the existing event stream
-    # ------------------------------------------------------------------
-    events = backend.read_events()
-
-    # ------------------------------------------------------------------
-    # 2. If the stream already has events, check idempotence
-    # ------------------------------------------------------------------
-    if events:
-        first = events[0]
-
-        # (c) No-op: first event is already timeline.imported with
-        # source='legacy_local' and parity holds.
-        if first.kind == "timeline.imported":
-            source = first.payload.source if hasattr(first.payload, 'source') else None
-            if source == "legacy_local":
-                # Verify projection parity
-                projected = project_to_assembly(events)
-                try:
-                    raw_assembly = read_json(timeline_home / "assembly.json")
-                except Exception:
-                    return {
-                        "ok": False,
-                        "imported": False,
-                        "event_id": None,
-                        "parity_ok": False,
-                        "detail": "Cannot read source assembly.json for parity check",
-                    }
-
-                # Unwrap the wrapper if present
-                if isinstance(raw_assembly, dict) and "assembly" in raw_assembly:
-                    legacy_body = raw_assembly["assembly"]
-                else:
-                    legacy_body = raw_assembly
-
-                if projected == legacy_body:
-                    return {
-                        "ok": True,
-                        "imported": False,
-                        "event_id": first.event_id,
-                        "parity_ok": True,
-                        "detail": "Already imported — parity holds, skipping",
-                    }
-                else:
-                    return {
-                        "ok": False,
-                        "imported": False,
-                        "event_id": first.event_id,
-                        "parity_ok": False,
-                        "detail": "Already imported but parity does NOT hold",
-                    }
-
-        # Stream exists but first event is not timeline.imported —
-        # do not clobber an existing event-sourced timeline.
-        return {
-            "ok": False,
-            "imported": False,
-            "event_id": None,
-            "parity_ok": None,
-            "detail": (
-                f"Event log is not empty and first event is "
-                f"{first.kind!r}, not timeline.imported — refusing to import"
-            ),
-        }
-
-    # ------------------------------------------------------------------
-    # 3. Event log is empty — perform the import
-    # ------------------------------------------------------------------
-
-    # Read assembly.json (source blob — never mutated)
-    try:
-        raw_assembly = read_json(timeline_home / "assembly.json")
-    except FileNotFoundError:
-        return {
-            "ok": False,
-            "imported": False,
-            "event_id": None,
-            "parity_ok": None,
-            "detail": "Source assembly.json not found",
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "imported": False,
-            "event_id": None,
-            "parity_ok": None,
-            "detail": f"Failed to read source assembly.json: {exc}",
-        }
-
-    # Build snapshot (matching LocalFsBackend._build_imported_event shape)
-    snapshot: dict[str, Any] = {"assembly.json": raw_assembly}
-    # Also include display.json and manifest.json if they exist
-    for name in ("display.json", "manifest.json"):
-        path = timeline_home / name
-        if path.is_file():
-            try:
-                snapshot[name] = read_json(path)
-            except Exception:
-                pass
-
-    # Append the timeline.imported event
-    try:
-        event = backend.append_event(
-            backend.timeline_id,
-            "timeline.imported",
-            {
-                "snapshot": snapshot,
-                "source": "legacy_local",
-            },
-            actor=actor,
-        )
-    except Exception as exc:
-        return {
-            "ok": False,
-            "imported": False,
-            "event_id": None,
-            "parity_ok": None,
-            "detail": f"Failed to append timeline.imported: {exc}",
-        }
-
-    # ------------------------------------------------------------------
-    # 4. Verify projection parity (b)
-    # ------------------------------------------------------------------
-    all_events = backend.read_events()
-    projected = project_to_assembly(all_events)
-
-    # Unwrap legacy assembly.json if it has the wrapper shape
-    if isinstance(raw_assembly, dict) and "assembly" in raw_assembly:
-        legacy_body = raw_assembly["assembly"]
-    else:
-        legacy_body = raw_assembly
-
-    parity_ok = projected == legacy_body
-
-    # ------------------------------------------------------------------
-    # 5. Write progress artifacts under runs/migrations/<timestamp>/ (d)
-    # ------------------------------------------------------------------
-    progress_dir = timeline_home.parent.parent / "runs" / "migrations" / ts
-    try:
-        progress_dir.mkdir(parents=True, exist_ok=True)
-        progress_file = progress_dir / "import_result.json"
-        progress_data = {
-            "run_ts": ts,
-            "timeline_ulid": timeline_home.name,
-            "imported": True,
-            "event_id": event.event_id,
-            "parity_ok": parity_ok,
-        }
-        progress_file.write_text(
-            _json.dumps(progress_data, indent=2, sort_keys=True),
-            encoding="utf-8",
-        )
-    except Exception:
-        # Progress artifact is best-effort; do not fail the import.
-        pass
-
     return {
-        "ok": parity_ok,
-        "imported": True,
-        "event_id": event.event_id,
-        "parity_ok": parity_ok,
+        "ok": False,
+        "imported": False,
+        "event_id": None,
+        "parity_ok": None,
         "detail": (
-            "Import succeeded, parity matches"
-            if parity_ok
-            else "Import succeeded but projection parity does NOT match source assembly.json"
+            "runtime legacy-local import is disabled; run "
+            "scripts/migrations/sprint-2/migrate_timelines.py"
         ),
     }
 
@@ -556,22 +353,21 @@ def import_supabase_config(
     actor: Any,
     config_version: int | None = None,
 ) -> dict[str, Any]:
-    """Idempotently import a Supabase timeline config as a ``timeline.imported`` event.
+    """Idempotently seed a Supabase TimelineConfig with ``timeline.config_replaced``.
 
     Per SD2, parity is **config-as-snapshot**: the stored snapshot must equal
     the source config blob — NOT projected assembly.  This is a different data
     model from the LocalFs path, where the source blob is an assembly document.
 
-    (a) When the event log is empty, appends exactly one ``timeline.imported``
-        event with ``source='supabase_config'`` and ``snapshot`` containing
-        the full config blob (wrapped as ``{"config": <config>}``).
+    (a) When the event log is empty, validates *config* as a raw TimelineConfig
+        and appends exactly one ``timeline.config_replaced`` event.
 
-    (b) Idempotent guard: if the first event is already ``timeline.imported``
-        with ``source='supabase_config'`` **and** config-as-snapshot parity
+    (b) Idempotent guard: if the first event is already
+        ``timeline.config_replaced`` and full-config parity
         holds, returns immediately without appending.
 
-    (c) Does NOT use projection for parity — per SD2, parity means
-        ``snapshot["config"] == config``.
+    (c) ``timeline.imported`` remains migration-only legacy and is never
+        emitted by this runtime path.
 
     Parameters
     ----------
@@ -598,9 +394,7 @@ def import_supabase_config(
         (str|None).  ``skipped_state`` is one of ``"already_imported"``,
         ``"already_event_sourced"``, ``"no_config"``, or ``None``.
     """
-    import json as _json
-
-    from astrid.core.timeline.events.schema import TimelineImportedPayload, TimelineEvent
+    from astrid import timeline as timeline_contract
 
     # ------------------------------------------------------------------
     # 0. Null config guard
@@ -615,6 +409,18 @@ def import_supabase_config(
             "skipped_state": "no_config",
         }
 
+    try:
+        validated_config = timeline_contract.canonical_timeline_config(config)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "imported": False,
+            "event_id": None,
+            "parity_ok": None,
+            "detail": f"Supabase config is not a raw TimelineConfig: {exc}",
+            "skipped_state": "invalid_config",
+        }
+
     # ------------------------------------------------------------------
     # 1. Read existing event stream
     # ------------------------------------------------------------------
@@ -626,37 +432,36 @@ def import_supabase_config(
     if events:
         first = events[0]
 
-        if first.kind == "timeline.imported":
-            source = first.payload.source if hasattr(first.payload, 'source') else None
-            if source == "supabase_config":
-                # Check config-as-snapshot parity (SD2)
-                snapshot = first.payload.snapshot if hasattr(first.payload, 'snapshot') else None
-                if isinstance(snapshot, dict):
-                    stored_config = snapshot.get("config")
-                    parity_ok = stored_config == config
-                else:
-                    parity_ok = False
+        if first.kind == "timeline.config_replaced":
+            stored_config = (
+                first.payload.config if hasattr(first.payload, "config") else None
+            )
+            parity_ok = (
+                isinstance(stored_config, dict)
+                and timeline_contract.timeline_configs_equal(
+                    stored_config, validated_config
+                )
+            )
 
-                if parity_ok:
-                    return {
-                        "ok": True,
-                        "imported": False,
-                        "event_id": first.event_id,
-                        "parity_ok": True,
-                        "detail": "Already imported — config-as-snapshot parity holds, skipping",
-                        "skipped_state": "already_imported",
-                    }
-                else:
-                    return {
-                        "ok": False,
-                        "imported": False,
-                        "event_id": first.event_id,
-                        "parity_ok": False,
-                        "detail": "Already imported but config-as-snapshot parity does NOT hold",
-                        "skipped_state": None,
-                    }
+            if parity_ok:
+                return {
+                    "ok": True,
+                    "imported": False,
+                    "event_id": first.event_id,
+                    "parity_ok": True,
+                    "detail": "Already imported — TimelineConfig parity holds, skipping",
+                    "skipped_state": "already_imported",
+                }
+            return {
+                "ok": False,
+                "imported": False,
+                "event_id": first.event_id,
+                "parity_ok": False,
+                "detail": "Already imported but TimelineConfig parity does NOT hold",
+                "skipped_state": None,
+            }
 
-        # Stream exists but first event is not a matching timeline.imported
+        # Stream exists but first event is not a matching full-config seed.
         return {
             "ok": False,
             "imported": False,
@@ -664,7 +469,7 @@ def import_supabase_config(
             "parity_ok": None,
             "detail": (
                 f"Event log is not empty and first event is "
-                f"{first.kind!r}, not timeline.imported with source='supabase_config' — "
+                f"{first.kind!r}, not timeline.config_replaced — "
                 f"refusing to import"
             ),
             "skipped_state": "already_event_sourced",
@@ -673,15 +478,12 @@ def import_supabase_config(
     # ------------------------------------------------------------------
     # 3. Event log is empty — perform the import
     # ------------------------------------------------------------------
-    snapshot: dict[str, Any] = {"config": config}
-
     try:
         event = backend.append_event(
             timeline_id,
-            "timeline.imported",
+            "timeline.config_replaced",
             {
-                "snapshot": snapshot,
-                "source": "supabase_config",
+                "config": validated_config,
             },
             actor=actor,
         )
@@ -691,21 +493,25 @@ def import_supabase_config(
             "imported": False,
             "event_id": None,
             "parity_ok": None,
-            "detail": f"Failed to append timeline.imported: {exc}",
+            "detail": f"Failed to append timeline.config_replaced: {exc}",
             "skipped_state": None,
         }
 
     # ------------------------------------------------------------------
-    # 4. Verify config-as-snapshot parity (SD2)
+    # 4. Verify full-config parity
     # ------------------------------------------------------------------
     all_events = backend.read_events()
     if all_events:
         imported_event = all_events[0]
-        imp_snapshot = imported_event.payload.snapshot if hasattr(imported_event.payload, 'snapshot') else None
-        if isinstance(imp_snapshot, dict):
-            parity_ok = imp_snapshot.get("config") == config
-        else:
-            parity_ok = False
+        stored_config = (
+            imported_event.payload.config
+            if hasattr(imported_event.payload, "config")
+            else None
+        )
+        parity_ok = (
+            isinstance(stored_config, dict)
+            and timeline_contract.timeline_configs_equal(stored_config, validated_config)
+        )
     else:
         parity_ok = False
 
@@ -715,9 +521,9 @@ def import_supabase_config(
         "event_id": event.event_id,
         "parity_ok": parity_ok,
         "detail": (
-            "Import succeeded, config-as-snapshot parity matches"
+            "Import succeeded, TimelineConfig parity matches"
             if parity_ok
-            else "Import succeeded but config-as-snapshot parity does NOT match"
+            else "Import succeeded but TimelineConfig parity does NOT match"
         ),
         "skipped_state": None,
     }

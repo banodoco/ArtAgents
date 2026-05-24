@@ -21,6 +21,8 @@ from typing import Optional, Sequence
 
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.project.project import ProjectError, require_project
+from astrid.core.project.run import resolve_required_project_timeline
+from astrid.core.project.schema import build_run_record
 from astrid.core.project.paths import (
     project_dir,
     resolve_projects_root,
@@ -66,6 +68,7 @@ from astrid.core.task.plan import (
     step_dir_for_path,
 )
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
+from astrid.core.timeline.crud import record_contributing_run
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
 
@@ -234,22 +237,15 @@ def cmd_start(
                     f"Using default timeline: {timeline_slug}. "
                     f"Use --timeline to override."
                 )
-    # If still no timeline, list available timelines and error when a choice is
-    # needed; a project with zero timelines can still start a task run.
     if timeline_id is None:
-        from astrid.core.timeline.crud import list_timelines
-        available = list_timelines(slug, root=projects_root)
-        if available:
-            _print_err("No default timeline; pass --timeline <slug>. Available:")
-            for ts in available:
-                _print_err(f"  {ts.slug}  ({ts.name})")
-            return 1
-        else:
-            _print_err(
-                f"start: no timelines exist for project {slug!r}; "
-                "starting without a timeline. "
-                f"Create one later with `astrid timelines create <slug>`."
+        try:
+            timeline_id, timeline_slug = resolve_required_project_timeline(
+                slug,
+                root=projects_root,
             )
+        except Exception as exc:
+            _print_err(f"start: {exc}")
+            return 1
 
     proj_root = project_dir(slug, root=projects_root)
     proj_root.mkdir(parents=True, exist_ok=True)
@@ -275,6 +271,21 @@ def cmd_start(
 
     run_dir = proj_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(
+        run_dir / "run.json",
+        build_run_record(
+            slug,
+            run_id,
+            tool_id=args.orchestrator_id,
+            kind="orchestrator",
+            status="prepared",
+            out=run_dir,
+            argv=["start", *list(argv)],
+            metadata={"plan_hash": plan_hash},
+            timeline_id=timeline_id,
+        ),
+    )
+    record_contributing_run(slug, timeline_id, run_id, root=projects_root)
 
     # Lease-first ordering: any reader that observes current_run.json is
     # guaranteed to find a corresponding lease.json. The session id on the

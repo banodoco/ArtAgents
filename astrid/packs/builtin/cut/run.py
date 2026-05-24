@@ -4,10 +4,9 @@
 .. note::
 
     This module produces **standalone** ``hype.timeline.json`` artifacts for
-    the Remotion renderer.  These are NOT project-timeline containers
-    (``assembly.json`` / ``assembly.jsonl``).  Migrating cut/hype clip assembly
-    to emit ``clip.*`` events through the project-timeline ``EventLogBackend``
-    is deferred to **m3.5** (pack/worker write-path sweep)."""
+    the Remotion renderer.  In managed mode the same validated raw
+    ``TimelineConfig`` is emitted to the project timeline as
+    ``timeline.config_replaced`` before these run-local artifacts are written."""
 
 
 from __future__ import annotations
@@ -36,6 +35,7 @@ from ....timeline import (
     METADATA_VERSION,
     PipelineMetadata,
     TimelineConfig,
+    canonical_timeline_config,
     load_arrangement,
     load_metadata,
     load_pool,
@@ -1059,6 +1059,7 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     timeline_path_out = out_dir / "hype.timeline.json"
     assets_path_out = out_dir / "hype.assets.json"
     metadata_path_out = out_dir / "hype.metadata.json"
+    canonical_timeline_config(config)
     save_timeline(config, timeline_path_out)
     if out_dir == assets_path_in.parent.resolve():
         save_registry(registry, assets_path_out)
@@ -1097,7 +1098,7 @@ def _emit_cut_managed_events(
     args: argparse.Namespace, timeline: dict[str, Any],
     *, actor_via: Any | None = None,
 ) -> int:
-    """Emit arrangement.replaced event through the pack write gateway.
+    """Emit timeline.config_replaced event through the pack write gateway.
 
     Called when cut runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written.  The gateway
@@ -1121,10 +1122,11 @@ def _emit_cut_managed_events(
         display="builtin.cut",
         via=[actor_via] if actor_via is not None else None,
     )
+    config = canonical_timeline_config(timeline)
     events = [
         {
-            "kind": "arrangement.replaced",
-            "payload": {"arrangement": dict(timeline)},
+            "kind": "timeline.config_replaced",
+            "payload": {"config": config},
         }
     ]
     result = pack_write_gateway(
@@ -1280,6 +1282,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     edl_path = write_edl(edl_rows, out_dir, asset_paths, asset_urls)
     timeline_path = out_dir / "hype.timeline.json"
+    canonical_timeline_config(timeline)
     # m3.5 managed mode: emit events through the gateway before writing
     # compatibility outputs.
     if managed:

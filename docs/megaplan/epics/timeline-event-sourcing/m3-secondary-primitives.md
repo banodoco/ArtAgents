@@ -26,7 +26,6 @@ CLI verbs:
 - `timelines pool add --asset <id|path>`
 - `timelines pool remove --asset-id <id>`
 - `timelines pool score --asset-id <id> --score <0..1>`
-- `timelines arrangement set --from-json <file>`
 - `timelines arrangement show`
 
 Event kinds added:
@@ -45,7 +44,7 @@ Event kinds added:
 - `pool.asset_added`
 - `pool.asset_removed`
 - `pool.asset_scored`
-- `arrangement.replaced`
+- `arrangement.replaced` (migration-only legacy; not a public runtime write path)
 
 Python API:
 
@@ -72,7 +71,7 @@ Pack migration:
 ## Locked Decisions
 
 - All secondary primitives use the same `EventLogBackend` protocol and actor handling as clip primitives.
-- `arrangement.replaced` is the coarse-grained escape hatch for arrangement changes that cannot yet be represented as smaller semantic events. It must still be deterministic and replayable.
+- `arrangement.replaced` is migration-only legacy. Runtime coarse full-timeline changes use `timeline.config_replaced` with a validated raw TimelineConfig; public arrangement APIs are read-side only.
 - Pool assets and tracks should use UUIDs when creating new ids; preserve existing ids only where schema compatibility requires it.
 - `arrangement show` is read-side only and should read through the current compatibility projection until m4.
 - Events stay semantic-batched, especially for effect tuning sliders and theme override editing.
@@ -80,7 +79,7 @@ Pack migration:
 ## Open Questions
 
 - Theme override namespace: what is the stable key shape in `astrid/timeline.py::ThemeOverrides`?
-- Is `arrangement set --from-json` intentionally a full replacement, or should the planner introduce smaller arrangement events?
+- Which arrangement-like read models still need named, non-container events rather than raw TimelineConfig replacement?
 - Does pool scoring trigger downstream recompute or is it pure metadata?
 - Are audio bindings represented as clip fields, separate audio tracks, or asset relationships in the current schema?
 - Should transition identity be "between clip ids" or its own UUID entity?

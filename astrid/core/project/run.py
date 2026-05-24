@@ -88,6 +88,12 @@ def prepare_project_run(
         step_id = task_env.task_step_id_env()
         if not step_id:
             raise ProjectRunError("ASTRID_TASK_STEP_ID must be set when ASTRID_TASK_RUN_ID is set")
+        if timeline_id is None:
+            timeline_id = _timeline_id_from_parent_run(
+                project_slug,
+                parent_run_id,
+                root=projects_root,
+            )
         run_root = step_dir_for(project_slug, parent_run_id, step_id, step_version=1, root=projects_root)
         run_root.mkdir(parents=True, exist_ok=True)
         now = utc_now_iso()
@@ -112,6 +118,7 @@ def prepare_project_run(
             record["argv"] = redact_cli_args(list(argv))
         if timeline_id is not None:
             record["timeline_id"] = timeline_id
+            _record_contributing_run(project_slug, timeline_id, parent_run_id, root=projects_root)
         return ProjectRunContext(
             project_slug=project_slug,
             run_id=parent_run_id,
@@ -120,6 +127,8 @@ def prepare_project_run(
             record=record,
             root=projects_root,
         )
+    if timeline_id is None:
+        timeline_id, _timeline_slug = resolve_required_project_timeline(project_slug, root=projects_root)
     effective_run_id = paths.validate_run_id(run_id or generate_run_id())
     run_root = paths.run_dir(project_slug, effective_run_id, root=projects_root)
     if run_root.exists() and any(run_root.iterdir()):
@@ -138,6 +147,7 @@ def prepare_project_run(
     )
     run_json_path = paths.run_json_path(project_slug, effective_run_id, root=projects_root)
     write_json_atomic(run_json_path, record)
+    _record_contributing_run(project_slug, timeline_id, effective_run_id, root=projects_root)
     return ProjectRunContext(
         project_slug=project_slug,
         run_id=effective_run_id,
@@ -146,6 +156,78 @@ def prepare_project_run(
         record=record,
         root=projects_root,
     )
+
+
+def resolve_required_project_timeline(
+    project_slug: str,
+    *,
+    root: str | Path | None = None,
+) -> tuple[str, str]:
+    """Resolve exactly one non-tombstoned timeline for a project run.
+
+    The project default wins when it points at a live timeline. Without a live
+    default, a single live timeline is accepted. Zero or multiple live
+    timelines fail with explicit recovery guidance.
+    """
+    from astrid.core.timeline.crud import list_timelines
+    from astrid.core.timeline.defaults import read_project_default
+    from astrid.core.timeline.paths import find_timeline_slug_for_ulid
+
+    default_ulid = read_project_default(project_slug, root=root)
+    if default_ulid is not None:
+        default_slug = find_timeline_slug_for_ulid(project_slug, default_ulid, root=root)
+        if default_slug is not None:
+            return default_ulid, default_slug
+
+    live = list_timelines(project_slug, root=root)
+    if len(live) == 1:
+        return live[0].ulid, live[0].slug
+    if not live:
+        raise ProjectRunError(
+            f"project {project_slug!r} has no live timelines; "
+            f"recovery: python3 -m astrid attach {project_slug} && "
+            "python3 -m astrid timelines create main --default"
+        )
+    choices = ", ".join(row.slug for row in live)
+    raise ProjectRunError(
+        f"project {project_slug!r} has no default timeline and {len(live)} live timelines "
+        f"({choices}); recovery: python3 -m astrid attach {project_slug} && "
+        "python3 -m astrid timelines set-default <slug>"
+    )
+
+
+def _timeline_id_from_parent_run(
+    project_slug: str,
+    parent_run_id: str,
+    *,
+    root: str | Path | None = None,
+) -> str:
+    run_path = paths.run_json_path(project_slug, parent_run_id, root=root)
+    if run_path.is_file():
+        try:
+            parent = validate_run_record(read_json(run_path))
+        except Exception:
+            parent = None
+        if isinstance(parent, dict):
+            timeline_id = parent.get("timeline_id")
+            if isinstance(timeline_id, str) and timeline_id:
+                return timeline_id
+    raise ProjectRunError(
+        f"task run {parent_run_id!r} is missing run.json.timeline_id; "
+        "restart the task run after creating or selecting a timeline"
+    )
+
+
+def _record_contributing_run(
+    project_slug: str,
+    timeline_ulid: str,
+    run_id: str,
+    *,
+    root: str | Path | None = None,
+) -> None:
+    from astrid.core.timeline.crud import record_contributing_run
+
+    record_contributing_run(project_slug, timeline_ulid, run_id, root=root)
 
 
 def finalize_project_run(

@@ -5,11 +5,10 @@
 
     The ``hype.timeline.json`` artifacts produced by the ``cut`` step (and
     consumed by downstream steps like ``refine``, ``render``, ``validate``) are
-    **standalone** Remotion timeline files — they are NOT project-timeline
-    containers (``assembly.json`` / ``assembly.jsonl``).  Migrating the
-    orchestrated cut/hype clip assembly to emit ``clip.*`` events through the
-    project-timeline ``EventLogBackend`` is deferred to **m3.5**
-    (pack/worker write-path sweep)."""
+    Remotion timeline files. Managed TimelineConfig-producing steps emit the
+    same validated raw container to the project timeline as
+    ``timeline.config_replaced``; arrangement-only editor artifacts remain
+    non-container compatibility read models."""
 
 
 from __future__ import annotations
@@ -1337,47 +1336,11 @@ def _apply_trim_deltas_to_arrangement(
         trim_range[0] = float(trim_range[0]) + float(detail.get("trim_delta_start_sec", 0.0))
         trim_range[1] = float(trim_range[1]) + float(detail.get("trim_delta_end_sec", 0.0))
 
-    # Managed path: emit arrangement.replaced through the event gateway
-    # *before* writing the run-local compatibility artifact.
-    if (
-        project_slug is not None
-        and timeline_slug is not None
-        and timeline_event_stream_id is not None
-    ):
-        try:
-            from astrid.core.timeline._edit_helpers import pack_write_gateway
-            from astrid.core.timeline.events.schema import TimelineActor
-
-            actor = TimelineActor(
-                type="system",
-                id="builtin.hype:editor_micro_fix",
-                display="builtin.hype (editor micro-fix)",
-                via=[actor_via] if actor_via is not None else None,
-            )
-            events = [
-                {
-                    "kind": "arrangement.replaced",
-                    "payload": {"arrangement": dict(arrangement)},
-                }
-            ]
-            pack_write_gateway(
-                project_slug=project_slug,
-                timeline_slug=timeline_slug,
-                timeline_ulid="",  # resolved by gateway from slug
-                timeline_event_stream_id=timeline_event_stream_id,
-                events=events,
-                actor=actor,
-            )
-        except Exception as exc:
-            print(
-                f"hype: arrangement.replaced event emission failed"
-                f" (project={project_slug!r}, timeline={timeline_slug!r}): {exc}",
-                file=sys.stderr,
-            )
-
-    # Always persist the run-local artifact for downstream consumers
-    # (cut, render, etc.).  This is a derived compatibility output, not
-    # canonical state — the event stream is the source of truth.
+    # Always persist the run-local arrangement artifact for downstream
+    # consumers.  This function mutates an arrangement read model, not a raw
+    # TimelineConfig container, so it does not emit a canonical timeline event;
+    # managed full-container writes use timeline.config_replaced at the cut,
+    # refine, assemble, and worker TimelineConfig boundaries.
     timeline.save_arrangement(arrangement, path)
 
 

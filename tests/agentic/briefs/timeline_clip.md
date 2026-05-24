@@ -7,11 +7,12 @@ You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
 Exercise the timeline clip edit verbs (`clip.added`, `clip.removed`, `clip.moved`)
 through the canonical `astrid timelines` CLI surface:
 
-1. Create a timeline in `$SLUG` (e.g., `astrid timelines create --name "Clip Test" --slug clip-test`)
-2. Add a visual clip: `astrid timelines clip add --to <timeline> --kind visual --asset-id a1 --clip-id c1`
-3. Remove the clip: `astrid timelines clip remove --from <timeline> --clip-id c1`
-4. Verify the `assembly.jsonl` event log contains `clip.added` and `clip.removed` events
-5. Confirm that running `astrid timelines show <timeline>` (read-only) does NOT add new events
+1. Create a timeline in `$SLUG` (e.g., `astrid timelines create clip-test --name "Clip Test"`)
+2. Add a visual track: `astrid timelines track add clip-test --kind visual --track-id visual --label Visual`
+3. Add a visual clip: `astrid timelines clip add clip-test --kind visual --asset a1 --track visual`
+4. Remove the clip: `astrid timelines clip remove clip-test --clip-id a1`
+5. Verify the `assembly.jsonl` event log contains `clip.added` and `clip.removed` events
+6. Confirm that running `astrid timelines show clip-test` (read-only) does NOT add new events
 
 ## Constraints
 

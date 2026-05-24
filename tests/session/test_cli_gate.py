@@ -176,6 +176,7 @@ def test_allowlist_attach_runs_without_session(
     create_project("demo")
 
     # Seed a default timeline so Sprint 2 resolution works.
+    from astrid import timeline as timeline_contract
     from astrid.core.session.ulid import generate_ulid
 
     timeline_ulid = generate_ulid()
@@ -183,7 +184,7 @@ def test_allowlist_attach_runs_without_session(
     tdir = pdir / "timelines" / timeline_ulid
     tdir.mkdir(parents=True)
     (tdir / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
+        json.dumps(timeline_contract.canonical_empty_timeline()), encoding="utf-8"
     )
     (tdir / "manifest.json").write_text(
         json.dumps(

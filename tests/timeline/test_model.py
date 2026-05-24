@@ -9,11 +9,13 @@ import pytest
 
 from astrid.core.timeline.model import (
     TIMELINE_SCHEMA_VERSION,
-    Assembly,
     Display,
     FinalOutput,
     Manifest,
     TimelineValidationError,
+    read_timeline_config_json,
+    validate_timeline_config_json,
+    write_timeline_config_json,
 )
 from astrid.threads.ids import generate_ulid
 
@@ -44,46 +46,42 @@ def _make_final_output(
 
 
 # ---------------------------------------------------------------------------
-# Assembly
+# Raw TimelineConfig assembly.json helpers
 # ---------------------------------------------------------------------------
 
 
-class TestAssembly:
-    def test_round_trip_to_from_dict(self) -> None:
-        a = Assembly(schema_version=TIMELINE_SCHEMA_VERSION, assembly={"tracks": []})
-        obj = a.to_json_obj()
-        b = Assembly.from_dict(obj)
-        assert b == a
+class TestTimelineConfigJson:
+    def test_validate_returns_raw_config_copy(self) -> None:
+        original = {"tracks": [], "clips": []}
+        config = validate_timeline_config_json(original)
+        assert config == {"tracks": [], "clips": []}
+        assert config is not original
 
     def test_round_trip_write_read(self, tmp_path: Path) -> None:
-        a = Assembly(schema_version=TIMELINE_SCHEMA_VERSION, assembly={"notes": "hello"})
+        config = {"tracks": [], "clips": []}
         path = tmp_path / "assembly.json"
-        a.write(path)
-        b = Assembly.from_json(path)
-        assert b == a
+        written = write_timeline_config_json(path, config)
+        assert written == config
+        assert read_timeline_config_json(path) == config
+        assert json.loads(path.read_text(encoding="utf-8")) == config
 
-    def test_rejects_wrong_schema_version(self) -> None:
-        with pytest.raises(TimelineValidationError, match="schema_version"):
-            Assembly.from_dict({"schema_version": 99, "assembly": {}})
+    def test_rejects_wrapper_shape(self) -> None:
+        with pytest.raises(TimelineValidationError, match="wrapper"):
+            validate_timeline_config_json({
+                "schema_version": 1,
+                "assembly": {"tracks": [], "clips": []},
+            })
 
-    def test_rejects_missing_schema_version(self) -> None:
-        with pytest.raises(TimelineValidationError, match="schema_version"):
-            Assembly.from_dict({"assembly": {}})
+    def test_rejects_missing_tracks_or_clips(self) -> None:
+        with pytest.raises(TimelineValidationError, match="clips"):
+            validate_timeline_config_json({"tracks": []})
 
-    def test_rejects_non_dict_assembly(self) -> None:
-        with pytest.raises(TimelineValidationError, match="assembly"):
-            Assembly.from_dict({"schema_version": 1, "assembly": "not-a-dict"})
+        with pytest.raises(TimelineValidationError, match="tracks"):
+            validate_timeline_config_json({"clips": []})
 
     def test_rejects_non_dict_input(self) -> None:
-        with pytest.raises(TimelineValidationError, match="must be an object"):
-            Assembly.from_dict("not-a-dict")
-
-    def test_equality_is_value_based(self) -> None:
-        a = Assembly(schema_version=1, assembly={"x": 1})
-        b = Assembly(schema_version=1, assembly={"x": 1})
-        assert a == b
-        # Note: frozen=True but contains dict, so __hash__ raises TypeError.
-        # Assembly instances are intentionally not hashable.
+        with pytest.raises(TimelineValidationError, match="JSON object"):
+            validate_timeline_config_json("not-a-dict")
 
 
 # ---------------------------------------------------------------------------
@@ -256,13 +254,13 @@ class TestManifest:
                 }
             )
 
-    def test_contributing_runs_validates_ulids(self) -> None:
+    def test_contributing_runs_validates_run_ids(self) -> None:
         fo = _make_final_output()
-        with pytest.raises(TimelineValidationError, match="timeline ULID"):
+        with pytest.raises(TimelineValidationError, match="run id"):
             Manifest.from_dict(
                 {
                     "schema_version": 1,
-                    "contributing_runs": ["not-a-ulid"],
+                    "contributing_runs": ["not a run id"],
                     "final_outputs": [fo.to_json_obj()],
                     "tombstoned_at": None,
                 }

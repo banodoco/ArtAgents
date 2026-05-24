@@ -490,6 +490,7 @@ def _synthesize_event_descriptor(
                 "payload": {
                     "clip_id": clip.get("id"),
                     "kind": clip.get("kind", clip.get("clipType")),
+                    "track_id": clip.get("track", clip.get("track_id")),
                     "asset_id": clip.get("asset", clip.get("assetId", clip.get("asset_id"))),
                     "position": (
                         {"mode": "index", "index": op_args["position"]}

@@ -10,8 +10,8 @@ Provides:
   backend ref is supplied).
 
 - resolve_pull_destination: pull-specific destination resolution that
-  creates a local home when needed, writes ``assembly.identity.json`` with
-  ``provenance: imported``, and refuses ambiguous destinations before
+  creates a local home when needed, writes ``assembly.identity.json`` plus a
+  raw empty TimelineConfig, and refuses ambiguous destinations before
   performing any writes.
 """
 
@@ -418,6 +418,7 @@ def _create_pull_destination(
     Writes ``assembly.identity.json`` with ``provenance: imported``.
     """
     from uuid import uuid4
+    from astrid import timeline as timeline_contract
     from astrid.core.project.jsonio import write_json_atomic
     from astrid.core.project.schema import utc_now_iso
     from astrid.core.timeline.paths import (
@@ -427,7 +428,6 @@ def _create_pull_destination(
     from astrid.core.timeline.events.schema import EVENT_SCHEMA_VERSION
     from astrid.core.timeline.model import (
         TIMELINE_SCHEMA_VERSION,
-        Assembly,
         Display,
         Manifest,
     )
@@ -457,9 +457,8 @@ def _create_pull_destination(
     identity_path = tdir / "assembly.identity.json"
     write_json_atomic(identity_path, identity)
 
-    # Write minimal assembly and display
-    assembly = Assembly(schema_version=TIMELINE_SCHEMA_VERSION, assembly={})
-    assembly.write(tdir / "assembly.json")
+    # Write a raw empty TimelineConfig, not a legacy wrapper.
+    write_json_atomic(tdir / "assembly.json", timeline_contract.canonical_empty_timeline())
 
     display = Display(
         schema_version=TIMELINE_SCHEMA_VERSION,

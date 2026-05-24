@@ -15,6 +15,7 @@ from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestr
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.project import paths
 from astrid.core.project.project import create_project
+from astrid.core.timeline.crud import create_timeline
 from astrid.packs.builtin.hype import run as hype
 
 
@@ -26,6 +27,7 @@ def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_coll
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
     _clear_thread_env(monkeypatch)
     create_project("demo")
+    create_timeline("demo", "main", is_default=True)
     registry = ExecutorRegistry([_writer_executor("test.writer"), _requires_executor("test.requires"), _skip_executor("test.skip")])
 
     success = run_executor(ExecutorRunRequest("test.writer", out="", project="demo"), registry)
@@ -65,6 +67,7 @@ def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_p
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
     _clear_thread_env(monkeypatch)
     create_project("demo")
+    create_timeline("demo", "main", is_default=True)
     registry = OrchestratorRegistry([_writer_orchestrator("test.orch")])
 
     result = run_orchestrator(OrchestratorRunRequest("test.orch", project="demo"), registry)
@@ -95,6 +98,7 @@ def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
     _clear_thread_env(monkeypatch)
     create_project("demo")
+    create_timeline("demo", "main", is_default=True)
 
     code = hype.main(["--project", "demo", "--target-duration", "1"])
     assert code == 2

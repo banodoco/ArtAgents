@@ -39,6 +39,7 @@ from .events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
+    ClipRetrackedPayload,
     ClipRetimedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
@@ -70,6 +71,59 @@ def _normalise_position(
     )
 
 
+def _load_current_assembly(
+    project_slug: str,
+    slug: str,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    from .crud import show_timeline
+
+    record = show_timeline(project_slug, slug, root=root)
+    if record is None:
+        raise ClipEditError(f"timeline '{slug}' not found in project '{project_slug}'")
+    assembly = record.get("assembly")
+    if not isinstance(assembly, dict):
+        raise ClipEditError(f"timeline '{slug}' has malformed assembly state")
+    return assembly
+
+
+def _require_target_track(
+    assembly: dict[str, Any],
+    *,
+    track_id: str,
+    clip_kind: ClipKind | None = None,
+) -> dict[str, Any]:
+    tracks = assembly.get("tracks")
+    if not isinstance(tracks, list):
+        raise ClipEditError("timeline tracks projection is malformed")
+    for track in tracks:
+        if isinstance(track, dict) and track.get("id") == track_id:
+            track_kind = track.get("kind")
+            if clip_kind is not None:
+                expected_kind = "audio" if clip_kind == "audio" else "visual"
+                if track_kind != expected_kind:
+                    raise ClipEditError(
+                        f"track '{track_id}' is {track_kind!r}; "
+                        f"{clip_kind} clips require a {expected_kind!r} track"
+                    )
+            label = track.get("label")
+            if not isinstance(label, str) or not label.strip():
+                raise ClipEditError(f"track '{track_id}' is missing a non-empty label")
+            return track
+    raise ClipEditError(f"target track '{track_id}' not found")
+
+
+def _require_clip_exists(assembly: dict[str, Any], *, clip_id: str) -> dict[str, Any]:
+    clips = assembly.get("clips")
+    if not isinstance(clips, list):
+        raise ClipEditError("timeline clips projection is malformed")
+    for clip in clips:
+        if isinstance(clip, dict) and clip.get("id") == clip_id:
+            return clip
+    raise ClipEditError(f"clip '{clip_id}' not found")
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -86,6 +140,7 @@ def add_clip(
     *,
     kind: ClipKind,
     asset_id: str,
+    track_id: str | None = None,
     position: ClipPosition | dict[str, Any] | None = None,
     actor: TimelineActor | None = None,
     expected_version: int | None = None,
@@ -99,6 +154,8 @@ def add_clip(
         slug: Timeline slug within the project.
         kind: Clip kind — ``"visual"``, ``"audio"``, or ``"text"``.
         asset_id: Asset identifier for the clip.
+        track_id: Existing track identifier for the clip; defaults to the
+            conventional ``visual``/``audio`` target for API callers.
         position: Where to place the new clip (optional).
         actor: Who performed the action (defaults to a system actor).
         expected_version: Optional CAS guard (enforced in m5).
@@ -111,6 +168,12 @@ def add_clip(
         raise ClipEditError("asset_id must be a non-empty string")
     if kind not in {"visual", "audio", "text"}:
         raise ClipEditError(f"kind must be 'visual', 'audio', or 'text', got {kind!r}")
+    resolved_track_id = track_id or ("audio" if kind == "audio" else "visual")
+    if not isinstance(resolved_track_id, str) or not resolved_track_id.strip():
+        raise ClipEditError("track_id must be a non-empty string")
+    resolved_track_id = resolved_track_id.strip()
+    assembly = _load_current_assembly(project_slug, slug, root=root)
+    _require_target_track(assembly, track_id=resolved_track_id, clip_kind=kind)
 
     pos = _normalise_position(position)
 
@@ -121,6 +184,7 @@ def add_clip(
         ClipAddedPayload(
             clip_id=asset_id,  # asset_id serves as the clip id for now
             kind=kind,
+            track_id=resolved_track_id,
             asset_id=asset_id,
             position=pos,
         ),
@@ -197,6 +261,47 @@ def move_clip(
         timeline_id,
         "clip.moved",
         ClipMovedPayload(clip_id=clip_id, position=pos),
+        actor=act,
+        expected_version=expected_version,
+        txn_id=txn_id,
+    )
+    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
+    return event
+
+
+# ---------------------------------------------------------------------------
+# retrack_clip
+# ---------------------------------------------------------------------------
+
+
+def retrack_clip(
+    project_slug: str,
+    slug: str,
+    *,
+    clip_id: str,
+    track_id: str,
+    actor: TimelineActor | None = None,
+    expected_version: int | None = None,
+    txn_id: str | None = None,
+    root: str | Path | None = None,
+) -> TimelineEvent:
+    """Append a ``clip.retracked`` event for *clip_id*."""
+    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
+
+    if not isinstance(clip_id, str) or not clip_id.strip():
+        raise ClipEditError("clip_id must be a non-empty string")
+    if not isinstance(track_id, str) or not track_id.strip():
+        raise ClipEditError("track_id must be a non-empty string")
+    resolved_track_id = track_id.strip()
+    assembly = _load_current_assembly(project_slug, slug, root=root)
+    _require_clip_exists(assembly, clip_id=clip_id)
+    _require_target_track(assembly, track_id=resolved_track_id)
+
+    act = actor or _default_actor("retrack_clip")
+    event = backend.append_event(
+        timeline_id,
+        "clip.retracked",
+        ClipRetrackedPayload(clip_id=clip_id, track_id=resolved_track_id),
         actor=act,
         expected_version=expected_version,
         txn_id=txn_id,

@@ -36,6 +36,7 @@ from astrid.packs.builtin.refine.src.reviewers.speaker_flow import SpeakerFlowRe
 from astrid.packs.builtin.refine.src.reviewers.visual_quality import VisualQualityReviewer
 from astrid.domains.hype.text_match import segments_in_range, token_set_similarity, tokenize
 from ....timeline import (
+    canonical_timeline_config,
     is_all_generative_arrangement,
     load_arrangement,
     load_metadata,
@@ -554,10 +555,10 @@ def _flag_entry(finding: enriched_arrangement.ReviewerFinding) -> dict[str, Any]
 
 
 def _emit_refine_managed_events(
-    args: argparse.Namespace, arrangement: dict[str, Any],
+    args: argparse.Namespace, config: dict[str, Any],
     *, actor_via: Any | None = None,
 ) -> int:
-    """Emit arrangement.replaced event through the pack write gateway.
+    """Emit timeline.config_replaced event through the pack write gateway.
 
     Called when refine runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written, preserving the
@@ -578,10 +579,11 @@ def _emit_refine_managed_events(
         display="builtin.refine",
         via=[actor_via] if actor_via is not None else None,
     )
+    validated_config = canonical_timeline_config(config)
     events = [
         {
-            "kind": "arrangement.replaced",
-            "payload": {"arrangement": dict(arrangement)},
+            "kind": "timeline.config_replaced",
+            "payload": {"config": validated_config},
         }
     ]
     result = pack_write_gateway(
@@ -600,14 +602,6 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
     managed = _is_managed_mode(args)
     if not is_all_generative_arrangement(enriched.arrangement, enriched.pool):
         validate_arrangement_duration_window(enriched.arrangement)
-    # m3.5 managed mode: emit events through the gateway before writing
-    # compatibility outputs.
-    if managed:
-        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
-
-        actor_via_raw = getattr(args, "actor_via", None)
-        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
-        _emit_refine_managed_events(args, dict(enriched.arrangement), actor_via=actor_via)
     save_arrangement(enriched.arrangement, args.arrangement, set(pool_entries))
     compiled_plan = compile_arrangement_plan(enriched.arrangement, enriched.pool)
     provenance = dict(prior_meta.get("pipeline", {}).get("pool_provenance", {}) or {})
@@ -641,6 +635,15 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
     )
     if isinstance(prior_timeline, dict) and isinstance(prior_timeline.get("theme_overrides"), dict):
         rebuilt.setdefault("theme_overrides", prior_timeline["theme_overrides"])
+    canonical_timeline_config(rebuilt)
+    # m3.5 managed mode: emit events through the gateway before writing
+    # compatibility outputs.
+    if managed:
+        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
+
+        actor_via_raw = getattr(args, "actor_via", None)
+        actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
+        _emit_refine_managed_events(args, rebuilt, actor_via=actor_via)
     save_timeline(rebuilt, args.timeline)
     save_metadata(metadata, args.metadata)
     clips_by_order = {int(clip_id.rsplit("_", 1)[-1]): dict(clip_meta) for clip_id, clip_meta in metadata.get("clips", {}).items() if clip_id.startswith("clip_a_")}

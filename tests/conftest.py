@@ -137,6 +137,7 @@ def seed_project() -> Callable[[Path, str], Path]:
     """Return a callable that seeds the shared session project fixture shape."""
 
     def _seed_project(projects_root: Path, slug: str) -> Path:
+        from astrid import timeline as timeline_contract
         from astrid.core.session.ulid import generate_ulid
 
         pdir = projects_root / slug
@@ -146,7 +147,7 @@ def seed_project() -> Callable[[Path, str], Path]:
         tdir = pdir / "timelines" / timeline_ulid
         tdir.mkdir(parents=True, exist_ok=True)
         (tdir / "assembly.json").write_text(
-            json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
+            json.dumps(timeline_contract.canonical_empty_timeline()), encoding="utf-8"
         )
         (tdir / "manifest.json").write_text(
             json.dumps(

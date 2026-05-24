@@ -7,6 +7,7 @@ asserted as observable).
 from __future__ import annotations
 
 import io
+import json
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -18,6 +19,7 @@ from _lifecycle_fixtures import bind_writer_session, setup_packs_and_compile  # 
 
 from astrid.core.task.lifecycle import cmd_abort, cmd_runs_ls, cmd_start
 from astrid.core.project.project import create_project
+from astrid.core.timeline.crud import create_timeline
 
 
 _BODY_A = '''from astrid.orchestrate import orchestrator, code
@@ -33,9 +35,22 @@ def app(): return [code("b1", argv=["echo","b1"])]
 
 def _start_one(packs: Path, projects: Path, qid: str, project: str, run_id: str) -> None:
     create_project(project, root=projects, exist_ok=True)
+    if not (projects / project / "timelines").exists():
+        timeline = create_timeline(project, "main", is_default=True, root=projects)
+    else:
+        timeline = None
     bind_writer_session(projects, project)
     with redirect_stdout(io.StringIO()):
-        cmd_start([qid, "--project", project, "--name", run_id], packs_root=packs, projects_root=projects)
+        rc = cmd_start([qid, "--project", project, "--name", run_id], packs_root=packs, projects_root=projects)
+    assert rc == 0
+    run_record = json.loads((projects / project / "runs" / run_id / "run.json").read_text(encoding="utf-8"))
+    assert isinstance(run_record["timeline_id"], str)
+    if timeline is not None:
+        assert run_record["timeline_id"] == timeline["ulid"]
+        manifest = json.loads(
+            (projects / project / "timelines" / timeline["ulid"] / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert run_id in manifest["contributing_runs"]
 
 
 def _abort_one(projects: Path, project: str) -> None:
@@ -97,3 +112,17 @@ def test_runs_ls_project_filter(tmp_path: Path) -> None:
     out = buf.getvalue()
     assert "alpha" in out and "r1" in out
     assert "beta" not in out and "r2" not in out
+
+
+def test_start_without_live_timeline_fails_with_recovery(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    packs, projects = setup_packs_and_compile(tmp_path, "demo", "appA", _BODY_A, "demo.appA")
+    create_project("empty", root=projects, exist_ok=True)
+    bind_writer_session(projects, "empty")
+
+    rc = cmd_start(["demo.appA", "--project", "empty", "--name", "r1"], packs_root=packs, projects_root=projects)
+
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "no live timelines" in captured.err
+    assert "timelines create main --default" in captured.err
+    assert not (projects / "empty" / "runs" / "r1" / "run.json").exists()

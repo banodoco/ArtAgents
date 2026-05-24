@@ -56,6 +56,7 @@ import pytest
 # Repo-root path for stand-alone CLI invocation.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lifecycle_fixtures import bind_writer_session  # noqa: E402
+from astrid.core.timeline.crud import create_timeline  # noqa: E402
 
 from astrid.core.task import gate as _gate_mod
 from astrid.core.task import lifecycle as _lifecycle_mod
@@ -384,6 +385,7 @@ def _placeholder_substitution_observably_flipped(tmp_path: Path) -> bool:
     projects_root = tmp_path / "projects-c3"
     projects_root.mkdir()
     create_project("p3", root=projects_root, exist_ok=True)
+    create_timeline("p3", "main", root=projects_root, is_default=True)
     bind_writer_session(projects_root, "p3")
     rc = cmd_start(
         ["builtin.agent_probe", "--project", "p3", "--name", "r3"],

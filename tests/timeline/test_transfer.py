@@ -115,12 +115,12 @@ class TestTransferLoop:
         # Append events to source
         src_backend.append_event(
             src_tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         src_backend.append_event(
             src_tid, "clip.added",
-            {"clip_id": "c2", "kind": "audio", "asset_id": "a2"},
+            {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2"},
             actor=_ACTOR,
         )
         src_backend.append_event(
@@ -195,7 +195,7 @@ class TestTransferLoop:
 
         src_backend.append_event(
             src_tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -274,7 +274,7 @@ class TestTransferLoop:
         for i in range(3):
             src_backend.append_event(
                 src_tid, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 
@@ -405,7 +405,7 @@ class TestSupabaseFakeTransfer:
         # Append events to source
         src_backend.append_event(
             src_tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         src_backend.append_event(
@@ -476,7 +476,7 @@ class TestSupabaseFakeTransfer:
 
         src_backend.append_event(
             src_tid, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -545,7 +545,7 @@ class TestSupabaseFakeTransfer:
         for i in range(3):
             src_backend.append_event(
                 src_tid, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 

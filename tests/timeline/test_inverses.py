@@ -34,6 +34,7 @@ from astrid.core.timeline.events.schema import (
     ThemeOverriddenPayload,
     ThemeSetPayload,
     TimelineActor,
+    TimelineConfigReplacedPayload,
     TimelineEvent,
     TrackAddedPayload,
     TrackRemovedPayload,
@@ -71,7 +72,7 @@ def _make_event(kind: str, payload: object) -> TimelineEvent:
         # clip.added → clip.removed
         (
             "clip.added",
-            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
             {"clips": []},
             {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1"}]},
             "clip.removed",
@@ -175,7 +176,7 @@ def _make_event(kind: str, payload: object) -> TimelineEvent:
         # track.added → track.removed
         (
             "track.added",
-            TrackAddedPayload(track_id="t1", kind="visual"),
+            TrackAddedPayload(track_id="t1", kind="visual", label="Track 1"),
             {"tracks": []},
             {"tracks": [{"id": "t1", "kind": "visual"}]},
             "track.removed",
@@ -251,6 +252,14 @@ def _make_event(kind: str, payload: object) -> TimelineEvent:
             {"arrangement": {"clips": [{"id": "c1"}]}},
             {"arrangement": {"clips": [{"id": "c2"}]}},
             "arrangement.replaced",
+        ),
+        # timeline.config_replaced -> timeline.config_replaced with prior config
+        (
+            "timeline.config_replaced",
+            TimelineConfigReplacedPayload(config={"tracks": [], "clips": []}),
+            {"tracks": [{"id": "v1", "kind": "visual", "label": "Video"}], "clips": []},
+            {"tracks": [], "clips": []},
+            "timeline.config_replaced",
         ),
     ],
 )
@@ -365,11 +374,11 @@ def test_plan_inverses_walk_sequence():
     """plan_inverses walks a sequence and produces one inverse per event."""
     e1 = _make_event(
         "clip.added",
-        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
     )
     e2 = _make_event(
         "track.added",
-        TrackAddedPayload(track_id="t1", kind="visual"),
+        TrackAddedPayload(track_id="t1", kind="visual", label="Track 1"),
     )
     e3 = _make_event(
         "pool.asset_added",
@@ -392,7 +401,7 @@ def test_plan_inverses_mixed_reversible_non_reversible():
     """plan_inverses handles mixed reversible and non-reversible events."""
     e1 = _make_event(
         "clip.added",
-        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
     )
     e2 = _make_event("timeline.deleted", {})
 
@@ -407,7 +416,7 @@ def test_plan_inverses_with_erased_event():
     """plan_inverses handles erased events in sequence."""
     e1 = _make_event(
         "clip.added",
-        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
     )
     erased = ErasedPayload(
         erased=True,
@@ -433,7 +442,7 @@ def test_plan_inverse_is_pure():
     """plan_inverse is a pure function — same inputs, same outputs."""
     event = _make_event(
         "clip.added",
-        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
     )
     before = {"clips": []}
     after = {"clips": [{"id": "c1"}]}
@@ -450,11 +459,11 @@ def test_plan_inverses_is_pure():
     """plan_inverses is a pure function — same inputs, same outputs."""
     e1 = _make_event(
         "clip.added",
-        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+        ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
     )
     e2 = _make_event(
         "track.added",
-        TrackAddedPayload(track_id="t1", kind="visual"),
+        TrackAddedPayload(track_id="t1", kind="visual", label="Track 1"),
     )
 
     r1 = plan_inverses([e1, e2])
