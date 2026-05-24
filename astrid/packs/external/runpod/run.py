@@ -251,6 +251,7 @@ def _build_pod_handle(
     image: str,
     container_disk_gb: int,
     volume_in_gb: int,
+    storage_name: str | None,
     network_volume_id: Any,
     ports: str | None,
 ) -> dict[str, Any]:
@@ -269,6 +270,7 @@ def _build_pod_handle(
             "image": image,
             "container_disk_in_gb": container_disk_gb,
             "volume_in_gb": volume_in_gb,
+            "storage_name": storage_name,
             "network_volume_id": network_volume_id,
             "ports": ports or "8888/http,22/tcp",
         },
@@ -347,7 +349,7 @@ def _load_handle_and_config(handle_path: Path) -> tuple[dict[str, Any], Any]:
         api_key=api_key,
         gpu_type=handle.get("gpu_type", "NVIDIA GeForce RTX 4090"),
         container_disk_gb=snap.get("container_disk_in_gb", 200),
-        storage_name=snap.get("network_volume_id"),
+        storage_name=snap.get("storage_name") or snap.get("network_volume_id"),
         ssh_public_key=os.environ.get("RUNPOD_SSH_PUBLIC_KEY"),
         ssh_private_key=os.environ.get("RUNPOD_SSH_PRIVATE_KEY"),
         ssh_public_key_path=os.environ.get("RUNPOD_SSH_PUBLIC_KEY_PATH"),
@@ -433,6 +435,7 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
         image=image,
         container_disk_gb=container_disk_gb,
         volume_in_gb=config.disk_size_gb,
+        storage_name=storage_name,
         network_volume_id=pod._storage_volume,
         ports=ports,
     )
@@ -728,6 +731,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
             image=image,
             container_disk_gb=container_disk_gb,
             volume_in_gb=config.disk_size_gb,
+            storage_name=storage_name,
             network_volume_id=pod._storage_volume,
             ports=ports,
         )

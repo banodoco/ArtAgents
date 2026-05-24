@@ -102,6 +102,7 @@ _CONFIG_SNAPSHOT_REQUIRED_KEYS = {
     "image",
     "container_disk_in_gb",
     "volume_in_gb",
+    "storage_name",
     "network_volume_id",
     "ports",
 }
@@ -220,7 +221,8 @@ def test_pod_handle_builder_keeps_durable_and_transient_shapes_compatible() -> N
         image="runpod/pytorch:latest",
         container_disk_gb=200,
         volume_in_gb=200,
-        network_volume_id=None,
+        storage_name="astrid-storage",
+        network_volume_id="vol-storage",
         ports=None,
     )
     session_handle = _build_pod_handle(
@@ -235,12 +237,18 @@ def test_pod_handle_builder_keeps_durable_and_transient_shapes_compatible() -> N
         image="runpod/pytorch:latest",
         container_disk_gb=200,
         volume_in_gb=200,
-        network_volume_id=None,
+        storage_name="astrid-storage",
+        network_volume_id="vol-storage",
         ports=None,
     )
 
     assert list(provision_handle) == list(session_handle)
     assert list(provision_handle["config_snapshot"]) == list(session_handle["config_snapshot"])
+    assert provision_handle["config_snapshot"]["storage_name"] == "astrid-storage"
+    assert session_handle["config_snapshot"]["storage_name"] == "astrid-storage"
+    assert "project" not in provision_handle
+    assert "run_id" not in provision_handle
+    assert "handle_path" not in provision_handle
     _assert_pod_handle_shape(provision_handle)
 
 
@@ -283,6 +291,7 @@ def test_provision_writes_pod_handle_and_cost(
             assert handle_path.is_file(), "pod_handle.json not written"
             handle = json.loads(handle_path.read_text())
             _assert_pod_handle_shape(handle)
+            assert handle["config_snapshot"]["storage_name"] is None
 
             # Verify cost.json
             cost_path = produces_dir / "cost.json"
@@ -363,6 +372,45 @@ def test_provision_named_storage_missing_fails_before_launch_without_creation(
     err = capsys.readouterr().err
     assert "missing-volume" in err
     assert ENSURE_STORAGE_HINT in err
+
+
+def test_provision_configured_storage_name_is_recorded_in_canonical_handle(
+    produces_dir: Path,
+    mock_launch: MagicMock,
+    mock_pod: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provision persists the configured storage name, not only the volume id."""
+    from astrid.packs.external.runpod.run import cmd_provision
+
+    class Args:
+        gpu_type = "NVIDIA GeForce RTX 4090"
+        storage_name = "astrid-storage"
+        require_storage = False
+        max_runtime_seconds = None
+        name_prefix = None
+        image = None
+        container_disk_gb = None
+        datacenter_id = None
+        ports = None
+        produces_dir = produces_dir
+
+    mock_pod._storage_volume = "vol-astrid-storage"
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
+
+    with patch("runpod_lifecycle.launch", mock_launch), \
+         patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value={"id": "vol-astrid-storage"})), \
+         patch("runpod_lifecycle.RunPodConfig", MagicMock()):
+        exit_code = cmd_provision(Args(), produces_dir)
+
+    assert exit_code == 0
+    handle = json.loads((produces_dir / "pod_handle.json").read_text(encoding="utf-8"))
+    _assert_pod_handle_shape(handle)
+    assert handle["config_snapshot"]["storage_name"] == "astrid-storage"
+    assert handle["config_snapshot"]["network_volume_id"] == "vol-astrid-storage"
+    assert "project" not in handle
+    assert "run_id" not in handle
+    assert "handle_path" not in handle
 
 
 def test_session_storage_required_fails_before_launch_with_ensure_storage_hint(
@@ -850,7 +898,10 @@ def test_session_transient_handle_exists_during_detached_exec_and_is_removed_aft
     async def ship_and_assert_handle(*args, **kwargs):
         handle_path = produces_dir / "pod_handle.json"
         assert handle_path.is_file()
-        _assert_pod_handle_shape(json.loads(handle_path.read_text(encoding="utf-8")))
+        handle = json.loads(handle_path.read_text(encoding="utf-8"))
+        _assert_pod_handle_shape(handle)
+        assert handle["config_snapshot"]["storage_name"] == "astrid-storage"
+        assert handle["config_snapshot"]["network_volume_id"] == "vol-astrid-storage"
         return result
 
     ship = AsyncMock(side_effect=ship_and_assert_handle)
@@ -858,16 +909,19 @@ def test_session_transient_handle_exists_during_detached_exec_and_is_removed_aft
     import os
 
     os.environ["RUNPOD_API_KEY"] = "test-key-rpa_0000000000000000000000000000000000000000000000"
+    mock_pod._storage_volume = "vol-astrid-storage"
     try:
         with patch("runpod_lifecycle.launch", mock_launch), \
              patch("runpod_lifecycle.get_pod", AsyncMock(return_value=mock_pod)), \
+             patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value={"id": "vol-astrid-storage"})), \
              patch("runpod_lifecycle.ship_and_run_detached", ship), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
             from astrid.packs.external.runpod.run import cmd_session
 
             class Args:
                 gpu_type = None
-                storage_name = None
+                storage_name = "astrid-storage"
+                require_storage = False
                 max_runtime_seconds = None
                 name_prefix = None
                 image = None
