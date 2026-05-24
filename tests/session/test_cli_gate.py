@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
-from contextlib import redirect_stderr, redirect_stdout
 
 import pytest
 
@@ -88,13 +88,15 @@ def test_unbound_next_prints_discovery_hint(
     never an error; it always tells the agent the single next action.
     """
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc, stdout, _stderr = _run_pipeline(["next", "--project", "demo"])
+    rc, stdout, stderr = _run_pipeline(["next", "--project", "demo"])
     assert rc == 0
-    assert "no session bound" in stdout
-    assert "astrid attach demo" in stdout
+    assert stderr == ""
+    assert "session bound to 'demo', but no active task run" in stdout
+    assert "astrid start <orchestrator-id> --project demo" in stdout
 
-    rc2, stdout2, _stderr2 = _run_pipeline(["next"])
+    rc2, stdout2, stderr2 = _run_pipeline(["next"])
     assert rc2 == 0
+    assert stderr2 == ""
     assert "no session bound" in stdout2
     assert "astrid attach" in stdout2
 
@@ -106,8 +108,9 @@ def test_allowlist_status_runs_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc, stdout, _stderr = _run_pipeline(["status"])
+    rc, stdout, stderr = _run_pipeline(["status"])
     assert rc == 0
+    assert stderr == ""
     assert "no session bound" in stdout
 
 
@@ -157,8 +160,9 @@ def test_allowlist_attach_runs_without_session(
     proj["default_timeline_id"] = timeline_ulid
     write_json_atomic(pp, proj)
 
-    rc, stdout, _stderr = _run_pipeline(["attach", "demo"])
+    rc, stdout, stderr = _run_pipeline(["attach", "demo"])
     assert rc == 0
+    assert stderr == "Using default timeline: primary. Use --timeline to override.\n"
     assert "export ASTRID_SESSION_ID=" in stdout
 
 
@@ -167,11 +171,8 @@ def test_allowlist_projects_ls_runs_without_session(
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, _stdout, stderr = _run_pipeline(["projects", "ls"])
-    # `projects ls` may not exist as a sub-verb in this repo; the gate is
-    # what we're testing, NOT the underlying command. Both 0 and non-zero
-    # exit codes are fine — the only forbidden outcome is the gate
-    # rejecting the verb.
-    assert "no session bound" not in stderr
+    assert rc == 0
+    assert stderr == ""
 
 
 def test_allowlist_projects_default_runs_without_session(
@@ -180,32 +181,36 @@ def test_allowlist_projects_default_runs_without_session(
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, _stdout, stderr = _run_pipeline(["projects", "default"])
     assert rc == 0
-    assert "no session bound" not in stderr
+    assert stderr == ""
 
 
 def test_allowlist_projects_create_runs_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc, _stdout, stderr = _run_pipeline(["projects", "create", "demo"])
+    rc, stdout, stderr = _run_pipeline(["projects", "create", "demo"])
     assert rc == 0
-    assert "no session bound" not in stderr
+    assert stderr == ""
+    assert "created: demo" in stdout
 
 
 def test_allowlist_sessions_ls_runs_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc, _stdout, _stderr = _run_pipeline(["sessions", "ls"])
+    rc, stdout, stderr = _run_pipeline(["sessions", "ls"])
     assert rc == 0
+    assert stderr == ""
+    assert stdout == "no sessions\n"
 
 
 def test_allowlist_help_runs_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc, stdout, _stderr = _run_pipeline(["--help"])
+    rc, stdout, stderr = _run_pipeline(["--help"])
     assert rc == 0
+    assert stderr == ""
     assert "Astrid command gateway" in stdout
 
 
@@ -234,10 +239,10 @@ def test_author_test_with_project_bypasses_gate(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    # The `author test` command itself may fail (missing pack), but the
-    # session gate MUST NOT be what fails it. We accept any non-2 'no
-    # session bound' outcome.
-    rc, _stdout, stderr = _run_pipeline(["author", "test", "pack.thing", "--project", "demo"])
+    rc, stdout, stderr = _run_pipeline(["author", "test", "pack.thing", "--project", "demo"])
+    assert rc == 2
+    assert stdout == ""
+    assert "astrid author test: error: the following arguments are required: --fixture" in stderr
     assert "no session bound" not in stderr
 
 

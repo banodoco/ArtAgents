@@ -5,62 +5,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from astrid.core.util.secrets import candidate_env_files, read_env_value
+
 
 DEFAULT_FUNCTION_NAME = "reigh-data-fetch"
 
 
 def _read_env_value(env_path: Path, key: str) -> str:
-    if not env_path.is_file():
-        return ""
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        if line.startswith("export "):
-            line = line[len("export ") :].strip()
-        env_key, env_value = line.split("=", 1)
-        if env_key.strip() == key:
-            return env_value.strip().strip('"').strip("'")
-    return ""
+    return read_env_value(env_path, key)
 
 
 def _candidate_env_files(env_file: Path | None = None) -> list[Path]:
-    candidates: list[Path] = []
-    if env_file is not None:
-        candidates.append(env_file)
-    repo_root = Path(__file__).resolve().parents[3]
-    workspace = repo_root.parent
-    candidates.extend(
-        [
-            Path.cwd() / "this.env",
-            Path.cwd() / ".env.local",
-            Path.cwd() / ".env",
-            repo_root / "this.env",
-            repo_root / ".env.local",
-            repo_root / ".env",
-            workspace / "this.env",
-            workspace / ".env.local",
-            workspace / ".env",
-            workspace / "reigh-app" / "this.env",
-            workspace / "reigh-app" / ".env.local",
-            workspace / "reigh-app" / ".env",
-            Path.home() / "this.env",
-            Path.home() / ".env.local",
-            Path.home() / ".env",
-            Path.home() / ".codex" / "this.env",
-            Path.home() / ".codex" / ".env.local",
-            Path.home() / ".codex" / ".env",
-        ]
-    )
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        unique.append(resolved)
-    return unique
+    return candidate_env_files(env_file, profile="reigh")
 
 
 def _env_first(keys: tuple[str, ...], env_file: Path | None = None) -> str:
@@ -198,4 +154,3 @@ def resolve_jwks_url(jwks_url: str | None = None, env_file: Path | None = None) 
 
     base = resolve_supabase_url(env_file=env_file)
     return f"{base}/auth/v1/.well-known/jwks.json"
-

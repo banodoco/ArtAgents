@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Literal
+
+EnvSearchProfile = Literal["default", "reigh"]
 
 
-def _read_env_value(env_path: Path, key: str) -> str:
+def read_env_value(env_path: Path, key: str) -> str:
     if not env_path.is_file():
         return ""
     for raw in env_path.read_text(encoding="utf-8").splitlines():
@@ -21,38 +24,56 @@ def _read_env_value(env_path: Path, key: str) -> str:
     return ""
 
 
-def _candidate_env_files(env_file: Path | None) -> list[Path]:
+def candidate_env_files(
+    env_file: Path | None = None,
+    *,
+    profile: EnvSearchProfile = "default",
+) -> list[Path]:
     candidates: list[Path] = []
     if env_file is not None:
         candidates.append(env_file)
     repo_root = Path(__file__).resolve().parents[2]
     workspace = repo_root.parent
-    candidates.extend(
-        [
-            Path.cwd() / "this.env",
-            Path.cwd() / ".env",
-            Path(__file__).resolve().parent / "this.env",
-            Path(__file__).resolve().parent / ".env",
-            repo_root / "this.env",
-            repo_root / ".env",
-            workspace / "this.env",
-            workspace / ".env",
-            workspace / "reigh-app" / "this.env",
-            workspace / "reigh-app" / ".env",
-            workspace / "reigh-worker" / "this.env",
-            workspace / "reigh-worker" / ".env",
-            workspace / "reigh-worker-orchestrator" / "this.env",
-            workspace / "reigh-worker-orchestrator" / ".env",
-            Path.home() / "this.env",
-            Path.home() / ".env",
-            Path.home() / ".codex" / "this.env",
-            Path.home() / ".codex" / ".env",
-            Path.home() / ".claude" / "this.env",
-            Path.home() / ".claude" / ".env",
-            Path.home() / ".hermes" / "this.env",
-            Path.home() / ".hermes" / ".env",
-        ]
-    )
+    if profile == "reigh":
+        names = ("this.env", ".env.local", ".env")
+        candidates.extend(
+            [
+                Path.cwd() / name
+                for name in names
+            ]
+        )
+        candidates.extend(repo_root / name for name in names)
+        candidates.extend(workspace / name for name in names)
+        candidates.extend(workspace / "reigh-app" / name for name in names)
+        candidates.extend(Path.home() / name for name in names)
+        candidates.extend(Path.home() / ".codex" / name for name in names)
+    else:
+        candidates.extend(
+            [
+                Path.cwd() / "this.env",
+                Path.cwd() / ".env",
+                Path(__file__).resolve().parent / "this.env",
+                Path(__file__).resolve().parent / ".env",
+                repo_root / "this.env",
+                repo_root / ".env",
+                workspace / "this.env",
+                workspace / ".env",
+                workspace / "reigh-app" / "this.env",
+                workspace / "reigh-app" / ".env",
+                workspace / "reigh-worker" / "this.env",
+                workspace / "reigh-worker" / ".env",
+                workspace / "reigh-worker-orchestrator" / "this.env",
+                workspace / "reigh-worker-orchestrator" / ".env",
+                Path.home() / "this.env",
+                Path.home() / ".env",
+                Path.home() / ".codex" / "this.env",
+                Path.home() / ".codex" / ".env",
+                Path.home() / ".claude" / "this.env",
+                Path.home() / ".claude" / ".env",
+                Path.home() / ".hermes" / "this.env",
+                Path.home() / ".hermes" / ".env",
+            ]
+        )
     seen: set[Path] = set()
     unique: list[Path] = []
     for candidate in candidates:
@@ -61,6 +82,14 @@ def _candidate_env_files(env_file: Path | None) -> list[Path]:
             seen.add(resolved)
             unique.append(resolved)
     return unique
+
+
+def _read_env_value(env_path: Path, key: str) -> str:
+    return read_env_value(env_path, key)
+
+
+def _candidate_env_files(env_file: Path | None = None) -> list[Path]:
+    return candidate_env_files(env_file)
 
 
 def load_api_key(name: str, env_file: Path | None = None) -> str:
@@ -79,9 +108,9 @@ def load_api_key(name: str, env_file: Path | None = None) -> str:
     if key := os.environ.get(name, "").strip():
         return key
     tried: list[str] = [f"{name} environment variable"]
-    for candidate in _candidate_env_files(env_file):
+    for candidate in candidate_env_files(env_file):
         tried.append(str(candidate))
-        if key := _read_env_value(candidate, name):
+        if key := read_env_value(candidate, name):
             return key
     raise SystemExit(f"{name} not found. Tried: {', '.join(tried)}")
 

@@ -5,6 +5,6 @@ version: 0.1.0
 description: "Coordinate asset ingestion and assembly into a trailer."
 kind: external
 runtime:
-  type: python-cli
-  entrypoint: run.py
-  callable: main
+  kind: python
+  module: run
+  function: main

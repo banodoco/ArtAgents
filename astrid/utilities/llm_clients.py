@@ -10,9 +10,11 @@ import mimetypes
 import os
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
+
+from astrid.core.util.secrets import candidate_env_files, read_env_value
+from astrid.core.util.time import utc_now_seconds
 
 
 _IMAGE_BLOCK_ALLOWED_KEYS = frozenset({"type", "source", "cache_control"})
@@ -54,7 +56,7 @@ def _materialize_message_images(messages: list[dict[str, Any]]) -> list[dict[str
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return utc_now_seconds()
 
 
 def _jsonable(value: Any) -> Any:
@@ -198,60 +200,11 @@ class GeminiClient(Protocol):
 
 
 def _read_env_value(env_path: Path, key: str) -> str:
-    if not env_path.is_file():
-        return ""
-    for line in env_path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
-            continue
-        if stripped.startswith("export "):
-            stripped = stripped[len("export ") :].strip()
-        env_key, env_value = stripped.split("=", 1)
-        if env_key.strip() == key:
-            return env_value.strip().strip('"').strip("'")
-    return ""
+    return read_env_value(env_path, key)
 
 
 def _candidate_env_files(env_file: Path | None) -> list[Path]:
-    repo_root = Path(__file__).resolve().parents[1]
-    workspace = repo_root.parent
-    candidates: list[Path] = []
-    if env_file is not None:
-        candidates.append(env_file)
-    candidates.extend(
-        [
-            Path.cwd() / "this.env",
-            Path.cwd() / ".env",
-            Path(__file__).resolve().parent / "this.env",
-            Path(__file__).resolve().parent / ".env",
-            repo_root / "this.env",
-            repo_root / ".env",
-            workspace / "this.env",
-            workspace / ".env",
-            workspace / "reigh-app" / "this.env",
-            workspace / "reigh-app" / ".env",
-            workspace / "reigh-worker" / "this.env",
-            workspace / "reigh-worker" / ".env",
-            workspace / "reigh-worker-orchestrator" / "this.env",
-            workspace / "reigh-worker-orchestrator" / ".env",
-            Path.home() / "this.env",
-            Path.home() / ".env",
-            Path.home() / ".codex" / "this.env",
-            Path.home() / ".codex" / ".env",
-            Path.home() / ".claude" / "this.env",
-            Path.home() / ".claude" / ".env",
-            Path.home() / ".hermes" / "this.env",
-            Path.home() / ".hermes" / ".env",
-        ]
-    )
-    seen: set[Path] = set()
-    unique: list[Path] = []
-    for candidate in candidates:
-        resolved = candidate.expanduser().resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(resolved)
-    return unique
+    return candidate_env_files(env_file)
 
 
 def _load_api_key(env_file: Path | None, key: str) -> str:

@@ -1,0 +1,28 @@
+{
+  "artifact_kind": "sprint_1_handoff_snapshot_manifest",
+  "generated_at": "2026-05-24T04:21:25+02:00",
+  "projects_root": "/Users/peteromalley/Documents/reigh-workspace/astrid-projects",
+  "repo_root": "/Users/peteromalley/Documents/reigh-workspace/Astrid",
+  "snapshot": {
+    "path": "/private/tmp/astrid-snapshots/astrid-state-20260524-042125.tar.gz",
+    "sha256": "19c565d09bba44cb03be5c4652fc79baddf589df4bd40b000c250e4dbebc7b22",
+    "committed_to_repo": false,
+    "reason_not_committed": "Snapshot contains extracted project artifacts and debug payloads; only checksum and coverage proof are committed."
+  },
+  "coverage": {
+    "stable_roots_present": [
+      "projects/",
+      "repo/"
+    ],
+    "projects_root_examples": [
+      "projects/smoke/runs/01KRY9PEFNTEQGSK8RY3KKZ6HM/audit/ledger.jsonl",
+      "projects/smoke/runs/01KRY9PEFNTEQGSK8RY3KKZ6HM/hype.plan.json",
+      "projects/smoke/runs/01KRY9PR201APVMXKFJX32VEP0/_llm_debug/index.jsonl"
+    ],
+    "repo_root_rollback_subset": [
+      "repo/.astrid/threads.json"
+    ],
+    "variant_sidecars_present": []
+  },
+  "inventory_csv": "docs/reshape/artifacts/sprint-1-handoff-inventory.csv"
+}

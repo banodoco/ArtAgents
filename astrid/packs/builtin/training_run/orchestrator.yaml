@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "builtin.training_run",
   "name": "Training Run",
   "kind": "built_in",

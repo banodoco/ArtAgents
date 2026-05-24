@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "builtin.human_review",
   "name": "Human Review",
   "kind": "built_in",

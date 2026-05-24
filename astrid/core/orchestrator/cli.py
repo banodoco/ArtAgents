@@ -12,14 +12,16 @@ from typing import Any
 
 from astrid.core._search import (
     SearchRecord,
-    search as run_search,
     short_description_or_truncated,
+)
+from astrid.core._search import (
+    search as run_search,
 )
 from astrid.core.dirty import detect_local_edits
 from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
 from astrid.core.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
-from astrid.core.update import update_check, update_apply
+from astrid.core.update import update_apply, update_check
 
 from .registry import OrchestratorRegistry, load_default_registry
 from .schema import OrchestratorDefinition, OrchestratorValidationError, to_capability_handle
@@ -231,16 +233,16 @@ version: 0.1.0
 description: \"TODO: describe what this orchestrator does.\"
 
 runtime:
-  type: python-cli
-  entrypoint: run.py
-  callable: main
+  kind: python
+  module: run
+  function: main
 """
 
 _RUN_PY_TEMPLATE = """\
 \"\"\"{qualified_id} — orchestrator runtime entrypoint.
 
 Implement your orchestrator logic here. The function named ``main`` (or
-whatever you set for ``runtime.callable`` in the manifest) is the entrypoint.
+whatever you set for ``runtime.function`` in the manifest) is the entrypoint.
 \"\"\"
 
 

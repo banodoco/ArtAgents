@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from astrid.core.util.time import utc_now_milliseconds
+
 # ---------------------------------------------------------------------------
 # Pinned GPU pricing fallback (USD/hr).
 # Used when the RunPod pricing API is unreachable.
@@ -46,7 +48,7 @@ _PRICING_TABLE: dict[str, float] = {
 
 def _utc_now_iso() -> str:
     """Return current UTC timestamp in ISO 8601 with milliseconds."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return utc_now_milliseconds()
 
 
 def _get_hourly_rate(api_key: str, gpu_type) -> float:

@@ -9,11 +9,11 @@ used to produce updated copies (e.g. when WriterContext auto-rebinds the
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core.util.time import utc_now_iso
 
 SessionRole = Literal["writer", "reader", "orphan-pending"]
 _ALLOWED_ROLES: tuple[SessionRole, ...] = ("writer", "reader", "orphan-pending")
@@ -24,7 +24,7 @@ class SessionValidationError(ValueError):
 
 
 def now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 @dataclass(frozen=True)

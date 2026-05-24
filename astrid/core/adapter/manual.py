@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.task.plan import CostEntry, Step
+from astrid.core.util.time import utc_now_milliseconds
 
 
 def _step_dir(run_ctx: RunContext) -> Path:
@@ -23,7 +23,7 @@ def _step_dir(run_ctx: RunContext) -> Path:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return utc_now_milliseconds()
 
 
 # Inbox completion-entry contract — parity with the ack identity contract:

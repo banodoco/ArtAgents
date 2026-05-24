@@ -22,9 +22,10 @@ import fcntl
 import hashlib
 import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from astrid.core.util.time import utc_now_iso
 
 ZERO_HASH = "sha256:" + "0" * 64
 
@@ -715,7 +716,7 @@ def _event_hash(prev_hash: str, event: dict[str, Any]) -> str:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 def _read_tail_hash(handle) -> str:

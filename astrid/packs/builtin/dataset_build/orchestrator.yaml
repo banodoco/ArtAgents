@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "builtin.dataset_build",
   "name": "Dataset Build",
   "kind": "built_in",

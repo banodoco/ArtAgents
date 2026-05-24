@@ -1,0 +1,23 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+include = [
+    "scripts/reshape/**/*.py",
+    "tests/reshape/**/*.py",
+    "tests/concurrency/two_tab_harness.py",
+    "tests/concurrency/test_two_tab_harness_smoke.py",
+]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["scripts/reshape"]
+follow_imports = "skip"
+ignore_missing_imports = true
+namespace_packages = true
+explicit_package_bases = true
+pretty = true
+show_error_codes = true
+warn_unused_configs = true

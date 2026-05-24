@@ -14,13 +14,13 @@ import dataclasses
 import hashlib
 import json
 import shlex
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
 from astrid.core.project.paths import project_dir
 from astrid.core.task.active_run import read_active_run
+from astrid.core.task.cas import intern, link_into_produces
 from astrid.core.task.env import (
     apply_task_run_env,
     is_author_test_mode,
@@ -47,28 +47,24 @@ from astrid.core.task.events import (
     make_step_dispatched_event,
     make_step_failed_event,
     read_events,
-    verify_chain,
 )
-from astrid.core.task.cas import intern, link_into_produces
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     AckRule,
-    CostEntry,
     ProducesEntry,
+    RepeatForEach,
+    RepeatUntil,
     Step,
+    TaskPlan,
+    compute_plan_hash,
     is_attested_kind,
     is_code_kind,
     is_group_step,
     iter_steps_with_path,
-    RepeatForEach,
-    RepeatUntil,
-    TaskPlan,
-    compute_plan_hash,
     load_plan,
     parse_from_ref,
     step_dir_for_path,
 )
-
 
 ITERATE_FEEDBACK_PREFIX = "iterate_feedback="
 
@@ -1320,8 +1316,13 @@ def match_attested_command(incoming: str, expected_prefix: str) -> tuple[bool, A
             continue
         remaining.append(token)
         i += 1
+    try:
+        expected_tokens = shlex.split(expected_prefix)
+    except ValueError:
+        return False, AttestedArgs(agent=agent, actor=actor, evidence=tuple(evidence), item=item)
     rejoined = " ".join(shlex.quote(token) for token in remaining)
-    matched = rejoined == expected_prefix
+    expected = " ".join(shlex.quote(token) for token in expected_tokens)
+    matched = rejoined == expected
     return matched, AttestedArgs(agent=agent, actor=actor, evidence=tuple(evidence), item=item)
 
 

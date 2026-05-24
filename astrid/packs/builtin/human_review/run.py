@@ -237,9 +237,9 @@ def _normalize_decision(value: Any) -> str:
 
 
 def _now_iso() -> str:
-    from datetime import UTC, datetime
+    from astrid.core.util.time import utc_now_iso
 
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | None,

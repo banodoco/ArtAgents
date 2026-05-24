@@ -16,24 +16,12 @@ from uuid import uuid4
 
 import pytest
 
-# Register the performance_smoke marker so pytest does not warn.
-pytest.mark.performance_smoke = pytest.mark.performance_smoke
-
-
-def pytest_configure(config: pytest.Config) -> None:
-    config.addinivalue_line(
-        "markers",
-        "performance_smoke: lightweight smoke test for performance (loose thresholds, CI-safe)",
-    )
-
-
 from astrid.core.project.schema import utc_now_iso
 from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
 from astrid.core.timeline.eventlog.types import (
     EventLogError,
     EventLogIdempotentError,
     EventLogStaleVersionError,
-    EventLogVerification,
     TimelineVersionConflict,
 )
 from astrid.core.timeline.events.schema import (

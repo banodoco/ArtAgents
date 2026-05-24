@@ -9,7 +9,6 @@ guard_canonical_entrypoint('builtin.event_talks')
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
 from pathlib import Path
@@ -20,7 +19,6 @@ from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 from astrid.core.task.events import append_event
 from astrid.core.project.run import (
-    ProjectRunError,
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
@@ -340,8 +338,6 @@ def _exec_render_manifest(args: argparse.Namespace) -> int:
     can proceed.  Full ffmpeg/Remotion rendering may be restored in a
     follow-up.
     """
-    import shutil
-
     manifest: Path = args.manifest
     out_dir: Path = getattr(args, "out_dir", args.out) if hasattr(args, "out_dir") else args.out
 
@@ -367,17 +363,9 @@ def _exec_render_manifest(args: argparse.Namespace) -> int:
 
 def _probe_duration(video: Path) -> float:
     """Return video duration in seconds via ffprobe."""
-    import subprocess as sp
-    result = sp.run(
-        [
-            "ffprobe", "-v", "error", "-show_entries",
-            "format=duration", "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video),
-        ],
-        capture_output=True, text=True, check=True,
-    )
-    return float(result.stdout.strip())
+    from astrid.core.util.media import ffprobe_duration_seconds
+
+    return ffprobe_duration_seconds(video)
 
 
 def _coalesce_hit_intervals(

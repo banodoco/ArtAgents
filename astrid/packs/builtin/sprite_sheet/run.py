@@ -31,12 +31,10 @@ from astrid.packs.builtin.generate_image_openai.run import (
     GPT_IMAGE_2_MAX_RATIO,
     GPT_IMAGE_2_MIN_PIXELS,
     _call_image_api,
-    _candidate_env_files,
     _die,
-    _read_env_value,
     _validate_payload,
 )
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
 
 EDIT_API_URL = "https://api.openai.com/v1/images/edits"
 DEFAULT_KEY_COLOR = "#ff00ff"

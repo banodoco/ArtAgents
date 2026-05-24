@@ -20,12 +20,13 @@ import csv
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
 from ..asset_cache import run as asset_cache
 from ....audit import AuditContext
+from astrid.core.util.time import utc_now_seconds
 from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
 from ....theme_schema import load_theme, theme_root
 from ...._paths import PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT
@@ -273,13 +274,9 @@ def probe_asset(path: Path | str) -> dict[str, Any]:
     }
 
 def probe_video_duration(video_path: Path) -> float:
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(result.stdout.strip())
+    from astrid.core.util.media import ffprobe_duration_seconds
+
+    return ffprobe_duration_seconds(video_path)
 
 def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
     asset_paths: dict[str, Path] = {}
@@ -845,7 +842,7 @@ def build_metadata_from_arrangement(
         steps_run.insert(-1, "arrange")
     return {
         "version": METADATA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_at": utc_now_seconds(),
         "pipeline": {
             "steps_run": steps_run,
             "tool_versions": _tool_fingerprints(PACKAGE_ROOT),
@@ -1001,7 +998,7 @@ def build_resume_metadata(
     sources = {key: dict(value) for key, value in prior_sources.items()} if isinstance(prior_sources, dict) else {}
     return {
         "version": METADATA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_at": utc_now_seconds(),
         "pipeline": {
             "steps_run": ["cut"],
             "tool_versions": {"cut.py": "sprint3"},

@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "id": "builtin.youtube_audio",
   "name": "YouTube Audio",
   "kind": "built_in",

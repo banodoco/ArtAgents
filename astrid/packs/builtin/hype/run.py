@@ -506,22 +506,9 @@ def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
 
 
 def probe_audio_duration(path: Path | str) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(result.stdout.strip())
+    from astrid.core.util.media import ffprobe_duration_seconds
+
+    return ffprobe_duration_seconds(path)
 
 
 def _arrange_target_duration(args: argparse.Namespace) -> float | None:

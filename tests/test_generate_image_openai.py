@@ -6,6 +6,8 @@ import pytest
 
 from astrid.core.util.secrets import load_api_key
 from astrid.packs.builtin.generate_image_openai.run import main
+from astrid.packs.builtin.sprite_sheet.run import load_fal_key
+from astrid.packs.builtin.transcribe.run import load_api_key as load_transcribe_api_key
 from astrid.utilities.llm_clients import _load_api_key
 
 
@@ -69,3 +71,22 @@ def test_llm_client_key_loader_reads_this_env(monkeypatch, tmp_path):
     (tmp_path / "this.env").write_text("ANTHROPIC_API_KEY=from-this-env\n", encoding="utf-8")
 
     assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-this-env"
+
+
+def test_packs_that_used_generate_image_env_helpers_read_shared_env(monkeypatch, tmp_path):
+    env_file = tmp_path / "keys.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "OPENAI_API_KEY=from-openai",
+                "FAL_KEY=from-fal",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.delenv("FAL_API_KEY", raising=False)
+
+    assert load_transcribe_api_key(env_file) == "from-openai"
+    assert load_fal_key(env_file) == "from-fal"

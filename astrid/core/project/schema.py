@@ -11,10 +11,11 @@ survives.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import UUID
+
+from astrid.core.util.time import utc_now_seconds
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id
 
@@ -30,7 +31,7 @@ class ProjectValidationError(ValueError):
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return utc_now_seconds()
 
 
 def build_project(
