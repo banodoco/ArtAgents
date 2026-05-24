@@ -118,6 +118,9 @@ pytest, pinned hype regression smoke, two-tab harness smoke, and a broad pytest
 subset that excludes known unrelated baseline failures. Ruff is intentionally
 scoped in `pyproject.toml` to Sprint 0 Python surfaces; the pre-existing
 repository-wide Ruff backlog is not part of Sprint 0.
+On GitHub Actions, the broad pytest subset also excludes tests that require
+uncommitted local fixtures, real FAL credentials, ffprobe, or the sibling
+timeline-composition checkout.
 
 Pack validation passed:
 
