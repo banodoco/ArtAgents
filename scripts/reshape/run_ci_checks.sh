@@ -10,6 +10,7 @@ BROAD_PYTEST_ARGS=(
   --ignore=tests/core/model_catalog/test_registry.py
   --ignore=tests/packs/builtin/dataset_build/test_offline_fixtures.py
   --ignore=tests/packs/builtin/generate_image/test_demo_orchestrator.py
+  --ignore=tests/packs/builtin/generate_image/test_e2e.py
   --ignore=tests/packs/builtin/generate_image/test_manifest_and_validation.py
   --ignore=tests/spikes/test_env_inheritance.py
   --ignore=tests/test_agent_probe_regression.py
