@@ -84,25 +84,25 @@ def cmd_skip(
     parser.add_argument(
         "--agent",
         default=None,
-        help="agent id (mutually exclusive with --actor); defaults to 'cli' when neither given",
+        help="agent id (mutually exclusive with --human); defaults to 'cli' when neither given",
     )
     parser.add_argument(
-        "--actor",
+        "--human",
         default=None,
-        help="actor name (mutually exclusive with --agent)",
+        help="human name (mutually exclusive with --agent)",
     )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    if args.agent is not None and args.actor is not None:
-        _print_err("skip: --agent and --actor are mutually exclusive")
+    if sum(value is not None for value in (args.agent, args.human)) > 1:
+        _print_err("skip: --agent and --human are mutually exclusive")
         return 1
     if args.agent is not None:
         actor_kind, actor_id = "agent", args.agent
-    elif args.actor is not None:
-        actor_kind, actor_id = "actor", args.actor
+    elif args.human is not None:
+        actor_kind, actor_id = "human", args.human
     else:
         actor_kind, actor_id = "agent", "cli"
 
@@ -128,6 +128,8 @@ def cmd_skip(
 
     plan = load_plan(plan_path)
     events = read_events(events_path)
+    from astrid.core.task.plan_verbs import apply_mutations
+    plan = apply_mutations(plan, events)
 
     step, path_tuple = _resolve_frontier_step(plan, events)
     if step is None:
@@ -175,6 +177,7 @@ def cmd_skip(
             actor_kind=actor_kind,
             actor_id=actor_id,
             reason=args.reason,
+            step_version=step.version,
         )
     else:
         event = make_step_skipped_event(
@@ -182,6 +185,7 @@ def cmd_skip(
             actor_kind=actor_kind,
             actor_id=actor_id,
             reason=args.reason,
+            step_version=step.version,
         )
 
     try:

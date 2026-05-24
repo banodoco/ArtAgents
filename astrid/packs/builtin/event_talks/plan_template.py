@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
 from typing import Any
 
+from astrid.core.orchestrator.plan_template import (
+    build_leaf_template,
+    build_plan_template,
+    cost_entry,
+    emit_plan_json,
+    file_output,
+)
 
 def build_plan_v2(
     *,
@@ -31,85 +37,36 @@ def build_plan_v2(
     cmd_holding = _build_holding_cmd(python_exec, run_root, source)
     cmd_render = _build_render_cmd(python_exec, run_root)
 
-    plan: dict[str, Any] = {
-        "plan_id": plan_id,
-        "version": 2,
-        "steps": [
-            {
-                "id": "ados-sunday-template",
-                "adapter": "local",
-                "command": cmd_ados,
-                "produces": {
-                    "template_output": {
-                        "path": "ados-sunday-template.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "search-transcript",
-                "adapter": "local",
-                "command": cmd_search,
-                "produces": {
-                    "search_output": {
-                        "path": "search-results.txt",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "find-holding-screens",
-                "adapter": "local",
-                "command": cmd_holding,
-                "produces": {
-                    "holding_output": {
-                        "path": "holding-screens.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "render",
-                "adapter": "local",
-                "command": cmd_render,
-                "produces": {
-                    "render_output": {
-                        "path": "render-manifest.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
+    local_zero = cost_entry(0, source="local")
+    return build_plan_template(
+        plan_id=plan_id,
+        steps=[
+            build_leaf_template(
+                "ados-sunday-template",
+                command=cmd_ados,
+                produces=[file_output("template_output", "ados-sunday-template.json")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "search-transcript",
+                command=cmd_search,
+                produces=[file_output("search_output", "search-results.txt")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "find-holding-screens",
+                command=cmd_holding,
+                produces=[file_output("holding_output", "holding-screens.json")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "render",
+                command=cmd_render,
+                produces=[file_output("render_output", "render-manifest.json")],
+                cost=local_zero,
+            ),
         ],
-    }
-    return plan
-
-
-def emit_plan_json(plan: dict[str, Any], path: str | Path) -> None:
-    """Write a plan dict as canonical JSON to *path*."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(plan, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    path.write_text(payload, encoding="utf-8")
+    )
 
 
 def _build_ados_cmd(python_exec: str, run_root: Path) -> str:

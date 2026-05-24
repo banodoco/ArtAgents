@@ -69,7 +69,6 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo done",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},

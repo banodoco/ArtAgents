@@ -69,7 +69,6 @@ def cost_fixture(tmp_projects_root: Path) -> dict:
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo ok",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},

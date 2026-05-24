@@ -22,6 +22,8 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 from astrid.core.task.plan import (
     TaskPlanError,
+    is_legacy_repeat_until_condition,
+    parse_repeat_until_expression,
     _strip_astrid_prefix,
     load_plan,
 )
@@ -35,9 +37,8 @@ class OrchestrateDefinitionError(Exception):
 _RESERVED_ATTRS = frozenset(
     {"id", "kind", "command", "argv", "plan", "produces", "repeat", "instructions", "ack"}
 )
-_VALID_UNTIL = frozenset({"user_approves", "verifier_passes", "quorum"})
 _VALID_ON_EXHAUST = frozenset({"escalate", "fail"})
-_VALID_ACK_KINDS = frozenset({"agent", "actor"})
+_VALID_ACK_KINDS = frozenset({"agent", "human"})
 
 
 @dataclass(frozen=True)
@@ -202,13 +203,14 @@ def _step_to_dict(
     _visiting: set,
 ) -> dict:
     if step.kind == "code":
-        out: dict = {"id": step.id, "kind": "code", "command": step.command}
+        out: dict = {"id": step.id, "adapter": "local", "command": step.command}
     elif step.kind == "attested":
         out = {
             "id": step.id,
-            "kind": "attested",
+            "adapter": "manual",
             "command": step.command,
             "instructions": step.instructions,
+            "requires_ack": True,
             "ack": dict(step.ack or {}),
         }
     elif step.kind == "nested":
@@ -239,12 +241,10 @@ def _step_to_dict(
                 f"qualified id string, got {type(nested_plan).__name__}"
             )
         # Flatten the nested sub-plan into ``children`` so the compiled plan
-        # satisfies the v2 validator (which requires either ``command`` or
-        # ``children``). The ``plan`` field is preserved for audit/debug.
+        # satisfies the v2 collapsed schema.
         out = {
             "id": step.id,
-            "kind": "nested",
-            "plan": child_payload,
+            "adapter": "local",
             "children": list(child_payload.get("steps", [])),
         }
     else:
@@ -386,7 +386,7 @@ def _normalize_ack(ack: Any, step_id: str) -> dict:
         kind = ack["kind"]
     else:
         raise OrchestrateDefinitionError(
-            f"attested step {step_id!r} ack must be 'agent', 'actor', or "
+            f"attested step {step_id!r} ack must be 'agent', 'human', or "
             f"a dict with 'kind'; got {type(ack).__name__}"
         )
     if kind not in _VALID_ACK_KINDS:
@@ -496,11 +496,15 @@ def repeat_until(
     on_exhaust: str,
     quorum_n: Optional[int] = None,
 ) -> _RepeatUntilSpec:
-    if condition not in _VALID_UNTIL:
+    if not isinstance(condition, str) or not condition:
         raise OrchestrateDefinitionError(
-            f"repeat_until condition must be one of {sorted(_VALID_UNTIL)}, "
-            f"got {condition!r}"
+            f"repeat_until condition must be a non-empty string, got {condition!r}"
         )
+    if not is_legacy_repeat_until_condition(condition):
+        try:
+            parse_repeat_until_expression(condition)
+        except TaskPlanError as exc:
+            raise OrchestrateDefinitionError(f"invalid repeat_until expression: {exc}") from exc
     if not isinstance(max_iterations, int) or isinstance(max_iterations, bool) or max_iterations < 1:
         raise OrchestrateDefinitionError(
             f"repeat_until max_iterations must be an int >= 1, got {max_iterations!r}"

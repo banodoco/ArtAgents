@@ -36,20 +36,19 @@ from astrid.core.project.current_run import (
     write_current_run,
 )
 from astrid.core.session.lease import (
-    read_lease,
     release_writer_lease,
     write_lease_init,
 )
 from astrid.core.session.writer import writer_context_for_project
+from astrid.core.task.claim import active_claims_by_step
 from astrid.core.task.env import task_actor_env
 from astrid.core.task.events import (
     EventLogError,
     _run_is_complete,
+    make_plan_initialized_event,
     make_run_aborted_event,
     make_run_completed_event,
     make_run_started_event,
-    make_step_awaiting_fetch_event,
-    make_step_completed_event,
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
@@ -67,6 +66,7 @@ from astrid.core.task.plan import (
     load_plan,
     step_dir_for_path,
 )
+from astrid.core.task.plan_verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.timeline.crud import record_contributing_run
 from astrid.core.timeline.defaults import read_project_default
@@ -85,7 +85,7 @@ FIRST COMMAND (Sprint 1 / T15)
 
 RECOVERY COMMANDS
 - See next legal action:    astrid next --project {slug}
-- Acknowledge attested:     astrid ack <step> --project {slug} --decision approve [--agent <id> | --actor <name>]
+- Acknowledge attested:     astrid ack <step> --project {slug} --decision approve [--agent <id> | --human <name>]
 - View run state:           astrid status --project {slug}
 - End the run:              astrid abort --project {slug}
 - Take over a stuck run:    astrid sessions takeover <run-id|session-id>
@@ -112,7 +112,7 @@ INBOX SURFACE
 - Consume-on-next: astrid next reads inbox/, validates each file against
   the current cursor, and appends a step_attested / item_attested /
   cursor_rewind / run_aborted event before computing the next step.
-- Agent attestations only — actor-ack steps must use `astrid ack` (the
+- Agent attestations only — human-ack steps must use `astrid ack` (the
   inbox file would be quarantined to inbox/.rejected/ otherwise).
 - WARNING: `astrid next` is state-mutating when inbox/ has files.
 """
@@ -253,7 +253,7 @@ def cmd_start(
     write_json_atomic(plan_path, compiled_payload)
 
     try:
-        load_plan(plan_path)
+        plan = load_plan(plan_path)
     except Exception as exc:
         _print_err(f"start: compiled plan failed validation: {exc}")
         return 1
@@ -315,8 +315,10 @@ def cmd_start(
 
     events_path = run_dir / "events.jsonl"
     actor = task_actor_env()
+    started_by = f"human:{actor}" if actor else None
     with writer_context_for_project(slug, root=projects_root) as writer:
-        writer.append(make_run_started_event(run_id, plan_hash, actor=actor))
+        writer.append(make_plan_initialized_event(run_id, plan.to_dict(), plan_hash))
+        writer.append(make_run_started_event(run_id, plan_hash, started_by=started_by))
 
     agent_md = _AGENT_MD_TEMPLATE.format(
         preamble=PROHIBITION_PREAMBLE,
@@ -498,8 +500,9 @@ def cmd_status(
     plan_path = proj_root / "plan.json"
     events_path = proj_root / "runs" / run_id / "events.jsonl"
 
-    plan = load_plan(plan_path)
     events = read_events(events_path)
+    plan = apply_mutations(load_plan(plan_path), events)
+    claims = active_claims_by_step(events)
     peek = peek_current_step(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
@@ -525,6 +528,9 @@ def cmd_status(
         if peek.step.produces:
             names = ", ".join(p.name for p in peek.step.produces)
             print(f"produces:  {names}")
+        claimed_identity = claims.get(path_str)
+        if peek.step.assignee != "system" or claimed_identity is not None:
+            print(f"owner:     {_format_claim_line(step=peek.step, claimed_identity=claimed_identity)}")
 
     pending = pending_count(proj_root / "runs" / run_id)
     if pending > 0:
@@ -647,10 +653,35 @@ def _format_schema_requirements(step) -> str:
     return "\n".join(lines)
 
 
-def _format_ack_template(
-    *, path_str: str, slug: str, ack_kind: str, has_repeat_for_each: bool
+def _identity_parts(identity: str | None) -> tuple[str, str] | None:
+    if identity is None:
+        return None
+    if identity.startswith("agent:") and len(identity) > len("agent:"):
+        return "agent", identity[len("agent:"):]
+    if identity.startswith("human:") and len(identity) > len("human:"):
+        return "human", identity[len("human:"):]
+    return None
+
+
+def _ack_identity_token(
+    *, step, ack_kind: str, claimed_identity: str | None
 ) -> str:
-    identity = "--agent <id>" if ack_kind == "agent" else "--actor <name>"
+    claimed = _identity_parts(claimed_identity)
+    assignee = _identity_parts(getattr(step, "assignee", None))
+    if claimed is not None and claimed[0] == ack_kind:
+        return f"--{claimed[0]} {claimed[1]}"
+    if assignee is not None and assignee[0] == ack_kind:
+        return f"--{assignee[0]} {assignee[1]}"
+    return "--agent <id>" if ack_kind == "agent" else "--human <name>"
+
+
+def _format_ack_template(
+    *, path_str: str, slug: str, step, claimed_identity: str | None, has_repeat_for_each: bool
+) -> str:
+    ack_kind = step.ack.kind if step.ack is not None else "agent"
+    identity = _ack_identity_token(
+        step=step, ack_kind=ack_kind, claimed_identity=claimed_identity
+    )
     base = (
         f"astrid ack {path_str} --project {slug} --decision approve "
         f"{identity} [--evidence path ...]"
@@ -660,9 +691,18 @@ def _format_ack_template(
     return base
 
 
+def _format_claim_line(*, step, claimed_identity: str | None) -> str:
+    parts = [f"assignee: {getattr(step, 'assignee', 'system')}"]
+    if claimed_identity is not None:
+        parts.append(f"claimed: {claimed_identity}")
+    return "  ".join(parts)
+
+
 def _find_step_by_path(plan, path_tuple):
-    """Walk a TaskPlan to find the step at ``path_tuple`` (descending NestedStep
-    children). Returns the step or None if the path does not resolve.
+    """Walk a TaskPlan to find the step at ``path_tuple``.
+
+    Descends through group-step children and returns None if the path does not
+    resolve.
     """
     if not path_tuple:
         return None
@@ -1294,8 +1334,9 @@ def cmd_next(
         except (TaskRunGateError, OSError, EventLogError):
             continue
 
-    plan = load_plan(plan_path)
     events = read_events(events_path)
+    plan = apply_mutations(load_plan(plan_path), events)
+    claims = active_claims_by_step(events)
     peek = peek_current_step(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
@@ -1432,6 +1473,7 @@ def cmd_next(
         return 0
 
     path_str = STEP_PATH_SEP.join(peek.path_tuple)
+    claimed_identity = claims.get(path_str)
 
     _render_kwargs = dict(
         projects_root=projects_root,
@@ -1441,6 +1483,10 @@ def cmd_next(
         item_id=peek.item_id,
         iteration=peek.iteration,
     )
+
+    if peek.step.assignee != "system" or claimed_identity is not None:
+        print(_format_claim_line(step=peek.step, claimed_identity=claimed_identity))
+        print()
 
     if is_code_kind(peek.step):
         print(f"run: {render_step_instructions(peek.step.command, **_render_kwargs)}")
@@ -1486,12 +1532,13 @@ def cmd_next(
             _format_ack_template(
                 path_str=path_str,
                 slug=slug,
-                ack_kind=(peek.step.ack.kind if peek.step.ack is not None else "agent"),
+                step=peek.step,
+                claimed_identity=claimed_identity,
                 has_repeat_for_each=host_has_for_each,
             )
         )
     else:
-        # Defensive: peek_current_step should never surface a NestedStep.
+        # Defensive: peek_current_step should never surface a group step.
         _print_err(f"next: unexpected step kind {type(peek.step).__name__}")
         return 1
 
@@ -1504,7 +1551,7 @@ def cmd_next(
                 slug,
                 run_id,
                 peek.path_tuple,
-                step_version=1,
+                step_version=peek.step.version,
                 iteration=prev_iter,
                 root=projects_root,
             )
@@ -1672,194 +1719,15 @@ def cmd_step_retry_fetch(
     *,
     projects_root: Optional[Path] = None,
 ) -> int:
-    """Retry artifact fetch for a step in ``awaiting_fetch`` state."""
-    from astrid.core.adapter.remote_artifact_fetch import fetch_artifacts
-    from astrid.core.task.plan_verbs import apply_mutations
-    from astrid.core.task.plan import iter_steps_with_path
+    """Reject the deferred remote-artifact retry-fetch surface."""
+    from astrid.core.adapter.remote_artifact import REMOTE_ARTIFACT_DEFERRAL
 
-    parser = argparse.ArgumentParser(prog="astrid step retry-fetch", add_help=True)
-    parser.add_argument("step_id", help="step id (e.g. transcribe, render)")
-    parser.add_argument("--run", default=None, dest="run_id", help="run id")
-    parser.add_argument("--project", default=None, help="project slug")
-    try:
-        args = parser.parse_args(list(argv))
-    except SystemExit as exc:
-        return _system_exit_code(exc)
-
-    if args.project is not None:
-        try:
-            slug = validate_project_slug(args.project)
-        except Exception as exc:
-            _print_err(f"step retry-fetch: {exc}")
-            return 1
-    else:
-        _print_err("step retry-fetch: --project is required")
-        return 1
-
-    if args.run_id is not None:
-        try:
-            run_id = validate_run_id(args.run_id)
-        except Exception as exc:
-            _print_err(f"step retry-fetch: --run {exc}")
-            return 1
-    else:
-        current = read_current_run(slug, root=projects_root)
-        if current is None:
-            _print_err(
-                f"step retry-fetch: no active run for project {slug!r} "
-                f"and --run not specified"
-            )
-            return 1
-        run_id = current
-
-    proj_root = project_dir(slug, root=projects_root)
-    run_dir = proj_root / "runs" / run_id
-    if not run_dir.is_dir():
-        _print_err(
-            f"step retry-fetch: run {run_id!r} not found in project {slug!r}"
-        )
-        return 1
-
-    events_path = run_dir / "events.jsonl"
-    if not events_path.is_file():
-        _print_err(
-            f"step retry-fetch: no events.jsonl for run {run_id!r}"
-        )
-        return 1
-
-    events = read_events(events_path)
-    if not events:
-        _print_err(
-            f"step retry-fetch: empty events log for run {run_id!r}"
-        )
-        return 1
-
-    step_id = args.step_id
-    latest_event = _latest_event_for_step(events, step_id)
-    if latest_event is None:
-        _print_err(
-            f"step retry-fetch: no events found for step {step_id!r} "
-            f"in run {run_id!r}"
-        )
-        return 1
-
-    latest_kind = latest_event.get("kind")
-
-    if latest_kind == "step_completed":
-        _print_err(
-            f"step retry-fetch: step {step_id!r} is already completed"
-        )
-        return 0
-
-    if latest_kind == "step_failed":
-        _print_err(
-            f"step retry-fetch: step {step_id!r} is failed, not awaiting_fetch"
-        )
-        return 1
-
-    if latest_kind != "step_awaiting_fetch":
-        _print_err(
-            f"step retry-fetch: step {step_id!r} is in state "
-            f"{latest_kind!r}, expected awaiting_fetch"
-        )
-        return 1
-
-    plan_path = proj_root / "plan.json"
-    if not plan_path.is_file():
-        _print_err(
-            f"step retry-fetch: plan.json not found for project {slug!r}"
-        )
-        return 1
-
-    plan = load_plan(plan_path)
-    effective = apply_mutations(plan, events)
-
-    target_step: Step | None = None
-    target_path: tuple[str, ...] = ()
-    for path_tuple, s in iter_steps_with_path(effective):
-        if s.id == step_id and target_step is None:
-            target_step = s
-            target_path = path_tuple
-
-    if target_step is None:
-        _print_err(
-            f"step retry-fetch: step {step_id!r} not found in effective plan"
-        )
-        return 1
-
-    step_version = target_step.version
-
-    from astrid.core.adapter import RunContext
-
-    run_ctx = RunContext(
-        slug=slug,
-        run_id=run_id,
-        project_root=proj_root,
-        plan_step_path=target_path,
-        step_version=step_version,
-    )
-
-    fetch_result = fetch_artifacts(target_step, run_ctx)
-
-    if fetch_result.status == "completed":
-        path_str = STEP_PATH_SEP.join(target_path)
-        with writer_context_for_project(slug, root=projects_root) as writer:
-            writer.append(
-                make_step_completed_event(
-                    path_str,
-                    0,
-                    adapter="remote-artifact",
-                )
-            )
-        print(f"step {step_id}: all artifacts fetched")
-
-        events_after = read_events(events_path)
-        plan_after = load_plan(plan_path)
-        if _run_is_complete(plan_after, events_after):
-            with writer_context_for_project(slug, root=projects_root) as writer:
-                writer.append(make_run_completed_event(run_id))
-            print(f"run {run_id}: completed")
-        return 0
-
-    if fetch_result.status == "awaiting_fetch":
-        path_str = STEP_PATH_SEP.join(target_path)
-        with writer_context_for_project(slug, root=projects_root) as writer:
-            writer.append(
-                make_step_awaiting_fetch_event(
-                    path_str,
-                    missing=list(fetch_result.missing),
-                    mismatched=list(fetch_result.mismatched),
-                    reason=fetch_result.reason,
-                    adapter="remote-artifact",
-                )
-            )
-        _print_err(
-            f"step {step_id}: still awaiting_fetch: "
-            f"missing={fetch_result.missing}, mismatched={fetch_result.mismatched}"
-        )
-        return 1
-
-    _print_err(f"step retry-fetch: fetch failed: {fetch_result.reason}")
+    _print_err(f"step retry-fetch: {REMOTE_ARTIFACT_DEFERRAL}")
     return 1
 
 
-def _latest_event_for_step(
-    events: list[dict[str, Any]],
-    step_id: str,
-) -> dict[str, Any] | None:
-    """Return the latest event whose leaf step id matches *step_id*."""
-    latest: dict[str, Any] | None = None
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        path_list = ev.get("plan_step_path")
-        if isinstance(path_list, list) and path_list and path_list[-1] == step_id:
-            latest = ev
-    return latest
-
-
-from astrid.core.task.lifecycle_ack import cmd_ack  # noqa: E402
-from astrid.core.task.lifecycle_skip import cmd_skip  # noqa: E402
+from astrid.core.task.lifecycle_ack import cmd_ack  # noqa: E402,F401
+from astrid.core.task.lifecycle_skip import cmd_skip  # noqa: E402,F401
 
 __all__ = [
     "cmd_abort",

@@ -24,10 +24,10 @@ LEGACY_FIXTURE_PLAN: dict = {
     "plan_id": "p1",
     "version": 2,
     "steps": [
-        {"id": "s1", "kind": "code", "adapter": "local", "command": "echo one", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
+        {"id": "s1", "adapter": "local", "command": "echo one", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
         {
             "id": "s2",
-            "kind": "attested",
+                    "requires_ack": True,
             "adapter": "manual",
             "command": "ack --project demo --step s2",
             "instructions": "review",
@@ -36,15 +36,14 @@ LEGACY_FIXTURE_PLAN: dict = {
         },
         {
             "id": "s3",
-            "kind": "group",
             "adapter": "local",
-            "children": [{"id": "c1", "kind": "code", "adapter": "local", "command": "echo c1", "cost": {"amount": 0, "currency": "USD", "source": "local"}}],
+            "children": [{"id": "c1", "adapter": "local", "command": "echo c1", "cost": {"amount": 0, "currency": "USD", "source": "local"}}],
             "cost": {"amount": 0, "currency": "USD", "source": "local"},
         },
     ],
 }
 # V2 frozen hash computed after Sprint 5b v1→v2 fixture migration.
-FROZEN_LEGACY_HASH = "sha256:5436253677a6d349d75d42eec6d58c480b8bddbfccc781c3d274ce3dcf297eab"
+FROZEN_LEGACY_HASH = "sha256:f603765e9381706695112f2143fb13b37accc5bdc563b7d643284e6658bb3ccf"
 
 
 def _setup_run(tmp_projects_root: Path, plan: dict, *, slug: str = "demo", run_id: str = "run-1") -> Path:
@@ -66,7 +65,6 @@ def test_code_produces_check_fails_rewinds_cursor(tmp_projects_root: Path) -> No
         "steps": [
             {
                 "id": "step-1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo go",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -121,7 +119,6 @@ def test_code_produces_check_passes_advances(tmp_projects_root: Path) -> None:
         "steps": [
             {
                 "id": "step-1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo go",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -132,7 +129,7 @@ def test_code_produces_check_passes_advances(tmp_projects_root: Path) -> None:
                     }
                 },
             },
-            {"id": "step-2", "kind": "code", "adapter": "local", "command": "echo two", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
+            {"id": "step-2", "adapter": "local", "command": "echo two", "cost": {"amount": 0, "currency": "USD", "source": "local"}},
         ],
     }
     _setup_run(tmp_projects_root, plan)
@@ -171,7 +168,7 @@ def test_attested_sentinel_only_check_rejected_at_load(tmp_path: Path) -> None:
             "steps": [
                 {
                     "id": "s1",
-                    "kind": "attested",
+                    "requires_ack": True,
                     "adapter": "manual",
                     "command": "ack --project demo --step s1",
                     "instructions": "review",
@@ -201,7 +198,7 @@ def test_attested_with_all_of_semantic_check_accepts(tmp_path: Path) -> None:
             "steps": [
                 {
                     "id": "s1",
-                    "kind": "attested",
+                    "requires_ack": True,
                     "adapter": "manual",
                     "command": "ack --project demo --step s1",
                     "instructions": "review",
@@ -241,7 +238,6 @@ def test_code_with_sentinel_only_check_accepts(tmp_path: Path) -> None:
             "steps": [
                 {
                     "id": "s1",
-                    "kind": "code",
                     "adapter": "local",
                     "command": "echo go",
                     "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -268,7 +264,6 @@ def test_legacy_produces_list_normalizes_to_sentinel_dict(tmp_path: Path) -> Non
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo go",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},

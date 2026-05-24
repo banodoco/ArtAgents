@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import fcntl
-import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .transport import append_ledger_record
 from .util import MAX_TEXT_PREVIEW, file_metadata, redact, stable_id, text_preview, utc_now
 
 PARENT_IDS_ENV = "ASTRID_AUDIT_PARENT_IDS"
@@ -60,15 +59,9 @@ class AuditContext:
     def append(self, event: dict[str, Any]) -> None:
         if not self.enabled:
             return
-        payload = {"schema_version": 1, "created_at": utc_now(), **redact(event)}
+        payload = {"created_at": utc_now(), **redact(event)}
         self.audit_dir.mkdir(parents=True, exist_ok=True)
-        with self.ledger_path.open("a", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                handle.write(json.dumps(payload, sort_keys=True) + "\n")
-                handle.flush()
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        append_ledger_record(self.ledger_path, payload)
 
     def register_asset(
         self,

@@ -95,7 +95,7 @@ def test_optional_with_requires_ack_rejected_at_load(tmp_path: Path) -> None:
                     "command": "review",
                     "requires_ack": True,
                     "optional": True,
-                    "ack": {"kind": "actor"},
+                    "ack": {"kind": "human"},
                 }
             ],
         },

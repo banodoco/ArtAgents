@@ -167,7 +167,7 @@ Common task commands:
 ```bash
 python3 -m astrid start <orchestrator-id> --project <slug>
 python3 -m astrid next --project <slug>
-python3 -m astrid ack <step> --project <slug> --decision approve [--agent <id> | --actor <name>]
+python3 -m astrid ack <step> --project <slug> --decision approve [--agent <id> | --human <name>]
 python3 -m astrid status --project <slug>
 python3 -m astrid abort --project <slug>
 python3 -m astrid sessions {ls, detach, takeover} ...
@@ -184,6 +184,26 @@ Normal task-run mutations must go through the writer-owned task APIs; do not
 edit `plan.json`, `events.jsonl`, `current_run.json`, or `lease.json` by hand.
 The low-level event append helpers are transport internals, not agent-facing
 escape hatches.
+
+Sprint 3 task plans use one collapsed step shape: leaves have `command`, groups
+have `children`, and both share `adapter`, `requires_ack`, `assignee`,
+`produces`, `repeat`, and `version`. Do not author legacy `kind: code`,
+`kind: attested`, `kind: nested`, or inline `plan` step payloads. If you find a
+v1 plan, run `scripts/migrations/sprint-3/migrate_plans.py` rather than relying
+on runtime auto-migration.
+
+The first event in each run is `plan_initialized`. Treat `plan.json` as a
+cached projection replayed from `plan_initialized` plus `plan_mutated`, not as
+the source of truth. Use plan mutation verbs for edits.
+
+`repeat.until` now accepts expression strings such as
+`review.produces.verdict.status == "approved"`. Repeated group steps may expose
+descendant produces through `re_export`; missing artifacts or malformed JSON
+fail closed. Legacy conditions such as `user_approves` exist only for migrated
+read compatibility.
+
+`remote-artifact` is reserved but runtime-disabled until Sprint 5a. Current
+plans should use `local` or `manual` adapters.
 
 ## Create Something New
 

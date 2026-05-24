@@ -20,7 +20,7 @@ def hype():
             "review",
             command="echo review",
             instructions="approve to finish",
-            ack="actor",
+            ack="human",
         ),
         attested(
             "verdict",
@@ -29,7 +29,7 @@ def hype():
                 "Write a one-line JSON verdict to verdict.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"ship\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "verdict.json")},
         ),
         attested(
@@ -39,7 +39,7 @@ def hype():
                 "Write a one-line JSON verdict to final_verdict.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"ship\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "final_verdict.json")},
         ),
         attested(
@@ -49,7 +49,7 @@ def hype():
                 "Write a one-line verdict to verdict.txt (e.g. 'ship'), "
                 "then ack to finish."
             ),
-            ack="actor",
+            ack="human",
         ),
         attested(
             "end_verdict",
@@ -58,7 +58,7 @@ def hype():
                 "Write a one-line verdict to end_verdict.txt (e.g. 'ready'), "
                 "then ack to finish."
             ),
-            ack="actor",
+            ack="human",
         ),
         attested(
             "terminal_verdict",
@@ -67,7 +67,7 @@ def hype():
                 "Write a one-line JSON verdict to terminal_verdict.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"complete\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "terminal_verdict.json")},
         ),
         attested(
@@ -77,7 +77,7 @@ def hype():
                 "Write a one-line JSON verdict to ultimate_verdict.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"done\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "ultimate_verdict.json")},
         ),
         attested(
@@ -87,7 +87,7 @@ def hype():
                 "Write a one-line verdict to concluding_verdict.txt (e.g. 'done'), "
                 "then ack to finish."
             ),
-            ack="actor",
+            ack="human",
         ),
         attested(
             "final_review",
@@ -96,7 +96,7 @@ def hype():
                 "Write a one-line JSON verdict to final_review.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"complete\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "final_review.json")},
         ),
         attested(
@@ -106,7 +106,7 @@ def hype():
                 "Write a one-line JSON verdict to wrap_verdict.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"ship\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "wrap_verdict.json")},
         ),
         attested(
@@ -116,7 +116,7 @@ def hype():
                 "Write a one-line verdict to verdict.txt (e.g. 'ship'), "
                 "then ack to finish."
             ),
-            ack="actor",
+            ack="human",
         ),
         attested(
             "agentic_append_verdict",
@@ -125,7 +125,7 @@ def hype():
                 "Write a one-line JSON verdict to agentic_append_verdict.json with a single "
                 "\"verdict\" key (e.g. {\"verdict\": \"ship\"}), then ack to finish."
             ),
-            ack="actor",
+            ack="human",
             produces={"verdict": (json_file(), "agentic_append_verdict.json")},
         ),
     ]

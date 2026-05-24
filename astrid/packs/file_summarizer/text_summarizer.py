@@ -54,7 +54,7 @@ def text_summarizer():
                 "}\n\n"
                 "Write the summary then ack."
             ),
-            ack="actor",
+            ack="human",
             produces={
                 "summary.json": json_file(),
             },
@@ -75,7 +75,7 @@ def text_summarizer():
                 "assessing whether the input text was interesting or useful.\n"
                 "Ack when done."
             ),
-            ack="actor",
+            ack="human",
             produces={
                 "verdict.json": json_file(),
             },

@@ -1,7 +1,7 @@
 """Tests for ack identity enforcement (Sprint 3 T21).
 
-Argparse rejects no-agent-no-actor AND both agent+actor.
-Python-level cmd_ack(Namespace(agent=None, actor=None)) raises clean error.
+Argparse rejects no-agent-no-human AND both agent+human.
+Python-level cmd_ack(Namespace(agent=None, human=None)) raises clean error.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ def _make_ack_parser():
     parser.add_argument("--evidence", action="append", default=[], help="repeatable evidence")
     identity = parser.add_mutually_exclusive_group(required=True)
     identity.add_argument("--agent", default=None, help="agent id")
-    identity.add_argument("--actor", default=None, help="actor name")
+    identity.add_argument("--human", default=None, help="human name")
     parser.add_argument("--feedback", default=None)
     parser.add_argument("--item", default=None)
     return parser
 
 
-def test_ack_parser_requires_agent_or_actor() -> None:
-    """Missing both --agent and --actor → argparse rejects."""
+def test_ack_parser_requires_agent_or_human() -> None:
+    """Missing both --agent and --human → argparse rejects."""
     parser = _make_ack_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
@@ -46,30 +46,30 @@ def test_ack_parser_allows_agent_only() -> None:
         "approve", "--project", "demo", "--decision", "approve", "--agent", "ag-1",
     ])
     assert args.agent == "ag-1"
-    assert args.actor is None
+    assert args.human is None
 
 
-def test_ack_parser_allows_actor_only() -> None:
+def test_ack_parser_allows_human_only() -> None:
     parser = _make_ack_parser()
     args = parser.parse_args([
-        "approve", "--project", "demo", "--decision", "approve", "--actor", "Alice",
+        "approve", "--project", "demo", "--decision", "approve", "--human", "Alice",
     ])
-    assert args.actor == "Alice"
+    assert args.human == "Alice"
     assert args.agent is None
 
 
-def test_ack_parser_rejects_both_agent_and_actor() -> None:
+def test_ack_parser_rejects_both_agent_and_human() -> None:
     """Mutually exclusive group: cannot supply both."""
     parser = _make_ack_parser()
     with pytest.raises(SystemExit):
         parser.parse_args([
             "approve", "--project", "demo", "--decision", "approve",
-            "--agent", "ag-1", "--actor", "Alice",
+            "--agent", "ag-1", "--human", "Alice",
         ])
 
 
 def test_cmd_ack_python_rejects_no_identity() -> None:
-    """Python callers synthesising Namespace(agent=None, actor=None) get clean error.
+    """Python callers synthesising Namespace(agent=None, human=None) get clean error.
 
     The function-boundary identity assertion inside cmd_ack (Sprint 3 T16)
     catches this case explicitly before proceeding to filesystem ops.
@@ -80,14 +80,14 @@ def test_cmd_ack_python_rejects_no_identity() -> None:
         project="demo",
         step="s1",
         agent=None,
-        actor=None,
+        human=None,
         evidence=(),
         decision="approve",
         feedback=None,
         item=None,
     )
     # Simulate the function-boundary check
-    if ns.agent is None and ns.actor is None:
+    if ns.agent is None and ns.human is None:
         # This is what cmd_ack does — prints to stderr and returns 1
         import sys
         # We don't actually call cmd_ack since it needs a real filesystem,

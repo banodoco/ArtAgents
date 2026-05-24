@@ -40,7 +40,7 @@ Sprint 1 split the legacy single `active_run.json` into a pair: `current_run.jso
 
 `code` is deterministic argv subprocess execution. It is a strict superset of `RUNTIME_KINDS={python,command}` in `astrid/core/orchestrator/schema.py`, may call `python3 -m astrid executors run <name> ...`, and must not call `astrid orchestrators run`.
 
-`attested` is agent or human work with instructions, produces, identity-pinned ack, and evidence. Agent attestations require `--agent <id>`. Human attestations require `--actor <name>` matching `ASTRID_ACTOR`. Self-acks and unpinned actors are rejected.
+`attested` is agent or human work with instructions, produces, identity-pinned ack, and evidence. Agent attestations require `--agent <id>`. Human attestations require `--human <name>` matching `ASTRID_ACTOR`. Self-acks and unpinned humans are rejected.
 
 `nested` is the only sub-orchestrator delegation mechanism. The child plan is data in the compiled tree so the gate can hash, pin, and derive cursors from its structure.
 
@@ -66,7 +66,7 @@ Agent mid-run verbs: `next`, `ack`, `status`, `abort`. Operator verbs: `start`, 
 
 ## 9. Ack Decisions
 
-`approve` advances when the current step is awaiting approval and checks pass. `retry` is only valid after verifier failure and reruns with stderr/verifier output as feedback. `iterate --feedback` is only valid for `repeat.until=user_approves` and appends to cumulative constraints. `abort` ends the run. Attested steps require `--agent` or `--actor` as above; `--item <id>` targets one `repeat.for_each` item.
+`approve` advances when the current step is awaiting approval and checks pass. `retry` is only valid after verifier failure and reruns with stderr/verifier output as feedback. `iterate --feedback` is only valid for migrated legacy `repeat.until=user_approves` steps and appends to cumulative constraints. `abort` ends the run. Attested steps require `--agent` or `--human` as above; `--item <id>` targets one `repeat.for_each` item.
 
 ## 10. Authoring
 
@@ -245,7 +245,7 @@ SD-017 task run env: `ASTRID_TASK_RUN_ID` is the integration surface for orchest
 
 SD-018 child output preservation: Task mode preserves child output dirs and mirrors hype artifacts under `runs/<task-run-id>/steps/<step-id>/produces/` while standalone behavior stays unchanged so `tests/test_project_runs.py` keeps passing.
 
-SD-019 attestor identity: Agent attestations require `--agent`, human attestations require `--actor` matching `ASTRID_ACTOR`, and self-acks are rejected.
+SD-019 attestor identity: Agent attestations require `--agent`, human attestations require `--human` matching `ASTRID_ACTOR`, and self-acks are rejected.
 
 SD-020 ack rules: `approve` advances, `retry` is only valid after verifier failure, `iterate --feedback` is only valid for `repeat.until=user_approves`, and `abort` ends the run.
 

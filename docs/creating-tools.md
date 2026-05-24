@@ -56,6 +56,36 @@ previous one cannot satisfy the request.
    (existing + new) and may call other orchestrators. Executors must not call
    orchestrators.
 
+When an orchestrator emits a task-mode `plan.json`, author the plan through
+`astrid.core.orchestrator.plan_template` instead of hand-building nested step
+dicts. Use `build_leaf_template()` for executable/manual leaves,
+`build_group_template()` for child containers and `re_export`, and
+`build_plan_template()` for the final v2 payload. The helpers construct the
+same `Step` / `TaskPlan` objects that the kernel validates, so pack templates
+stay close to the collapsed Sprint 3 schema while preserving normal
+`OrchestratorDefinition` manifests until the later framework rewrite.
+
+Task-mode plans use the collapsed Sprint 3 step schema: a leaf has `command`;
+a group has `children`; both share fields such as `adapter`, `requires_ack`,
+`assignee`, `produces`, `repeat`, and `version`. Do not author legacy
+`kind: code`, `kind: attested`, `kind: nested`, or inline `plan` step payloads.
+Those shapes belong only to the Sprint 3 migration script.
+
+The first event in a new run is `plan_initialized`, and `plan.json` is an
+atomic cached projection of `plan_initialized` plus later `plan_mutated` events.
+Mutation verbs must update the event log and refresh that cached projection;
+do not edit `plan.json` directly.
+
+For repeat loops, prefer expression `repeat.until`, for example
+`review.produces.verdict.status == "approved"`. Group steps may repeat when
+they expose descendant artifacts through `re_export`; the expression references
+the group produce name, and the runtime resolves the descendant path. Legacy
+conditions such as `user_approves` are migration/read compatibility only.
+
+`remote-artifact` remains schema-reserved in Sprint 3, but every runtime path
+rejects it with the Sprint 5a deferral message. Use `local` or `manual` for
+current authoring.
+
 Anti-pattern: a single orchestrator `run.py` that opens HTTP sockets, parses
 model output, downloads files, and assembles grids — all inline. That is three
 or four executors hiding in a trench coat. Split them out so each piece is
@@ -183,6 +213,29 @@ Copy the closest template and replace the placeholder identifiers:
 - `docs/templates/executor/`
 - `docs/templates/orchestrator/`
 - `docs/templates/element/`
+
+For task-mode orchestrator templates, start from the canonical builders:
+
+```python
+from astrid.core.orchestrator.plan_template import (
+    build_leaf_template,
+    build_plan_template,
+    cost_entry,
+    file_output,
+)
+
+plan = build_plan_template(
+    plan_id="my-workflow",
+    steps=[
+        build_leaf_template(
+            "render",
+            command="python3 -m astrid.packs.builtin.render.run ...",
+            produces=[file_output("video", "hype.mp4")],
+            cost=cost_entry(0, source="local"),
+        )
+    ],
+)
+```
 
 Then run:
 

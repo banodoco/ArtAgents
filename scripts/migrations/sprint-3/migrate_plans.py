@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 PROJECTS_ROOT_DEFAULT = os.path.expanduser("~/Documents/reigh-workspace/astrid-projects")
+PLAN_BACKUP_SUFFIX = ".sprint3.bak"
+EVENTS_BACKUP_SUFFIX = ".plan_initialized.sprint3.bak"
+_LEGACY_ACTOR_FLAG_RE = re.compile(r"(?<!\S)--actor(?=(\s|=|$))")
 
 
 def _read_legacy_plan_payload(path: str | Path) -> Any:
@@ -50,31 +54,33 @@ def _migrate_step(step: dict[str, Any]) -> dict[str, Any]:
     new: dict[str, Any] = {"id": step["id"], "adapter": "local", "version": 1}
 
     # Fields that survive any kind transition.
-    for field in ("repeat", "produces", "check"):
+    for field in ("produces", "check"):
         if field in step:
             new[field] = step[field]
+    if "repeat" in step:
+        new["repeat"] = _migrate_repeat(step["repeat"])
 
     if kind in ("code", None):
         new["adapter"] = "local"
         new["assignee"] = "system"
-        new["command"] = step.get("command")
+        new["command"] = _migrate_legacy_text(step.get("command"))
         new["version"] = 1
         return new
 
     if kind == "attested":
         new["adapter"] = "manual"
-        new["command"] = step.get("command", "")
+        new["command"] = _migrate_legacy_text(step.get("command", ""))
         new["assignee"] = _broadened_assignee(step)
         new["requires_ack"] = True
         new["version"] = 1
-        # Preserve instructions verbatim per SC18.
         instructions = step.get("instructions")
         if instructions:
-            new["instructions"] = instructions
+            new["instructions"] = _migrate_legacy_text(instructions)
         # Preserve ack rule if present.
         ack = step.get("ack")
-        if isinstance(ack, dict) and ack.get("kind") in ("agent", "actor"):
-            new["ack"] = {"kind": ack["kind"]}
+        if isinstance(ack, dict) and ack.get("kind") in ("agent", "actor", "human"):
+            ack_kind = "human" if ack.get("kind") == "actor" else ack["kind"]
+            new["ack"] = {"kind": ack_kind}
         return new
 
     if kind == "nested":
@@ -99,28 +105,56 @@ def _migrate_step(step: dict[str, Any]) -> dict[str, Any]:
     # Unknown kind — fall back to local.
     new["adapter"] = "local"
     new["assignee"] = "system"
-    new["command"] = step.get("command")
+    new["command"] = _migrate_legacy_text(step.get("command"))
     new["version"] = 1
     return new
+
+
+def _migrate_legacy_text(value: Any) -> Any:
+    """Normalize legacy CLI spelling in migrated plan text fields."""
+    if not isinstance(value, str):
+        return value
+    return _LEGACY_ACTOR_FLAG_RE.sub("--human", value)
+
+
+def _migrate_repeat(value: Any) -> Any:
+    """Copy repeat payloads while recursively normalizing embedded text.
+
+    Legacy repeat-until condition names remain as compatibility data because
+    the runtime still marks them as supported legacy reads. The migration's job
+    here is to keep repeat payloads valid and idempotent while eliminating
+    legacy actor flag spelling from any text-bearing nested values.
+    """
+    if isinstance(value, dict):
+        return {k: _migrate_repeat(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_migrate_repeat(v) for v in value]
+    return _migrate_legacy_text(value)
 
 
 def _broadened_assignee(step: dict[str, Any]) -> str:
     """Derive assignee for an attested step per SD-A broadening rules.
 
-    SD-A: attested steps with no concrete identity get broadened to
-    'any-agent' when ack.kind == 'agent' or 'any-human' when ack.kind == 'actor'.
+    SD-A compatibility: attested steps with no concrete identity get broadened
+    to canonical forms only. Legacy actor maps to any-human; legacy any-agent
+    no longer appears in migrated output.
     """
     ack = step.get("ack")
     if isinstance(ack, dict):
         if ack.get("kind") == "agent":
-            return "any-agent"
-        if ack.get("kind") == "actor":
+            return "system"
+        if ack.get("kind") in ("actor", "human"):
             return "any-human"
     return "any-human"  # default fallback
 
 
-def migrate_plan(plan_path: Path) -> tuple[bool, list[str]]:
-    """Migrate a single plan.json file. Returns (changed, broadening_notes)."""
+def migrate_plan(plan_path: Path) -> tuple[bool, dict[str, Any], list[str]]:
+    """Migrate a single plan.json file.
+
+    Returns ``(changed, new_payload, broadening_notes)``. This function is pure
+    with respect to disk writes so dry-run and tests can inspect output without
+    mutating source plans.
+    """
     try:
         payload = _read_legacy_plan_payload(plan_path)
     except FileNotFoundError:
@@ -153,7 +187,7 @@ def migrate_plan(plan_path: Path) -> tuple[bool, list[str]]:
         migrated_steps.append(migrated)
 
         # Track assignee broadening.
-        if migrated.get("assignee") in ("any-agent", "any-human"):
+        if migrated.get("assignee") in ("any-human",):
             step_id = migrated.get("id", step.get("id", "?"))
             broadening_notes.append(
                 f"    {step_id}: {step.get('assignee', '?')} → {migrated['assignee']}"
@@ -165,6 +199,103 @@ def migrate_plan(plan_path: Path) -> tuple[bool, list[str]]:
         "steps": migrated_steps,
     }
     return True, new_payload, broadening_notes
+
+
+def _backup_path(plan_path: Path) -> Path:
+    return plan_path.with_name(plan_path.name + PLAN_BACKUP_SUFFIX)
+
+
+def _write_backup_once(plan_path: Path) -> Path:
+    backup_path = _backup_path(plan_path)
+    if backup_path.exists():
+        return backup_path
+    backup_path.write_bytes(plan_path.read_bytes())
+    return backup_path
+
+
+def _events_backup_path(events_path: Path) -> Path:
+    return events_path.with_name(events_path.name + EVENTS_BACKUP_SUFFIX)
+
+
+def _write_events_backup_once(events_path: Path) -> Path:
+    backup_path = _events_backup_path(events_path)
+    if backup_path.exists():
+        return backup_path
+    backup_path.write_bytes(events_path.read_bytes())
+    return backup_path
+
+
+def _event_hash(prev_hash: str, event: dict[str, Any]) -> str:
+    import hashlib as _hashlib
+
+    payload = {k: v for k, v in event.items() if k != "hash"}
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return "sha256:" + _hashlib.sha256((prev_hash + "\n" + canonical).encode("utf-8")).hexdigest()
+
+
+def _seed_plan_initialized_event(
+    run_dir: Path,
+    plan_payload: dict[str, Any],
+    *,
+    apply: bool,
+) -> bool:
+    events_path = run_dir / "events.jsonl"
+    if not events_path.exists():
+        return False
+    try:
+        events = [
+            json.loads(line)
+            for line in events_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"  WARN: could not seed plan_initialized in {events_path}: {exc}", file=sys.stderr)
+        return False
+    if not events:
+        return False
+    if events[0].get("kind") == "plan_initialized":
+        return False
+
+    first = events[0]
+    plan_hash = first.get("plan_hash")
+    if not isinstance(plan_hash, str) or not plan_hash:
+        plan_hash = "unknown"
+    run_id = first.get("run_id") if isinstance(first.get("run_id"), str) else run_dir.name
+    seeded = {
+        "kind": "plan_initialized",
+        "run_id": run_id,
+        "plan_hash": plan_hash,
+        "plan": plan_payload,
+        "ts": first.get("ts") if isinstance(first.get("ts"), str) else "1970-01-01T00:00:00Z",
+    }
+    raw_events = [seeded] + [
+        {k: v for k, v in event.items() if k != "hash"}
+        for event in events
+    ]
+
+    prev_hash = "sha256:" + "0" * 64
+    rehashed: list[dict[str, Any]] = []
+    for event in raw_events:
+        stored = dict(event)
+        stored["hash"] = _event_hash(prev_hash, stored)
+        rehashed.append(stored)
+        prev_hash = stored["hash"]
+
+    if apply:
+        _write_events_backup_once(events_path)
+        events_path.write_text(
+            "".join(
+                json.dumps(ev, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+                for ev in rehashed
+            ),
+            encoding="utf-8",
+        )
+    return True
 
 
 def _find_run_dirs(projects_root: Path) -> list[Path]:
@@ -229,19 +360,42 @@ def main() -> int:
             skipped_count += 1
             continue
 
-        if not changed:
+        seed_payload: dict[str, Any] | None = new_payload if changed else None
+        if seed_payload is None:
+            try:
+                current_payload = _read_legacy_plan_payload(plan_path)
+                if isinstance(current_payload, dict) and current_payload.get("version") == 2:
+                    seed_payload = current_payload
+            except Exception:
+                seed_payload = None
+
+        seeded = False
+        if seed_payload is not None:
+            seeded = _seed_plan_initialized_event(
+                run_dir,
+                seed_payload,
+                apply=False,
+            )
+
+        if not changed and not seeded:
             skipped_count += 1
             continue
 
         rel = plan_path.relative_to(projects_root) if plan_path.is_relative_to(projects_root) else plan_path
         print(f"  migrate: {rel}")
+        if seeded:
+            print(f"  seed-plan-initialized: {rel.parent / 'events.jsonl'}")
 
         if args.apply:
             try:
-                plan_path.write_text(
-                    json.dumps(new_payload, indent=2, ensure_ascii=False) + "\n",
-                    encoding="utf-8",
-                )
+                if changed:
+                    _write_backup_once(plan_path)
+                    plan_path.write_text(
+                        json.dumps(new_payload, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8",
+                    )
+                if seeded and seed_payload is not None:
+                    _seed_plan_initialized_event(run_dir, seed_payload, apply=True)
             except OSError as exc:
                 print(f"  ERROR writing {plan_path}: {exc}", file=sys.stderr)
                 skipped_count += 1
@@ -257,7 +411,7 @@ def main() -> int:
         total_broadened = sum(len(notes) for _, notes in all_broadening_notes)
         log_lines.append(
             f"WARNING: {total_broadened} step(s) had their assignee broadened to "
-            f"any-agent/any-human. Run `astrid claim <step> --for ...` post-migration "
+            f"any-human. Run `astrid claim <step> --for ...` post-migration "
             f"to pin a concrete identity."
         )
         log_lines.append("")

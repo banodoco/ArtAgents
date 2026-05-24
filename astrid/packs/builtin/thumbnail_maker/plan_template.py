@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from pathlib import Path
 from typing import Any
 
+from astrid.core.orchestrator.plan_template import (
+    build_leaf_template,
+    build_plan_template,
+    cost_entry,
+    emit_plan_json,
+    file_output,
+)
 
 def build_plan_v2(
     *,
@@ -32,101 +38,42 @@ def build_plan_v2(
     cmd_build_ref = _build_build_ref_cmd(python_exec, run_root)
     cmd_generate = _build_generate_cmd(python_exec, run_root)
 
-    plan: dict[str, Any] = {
-        "plan_id": plan_id,
-        "version": 2,
-        "steps": [
-            {
-                "id": "resolve-video",
-                "adapter": "local",
-                "command": cmd_resolve,
-                "produces": {
-                    "resolve_output": {
-                        "path": "video-resolution.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "plan-evidence",
-                "adapter": "local",
-                "command": cmd_plan,
-                "produces": {
-                    "evidence_plan_output": {
-                        "path": "evidence/evidence-plan.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "discover-video-evidence",
-                "adapter": "local",
-                "command": cmd_discover,
-                "produces": {
-                    "candidates_output": {
-                        "path": "evidence/candidates.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "build-reference-pack",
-                "adapter": "local",
-                "command": cmd_build_ref,
-                "produces": {
-                    "reference_pack_output": {
-                        "path": "evidence/reference-pack.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
-            {
-                "id": "generate-thumbnails",
-                "adapter": "local",
-                "command": cmd_generate,
-                "produces": {
-                    "thumbnail_output": {
-                        "path": "thumbnail-manifest.json",
-                        "check": {
-                            "check_id": "file_nonempty",
-                            "params": {},
-                            "sentinel": False,
-                        },
-                    }
-                },
-                "cost": {"amount": 0, "currency": "USD", "source": "local"},
-            },
+    local_zero = cost_entry(0, source="local")
+    return build_plan_template(
+        plan_id=plan_id,
+        steps=[
+            build_leaf_template(
+                "resolve-video",
+                command=cmd_resolve,
+                produces=[file_output("resolve_output", "video-resolution.json")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "plan-evidence",
+                command=cmd_plan,
+                produces=[file_output("evidence_plan_output", "evidence/evidence-plan.json")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "discover-video-evidence",
+                command=cmd_discover,
+                produces=[file_output("candidates_output", "evidence/candidates.json")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "build-reference-pack",
+                command=cmd_build_ref,
+                produces=[file_output("reference_pack_output", "evidence/reference-pack.json")],
+                cost=local_zero,
+            ),
+            build_leaf_template(
+                "generate-thumbnails",
+                command=cmd_generate,
+                produces=[file_output("thumbnail_output", "thumbnail-manifest.json")],
+                cost=local_zero,
+            ),
         ],
-    }
-    return plan
-
-
-def emit_plan_json(plan: dict[str, Any], path: str | Path) -> None:
-    """Write a plan dict as canonical JSON to *path*."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(plan, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    path.write_text(payload, encoding="utf-8")
+    )
 
 
 def _build_resolve_cmd(

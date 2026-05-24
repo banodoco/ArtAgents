@@ -587,8 +587,7 @@ def _wait_adapter(decision: Any) -> int:
 
     For local adapter: poll the subprocess until it exits, capture returncode.
     For manual adapter: the agent does work out-of-band; return 0 immediately.
-    For remote-artifact adapter: poll the remote job in a loop until done/failed.
-    The actual completion is detected by record_dispatch_complete via the adapter.
+    For remote-artifact adapter: fail closed with the Sprint 5a deferral error.
     """
     adapter_kind = getattr(decision, "adapter", None)
     if adapter_kind == "local":
@@ -637,56 +636,11 @@ def _wait_local_subprocess(decision: Any) -> int:
 
 
 def _wait_remote_artifact(decision: Any) -> int:
-    """Poll the remote-artifact adapter until the subprocess exits.
+    """Reject the schema-reserved remote-artifact runtime surface."""
+    from astrid.core.adapter.remote_artifact import REMOTE_ARTIFACT_DEFERRAL
 
-    Loads ``remote_state.json`` from the step directory and polls the
-    adapter's poll() method in a loop, sleeping ``poll_interval_seconds``
-    between checks.  Returns 0 on ``done``, 1 on ``failed``.
-    """
-    import json
-    import time
-    from pathlib import Path
-
-    from astrid.core.adapter.remote_artifact import RemoteArtifactAdapter
-
-    project_root = getattr(decision, "project_root", None)
-    run_id = getattr(decision, "run_id", None)
-    path_tuple = getattr(decision, "plan_step_path", ())
-    step_version = getattr(decision, "step_version", 1)
-    if not project_root or not run_id or not path_tuple:
-        return 1
-
-    step_dir = project_root / "runs" / run_id / "steps"
-    for seg in path_tuple:
-        step_dir = step_dir / seg
-    step_dir = step_dir / f"v{step_version}"
-
-    remote_state_path = step_dir / "remote_state.json"
-    if not remote_state_path.exists():
-        return 1
-
-    try:
-        state = json.loads(remote_state_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return 1
-
-    poll_interval = state.get("poll_interval_seconds", 30) or 30
-    adapter = RemoteArtifactAdapter()
-
-    while True:
-        try:
-            wpid, status = os.waitpid(decision.pid, os.WNOHANG) if getattr(decision, "pid", None) else (0, 0)
-        except (ChildProcessError, OSError):
-            wpid = 0
-
-        poll_result = adapter.poll(None, _make_run_ctx_for_poll(
-            project_root, run_id, path_tuple, step_version
-        ))
-        if poll_result.status == "done":
-            return 0
-        if poll_result.status == "failed":
-            return 1
-        time.sleep(poll_interval)
+    print(f"remote-artifact: {REMOTE_ARTIFACT_DEFERRAL}", file=sys.stderr)
+    return 1
 
 
 def _make_run_ctx_for_poll(
@@ -779,7 +733,7 @@ Usage:
     python3 -m astrid unclaim <step> --project <slug> --run-id <id> [--for agent:<id>|human:<name>]
   Task-mode agent-facing verbs (mid-run):
     python3 -m astrid next --project <slug>
-    python3 -m astrid ack <step> --project <slug> --decision {approve,retry,iterate,abort} [--agent <id> | --actor <name>] [--evidence path] [--feedback "..."] [--item id]
+    python3 -m astrid ack <step> --project <slug> --decision {approve,retry,iterate,abort} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
     python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/HOOKS.md
     # sessions \u2014 tab binding and takeover
   Session verbs (Sprint 1):

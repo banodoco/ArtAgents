@@ -5,8 +5,6 @@ Covers: supersede routing, stale → .rejected/, missing submitted_by_kind rejec
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 import pytest
@@ -14,10 +12,10 @@ import pytest
 from astrid.core.task.inbox import (
     CONSUMED_DIR_NAME,
     INBOX_DIR_NAME,
-    InboxEntry,
     InboxValidationError,
     REJECTED_DIR_NAME,
     _parse_entry,
+    _latest_event_for_path,
 )
 
 
@@ -66,7 +64,7 @@ def test_parse_v2_entry_with_item_id() -> None:
         "step_version": 1,
         "item_id": "abc123",
         "submitted_by": "human-1",
-        "submitted_by_kind": "actor",
+        "submitted_by_kind": "human",
         "decision": "approve",
         "submitted_at": "2026-05-12T00:00:00Z",
         "evidence": {},
@@ -143,3 +141,23 @@ def test_stale_entries_destination_known() -> None:
     assert INBOX_DIR_NAME == "inbox"
     assert CONSUMED_DIR_NAME == ".consumed"
     assert REJECTED_DIR_NAME == ".rejected"
+
+
+def test_latest_event_for_path_filters_by_step_version() -> None:
+    events = [
+        {
+            "kind": "produces_check_failed",
+            "plan_step_path": ["render"],
+            "step_version": 1,
+            "reason": "old",
+        },
+        {
+            "kind": "produces_check_failed",
+            "plan_step_path": ["render"],
+            "step_version": 2,
+            "reason": "current",
+        },
+    ]
+
+    assert _latest_event_for_path(events, ("render",), step_version=2)["reason"] == "current"
+    assert _latest_event_for_path(events, ("render",), step_version=3) is None

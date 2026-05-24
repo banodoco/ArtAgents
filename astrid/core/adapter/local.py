@@ -11,6 +11,7 @@ from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.task.plan import CostEntry, Step
+from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.util.time import utc_now_milliseconds
 
 
@@ -70,9 +71,9 @@ class LocalAdapter:
             log_handle.close()
 
         started_at = _utc_now_iso()
-        meta_path.write_text(
-            json.dumps({"pid": proc.pid, "started_at": started_at, "command": step.command}),
-            encoding="utf-8",
+        write_json_sidecar(
+            meta_path,
+            {"pid": proc.pid, "started_at": started_at, "command": step.command},
         )
         return DispatchResult(status="dispatched", pid=proc.pid, started_at=started_at)
 
@@ -102,12 +103,22 @@ class LocalAdapter:
         """Inspect produces + exit-code sidecar to classify completion."""
         step_dir = _step_dir(run_ctx)
         returncode_path = step_dir / "returncode"
-        returncode: int | None = None
-        if returncode_path.exists():
-            try:
-                returncode = int(returncode_path.read_text(encoding="utf-8").strip())
-            except ValueError:
-                returncode = None
+        if not returncode_path.exists():
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason="returncode sidecar missing",
+                cost=_read_cost_sidecar(step_dir),
+            )
+        try:
+            returncode = int(returncode_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason="returncode sidecar invalid",
+                cost=_read_cost_sidecar(step_dir),
+            )
 
         # Produces checks: every declared produces.path must exist (non-empty file)
         # under the canonical ``step_dir/produces/<path>`` layout (hype-spike G2).

@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-_VOLATILE_FIELDS = ("ts", "hash", "run_id", "pid")
+_VOLATILE_FIELDS = ("ts", "hash", "run_id", "pid", "dispatch_event_hash")
 
 
 def _rewrite_paths(value: Any, run_dir_str: str | None) -> Any:

@@ -36,7 +36,6 @@ def _run_one_step(tmp_projects_root: Path, slug: str, payload: bytes) -> None:
         "steps": [
             {
                 "id": "step-1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo go",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},

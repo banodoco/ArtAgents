@@ -141,7 +141,7 @@ def test_b_code_step_record_dispatch_complete_does_not_set_inline_check_result(
     os.environ["ASTRID_ACTOR"] = "alice"
     rc, out, err = _ack(
         projects, "step_a", "--project", "p", "--decision", "approve",
-        "--actor", "alice",
+        "--human", "alice",
     )
     assert "ack accepted, but produces check failed" not in err, (
         f"code-step rewinds must never surface through cmd_ack's rejection branch; "

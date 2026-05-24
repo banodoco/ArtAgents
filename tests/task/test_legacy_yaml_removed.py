@@ -1,7 +1,5 @@
-"""Verify the legacy v1 plan reader path is removed (Sprint 5b T4/T12).
+"""Verify legacy v1 plan compatibility is migration-only.
 
-The conftest.py auto-migration shim intercepts ``_validate_plan`` in test
-contexts and silently rewrites v1→v2.  These tests verify:
 - ``_read_legacy_plan_payload`` is removed from plan.py
 - v1 plans can still be migrated via the migrate_plans.py script
 - Non-v2 versions are rejected with a message pointing at migrate_plans.py
@@ -65,23 +63,21 @@ def test_migrate_plans_script_still_works(tmp_path: Path) -> None:
 
 def test_non_v2_version_rejected_with_migration_hint() -> None:
     """A plan with version != 2 raises TaskPlanError pointing at the migration
-    script.  (v1 is auto-migrated by conftest shim in test context, so we
-    test with version=3.)"""
-    v3_payload = {
-        "plan_id": "future",
-        "version": 3,
+    script."""
+    v1_payload = {
+        "plan_id": "legacy",
+        "version": 1,
         "steps": [
             {
                 "id": "s1",
                 "kind": "code",
-                "adapter": "local",
-                "command": "echo future",
+                "command": "echo legacy",
             },
         ],
     }
 
     with pytest.raises(TaskPlanError, match="migrate_plans.py"):
-        _validate_plan(v3_payload)
+        _validate_plan(v1_payload)
 
 
 # ── v2 payload passes cleanly ──────────────────────────────────────────
@@ -94,7 +90,6 @@ def test_v2_plan_passes_validation() -> None:
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo ok",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
