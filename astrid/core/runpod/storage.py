@@ -7,6 +7,12 @@ import os
 from typing import Any
 
 
+ENSURE_STORAGE_HINT = (
+    "Run `python3 -m astrid runpod ensure-storage <storage-name> --size <GB> "
+    "--datacenter <id>` first, then pass `--storage-name <storage-name>`."
+)
+
+
 async def ensure_storage(
     name: str,
     *,
@@ -50,6 +56,23 @@ async def ensure_storage(
         )
 
     return await Pod.create_storage(name, size_gb, datacenter_id)
+
+
+async def require_existing_storage(
+    name: str | None,
+    *,
+    context: str = "RunPod storage",
+) -> dict[str, Any]:
+    """Return an existing RunPod network volume, or fail without creating one."""
+    if not name:
+        raise ValueError(f"{context} requires a pre-existing RunPod network storage volume. {ENSURE_STORAGE_HINT}")
+
+    from runpod_lifecycle import Pod
+
+    existing = await Pod.get_storage(name)
+    if existing is None:
+        raise ValueError(f"RunPod network storage volume {name!r} was not found. {ENSURE_STORAGE_HINT}")
+    return existing
 
 
 async def list_volumes(api_key: str | None = None) -> list[dict[str, Any]]:

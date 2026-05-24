@@ -11,6 +11,7 @@ from astrid.core.task.run_audit import (
     cmd_run_cost,
     cmd_run_show,
     cmd_run_trace,
+    _cost_by_source,
 )
 
 
@@ -343,6 +344,72 @@ def test_run_cost_handles_missing_events(tmp_path: Path) -> None:
         )
     )
     assert "(no cost events)" in output.lower()
+
+
+def test_runpod_cost_sidecar_basis_is_executor_local_metadata(tmp_path: Path) -> None:
+    """Local adapter cost parsing keeps the task cost model to amount/currency/source."""
+    from astrid.core.adapter.local import _read_cost_sidecar
+    from astrid.packs.external.runpod.run import _write_cost_sidecar
+
+    step_dir = tmp_path / "run" / "steps" / "render" / "v1"
+    produces = step_dir / "produces"
+    _write_cost_sidecar(produces, duration_seconds=60, hourly_rate=0.60, basis_prefix="exec")
+
+    payload = json.loads((produces / "cost.json").read_text(encoding="utf-8"))
+    assert {"amount", "currency", "source"} <= set(payload)
+    assert payload["source"] == "runpod"
+    assert payload["currency"] == "USD"
+    assert "basis" in payload
+
+    cost = _read_cost_sidecar(step_dir)
+    assert cost is not None
+    assert cost.source == "runpod"
+    assert cost.currency == "USD"
+    assert not hasattr(cost, "basis")
+
+
+def test_run_cost_rollup_does_not_require_basis(tmp_path: Path) -> None:
+    """Run cost aggregation only depends on amount/currency/source."""
+    slug = "demo"
+    run_id = "run-runpod-cost"
+    run_dir = tmp_path / "projects" / slug / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    events = [
+        {"kind": "run_started", "run_id": run_id},
+        {
+            "kind": "step_completed",
+            "plan_step_path": ["render"],
+            "returncode": 0,
+            "cost": {"amount": 1.25, "currency": "USD", "source": "runpod"},
+        },
+        {
+            "kind": "step_failed",
+            "plan_step_path": ["retry"],
+            "returncode": 1,
+            "cost": {
+                "amount": 0.75,
+                "currency": "USD",
+                "source": "runpod",
+                "basis": "diagnostic only",
+            },
+        },
+    ]
+    (run_dir / "events.jsonl").write_text(
+        "\n".join(json.dumps(e) for e in events) + "\n",
+        encoding="utf-8",
+    )
+
+    by_source = _cost_by_source(events)
+    assert by_source["runpod"] == {"amount": 2.0, "currency": "USD", "source": "runpod"}
+
+    output = _capture_output(
+        lambda: cmd_run_cost(
+            [run_id, "--project", slug], projects_root=tmp_path / "projects"
+        )
+    )
+    assert "Total cost: $2.00" in output
+    assert "runpod" in output
+    assert "basis" not in output
 
 
 # ---------------------------------------------------------------------------

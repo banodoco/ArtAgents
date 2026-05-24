@@ -220,7 +220,11 @@ def _check_runpod_stale_handles() -> DoctorCheck:
     Does NOT add a symmetric runpod metadata check (out of scope).
     """
     from astrid.core.project.paths import resolve_projects_root
-    from astrid.core.runpod.sweeper import collect_handles
+    from astrid.core.runpod.sweeper import (
+        _derive_run_dir,
+        _handle_path_belongs_to_run,
+        collect_handles,
+    )
 
     projects_root = resolve_projects_root()
     if not projects_root.is_dir():
@@ -234,7 +238,10 @@ def _check_runpod_stale_handles() -> DoctorCheck:
     now_utc = datetime.now(timezone.utc)
     stale_count = 0
 
-    for _path, handle in handles:
+    for path, handle in handles:
+        run_dir = _derive_run_dir(path, projects_root)
+        if run_dir is None or not _handle_path_belongs_to_run(run_dir, path):
+            continue
         terminate_at_str = handle.get("terminate_at", "")
         if not terminate_at_str:
             continue

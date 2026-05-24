@@ -528,9 +528,19 @@ def _dispatch_runpod(args: list[str]) -> int:
 
 def _dispatch_runpod_volumes(args: list[str]) -> int:
     """Dispatch ``astrid runpod volumes ls``."""
-    if not args or args[0] != "ls":
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="astrid runpod volumes")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("ls", help="List RunPod network volumes as JSON.")
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit:
+        return 2
+    if parsed.command != "ls":
         print("usage: astrid runpod volumes ls", file=sys.stderr)
         return 2
+
     from .core.runpod.storage import list_volumes
 
     try:
@@ -544,7 +554,7 @@ def _dispatch_runpod_volumes(args: list[str]) -> int:
         asyncio.run(_volumes_ls())
         return 0
     except Exception as exc:
-        print(f"runpod volumes: {exc}", file=sys.stderr)
+        print(f"runpod volumes ls: {exc}", file=sys.stderr)
         return 1
 
 
@@ -555,7 +565,7 @@ def _dispatch_runpod_ensure_storage(args: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="astrid runpod ensure-storage")
     parser.add_argument("name", help="Volume name to find or create.")
     parser.add_argument("--size", type=int, default=50, help="Size in GB for new volumes (default: 50).")
-    parser.add_argument("--datacenter", dest="datacenter_id", default=None, help="RunPod datacenter ID.")
+    parser.add_argument("--datacenter", "--datacenter-id", dest="datacenter_id", default=None, help="RunPod datacenter ID.")
     try:
         parsed = parser.parse_args(args)
     except SystemExit:

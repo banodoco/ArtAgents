@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
 from astrid.packs.builtin.dataset_build.interfaces import (
     ArtifactPullResult,
     ComputeHandle,
@@ -51,10 +52,17 @@ class RunPodComputeBackend:
         return "runpod"
 
     def provision(self, config: dict[str, Any]) -> ComputeHandle:
+        if bool(config.get("storage_required")) and not str(config.get("storage_name") or "").strip():
+            raise BackendExecutionError(
+                "RunPod training requires compute.storage_name when storage_required is true. "
+                + ENSURE_STORAGE_HINT
+            )
         produces_dir = _produces_dir(config, "provision")
         argv = _runpod_argv("provision", produces_dir)
         _append_optional(argv, "--gpu-type", config.get("gpu_type"))
         _append_optional(argv, "--storage-name", config.get("storage_name"))
+        if bool(config.get("storage_required")):
+            argv.append("--require-storage")
         _append_optional(argv, "--max-runtime-seconds", config.get("max_runtime_seconds"))
         _append_optional(argv, "--name-prefix", config.get("name_prefix"))
         _append_optional(argv, "--image", config.get("image"))
