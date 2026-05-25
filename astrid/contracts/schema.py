@@ -116,6 +116,7 @@ class AliasRecord:
     canonical_id: str
     deprecated: bool = False
     deprecation_message: str = ""
+    source_pack_id: str = ""
 
 
 @dataclass(frozen=True)

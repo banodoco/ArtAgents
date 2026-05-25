@@ -17,6 +17,7 @@ from astrid.contracts.schema import (
     ISOLATION_MODES,
     OUTPUT_MODES,
     PORT_REQUIRED_TYPES,
+    AliasRecord,
     CacheMode,
     CachePolicy,
     CapabilityHandle,
@@ -88,7 +89,14 @@ class OrchestratorDefinition:
         return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
 
 
-def to_capability_handle(definition: OrchestratorDefinition) -> CapabilityHandle:
+def to_capability_handle(
+    definition: OrchestratorDefinition,
+    *,
+    aliases: tuple[AliasRecord, ...] = (),
+    resolved_alias: str | None = None,
+    deprecated: bool = False,
+    deprecation_message: str = "",
+) -> CapabilityHandle:
     """Adapt an ``OrchestratorDefinition`` into a ``CapabilityHandle``.
 
     Field mapping mirrors the executor adapter:
@@ -99,6 +107,10 @@ def to_capability_handle(definition: OrchestratorDefinition) -> CapabilityHandle
     * ``kind`` — ``definition.kind`` (preserved as-is)
     * ``provenance`` — source derived from metadata, default ``"pack"``
     * ``safety`` — network flag from ``definition.isolation.network``
+
+    Alias metadata (*aliases*, *resolved_alias*, *deprecated*,
+    *deprecation_message*) is carried on the handle and never mutates
+    ``OrchestratorDefinition.metadata``.
     """
     parts = definition.id.split(".", 1)
     pack_id = parts[0]
@@ -110,7 +122,7 @@ def to_capability_handle(definition: OrchestratorDefinition) -> CapabilityHandle
 
     forked_from = str(metadata.get("forked_from") or "")
     upstream_version = str(metadata.get("upstream_version") or "")
-    compatibility_token = str(metadata.get("compatibility_token") or "")
+    compatibility_token=str(metadata.get("compatibility_token") or "")
     local_edit_state = str(metadata.get("local_edit_state") or "clean")
     override_target = str(metadata.get("override_target") or "")
 
@@ -126,6 +138,7 @@ def to_capability_handle(definition: OrchestratorDefinition) -> CapabilityHandle
             forked_from=forked_from or None,
             upstream_version=upstream_version or None,
             compatibility_token=compatibility_token or None,
+            resolved_alias=resolved_alias,
         ),
         safety=SafetyDeclaration(network=definition.isolation.network),
         description=definition.description,
@@ -133,6 +146,9 @@ def to_capability_handle(definition: OrchestratorDefinition) -> CapabilityHandle
         keywords=definition.keywords,
         local_edit_state=local_edit_state,
         override_target=override_target or None,
+        aliases=aliases,
+        deprecated=deprecated,
+        deprecation_message=deprecation_message,
         inputs=definition.inputs,
         outputs=definition.outputs,
     )

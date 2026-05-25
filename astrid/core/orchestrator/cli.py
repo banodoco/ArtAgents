@@ -6,7 +6,6 @@ import argparse
 import json
 import shlex
 import sys
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -412,7 +411,14 @@ def _cmd_list(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
 
 
 def _cmd_search(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
-    records = [_orchestrator_search_record(item) for item in _filter_by_pack(registry.list(), getattr(args, "pack", None))]
+    resolver = registry.alias_resolver
+    records = [
+        _orchestrator_search_record(
+            item,
+            aliases=_aliases_text(resolver, item.id) if resolver else "",
+        )
+        for item in _filter_by_pack(registry.list(), getattr(args, "pack", None))
+    ]
     hits = run_search(records, list(args.terms), limit=int(args.limit))
     if args.json:
         payload = [
@@ -431,7 +437,28 @@ def _cmd_search(args: argparse.Namespace, registry: OrchestratorRegistry) -> int
     return 0
 
 
-def _orchestrator_search_record(orchestrator: OrchestratorDefinition) -> SearchRecord:
+def _aliases_text(resolver: Any, canonical_id: str) -> str:
+    """Return a space-joined string of alias ids for *canonical_id*.
+
+    Deprecated aliases get a ``[deprecated]`` suffix so the deprecation
+    status is visible to search scoring and human-readable output.
+    Returns the empty string when there are no aliases.
+    """
+    records = resolver.get_aliases_for(canonical_id)
+    if not records:
+        return ""
+    parts: list[str] = []
+    for r in records:
+        part = r.alias
+        if r.deprecated:
+            part += " [deprecated]"
+        if r.deprecation_message:
+            part += " " + r.deprecation_message
+        parts.append(part)
+    return " ".join(parts)
+
+
+def _orchestrator_search_record(orchestrator: OrchestratorDefinition, *, aliases: str = "") -> SearchRecord:
     short = short_description_or_truncated(orchestrator.short_description, orchestrator.description)
     fields = {
         "id": orchestrator.id,
@@ -443,23 +470,44 @@ def _orchestrator_search_record(orchestrator: OrchestratorDefinition) -> SearchR
         "version": orchestrator.version,
         "category": str(orchestrator.metadata.get("category") or orchestrator.kind),
     }
+    if aliases:
+        fields["aliases"] = aliases
     return SearchRecord(id=orchestrator.id, kind=orchestrator.kind, short_description=short, fields=fields)
 
 
 def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
-    # Resolve alias BEFORE _require_qualified_id (SD1): alias → canonical ID
-    # (which always contains a dot), then qualify, then lookup.
-    resolver = registry.alias_resolver
-    resolved_id = resolver.resolve(args.orchestrator_id) if resolver else args.orchestrator_id
-    _require_qualified_id(resolved_id, "orchestrator id")
-    orchestrator = registry.get(resolved_id)
+    _require_qualified_id(args.orchestrator_id, "orchestrator id")
+
+    # Detect alias resolution before get() so we can enrich the handle.
+    requested_id = args.orchestrator_id
+    alias_record = None
+    if registry.alias_resolver is not None and registry.alias_resolver.is_alias(requested_id):
+        alias_record = registry.alias_resolver.get_record(requested_id)
+
+    orchestrator = registry.get(requested_id)
     _require_pack_match(orchestrator, getattr(args, "pack", None))
     show_overrides = bool(getattr(args, "show_overrides", False))
+
+    # Collect alias metadata for the capability handle.
+    resolved_alias: str | None = None
+    aliases: tuple = ()
+    deprecated: bool = False
+    deprecation_message: str = ""
+    if alias_record is not None:
+        resolved_alias = requested_id
+        deprecated = alias_record.deprecated
+        deprecation_message = alias_record.deprecation_message
+    if registry.alias_resolver is not None:
+        aliases = tuple(registry.alias_resolver.get_aliases_for(orchestrator.id))
+
     if args.json:
-        handle = to_capability_handle(orchestrator)
-        if resolver is not None:
-            aliases = resolver.get_aliases_for(resolved_id)
-            handle = replace(handle, aliases=tuple(aliases))
+        handle = to_capability_handle(
+            orchestrator,
+            aliases=aliases,
+            resolved_alias=resolved_alias,
+            deprecated=deprecated,
+            deprecation_message=deprecation_message,
+        )
         result = {"_capability": handle.to_dict(), **orchestrator.to_dict()}
         if show_overrides and registry.override_store is not None:
             result["_override"] = registry.override_store.resolve("orchestrator", orchestrator.id)
@@ -476,6 +524,15 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
         print(f"description: {orchestrator.description}")
     if orchestrator.keywords:
         print(f"keywords: {', '.join(orchestrator.keywords)}")
+    # Alias mapping (human-readable)
+    if resolved_alias:
+        print(f"requested_alias: {resolved_alias} → {orchestrator.id}")
+        if deprecated:
+            msg = f"deprecated: {deprecation_message}" if deprecation_message else "deprecated: yes"
+            print(msg)
+    if aliases:
+        alias_ids = [a.alias for a in aliases]
+        print(f"aliases: {', '.join(alias_ids)}")
     _print_ports("inputs", orchestrator.inputs)
     _print_outputs(orchestrator)
     if orchestrator.child_executors:

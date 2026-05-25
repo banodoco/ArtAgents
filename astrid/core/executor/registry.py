@@ -14,6 +14,7 @@ from astrid.core.alias_resolver import (
     AliasResolver,
     _register_pack_aliases,
     create_shared_alias_resolver,
+    extract_pack_aliases,
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
@@ -93,6 +94,18 @@ class ExecutorRegistry:
         else:
             yield entry
 
+    def _resolve_requested_id(self, executor_id: str) -> str:
+        """Resolve *executor_id* to a canonical registry key."""
+        resolver = self.alias_resolver
+        canonical_id = resolver.resolve(executor_id) if resolver else executor_id
+        if canonical_id in self._executors:
+            return canonical_id
+        if resolver is not None and executor_id != canonical_id and resolver.is_alias(executor_id):
+            raise KeyError(
+                f"alias {executor_id!r} points to missing executor {canonical_id!r}"
+            )
+        raise KeyError(f"unknown executor id {executor_id!r}")
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -108,25 +121,17 @@ class ExecutorRegistry:
         return definition
 
     def get(self, executor_id: str) -> ExecutorDefinition:
-        try:
-            definition = self._resolve_entry(self._executors[executor_id])
-        except KeyError as exc:
-            raise KeyError(f"unknown executor id {executor_id!r}") from exc
+        canonical_id = self._resolve_requested_id(executor_id)
+        definition = self._resolve_entry(self._executors[canonical_id])
 
-        # Check override store for a remapped target.
         if self.override_store is not None:
-            target_id = self.override_store.resolve("executor", executor_id)
-            if target_id is not None and target_id != executor_id:
-                # Validate that the override target exists.
+            target_id = self.override_store.resolve("executor", canonical_id)
+            if target_id is not None and target_id != canonical_id:
                 if target_id not in self._executors:
                     raise ExecutorRegistryError(
-                        f"override target {target_id!r} for executor {executor_id!r} not found in registry"
+                        f"override target {target_id!r} for executor {canonical_id!r} not found in registry"
                     )
-                target_def = self._resolve_entry(self._executors[target_id])
-                # Annotate the returned definition with override_target metadata.
-                target_metadata = dict(target_def.metadata)
-                target_metadata["override_target"] = target_id
-                return replace(target_def, metadata=target_metadata)
+                return self._resolve_entry(self._executors[target_id])
 
         return definition
 
@@ -251,14 +256,15 @@ def load_default_registry(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> ExecutorRegistry:
-    resolver = create_shared_alias_resolver()
-    _register_pack_aliases(resolver, {})  # M1: no aliases yet
-    registry = ExecutorRegistry(alias_resolver=resolver)
-    for executor in load_pack_executors(
+    packs = _discover_executor_packs(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
-    ):
+    )
+    resolver = create_shared_alias_resolver()
+    _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="executor"))
+    registry = ExecutorRegistry(alias_resolver=resolver)
+    for executor in _load_pack_executors_from_packs(packs):
         registry.register(executor)
     if banodoco_config is not None and banodoco_config.enabled:
         for executor in load_banodoco_catalog_executors(banodoco_config):
@@ -273,6 +279,20 @@ def load_pack_executors(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> tuple[ExecutorDefinition, ...]:
+    packs = _discover_executor_packs(
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+    )
+    return _load_pack_executors_from_packs(packs)
+
+
+def _discover_executor_packs(
+    *,
+    project_root: str | Path,
+    extra_pack_roots: tuple[str, ...],
+    include_installed: bool,
+) -> tuple[Any, ...]:
     # Mirror load_pack_elements(): discover source-tree packs (excluding
     # local), then conditionally discover the project-scoped local pack
     # when the project root differs from the repository root.
@@ -313,7 +333,12 @@ def load_pack_executors(
                         if pack.id == "local":
                             continue
                         packs.append(pack)
+    return tuple(packs)
 
+
+def _load_pack_executors_from_packs(
+    packs: Iterable[Any],
+) -> tuple[ExecutorDefinition, ...]:
     executors: list[ExecutorDefinition] = []
     for pack in packs:
         for root in iter_executor_roots(pack):

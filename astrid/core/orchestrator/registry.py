@@ -14,6 +14,7 @@ from astrid.core.alias_resolver import (
     AliasResolver,
     _register_pack_aliases,
     create_shared_alias_resolver,
+    extract_pack_aliases,
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.executor.registry import ExecutorRegistry
@@ -82,6 +83,18 @@ class OrchestratorRegistry:
         else:
             yield entry
 
+    def _resolve_requested_id(self, orchestrator_id: str) -> str:
+        """Resolve *orchestrator_id* to a canonical registry key."""
+        resolver = self.alias_resolver
+        canonical_id = resolver.resolve(orchestrator_id) if resolver else orchestrator_id
+        if canonical_id in self._orchestrators:
+            return canonical_id
+        if resolver is not None and orchestrator_id != canonical_id and resolver.is_alias(orchestrator_id):
+            raise KeyError(
+                f"alias {orchestrator_id!r} points to missing orchestrator {canonical_id!r}"
+            )
+        raise KeyError(f"unknown orchestrator id {orchestrator_id!r}")
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -97,25 +110,17 @@ class OrchestratorRegistry:
         return definition
 
     def get(self, orchestrator_id: str) -> OrchestratorDefinition:
-        try:
-            definition = self._resolve_entry(self._orchestrators[orchestrator_id])
-        except KeyError as exc:
-            raise KeyError(f"unknown orchestrator id {orchestrator_id!r}") from exc
+        canonical_id = self._resolve_requested_id(orchestrator_id)
+        definition = self._resolve_entry(self._orchestrators[canonical_id])
 
-        # Check override store for a remapped target.
         if self.override_store is not None:
-            target_id = self.override_store.resolve("orchestrator", orchestrator_id)
-            if target_id is not None and target_id != orchestrator_id:
-                # Validate that the override target exists.
+            target_id = self.override_store.resolve("orchestrator", canonical_id)
+            if target_id is not None and target_id != canonical_id:
                 if target_id not in self._orchestrators:
                     raise OrchestratorRegistryError(
-                        f"override target {target_id!r} for orchestrator {orchestrator_id!r} not found in registry"
+                        f"override target {target_id!r} for orchestrator {canonical_id!r} not found in registry"
                     )
-                target_def = self._resolve_entry(self._orchestrators[target_id])
-                # Annotate the returned definition with override_target metadata.
-                target_metadata = dict(target_def.metadata)
-                target_metadata["override_target"] = target_id
-                return replace(target_def, metadata=target_metadata)
+                return self._resolve_entry(self._orchestrators[target_id])
 
         return definition
 
@@ -148,6 +153,20 @@ class OrchestratorRegistry:
         self._validate_child_orchestrators(alias_resolver=self.alias_resolver)
         if self.alias_resolver is not None:
             self.alias_resolver.validate_no_cycles()
+            # Cross-check: every alias must resolve to a known orchestrator.
+            # Skip aliases whose resolved target is a known executor — those
+            # were registered as executor aliases (not orchestrator aliases)
+            # and live in this resolver only via test scaffolding or shared
+            # resolver setups.
+            exec_reg = executor_registry or self._executor_registry
+            exec_known = set(exec_reg.as_mapping()) if exec_reg else set()
+            for alias, record in self.alias_resolver._aliases.items():
+                target = self.alias_resolver.resolve(alias)
+                if target not in self._orchestrators:
+                    if target not in exec_known:
+                        raise OrchestratorRegistryError(
+                            f"alias {alias!r} resolves to unknown orchestrator {target!r}"
+                        )
         return self.list()
 
     def to_dict(self, kind: str | None = None) -> dict[str, Any]:
@@ -170,7 +189,15 @@ class OrchestratorRegistry:
     ) -> None:
         registry = executor_registry or self._executor_registry or load_default_executor_registry()
         known_executor_ids = set(registry.as_mapping())
-        resolver = alias_resolver or self.alias_resolver
+        # Resolve child executor references through the *executor* alias resolver
+        # when it is populated (the orchestrator's own alias resolver maps
+        # orchestrator ids, not executor ids).  Fall back to the orchestrator
+        # resolver when the executor resolver carries no aliases, which can
+        # happen in tests that register executor aliases on a shared resolver.
+        exec_alias_resolver: AliasResolver | None = getattr(registry, 'alias_resolver', None)
+        if exec_alias_resolver is not None and not exec_alias_resolver._aliases:
+            exec_alias_resolver = None
+        resolver = exec_alias_resolver or alias_resolver or self.alias_resolver
         # Winners only.
         for orchestrator in (self._resolve_entry(entry) for entry in self._orchestrators.values()):
             for child_executor in orchestrator.child_executors:
@@ -322,17 +349,18 @@ def load_default_registry(
     include_installed: bool = True,
 ) -> OrchestratorRegistry:
     active_executor_registry = executor_registry
+    packs = _discover_orchestrator_packs(
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+    )
     resolver = create_shared_alias_resolver()
-    _register_pack_aliases(resolver, {})  # M1: no aliases yet
+    _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="orchestrator"))
     registry = OrchestratorRegistry(
         executor_registry=active_executor_registry,
         alias_resolver=resolver,
     )
-    for orchestrator in load_pack_orchestrators(
-        project_root=project_root,
-        extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
-    ):
+    for orchestrator in _load_pack_orchestrators_from_packs(packs):
         registry.register(orchestrator)
     registry.validate_all(executor_registry=active_executor_registry)
     return registry
@@ -344,6 +372,20 @@ def load_pack_orchestrators(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> tuple[OrchestratorDefinition, ...]:
+    packs = _discover_orchestrator_packs(
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+    )
+    return _load_pack_orchestrators_from_packs(packs)
+
+
+def _discover_orchestrator_packs(
+    *,
+    project_root: str | Path,
+    extra_pack_roots: tuple[str, ...],
+    include_installed: bool,
+) -> tuple[Any, ...]:
     # Mirror load_pack_elements(): discover source-tree packs (excluding
     # local), then conditionally discover the project-scoped local pack
     # when the project root differs from the repository root.
@@ -384,7 +426,12 @@ def load_pack_orchestrators(
                         if pack.id == "local":
                             continue
                         packs.append(pack)
+    return tuple(packs)
 
+
+def _load_pack_orchestrators_from_packs(
+    packs: Iterable[Any],
+) -> tuple[OrchestratorDefinition, ...]:
     orchestrators: list[OrchestratorDefinition] = []
     for pack in packs:
         for root in iter_orchestrator_roots(pack):

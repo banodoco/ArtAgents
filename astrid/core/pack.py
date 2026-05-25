@@ -13,6 +13,8 @@ import yaml
 PACK_MANIFEST_NAMES = ("pack.yaml", "pack.yml", "pack.json")
 EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
 ORCHESTRATOR_MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
+PACK_ALIAS_KINDS: tuple[Literal["executor", "orchestrator"], ...] = ("executor", "orchestrator")
+PackAliasKind = Literal["executor", "orchestrator"]
 # Authoritative element-kind contract (mirrored as a Literal in
 # astrid.core.element.schema; kept here too because pack.py is loaded
 # before element/__init__.py and importing from there causes a cycle).
@@ -41,6 +43,7 @@ class PackDefinition:
     status: str = field(default="active")
     visibility: str = field(default="visible")
     schema_version: str = field(default="")
+    aliases: tuple[dict[str, Any], ...] = field(default_factory=tuple)
     origin: str = field(default="unknown")
     install_tier: str = field(default="default")
     pack_type: str = field(default="capability")
@@ -57,7 +60,7 @@ class PackDefinition:
             "stability": self.stability,
             "support": self.support,
         }
-        return {
+        payload = {
             "id": self.id,
             "name": self.name,
             "version": self.version,
@@ -73,6 +76,9 @@ class PackDefinition:
             **taxonomy,
             "taxonomy": taxonomy,
         }
+        if self.aliases:
+            payload["aliases"] = [dict(alias) for alias in self.aliases]
+        return payload
 
 
 def packs_root() -> Path:
@@ -144,6 +150,7 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
     status = _optional_string(data, "status", "pack.status", default="active")
     visibility = _optional_string(data, "visibility", "pack.visibility", default="visible")
     schema_version = str(data.get("schema_version", "")) if "schema_version" in data else ""
+    aliases = _optional_pack_aliases(data.get("aliases"), path="pack.aliases")
     taxonomy = pack_taxonomy_from_manifest(data, status=status)
     return PackDefinition(
         id=pack_id,
@@ -158,6 +165,7 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
         status=status,
         visibility=visibility,
         schema_version=schema_version,
+        aliases=aliases,
         **taxonomy,
     )
 
@@ -189,6 +197,55 @@ def _default_stability_for_status(status: str) -> str:
     if status == "deprecated":
         return "deprecated"
     return "stable"
+
+
+def _optional_pack_aliases(value: Any, *, path: str) -> tuple[dict[str, Any], ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise PackValidationError(f"{path} must be an array")
+
+    normalized: list[dict[str, Any]] = []
+    allowed_keys = {"alias", "canonical_id", "kind", "deprecated", "deprecation_message"}
+    for index, raw_alias in enumerate(value):
+        alias_path = f"{path}[{index}]"
+        if not isinstance(raw_alias, dict):
+            raise PackValidationError(f"{alias_path} must be an object")
+        unknown_keys = sorted(set(raw_alias) - allowed_keys)
+        if unknown_keys:
+            raise PackValidationError(
+                f"{alias_path} has unknown field(s): {', '.join(unknown_keys)}"
+            )
+
+        kind = _require_string(raw_alias, "kind", f"{alias_path}.kind")
+        if kind not in PACK_ALIAS_KINDS:
+            raise PackValidationError(
+                f"{alias_path}.kind must be one of {list(PACK_ALIAS_KINDS)}"
+            )
+
+        alias = _require_string(raw_alias, "alias", f"{alias_path}.alias")
+        qualified_id_pack_id(alias, path=f"{alias_path}.alias")
+        canonical_id = _require_string(raw_alias, "canonical_id", f"{alias_path}.canonical_id")
+        qualified_id_pack_id(canonical_id, path=f"{alias_path}.canonical_id")
+
+        normalized_alias: dict[str, Any] = {
+            "kind": kind,
+            "alias": alias,
+            "canonical_id": canonical_id,
+        }
+        if "deprecated" in raw_alias:
+            deprecated = raw_alias["deprecated"]
+            if not isinstance(deprecated, bool):
+                raise PackValidationError(f"{alias_path}.deprecated must be a boolean")
+            normalized_alias["deprecated"] = deprecated
+        if "deprecation_message" in raw_alias:
+            deprecation_message = raw_alias["deprecation_message"]
+            if not isinstance(deprecation_message, str):
+                raise PackValidationError(f"{alias_path}.deprecation_message must be a string")
+            normalized_alias["deprecation_message"] = deprecation_message
+        normalized.append(normalized_alias)
+
+    return tuple(normalized)
 
 
 def pack_manifest_path(root: str | Path) -> Path | None:

@@ -132,8 +132,40 @@ The pack manifest declares:
 - **Agent instructions**: `purpose`, `normal_entrypoints`,
   `do_not_use_for`, `required_context`.
 - **Documentation references**: paths to `AGENTS.md`, `README.md`, etc.
+- **Aliases**: alternate public ids that route to executor or orchestrator
+  capabilities in this pack. See
+  [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
+  the full alias vocabulary and schema.
 
 Refer to `pack.json` for the full field list and constraints.
+
+### Pack-Level Aliases
+
+A pack can declare aliases for its capabilities — old or alternate ids that
+resolve to the canonical capability id. Aliases keep backward compatibility when
+a capability is renamed or moved to a different pack namespace.
+
+```yaml
+# In pack.yaml
+aliases:
+  - kind: executor
+    alias: builtin.render
+    canonical_id: rendering.render
+    deprecated: true
+    deprecation_message: "Moved to rendering.render — update your references"
+```
+
+Key rules:
+
+- Aliases are declared on the pack that owns the **canonical** capability, not on
+  the alias source pack.
+- `kind` must be `executor` or `orchestrator` — element aliases are deferred.
+- Both `alias` and `canonical_id` must be qualified ids (`pack.slug`).
+- `deprecated` and `deprecation_message` are optional; they surface
+  informational metadata in `inspect` and `search` without blocking resolution.
+- Component-level `metadata.aliases` on individual executor/orchestrator
+  manifests is legacy validation-only — new aliases must use the pack-level
+  `aliases` field.
 
 ### Executor Manifest (`executor.yaml`)
 
