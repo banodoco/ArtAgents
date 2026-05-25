@@ -25,8 +25,8 @@ Use the built-in script pipeline with the Seinfeld preset:
 
 ```bash
 python3 -m astrid executors inspect builtin.script_pipeline --json
-python3 -m astrid.packs.builtin.script_pipeline.run --preset seinfeld --fake --produces-dir runs/seinfeld-script/produces
-python3 -m astrid.packs.builtin.script_pipeline.run --preset seinfeld --produces-dir runs/seinfeld-script/produces
+python3 -m astrid.packs.builtin.executors.script_pipeline.run --preset seinfeld --fake --produces-dir runs/seinfeld-script/produces
+python3 -m astrid.packs.builtin.executors.script_pipeline.run --preset seinfeld --produces-dir runs/seinfeld-script/produces
 ```
 
 The direct module command above is useful when no Astrid session is bound. In a

@@ -13,6 +13,16 @@
           "provision",
           "--produces-dir",
           "{out}/produces"
+        ],
+        "input_args": [
+          {"input": "gpu_type", "flag": "--gpu-type", "optional": true},
+          {"input": "storage_name", "flag": "--storage-name", "optional": true},
+          {"input": "max_runtime_seconds", "flag": "--max-runtime-seconds", "optional": true},
+          {"input": "name_prefix", "flag": "--name-prefix", "optional": true},
+          {"input": "image", "flag": "--image", "optional": true},
+          {"input": "container_disk_gb", "flag": "--container-disk-gb", "optional": true},
+          {"input": "datacenter_id", "flag": "--datacenter-id", "optional": true},
+          {"input": "ports", "flag": "--ports", "optional": true}
         ]
       },
       "conditions": [],
@@ -92,7 +102,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -134,6 +144,15 @@
           "exec",
           "--produces-dir",
           "{out}/produces"
+        ],
+        "input_args": [
+          {"input": "pod_handle", "flag": "--pod-handle"},
+          {"input": "local_root", "flag": "--local-root", "optional": true},
+          {"input": "remote_root", "flag": "--remote-root", "optional": true},
+          {"input": "remote_script", "flag": "--remote-script", "optional": true},
+          {"input": "timeout", "flag": "--timeout", "optional": true},
+          {"input": "upload_mode", "flag": "--upload-mode", "optional": true},
+          {"input": "excludes", "flag": "--excludes", "optional": true}
         ]
       },
       "conditions": [
@@ -215,7 +234,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -257,6 +276,12 @@
           "pull",
           "--produces-dir",
           "{out}/produces"
+        ],
+        "input_args": [
+          {"input": "pod_handle", "flag": "--pod-handle"},
+          {"input": "remote_path", "flag": "--remote-path", "repeatable": true},
+          {"input": "local_dir", "flag": "--local-dir"},
+          {"input": "ssh_key", "flag": "--ssh-key", "optional": true}
         ]
       },
       "conditions": [
@@ -320,7 +345,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -362,6 +387,9 @@
           "teardown",
           "--produces-dir",
           "{out}/produces"
+        ],
+        "input_args": [
+          {"input": "pod_handle", "flag": "--pod-handle"}
         ]
       },
       "conditions": [
@@ -407,7 +435,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",
@@ -449,6 +477,22 @@
           "session",
           "--produces-dir",
           "{out}/produces"
+        ],
+        "input_args": [
+          {"input": "gpu_type", "flag": "--gpu-type", "optional": true},
+          {"input": "storage_name", "flag": "--storage-name", "optional": true},
+          {"input": "max_runtime_seconds", "flag": "--max-runtime-seconds", "optional": true},
+          {"input": "name_prefix", "flag": "--name-prefix", "optional": true},
+          {"input": "image", "flag": "--image", "optional": true},
+          {"input": "container_disk_gb", "flag": "--container-disk-gb", "optional": true},
+          {"input": "datacenter_id", "flag": "--datacenter-id", "optional": true},
+          {"input": "ports", "flag": "--ports", "optional": true},
+          {"input": "local_root", "flag": "--local-root", "optional": true},
+          {"input": "remote_root", "flag": "--remote-root", "optional": true},
+          {"input": "remote_script", "flag": "--remote-script", "optional": true},
+          {"input": "timeout", "flag": "--timeout", "optional": true},
+          {"input": "upload_mode", "flag": "--upload-mode", "optional": true},
+          {"input": "excludes", "flag": "--excludes", "optional": true}
         ]
       },
       "conditions": [],
@@ -567,7 +611,7 @@
       "kind": "external",
       "metadata": {
         "catalog_source": "none_declared",
-        "cli_module": "runpod_lifecycle.cli",
+        "cli_module": "astrid.packs.external.runpod.run",
         "command_names": [
           "provision",
           "exec",

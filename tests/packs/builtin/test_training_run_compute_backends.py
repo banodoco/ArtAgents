@@ -11,6 +11,7 @@ import pytest
 
 from astrid.packs.builtin.orchestrators.dataset_build.interfaces import RunPodHandle
 from astrid.packs.builtin.orchestrators.training_run.compute_backends import (
+    BackendExecutionError,
     BackendRegistryError,
     RunPodComputeBackend,
     RunPodRemoteExecutionBackend,
@@ -116,6 +117,37 @@ def test_runpod_compute_preserves_provision_arguments_and_estimates_cost(tmp_pat
     assert estimate.gpu_hours == 2
     assert estimate.estimated_cost_usd == 1.58
     assert estimate.details["pricing_source"] == "pinned_training_run_rates"
+
+
+def test_runpod_compute_storage_required_requires_name_before_command(tmp_path: Path) -> None:
+    backend = RunPodComputeBackend(repo_root=tmp_path, runner=RecordingRunner())
+
+    with pytest.raises(BackendExecutionError, match="ensure-storage"):
+        backend.provision(
+            {
+                "produces_dir": tmp_path / "provision",
+                "storage_required": True,
+                "gpu_type": "NVIDIA RTX 6000 Ada Generation",
+            }
+        )
+
+
+def test_runpod_compute_storage_required_threads_require_storage_flag(tmp_path: Path) -> None:
+    runner = RecordingRunner()
+    backend = RunPodComputeBackend(repo_root=tmp_path, runner=runner)
+
+    backend.provision(
+        {
+            "produces_dir": tmp_path / "provision",
+            "storage_required": True,
+            "storage_name": "astrid-storage",
+            "ports": "8675/http,22/tcp",
+        }
+    )
+
+    call = runner.calls[0]
+    assert "--require-storage" in call
+    assert _arg_value(call, "--storage-name") == "astrid-storage"
 
 
 def test_runpod_remote_exec_and_pull_preserve_existing_argument_shapes(tmp_path: Path) -> None:

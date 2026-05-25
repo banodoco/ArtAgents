@@ -37,7 +37,6 @@ def test_produces_pass_interns_into_cas_and_links(tmp_projects_root: Path) -> No
         "steps": [
             {
                 "id": "step-1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo go",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},

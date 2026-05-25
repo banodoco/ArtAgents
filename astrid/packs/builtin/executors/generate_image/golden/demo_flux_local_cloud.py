@@ -6,7 +6,7 @@ flux-dev is cloud-only in v2 (SD-001).  z-image covers local.
 
 Usage::
 
-    python -m astrid.packs.builtin.generate_image.golden.demo_flux_local_cloud
+    python -m astrid.packs.builtin.executors.generate_image.golden.demo_flux_local_cloud
 
 The local path requires vibecomfy + a running ComfyUI instance.
 The cloud path requires FAL_KEY to be resolvable.

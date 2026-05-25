@@ -14,70 +14,19 @@ collapses (sessions are explicitly resumable, never auto-expire).
 from __future__ import annotations
 
 import argparse
-import json
 from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from astrid.core.project import paths as project_paths
-from astrid.core.session import cli, paths as session_paths
+from astrid.core.session import cli
+from astrid.core.session import paths as session_paths
 from astrid.core.session.binding import (
     ASTRID_SESSION_ID_ENV,
     resolve_current_session,
 )
 from astrid.core.session.identity import Identity, write_identity
-
-
-def _seed_project(projects_root: Path, slug: str) -> Path:
-    pdir = projects_root / slug
-    pdir.mkdir(parents=True, exist_ok=True)
-
-    # Seed a default timeline so Sprint 2 resolution works.
-    from astrid.core.session.ulid import generate_ulid
-
-    timeline_ulid = generate_ulid()
-    tdir = pdir / "timelines" / timeline_ulid
-    tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
-    )
-    (tdir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contributing_runs": [],
-                "final_outputs": [],
-                "tombstoned_at": None,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tdir / "display.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "slug": "primary",
-                "name": "Primary",
-                "is_default": True,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (pdir / "project.json").write_text(
-        json.dumps(
-            {
-                "created_at": "2026-05-11T00:00:00Z",
-                "name": slug,
-                "schema_version": 1,
-                "slug": slug,
-                "updated_at": "2026-05-11T00:00:00Z",
-                "default_timeline_id": timeline_ulid,
-            }
-        ),
-        encoding="utf-8",
-    )
-    return pdir
 
 
 @pytest.fixture
@@ -108,8 +57,10 @@ def _parse_sid(output: str) -> str:
     raise AssertionError(f"export line not in output:\n{output}")
 
 
-def test_attach_emits_session_file_and_export_line(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_attach_emits_session_file_and_export_line(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     cli.cmd_attach(_attach_args(), out=buf)
     sid = _parse_sid(buf.getvalue())
@@ -117,9 +68,9 @@ def test_attach_emits_session_file_and_export_line(env: dict[str, Path]) -> None
 
 
 def test_tab_restart_and_re_export_restores_session(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
 ) -> None:
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     cli.cmd_attach(_attach_args(timeline="primary"), out=buf)
     sid = _parse_sid(buf.getvalue())
@@ -138,7 +89,7 @@ def test_tab_restart_and_re_export_restores_session(
 
 
 def test_session_file_survives_arbitrary_subsequent_attaches(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
 ) -> None:
     """Attach is now IDEMPOTENT for the same (slug, agent_id) pair (#19).
 
@@ -151,7 +102,7 @@ def test_session_file_survives_arbitrary_subsequent_attaches(
     (2) --fresh forces a new session id.
     """
 
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     buf_a = StringIO()
     cli.cmd_attach(_attach_args(), out=buf_a)
     sid_a = _parse_sid(buf_a.getvalue())

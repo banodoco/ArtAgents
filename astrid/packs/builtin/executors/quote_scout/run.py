@@ -9,11 +9,11 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('builtin.quote_scout')
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from .....audit import register_outputs
+from astrid.audit import register_outputs
+from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 
 QUOTE_CANDIDATES_VERSION = 1
@@ -48,7 +48,7 @@ SYSTEM_PROMPT = (
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return utc_now_seconds()
 
 
 def validate_quote_candidates(payload: Any) -> None:

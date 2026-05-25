@@ -10,17 +10,17 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('builtin.pool_merge')
 import argparse
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.element import catalog as effects_catalog
-from ..... import timeline
-from .....audit import register_outputs
+from astrid.core.util.time import utc_now_seconds
+from astrid import timeline
+from astrid.audit import register_outputs
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return utc_now_seconds()
 
 
 def _stable_pool_id(effect_id: str) -> str:

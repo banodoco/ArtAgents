@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from astrid import pipeline
+
 
 # ---------------------------------------------------------------------------
 # Find path (volume exists)
@@ -40,13 +42,14 @@ def test_ensure_storage_creates_when_missing() -> None:
     created_volume = {"id": "vol-new", "name": "new-volume", "size": 100}
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
-         patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created_volume)):
+         patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created_volume)) as create_storage:
         from astrid.core.runpod.storage import ensure_storage
 
         import asyncio
 
         result = asyncio.run(ensure_storage("new-volume", size_gb=100, datacenter_id="US-GA-1"))
         assert result == created_volume
+        create_storage.assert_awaited_once_with("new-volume", 100, "US-GA-1")
 
 
 def test_ensure_storage_raises_without_datacenter_when_missing() -> None:
@@ -97,6 +100,30 @@ def test_ensure_storage_idempotent() -> None:
         assert r1 == r2 == existing
 
 
+def test_require_existing_storage_fails_without_creating_when_missing() -> None:
+    """Storage-required executor paths report the ensure-storage command without creation."""
+    from astrid.core.runpod.storage import ENSURE_STORAGE_HINT, require_existing_storage
+
+    with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
+         patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
+        import asyncio
+
+        with pytest.raises(ValueError, match="missing-vol"):
+            asyncio.run(require_existing_storage("missing-vol", context="RunPod provision"))
+
+        create_storage.assert_not_called()
+
+    try:
+        asyncio.run(require_existing_storage(None, context="RunPod session"))
+    except ValueError as exc:
+        message = str(exc)
+    else:  # pragma: no cover - assertion guard
+        pytest.fail("require_existing_storage should fail without a storage name")
+
+    assert ENSURE_STORAGE_HINT in message
+    assert "python3 -m astrid runpod ensure-storage <storage-name>" in message
+
+
 # ---------------------------------------------------------------------------
 # Provision/session executors do NOT auto-create storage
 # ---------------------------------------------------------------------------
@@ -122,6 +149,55 @@ def test_provision_does_not_auto_create_storage() -> None:
     )
 
 
+def test_storage_free_provision_and_session_do_not_probe_or_create_storage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Storage-free executor modes do not call get_storage or create_storage."""
+    from astrid.packs.external.runpod.run import cmd_provision, cmd_session
+
+    pod = MagicMock()
+    pod.id = "pod-storage-free"
+    pod.name = "astrid-storage-free"
+    pod._storage_volume = None
+    pod.wait_ready = AsyncMock()
+    pod._ensure_ssh_details = AsyncMock(return_value={"ip": "1.2.3.4", "port": 2222})
+    pod.terminate = AsyncMock()
+    launch = AsyncMock(return_value=pod)
+
+    class ProvisionArgs:
+        gpu_type = "NVIDIA GeForce RTX 4090"
+        storage_name = None
+        require_storage = False
+        max_runtime_seconds = None
+        name_prefix = None
+        image = None
+        container_disk_gb = None
+        datacenter_id = None
+        ports = None
+
+    class SessionArgs(ProvisionArgs):
+        remote_root = None
+        remote_script = None
+        local_root = None
+        timeout = None
+        upload_mode = None
+        excludes = None
+
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
+
+    with patch("runpod_lifecycle.launch", launch), \
+         patch("runpod_lifecycle.get_pod", AsyncMock(return_value=pod)), \
+         patch("runpod_lifecycle.RunPodConfig", MagicMock()), \
+         patch("runpod_lifecycle.Pod.get_storage", AsyncMock()) as get_storage, \
+         patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
+        assert cmd_provision(ProvisionArgs(), tmp_path / "provision") == 0
+        assert cmd_session(SessionArgs(), tmp_path / "session") == 0
+
+    get_storage.assert_not_called()
+    create_storage.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # list_volumes
 # ---------------------------------------------------------------------------
@@ -145,3 +221,58 @@ def test_list_volumes_passthrough() -> None:
     finally:
         if os.environ.get("RUNPOD_API_KEY") == "test-key-rpa_0000000000000000000000000000000000000000000000":
             del os.environ["RUNPOD_API_KEY"]
+
+
+def test_runpod_volumes_ls_requires_api_key(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
+
+    rc = pipeline._dispatch_runpod_volumes(["ls"])
+
+    assert rc == 1
+    assert "RUNPOD_API_KEY is not set" in capsys.readouterr().err
+
+
+def test_runpod_volumes_ls_emits_json_and_is_read_only(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
+    volumes = [{"id": "vol-a", "name": "astrid-a"}]
+
+    with patch("runpod_lifecycle.api.get_network_volumes", return_value=volumes), \
+         patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
+        rc = pipeline._dispatch_runpod_volumes(["ls"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == volumes
+    create_storage.assert_not_called()
+
+
+def test_runpod_ensure_storage_cli_requires_datacenter_when_creation_needed(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
+
+    with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
+         patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
+        rc = pipeline._dispatch_runpod_ensure_storage(["missing-vol"])
+
+    assert rc == 1
+    assert "datacenter_id is required" in capsys.readouterr().err
+    create_storage.assert_not_called()
+
+
+def test_runpod_ensure_storage_cli_supports_datacenter_id_alias(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("RUNPOD_API_KEY", "test-key-rpa_0000000000000000000000000000000000000000000000")
+    created = {"id": "vol-new", "name": "new-volume", "size": 50}
+
+    with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
+         patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created)):
+        rc = pipeline._dispatch_runpod_ensure_storage(["new-volume", "--datacenter-id", "US-GA-1"])
+
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out) == created

@@ -11,20 +11,17 @@ everything from here."
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.schema import utc_now_iso
-from astrid.core.timeline.eventlog.protocol import EventLogBackend
+from astrid import timeline as timeline_contract
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineRecoveredPayload,
 )
 from astrid.core.timeline.projection import (
     ProjectionError,
-    project_to_assembly,
-    project_to_checkpoint,
     regenerate_projection,
     replay_projection,
 )
@@ -130,19 +127,15 @@ def recover_to_event(
             ),
         )
 
-    # 4. Project to the anchor event
-    try:
-        anchor_projection = project_to_assembly(
-            backend.read_events(),
-            initial_assembly=None,
-        )
-    except ProjectionError:
-        raise
+    # 4. Replay to the target event and validate the anchor as a raw TimelineConfig.
+    anchor_projection = _validate_authoritative_config(
+        replay_projection(backend, stop_at_event_id=event_id),
+        event_id=event_id,
+        kind="(recovery-anchor)",
+        label="replayed anchor projection",
+    )
 
-    # 5. Find the specific anchor projection (replay to the target event)
-    anchor_projection = replay_projection(backend, stop_at_event_id=event_id)
-
-    # 6. Build the recovery payload
+    # 5. Build the recovery payload
     # Include a summary of the projected state for auditability
     projected_summary = _summarize_projection(anchor_projection)
     recovery_payload = TimelineRecoveredPayload(
@@ -152,7 +145,7 @@ def recover_to_event(
         projected_state_summary=anchor_projection,
     ).to_json_obj()
 
-    # 7. Append timeline.recovered event
+    # 6. Append timeline.recovered event
     recovered_event = backend.append_event(
         target.timeline_id,
         "timeline.recovered",
@@ -160,7 +153,7 @@ def recover_to_event(
         actor=actor,
     )
 
-    # 8. Regenerate materialized projection files
+    # 7. Regenerate materialized projection files
     tdir = _timeline_dir(project_slug, target.timeline_ulid, root=root)
     regenerated = regenerate_projection(
         target.timeline_id,
@@ -168,7 +161,7 @@ def recover_to_event(
         timeline_home=tdir,
     )
 
-    # 9. Collect regenerated artifact paths
+    # 8. Collect regenerated artifact paths
     artifact_paths = [
         str(tdir / "assembly.json"),
         str(tdir / "assembly.checkpoint.json"),
@@ -276,11 +269,14 @@ def recover_to_snapshot(
     if not isinstance(snap_event_id, str):
         raise ValueError("snapshot metadata must include last_event_id (string)")
 
-    # 5. Verify anchor hash against backend
-    # Replay to the snapshot event and verify the hash matches
+    # 5. Verify anchor hash against backend and validate the replayed anchor
+    # projection as the authority the snapshot must match.
     try:
-        anchor_projection_from_events = replay_projection(
-            backend, stop_at_event_id=snap_event_id
+        anchor_projection_from_events = _validate_authoritative_config(
+            replay_projection(backend, stop_at_event_id=snap_event_id),
+            event_id=snap_event_id,
+            kind="(snapshot-verify)",
+            label="replayed snapshot anchor projection",
         )
     except ProjectionError as exc:
         raise ProjectionError(
@@ -315,13 +311,25 @@ def recover_to_snapshot(
             ),
         )
 
+    snapshot_config = _validate_authoritative_config(
+        snapshot_assembly,
+        event_id=snap_event_id,
+        kind="(snapshot-verify)",
+        label="snapshot TimelineConfig",
+    )
+    _assert_snapshot_matches_anchor(
+        snapshot_config,
+        anchor_projection_from_events,
+        event_id=snap_event_id,
+    )
+
     # 7. Build the recovery payload
-    projected_summary = _summarize_projection(snapshot_assembly)
+    projected_summary = _summarize_projection(snapshot_config)
     recovery_payload = TimelineRecoveredPayload(
         anchor_event_id=snap_event_id,
         anchor_type="snapshot",
         reason=reason,
-        projected_state_summary=snapshot_assembly,
+        projected_state_summary=snapshot_config,
     ).to_json_obj()
 
     # 8. Append timeline.recovered event
@@ -371,23 +379,48 @@ def _summarize_projection(assembly: dict[str, Any]) -> dict[str, Any]:
     """Build a lightweight summary of the projected assembly for audit output."""
     clips = assembly.get("clips", [])
     tracks = assembly.get("tracks", [])
-    pool = assembly.get("pool", {})
-    arrangement = assembly.get("arrangement", {})
     theme = assembly.get("theme", "")
 
     return {
         "clip_count": len(clips) if isinstance(clips, list) else 0,
         "track_count": len(tracks) if isinstance(tracks, list) else 0,
-        "pool_asset_count": (
-            len(pool.get("entries", []))
-            if isinstance(pool, dict)
-            else 0
-        ),
-        "arrangement_clip_count": (
-            len(arrangement.get("clips", []))
-            if isinstance(arrangement, dict)
-            else 0
-        ),
         "theme": theme if isinstance(theme, str) else "",
         "total_projections": 1,  # placeholder for non-assembly projections
     }
+
+
+def _validate_authoritative_config(
+    config: dict[str, Any],
+    *,
+    event_id: str,
+    kind: str,
+    label: str,
+) -> dict[str, Any]:
+    """Return a validated raw TimelineConfig or raise a projection error."""
+    try:
+        return timeline_contract.validate_timeline_config_for_container(config)
+    except Exception as exc:
+        raise ProjectionError(
+            event_id=event_id,
+            kind=kind,
+            reason=f"{label} is not a valid raw TimelineConfig: {exc}",
+        ) from exc
+
+
+def _assert_snapshot_matches_anchor(
+    snapshot_config: dict[str, Any],
+    anchor_config: dict[str, Any],
+    *,
+    event_id: str,
+) -> None:
+    snapshot_digest = timeline_contract.timeline_config_digest(snapshot_config)
+    anchor_digest = timeline_contract.timeline_config_digest(anchor_config)
+    if snapshot_digest != anchor_digest:
+        raise ProjectionError(
+            event_id=event_id,
+            kind="(snapshot-verify)",
+            reason=(
+                "snapshot TimelineConfig digest does not match replayed anchor "
+                f"projection digest ({snapshot_digest!r} != {anchor_digest!r})"
+            ),
+        )

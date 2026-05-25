@@ -2,14 +2,14 @@
 
 Proves:
 (a) apply_event_to_assembly and project_to_assembly for every event kind.
-(b) timeline.imported snapshot unwrapping (full wrapper shape).
+(b) timeline.imported is migration-only legacy and rejected by runtime replay.
 (c) Lifecycle no-ops (created, renamed, default_set, tombstoned, deleted).
 (d) Deterministic output — same input always produces same output.
 (e) Input immutability — projector never mutates input events.
 (f) Golden fixture validation.
 (g) ProjectionError for unsupported event kinds.
 (h) Checkpoint-assisted replay produces same assembly as full replay.
-(i) Bootstrap variants: created (no imported) and legacy (with imported).
+(i) Bootstrap variants: created (no imported) and legacy (rejected).
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from astrid import timeline as timeline_contract
 from astrid.core.project import paths as project_paths
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import create_project
@@ -32,14 +33,32 @@ from astrid.core.timeline.events.schema import (
 )
 from astrid.core.timeline.paths import assembly_identity_path
 from astrid.core.timeline.projection import (
+    MATERIALIZER_ALLOWED_CLASSIFICATIONS,
+    PROJECTOR_EVENT_CLASSIFICATION,
     ProjectionError,
     apply_event_to_assembly,
+    classify_projector_event_kind,
     project_to_assembly,
     regenerate_projection,
 )
+from astrid.core.timeline.events.schema.types import _PAYLOAD_TYPES
 
 ROOT = Path(__file__).resolve().parents[2]
 GOLDEN_DIR = ROOT / "tests" / "golden"
+RUNTIME_GOLDEN_FIXTURES = (
+    "fixture_clip.json",
+    "fixture_transition.json",
+    "fixture_effect.json",
+    "fixture_theme.json",
+    "fixture_track.json",
+    "fixture_audio.json",
+    "fixture_pool.json",
+    "fixture_bootstrap_created.json",
+)
+LEGACY_REJECTION_GOLDEN_FIXTURES = (
+    "fixture_arrangement.json",
+    "fixture_bootstrap_legacy.json",
+)
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -79,6 +98,44 @@ def _load_golden_fixture(name: str) -> dict[str, Any]:
         return json.load(f)
 
 
+def _empty_runtime_assembly() -> dict[str, Any]:
+    """Return a validated empty raw TimelineConfig assembly for runtime tests."""
+    return timeline_contract.canonical_empty_timeline()
+
+
+def _raw_clip(
+    clip_id: str,
+    *,
+    track: str = "visual",
+    clip_type: str = "media",
+    asset: str | None = "a1",
+    at: float = 0.0,
+) -> dict[str, Any]:
+    clip: dict[str, Any] = {
+        "id": clip_id,
+        "at": at,
+        "track": track,
+        "clipType": clip_type,
+    }
+    if asset:
+        clip["asset"] = asset
+    if clip_type == "text":
+        clip["text"] = {"content": ""}
+    return clip
+
+
+def test_every_event_kind_has_projection_classification() -> None:
+    expected = set(_PAYLOAD_TYPES)
+    assert set(PROJECTOR_EVENT_CLASSIFICATION) == expected
+    assert classify_projector_event_kind("track.added") == "timeline_config_mutation"
+    assert classify_projector_event_kind("timeline.config_replaced") == "validated_full_config_replacement"
+    assert classify_projector_event_kind("timeline.recovered") == "validated_full_config_replacement"
+    assert classify_projector_event_kind("arrangement.replaced") == "migration_only_legacy"
+    assert classify_projector_event_kind("pool.asset_added") == "non_container_read_model"
+    assert "migration_only_legacy" not in MATERIALIZER_ALLOWED_CLASSIFICATIONS
+    assert "non_container_read_model" not in MATERIALIZER_ALLOWED_CLASSIFICATIONS
+
+
 # ── apply_event_to_assembly — clip.* events ───────────────────────────────────
 
 
@@ -86,29 +143,46 @@ class TestApplyClipAdded:
     def test_adds_clip_with_defaults(self):
         state: dict[str, Any] = {}
         event = _make_event("clip.added", {
-            "clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None,
+            "clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None,
         })
         result = apply_event_to_assembly(state, event)
         assert result["clips"] == [{
-            "id": "c1", "kind": "visual", "asset_id": "a1",
-            "start": 0.0, "duration": 0.0, "text": "", "note": "",
+            "id": "c1",
+            "at": 0.0,
+            "track": "visual",
+            "clipType": "media",
+            "asset": "a1",
         }]
+        timeline_contract.validate_timeline_config_for_container(result)
 
     def test_adds_clip_at_index(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("clip.added", {
-            "clip_id": "c2", "kind": "audio", "asset_id": "a2",
+            "clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2",
             "position": {"mode": "index", "index": 0},
         })
         result = apply_event_to_assembly(state, event)
         assert [c["id"] for c in result["clips"]] == ["c2", "c1"]
+        assert result["clips"][0]["track"] == "audio"
+
+    def test_adds_clip_on_explicit_track_id(self):
+        state = {"clips": [], "tracks": [{"id": "captions", "kind": "visual", "label": "Captions"}]}
+        event = _make_event("clip.added", {
+            "clip_id": "c1",
+            "kind": "text",
+            "track_id": "captions",
+            "asset_id": "a1",
+            "position": None,
+        })
+        result = apply_event_to_assembly(state, event)
+        assert result["clips"][0]["track"] == "captions"
+        assert result["clips"][0]["clipType"] == "text"
 
     def test_input_state_not_mutated(self):
         state: dict[str, Any] = {}
         state_copy = deepcopy(state)
         event = _make_event("clip.added", {
-            "clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None,
+            "clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None,
         })
         apply_event_to_assembly(state, event)
         assert state == state_copy
@@ -116,26 +190,38 @@ class TestApplyClipAdded:
 
 class TestApplyClipRemoved:
     def test_removes_existing_clip(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("clip.removed", {"clip_id": "c1"})
         result = apply_event_to_assembly(state, event)
         assert result["clips"] == []
 
     def test_remove_nonexistent_noops(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("clip.removed", {"clip_id": "nonexistent"})
         result = apply_event_to_assembly(state, event)
         assert len(result["clips"]) == 1
 
 
+class TestApplyClipRetracked:
+    def test_retracks_clip(self):
+        state = {
+            "clips": [_raw_clip("c1", track="v1")],
+            "tracks": [
+                {"id": "v1", "kind": "visual", "label": "Video"},
+                {"id": "v2", "kind": "visual", "label": "Overlay"},
+            ],
+        }
+        event = _make_event("clip.retracked", {"clip_id": "c1", "track_id": "v2"})
+        result = apply_event_to_assembly(state, event)
+        assert result["clips"][0]["track"] == "v2"
+
+
 class TestApplyClipMoved:
     def test_moves_clip_before(self):
         state = {"clips": [
-            {"id": "c1", "kind": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
-            {"id": "c2", "kind": "audio", "asset_id": "a2", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
-        ]}
+            _raw_clip("c1"),
+            _raw_clip("c2", track="audio", asset="a2"),
+        ], "tracks": []}
         event = _make_event("clip.moved", {
             "clip_id": "c2", "position": {"mode": "before", "ref_clip_id": "c1"},
         })
@@ -145,20 +231,19 @@ class TestApplyClipMoved:
 
 class TestApplyClipRetimed:
     def test_retimes_clip(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("clip.retimed", {"clip_id": "c1", "start": 2.5, "duration": 10.0})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["start"] == 2.5
-        assert result["clips"][0]["duration"] == 10.0
+        assert result["clips"][0]["at"] == 2.5
+        assert result["clips"][0]["hold"] == 10.0
 
 
 class TestApplyClipSwapped:
     def test_swaps_clips(self):
         state = {"clips": [
-            {"id": "c1", "kind": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
-            {"id": "c2", "kind": "audio", "asset_id": "a2", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
-        ]}
+            _raw_clip("c1"),
+            _raw_clip("c2", track="audio", asset="a2"),
+        ], "tracks": []}
         event = _make_event("clip.swapped", {"clip_a_id": "c1", "clip_b_id": "c2"})
         result = apply_event_to_assembly(state, event)
         assert [c["id"] for c in result["clips"]] == ["c2", "c1"]
@@ -166,29 +251,26 @@ class TestApplyClipSwapped:
 
 class TestApplyClipReplaced:
     def test_replaces_asset(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "old",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1", asset="old")], "tracks": []}
         event = _make_event("clip.replaced", {"clip_id": "c1", "with_asset_id": "new"})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["asset_id"] == "new"
+        assert result["clips"][0]["asset"] == "new"
 
 
 class TestApplyClipTextSet:
     def test_sets_text(self):
-        state = {"clips": [{"id": "c1", "kind": "text", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1", clip_type="text", asset=None)], "tracks": []}
         event = _make_event("clip.text_set", {"clip_id": "c1", "text": "Hello"})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["text"] == "Hello"
+        assert result["clips"][0]["text"] == {"content": "Hello"}
 
 
 class TestApplyClipAnnotated:
-    def test_annotates_clip(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+    def test_annotation_is_non_container_read_model_noop(self):
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("clip.annotated", {"clip_id": "c1", "note": "important"})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["note"] == "important"
+        assert result == state
 
 
 # ── apply_event_to_assembly — transition.* events ─────────────────────────────
@@ -196,23 +278,23 @@ class TestApplyClipAnnotated:
 
 class TestApplyTransition:
     def test_sets_transition(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("transition.set", {
             "left_clip_id": "c1", "kind": "crossfade", "right_clip_id": "c2",
             "duration_seconds": 1.5,
         })
         result = apply_event_to_assembly(state, event)
         assert result["clips"][0]["transition"] == {
-            "kind": "crossfade", "right_clip_id": "c2", "duration_seconds": 1.5,
+            "type": "crossfade",
+            "duration": 1.5,
+            "params": {"right_clip_id": "c2"},
         }
 
     def test_removes_transition(self):
         state = {"clips": [{
-            "id": "c1", "kind": "visual", "asset_id": "a1",
-            "start": 0.0, "duration": 0.0, "text": "", "note": "",
-            "transition": {"kind": "crossfade", "right_clip_id": "c2", "duration_seconds": 1.5},
-        }]}
+            **_raw_clip("c1"),
+            "transition": {"type": "crossfade", "duration": 1.5},
+        }], "tracks": []}
         event = _make_event("transition.removed", {"left_clip_id": "c1", "right_clip_id": "c2"})
         result = apply_event_to_assembly(state, event)
         assert "transition" not in result["clips"][0]
@@ -223,33 +305,26 @@ class TestApplyTransition:
 
 class TestApplyEffect:
     def test_adds_effect(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1")], "tracks": []}
         event = _make_event("effect.added", {
             "clip_id": "c1", "effect_id": "blur", "params": {"amount": 5},
         })
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["effects"] == [
-            {"effect_id": "blur", "params": {"amount": 5}},
-        ]
+        assert result["clips"][0]["params"]["effects"] == {"blur": {"amount": 5}}
 
     def test_removes_effect(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": "",
-                            "effects": [{"effect_id": "blur", "params": {"amount": 5}}]}]}
+        state = {"clips": [{**_raw_clip("c1"), "params": {"effects": {"blur": {"amount": 5}}}}], "tracks": []}
         event = _make_event("effect.removed", {"clip_id": "c1", "effect_id": "blur"})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["effects"] == []
+        assert result["clips"][0]["params"]["effects"] == {}
 
     def test_tunes_effect(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": "",
-                            "effects": [{"effect_id": "blur", "params": {"amount": 5}}]}]}
+        state = {"clips": [{**_raw_clip("c1"), "params": {"effects": {"blur": {"amount": 5}}}}], "tracks": []}
         event = _make_event("effect.tuned", {
             "clip_id": "c1", "effect_id": "blur", "param": "amount", "value": 10,
         })
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["effects"][0]["params"]["amount"] == 10
+        assert result["clips"][0]["params"]["effects"]["blur"]["amount"] == 10
 
 
 # ── apply_event_to_assembly — theme.* events ──────────────────────────────────
@@ -263,10 +338,10 @@ class TestApplyTheme:
         assert result["theme"] == "sleek"
 
     def test_overrides_theme(self):
-        state = {"theme": "sleek", "theme_overrides": {}}
-        event = _make_event("theme.overridden", {"override_id": "bg_color", "value": "#000"})
+        state = {"clips": [], "tracks": [], "theme": "sleek", "theme_overrides": {}}
+        event = _make_event("theme.overridden", {"override_id": "visual", "value": {"color_palette": "muted"}})
         result = apply_event_to_assembly(state, event)
-        assert result["theme_overrides"]["bg_color"] == "#000"
+        assert result["theme_overrides"]["visual"] == {"color_palette": "muted"}
 
 
 # ── apply_event_to_assembly — track.* events ──────────────────────────────────
@@ -281,13 +356,12 @@ class TestApplyTrack:
         result = apply_event_to_assembly(state, event)
         assert result["tracks"] == [{"id": "v1", "kind": "visual", "label": "Video"}]
 
-    def test_adds_track_without_label(self):
+    def test_rejects_track_without_label(self):
         state = {"tracks": []}
-        event = _make_event("track.added", {
-            "track_id": "a1", "kind": "audio", "label": None,
-        })
-        result = apply_event_to_assembly(state, event)
-        assert result["tracks"] == [{"id": "a1", "kind": "audio"}]
+        with pytest.raises(TypeError):
+            _make_event("track.added", {
+                "track_id": "a1", "kind": "audio",
+            })
 
     def test_removes_track(self):
         state = {"tracks": [{"id": "v1", "kind": "visual"}, {"id": "a1", "kind": "audio"}]}
@@ -301,53 +375,48 @@ class TestApplyTrack:
 
 class TestApplyAudio:
     def test_binds_audio(self):
-        state = {"clips": [{"id": "c1", "kind": "audio", "asset_id": "",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1", track="audio", asset=None)], "tracks": []}
         event = _make_event("audio.bound", {"clip_id": "c1", "asset_id": "song.mp3"})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["asset_id"] == "song.mp3"
+        assert result["clips"][0]["asset"] == "song.mp3"
 
     def test_unbinds_audio(self):
-        state = {"clips": [{"id": "c1", "kind": "audio", "asset_id": "song.mp3",
-                            "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        state = {"clips": [_raw_clip("c1", track="audio", asset="song.mp3")], "tracks": []}
         event = _make_event("audio.unbound", {"clip_id": "c1"})
         result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["asset_id"] == ""
+        assert "asset" not in result["clips"][0]
 
 
 # ── apply_event_to_assembly — pool.* events ──────────────────────────────────
 
 
 class TestApplyPool:
-    def test_adds_pool_asset(self):
+    def test_pool_asset_added_is_non_container_noop(self):
         state = {"pool": {"entries": []}}
         event = _make_event("pool.asset_added", {"asset_id": "img1.png"})
-        result = apply_event_to_assembly(state, event)
-        assert result["pool"]["entries"] == [{"asset_id": "img1.png", "score": 0.0}]
+        assert apply_event_to_assembly(state, event) == state
 
-    def test_removes_pool_asset(self):
+    def test_pool_asset_removed_is_non_container_noop(self):
         state = {"pool": {"entries": [{"asset_id": "img1.png", "score": 0.5}]}}
         event = _make_event("pool.asset_removed", {"asset_id": "img1.png"})
-        result = apply_event_to_assembly(state, event)
-        assert result["pool"]["entries"] == []
+        assert apply_event_to_assembly(state, event) == state
 
-    def test_scores_pool_asset(self):
+    def test_pool_asset_scored_is_non_container_noop(self):
         state = {"pool": {"entries": [{"asset_id": "img1.png", "score": 0.5}]}}
         event = _make_event("pool.asset_scored", {"asset_id": "img1.png", "score": 0.9})
-        result = apply_event_to_assembly(state, event)
-        assert result["pool"]["entries"][0]["score"] == 0.9
+        assert apply_event_to_assembly(state, event) == state
 
 
 # ── apply_event_to_assembly — arrangement.* events ────────────────────────────
 
 
 class TestApplyArrangement:
-    def test_replaces_arrangement(self):
+    def test_rejects_arrangement_replaced(self):
         state = {"arrangement": {"clips": []}}
         new_arr = {"clips": [{"track": "v1", "clip_id": "c1", "start": 0.0, "end": 5.0}]}
         event = _make_event("arrangement.replaced", {"arrangement": new_arr})
-        result = apply_event_to_assembly(state, event)
-        assert result["arrangement"] == new_arr
+        with pytest.raises(ProjectionError, match="not a TimelineConfig"):
+            apply_event_to_assembly(state, event)
 
 
 # ── lifecycle no-ops ──────────────────────────────────────────────────────────
@@ -357,7 +426,7 @@ class TestLifecycleNoOps:
     """Prove all lifecycle events are intentional assembly no-ops."""
 
     def test_timeline_created_is_noop(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
+        state = {"clips": [{"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1",
                             "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
         event = _make_event("timeline.created", {
             "timeline_id": "00000000-0000-0000-0000-000000000001",
@@ -402,15 +471,14 @@ class TestLifecycleNoOps:
 
 
 class TestTimelineImported:
-    def test_unwraps_full_wrapper_shape(self):
-        """Snapshot with schema_version + nested assembly → inner dict extracted."""
-        state: dict[str, Any] = {}
+    def test_rejects_full_wrapper_shape(self):
+        """Runtime replay fails closed on legacy wrapper snapshots."""
         payload = {
             "snapshot": {
                 "assembly.json": {
                     "schema_version": 1,
                     "assembly": {
-                        "clips": [{"id": "legacy-1", "kind": "visual", "asset_id": "old.mp4",
+                        "clips": [{"id": "legacy-1", "kind": "visual", "track_id": "visual", "asset_id": "old.mp4",
                                    "start": 1.0, "duration": 5.0, "text": "hi", "note": "old"}],
                         "theme": "legacy-theme",
                     },
@@ -419,48 +487,27 @@ class TestTimelineImported:
             "source": "legacy_local",
         }
         event = _make_event("timeline.imported", payload)
-        result = apply_event_to_assembly(state, event)
-        assert len(result["clips"]) == 1
-        assert result["clips"][0]["id"] == "legacy-1"
-        assert result["theme"] == "legacy-theme"
+        with pytest.raises(ProjectionError, match="migration-only legacy"):
+            apply_event_to_assembly({}, event)
 
-    def test_imported_merges_with_existing_state(self):
-        """When replaying, imported state is merged — existing state wins."""
-        state = {"existing_key": "existing_value"}
+    def test_rejects_bare_snapshot_without_wrapper(self):
+        """Shape-valid legacy imported snapshots are still migration-only."""
         payload = {
             "snapshot": {
-                "assembly.json": {
-                    "schema_version": 1,
-                    "assembly": {"clips": []},
-                },
+                "assembly.json": {"clips": [], "tracks": []},
             },
             "source": "legacy_local",
         }
         event = _make_event("timeline.imported", payload)
-        result = apply_event_to_assembly(state, event)
-        assert result.get("existing_key") == "existing_value"
+        with pytest.raises(ProjectionError, match="migration-only legacy"):
+            apply_event_to_assembly({}, event)
 
-    def test_bare_snapshot_without_wrapper(self):
-        """Snapshot value without 'assembly' key → used as-is."""
-        state: dict[str, Any] = {}
-        payload = {
-            "snapshot": {
-                "assembly.json": {"clips": [{"id": "bare", "kind": "visual", "asset_id": "b.mp4",
-                                              "start": 0.0, "duration": 0.0, "text": "", "note": ""}]},
-            },
-            "source": "legacy_local",
-        }
-        event = _make_event("timeline.imported", payload)
-        result = apply_event_to_assembly(state, event)
-        assert result["clips"][0]["id"] == "bare"
-
-    def test_empty_snapshot_noops(self):
-        """Empty snapshot dict → no state change."""
-        state = {"clips": []}
+    def test_empty_snapshot_rejected(self):
+        """Even an empty imported payload cannot silently no-op at runtime."""
         payload = {"snapshot": {}, "source": "legacy_local"}
         event = _make_event("timeline.imported", payload)
-        result = apply_event_to_assembly(state, event)
-        assert result is state
+        with pytest.raises(ProjectionError, match="migration-only legacy"):
+            apply_event_to_assembly({"clips": []}, event)
 
 
 # ── project_to_assembly (full replay) ─────────────────────────────────────────
@@ -470,9 +517,9 @@ class TestProjectToAssembly:
     def test_full_replay_from_empty(self):
         """Full replay of a sequence of events produces expected assembly."""
         events = [
-            _make_event("clip.added", {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            _make_event("clip.added", {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA01"),
-            _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA02"),
             _make_event("clip.removed", {"clip_id": "c1"},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA03"),
@@ -481,12 +528,59 @@ class TestProjectToAssembly:
         assert len(result["clips"]) == 1
         assert result["clips"][0]["id"] == "c2"
 
+    def test_representative_timeline_config_native_replay_has_no_legacy_keys(self):
+        events = [
+            _make_event("track.added", {"track_id": "v1", "kind": "visual", "label": "Video"},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA11"),
+            _make_event("track.added", {"track_id": "v2", "kind": "visual", "label": "Overlay"},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA12"),
+            _make_event("clip.added", {
+                "clip_id": "c1",
+                "kind": "visual",
+                "track_id": "v1",
+                "asset_id": "asset-1",
+                "position": None,
+            }, event_id="01AAAAAAAAAAAAAAAAAAAAAA13"),
+            _make_event("clip.retracked", {"clip_id": "c1", "track_id": "v2"},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA14"),
+            _make_event("clip.retimed", {"clip_id": "c1", "start": 1.5, "duration": 4.0},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA15"),
+            _make_event("clip.replaced", {"clip_id": "c1", "with_asset_id": "asset-2"},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA16"),
+            _make_event("clip.text_set", {"clip_id": "c1", "text": "hello"},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA17"),
+            _make_event("clip.annotated", {"clip_id": "c1", "note": "read-model-only"},
+                        event_id="01AAAAAAAAAAAAAAAAAAAAAA18"),
+        ]
+
+        result = project_to_assembly(events)
+
+        timeline_contract.validate_timeline_config_for_container(result)
+        assert result["tracks"] == [
+            {"id": "v1", "kind": "visual", "label": "Video"},
+            {"id": "v2", "kind": "visual", "label": "Overlay"},
+        ]
+        assert result["clips"] == [{
+            "id": "c1",
+            "at": 1.5,
+            "track": "v2",
+            "clipType": "media",
+            "asset": "asset-2",
+            "hold": 4.0,
+            "text": {"content": "hello"},
+        }]
+        forbidden = {"kind", "asset_id", "start", "duration", "pool", "arrangement"}
+        assert forbidden.isdisjoint(result)
+        for track in result["tracks"]:
+            assert "label" in track
+        for clip in result["clips"]:
+            assert forbidden.isdisjoint(clip)
+
     def test_full_replay_with_initial_assembly_seed(self):
         """Seeding initial_assembly and replaying suffix events works."""
-        seed = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                           "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        seed = {"clips": [_raw_clip("c1")], "tracks": []}
         suffix = [
-            _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA01"),
         ]
         result = project_to_assembly(suffix, initial_assembly=seed)
@@ -494,11 +588,10 @@ class TestProjectToAssembly:
 
     def test_initial_assembly_not_mutated(self):
         """Seeding initial_assembly does not mutate the input."""
-        seed = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
-                           "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        seed = {"clips": [_raw_clip("c1")], "tracks": []}
         seed_copy = deepcopy(seed)
         suffix = [
-            _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA01"),
         ]
         project_to_assembly(suffix, initial_assembly=seed)
@@ -516,7 +609,7 @@ class TestProjectToAssembly:
             "prev_hash": None,
             "hash": "01AAAAAAAAAAAAAAAAAAAAAA010",
             "kind": "clip.added",
-            "payload": {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            "payload": {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             "expected_version": None,
             "schema_version": 2,
             "txn_id": None,
@@ -538,14 +631,104 @@ class TestProjectToAssembly:
         with pytest.raises(TimelineEventSchemaError, match="unsupported event kind"):
             _make_event("unknown.thing", {"x": 1})
 
-    def test_empty_event_list_returns_empty_dict(self):
-        assert project_to_assembly([]) == {}
+    def test_empty_event_list_returns_empty_runtime_container(self):
+        assert project_to_assembly([]) == {"clips": [], "tracks": []}
 
     def test_empty_event_list_with_seed_returns_seed_copy(self):
-        seed = {"clips": []}
+        seed = _empty_runtime_assembly()
         result = project_to_assembly([], initial_assembly=seed)
         assert result == seed
         assert result is not seed  # deep copy
+        timeline_contract.validate_timeline_config_for_container(result)
+
+    def test_empty_runtime_assembly_helper_rejects_legacy_wrapper(self):
+        seed = _empty_runtime_assembly()
+        assert seed == {"clips": [], "tracks": []}
+        with pytest.raises(ValueError, match="legacy wrapper/read-model keys"):
+            timeline_contract.validate_timeline_config_for_container({
+                "schema_version": 1,
+                "assembly": seed,
+            })
+
+
+class TestTimelineConfigReplacedProjection:
+    def test_config_replaced_projects_full_validated_replacement_without_mutating_inputs(self):
+        state = {
+            "tracks": [{"id": "old", "kind": "visual", "label": "Old"}],
+            "clips": [{"id": "old_clip", "at": 0, "track": "old", "clipType": "text", "hold": 1}],
+        }
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [],
+        }
+        original_config = deepcopy(config)
+        event = _make_event("timeline.config_replaced", {"config": config})
+
+        result = apply_event_to_assembly(state, event)
+
+        assert result == config
+        assert result is not config
+        assert config == original_config
+        assert state["tracks"][0]["id"] == "old"
+        result["tracks"][0]["label"] = "Changed"
+        assert event.payload.config["tracks"][0]["label"] == "Video"  # type: ignore[attr-defined]
+        timeline_contract.validate_timeline_config_for_container(result)
+
+    def test_config_replaced_rejects_legacy_wrapper_payloads(self):
+        with pytest.raises(ValueError, match="legacy wrapper/read-model keys"):
+            _make_event(
+                "timeline.config_replaced",
+                {
+                    "config": {
+                        "schema_version": 1,
+                        "assembly": {"tracks": [], "clips": []},
+                    }
+                },
+            )
+
+
+class TestTimelineRecoveredProjection:
+    def test_recovered_projects_validated_raw_config_without_mutating_payload(self):
+        state = {
+            "tracks": [{"id": "old", "kind": "visual", "label": "Old"}],
+            "clips": [],
+        }
+        recovered = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Recovered"}],
+            "clips": [],
+        }
+        event = _make_event(
+            "timeline.recovered",
+            {
+                "anchor_event_id": "01AAAAAAAAAAAAAAAAAAAAAA01",
+                "anchor_type": "event",
+                "reason": "recover",
+                "projected_state_summary": recovered,
+            },
+        )
+
+        result = apply_event_to_assembly(state, event)
+
+        assert result == recovered
+        assert result is not recovered
+        result["tracks"][0]["label"] = "Changed"
+        assert event.payload.projected_state_summary["tracks"][0]["label"] == "Recovered"  # type: ignore[attr-defined]
+        timeline_contract.validate_timeline_config_for_container(result)
+
+    def test_recovered_rejects_legacy_wrapper_payloads(self):
+        with pytest.raises(ValueError, match="legacy wrapper/read-model keys"):
+            _make_event(
+                "timeline.recovered",
+                {
+                    "anchor_event_id": "01AAAAAAAAAAAAAAAAAAAAAA01",
+                    "anchor_type": "event",
+                    "reason": "recover",
+                    "projected_state_summary": {
+                        "schema_version": 1,
+                        "assembly": {"tracks": [], "clips": []},
+                    },
+                },
+            )
 
 
 # ── determinism ───────────────────────────────────────────────────────────────
@@ -554,7 +737,7 @@ class TestProjectToAssembly:
 class TestDeterminism:
     def test_same_input_same_output(self):
         events = [
-            _make_event("clip.added", {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            _make_event("clip.added", {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA01"),
             _make_event("clip.retimed", {"clip_id": "c1", "start": 5.0, "duration": 30.0},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA02"),
@@ -567,9 +750,9 @@ class TestDeterminism:
     def test_deterministic_across_runs(self):
         """project_to_assembly is pure — no time/random/network."""
         # Use an initial seed so all keys are present
-        seed = {"clips": [], "tracks": [], "theme": "", "theme_overrides": {}, "pool": {"entries": []}, "arrangement": {"clips": []}}
+        seed = {"clips": [], "tracks": [], "theme_overrides": {}}
         events = [
-            _make_event("clip.added", {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            _make_event("clip.added", {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA01"),
             _make_event("track.added", {"track_id": "v1", "kind": "visual", "label": "V"},
                         event_id="01AAAAAAAAAAAAAAAAAAAAAA02"),
@@ -585,18 +768,7 @@ class TestDeterminism:
 class TestGoldenFixtures:
     """Validate all golden fixtures produce the expected assembly."""
 
-    @pytest.mark.parametrize("fixture_name", [
-        "fixture_clip.json",
-        "fixture_transition.json",
-        "fixture_effect.json",
-        "fixture_theme.json",
-        "fixture_track.json",
-        "fixture_audio.json",
-        "fixture_pool.json",
-        "fixture_arrangement.json",
-        "fixture_bootstrap_created.json",
-        "fixture_bootstrap_legacy.json",
-    ])
+    @pytest.mark.parametrize("fixture_name", RUNTIME_GOLDEN_FIXTURES)
     def test_golden_fixture_produces_expected_assembly(self, fixture_name: str):
         data = _load_golden_fixture(fixture_name)
         events_raw = data["events"]
@@ -605,6 +777,70 @@ class TestGoldenFixtures:
         events = [TimelineEvent.from_dict(e) for e in events_raw]
         result = project_to_assembly(events)
         assert result == expected, f"Fixture {fixture_name} mismatch"
+        timeline_contract.validate_timeline_config_for_container(result)
+
+    @pytest.mark.parametrize("fixture_name", RUNTIME_GOLDEN_FIXTURES)
+    def test_runtime_golden_expected_assemblies_are_raw_timeline_configs(
+        self, fixture_name: str
+    ):
+        data = _load_golden_fixture(fixture_name)
+        expected = data["expected_assembly"]
+
+        timeline_contract.validate_timeline_config_for_container(expected)
+        assert "schema_version" not in expected
+        assert "assembly" not in expected
+        assert "pool" not in expected
+        assert "arrangement" not in expected
+        assert all(track.get("label") is not None for track in expected["tracks"])
+
+    def test_every_golden_fixture_is_accounted_for_by_boundary(self):
+        fixture_names = {path.name for path in GOLDEN_DIR.glob("fixture_*.json")}
+        accounted_for = set(RUNTIME_GOLDEN_FIXTURES) | set(LEGACY_REJECTION_GOLDEN_FIXTURES)
+        assert fixture_names == accounted_for
+
+    @pytest.mark.parametrize("fixture_name", RUNTIME_GOLDEN_FIXTURES)
+    def test_runtime_golden_fixtures_do_not_embed_legacy_payload_shapes(
+        self, fixture_name: str
+    ):
+        source = (GOLDEN_DIR / fixture_name).read_text(encoding="utf-8")
+        forbidden = (
+            '"kind": "timeline.imported"',
+            '"kind": "timeline.recovered"',
+            '"kind": "arrangement.replaced"',
+            '"label": null',
+            '"assembly": {',
+            '"pool": {',
+            '"arrangement": {',
+        )
+        for marker in forbidden:
+            assert marker not in source, f"{fixture_name} contains legacy-only marker {marker!r}"
+
+    def test_shared_runtime_seeders_use_canonical_empty_timeline(self):
+        seeders = [
+            ROOT / "tests" / "conftest.py",
+            ROOT / "tests" / "session" / "test_cli_gate.py",
+        ]
+        forbidden_inline_seeds = (
+            'json.dumps({"clips": [], "tracks": []})',
+            'json.dumps({"tracks": [], "clips": []})',
+        )
+        for path in seeders:
+            source = path.read_text(encoding="utf-8")
+            assert "canonical_empty_timeline()" in source
+            for marker in forbidden_inline_seeds:
+                assert marker not in source, f"{path} hand-writes a runtime empty container"
+
+    @pytest.mark.parametrize("fixture_name", LEGACY_REJECTION_GOLDEN_FIXTURES)
+    def test_legacy_read_model_fixtures_reject_runtime_projection(self, fixture_name: str):
+        data = _load_golden_fixture(fixture_name)
+        events = [TimelineEvent.from_dict(e) for e in data["events"]]
+        with pytest.raises(ProjectionError, match="migration-only legacy|not a TimelineConfig"):
+            project_to_assembly(events)
+
+    def test_pool_fixture_is_non_container_noop(self):
+        data = _load_golden_fixture("fixture_pool.json")
+        events = [TimelineEvent.from_dict(e) for e in data["events"]]
+        assert project_to_assembly(events) == {"clips": [], "tracks": []}
 
     def test_golden_fixture_prefix_replay_consistent(self):
         """Prefix replay must produce intermediate state consistent with stepwise replay."""
@@ -615,7 +851,7 @@ class TestGoldenFixtures:
         for k in range(len(events) + 1):
             prefix = events[:k]
             full_state = project_to_assembly(prefix)
-            stepwise: dict[str, Any] = {}
+            stepwise: dict[str, Any] = _empty_runtime_assembly()
             for e in prefix:
                 stepwise = apply_event_to_assembly(stepwise, e)
             assert full_state == stepwise, f"Prefix {k} mismatch"
@@ -643,8 +879,8 @@ class TestCheckpointParity:
 
         # Append several events
         events_data = [
-            ("clip.added", {"clip_id": "a", "kind": "visual", "asset_id": "a1", "position": None}),
-            ("clip.added", {"clip_id": "b", "kind": "audio", "asset_id": "b1", "position": None}),
+            ("clip.added", {"clip_id": "a", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None}),
+            ("clip.added", {"clip_id": "b", "kind": "audio", "track_id": "audio", "asset_id": "b1", "position": None}),
             ("clip.retimed", {"clip_id": "a", "start": 2.0, "duration": 10.0}),
             ("track.added", {"track_id": "v1", "kind": "visual", "label": "Video"}),
         ]
@@ -688,7 +924,7 @@ class TestCheckpointParity:
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "a", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "a", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
 
@@ -723,7 +959,7 @@ class TestCheckpointParity:
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "a", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "a", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
 
@@ -742,7 +978,7 @@ class TestCheckpointParity:
 
 class TestBootstrapBehavior:
     """Prove bootstrap seam: created timelines get no timeline.imported;
-    true-legacy timelines get timeline.imported."""
+    true-legacy timelines fail closed until migrated."""
 
     def test_created_timeline_no_bootstrap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """A fresh created timeline does NOT emit timeline.imported on first write."""
@@ -759,8 +995,8 @@ class TestBootstrapBehavior:
             timeline_ulid="",
             timeline_event_stream_id="",
             events=[{
-                "kind": "arrangement.replaced",
-                "payload": {"arrangement": {"clips": []}},
+                "kind": "track.added",
+                "payload": {"track_id": "v1", "kind": "visual", "label": "Video"},
             }],
             actor=TimelineActor(type="system", id="test:boot", display="Test"),
         )
@@ -770,9 +1006,9 @@ class TestBootstrapBehavior:
         assert result.attempts == 1, \
             f"Expected 1 domain event, got {result.attempts}"
 
-    def test_legacy_timeline_bootstraps(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    def test_legacy_timeline_rejects_runtime_bootstrap(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         """A true-legacy timeline (no identity, has compatibility files)
-        emits timeline.imported before the domain event."""
+        fails closed instead of emitting timeline.imported."""
         import json
         from astrid.core.timeline._edit_helpers import pack_write_gateway
         from astrid.core.timeline.events.schema import TimelineActor
@@ -798,35 +1034,25 @@ class TestBootstrapBehavior:
             encoding="utf-8",
         )
         (tdir / "assembly.json").write_text(
-            json.dumps({"schema_version": 1, "assembly": {"clips": []}}),
+            json.dumps({"clips": [], "tracks": []}),
             encoding="utf-8",
         )
 
-        # Should bootstrap.
-        result = pack_write_gateway(
-            project_slug="legacy-proj",
-            timeline_slug="legacy-tl",
-            timeline_ulid="",
-            timeline_event_stream_id="",
-            events=[{
-                "kind": "clip.added",
-                "payload": {"clip_id": "new-clip", "kind": "visual", "asset_id": "a1", "position": None},
-            }],
-            actor=TimelineActor(type="system", id="test:legacy", display="Test"),
-        )
+        with pytest.raises(Exception, match="Runtime legacy bootstrap is disabled"):
+            pack_write_gateway(
+                project_slug="legacy-proj",
+                timeline_slug="legacy-tl",
+                timeline_ulid="",
+                timeline_event_stream_id="",
+                events=[{
+                    "kind": "clip.added",
+                    "payload": {"clip_id": "new-clip", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
+                }],
+                actor=TimelineActor(type="system", id="test:legacy", display="Test"),
+            )
 
-        assert result.bootstrap_emitted is True, \
-            "True-legacy timelines must emit timeline.imported"
-
-        # Verify the event stream has timeline.imported + domain event.
-        identity = read_json(tdir / "assembly.identity.json")
-        assert identity.get("provenance") == "imported"
-
-        backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=tdir)
-        events = backend.read_events()
-        assert len(events) >= 2, f"Expected >= 2 events, got {len(events)}"
-        kinds = [e.kind for e in events]
-        assert "timeline.imported" in kinds
+        assert not (tdir / "assembly.identity.json").exists()
+        assert not (tdir / "assembly.jsonl").exists()
 
 
 # ── repair tests ──────────────────────────────────────────────────────────────
@@ -853,7 +1079,7 @@ class TestRepairPaths:
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
 
@@ -882,14 +1108,26 @@ class TestRepairPaths:
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
 
         # Overwrite assembly.json with stale content.
-        stale = {"schema_version": 1, "assembly": {"clips": [{"id": "stale", "kind": "visual", "asset_id": "x", "start": 0, "duration": 0, "text": "", "note": ""}]}}
+        stale = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [
+                {
+                    "id": "stale",
+                    "at": 0,
+                    "track": "v1",
+                    "clipType": "media",
+                    "asset": "x",
+                    "hold": 1,
+                }
+            ],
+        }
         write_json_atomic(tdir / "assembly.json", stale)
 
         # Append a real clip event.
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "real", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "real", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
 
@@ -899,8 +1137,7 @@ class TestRepairPaths:
 
         # The assembly should reflect the real event, not the stale version.
         assembly_raw = read_json(tdir / "assembly.json")
-        inner = assembly_raw.get("assembly", assembly_raw)
-        clip_ids = [c["id"] for c in inner.get("clips", [])]
+        clip_ids = [c["id"] for c in assembly_raw.get("clips", [])]
         assert "real" in clip_ids
         assert "stale" not in clip_ids
 
@@ -910,9 +1147,9 @@ class TestRepairPaths:
 
 class TestEdgeCases:
     def test_clip_added_preserves_existing_clips(self):
-        state = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1",
+        state = {"clips": [{"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1",
                             "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
-        event = _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None})
+        event = _make_event("clip.added", {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None})
         result = apply_event_to_assembly(state, event)
         assert len(result["clips"]) == 2
 
@@ -960,13 +1197,13 @@ class TestReplayProjection:
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            payload={"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None},
             actor=_actor(),
         )
 
@@ -993,13 +1230,13 @@ class TestReplayProjection:
         e1 = backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
         e2 = backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c2", "kind": "audio", "asset_id": "a2", "position": None},
+            payload={"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "position": None},
             actor=_actor(),
         )
 
@@ -1032,7 +1269,7 @@ class TestReplayProjection:
         backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
 
@@ -1129,7 +1366,7 @@ class TestPreviewAtEventId:
         e1 = backend.append_event(
             timeline_id=timeline_id,
             kind="clip.added",
-            payload={"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+            payload={"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
             actor=_actor(),
         )
 
@@ -1137,10 +1374,10 @@ class TestPreviewAtEventId:
         assert len(assembly["clips"]) == 1
         assert assembly["clips"][0]["id"] == "c1"
 
-    def test_preview_no_events_returns_empty_dict(
+    def test_preview_no_events_returns_empty_runtime_container(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     ):
-        """replay_projection on empty stream returns empty dict for full replay."""
+        """replay_projection on empty stream returns the canonical empty container."""
         monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
 
         from astrid.core.timeline.projection import replay_projection
@@ -1155,4 +1392,33 @@ class TestPreviewAtEventId:
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
 
         assembly = replay_projection(backend)
-        assert assembly == {}
+        assert assembly == {"clips": [], "tracks": []}
+
+
+def test_runtime_sources_do_not_seed_wrapper_assembly_defaults() -> None:
+    """Runtime timeline code must not depend on legacy Assembly wrappers."""
+    runtime_files = [
+        Path("astrid/core/timeline/assembly_helper.py"),
+        Path("astrid/core/timeline/branch.py"),
+        Path("astrid/core/timeline/cli.py"),
+        Path("astrid/core/timeline/crud.py"),
+        Path("astrid/core/timeline/eventlog/local_fs.py"),
+        Path("astrid/core/timeline/eventlog/projector.py"),
+        Path("astrid/core/timeline/eventlog/selector.py"),
+        Path("astrid/core/timeline/model.py"),
+        Path("astrid/core/timeline/operations.py"),
+        Path("astrid/core/timeline/paths.py"),
+        Path("astrid/core/timeline/projection.py"),
+    ]
+    forbidden = (
+        ".assembly",
+        "Assembly(",
+        "Assembly.from_",
+        '"assembly": {}',
+        '{"schema_version": 1, "assembly"',
+    )
+
+    for path in runtime_files:
+        text = path.read_text()
+        for marker in forbidden:
+            assert marker not in text, f"{path} contains forbidden runtime wrapper marker {marker!r}"

@@ -68,6 +68,11 @@
           "type": "string",
           "description": "RunPod network storage volume name."
         },
+        "storage_required": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, training config validation requires storage_name and the RunPod backend passes --require-storage so the executor verifies the volume exists before provisioning."
+        },
         "name_prefix": {
           "type": "string",
           "description": "RunPod pod name prefix."

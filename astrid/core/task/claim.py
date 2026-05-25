@@ -9,22 +9,13 @@ under Sprint 1's writer_epoch CAS (apex contract preserved).
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.session.binding import resolve_current_session
-from astrid.core.session.model import SessionRole
-from astrid.core.task.active_run import read_active_run
-from astrid.core.task.events import (
-    EVENTS_FILENAME,
-    LEASE_FILENAME,
-    append_event_locked,
-    read_events,
-)
-from astrid.core.task.plan import STEP_PATH_SEP
+from astrid.core.session.writer import writer_context_for_project
 
 CLAIM_KIND = "claim"
 UNCLAIM_KIND = "unclaim"
@@ -34,22 +25,11 @@ def _print_err(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
-def _read_lease_epoch(run_dir: Path) -> int:
-    lease_path = run_dir / LEASE_FILENAME
-    if not lease_path.exists():
-        return 0
-    try:
-        payload = json.loads(lease_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return 0
-    return int(payload.get("writer_epoch", 0))
-
-
 def _resolve_session_identity(slug: str | None = None) -> tuple[str, str, str]:
     """Resolve the current session's identity.
 
-    Returns ``(agent_id, actor_name, role)``. ``actor_name`` is the human
-    name if the session has one, otherwise ``None``-equivalent (empty string).
+    Returns ``(agent_id, human_name, role)``. ``human_name`` is reserved for
+    future session identity and is currently empty.
     T9 / FLAG-S1-003: pass ``slug`` so file-bound .astrid-session fallback
     can resolve when ``ASTRID_SESSION_ID`` is lost between terminal calls.
     """
@@ -95,17 +75,6 @@ def _make_unclaim_event(
     }
 
 
-def _emit(run_dir: Path, event: dict, expected_epoch: int) -> dict:
-    from astrid.core.task.events import _peek_tail_hash
-    prev_hash = _peek_tail_hash(run_dir / EVENTS_FILENAME)
-    return append_event_locked(
-        run_dir,
-        event,
-        expected_writer_epoch=expected_epoch,
-        expected_prev_hash=prev_hash,
-    )
-
-
 def _parse_for_flag(for_value: str) -> tuple[str, str]:
     """Parse ``--for agent:<id>`` or ``--for human:<name>`` into (identity, kind)."""
     if not isinstance(for_value, str) or not for_value:
@@ -116,16 +85,73 @@ def _parse_for_flag(for_value: str) -> tuple[str, str]:
         if not ident:
             _print_err("claim: --for agent:<id> missing agent id")
             sys.exit(1)
-        return ident, "agent"
+        return f"agent:{ident}", "agent"
     if for_value.startswith("human:"):
         ident = for_value[len("human:"):]
         if not ident:
             _print_err("claim: --for human:<name> missing name")
             sys.exit(1)
-        return ident, "actor"
+        return f"human:{ident}", "human"
     _print_err(f"claim: --for must be 'agent:<id>' or 'human:<name>', got {for_value!r}")
     sys.exit(1)
     return "", ""  # unreachable
+
+
+def _normalize_claim_identity(identity: Any, kind: Any) -> str | None:
+    """Normalize claim event identity for read compatibility.
+
+    New events store ``agent:<id>`` or ``human:<name>`` in the identity field.
+    Legacy Sprint 1/2 events may carry ``claimed_by_kind=actor`` with either a
+    bare name or ``actor:<name>``; keep that compatibility here, not in the
+    new-write parser.
+    """
+    if not isinstance(identity, str) or not identity:
+        return None
+    if kind == "actor":
+        if identity.startswith("actor:"):
+            suffix = identity[len("actor:"):]
+            return f"human:{suffix}" if suffix else None
+        if identity.startswith("human:"):
+            return identity
+        return f"human:{identity}"
+    if kind in {"agent", "human"}:
+        prefix = f"{kind}:"
+        if identity.startswith(prefix):
+            suffix = identity[len(prefix):]
+            return identity if suffix else None
+        return f"{prefix}{identity}"
+    if identity.startswith("agent:") or identity.startswith("human:"):
+        return identity
+    return None
+
+
+def active_claims_by_step(events: Sequence[dict[str, Any]]) -> dict[str, str]:
+    """Project active claim state from events.
+
+    Returns ``step_path -> canonical identity``. ``actor`` is accepted only
+    through ``_normalize_claim_identity`` for legacy event reads.
+    """
+    claims: dict[str, str] = {}
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        step = event.get("step")
+        if not isinstance(step, str) or not step:
+            continue
+        kind = event.get("kind")
+        if kind == CLAIM_KIND:
+            identity = _normalize_claim_identity(
+                event.get("claimed_by"), event.get("claimed_by_kind")
+            )
+            if identity is not None:
+                claims[step] = identity
+        elif kind == UNCLAIM_KIND:
+            identity = _normalize_claim_identity(
+                event.get("unclaimed_by"), event.get("unclaimed_by_kind")
+            )
+            if identity is None or claims.get(step) == identity:
+                claims.pop(step, None)
+    return claims
 
 
 def _resolve_claim_identity(args) -> tuple[str, str]:
@@ -133,11 +159,11 @@ def _resolve_claim_identity(args) -> tuple[str, str]:
     if args.for_claim is not None:
         return _parse_for_flag(args.for_claim)
     # Default: current session identity. T9: plumb slug from --project.
-    agent_id, _actor_name, _role = _resolve_session_identity(
+    agent_id, _human_name, _role = _resolve_session_identity(
         slug=getattr(args, "project", None)
     )
     if agent_id:
-        return agent_id, "agent"
+        return f"agent:{agent_id}", "agent"
     _print_err(
         "claim: no --for flag supplied and no session identity available; "
         "run `astrid attach <project>` first or supply --for agent:<id> or --for human:<name>"
@@ -188,21 +214,20 @@ def cmd_claim(argv: Sequence[str], *, projects_root: Path | None = None) -> int:
         return 1
 
     claimed_by, claimed_by_kind = _resolve_claim_identity(args)
-    epoch = _read_lease_epoch(run_dir)
-    event = _make_claim_event(
-        args.step,
-        claimed_by=claimed_by,
-        claimed_by_kind=claimed_by_kind,
-        writer_epoch=epoch,
-    )
-
     try:
-        _emit(run_dir, event, epoch)
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            event = _make_claim_event(
+                args.step,
+                claimed_by=claimed_by,
+                claimed_by_kind=claimed_by_kind,
+                writer_epoch=writer.expected_writer_epoch,
+            )
+            writer.append(event)
     except Exception as exc:
         _print_err(f"claim: event-append failed: {exc}")
         return 1
 
-    print(f"claimed {args.step!r} for {claimed_by_kind}:{claimed_by}")
+    print(f"claimed {args.step!r} for {claimed_by}")
     return 0
 
 
@@ -232,21 +257,20 @@ def cmd_unclaim(argv: Sequence[str], *, projects_root: Path | None = None) -> in
         return 1
 
     unclaimed_by, unclaimed_by_kind = _resolve_claim_identity(args)
-    epoch = _read_lease_epoch(run_dir)
-    event = _make_unclaim_event(
-        args.step,
-        unclaimed_by=unclaimed_by,
-        unclaimed_by_kind=unclaimed_by_kind,
-        writer_epoch=epoch,
-    )
-
     try:
-        _emit(run_dir, event, epoch)
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            event = _make_unclaim_event(
+                args.step,
+                unclaimed_by=unclaimed_by,
+                unclaimed_by_kind=unclaimed_by_kind,
+                writer_epoch=writer.expected_writer_epoch,
+            )
+            writer.append(event)
     except Exception as exc:
         _print_err(f"unclaim: event-append failed: {exc}")
         return 1
 
-    print(f"unclaimed {args.step!r} for {unclaimed_by_kind}:{unclaimed_by}")
+    print(f"unclaimed {args.step!r} for {unclaimed_by}")
     return 0
 
 
@@ -279,4 +303,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-__all__ = ["cmd_claim", "cmd_unclaim", "build_parser", "CLAIM_KIND", "UNCLAIM_KIND"]
+__all__ = [
+    "cmd_claim",
+    "cmd_unclaim",
+    "build_parser",
+    "CLAIM_KIND",
+    "UNCLAIM_KIND",
+    "active_claims_by_step",
+]

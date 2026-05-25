@@ -190,9 +190,11 @@ export interface SharedAssetEntry {
   fps?: number;
   generationId?: string;
   resolution?: string;
+  thumbnailUrl?: string;
   type?: string;
   url?: string;
   url_expires_at?: string;
+  variantId?: string;
 }
 
 export type AssetEntry = SharedAssetEntry;
@@ -202,6 +204,7 @@ export type AssetRegistryEntry = SharedAssetEntry;
 export interface SharedTheme {
   audio?: Record<string, unknown>;
   generation?: Record<string, unknown>;
+  id: string;
   pacing?: Record<string, unknown>;
   visual?: Record<string, unknown>;
   voice?: Record<string, unknown>;
@@ -221,7 +224,7 @@ export type ThemeOverrides = SharedThemeOverrides;
 
 export interface SharedTimelineClip {
   asset?: string;
-  at?: number;
+  at: number;
   clipType?: string;
   clip_order?: number;
   continuous?: AnimationReferenceList;
@@ -236,7 +239,7 @@ export interface SharedTimelineClip {
   generation?: Record<string, unknown>;
   height?: number;
   hold?: number;
-  id?: string;
+  id: string;
   opacity?: number;
   params?: Record<string, unknown>;
   pool_id?: string;
@@ -244,7 +247,7 @@ export interface SharedTimelineClip {
   speed?: number;
   text?: TextClipData;
   to?: number;
-  track?: string;
+  track: string;
   transition?: ClipTransitionReference | string;
   volume?: number;
   width?: number;
@@ -257,7 +260,7 @@ export type TimelineClip = SharedTimelineClip;
 export type Clip = SharedTimelineClip;
 
 export interface SharedTimelineConfig {
-  clips?: SharedTimelineClip[];
+  clips: SharedTimelineClip[];
   generation_defaults?: Record<string, unknown>;
   output?: SharedTimelineOutput;
   pinnedShotGroups?: Record<string, unknown>[];
@@ -269,11 +272,11 @@ export interface SharedTimelineConfig {
 export type TimelineConfig = SharedTimelineConfig;
 
 export interface SharedTimelineOutput {
-  background?: string;
-  background_scale?: number;
-  file?: string;
-  fps?: number;
-  resolution?: string;
+  background?: null | string;
+  background_scale?: null | number;
+  file: string;
+  fps: number;
+  resolution: string;
 }
 
 export type TimelineOutput = SharedTimelineOutput;

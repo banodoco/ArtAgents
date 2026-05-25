@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -106,21 +108,12 @@ def _write_plan(tmp_path: Path, payload: dict) -> Path:
     return p
 
 
-def test_load_plan_rejects_non_v2(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unshimmed_validate_plan
-) -> None:
+def test_load_plan_rejects_non_v2(tmp_path: Path) -> None:
     """Production load_plan must reject v1 plans.
 
-    The conftest installs a session-wide v1->v2 auto-migration shim on
-    _validate_plan so legacy fixtures keep working. This test asserts the
-    *production* (un-shimmed) contract — that real callers see a hard
-    TaskPlanError on legacy v1 — by temporarily restoring the original
-    validator (handed back via the ``unshimmed_validate_plan`` fixture).
+    Legacy v1 compatibility now lives in the migration script, not in a
+    pytest-wide loader shim.
     """
-    from astrid.core.task import plan as plan_mod
-
-    monkeypatch.setattr(plan_mod, "_validate_plan", unshimmed_validate_plan)
-
     plan_path = _write_plan(tmp_path, {
         "plan_id": "p1", "version": 1,
         "steps": [{"id": "s1", "command": "echo"}],
@@ -129,18 +122,23 @@ def test_load_plan_rejects_non_v2(
         load_plan(plan_path)
 
 
-def test_load_plan_accepts_v1_via_test_shim(tmp_path: Path) -> None:
-    """Document the conftest shim's behavior: under tests, v1 auto-migrates.
+def test_v1_plan_migrates_explicitly_then_loads(tmp_path: Path) -> None:
+    """Explicit migration coverage replaces the former test loader shim."""
+    repo_root = Path(__file__).resolve().parents[2]
+    mig_path = repo_root / "scripts" / "migrations" / "sprint-3" / "migrate_plans.py"
+    spec = importlib.util.spec_from_file_location("_test_migrate_plans_schema", mig_path)
+    mig = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = mig
+    spec.loader.exec_module(mig)
 
-    This is the inverse of test_load_plan_rejects_non_v2 — it locks in the
-    fact that within the pytest session the auto-migration shim turns a v1
-    payload into a valid v2 TaskPlan. If this ever fails, either the shim
-    was removed or the migration script changed; both should be intentional.
-    """
     plan_path = _write_plan(tmp_path, {
         "plan_id": "p1", "version": 1,
-        "steps": [{"id": "s1", "command": "echo"}],
+        "steps": [{"id": "s1", "kind": "code", "command": "echo"}],
     })
+    changed, migrated, _notes = mig.migrate_plan(plan_path)
+    assert changed is True
+    plan_path.write_text(json.dumps(migrated), encoding="utf-8")
+
     plan = load_plan(plan_path)
     assert plan.version == 2
     assert plan.steps[0].id == "s1"
@@ -155,6 +153,31 @@ def test_load_plan_accepts_v2(tmp_path: Path) -> None:
     assert plan.version == 2
     assert len(plan.steps) == 1
     assert plan.steps[0].id == "s1"
+
+
+def test_v2_plan_rejects_legacy_step_kind(tmp_path: Path) -> None:
+    plan_path = _write_plan(tmp_path, {
+        "plan_id": "p1", "version": 2,
+        "steps": [{"id": "s1", "kind": "code", "adapter": "local", "command": "echo"}],
+    })
+    with pytest.raises(TaskPlanError, match="kind is legacy v1 schema"):
+        load_plan(plan_path)
+
+
+def test_v2_plan_rejects_legacy_inline_plan_payload(tmp_path: Path) -> None:
+    plan_path = _write_plan(tmp_path, {
+        "plan_id": "p1", "version": 2,
+        "steps": [{
+            "id": "parent",
+            "plan": {
+                "plan_id": "inline",
+                "version": 1,
+                "steps": [{"id": "child", "kind": "code", "command": "echo"}],
+            },
+        }],
+    })
+    with pytest.raises(TaskPlanError, match=r"\.plan is legacy v1 inline child-plan schema"):
+        load_plan(plan_path)
 
 
 def test_load_plan_with_group_step(tmp_path: Path) -> None:
@@ -365,13 +388,10 @@ def test_all_six_invariant_ids_are_stable() -> None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Legacy import compatibility (CodeStep/AttestedStep/NestedStep are placeholders)
-# ---------------------------------------------------------------------------
-
-def test_legacy_imports_still_resolve() -> None:
-    """Ensure CodeStep, AttestedStep, NestedStep are still importable placeholders."""
-    from astrid.core.task.plan import AttestedStep, CodeStep, NestedStep
-    assert CodeStep is not None
-    assert AttestedStep is not None
-    assert NestedStep is not None
+def test_legacy_step_classes_are_not_exported() -> None:
+    with pytest.raises(ImportError):
+        from astrid.core.task.plan import CodeStep  # noqa: F401
+    with pytest.raises(ImportError):
+        from astrid.core.task.plan import AttestedStep  # noqa: F401
+    with pytest.raises(ImportError):
+        from astrid.core.task.plan import NestedStep  # noqa: F401

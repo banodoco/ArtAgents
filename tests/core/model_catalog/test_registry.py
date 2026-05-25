@@ -6,20 +6,13 @@ SD-001 identity assertions, get_by_mode, backend_available, and edge cases.
 
 from __future__ import annotations
 
-from textwrap import dedent
-from pathlib import Path
-
 import pytest
-import yaml
 
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.model_catalog.schema import (
     CANONICAL_IMAGE_MODES,
-    ModelEntry,
-    ModeSpec,
     validate_registry,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helper: make a minimal valid v2 YAML payload
@@ -215,7 +208,7 @@ class TestInvalidModeNames:
                         "requires": ["prompt"],
                         "backends": {
                             "cloud": {
-                                "endpoint": f"fal-ai/test",
+                                "endpoint": "fal-ai/test",
                                 "param_map": {"prompt": "prompt"},
                             }
                         },
@@ -768,22 +761,27 @@ class TestSD001ModelIdentity:
 class TestShippedRegistry:
     """Verify the shipped models.yaml loads correctly with all expected entries."""
 
+    EXPECTED_SHIPPED_IDS = {
+        "z-image",
+        "qwen-image-2512",
+        "qwen-image-edit",
+        "flux-dev",
+        "flux-schnell",
+        "flux2-klein-9b",
+        "flux2-klein-4b",
+        "wan-2.2",
+        "ltx-2.3",
+    }
+
     def test_load_default_succeeds(self) -> None:
         registry = ModelRegistry.load_default()
         assert registry is not None
-        # 5 models: z-image, qwen-image-2512, qwen-image-edit, flux-dev, flux-schnell
-        assert len(registry.list_all()) == 5
+        assert len(registry.list_all()) == len(self.EXPECTED_SHIPPED_IDS)
 
     def test_all_shipped_ids(self) -> None:
         registry = ModelRegistry.load_default()
         ids = {e.id for e in registry.list_all()}
-        assert ids == {
-            "z-image",
-            "qwen-image-2512",
-            "qwen-image-edit",
-            "flux-dev",
-            "flux-schnell",
-        }
+        assert ids == self.EXPECTED_SHIPPED_IDS
 
     def test_get_unknown_raises_keyerror(self) -> None:
         registry = ModelRegistry.load_default()
@@ -816,10 +814,9 @@ class TestShippedRegistry:
 
 
 class TestListByModalityV2:
-    def test_image_returns_five_entries(self) -> None:
+    def test_image_returns_expected_entries(self) -> None:
         registry = ModelRegistry.load_default()
         image_models = registry.list_by_modality("image")
-        assert len(image_models) == 5
 
         ids = {m.id for m in image_models}
         assert ids == {
@@ -828,11 +825,14 @@ class TestListByModalityV2:
             "qwen-image-edit",
             "flux-dev",
             "flux-schnell",
+            "flux2-klein-9b",
+            "flux2-klein-4b",
         }
 
-    def test_video_returns_empty(self) -> None:
+    def test_video_returns_expected_entries(self) -> None:
         registry = ModelRegistry.load_default()
-        assert registry.list_by_modality("video") == []
+        video_models = registry.list_by_modality("video")
+        assert {m.id for m in video_models} == {"wan-2.2", "ltx-2.3"}
 
     def test_audio_returns_empty(self) -> None:
         registry = ModelRegistry.load_default()

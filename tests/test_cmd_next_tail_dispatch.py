@@ -61,12 +61,12 @@ from astrid.core.task.lifecycle import cmd_next
 _BODY_PRODUCES = '''from astrid.orchestrate import orchestrator, attested
 from astrid.verify import json_file
 @orchestrator("demo.with_produces")
-def main(): return [attested("review", command="review.sh", instructions="check", ack="actor", produces={"out": json_file()})]
+def main(): return [attested("review", command="review.sh", instructions="check", ack="human", produces={"out": json_file()})]
 '''
 
 _BODY_FE = '''from astrid.orchestrate import orchestrator, attested, repeat_for_each
 @orchestrator("demo.fe")
-def main(): return [attested("review_each", command="r.sh", instructions="check", ack="actor",
+def main(): return [attested("review_each", command="r.sh", instructions="check", ack="human",
     repeat=repeat_for_each(items=["a","b","c"]))]
 '''
 
@@ -130,7 +130,7 @@ def test_b_host_close_hint_when_items_complete_without_host_attested(
         append_event(
             events_path,
             make_item_attested_event(
-                ("review_each",), item, attestor_kind="actor", attestor_id="alice",
+                ("review_each",), item, attestor_kind="human", attestor_id="alice",
             ),
         )
 
@@ -200,7 +200,7 @@ def test_c2_real_world_event_order_after_attested(tmp_path: Path) -> None:
     )
     events_path = projects / "p" / "runs" / "rc2" / "events.jsonl"
     # Real-world event order from _dispatch_attested + _run_inline_checks:
-    append_event(events_path, make_step_attested_event("review", "actor", "tester", evidence=()))
+    append_event(events_path, make_step_attested_event("review", "human", "tester", evidence=()))
     append_event(
         events_path,
         make_produces_check_passed_event(

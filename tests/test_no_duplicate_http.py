@@ -57,19 +57,19 @@ def test_no_duplicate_defs_in_packs() -> None:
 
 ALLOWLIST_URLLIB = {
     # Migrated in Sprint 01 — still uses urllib for OpenAI API (not fal)
-    "astrid/packs/builtin/generate_image_openai/run.py",
+    "astrid/packs/builtin/executors/generate_image_openai/run.py",
     # Pre-existing packs NOT migrated this sprint (grandfathered):
-    "astrid/packs/builtin/vary_grid/run.py",
-    "astrid/packs/builtin/visual_understand/run.py",
-    "astrid/packs/builtin/audio_understand/run.py",
-    "astrid/packs/builtin/reigh_data/run.py",
-    "astrid/packs/builtin/render/run.py",
-    "astrid/packs/builtin/publish/run.py",
-    "astrid/packs/builtin/search_loras/run.py",
-    "astrid/packs/builtin/sprite_sheet/run.py",
-    "astrid/packs/builtin/asset_cache/run.py",
+    "astrid/packs/builtin/orchestrators/vary_grid/run.py",
+    "astrid/packs/builtin/executors/visual_understand/run.py",
+    "astrid/packs/builtin/executors/audio_understand/run.py",
+    "astrid/packs/builtin/executors/reigh_data/run.py",
+    "astrid/packs/builtin/executors/render/run.py",
+    "astrid/packs/builtin/executors/publish/run.py",
+    "astrid/packs/builtin/executors/search_loras/run.py",
+    "astrid/packs/builtin/executors/sprite_sheet/run.py",
+    "astrid/packs/builtin/executors/asset_cache/run.py",
     # seinfeld/script_pipeline was generalized into builtin/script_pipeline (builtin-training epic)
-    "astrid/packs/builtin/script_pipeline/run.py",
+    "astrid/packs/builtin/executors/script_pipeline/run.py",
 }
 
 

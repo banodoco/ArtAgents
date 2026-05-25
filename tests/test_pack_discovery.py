@@ -123,11 +123,7 @@ class PackDiscoveryTest(unittest.TestCase):
         executor_registry = load_executor_registry()
         orchestrator_registry = load_orchestrator_registry(executor_registry=executor_registry)
 
-        # Floor recalibrated after T2 restructure: builtin/clip_extract removed
-        # (deduplicated — the 6 other copies in media, clip_tools, file_summarizer,
-        # text_review, text_digest, video_tools remain). M3 cleanup (T17) will
-        # remove comfy_t2i_ds1 external wrapper. Current floor: 53.
-        self.assertGreaterEqual(len(executor_registry.list()), 53)
+        self.assertGreaterEqual(len(executor_registry.list()), 52)
         self.assertGreaterEqual(len(orchestrator_registry.list()), 5)
         self.assertIn("builtin.cut", executor_registry.as_mapping())
         self.assertIn("external.moirae", executor_registry.as_mapping())

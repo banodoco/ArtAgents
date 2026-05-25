@@ -20,6 +20,7 @@ from astrid.core.task.events import (
     make_step_completed_event,
     make_step_dispatched_event,
 )
+from astrid.core.task.claim import _make_claim_event
 from astrid.core.task.lifecycle import cmd_status
 
 
@@ -52,6 +53,30 @@ def test_status_names_current_step_run_id_and_recent_event(tmp_path: Path) -> No
     assert "r1" in out
     # Most recent event kind is step_completed.
     assert "step_completed" in out
+
+
+def test_status_prints_current_step_assignee_and_claim(tmp_path: Path) -> None:
+    packs, projects = setup_run(tmp_path, "demo", "app", _BODY, "demo.app", run_id="r1c")
+    events_path = projects / "p" / "runs" / "r1c" / "events.jsonl"
+    append_event(
+        events_path,
+        {
+            "kind": "plan_mutated",
+            "diff": {"op": "edit", "path": "step_a", "fields": {"assignee": "any-human"}},
+        },
+    )
+    append_event(
+        events_path,
+        _make_claim_event(
+            "step_a", claimed_by="actor:bob", claimed_by_kind="actor", writer_epoch=1
+        ),
+    )
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cmd_status(["--project", "p"], projects_root=projects)
+    assert rc == 0
+    out = buf.getvalue()
+    assert "owner:     assignee: any-human  claimed: human:bob" in out
 
 
 def test_status_no_active_run_prints_recovery(tmp_path: Path) -> None:

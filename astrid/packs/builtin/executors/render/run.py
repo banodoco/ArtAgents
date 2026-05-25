@@ -21,10 +21,10 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from ..asset_cache import run as asset_cache
-from ..... import timeline
-from .....audit import AuditContext
-from .....theme_schema import ThemeValidationError, load_theme
-from ....._paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid import timeline
+from astrid.audit import AuditContext
+from astrid.theme_schema import ThemeValidationError, load_theme
+from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
 
 
 def _pick_free_port() -> int:

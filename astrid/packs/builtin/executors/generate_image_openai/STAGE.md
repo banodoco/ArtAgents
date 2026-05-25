@@ -10,7 +10,7 @@ or fallback art packs.
 > (vibecomfy) and cloud (fal) execution.  Prefer the new multi-backend
 > executor for new work unless you specifically need OpenAI GPT Image models.
 
-This executor wraps `astrid.packs.builtin.generate_image_openai.run` and expects a
+This executor wraps `astrid.packs.builtin.executors.generate_image_openai.run` and expects a
 prompt file. Put one prompt per line, or provide a JSON/JSONL list accepted by the
 underlying CLI.
 
@@ -54,7 +54,7 @@ Pass `--preset <name>` to use a canned prompt and behaviour bundle. Currently:
   command pipes a prompt file rather than a preset:
 
   ```bash
-  python3 -m astrid.packs.builtin.generate_image_openai.run \
+  python3 -m astrid.packs.builtin.executors.generate_image_openai.run \
     --preset saint-peter-of-banodoco \
     --out-dir runs/first-rite/images \
     --manifest runs/first-rite/manifest.json \

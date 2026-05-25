@@ -29,7 +29,9 @@ from .schema import ExecutorDefinition, ExecutorValidationError, to_capability_h
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(raw_argv)
+    setattr(args, "_raw_argv", raw_argv)
     # FLAG-S1-002: 'new' short-circuits BEFORE load_default_registry() so
     # scaffold commands never load the built-in registry or import pack code.
     if getattr(args, "command", None) == "new":
@@ -130,9 +132,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--check-binaries", action="store_true", help="Also require declared external binaries to be on PATH.")
     run_parser.add_argument("--python-exec", help="Python executable for {python_exec} placeholders.")
     run_parser.add_argument("--verbose", action="store_true", help="Stream subprocess output for built-in pipeline steps.")
-    run_parser.add_argument("--thread", help="Thread id, @new, or @none for this run.")
-    run_parser.add_argument("--variants", type=int, help="Request a sibling variant count for variant-aware producers.")
-    run_parser.add_argument("--from", dest="from_ref", help="Consume a specific prior run or variant, e.g. <run-id>:<n>.")
     run_parser.add_argument("--video-url", "--video", dest="video_url", help="Reachable http(s) video URL.")
     run_parser.add_argument("--title", help="YouTube video title.")
     run_parser.add_argument("--description", help="YouTube video description.")
@@ -433,8 +432,8 @@ outputs:
 
 # command.argv runs the runtime as a subprocess. Placeholders in braces are
 # substituted from the inputs / outputs / runtime context. {{python_exec}}
-# resolves to the interpreter; add `--project {{project}}` if you want the
-# executor to participate in task-mode gating.
+# resolves to the interpreter. Task-mode identity is supplied by ASTRID_TASK_*
+# environment variables; do not add a local --project flag to --out commands.
 command:
   argv:
     - "{{python_exec}}"
@@ -647,7 +646,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         else:
             print("override: none")
     _print_invocation_example("executors", executor.id, executor.inputs)
-    _print_active_thread_footer()
     return 0
 
 
@@ -715,6 +713,7 @@ def _cmd_install(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
 def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     from .runner import ExecutorRunRequest, run_executor
 
+    _reject_run_passthrough(getattr(args, "_raw_argv", ()) or ())
     _require_qualified_id(args.executor_id, "executor id")
     executor = registry.get(args.executor_id)
     project_uuid = _project_uuid_or_none(args.project)
@@ -742,9 +741,7 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         check_binaries=bool(args.check_binaries),
         python_exec=args.python_exec,
         verbose=bool(args.verbose),
-        thread=args.thread,
-        variants=args.variants,
-        from_ref=args.from_ref,
+        argv=tuple(getattr(args, "_raw_argv", ()) or ()),
     )
     result = run_executor(request, registry)
     if result.missing_binaries:
@@ -847,8 +844,8 @@ def _run_inputs(args: argparse.Namespace) -> dict[str, Any]:
     return inputs
 
 
-def _parse_input_values(raw_values: list[str]) -> dict[str, str]:
-    values: dict[str, str] = {}
+def _parse_input_values(raw_values: list[str]) -> dict[str, Any]:
+    values: dict[str, Any] = {}
     for raw in raw_values:
         if "=" not in raw:
             raise ValueError(f"invalid --input value {raw!r}; expected NAME=VALUE")
@@ -857,10 +854,23 @@ def _parse_input_values(raw_values: list[str]) -> dict[str, str]:
         if not key:
             raise ValueError(f"invalid --input value {raw!r}; expected NAME=VALUE")
         if key in values:
-            values[key] = f"{values[key]},{value}"
+            existing = values[key]
+            if isinstance(existing, list):
+                existing.append(value)
+            else:
+                values[key] = [existing, value]
         else:
             values[key] = value
     return values
+
+
+def _reject_run_passthrough(raw_argv: tuple[str, ...] | list[str]) -> None:
+    if "--" not in raw_argv:
+        return
+    marker = list(raw_argv).index("--")
+    extra = list(raw_argv)[marker + 1 :]
+    if extra:
+        raise ValueError("executors run does not accept arbitrary passthrough arguments after --")
 
 
 def _require_qualified_id(value: str, label: str) -> None:
@@ -935,27 +945,6 @@ def _print_outputs(executor: ExecutorDefinition) -> None:
     for output in executor.outputs:
         placeholder = f", placeholder={output.placeholder}" if output.placeholder else ""
         print(f"  - {output.name} ({output.type}, {output.mode}{placeholder})")
-
-
-def _print_active_thread_footer() -> None:
-    try:
-        import os
-
-        from astrid._paths import REPO_ROOT
-        from astrid.threads.index import ThreadIndexStore
-
-        index = ThreadIndexStore(Path(os.environ.get("ASTRID_REPO_ROOT", REPO_ROOT))).read()
-    except Exception:
-        print("active_thread: unavailable")
-        print("thread_details: python3 -m astrid thread show @active")
-        return
-    active = index.get("active_thread_id")
-    thread = index.get("threads", {}).get(active) if isinstance(active, str) else None
-    if isinstance(thread, dict):
-        print(f"active_thread: {thread.get('label') or 'unlabeled'} ({active})")
-    else:
-        print("active_thread: none")
-    print("thread_details: python3 -m astrid thread show @active")
 
 
 def _cmd_override(args: argparse.Namespace, registry: ExecutorRegistry) -> int:

@@ -14,21 +14,10 @@ ingestion is deferred.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import NoReturn
 
-from ._edit_helpers import (
-    TimelineEditError,
-    _default_actor,
-    _materialize,
-    _resolve_backend,
-)
-from .events.schema import (
-    PoolAssetAddedPayload,
-    PoolAssetRemovedPayload,
-    PoolAssetScoredPayload,
-    TimelineActor,
-    TimelineEvent,
-)
+from ._edit_helpers import TimelineEditError
+from .events.schema import TimelineActor
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +34,7 @@ def pool_asset_add(
     expected_version: int | None = None,
     txn_id: str | None = None,
     root: str | Path | None = None,
-) -> TimelineEvent:
+) -> NoReturn:
     """Append a ``pool.asset_added`` event to *slug* in *project_slug*.
 
     Adds *asset_id* to the pool with an initial score of 0.0.
@@ -59,22 +48,14 @@ def pool_asset_add(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
-
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise TimelineEditError("asset_id must be a non-empty string")
 
-    act = actor or _default_actor("pool_asset_add")
-    event = backend.append_event(
-        timeline_id,
-        "pool.asset_added",
-        PoolAssetAddedPayload(asset_id=asset_id),
-        actor=act,
-        expected_version=expected_version,
-        txn_id=txn_id,
+    raise TimelineEditError(
+        "pool.asset_added is a non-container read-model event and cannot be "
+        "appended through runtime edit paths; run the Sprint 2 migration for "
+        "legacy pool data"
     )
-    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
-    return event
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +72,7 @@ def pool_asset_remove(
     expected_version: int | None = None,
     txn_id: str | None = None,
     root: str | Path | None = None,
-) -> TimelineEvent:
+) -> NoReturn:
     """Append a ``pool.asset_removed`` event to *slug* in *project_slug*.
 
     Args:
@@ -103,22 +84,14 @@ def pool_asset_remove(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
-
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise TimelineEditError("asset_id must be a non-empty string")
 
-    act = actor or _default_actor("pool_asset_remove")
-    event = backend.append_event(
-        timeline_id,
-        "pool.asset_removed",
-        PoolAssetRemovedPayload(asset_id=asset_id),
-        actor=act,
-        expected_version=expected_version,
-        txn_id=txn_id,
+    raise TimelineEditError(
+        "pool.asset_removed is a non-container read-model event and cannot be "
+        "appended through runtime edit paths; run the Sprint 2 migration for "
+        "legacy pool data"
     )
-    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
-    return event
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +109,7 @@ def pool_asset_score(
     expected_version: int | None = None,
     txn_id: str | None = None,
     root: str | Path | None = None,
-) -> TimelineEvent:
+) -> NoReturn:
     """Append a ``pool.asset_scored`` event to *slug* in *project_slug*.
 
     Pool scoring is pure metadata — no downstream recompute is triggered.
@@ -151,8 +124,6 @@ def pool_asset_score(
         txn_id: Optional transaction id (enforced in m5).
         root: Filesystem root override.
     """
-    timeline_id, tdir, backend, _bootstrap = _resolve_backend(project_slug, slug, root=root)
-
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise TimelineEditError("asset_id must be a non-empty string")
     if not isinstance(score, (int, float)) or isinstance(score, bool):
@@ -160,14 +131,8 @@ def pool_asset_score(
     if score < 0 or score > 1:
         raise TimelineEditError("score must be between 0 and 1")
 
-    act = actor or _default_actor("pool_asset_score")
-    event = backend.append_event(
-        timeline_id,
-        "pool.asset_scored",
-        PoolAssetScoredPayload(asset_id=asset_id, score=float(score)),
-        actor=act,
-        expected_version=expected_version,
-        txn_id=txn_id,
+    raise TimelineEditError(
+        "pool.asset_scored is a non-container read-model event and cannot be "
+        "appended through runtime edit paths; run the Sprint 2 migration for "
+        "legacy pool data"
     )
-    _materialize(tdir, event, timeline_id=timeline_id, backend=backend)
-    return event

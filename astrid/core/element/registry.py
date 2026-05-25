@@ -2,24 +2,38 @@
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import Iterable, cast
+from typing import TYPE_CHECKING, Iterable, cast
 
 from astrid._paths import REPO_ROOT
 from astrid.core.alias_resolver import (
     AliasResolver,
-    create_shared_alias_resolver,
     _register_pack_aliases,
+    create_shared_alias_resolver,
 )
-from astrid.core.pack import discover_packs, ensure_local_pack, iter_element_roots, validate_element_pack_id
+from astrid.core.manifest import dump_manifest_payload, load_manifest_mapping
+from astrid.core.pack import (
+    discover_packs,
+    ensure_local_pack,
+    iter_element_roots,
+    validate_element_pack_id,
+)
 
-from .schema import ELEMENT_KINDS, ElementDefinition, ElementKind, ElementValidationError, load_element_definition
+from .schema import (
+    ELEMENT_KINDS,
+    ElementDefinition,
+    ElementKind,
+    ElementValidationError,
+    load_element_definition,
+)
+
+if TYPE_CHECKING:
+    from astrid.core.override import OverrideStore
 
 
 class ElementRegistryError(ElementValidationError):
@@ -247,9 +261,9 @@ def _rewrite_pack_id(element_root: Path, new_pack_id: str) -> None:
         manifest = element_root / name
         if not manifest.is_file():
             continue
-        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data = load_manifest_mapping(manifest, manifest_kind="element")
         data["pack_id"] = new_pack_id
-        manifest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        dump_manifest_payload(manifest, data)
         return
 
 

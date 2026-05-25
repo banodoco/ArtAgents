@@ -23,12 +23,18 @@ from astrid.core.timeline.projection import ProjectionError
 _ACTOR = TimelineActor(type="agent", id="branch-test")
 
 
+def _raw_config(label: str = "Video") -> dict:
+    return {
+        "tracks": [{"id": "v1", "kind": "visual", "label": label}],
+        "clips": [],
+    }
+
+
 class TestBranchProvenance:
     """Tests for branch provenance invariants."""
 
     def test_branch_identity_has_provenance_branched(self, tmp_path: Path, monkeypatch):
         """Branch creation writes assembly.identity.json with provenance: branched."""
-        from astrid.core.timeline import observability, paths
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 
         timeline_id = str(uuid4())
@@ -48,15 +54,15 @@ class TestBranchProvenance:
         # Write a minimal assembly so projection works
         write_json_atomic(
             tl_dir / "assembly.json",
-            {"schema_version": 1, "assembly": {"clips": [], "tracks": [], "pool": {"entries": []}}},
+            {"clips": [], "tracks": []},
         )
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
-        # Append a clip event to the source so there's something to project
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id,
+            "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -141,14 +147,15 @@ class TestBranchProvenance:
         )
         write_json_atomic(
             tl_dir / "assembly.json",
-            {"schema_version": 1, "assembly": {"clips": [], "tracks": [], "pool": {"entries": []}}},
+            {"clips": [], "tracks": []},
         )
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id,
+            "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -228,14 +235,15 @@ class TestBranchFailureDoesNotPolluteSource:
         )
         write_json_atomic(
             tl_dir / "assembly.json",
-            {"schema_version": 1, "assembly": {"clips": [], "tracks": [], "pool": {"entries": []}}},
+            {"clips": [], "tracks": []},
         )
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id,
+            "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -294,6 +302,83 @@ class TestBranchFailureDoesNotPolluteSource:
         branched_events = [e for e in source_events if e.kind == "timeline.branched_from"]
         assert len(branched_events) == 0
 
+    def test_legacy_anchor_projection_rejected_before_source_event(self, tmp_path: Path, monkeypatch):
+        """Old clip-shaped anchor projections cannot seed a branch."""
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+
+        timeline_id = str(uuid4())
+        proj_dir = tmp_path / "test-project"
+        tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
+        tl_dir.mkdir(parents=True)
+
+        from astrid.core.project.jsonio import write_json_atomic
+        write_json_atomic(
+            tl_dir / "assembly.identity.json",
+            {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
+        )
+        write_json_atomic(
+            tl_dir / "display.json",
+            {"schema_version": 1, "slug": "source", "name": "source", "is_default": False},
+        )
+
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
+        e1 = backend.append_event(
+            timeline_id,
+            "arrangement.replaced",
+            {"arrangement": {"clips": []}},
+            actor=_ACTOR,
+        )
+        source_event_count_before = len(backend.read_events())
+
+        def fake_resolve_target(project_slug, slug_or_id, root=None):
+            from astrid.core.timeline.observability import ResolvedTarget
+            return ResolvedTarget(
+                backend="local_fs",
+                timeline_id=timeline_id,
+                timeline_ulid="01J00000000000000000000001",
+                timeline_home=tl_dir,
+                slug="source",
+                backend_name_display="local_fs",
+            )
+
+        monkeypatch.setattr(
+            "astrid.core.timeline.branch.resolve_timeline_target",
+            fake_resolve_target,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.paths.timeline_dir",
+            lambda project_slug, ulid, root=None: proj_dir / "timelines" / ulid,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.paths.validate_timeline_slug",
+            lambda s: s,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.paths.find_timeline_by_slug",
+            lambda ps, slug, root=None: None,
+        )
+        monkeypatch.setattr(
+            "astrid.core.timeline.paths.find_timeline_by_event_stream_id",
+            lambda ps, tid, root=None: None,
+        )
+
+        from astrid.core.timeline.branch import create_branch_timeline
+
+        with pytest.raises(ProjectionError, match="not a TimelineConfig"):
+            create_branch_timeline(
+                "test-project",
+                "source",
+                "legacy-branch",
+                from_event_id=e1.event_id,
+                actor=_ACTOR,
+                reason="testing",
+                root=tmp_path,
+            )
+
+        source_events = backend.read_events()
+        assert len(source_events) == source_event_count_before
+        assert [e.kind for e in source_events] == ["arrangement.replaced"]
+
 
 class TestBranchesList:
     """Tests for list_branches() using source-stream events only."""
@@ -333,7 +418,7 @@ class TestBranchesList:
         # Also append a regular clip event
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -384,7 +469,7 @@ class TestBranchesList:
         # Only clip events, no branched_from
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 

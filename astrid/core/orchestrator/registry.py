@@ -7,24 +7,34 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid._paths import REPO_ROOT
 from astrid.core.alias_resolver import (
     AliasResolver,
-    create_shared_alias_resolver,
     _register_pack_aliases,
+    create_shared_alias_resolver,
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
-from astrid.core.executor.registry import ExecutorRegistry, load_default_registry as load_default_executor_registry
-from astrid.core.pack import discover_packs, ensure_local_pack, iter_orchestrator_roots, validate_content_id_in_pack
+from astrid.core.executor.registry import ExecutorRegistry
+from astrid.core.executor.registry import load_default_registry as load_default_executor_registry
+from astrid.core.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
+from astrid.core.pack import (
+    discover_packs,
+    ensure_local_pack,
+    iter_orchestrator_roots,
+    validate_content_id_in_pack,
+)
 
+from .folder import load_folder_orchestrators
 from .schema import (
     OrchestratorDefinition,
     OrchestratorValidationError,
     validate_orchestrator_definition,
 )
-from .folder import load_folder_orchestrators
+
+if TYPE_CHECKING:
+    from astrid.core.override import OverrideStore
 
 
 class OrchestratorRegistryError(OrchestratorValidationError):
@@ -78,7 +88,6 @@ class OrchestratorRegistry:
 
     def register(self, orchestrator: OrchestratorDefinition | dict[str, Any]) -> OrchestratorDefinition:
         definition = validate_orchestrator_definition(orchestrator)
-        priority = int(definition.metadata.get("priority", 30))
         if definition.id not in self._orchestrators:
             self._orchestrators[definition.id] = []
         self._orchestrators[definition.id].append(definition)
@@ -430,8 +439,8 @@ def _rewrite_orchestrator_manifest_fork(
         return  # No manifest to rewrite — orchestrator was loaded via orchestrator.py
 
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        data = load_manifest_mapping(manifest_path, manifest_kind="orchestrator")
+    except ManifestParseError:
         return  # Cannot parse, leave as-is
 
     new_id = f"local.{local_id}"
@@ -445,7 +454,7 @@ def _rewrite_orchestrator_manifest_fork(
     metadata["forked_from"] = forked_from
     metadata["upstream_version"] = upstream_version
 
-    manifest_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    dump_manifest_payload(manifest_path, data)
 
 
 __all__ = [

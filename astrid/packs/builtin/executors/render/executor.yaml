@@ -16,6 +16,26 @@
     "effect"
   ],
   "conditions": [],
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.builtin.executors.render.run",
+      "--timeline",
+      "{timeline}",
+      "--assets",
+      "{assets_registry}",
+      "--out",
+      "{out}/hype.mp4"
+    ],
+    "input_args": [
+      {
+        "input": "theme",
+        "flag": "--theme",
+        "optional": true
+      }
+    ]
+  },
   "description": "Render the brief timeline to hype.mp4 through Remotion.",
   "graph": {
     "consumes": [],
@@ -42,13 +62,13 @@
     {
       "description": "",
       "name": "timeline",
-      "required": false,
+      "required": true,
       "type": "file"
     },
     {
       "description": "",
-      "name": "assets",
-      "required": false,
+      "name": "assets_registry",
+      "required": true,
       "type": "file"
     },
     {
@@ -87,7 +107,7 @@
       "description": "",
       "mode": "create_or_replace",
       "name": "video",
-      "path_template": "{brief_out}/hype.mp4",
+      "path_template": "{out}/hype.mp4",
       "type": "file"
     }
   ],

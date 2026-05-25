@@ -1,5 +1,4 @@
-"""Thin delegation wrapper around ``projection.py`` for assembly.json
-compatibility writes.
+"""Thin delegation wrapper around ``projection.py`` for compatibility writes.
 
 After m4 this module no longer contains an independent dispatch table or
 applicator functions.  ``materialize_event()`` and ``materialize_clip_event()``
@@ -27,11 +26,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import read_json, write_json_atomic
-from astrid.core.timeline.model import Assembly, TIMELINE_SCHEMA_VERSION
 
 from .events.schema import TimelineEvent
-from .projection import _DISPATCH_MAP, apply_event_to_assembly
+from .projection import (
+    MATERIALIZER_ALLOWED_CLASSIFICATIONS,
+    _DISPATCH_MAP,
+    apply_event_to_assembly,
+    classify_projector_event_kind,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -101,14 +105,6 @@ def ensure_theme_overrides_key(assembly: dict[str, Any]) -> dict[str, Any]:
     return _ensure_key(assembly, "theme_overrides", {}, type_check=dict)
 
 
-def ensure_pool_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    return _ensure_key(assembly, "pool", {"entries": []}, type_check=dict)
-
-
-def ensure_arrangement_key(assembly: dict[str, Any]) -> dict[str, Any]:
-    return _ensure_key(assembly, "arrangement", {"clips": []}, type_check=dict)
-
-
 # Map of key → ensure function (mirrors the keys used by the projector's
 # dispatch table).  Used for pre-flight validation before delegating to
 # the projector, so error messages remain backward-compatible.
@@ -117,8 +113,6 @@ _ENSURE_FN: dict[str, Any] = {
     "tracks": ensure_tracks_key,
     "theme": ensure_theme_key,
     "theme_overrides": ensure_theme_overrides_key,
-    "pool": ensure_pool_key,
-    "arrangement": ensure_arrangement_key,
 }
 
 
@@ -130,61 +124,57 @@ _ENSURE_FN: dict[str, Any] = {
 def materialize_event(timeline_home: Path, event: TimelineEvent) -> None:
     """Apply a single *event* to ``assembly.json`` on disk.
 
-    1. Load ``assembly.json`` (wrapper shape ``{schema_version, assembly}``).
-    2. Pre-validate assembly shape via ``_ENSURE_FN`` (backward-compatible
-       error messages).
-    3. Fold *event* onto the inner assembly dict via
-       ``apply_event_to_assembly()``.
-    4. Atomically write the projected result back to ``assembly.json``,
-       preserving the wrapper shape.
+    1. Load ``assembly.json`` as a raw TimelineConfig container.
+    2. Reject event kinds classified as non-container read models or
+       migration-only legacy.
+    3. Fold *event* onto the inner assembly dict via ``apply_event_to_assembly()``.
+    4. Atomically write the projected raw dict back to ``assembly.json``.
 
     Raises ``AssemblyMutationError`` when the assembly file is malformed or
     the projector raises a ``ProjectionError``.
     """
+    classification = classify_projector_event_kind(event.kind)
+    if classification not in MATERIALIZER_ALLOWED_CLASSIFICATIONS:
+        raise AssemblyMutationError(
+            f"{event.kind!r} is classified as {classification!r} and cannot be "
+            "materialized into the runtime TimelineConfig container"
+        )
+
     assembly_path = timeline_home / "assembly.json"
     try:
-        assembly = Assembly.from_json(assembly_path)
+        raw = read_json(assembly_path)
     except FileNotFoundError:
-        assembly = Assembly(
-            schema_version=TIMELINE_SCHEMA_VERSION,
-            assembly={},
-        )
+        current_state = timeline_contract.canonical_empty_timeline()
     except Exception as exc:
         raise AssemblyMutationError(
             f"failed to read assembly.json for materialization: {exc}"
         ) from exc
-
-    current_state = dict(assembly.assembly)
+    else:
+        if not isinstance(raw, dict):
+            raise AssemblyMutationError(
+                f"assembly.json must be an object, got {type(raw).__name__}"
+            )
+        if "assembly" in raw or "schema_version" in raw:
+            raise AssemblyMutationError(
+                "legacy assembly.json wrappers are not accepted by runtime "
+                "materialization; run the Sprint 2 migration first"
+            )
+        try:
+            current_state = timeline_contract.canonical_timeline_config(raw)
+        except Exception as exc:
+            raise AssemblyMutationError(
+                f"assembly.json is not a valid raw TimelineConfig container: {exc}"
+            ) from exc
 
     # Pre-validate: look up which keys this event kind requires and run the
     # backward-compatible ensure checks so error messages match the old format.
-    # Important: when the assembly is empty we initialize ALL required keys
-    # at once (as the old code did via _EMPTY_INIT_DEFAULTS), then run the
-    # type-checking ensure functions which will find the keys present.
     dispatch_entry = _DISPATCH_MAP.get(event.kind)
     if dispatch_entry is not None:
         ensure_keys, _dispatcher, _applicator = dispatch_entry
-        if not current_state:
-            # Empty assembly: bulk-initialise all required keys.
-            from copy import deepcopy
-
-            _EMPTY_INIT_DEFAULTS: dict[str, Any] = {
-                "clips": [],
-                "tracks": [],
-                "theme": "",
-                "theme_overrides": {},
-                "pool": {"entries": []},
-                "arrangement": {"clips": []},
-            }
-            for key in ensure_keys:
-                if key in _EMPTY_INIT_DEFAULTS:
-                    current_state[key] = deepcopy(_EMPTY_INIT_DEFAULTS[key])
-        else:
-            # Non-empty assembly: run each ensure check independently.
-            for key in ensure_keys:
-                ensure_fn = _ENSURE_FN.get(key)
-                if ensure_fn is not None:
-                    current_state = ensure_fn(current_state)
+        for key in ensure_keys:
+            ensure_fn = _ENSURE_FN.get(key)
+            if ensure_fn is not None and key in current_state:
+                current_state = ensure_fn(current_state)
 
     # Fold the single event onto the current state.
     try:
@@ -195,12 +185,7 @@ def materialize_event(timeline_home: Path, event: TimelineEvent) -> None:
             f"({event.kind!r}): {exc}"
         ) from exc
 
-    # Write back atomically with the wrapper shape.
-    new_assembly = Assembly(
-        schema_version=TIMELINE_SCHEMA_VERSION,
-        assembly=new_state,
-    )
-    new_assembly.write(assembly_path)
+    write_json_atomic(assembly_path, new_state)
 
 
 def materialize_clip_event(timeline_home: Path, event: TimelineEvent) -> None:

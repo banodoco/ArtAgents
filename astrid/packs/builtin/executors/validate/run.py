@@ -25,12 +25,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .....timeline import load_timeline
+from astrid.timeline import load_timeline
 
-from .....audit import register_outputs
+from astrid.audit import register_outputs
 
 from astrid.domains.hype.text_match import TOKEN_RE, segments_in_range, token_set_similarity, tokenize
-from ....._paths import executor_argv
+from astrid._paths import executor_argv
 
 
 def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:

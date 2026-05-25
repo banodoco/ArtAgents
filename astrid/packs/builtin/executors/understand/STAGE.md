@@ -29,7 +29,7 @@ the dispatcher module directly:
 python3 -m astrid executors run builtin.understand --input mode=video --dry-run
 
 # Canonical form — full modality-specific flag passthrough.
-python3 -m astrid.packs.builtin.understand.run --mode image --image frame.jpg
-python3 -m astrid.packs.builtin.understand.run --mode audio --audio clip.wav
-python3 -m astrid.packs.builtin.understand.run --mode video --video source.mp4 --at 01:20
+python3 -m astrid.packs.builtin.executors.understand.run --mode image --image frame.jpg
+python3 -m astrid.packs.builtin.executors.understand.run --mode audio --audio clip.wav
+python3 -m astrid.packs.builtin.executors.understand.run --mode video --video source.mp4 --at 01:20
 ```

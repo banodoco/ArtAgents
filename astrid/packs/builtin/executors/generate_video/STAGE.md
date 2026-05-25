@@ -81,28 +81,28 @@ See:
 
 ```bash
 # Cloud text-to-video
-python -m astrid.packs.builtin.generate_video.run \
+python -m astrid.packs.builtin.executors.generate_video.run \
   --model wan-2.2 --mode t2v --execution cloud \
   --prompt "a serene mountain lake at dawn" --out ./out
 
 # Local image-to-video (requires vibecomfy + ComfyUI)
-python -m astrid.packs.builtin.generate_video.run \
+python -m astrid.packs.builtin.executors.generate_video.run \
   --model wan-2.2 --mode i2v --execution local \
   --prompt "animate this scene" --image-ref ./frame0.png --out ./out
 
 # Image-to-video cloud
-python -m astrid.packs.builtin.generate_video.run \
+python -m astrid.packs.builtin.executors.generate_video.run \
   --model ltx-2.3 --mode i2v --execution cloud \
   --prompt "animate this scene" --image-ref ./frame0.png --out ./out
 
 # First-last-frame interpolation (local)
-python -m astrid.packs.builtin.generate_video.run \
+python -m astrid.packs.builtin.executors.generate_video.run \
   --model ltx-2.3 --mode flf --execution local \
   --prompt "smooth transition" \
   --image-ref ./frame0.png --image-end-ref ./frameN.png --out ./out
 
 # With resolution, frames, and fps
-python -m astrid.packs.builtin.generate_video.run \
+python -m astrid.packs.builtin.executors.generate_video.run \
   --model ltx-2.3 --mode t2v --execution local \
   --prompt "cyberpunk city flythrough" \
   --resolution 1280x720 --frames 81 --fps 24 --out ./out

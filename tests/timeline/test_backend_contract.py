@@ -19,7 +19,11 @@ from astrid.core.timeline.eventlog.types import (
     EventLogError,
     EventLogStaleVersionError,
 )
-from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
+from astrid.core.timeline.events.schema import (
+    TimelineActor,
+    TimelineConfigReplacedPayload,
+    TimelineEvent,
+)
 
 # Shared actor for most tests
 _ACTOR = TimelineActor(type="agent", id="codex:contract-test")
@@ -39,7 +43,7 @@ class TestLocalFsBackendContract:
         event = backend.append_event(
             backend.timeline_id,
             "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         events = backend.read_events()
@@ -53,7 +57,7 @@ class TestLocalFsBackendContract:
         backend = local_fs_backend
         event1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         event2 = backend.append_event(
@@ -72,7 +76,7 @@ class TestLocalFsBackendContract:
         backend = local_fs_backend
         backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         backend.append_event(
@@ -90,7 +94,7 @@ class TestLocalFsBackendContract:
         backend = local_fs_backend
         backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         with pytest.raises(EventLogStaleVersionError) as excinfo:
@@ -110,7 +114,7 @@ class TestLocalFsBackendContract:
         backend = local_fs_backend
         backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         events_before = backend.read_events()
@@ -140,7 +144,7 @@ class TestLocalFsBackendContract:
         with pytest.raises(EventLogError, match="rejects appends"):
             backend.append_event(
                 backend.timeline_id, "clip.added",
-                {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+                {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
                 actor=_ACTOR,
             )
 
@@ -149,16 +153,33 @@ class TestLocalFsBackendContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            {"track_id": "t1", "kind": "visual", "label": "Track 1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t2", "kind": "audio"},
+            {"track_id": "t2", "kind": "audio", "label": "Track 2"},
             actor=_ACTOR,
         )
         assert e1.prev_hash is None  # first event
         assert e2.prev_hash == e1.hash  # links to previous
+
+    def test_config_replaced_round_trips_and_verifies(self, local_fs_backend):
+        """timeline.config_replaced stores a validated raw TimelineConfig payload."""
+        backend = local_fs_backend
+        event = backend.append_event(
+            backend.timeline_id,
+            "timeline.config_replaced",
+            {"config": {"tracks": [], "clips": []}},
+            actor=_ACTOR,
+        )
+
+        events = backend.read_events()
+        assert events[0].event_id == event.event_id
+        assert events[0].kind == "timeline.config_replaced"
+        assert isinstance(events[0].payload, TimelineConfigReplacedPayload)
+        assert events[0].payload.config == {"tracks": [], "clips": []}
+        assert backend.verify_chain().ok is True
 
 
 # ======================================================================
@@ -175,7 +196,7 @@ class TestSupabaseBackendFakeContract:
         event = backend.append_event(
             backend.timeline_id,
             "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         events = backend.read_events()
@@ -183,6 +204,21 @@ class TestSupabaseBackendFakeContract:
         assert events[0].event_id == event.event_id
         assert events[0].kind == "clip.added"
         assert events[0].hash == event.hash
+
+    def test_config_replaced_round_trips_and_verifies(self, supabase_backend_with_fake):
+        """timeline.config_replaced is accepted by the backend contract fake."""
+        backend = supabase_backend_with_fake
+        backend.append_event(
+            backend.timeline_id,
+            "timeline.config_replaced",
+            {"config": {"tracks": [], "clips": []}},
+            actor=_ACTOR,
+        )
+
+        events = backend.read_events()
+        assert len(events) == 1
+        assert isinstance(events[0].payload, TimelineConfigReplacedPayload)
+        assert backend.verify_chain().ok is True
 
     def test_head_after_append(self, supabase_backend_with_fake):
         """head() reflects the last appended event."""
@@ -304,7 +340,7 @@ class TestSupabaseBackendFakeContract:
         backend = supabase_backend_with_fake
         backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         backend.append_event(
@@ -319,7 +355,7 @@ class TestSupabaseBackendFakeContract:
         # Tamper the payload of event 0
         fake_supabase_transport.tamper_event(
             backend.timeline_id, 0,
-            {"clip_id": "c1", "kind": "audio", "asset_id": "a99"},
+            {"clip_id": "c1", "kind": "audio", "track_id": "audio", "asset_id": "a99"},
         )
 
         result = backend.verify_chain()
@@ -377,13 +413,11 @@ def _events_from_fixture(fixture: dict) -> list:
 def _strip_none_values(obj: Any) -> Any:
     """Recursively strip dict entries whose value is None.
 
-    This mirrors the canonical JSON normalizer which drops ``None``-valued
-    keys during storage.  Golden fixtures sometimes carry explicit
-    ``\"label\": null`` in expected_assembly, but the event log's canonical
-    serialiser strips those keys, so projected assembly will never contain
-    ``None``-valued entries.  Normalising both sides before comparison
-    keeps the golden files read-only while making the check faithful to
-    the real storage behaviour.
+    This mirrors the canonical JSON normalizer which drops ``None``-valued keys
+    during storage.  Runtime golden fixtures should not depend on this for
+    legacy no-label tracks; those belong only in explicit rejection or migration
+    fixtures.  Normalising both sides keeps backend round-trips faithful to the
+    real storage behaviour for optional fields.
     """
     if isinstance(obj, dict):
         return {
@@ -407,6 +441,11 @@ class TestGoldenFixtureRoundTrip:
         events = _events_from_fixture(fixture)
         if not events:
             pytest.skip("Fixture has no events")
+        expects_runtime_rejection = any(
+            e.kind == "timeline.imported"
+            or e.kind == "arrangement.replaced"
+            for e in events
+        )
 
         backend = local_fs_backend
         timeline_id = events[0].timeline_id
@@ -449,6 +488,12 @@ class TestGoldenFixtureRoundTrip:
         assert len(stored) == len(events)
 
         from astrid.core.timeline.projection import project_to_assembly
+        if expects_runtime_rejection:
+            with pytest.raises(Exception, match="migration-only legacy|not a TimelineConfig"):
+                project_to_assembly(stored)
+            assert be.verify_chain().ok is True
+            return
+
         projected = project_to_assembly(stored)
 
         expected = fixture["expected_assembly"]
@@ -484,6 +529,11 @@ class TestGoldenFixtureRoundTrip:
         events = _events_from_fixture(fixture)
         if not events:
             pytest.skip("Fixture has no events")
+        expects_runtime_rejection = any(
+            e.kind == "timeline.imported"
+            or e.kind == "arrangement.replaced"
+            for e in events
+        )
 
         timeline_id = events[0].timeline_id
 
@@ -521,6 +571,12 @@ class TestGoldenFixtureRoundTrip:
         assert len(stored) == len(events)
 
         from astrid.core.timeline.projection import project_to_assembly
+        if expects_runtime_rejection:
+            with pytest.raises(Exception, match="migration-only legacy|not a TimelineConfig"):
+                project_to_assembly(stored)
+            assert be.verify_chain().ok is True
+            return
+
         projected = project_to_assembly(stored)
 
         expected = fixture["expected_assembly"]
@@ -559,7 +615,7 @@ class TestLocalFsTamperContract:
         backend = local_fs_backend
         backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         backend.append_event(
@@ -618,12 +674,12 @@ class TestLocalFsTamperContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            {"track_id": "t1", "kind": "visual", "label": "Track 1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t2", "kind": "audio"},
+            {"track_id": "t2", "kind": "audio", "label": "Track 2"},
             actor=_ACTOR,
         )
 
@@ -692,7 +748,7 @@ class TestLocalFsImportContract:
         """Import creates a new event with destination-native ID and hash."""
         backend = local_fs_backend
         source = _make_source_event("clip.added", {
-            "clip_id": "c1", "kind": "visual", "asset_id": "a1",
+            "clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1",
         })
 
         imported = backend.append_imported_event(
@@ -749,12 +805,12 @@ class TestLocalFsImportContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_IMPORT_ACTOR,
         )
 
         source = _make_source_event("track.added", {
-            "track_id": "t1", "kind": "visual",
+            "track_id": "t1", "kind": "visual", "label": "Track 1",
         })
         imported = backend.append_imported_event(
             backend.timeline_id,
@@ -780,7 +836,7 @@ class TestLocalFsImportContract:
         )
 
         source = _make_source_event("clip.added", {
-            "clip_id": "c1", "kind": "visual", "asset_id": "a1",
+            "clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1",
         })
         with pytest.raises(EventLogError, match="rejects appends"):
             backend.append_imported_event(
@@ -800,7 +856,7 @@ class TestSupabaseFakeImportContract:
         """Import creates a new event with destination-native ID and hash."""
         backend = supabase_backend_with_fake
         source = _make_source_event("clip.added", {
-            "clip_id": "c1", "kind": "visual", "asset_id": "a1",
+            "clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1",
         }, source_backend="local_fs")
 
         imported = backend.append_imported_event(
@@ -878,7 +934,7 @@ class TestSupabaseFakeImportContract:
         )
 
         source = _make_source_event("clip.added", {
-            "clip_id": "c1", "kind": "visual", "asset_id": "a1",
+            "clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1",
         }, source_backend="local_fs")
         with pytest.raises(EventLogError, match="rejects appends"):
             backend.append_imported_event(
@@ -902,7 +958,7 @@ class TestLocalFsErasureRepairContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
@@ -912,7 +968,7 @@ class TestLocalFsErasureRepairContract:
         )
         e3 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            {"track_id": "t1", "kind": "visual", "label": "Track 1"},
             actor=_ACTOR,
         )
 
@@ -947,12 +1003,12 @@ class TestLocalFsErasureRepairContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            {"track_id": "t1", "kind": "visual", "label": "Track 1"},
             actor=_ACTOR,
         )
         e3 = backend.append_event(
@@ -994,12 +1050,12 @@ class TestLocalFsErasureRepairContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            {"track_id": "t1", "kind": "visual", "label": "Track 1"},
             actor=_ACTOR,
         )
         e3 = backend.append_event(
@@ -1030,7 +1086,7 @@ class TestLocalFsErasureRepairContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -1059,7 +1115,7 @@ class TestLocalFsErasureRepairContract:
         backend = local_fs_backend
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -1081,7 +1137,7 @@ class TestLocalFsErasureRepairContract:
         import_actor = TimelineActor(type="agent", id="importer")
         source = _make_source_event(
             "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             source_backend="supabase",
         )
         imported = backend.append_imported_event(
@@ -1118,12 +1174,12 @@ class TestSupabaseFakeErasureRepairContract:
         backend = supabase_backend_with_fake
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             backend.timeline_id, "track.added",
-            {"track_id": "t1", "kind": "audio"},
+            {"track_id": "t1", "kind": "audio", "label": "Track 1"},
             actor=_ACTOR,
         )
 
@@ -1152,7 +1208,7 @@ class TestSupabaseFakeErasureRepairContract:
         for i in range(5):
             backend.append_event(
                 backend.timeline_id, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 
@@ -1177,7 +1233,7 @@ class TestSupabaseFakeErasureRepairContract:
         backend = supabase_backend_with_fake
         e1 = backend.append_event(
             backend.timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -1220,13 +1276,8 @@ class TestLocalFsRecoveryContract:
         home = backend.timeline_home
 
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
-            actor=_ACTOR,
-        )
-        e2 = backend.append_event(
-            timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            timeline_id, "timeline.config_replaced",
+            {"config": {"tracks": [], "clips": []}},
             actor=_ACTOR,
         )
 
@@ -1244,21 +1295,21 @@ class TestLocalFsRecoveryContract:
         from astrid.core.project.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.json",
-            {"schema_version": 1, "assembly": {"clips": [], "tracks": [], "pool": {"entries": []}}},
+            {"clips": [], "tracks": []},
         )
 
         result = recover_to_event(
-            "test-project", "rcv-test", e2.event_id,
+            "test-project", "rcv-test", e1.event_id,
             _ACTOR, "contract recovery",
         )
 
         assert isinstance(result, RecoveryResult)
-        assert result.anchor_event_id == e2.event_id
+        assert result.anchor_event_id == e1.event_id
         assert result.anchor_type == "event"
-        assert result.new_version == 3
+        assert result.new_version == 2
 
         events = backend.read_events()
-        assert len(events) == 3
+        assert len(events) == 2
         assert events[-1].kind == "timeline.recovered"
 
     def test_recover_refuses_broken_chain(
@@ -1275,8 +1326,8 @@ class TestLocalFsRecoveryContract:
         home = backend.timeline_home
 
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": {"tracks": [], "clips": []}},
             actor=_ACTOR,
         )
 
@@ -1303,7 +1354,7 @@ class TestLocalFsRecoveryContract:
                     "prev_hash": "wrong-hash",
                     "hash": "also-wrong",
                     "kind": "clip.added",
-                    "payload": {"clip_id": "bad", "kind": "visual", "asset_id": "x"},
+                    "payload": {"clip_id": "bad", "kind": "visual", "track_id": "visual", "asset_id": "x"},
                     "schema_version": 2,
                 })
                 + "\n"
@@ -1333,13 +1384,8 @@ class TestSupabaseFakeRecoveryContract:
         timeline_id = backend.timeline_id
 
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
-            actor=_ACTOR,
-        )
-        e2 = backend.append_event(
-            timeline_id, "track.added",
-            {"track_id": "t1", "kind": "audio"},
+            timeline_id, "timeline.config_replaced",
+            {"config": {"tracks": [], "clips": []}},
             actor=_ACTOR,
         )
 
@@ -1372,16 +1418,16 @@ class TestSupabaseFakeRecoveryContract:
         )
 
         result = recover_to_event(
-            "test-project", "rcv-fake", e2.event_id,
+            "test-project", "rcv-fake", e1.event_id,
             _ACTOR, "fake recovery test",
         )
 
         assert isinstance(result, RecoveryResult)
-        assert result.anchor_event_id == e2.event_id
-        assert result.new_version == 3
+        assert result.anchor_event_id == e1.event_id
+        assert result.new_version == 2
 
         events = backend.read_events()
-        assert len(events) == 3
+        assert len(events) == 2
         assert events[-1].kind == "timeline.recovered"
 
     def test_recover_refuses_broken_chain_fake(
@@ -1399,8 +1445,8 @@ class TestSupabaseFakeRecoveryContract:
         timeline_id = backend.timeline_id
 
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": {"tracks": [], "clips": []}},
             actor=_ACTOR,
         )
 

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
-from .....audit import register_outputs
+from astrid.audit import register_outputs
 from astrid.domains.hype import enriched_arrangement
 
 sys.modules.setdefault("quality_zones", sys.modules[__name__])

@@ -16,11 +16,12 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from ..arrange.run import pool_digest
-from .....audit import AuditContext
+from astrid.audit import AuditContext
+from astrid.core.util.media import ffprobe_duration_seconds
 from astrid.utilities.llm_clients import build_claude_client
-from .....timeline import load_arrangement, load_metadata, load_pool
+from astrid.timeline import load_arrangement, load_metadata, load_pool
 from ..transcribe.run import load_api_key
-from ....._paths import executor_argv
+from astrid._paths import executor_argv
 
 EDITOR_ACTIONS = (
     "accept",
@@ -311,22 +312,7 @@ def _probe_duration(
     *,
     ffprobe_runner: Any = subprocess.run,
 ) -> float:
-    result = ffprobe_runner(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(hype_mp4),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(str(result.stdout).strip())
+    return ffprobe_duration_seconds(hype_mp4, runner=ffprobe_runner)
 
 
 def sample_frames(

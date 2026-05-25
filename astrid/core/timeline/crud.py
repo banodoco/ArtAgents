@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
 from astrid.core.project.schema import utc_now_iso
@@ -16,11 +17,13 @@ from astrid.threads.ids import generate_ulid
 from .integrity import compute_sha256, file_size
 from .model import (
     TIMELINE_SCHEMA_VERSION,
-    Assembly,
     Display,
     FinalOutput,
     Manifest,
     TimelineValidationError,
+    read_timeline_config_json,
+    validate_timeline_config_json,
+    write_timeline_config_json,
 )
 from .eventlog import select_timeline_backend
 from .eventlog.types import SupabaseEventLogOptions
@@ -52,6 +55,7 @@ class TimelineSummary:
     run_count: int
     final_output_count: int
     last_finalized: str | None  # ISO-8601 timestamp of the most recent final output
+    tombstoned_at: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +93,7 @@ def create_timeline(
     tdir = timeline_dir(project_slug, ulid, root=root)
     tdir.mkdir(parents=True, exist_ok=False)
 
-    assembly = Assembly(schema_version=TIMELINE_SCHEMA_VERSION, assembly={})
+    assembly = validate_timeline_config_json(timeline_contract.canonical_empty_timeline())
     manifest = Manifest(
         schema_version=TIMELINE_SCHEMA_VERSION,
         contributing_runs=[],
@@ -103,7 +107,7 @@ def create_timeline(
         is_default=is_default,
     )
 
-    assembly.write(tdir / "assembly.json")
+    write_timeline_config_json(tdir / "assembly.json", assembly)
     manifest.write(tdir / "manifest.json")
     display.write(tdir / "display.json")
     write_json_atomic(
@@ -140,6 +144,7 @@ def list_timelines(
     project_slug: str,
     *,
     root: str | Path | None = None,
+    include_tombstoned: bool = False,
 ) -> list[TimelineSummary]:
     """Return summary rows for every timeline under *project_slug*."""
     td = timelines_dir(project_slug, root=root)
@@ -167,12 +172,16 @@ def list_timelines(
         run_count = 0
         final_output_count = 0
         last_finalized: str | None = None
+        tombstoned_at: str | None = None
         if mp.is_file():
             try:
                 manifest = Manifest.from_json(mp)
             except (TimelineValidationError, OSError):
                 manifest = None
             if manifest is not None:
+                tombstoned_at = manifest.tombstoned_at
+                if tombstoned_at is not None and not include_tombstoned:
+                    continue
                 run_count = len(manifest.contributing_runs)
                 final_output_count = len(manifest.final_outputs)
                 if manifest.final_outputs:
@@ -190,6 +199,7 @@ def list_timelines(
                 run_count=run_count,
                 final_output_count=final_output_count,
                 last_finalized=last_finalized,
+                tombstoned_at=tombstoned_at,
             )
         )
     return rows
@@ -205,6 +215,8 @@ def show_timeline(
     slug: str,
     *,
     root: str | Path | None = None,
+    include_tombstoned: bool = True,
+    verify: bool = False,
 ) -> dict[str, Any] | None:
     """Return the full timeline record (assembly + manifest + display).
 
@@ -213,26 +225,75 @@ def show_timeline(
     If an event log exists, the assembly is rebuilt from events; if not,
     the on-disk ``assembly.json`` is read directly (legacy fallback).
     """
-    found = find_timeline_by_slug(project_slug, slug, root=root)
+    found = find_timeline_by_slug(
+        project_slug,
+        slug,
+        root=root,
+        include_tombstoned=include_tombstoned,
+    )
     if found is None:
         return None
     ulid, tdir = found
-    # Load assembly.json with repair — regenerates from event log when
-    # available, falls back to direct file read for legacy timelines.
-    raw_assembly = load_assembly_json_with_repair(tdir)
+    # Normal reads repair stale projections from the event log. Verification
+    # reads are intentionally read-only and inspect assembly.json as-is.
+    raw_assembly = (
+        read_timeline_config_json(tdir / "assembly.json")
+        if verify
+        else load_assembly_json_with_repair(tdir)
+    )
     if raw_assembly is None:
         return None
-    assembly = Assembly.from_dict(raw_assembly)
+    assembly = validate_timeline_config_json(raw_assembly)
     manifest = Manifest.from_json(tdir / "manifest.json")
-    raw_display = load_display_json_with_repair(tdir)
+    raw_display = (
+        read_json(tdir / "display.json")
+        if verify
+        else load_display_json_with_repair(tdir)
+    )
     if raw_display is None:
         return None
     display = Display.from_dict(raw_display)
-    return {
+    result: dict[str, Any] = {
         "ulid": ulid,
         "display": display,
         "assembly": assembly,
         "manifest": manifest,
+    }
+    if verify:
+        result["verification"] = _verify_timeline_read_only(tdir)
+    return result
+
+
+def _verify_timeline_read_only(tdir: Path) -> dict[str, Any]:
+    events_file = tdir / "assembly.jsonl"
+    identity_file = tdir / "assembly.identity.json"
+    if not events_file.is_file():
+        return {"event_log": "absent", "ok": True, "checked_events": 0}
+    if not identity_file.is_file():
+        return {
+            "event_log": "present",
+            "ok": False,
+            "checked_events": 0,
+            "error": "assembly.identity.json missing",
+        }
+    identity = read_json(identity_file)
+    timeline_id = identity.get("timeline_id") if isinstance(identity, dict) else None
+    if not isinstance(timeline_id, str) or not timeline_id:
+        return {
+            "event_log": "present",
+            "ok": False,
+            "checked_events": 0,
+            "error": "timeline identity sidecar missing timeline_id",
+        }
+    from .eventlog import LocalFsBackend
+
+    verification = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir).verify_chain()
+    return {
+        "event_log": "present",
+        "ok": verification.ok,
+        "checked_events": verification.checked_events,
+        "last_event_id": verification.last_event_id,
+        "error": verification.error,
     }
 
 
@@ -261,7 +322,7 @@ def get_arrangement(
     if data is None:
         return None
     assembly = data["assembly"]
-    return assembly.assembly.get("arrangement")
+    return assembly.get("arrangement")
 
 
 # ---------------------------------------------------------------------------
@@ -405,6 +466,32 @@ def finalize_output(
     return fo
 
 
+def record_contributing_run(
+    project_slug: str,
+    timeline_ulid: str,
+    run_id: str,
+    *,
+    root: str | Path | None = None,
+) -> None:
+    """Ensure *run_id* is listed as contributing to *timeline_ulid*."""
+    tdir = timeline_dir(project_slug, timeline_ulid, root=root)
+    mp = tdir / "manifest.json"
+    if not mp.is_file():
+        raise TimelineCrudError(
+            f"timeline {timeline_ulid!r} has no manifest.json in project {project_slug!r}"
+        )
+    manifest = Manifest.from_json(mp)
+    if run_id in manifest.contributing_runs:
+        return
+    updated = Manifest(
+        schema_version=TIMELINE_SCHEMA_VERSION,
+        contributing_runs=[*manifest.contributing_runs, run_id],
+        final_outputs=list(manifest.final_outputs),
+        tombstoned_at=manifest.tombstoned_at,
+    )
+    updated.write(mp)
+
+
 # ---------------------------------------------------------------------------
 # Tombstone
 # ---------------------------------------------------------------------------
@@ -421,7 +508,7 @@ def tombstone_timeline(
     Milestone 1 intentionally leaves this on the legacy surface; it does not
     emit ``timeline.tombstoned``.
     """
-    found = find_timeline_by_slug(project_slug, slug, root=root)
+    found = find_timeline_by_slug(project_slug, slug, root=root, include_tombstoned=True)
     if found is None:
         raise TimelineCrudError(f"timeline '{slug}' not found in project '{project_slug}'")
 
@@ -463,7 +550,7 @@ def purge_timeline(
     Milestone 1 does not emit ``timeline.deleted`` here. Any delete event seen
     by projection or append enforcement must already exist in the stream.
     """
-    found = find_timeline_by_slug(project_slug, slug, root=root)
+    found = find_timeline_by_slug(project_slug, slug, root=root, include_tombstoned=True)
     if found is None:
         raise TimelineCrudError(f"timeline '{slug}' not found in project '{project_slug}'")
 

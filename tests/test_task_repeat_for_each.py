@@ -38,9 +38,9 @@ def _events_path(tmp_projects_root: Path, slug: str, run_id: str) -> Path:
 
 def test_for_each_static_expands_emits_for_each_expanded_once(tmp_projects_root: Path) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "repeat": {"for_each": {"items": ["a", "b", "c"]}},
             },
         ],
@@ -71,15 +71,17 @@ def test_for_each_static_expands_emits_for_each_expanded_once(tmp_projects_root:
 
 def test_for_each_partial_approval_via_item_flag(tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "attested",
+                "id": "host",
+                "adapter": "manual",
                 "command": "ack --project demo --step host",
                 "instructions": "review",
-                "ack": {"kind": "actor"},
+                "ack": {"kind": "human"},
+                "requires_ack": True,
                 "repeat": {"for_each": {"items": ["a", "b", "c"]}},
             },
-            {"id": "next", "kind": "code", "command": "echo done"},
+            {"id": "next", "adapter": "local", "command": "echo done"},
         ],
     }
     _setup(tmp_projects_root, plan)
@@ -87,7 +89,7 @@ def test_for_each_partial_approval_via_item_flag(tmp_projects_root: Path, monkey
 
     # Ack b first (out of order), then c, then a.
     for item in ("b", "c", "a"):
-        cmd = f"ack --project demo --step host --actor alice --item {item}"
+        cmd = f"ack --project demo --step host --human alice --item {item}"
         d = task_gate.gate_command("demo", cmd, cmd.split(), root=tmp_projects_root)
         assert d.item_id == item
         # Host should NOT have advanced yet.
@@ -102,9 +104,9 @@ def test_for_each_partial_approval_via_item_flag(tmp_projects_root: Path, monkey
 
 def test_for_each_from_ref_resolves_at_runtime_from_prior_step_produces(tmp_projects_root: Path) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "list_videos", "kind": "code", "command": "echo list",
+                "id": "list_videos", "adapter": "local", "command": "echo list",
                 "produces": {
                     "videos": {
                         "path": "videos.json",
@@ -113,7 +115,7 @@ def test_for_each_from_ref_resolves_at_runtime_from_prior_step_produces(tmp_proj
                 },
             },
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "repeat": {"for_each": {"from": "list_videos.produces.videos"}},
             },
         ],
@@ -139,9 +141,9 @@ def test_for_each_from_ref_resolves_at_runtime_from_prior_step_produces(tmp_proj
 
 def test_for_each_replay_is_deterministic_from_events(tmp_projects_root: Path) -> None:
     plan_dict = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "repeat": {"for_each": {"items": ["a", "b"]}},
             },
         ],
@@ -173,12 +175,12 @@ def test_for_each_replay_is_deterministic_from_events(tmp_projects_root: Path) -
 
 def test_for_each_code_body_propagates_item_id_env_var(tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     plan = {
-        "plan_id": "p", "version": 1, "steps": [
+        "plan_id": "p", "version": 2, "steps": [
             {
-                "id": "host", "kind": "code", "command": "echo go",
+                "id": "host", "adapter": "local", "command": "echo go",
                 "repeat": {"for_each": {"items": ["v1", "v2"]}},
             },
-            {"id": "next", "kind": "code", "command": "echo done"},
+            {"id": "next", "adapter": "local", "command": "echo done"},
         ],
     }
     _setup(tmp_projects_root, plan)

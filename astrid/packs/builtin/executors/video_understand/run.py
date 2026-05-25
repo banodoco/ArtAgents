@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from astrid.core.util.media import ffprobe_duration_seconds
 from astrid.utilities.llm_clients import build_gemini_client
 
 
@@ -72,8 +73,14 @@ def _die(message: str) -> None:
     raise SystemExit(1)
 
 
-def _run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, check=True, capture_output=True, text=True)
+def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        check=kwargs.pop("check", True),
+        capture_output=kwargs.pop("capture_output", True),
+        text=kwargs.pop("text", True),
+        **kwargs,
+    )
 
 
 def _parse_timestamp(value: str) -> float:
@@ -112,20 +119,7 @@ def _parse_times(values: list[str] | None) -> list[float]:
 
 
 def _probe_duration(media_path: Path) -> float:
-    return float(
-        _run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(media_path),
-            ]
-        ).stdout.strip()
-    )
+    return ffprobe_duration_seconds(media_path, runner=_run)
 
 
 def _window_plan(args: argparse.Namespace, duration_sec: float) -> list[dict[str, Any]]:

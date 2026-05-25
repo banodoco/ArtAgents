@@ -222,6 +222,7 @@ def test_sweeper_picks_up_session_breadcrumb() -> None:
         (run_dir / "lease.json").write_text(json.dumps({
             "writer_epoch": 0,
             "attached_session_id": None,
+            "plan_hash": "",
         }))
 
         # Pre-seed events

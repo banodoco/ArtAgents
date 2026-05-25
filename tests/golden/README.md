@@ -1,11 +1,18 @@
 # Golden Fixtures — Timeline Projection (m4)
 
 This directory contains backend-neutral fixture files for the
-`project_to_assembly()` projector. Each fixture is a single JSON file with:
+`project_to_assembly()` projector. Runtime fixtures must project to raw
+`TimelineConfig` only: top-level `clips` and `tracks`, with no
+`{schema_version, assembly}` wrapper and no `pool` or `arrangement` read-model
+keys. Legacy wrapper/no-label/arrangement cases are kept only as explicit
+runtime-rejection fixtures or in migration tests.
+
+Each fixture is a single JSON file with:
 
 - **`events`** — an ordered list of `TimelineEvent` dicts.
-- **`expected_assembly`** — the expected projected assembly dict (the **inner**
-  assembly, not the `{schema_version, assembly}` wrapper).
+- **`expected_assembly`** — the expected raw `TimelineConfig` dict for runtime
+  fixtures. Rejection fixtures may carry historical read-model shapes only to
+  prove runtime projection rejects them.
 
 ## Coverage
 
@@ -20,7 +27,7 @@ This directory contains backend-neutral fixture files for the
 | `fixture_pool.json` | `pool.asset_added`, `pool.asset_removed`, `pool.asset_scored` |
 | `fixture_arrangement.json` | `arrangement.replaced` |
 | `fixture_bootstrap_created.json` | Fresh created timeline — bare first domain event, lifecycle no-ops |
-| `fixture_bootstrap_legacy.json` | True legacy timeline — seeded by `timeline.imported` with full wrapper shape |
+| `fixture_bootstrap_legacy.json` | Historical legacy timeline — rejected by runtime projection |
 
 ## Bootstrap variants
 
@@ -28,10 +35,11 @@ This directory contains backend-neutral fixture files for the
    followed by a bare `clip.added`. The projector treats lifecycle events as
    no-ops. No `timeline.imported` is present.
 
-2. **Legacy** (`fixture_bootstrap_legacy.json`): A `timeline.imported` event
-   with a snapshot containing the full `assembly.json` wrapper shape
-   (`{schema_version: 1, assembly: {...}}`). Domain events follow and are
-   applied on top of the imported state.
+2. **Legacy** (`fixture_bootstrap_legacy.json`): A historical
+   `timeline.imported` event with a snapshot containing the full
+   `assembly.json` wrapper shape (`{schema_version: 1, assembly: {...}}`).
+   Runtime projection rejects this fixture; Sprint 2 migration code owns
+   loose decoding and conversion.
 
 ## Usage in tests
 
@@ -40,10 +48,12 @@ Consumers should:
 1. Load a fixture JSON file.
 2. Parse the `events` list into `TimelineEvent` objects via
    `TimelineEvent.from_dict()`.
-3. Call `project_to_assembly(events)` and assert the result equals
-   `expected_assembly`.
-4. Assert that `project_to_assembly(events[:k])` for any prefix `k` produces
-   intermediate state consistent with stepwise replay.
+3. For runtime fixtures, call `project_to_assembly(events)`, assert the result
+   equals `expected_assembly`, and validate it as raw `TimelineConfig`.
+4. For explicit rejection fixtures, assert `project_to_assembly(events)` raises
+   rather than converting legacy read-model shapes.
+5. Assert that `project_to_assembly(events[:k])` for any runtime prefix `k`
+   produces intermediate state consistent with stepwise replay.
 
 Cross-backend parity tests (m6, m8) consume these same fixtures unchanged.
 

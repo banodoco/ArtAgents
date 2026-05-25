@@ -1,100 +1,70 @@
 # Threads
 
-Threads are the local continuity layer for Astrid runs. Each eligible executor
-or orchestrator run writes `runs/<slug>/run.json`, and `.astrid/threads.json`
-keeps the active thread plus ordered run ids. The index is schema version 1,
-locked with `fcntl.flock`, written atomically, and rotated through
-`.astrid/threads.json.bak`.
+Threads are retained as an internal lineage model for legacy run records,
+variant sidecars, and iteration-video provenance. They are no longer a
+user-facing runtime binding contract for generic `astrid executors run` or
+`astrid orchestrators run` commands.
 
 ## Model
 
-- A thread is an ordered set of run ids with a label and `open` or `archived`
-  status.
-- A run records trimmed v1 metadata: run id, thread id, typed
-  `parent_run_ids`, redacted CLI args, input and output artifact hashes, brief
-  hash, provenance, and local output path.
-- Parent edges use `{run_id, kind}` objects. `causal` means the run consumed a
-  previous run; `chosen` means it consumed a selected variant.
-- Output paths are repo-relative. Private content under `runs/<slug>/private/`
-  is represented by hashes and labels only.
-- `.astrid/iteration_cache/` stores per-run summaries for iteration videos;
-  it is cache state, not thread identity.
+- `.astrid/threads.json` is compatibility state used by lineage readers.
+- Legacy `run.json` records may still contain a scalar thread id and typed
+  `parent_run_ids`.
+- New generic executor and orchestrator runtime calls do not create thread
+  records, do not select an active thread, and do not inject thread environment
+  variables.
+- Iteration-video tooling can still read the internal lineage index when a
+  caller explicitly asks for a lineage id or `@active` inside that pack.
+- `.astrid/iteration_cache/` stores per-run summaries for iteration videos; it
+  is cache state, not session identity.
 
 ## Prefixes
 
-Eligible run commands print thread context before command output:
-
-```text
-[thread] <label> . run #<n> . <thread-id>
-[variants] <unresolved variant guidance>
-Notice: <lifecycle notice>
-
-<command output>
-```
-
-The stable order is `[thread]`, optional `[variants]`, optional `Notice:`, then a
-blank line. `python3 -m astrid thread show @active` is the source of truth if
-the prefix is surprising.
+Generic runtime prefix lines were retired in Sprint 1. Inspect and run output
+should not include active-thread footers or thread banners. Existing prefix
+helpers remain only for compatibility tests and historical iteration fixtures,
+not as current CLI guidance.
 
 ## Privacy & Redaction
 
-`runs/` is local output and should stay out of git. CLI values whose keys look
-secret-like, including `KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `PASSPHRASE`,
-`API_KEY`, and `BEARER`, are stored as `***REDACTED***` in run records.
+`runs/` is local output and should stay out of git. Legacy thread records redact
+CLI values whose keys look secret-like, including `KEY`, `TOKEN`, `SECRET`,
+`PASSWORD`, `PASSPHRASE`, `API_KEY`, and `BEARER`.
 
 Brief snapshots are plaintext by default when the brief is outside the run's
-private directory. To opt into path-based privacy, put sensitive inputs under
-`runs/<slug>/private/`; thread records keep hashes and labels without storing
-the private path or plaintext. Use:
-
-```bash
-python3 -m astrid thread show @active --no-content
-```
-
-`--no-content` keeps ids, labels, hashes, status, and structural provenance while
-suppressing plaintext brief or prompt content. There is no dedicated brief
-privacy flag in v1.
+private directory. To opt into path-based privacy for legacy records, put
+sensitive inputs under `runs/<slug>/private/`; record builders keep hashes and
+labels without storing the private path or plaintext.
 
 ## Concurrent Variant Selection
 
-Variant producers write append-only selection events under
-`.astrid/threads/<thread-id>/selections.jsonl` and lock-protected group state
-under `.astrid/threads/<thread-id>/groups.json`.
+Variant producers can still write append-only selection events under
+`.astrid/threads/<lineage-id>/selections.jsonl` and lock-protected group state
+under `.astrid/threads/<lineage-id>/groups.json`.
 
 Selections are append-only; the most recent write is authoritative on read;
 prior selections are preserved as history but do not affect current keepers.
-
-That rule makes concurrent `thread keep` or `thread dismiss` writes safe. Review
-history when two terminals disagree, then write the current keeper explicitly:
-
-```bash
-python3 -m astrid thread keep <run-id>:<n>[,<n>]
-python3 -m astrid thread dismiss <run-id>:none
-```
+This behavior is lineage bookkeeping for pack utilities, not generic runtime
+binding.
 
 ## Tier Firing Rules
 
-| Tier | Fires when | Action |
-| --- | --- | --- |
-| `[thread]` | Every eligible run is attributed to a thread. | Confirm the label and id before trusting subsequent output. |
-| `[variants]` | A run requested variants or an unresolved variant group exists. | Review outputs and run `thread keep` or `thread dismiss`. |
-| `Notice:` | Lifecycle attribution needs attention, such as reopening a selected archived thread. | Read the notice before continuing. |
-
-Warn-style brief novelty, fan-out hints, and health-smell lines are deferred and
-are not v1 behavior.
+There are no current generic executor/orchestrator thread tiers. The retired
+thread banner, variant banner, lifecycle notices, fan-out hints, warning tiers,
+and health-smell lines are not active user-facing runtime behavior.
 
 ## Inspect Before Render
 
-Before rendering an iteration video, inspect the thread:
+Before rendering an iteration video, inspect the lineage:
 
 ```bash
-python3 -m astrid.packs.builtin.iteration_video.run inspect <thread>
+python3 -m astrid.packs.builtin.orchestrators.iteration_video.run inspect <lineage-id-or-active>
 ```
 
 Inspect does not render and does not dispatch summarization. It reports detected
 modalities, chosen renderers, quality, summary-cache hits and misses, and a
-single estimated cost line. Add `--no-content` when inspecting a sensitive
-thread.
+single estimated cost line. Use the pack-level no-content option for sensitive
+lineage.
 
 The render path is:
 
@@ -105,28 +75,30 @@ iteration.prepare -> iteration.assemble -> builtin.render -> finalize
 `iteration.assemble` writes canonical `iteration.*` files and render-compatible
 `hype.timeline.json` plus `hype.assets.json`. `builtin.render` consumes that
 exact `hype.*` pair and emits `hype.mp4`; the iteration-video orchestrator then
-records `iteration.mp4` with the other four SD-022 outputs.
+records `iteration.mp4` with the other canonical iteration outputs.
 
 ## Stale Locks
 
-If a command times out waiting for `.astrid/threads.json.lock`, first verify
-that no Astrid process is still running or writing thread state. After that
-process check, remove the stale lock file manually and rerun the command. The
-index keeps a `.bak` copy for recovery if a previous write was interrupted.
+If a lineage utility times out waiting for `.astrid/threads.json.lock`, first
+verify that no Astrid process is still running or writing lineage state. After
+that process check, remove the stale lock file manually and rerun the lineage
+utility. The index keeps a `.bak` copy for recovery if a previous write was
+interrupted.
 
-No lock-repair command ships in v1.
+No lock-repair command ships.
 
 ## Deferred
 
-V1 deliberately does not ship these deferred surfaces:
+These retired or deferred surfaces are not generic runtime behavior:
 
 - Thread split, merge, attach, detach, or automatic repair commands.
-- Extra renderers beyond `image_grid`, `audio_waveform`, and `generic_card`.
-- Cross-modal sub-pursuits or `--mode parallel|interleaved`; v1 is chaptered.
+- Generic executor/orchestrator thread selection flags.
+- Generic runtime thread prefix lines, active-thread inspect footers, and
+  thread environment inheritance.
+- Extra renderers beyond the currently implemented iteration-video renderers.
+- Cross-modal sub-pursuits or `--mode parallel|interleaved`; iteration video is
+  chaptered.
 - Natural-language parsing of `--direction`; it is a label only.
 - `--why` reasoning output on iteration-video inspect.
 - Brief-similarity heuristics, semantic-distance dilation, or browse UI.
-- Warn novelty, fan-out hinting, and thread-health smell output.
-- `preview_modes`, `host_id`, top-level `chosen_from_groups`, cost ranges,
-  latency fields, and formal N-1 migration helpers.
-
+- Warning novelty, fan-out hinting, and health-smell output.

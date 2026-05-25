@@ -51,7 +51,11 @@ def test_takeover_mid_consume_surfaces_stale_epoch(tmp_path: Path) -> None:
 
     # A competing session takes over before the consumer finishes.
     bump_epoch_and_swap_session(
-        run_dir, new_session_id="S-NEW", prev_session_id="S-OLD", reason="mid-consume"
+        run_dir,
+        new_session_id="S-NEW",
+        prev_session_id="S-OLD",
+        reason="mid-consume",
+        force=True,
     )
 
     # Consumer's NEXT append (the cursor-advance / step-completed write)

@@ -17,7 +17,8 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.schema import CommandSpec, Output, Port
+from astrid.contracts.schema import CommandInputArg, CommandSpec, Output, Port
+from astrid.core.executor.cli import main as executor_cli_main
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.runner import (
     ExecutorRunRequest,
@@ -26,6 +27,7 @@ from astrid.core.executor.runner import (
     evaluate_conditions,
     run_executor,
 )
+from astrid.core.executor.registry import load_default_registry
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
 
 
@@ -69,6 +71,137 @@ def _registry(executor: ExecutorDefinition) -> ExecutorRegistry:
     # Bypass full validation for some intentionally malformed fixtures.
     registry._executors[executor.id] = executor  # type: ignore[attr-defined]
     return registry
+
+
+def test_command_input_args_expand_repeated_and_optional_values_in_order(tmp_path: Path) -> None:
+    executor = _executor(
+        inputs=(Port(name="item", required=True), Port(name="note", required=False)),
+        argv=("echo", "fixed"),
+    )
+    executor = ExecutorDefinition(
+        **{
+            **executor.__dict__,
+            "command": CommandSpec(
+                argv=("echo", "fixed"),
+                input_args=(
+                    CommandInputArg(input="item", flag="--item", repeatable=True),
+                    CommandInputArg(input="note", flag="--note", optional=True),
+                ),
+            ),
+        }
+    )
+
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            inputs={"item": ["one", "two"]},
+        ),
+        _registry(executor),
+    )
+
+    assert command == ("echo", "fixed", "--item", "one", "--item", "two")
+
+
+def test_command_input_args_reject_duplicate_values_without_repeatability(tmp_path: Path) -> None:
+    executor = _executor(
+        inputs=(Port(name="item", required=True),),
+        argv=("echo",),
+    )
+    executor = ExecutorDefinition(
+        **{
+            **executor.__dict__,
+            "command": CommandSpec(
+                argv=("echo",),
+                input_args=(CommandInputArg(input="item", flag="--item"),),
+            ),
+        }
+    )
+
+    with pytest.raises(ExecutorRunnerError, match="not repeatable"):
+        build_executor_command(
+            ExecutorRunRequest(executor_id=executor.id, out=tmp_path, inputs={"item": ["one", "two"]}),
+            _registry(executor),
+        )
+
+
+def test_builtin_render_expands_semantic_timeline_assets_and_out_argv(tmp_path: Path) -> None:
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="builtin.render",
+            out=tmp_path / "render",
+            inputs={
+                "timeline": tmp_path / "hype.timeline.json",
+                "assets_registry": tmp_path / "hype.assets.json",
+            },
+            python_exec="/opt/python",
+        ),
+        load_default_registry(),
+    )
+
+    assert command == (
+        "/opt/python",
+        "-m",
+        "astrid.packs.builtin.executors.render.run",
+        "--timeline",
+        str(tmp_path / "hype.timeline.json"),
+        "--assets",
+        str(tmp_path / "hype.assets.json"),
+        "--out",
+        str((tmp_path / "render").resolve() / "hype.mp4"),
+    )
+
+
+def test_builtin_render_rejects_legacy_assets_input_name(tmp_path: Path) -> None:
+    with pytest.raises(ExecutorRunnerError, match="missing required input\\(s\\): assets_registry"):
+        build_executor_command(
+            ExecutorRunRequest(
+                executor_id="builtin.render",
+                out=tmp_path / "render",
+                inputs={
+                    "timeline": tmp_path / "hype.timeline.json",
+                    "assets": tmp_path / "hype.assets.json",
+                },
+                python_exec="/opt/python",
+            ),
+            load_default_registry(),
+        )
+
+
+def test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when_supplied(
+    tmp_path: Path,
+) -> None:
+    registry = load_default_registry()
+    base_request = ExecutorRunRequest(
+        executor_id="builtin.render",
+        out=tmp_path / "render",
+        inputs={
+            "timeline": "timeline.json",
+            "assets_registry": "assets.json",
+        },
+        python_exec="/opt/python",
+    )
+    assert "--theme" not in build_executor_command(base_request, registry)
+
+    themed = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="builtin.render",
+            out=tmp_path / "render",
+            inputs={
+                "timeline": "timeline.json",
+                "assets_registry": "assets.json",
+                "theme": "theme.json",
+            },
+            python_exec="/opt/python",
+        ),
+        registry,
+    )
+    assert themed[-2:] == ("--theme", "theme.json")
+
+
+def test_executors_run_rejects_arbitrary_passthrough_after_double_dash() -> None:
+    with pytest.raises(SystemExit):
+        executor_cli_main(["run", "local.echo", "--", "--surprise"])
 
 
 # ---------------------------------------------------------------------------

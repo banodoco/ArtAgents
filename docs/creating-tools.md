@@ -8,6 +8,11 @@ Start with the highest-level command that fits the user request. For normal
 video creation, run an orchestrator through `python3 -m astrid` instead of
 chaining internal executors by hand.
 
+Astrid commands are session-gated. If the shell is not already bound to a
+project session, run `python3 -m astrid next` for the one legal next action or
+`python3 -m astrid status` for the read-side breadcrumb, then attach before
+using registry discovery or tool creation commands.
+
 Do not chain pipeline internals by hand unless you are debugging one specific
 stage. Source-analysis executors intentionally pass file artifacts such as
 transcripts, scenes, quote candidates, pools, timelines, and assets. Those files
@@ -38,9 +43,10 @@ Before adding anything, follow this order. Move to the next step only when the
 previous one cannot satisfy the request.
 
 1. **Try to compose existing executors.** Run `python3 -m astrid executors
-   list` and `inspect` the likely candidates. If a workflow can be built by
-   wiring existing executors together, write *only* an orchestrator that calls
-   them. Do not duplicate logic that already lives in an executor.
+   search <terms>` or `list` after attaching, then `inspect` the likely
+   candidates. If a workflow can be built by wiring existing executors
+   together, write *only* an orchestrator that calls them. Do not duplicate
+   logic that already lives in an executor.
 2. **Create the missing executors.** Each new executor must do exactly one
    concrete unit of work — independently runnable, inspectable, testable. Keep
    it narrow: one network call, one transformation, one artifact in / one
@@ -49,6 +55,36 @@ previous one cannot satisfy the request.
 3. **Write the orchestrator that composes them.** It calls the executors
    (existing + new) and may call other orchestrators. Executors must not call
    orchestrators.
+
+When an orchestrator emits a task-mode `plan.json`, author the plan through
+`astrid.core.orchestrator.plan_template` instead of hand-building nested step
+dicts. Use `build_leaf_template()` for executable/manual leaves,
+`build_group_template()` for child containers and `re_export`, and
+`build_plan_template()` for the final v2 payload. The helpers construct the
+same `Step` / `TaskPlan` objects that the kernel validates, so pack templates
+stay close to the collapsed Sprint 3 schema while preserving normal
+`OrchestratorDefinition` manifests until the later framework rewrite.
+
+Task-mode plans use the collapsed Sprint 3 step schema: a leaf has `command`;
+a group has `children`; both share fields such as `adapter`, `requires_ack`,
+`assignee`, `produces`, `repeat`, and `version`. Do not author legacy
+`kind: code`, `kind: attested`, `kind: nested`, or inline `plan` step payloads.
+Those shapes belong only to the Sprint 3 migration script.
+
+The first event in a new run is `plan_initialized`, and `plan.json` is an
+atomic cached projection of `plan_initialized` plus later `plan_mutated` events.
+Mutation verbs must update the event log and refresh that cached projection;
+do not edit `plan.json` directly.
+
+For repeat loops, prefer expression `repeat.until`, for example
+`review.produces.verdict.status == "approved"`. Group steps may repeat when
+they expose descendant artifacts through `re_export`; the expression references
+the group produce name, and the runtime resolves the descendant path. Legacy
+conditions such as `user_approves` are migration/read compatibility only.
+
+`remote-artifact` is available for task leaves that dispatch remote work through
+the generic subprocess-plus-manifest contract. Use `local` or `manual` when the
+step should complete synchronously or through human attestation.
 
 Anti-pattern: a single orchestrator `run.py` that opens HTTP sockets, parses
 model output, downloads files, and assembles grids — all inline. That is three
@@ -178,16 +214,41 @@ Copy the closest template and replace the placeholder identifiers:
 - `docs/templates/orchestrator/`
 - `docs/templates/element/`
 
+For task-mode orchestrator templates, start from the canonical builders:
+
+```python
+from astrid.core.orchestrator.plan_template import (
+    build_leaf_template,
+    build_plan_template,
+    cost_entry,
+    file_output,
+)
+
+plan = build_plan_template(
+    plan_id="my-workflow",
+    steps=[
+        build_leaf_template(
+            "render",
+            command="python3 -m astrid.packs.builtin.executors.render.run ...",
+            produces=[file_output("video", "hype.mp4")],
+            cost=cost_entry(0, source="local"),
+        )
+    ],
+)
+```
+
 Then run:
 
 ```bash
+python3 -m astrid next
 python3 -m astrid doctor
 python3 -m astrid executors inspect builtin.example --json
 python3 -m astrid orchestrators inspect builtin.example --json
 python3 -m astrid elements inspect effects example-card --json
 ```
 
-Run only the inspect command that matches the thing you created.
+Run `next` only when you need to bind or re-orient, and run only the inspect
+command that matches the thing you created.
 
 ## Review Checklist
 

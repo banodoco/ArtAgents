@@ -16,8 +16,8 @@
     "runtime": {
       "oneOf": [
         {"$ref": "_defs.json#/definitions/runtime_python_cli"},
+        {"$ref": "_defs.json#/definitions/runtime_python"},
         {"$ref": "_defs.json#/definitions/runtime_command"},
-        {"$ref": "_defs.json#/definitions/runtime_python_legacy"},
         {"$ref": "_defs.json#/definitions/runtime_command_legacy"}
       ]
     },
@@ -26,8 +26,24 @@
       "properties": {
         "argv": {"type": "array", "items": {"type": "string"}},
         "cwd": {"type": "string"},
-        "env": {"type": "object"}
-      }
+        "env": {"type": "object"},
+        "input_args": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "input": {"type": "string"},
+              "flag": {"type": ["string", "null"]},
+              "repeatable": {"type": "boolean"},
+              "optional": {"type": "boolean"}
+            },
+            "required": ["input"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["argv"],
+      "additionalProperties": false
     },
     "inputs": {
       "type": "array",
@@ -38,8 +54,10 @@
           "type": {"type": "string"},
           "required": {"type": "boolean"},
           "default": {},
-          "description": {"type": "string"}
-        }
+          "description": {"type": "string"},
+          "placeholder": {"type": "string"}
+        },
+        "required": ["name"]
       }
     },
     "outputs": {
@@ -49,9 +67,13 @@
         "properties": {
           "name": {"type": "string"},
           "type": {"type": "string"},
+          "mode": {"type": "string"},
           "path_template": {"type": "string"},
+          "extension": {"type": "string"},
+          "placeholder": {"type": "string"},
           "description": {"type": "string"}
-        }
+        },
+        "required": ["name"]
       }
     },
     "cache": {"type": "object"},

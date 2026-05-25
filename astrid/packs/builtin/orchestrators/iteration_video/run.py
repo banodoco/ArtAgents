@@ -22,7 +22,7 @@ from astrid.packs.builtin.executors.render import run as render_executor
 from astrid.threads.ids import is_ulid
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.schema import SCHEMA_VERSION
-from astrid.threads.variants import write_sidecar
+from astrid.threads.variants import update_groups_for_run, write_sidecar
 
 OUTPUT_FILES = (
     ("iteration.mp4", "video"),
@@ -125,6 +125,7 @@ def run_iteration_video(
         shutil.move(str(hype_mp4), str(iteration_mp4))
     write_iteration_group_sidecar(
         out_path=out_path,
+        repo_root=repo_root,
         thread_id=target["thread_id"],
         target_run_id=target["target_run_id"],
     )
@@ -259,7 +260,7 @@ def inspect_cache(repo_root: Path, nodes: list[prepare.RunNode], *, summarizer_m
     return {"hits": hits, "misses": misses}
 
 
-def write_iteration_group_sidecar(*, out_path: Path, thread_id: str, target_run_id: str) -> None:
+def write_iteration_group_sidecar(*, out_path: Path, repo_root: Path, thread_id: str, target_run_id: str) -> None:
     manifest = _read_json(out_path / "iteration.manifest.json")
     assembly = manifest.get("assembly") if isinstance(manifest.get("assembly"), Mapping) else {}
     group = f"iteration-video:{target_run_id}"
@@ -284,6 +285,14 @@ def write_iteration_group_sidecar(*, out_path: Path, thread_id: str, target_run_
             }
         )
     write_sidecar(out_path, artifacts)
+    update_groups_for_run(
+        repo_root,
+        {
+            "thread_id": thread_id,
+            "run_id": target_run_id,
+            "output_artifacts": artifacts,
+        },
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

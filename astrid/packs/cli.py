@@ -1143,8 +1143,13 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.set_defaults(handler=_handle_new)
 
     list_parser = subparsers.add_parser(
-        "list", help="List installed external packs."
+        "list", help="List discovered packs."
     )
+    list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    list_parser.add_argument("--category", help="Filter by metadata.category.")
+    list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
+    list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     list_parser.set_defaults(handler=_handle_list)
 
     inspect_parser = subparsers.add_parser(
@@ -1160,6 +1165,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output as JSON."
     )
     inspect_parser.set_defaults(handler=_handle_inspect)
+
+    status_parser = subparsers.add_parser("status", help="Validate and summarize discovered packs.")
+    status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
+    status_parser.set_defaults(handler=_handle_status)
 
     # ── install ──
     install_parser = subparsers.add_parser(
@@ -1268,11 +1278,41 @@ def _handle_new(args: argparse.Namespace) -> int:
 
 def _handle_list(args: argparse.Namespace) -> int:
     """Handler for ``packs list``."""
-    return cmd_list([])
+    packs = _filtered_packs(args)
+    if args.json:
+        print(json.dumps({"packs": [_pack_payload(pack) for pack in packs]}, indent=2, sort_keys=True))
+        return 0
+    for pack in packs:
+        print(f"{pack.id}\t{pack.name}\t{pack.version}\t{pack.description}")
+    return 0
 
 
 def _handle_inspect(args: argparse.Namespace) -> int:
     """Handler for ``packs inspect``."""
+    from astrid.core.pack_store import InstalledPackStore
+
+    store = InstalledPackStore()
+    if store.get_active(args.pack_id) is None:
+        packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
+        pack = packs.get(args.pack_id)
+        if pack is None:
+            print(f"packs inspect: unknown pack {args.pack_id!r}", file=sys.stderr)
+            return 1
+        if args.agent:
+            payload = pack.agent
+        else:
+            payload = _pack_payload(pack)
+        if args.json_output:
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+        if args.agent:
+            for key, value in sorted(payload.items()):
+                print(f"{key}: {value}")
+            return 0
+        for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
+            print(f"{key}: {payload.get(key, '')}")
+        return 0
+
     argv = [args.pack_id]
     if args.agent:
         argv.append("--agent")

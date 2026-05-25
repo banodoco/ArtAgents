@@ -23,7 +23,7 @@ shape correctness.
 
 Usage::
 
-    python -m astrid.packs.builtin.generate_video.golden.demo_wan_ltx_local_cloud
+    python -m astrid.packs.builtin.executors.generate_video.golden.demo_wan_ltx_local_cloud
 """
 
 from __future__ import annotations

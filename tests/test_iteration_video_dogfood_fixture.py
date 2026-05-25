@@ -125,7 +125,7 @@ def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_pa
     assert {item["variant_meta"]["target_run_id"] for item in artifacts} == {TARGET_RUN_ID}
     assert all(item["variant_meta"]["fallback_diagnostics"] for item in artifacts)
 
-    orchestrator = _read_json(Path("astrid/packs/builtin/iteration_video/orchestrator.yaml"))
+    orchestrator = _read_json(Path("astrid/packs/builtin/orchestrators/iteration_video/orchestrator.yaml"))
     assert orchestrator["child_executors"] == ["iteration.prepare", "iteration.assemble", "builtin.render"]
     assert "builtin.cut" not in json.dumps(orchestrator)
 
@@ -145,16 +145,20 @@ def test_dogfood_fixture_prefix_lineage_variant_nag_silence_and_prerender_transc
         AttributionDecision(thread_id=THREAD_ID, label="astrid_logo_v3", source="fixture", run_number=4),
         variants_message=nag,
     )
-    assert prefix[0].startswith("[thread] astrid_logo_v3")
+    assert prefix[0].startswith("[lineage] astrid_logo_v3")
     assert prefix[1].startswith("[variants] 1 unresolved variant group")
+    assert "non-binding lineage selection" in prefix[1]
 
     keep_selection(repo, THREAD_ID, f"{VARIANT_A_RUN_ID}:1")
     assert variant_prefix_message(repo, THREAD_ID) is None
 
     transcript = (FIXTURE / "dogfood_transcript.txt").read_text(encoding="utf-8")
-    assert "[thread]" in transcript
+    assert "[lineage]" in transcript
     assert "[variants]" in transcript
-    assert "thread show @active --no-content" in transcript
+    retired_show_active = "thread show " + "@active --no-content"
+    retired_keep = "thread " + "keep"
+    assert retired_show_active not in transcript
+    assert retired_keep not in transcript
     assert "iteration_video.run inspect" in transcript
 
 

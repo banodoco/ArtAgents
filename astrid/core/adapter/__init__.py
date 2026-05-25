@@ -30,6 +30,11 @@ class RunContext:
     step_version: int
     iteration: int | None = None
     item_id: str | None = None
+    canonical_command: str | None = None
+    canonical_argv: tuple[str, ...] = ()
+    display_command: str | None = None
+    task_env: dict[str, str] | None = None
+    produces_root: Path | None = None
 
 
 @dataclass(frozen=True)

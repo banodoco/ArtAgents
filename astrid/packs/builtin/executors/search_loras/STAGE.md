@@ -35,7 +35,7 @@ python3 -m astrid executors run builtin.search_loras \
 Direct run with additional options:
 
 ```bash
-python3 -m astrid.packs.builtin.search_loras.run \
+python3 -m astrid.packs.builtin.executors.search_loras.run \
   --base-model stabilityai/stable-diffusion-xl-base-1.0 \
   --match "cinematic" \
   --limit 50 \
@@ -80,7 +80,7 @@ Hugging Face does not expose `base_model` as a complete tag group in
 extract their `base_model:*` tags:
 
 ```bash
-python3 -m astrid.packs.builtin.search_loras.run \
+python3 -m astrid.packs.builtin.executors.search_loras.run \
   --list-base-models \
   --base-model-match z-image \
   --fetch-limit 1000 \

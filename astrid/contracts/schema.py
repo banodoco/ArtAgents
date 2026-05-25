@@ -48,10 +48,19 @@ PerformerOutput = Output
 
 
 @dataclass(frozen=True)
+class CommandInputArg:
+    input: str
+    flag: str | None = None
+    repeatable: bool = False
+    optional: bool = False
+
+
+@dataclass(frozen=True)
 class CommandSpec:
     argv: tuple[str, ...]
     cwd: str | None = None
     env: dict[str, str] = field(default_factory=dict)
+    input_args: tuple[CommandInputArg, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -157,6 +166,7 @@ __all__ = [
     "PortType",
     "AliasRecord",
     "CachePolicy",
+    "CommandInputArg",
     "CapabilityHandle",
     "CommandSpec",
     "IsolationMetadata",

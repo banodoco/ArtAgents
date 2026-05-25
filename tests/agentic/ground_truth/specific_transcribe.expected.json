@@ -8,7 +8,7 @@
     },
     "invoked_via_canonical_cli": {
       "passed": false,
-      "note": "The dry-run line in the report names `python3 -m astrid.packs.builtin.transcribe.run --audio ... --out ...` as the composed command. The 'Ran for real with --verbose' line is ambiguous but most plausibly executed the same module path, not `astrid executors run builtin.transcribe`. Universal canonical_path_bypass also flags this."
+      "note": "The dry-run line in the report names `python3 -m astrid.packs.builtin.executors.transcribe.run --audio ... --out ...` as the composed command. The 'Ran for real with --verbose' line is ambiguous but most plausibly executed the same module path, not `astrid executors run builtin.transcribe`. Universal canonical_path_bypass also flags this."
     },
     "did_not_install_own_whisper": {
       "passed": true,

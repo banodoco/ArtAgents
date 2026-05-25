@@ -158,7 +158,7 @@ assessment:
       question: |
         Did the agent invoke the tool via `astrid executors run
         builtin.transcribe ...`, as opposed to
-        `python -m astrid.packs.builtin.transcribe.run ...` or
+        `python -m astrid.packs.builtin.executors.transcribe.run ...` or
         a direct import?
       evidence: [stderr]
       grading: pass_fail

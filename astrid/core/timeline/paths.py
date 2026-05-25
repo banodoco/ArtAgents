@@ -84,7 +84,11 @@ def checkpoint_path(
 
 
 def find_timeline_by_slug(
-    project_slug: str, slug: str, *, root: str | Path | None = None
+    project_slug: str,
+    slug: str,
+    *,
+    root: str | Path | None = None,
+    include_tombstoned: bool = False,
 ) -> tuple[str, Path] | None:
     """Scan timelines/*/display.json for a matching slug.
 
@@ -97,6 +101,8 @@ def find_timeline_by_slug(
     for child in sorted(td.iterdir()):
         if not child.is_dir():
             continue
+        if not include_tombstoned and _timeline_home_is_tombstoned(child):
+            continue
         try:
             data = load_display_json_with_repair(child)
         except (ProjectJsonError, OSError, ValueError):
@@ -107,12 +113,29 @@ def find_timeline_by_slug(
     return None
 
 
+def _timeline_home_is_tombstoned(timeline_home: str | Path) -> bool:
+    manifest_file = Path(timeline_home) / "manifest.json"
+    if not manifest_file.is_file():
+        return False
+    try:
+        manifest = read_json(manifest_file)
+    except (ProjectJsonError, OSError, ValueError):
+        return False
+    return isinstance(manifest, dict) and manifest.get("tombstoned_at") is not None
+
+
 def find_timeline_slug_for_ulid(
-    project_slug: str, ulid: str, *, root: str | Path | None = None
+    project_slug: str,
+    ulid: str,
+    *,
+    root: str | Path | None = None,
+    include_tombstoned: bool = False,
 ) -> str | None:
     """Reverse-lookup: read display.json for the given ULID and return the slug."""
     tdir = timeline_dir(project_slug, ulid, root=root)
     if not tdir.is_dir():
+        return None
+    if not include_tombstoned and _timeline_home_is_tombstoned(tdir):
         return None
     try:
         data = load_display_json_with_repair(tdir)
@@ -212,11 +235,11 @@ def load_display_json_with_repair(timeline_home: str | Path) -> dict[str, object
 def load_assembly_json_with_repair(
     timeline_home: str | Path,
 ) -> dict[str, object] | None:
-    """Return the assembly dict (wrapper shape) with repair from the event log.
+    """Return the raw TimelineConfig with repair from the event log.
 
     When an event log (``assembly.jsonl``) and identity sidecar exist,
     resolve the backend, read events, call ``regenerate_projection()``,
-    and return the projected assembly wrapper dict.  When no event log
+    and return the projected raw TimelineConfig.  When no event log
     exists, fall back to reading ``assembly.json`` directly.
 
     This is the assembly analogue of ``load_display_json_with_repair()``.
@@ -225,7 +248,7 @@ def load_assembly_json_with_repair(
     every Astrid-owned read/export entry point.
     """
     from .eventlog import LocalFsBackend
-    from .model import Assembly, TimelineValidationError
+    from .model import TimelineValidationError, validate_timeline_config_json
     from .projection import ErasedPayloadProjectionError, regenerate_projection
 
     timeline_dir_path = Path(timeline_home)
@@ -241,7 +264,10 @@ def load_assembly_json_with_repair(
             raw = read_json(assembly_file)
         except (ProjectJsonError, FileNotFoundError):
             return None
-        return raw if isinstance(raw, dict) else None
+        try:
+            return validate_timeline_config_json(raw)
+        except TimelineValidationError:
+            return None
 
     # Event log exists but no identity → can't resolve backend.
     if not identity_file.is_file():
@@ -275,17 +301,13 @@ def load_assembly_json_with_repair(
                 raw = read_json(assembly_file)
             except (ProjectJsonError, FileNotFoundError):
                 return None
-            return raw if isinstance(raw, dict) else None
+            try:
+                return validate_timeline_config_json(raw)
+            except TimelineValidationError:
+                return None
         return None
-
-    # Build the wrapper shape expected by callers.
-    from .model import TIMELINE_SCHEMA_VERSION
 
     try:
-        wrapper = Assembly(
-            schema_version=TIMELINE_SCHEMA_VERSION,
-            assembly=inner_assembly,
-        )
+        return validate_timeline_config_json(inner_assembly)
     except TimelineValidationError:
         return None
-    return wrapper.to_json_obj()

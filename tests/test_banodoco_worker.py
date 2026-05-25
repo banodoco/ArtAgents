@@ -56,7 +56,11 @@ class _FakeProvider:
         self.supabase_url = "https://example.supabase.co"
         self.timeout = 10.0
         self._version = version
-        self._timeline = timeline or {"theme": "banodoco-default", "clips": []}
+        self._timeline = timeline or {
+            "theme": "banodoco-default",
+            "tracks": [{"id": "main", "kind": "visual", "label": "Main"}],
+            "clips": [],
+        }
         self.save_calls: list[dict[str, Any]] = []
 
     def load_timeline(self, project_id, timeline_id):
@@ -102,9 +106,7 @@ class BanodocoWorkerTest(unittest.TestCase):
 
             def _mutator(config, _version):
                 config = dict(config)
-                config["clips"] = [
-                    {"id": "new", "at": 0, "track": "main", "clipType": "text", "text": {"content": "hi"}, "hold": 1.0}
-                ]
+                config["theme"] = "banodoco-default"
                 return config
 
             return _mutator

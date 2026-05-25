@@ -10,19 +10,19 @@ guard_canonical_entrypoint('builtin.pool_build')
 import argparse
 import json
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from ..... import timeline
-from .....audit import register_outputs
+from astrid import timeline
+from astrid.audit import register_outputs
+from astrid.core.util.time import utc_now_seconds
 
 AUDIO_EVENT_RE = re.compile(r"\b(applause|laughter|cheer|audience)\b", re.IGNORECASE)
 KIND_LETTER = {"dialogue": "d", "visual": "v", "reaction": "r", "applause": "a", "music": "m"}
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return utc_now_seconds()
 
 
 def scene_id_for(scene: dict[str, Any]) -> str:

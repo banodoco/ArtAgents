@@ -3,27 +3,28 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
+from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.util.time import utc_now_milliseconds
 
 
 def _step_dir(run_ctx: RunContext) -> Path:
-    base = run_ctx.project_root / "runs" / run_ctx.run_id / "steps"
-    for segment in run_ctx.plan_step_path:
-        base = base / segment
-    base = base / f"v{run_ctx.step_version}"
-    if run_ctx.iteration is not None:
-        base = base / "iterations" / f"{run_ctx.iteration:03d}"
-    elif run_ctx.item_id is not None:
-        base = base / "items" / run_ctx.item_id
-    return base
+    return step_dir_for_context(
+        run_ctx.project_root,
+        run_ctx.run_id,
+        run_ctx.plan_step_path,
+        run_ctx.step_version,
+        iteration=run_ctx.iteration,
+        item_id=run_ctx.item_id,
+    )
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return utc_now_milliseconds()
 
 
 # Inbox completion-entry contract — parity with the ack identity contract:
@@ -46,7 +47,9 @@ class ManualAdapter:
         payload: dict[str, object] = {
             "step_id": step.id,
             "step_version": run_ctx.step_version,
-            "command": step.command,
+            "command": run_ctx.canonical_command or step.command,
+            "display_command": run_ctx.display_command,
+            "task_env": run_ctx.task_env or {},
             "adapter": "manual",
             "assignee": step.assignee,
             "requires_ack": step.requires_ack,
@@ -56,7 +59,7 @@ class ManualAdapter:
             payload["instructions"] = step.instructions
         if step.ack is not None:
             payload["ack"] = {"kind": step.ack.kind}
-        dispatch_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        write_json_sidecar(dispatch_path, payload)
         return DispatchResult(status="dispatched", started_at=started_at)
 
     def poll(self, step: Step, run_ctx: RunContext) -> PollResult:
@@ -87,8 +90,24 @@ class ManualAdapter:
                     )
 
         cost = _read_cost(completion)
-        if completion.get("status") == "failed":
+        status = completion.get("status")
+        if status not in {"completed", "failed"}:
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason="manual completion status missing or unknown",
+                cost=cost,
+            )
+        if status == "failed":
             return CompleteResult(status="failed", returncode=None, reason=str(completion.get("reason", "manual completion reported failure")), cost=cost)
+        missing = _missing_declared_produces(step, step_dir)
+        if missing:
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason=f"produces check failed: missing {missing!r}",
+                cost=cost,
+            )
         return CompleteResult(status="completed", cost=cost)
 
 
@@ -103,6 +122,16 @@ def _read_completion(step_dir: Path) -> dict[str, object] | None:
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def _missing_declared_produces(step: Step, step_dir: Path) -> list[str]:
+    produces_root = step_dir / "produces"
+    missing: list[str] = []
+    for entry in step.produces:
+        artifact = produces_root / entry.path
+        if not artifact.exists() or artifact.stat().st_size == 0:
+            missing.append(entry.path)
+    return missing
 
 
 def _read_cost(payload: dict[str, object]) -> CostEntry | None:

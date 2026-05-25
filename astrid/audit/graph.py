@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from .transport import parse_ledger_bytes, verify_ledger_path
 
 
 def load_ledger(run_dir: Path | str) -> list[dict[str, Any]]:
@@ -10,12 +11,15 @@ def load_ledger(run_dir: Path | str) -> list[dict[str, Any]]:
     if not ledger_path.is_file():
         raise FileNotFoundError(f"audit ledger not found: {ledger_path}")
     events = []
-    for line_number, line in enumerate(ledger_path.read_text(encoding="utf-8").splitlines(), start=1):
-        if line.strip():
-            event = json.loads(line)
-            event["_ledger_line"] = line_number
-            events.append(event)
+    for line_number, event in enumerate(parse_ledger_bytes(ledger_path.read_bytes()), start=1):
+        event["_ledger_line"] = line_number
+        events.append(event)
     return events
+
+
+def verify_audit_ledger(run_dir: Path | str) -> tuple[bool, int | None, str]:
+    ledger_path = Path(run_dir).resolve() / "audit" / "ledger.jsonl"
+    return verify_ledger_path(ledger_path)
 
 
 def build_graph(events: list[dict[str, Any]]) -> dict[str, Any]:

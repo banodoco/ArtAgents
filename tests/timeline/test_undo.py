@@ -43,6 +43,22 @@ _ACTOR = TimelineActor(type="agent", id="undo-test")
 _ACTOR_B = TimelineActor(type="agent", id="other-actor")
 
 
+def _seed_local_identity(tl_dir: Path, timeline_id: str) -> None:
+    from astrid.core.project.jsonio import write_json_atomic
+
+    write_json_atomic(
+        tl_dir / "assembly.identity.json",
+        {
+            "schema_version": 2,
+            "timeline_id": timeline_id,
+            "timeline_ulid": "01J00000000000000000000000",
+            "backend": "local_fs",
+            "provenance": "created",
+            "created_at": "2026-05-24T00:00:00Z",
+        },
+    )
+
+
 class TestUndoSelectsLatestUndoableEvent:
     """Undo walks backwards and skips lifecycle/ops events."""
 
@@ -59,6 +75,7 @@ class TestUndoSelectsLatestUndoableEvent:
                 "audio.bound", "audio.unbound",
                 "pool.asset_added", "pool.asset_removed", "pool.asset_scored",
                 "arrangement.replaced",
+                "timeline.config_replaced",
             }, f"{kind} should be non-reversible"
 
     def test_all_reversible_kinds_not_in_non_reversible(self):
@@ -73,6 +90,7 @@ class TestUndoSelectsLatestUndoableEvent:
             "audio.bound", "audio.unbound",
             "pool.asset_added", "pool.asset_removed", "pool.asset_scored",
             "arrangement.replaced",
+            "timeline.config_replaced",
         }
         for kind in reversible:
             assert kind not in _NON_REVERSIBLE_KINDS, f"{kind} should be reversible"
@@ -93,11 +111,11 @@ class TestUndoClipAdded:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
 
         before = {"clips": []}
-        after = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
+        after = {"clips": [{"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""}]}
 
         inv = plan_inverse(event, before_projection=before, after_projection=after)
 
@@ -126,13 +144,13 @@ class TestUndoClipRemoved:
 
         before = {
             "clips": [
-                {"id": "c1", "kind": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
-                {"id": "c2", "kind": "audio", "asset_id": "a2", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
+                {"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
+                {"id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
             ]
         }
         after = {
             "clips": [
-                {"id": "c2", "kind": "audio", "asset_id": "a2", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
+                {"id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2", "start": 0.0, "duration": 0.0, "text": "", "note": ""},
             ]
         }
 
@@ -262,7 +280,7 @@ class TestUndoSequenceWalking:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
         e2 = TimelineEvent(
             event_id="01JAAAAAAAAAAAAAAAAAAAAA02",
@@ -276,8 +294,8 @@ class TestUndoSequenceWalking:
         )
 
         before = {"clips": [], "theme": ""}
-        after_e1 = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""}], "theme": ""}
-        after_e2 = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""}], "theme": "dark"}
+        after_e1 = {"clips": [{"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""}], "theme": ""}
+        after_e2 = {"clips": [{"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "start": 0.0, "duration": 0.0, "text": "", "note": ""}], "theme": "dark"}
 
         inverses = plan_inverses([e1, e2], initial_projection=before)
 
@@ -303,11 +321,11 @@ class TestUndoPureFunction:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
 
         before = {"clips": []}
-        after = {"clips": [{"id": "c1", "kind": "visual", "asset_id": "a1"}]}
+        after = {"clips": [{"id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"}]}
 
         inv1 = plan_inverse(event, before_projection=before, after_projection=after)
         inv2 = plan_inverse(event, before_projection=before, after_projection=after)
@@ -346,7 +364,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
         after_event = TimelineEvent(
             event_id="01JAAAAAAAAAAAAAAAAAAAAA02",
@@ -356,7 +374,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2"),
+            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2", track_id="visual"),
         )
 
         assert sel.matches(before_event) is False
@@ -375,7 +393,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
         no_match_event = TimelineEvent(
             event_id="01JAAAAAAAAAAAAAAAAAAAAA02",
@@ -385,7 +403,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2"),
+            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2", track_id="visual"),
         )
 
         assert sel.matches(match_event) is True
@@ -404,7 +422,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
         no_match_event = TimelineEvent(
             event_id="01JAAAAAAAAAAAAAAAAAAAAA02",
@@ -414,7 +432,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2"),
+            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2", track_id="visual"),
         )
 
         assert sel.matches(match_event) is True
@@ -434,7 +452,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
         # Matches time but not actor
         bad_actor = TimelineEvent(
@@ -445,7 +463,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2"),
+            payload=ClipAddedPayload(clip_id="c2", kind="visual", asset_id="a2", track_id="visual"),
         )
         # Matches actor but not time
         bad_time = TimelineEvent(
@@ -456,7 +474,7 @@ class TestMassUndoSelectorFiltering:
             prev_hash=None,
             hash=None,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c3", kind="visual", asset_id="a3"),
+            payload=ClipAddedPayload(clip_id="c3", kind="visual", asset_id="a3", track_id="visual"),
         )
 
         assert sel.matches(good) is True
@@ -475,18 +493,19 @@ class TestMassUndoPreviewOnly:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Append some clip events
         e1 = backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         e2 = backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c2", "kind": "audio", "asset_id": "a2"},
+            {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2"},
             actor=_ACTOR_B,
         )
 
@@ -502,9 +521,9 @@ class TestMassUndoPreviewOnly:
         assert preview.candidates[0]["invertible"] is True
         assert preview.candidates[0]["inverse_kind"] == "clip.removed"
 
-        # Verify the event stream was NOT mutated (bootstrap + 2 clips = 3 events)
+        # Verify the event stream was NOT mutated (identity sidecar + 2 clips).
         events_after = backend.read_events()
-        assert len(events_after) == 3  # still only the original events (bootstrap + 2 clips)
+        assert len(events_after) == 2
 
     def test_preview_empty_selector_raises(self, tmp_path: Path):
         """Empty selector raises ValueError."""
@@ -513,12 +532,13 @@ class TestMassUndoPreviewOnly:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Append an event so the timeline is not empty
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -534,6 +554,7 @@ class TestMassUndoPreviewOnly:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
@@ -542,7 +563,7 @@ class TestMassUndoPreviewOnly:
         # Ok, let's just append clip events and check
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -561,11 +582,12 @@ class TestMassUndoPreviewOnly:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -588,18 +610,19 @@ class TestMassUndoYesWrites:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Initial event count (bootstrap + clip)
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c2", "kind": "audio", "asset_id": "a2"},
+            {"clip_id": "c2", "kind": "audio", "track_id": "audio", "asset_id": "a2"},
             actor=_ACTOR,
         )
 
@@ -632,11 +655,12 @@ class TestMassUndoYesWrites:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -655,12 +679,13 @@ class TestMassUndoYesWrites:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Append a clip.moved — this is reversible
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -692,13 +717,14 @@ class TestMassUndoChunkBoundaries:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Append 5 clip events
         for i in range(5):
             backend.append_event(
                 timeline_id, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 
@@ -723,11 +749,12 @@ class TestMassUndoChunkBoundaries:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         backend.append_event(
             timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
             actor=_ACTOR,
         )
 
@@ -749,12 +776,13 @@ class TestMassUndoChunkBoundaries:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         for i in range(3):
             backend.append_event(
                 timeline_id, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 
@@ -781,13 +809,14 @@ class TestMassUndoPartialFailure:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         # Append 4 clip events
         for i in range(4):
             backend.append_event(
                 timeline_id, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 
@@ -828,12 +857,13 @@ class TestMassUndoPartialFailure:
         timeline_id = str(uuid4())
         tl_dir = tmp_path / "tl"
         tl_dir.mkdir(parents=True)
+        _seed_local_identity(tl_dir, timeline_id)
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tl_dir)
 
         for i in range(4):
             backend.append_event(
                 timeline_id, "clip.added",
-                {"clip_id": f"c{i}", "kind": "visual", "asset_id": f"a{i}"},
+                {"clip_id": f"c{i}", "kind": "visual", "track_id": "visual", "asset_id": f"a{i}"},
                 actor=_ACTOR,
             )
 

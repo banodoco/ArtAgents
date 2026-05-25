@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Sprint 1 audit (no-op): astrid/threads/ STAYS as an internal library.
 
-Per DEC-001 the threads package is retained — only the user-facing
-``astrid thread`` CLI verb is retired in T8 / T12. This script exists so
-the operator runbook has a single ``scripts/migrations/sprint-1/`` invocation
+Per DEC-001 the threads package is retained as non-binding lineage
+infrastructure — the user-facing ``astrid thread`` CLI verb and generic
+executor/orchestrator thread binding are retired. This script exists so the
+operator runbook has a single ``scripts/migrations/sprint-1/`` invocation
 sweep; it logs the discovery of threads-using callers under each project's
 ``runs/`` tree (variant sidecars, ThreadIndexStore tag files) so a future
-sprint can confirm what is still in use before deleting.
+sprint can confirm which pack-lineage utilities still depend on the data
+before deleting anything.
 
 ``--apply`` and ``--dry-run`` are accepted for symmetry with the other
 migration scripts. Neither actually mutates anything.

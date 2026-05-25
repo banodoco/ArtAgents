@@ -14,11 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrid import timeline as timeline_contract
 from astrid.core.timeline.assembly_helper import AssemblyMutationError, materialize_event
 from astrid.core.timeline.arrangement_edits import arrangement_replace
 from astrid.core.timeline.audio_edits import audio_bind, audio_unbind
 from astrid.core.timeline.clip_edits import add_clip
-from astrid.core.timeline.crud import create_timeline, get_arrangement
+from astrid.core.timeline.crud import create_timeline
 from astrid.core.timeline.effect_edits import effect_add, effect_remove, effect_tune
 from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
 from astrid.core.timeline.eventlog.types import (
@@ -26,15 +27,11 @@ from astrid.core.timeline.eventlog.types import (
     EventLogUnsupportedRpcError,
 )
 from astrid.core.timeline.events.schema import (
-    ArrangementReplacedPayload,
     AudioBoundPayload,
     AudioUnboundPayload,
     EffectAddedPayload,
     EffectRemovedPayload,
     EffectTunedPayload,
-    PoolAssetAddedPayload,
-    PoolAssetRemovedPayload,
-    PoolAssetScoredPayload,
     ThemeOverriddenPayload,
     ThemeSetPayload,
     TimelineActor,
@@ -44,7 +41,6 @@ from astrid.core.timeline.events.schema import (
     TransitionRemovedPayload,
     TransitionSetPayload,
 )
-from astrid.core.timeline.model import Assembly
 from astrid.core.timeline.paths import assembly_identity_path, timeline_dir
 from astrid.core.timeline.pool_edits import pool_asset_add, pool_asset_remove, pool_asset_score
 from astrid.core.timeline.theme_edits import theme_override, theme_set
@@ -79,6 +75,24 @@ def project_tree(tmp_projects_root: Path) -> Path:
 @pytest.fixture
 def demo_timeline(project_tree: Path) -> dict[str, object]:
     result = create_timeline("demo", "primary", name="Primary Timeline", root=project_tree)
+    track_add(
+        "demo",
+        "primary",
+        track_id="visual",
+        kind="visual",
+        label="Visual",
+        actor=_actor("seed"),
+        root=project_tree,
+    )
+    track_add(
+        "demo",
+        "primary",
+        track_id="audio",
+        kind="audio",
+        label="Audio",
+        actor=_actor("seed"),
+        root=project_tree,
+    )
     return {
         "ulid": result["ulid"],
         "slug": "primary",
@@ -105,6 +119,15 @@ def _timeline_id(demo_timeline: dict[str, object]) -> str:
 
 def _read_assembly_json(tdir: Path) -> dict:
     return json.loads((tdir / "assembly.json").read_text(encoding="utf-8"))
+
+
+def _write_raw_assembly_json(tdir: Path, data: dict[str, object] | None = None) -> None:
+    payload = timeline_contract.canonical_empty_timeline()
+    if data:
+        payload.update(data)
+    (tdir / "assembly.json").write_text(
+        json.dumps(payload, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _backend(demo_timeline: dict[str, object]) -> LocalFsBackend:
@@ -148,38 +171,17 @@ def _assert_theme_empty_init(assembly: dict) -> None:
     assert assembly["theme_overrides"] == {}
 
 
-def _assert_pool_empty_init(assembly: dict) -> None:
-    assert assembly["pool"] == {"entries": [{"asset_id": "asset-1", "score": 0.0}]}
-
-
-def _assert_arrangement_empty_init(assembly: dict) -> None:
-    assert assembly["arrangement"] == {"clips": [{"uuid": "u1"}], "note": "v1"}
-
-
 def _assert_transition_existing_shape(assembly: dict) -> None:
-    assert assembly["clips"][0]["transition"]["right_clip_id"] == "b"
-    assert assembly["keep"] == {"x": 1}
+    assert assembly["clips"][0]["transition"]["params"]["right_clip_id"] == "b"
 
 
 def _assert_track_existing_shape(assembly: dict) -> None:
     assert assembly["tracks"] == []
-    assert assembly["keep"] is True
 
 
 def _assert_theme_existing_shape(assembly: dict) -> None:
     assert assembly["theme"] == "old"
     assert assembly["theme_overrides"]["audio"] == {"ducking": 0.3}
-    assert assembly["keep"] == [1]
-
-
-def _assert_pool_existing_shape(assembly: dict) -> None:
-    assert assembly["pool"]["entries"][0]["score"] == 0.8
-    assert assembly["keep"] == "ok"
-
-
-def _assert_arrangement_existing_shape(assembly: dict) -> None:
-    assert assembly["arrangement"]["clips"] == [{"uuid": "u2"}]
-    assert assembly["keep"] == {"a": "b"}
 
 
 @pytest.mark.parametrize(
@@ -205,16 +207,6 @@ def _assert_arrangement_existing_shape(assembly: dict) -> None:
             {"theme_id": "banodoco-default"},
             _assert_theme_empty_init,
         ),
-        (
-            "pool.asset_added",
-            {"asset_id": "asset-1"},
-            _assert_pool_empty_init,
-        ),
-        (
-            "arrangement.replaced",
-            {"arrangement": {"clips": [{"uuid": "u1"}], "note": "v1"}},
-            _assert_arrangement_empty_init,
-        ),
     ],
 )
 def test_materializer_initializes_empty_assembly_for_secondary_domains(
@@ -224,6 +216,7 @@ def test_materializer_initializes_empty_assembly_for_secondary_domains(
     assertion,
 ) -> None:
     tdir = _tdir(demo_timeline)
+    _write_raw_assembly_json(tdir)
     event = TimelineEvent.new(
         timeline_id=_timeline_id(demo_timeline),
         ts="2026-05-20T12:00:00Z",
@@ -234,7 +227,7 @@ def test_materializer_initializes_empty_assembly_for_secondary_domains(
 
     materialize_event(tdir, event)
 
-    assembly = _read_assembly_json(tdir)["assembly"]
+    assembly = _read_assembly_json(tdir)
     assertion(assembly)
 
 
@@ -242,34 +235,25 @@ def test_materializer_initializes_empty_assembly_for_secondary_domains(
     ("seed", "kind", "payload", "assertion"),
     [
         (
-            {"clips": [{"id": "a", "asset_id": "old"}], "keep": {"x": 1}},
+            {
+                "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+                "clips": [{"id": "a", "at": 0, "track": "v1", "asset": "old"}],
+            },
             "transition.set",
             {"left_clip_id": "a", "right_clip_id": "b", "kind": "cross-fade", "duration_seconds": 0.25},
             _assert_transition_existing_shape,
         ),
         (
-            {"tracks": [{"id": "v1", "kind": "visual"}], "keep": True},
+            {"tracks": [{"id": "v1", "kind": "visual", "label": "Video"}]},
             "track.removed",
             {"track_id": "v1"},
             _assert_track_existing_shape,
         ),
         (
-            {"theme": "old", "theme_overrides": {"visual": {"fps": 24}}, "keep": [1]},
+            {"theme": "old", "theme_overrides": {"visual": {"fps": 24}}},
             "theme.overridden",
             {"override_id": "audio", "value": {"ducking": 0.3}},
             _assert_theme_existing_shape,
-        ),
-        (
-            {"pool": {"entries": [{"asset_id": "asset-1", "score": 0.1}]}, "keep": "ok"},
-            "pool.asset_scored",
-            {"asset_id": "asset-1", "score": 0.8},
-            _assert_pool_existing_shape,
-        ),
-        (
-            {"arrangement": {"clips": []}, "keep": {"a": "b"}},
-            "arrangement.replaced",
-            {"arrangement": {"clips": [{"uuid": "u2"}]}},
-            _assert_arrangement_existing_shape,
         ),
     ],
 )
@@ -281,7 +265,7 @@ def test_materializer_updates_existing_compatible_secondary_shapes(
     assertion,
 ) -> None:
     tdir = _tdir(demo_timeline)
-    Assembly(schema_version=1, assembly=seed).write(tdir / "assembly.json")
+    _write_raw_assembly_json(tdir, seed)
     event = TimelineEvent.new(
         timeline_id=_timeline_id(demo_timeline),
         ts="2026-05-20T12:00:00Z",
@@ -292,30 +276,25 @@ def test_materializer_updates_existing_compatible_secondary_shapes(
 
     materialize_event(tdir, event)
 
-    assembly = _read_assembly_json(tdir)["assembly"]
+    assembly = _read_assembly_json(tdir)
     assertion(assembly)
 
 
 @pytest.mark.parametrize(
-    ("kind", "payload", "seed", "match"),
+    ("kind", "payload", "match"),
     [
-        ("transition.set", {"left_clip_id": "a", "right_clip_id": "b", "kind": "cross-fade", "duration_seconds": 0.5}, {"tracks": []}, "no 'clips' key"),
-        ("effect.added", {"clip_id": "a", "effect_id": "glow"}, {"theme": "x"}, "no 'clips' key"),
-        ("track.added", {"track_id": "t1", "kind": "visual"}, {"clips": []}, "no 'tracks' key"),
-        ("theme.set", {"theme_id": "x"}, {"clips": []}, "no 'theme' key"),
-        ("pool.asset_added", {"asset_id": "asset-1"}, {"clips": []}, "no 'pool' key"),
-        ("arrangement.replaced", {"arrangement": {"clips": []}}, {"pool": {"entries": []}}, "no 'arrangement' key"),
+        ("pool.asset_added", {"asset_id": "asset-1"}, "non_container_read_model"),
+        ("pool.asset_scored", {"asset_id": "asset-1", "score": 0.8}, "non_container_read_model"),
+        ("arrangement.replaced", {"arrangement": {"clips": []}}, "migration_only_legacy"),
     ],
 )
-def test_materializer_rejects_incompatible_non_empty_secondary_shapes(
+def test_materializer_rejects_non_container_and_migration_only_kinds(
     demo_timeline: dict[str, object],
     kind: str,
     payload: dict[str, object],
-    seed: dict[str, object],
     match: str,
 ) -> None:
     tdir = _tdir(demo_timeline)
-    Assembly(schema_version=1, assembly=seed).write(tdir / "assembly.json")
     event = TimelineEvent.new(
         timeline_id=_timeline_id(demo_timeline),
         ts="2026-05-20T12:00:00Z",
@@ -346,11 +325,11 @@ def test_transition_events_materialize_and_read_back(demo_timeline: dict[str, ob
     assert isinstance(set_event.payload, TransitionSetPayload)
     assert set_event.payload.duration_seconds == 0.75
     _assert_last_event(demo_timeline, set_event, kind="transition.set", payload_type=TransitionSetPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
+    assembly = _read_assembly_json(tdir)
     assert assembly["clips"][0]["transition"] == {
-        "kind": "cross-fade",
-        "right_clip_id": "clip-b",
-        "duration_seconds": 0.75,
+        "type": "cross-fade",
+        "duration": 0.75,
+        "params": {"right_clip_id": "clip-b"},
     }
 
     remove_event = transition_remove(
@@ -364,7 +343,7 @@ def test_transition_events_materialize_and_read_back(demo_timeline: dict[str, ob
     assert remove_event.kind == "transition.removed"
     assert isinstance(remove_event.payload, TransitionRemovedPayload)
     _assert_last_event(demo_timeline, remove_event, kind="transition.removed", payload_type=TransitionRemovedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
+    assembly = _read_assembly_json(tdir)
     assert "transition" not in assembly["clips"][0]
 
 
@@ -382,7 +361,7 @@ def test_transition_set_on_nonexistent_clips_still_appends_event_and_keeps_assem
 
     assert event.kind == "transition.set"
     _assert_last_event(demo_timeline, event, kind="transition.set", payload_type=TransitionSetPayload)
-    assert _read_assembly_json(_tdir(demo_timeline))["assembly"]["clips"] == []
+    assert _read_assembly_json(_tdir(demo_timeline))["clips"] == []
 
 
 def test_effect_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:
@@ -402,8 +381,8 @@ def test_effect_events_materialize_and_read_back(demo_timeline: dict[str, object
     assert isinstance(add_event.payload, EffectAddedPayload)
     assert add_event.payload.params == {"opacity": 0.6}
     _assert_last_event(demo_timeline, add_event, kind="effect.added", payload_type=EffectAddedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["clips"][0]["effects"] == [{"effect_id": "text-card", "params": {"opacity": 0.6}}]
+    assembly = _read_assembly_json(tdir)
+    assert assembly["clips"][0]["params"]["effects"]["text-card"] == {"opacity": 0.6}
 
     tune_event = effect_tune(
         "demo",
@@ -419,8 +398,8 @@ def test_effect_events_materialize_and_read_back(demo_timeline: dict[str, object
     assert isinstance(tune_event.payload, EffectTunedPayload)
     assert tune_event.payload.value == 0.9
     _assert_last_event(demo_timeline, tune_event, kind="effect.tuned", payload_type=EffectTunedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["clips"][0]["effects"][0]["params"]["opacity"] == 0.9
+    assembly = _read_assembly_json(tdir)
+    assert assembly["clips"][0]["params"]["effects"]["text-card"]["opacity"] == 0.9
 
     remove_event = effect_remove(
         "demo",
@@ -433,8 +412,8 @@ def test_effect_events_materialize_and_read_back(demo_timeline: dict[str, object
     assert remove_event.kind == "effect.removed"
     assert isinstance(remove_event.payload, EffectRemovedPayload)
     _assert_last_event(demo_timeline, remove_event, kind="effect.removed", payload_type=EffectRemovedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["clips"][0]["effects"] == []
+    assembly = _read_assembly_json(tdir)
+    assert "text-card" not in assembly["clips"][0]["params"].get("effects", {})
 
 
 def test_effect_add_to_nonexistent_clip_still_appends_event_and_keeps_assembly_stable(
@@ -452,7 +431,7 @@ def test_effect_add_to_nonexistent_clip_still_appends_event_and_keeps_assembly_s
 
     assert event.kind == "effect.added"
     _assert_last_event(demo_timeline, event, kind="effect.added", payload_type=EffectAddedPayload)
-    assert _read_assembly_json(_tdir(demo_timeline))["assembly"]["clips"] == []
+    assert _read_assembly_json(_tdir(demo_timeline))["clips"] == []
 
 
 def test_theme_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:
@@ -468,7 +447,7 @@ def test_theme_events_materialize_and_read_back(demo_timeline: dict[str, object]
     assert set_event.kind == "theme.set"
     assert isinstance(set_event.payload, ThemeSetPayload)
     _assert_last_event(demo_timeline, set_event, kind="theme.set", payload_type=ThemeSetPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
+    assembly = _read_assembly_json(tdir)
     assert assembly["theme"] == "banodoco-default"
     assert assembly["theme_overrides"] == {}
 
@@ -483,7 +462,7 @@ def test_theme_events_materialize_and_read_back(demo_timeline: dict[str, object]
     assert override_event.kind == "theme.overridden"
     assert isinstance(override_event.payload, ThemeOverriddenPayload)
     _assert_last_event(demo_timeline, override_event, kind="theme.overridden", payload_type=ThemeOverriddenPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
+    assembly = _read_assembly_json(tdir)
     assert assembly["theme_overrides"]["visual"] == {"canvas": {"fps": 24}}
 
 
@@ -514,8 +493,8 @@ def test_track_events_materialize_and_read_back(demo_timeline: dict[str, object]
     assert add_event.kind == "track.added"
     assert isinstance(add_event.payload, TrackAddedPayload)
     _assert_last_event(demo_timeline, add_event, kind="track.added", payload_type=TrackAddedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["tracks"] == [{"id": "track-v1", "kind": "visual", "label": "Main"}]
+    assembly = _read_assembly_json(tdir)
+    assert {"id": "track-v1", "kind": "visual", "label": "Main"} in assembly["tracks"]
 
     remove_event = track_remove(
         "demo",
@@ -527,8 +506,8 @@ def test_track_events_materialize_and_read_back(demo_timeline: dict[str, object]
     assert remove_event.kind == "track.removed"
     assert isinstance(remove_event.payload, TrackRemovedPayload)
     _assert_last_event(demo_timeline, remove_event, kind="track.removed", payload_type=TrackRemovedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["tracks"] == []
+    assembly = _read_assembly_json(tdir)
+    assert {"id": "track-v1", "kind": "visual", "label": "Main"} not in assembly["tracks"]
 
 
 def test_audio_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:
@@ -546,8 +525,8 @@ def test_audio_events_materialize_and_read_back(demo_timeline: dict[str, object]
     assert bind_event.kind == "audio.bound"
     assert isinstance(bind_event.payload, AudioBoundPayload)
     _assert_last_event(demo_timeline, bind_event, kind="audio.bound", payload_type=AudioBoundPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["clips"][0]["asset_id"] == "asset-audio-2"
+    assembly = _read_assembly_json(tdir)
+    assert assembly["clips"][0]["asset"] == "asset-audio-2"
 
     unbind_event = audio_unbind(
         "demo",
@@ -559,52 +538,38 @@ def test_audio_events_materialize_and_read_back(demo_timeline: dict[str, object]
     assert unbind_event.kind == "audio.unbound"
     assert isinstance(unbind_event.payload, AudioUnboundPayload)
     _assert_last_event(demo_timeline, unbind_event, kind="audio.unbound", payload_type=AudioUnboundPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["clips"][0]["asset_id"] == ""
+    assembly = _read_assembly_json(tdir)
+    assert "asset" not in assembly["clips"][0]
 
 
-def test_pool_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:
-    tdir = _tdir(demo_timeline)
+def test_pool_events_reject_runtime_edit_paths(demo_timeline: dict[str, object]) -> None:
+    with pytest.raises(TimelineEditError, match="non-container read-model"):
+        pool_asset_add(
+            "demo",
+            "primary",
+            asset_id="asset-1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
 
-    add_event = pool_asset_add(
-        "demo",
-        "primary",
-        asset_id="asset-1",
-        actor=_actor(),
-        root=demo_timeline["root"],
-    )
-    assert add_event.kind == "pool.asset_added"
-    assert isinstance(add_event.payload, PoolAssetAddedPayload)
-    _assert_last_event(demo_timeline, add_event, kind="pool.asset_added", payload_type=PoolAssetAddedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["pool"]["entries"] == [{"asset_id": "asset-1", "score": 0.0}]
+    with pytest.raises(TimelineEditError, match="non-container read-model"):
+        pool_asset_score(
+            "demo",
+            "primary",
+            asset_id="asset-1",
+            score=0.9,
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
 
-    score_event = pool_asset_score(
-        "demo",
-        "primary",
-        asset_id="asset-1",
-        score=0.9,
-        actor=_actor(),
-        root=demo_timeline["root"],
-    )
-    assert score_event.kind == "pool.asset_scored"
-    assert isinstance(score_event.payload, PoolAssetScoredPayload)
-    _assert_last_event(demo_timeline, score_event, kind="pool.asset_scored", payload_type=PoolAssetScoredPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["pool"]["entries"][0]["score"] == 0.9
-
-    remove_event = pool_asset_remove(
-        "demo",
-        "primary",
-        asset_id="asset-1",
-        actor=_actor(),
-        root=demo_timeline["root"],
-    )
-    assert remove_event.kind == "pool.asset_removed"
-    assert isinstance(remove_event.payload, PoolAssetRemovedPayload)
-    _assert_last_event(demo_timeline, remove_event, kind="pool.asset_removed", payload_type=PoolAssetRemovedPayload)
-    assembly = _read_assembly_json(tdir)["assembly"]
-    assert assembly["pool"]["entries"] == []
+    with pytest.raises(TimelineEditError, match="non-container read-model"):
+        pool_asset_remove(
+            "demo",
+            "primary",
+            asset_id="asset-1",
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
 
 
 def test_pool_score_rejects_out_of_range(demo_timeline: dict[str, object]) -> None:
@@ -619,24 +584,17 @@ def test_pool_score_rejects_out_of_range(demo_timeline: dict[str, object]) -> No
         )
 
 
-def test_arrangement_replace_materializes_and_reads_back(demo_timeline: dict[str, object]) -> None:
-    tdir = _tdir(demo_timeline)
+def test_arrangement_replace_rejects_runtime_edit_path(demo_timeline: dict[str, object]) -> None:
     arrangement = {"clips": [{"uuid": "clip-1", "order": 1}], "title": "draft"}
 
-    event = arrangement_replace(
-        "demo",
-        "primary",
-        arrangement=arrangement,
-        actor=_actor(),
-        root=demo_timeline["root"],
-    )
-
-    assert event.kind == "arrangement.replaced"
-    assert isinstance(event.payload, ArrangementReplacedPayload)
-    assert event.payload.arrangement == arrangement
-    _assert_last_event(demo_timeline, event, kind="arrangement.replaced", payload_type=ArrangementReplacedPayload)
-    assert _read_assembly_json(tdir)["assembly"]["arrangement"] == arrangement
-    assert get_arrangement("demo", "primary", root=demo_timeline["root"]) == arrangement
+    with pytest.raises(TimelineEditError, match="migration-only legacy"):
+        arrangement_replace(
+            "demo",
+            "primary",
+            arrangement=arrangement,
+            actor=_actor(),
+            root=demo_timeline["root"],
+        )
 
 
 def test_secondary_supabase_paths_raise_missing_config_explicitly(
@@ -655,10 +613,8 @@ def test_secondary_supabase_paths_raise_missing_config_explicitly(
         lambda: transition_set("demo", "primary", left_clip_id="a", right_clip_id="b", actor=_actor(), root=demo_timeline["root"]),
         lambda: effect_add("demo", "primary", clip_id="a", effect_id="glow", actor=_actor(), root=demo_timeline["root"]),
         lambda: theme_set("demo", "primary", theme_id="banodoco-default", actor=_actor(), root=demo_timeline["root"]),
-        lambda: track_add("demo", "primary", track_id="track-1", kind="visual", actor=_actor(), root=demo_timeline["root"]),
+        lambda: track_add("demo", "primary", track_id="track-1", kind="visual", label="Main", actor=_actor(), root=demo_timeline["root"]),
         lambda: audio_bind("demo", "primary", clip_id="a", asset_id="asset-1", actor=_actor(), root=demo_timeline["root"]),
-        lambda: pool_asset_add("demo", "primary", asset_id="asset-1", actor=_actor(), root=demo_timeline["root"]),
-        lambda: arrangement_replace("demo", "primary", arrangement={"clips": []}, actor=_actor(), root=demo_timeline["root"]),
     ]
 
     for op in ops:

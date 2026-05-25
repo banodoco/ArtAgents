@@ -18,7 +18,7 @@ python3 -m astrid executors inspect builtin.spatial_audio_page --json
 Run:
 
 ```bash
-python3 -m astrid.packs.builtin.spatial_audio_page.run \
+python3 -m astrid.packs.builtin.executors.spatial_audio_page.run \
   --manifest runs/foley_map/example/tiles.json \
   --out runs/foley_map/example/page
 ```

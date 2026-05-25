@@ -47,7 +47,7 @@ These are the unknowns the prep phase MUST disambiguate before plan commits:
    - `tests/agentic/reports/20260518-172010-cross_pack_composition/agentic-cross-pack-composition-ds-1.{report.md,stderr.log}`
    - `tests/agentic/reports/20260518-172010-search_before_authoring/agentic-search-before-authoring-ds-1.{report.md,stderr.log}`
 
-   Specifically: what canonical-bypass form did each agent use? Is the bypass pattern different (e.g., `python -m astrid.packs.builtin.hype.run` vs `python -c 'import astrid.packs...'` vs running the pack's `run.py` directly by path)? The detector in Fix A must cover *all* observed patterns.
+   Specifically: what canonical-bypass form did each agent use? Is the bypass pattern different (e.g., `python -m astrid.packs.builtin.orchestrators.hype.run` vs `python -c 'import astrid.packs...'` vs running the pack's `run.py` directly by path)? The detector in Fix A must cover *all* observed patterns.
 
 2. **Why did `new_orchestrator_from_dsl` regress (PASS in v6 → FAIL in v7 on `contradiction_in_report`)?** The contradiction was "DSL-compiled orchestrators run via `astrid start`" claim vs no `astrid start` in stderr. Was the agent confused by added brief instructions? Did Fix #3's post-completion handoff change behavior in a way that broke this scenario's path? Read:
    - `tests/agentic/reports/20260518-172010-new_orchestrator_from_dsl/agentic-new-orchestrator-from-dsl-ds-1.{report.md,stderr.log}`

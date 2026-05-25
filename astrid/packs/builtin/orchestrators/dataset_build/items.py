@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 from astrid._paths import REPO_ROOT
+from astrid.core.util.time import utc_now_iso as _utc_now_iso
 
 
 UNKNOWN_RIGHTS = {
@@ -20,7 +20,7 @@ UNKNOWN_RIGHTS = {
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return _utc_now_iso()
 
 
 def sha256_file(path: str | Path) -> str:
@@ -136,4 +136,3 @@ def make_review_item(
     if filter_results is not None:
         review_item["filter_results"] = dict(filter_results)
     return review_item
-

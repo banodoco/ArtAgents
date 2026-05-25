@@ -13,14 +13,13 @@ import json
 import math
 import mimetypes
 import os
-import re
 import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 
-from astrid.packs.builtin.executors.generate_image_openai.run import _candidate_env_files, _read_env_value
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 from astrid.packs.builtin.orchestrators.logo_ideas.run import (
     FAL_QUEUE_URL,
     _http_get_bytes,

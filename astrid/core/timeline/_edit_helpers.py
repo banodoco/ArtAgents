@@ -6,15 +6,12 @@ track_edits, audio_edits, pool_edits, arrangement_edits).
 
 Every public mutation function in the edit modules uses:
 
-* ``_resolve_or_bootstrap_backend`` — locate the timeline, then resolve or
-  bootstrap the event-log backend.  Handles three cases:
+* ``_resolve_or_bootstrap_backend`` — locate the timeline, then resolve the
+  event-log backend.  Handles two cases:
   1. Identity exists with provenance ``"created"`` → resolve backend normally,
      first domain event is bare (no ``timeline.imported``).
-  2. No identity, no ``assembly.jsonl``, compatibility files exist →
-     true-legacy bootstrap: emit ``timeline.imported`` via
-     ``LocalFsBackend.bootstrap_legacy()``, write identity with provenance
-     ``"imported"``, then resolve backend normally.
-  3. Identity missing but ``assembly.jsonl`` already exists → fail closed.
+  2. Identity missing → fail closed. Legacy conversion is handled only by the
+     Sprint 2 migration scripts.
 * ``_materialize`` — post-append projection regenerator that calls
   ``regenerate_projection()`` to rewrite ``assembly.json`` from the
   canonical event stream.
@@ -24,11 +21,9 @@ Every public mutation function in the edit modules uses:
 Pack / worker write paths use:
 
 * ``pack_write_gateway`` — centralized append-then-regenerate gateway that
-  accepts a managed binding tuple, resolves the backend through the legacy
-  bootstrap seam (only true-legacy timelines with no identity sidecar get
-  ``timeline.imported``; created timelines with provenance ``"created"``
-  accept bare first domain events), appends events in a batch, regenerates
-  ``assembly.json`` once from the canonical event stream, and returns a
+  accepts a managed binding tuple, resolves an identity-backed backend,
+  appends events in a batch, regenerates ``assembly.json`` once from the
+  canonical event stream, and returns a
   normalised ``PackWriteResult``. Batch-level CAS, soft-lock enforcement,
   and explicit transaction orchestration are intentionally deferred in m5.
 * ``PackWriteResult`` — dataclass carrying new_version, event_ids, attempts,
@@ -45,7 +40,6 @@ from typing import Any
 from astrid.core.project.jsonio import read_json
 
 from .eventlog import EventLogBackend, select_timeline_backend
-from .eventlog.local_fs import LocalFsBackend
 from .eventlog.types import SupabaseEventLogOptions
 from .events.schema import TimelineActor, TimelineEvent
 from .paths import (
@@ -107,19 +101,14 @@ def _resolve_or_bootstrap_backend(
     actor: TimelineActor | None = None,
     supabase_options: SupabaseEventLogOptions | None = None,
 ) -> tuple[str, Path, EventLogBackend, bool]:
-    """Resolve the event-log backend, bootstrapping true-legacy timelines.
+    """Resolve the event-log backend for an identity-backed timeline.
 
     Three cases
     -----------
     1. **Identity exists with provenance ``"created"``** —
        resolve the backend normally.  The first domain event is bare
        (no ``timeline.imported``).
-    2. **No identity, no ``assembly.jsonl``, compatibility files exist** —
-       true-legacy bootstrap.  Emit ``timeline.imported`` via
-       ``LocalFsBackend.bootstrap_legacy()``, write identity with
-       provenance ``"imported"``, then resolve.
-    3. **Identity missing but ``assembly.jsonl`` already exists** —
-       fail closed with a clear error.
+    2. **Identity missing** — fail closed with a clear migration error.
 
     Returns ``(timeline_id, timeline_home, backend, bootstrap_performed)``.
 
@@ -159,30 +148,15 @@ def _resolve_or_bootstrap_backend(
         _stream, backend = select_timeline_backend(**select_kwargs)
         return timeline_id, tdir, backend, False
 
-    # --- Case 3: No identity but assembly.jsonl already exists → fail closed ---
-    if jsonl_path.is_file():
-        raise TimelineEditError(
-            f"timeline '{slug}' has an event log ({jsonl_path.name}) "
-            f"but no identity sidecar.  This timeline may be corrupted "
-            f"or was partially migrated.  Restore the identity sidecar "
-            f"or delete the event log and retry."
-        )
-
-    # --- Case 2: No identity, no assembly.jsonl, compatibility files
-    #     should exist → true-legacy bootstrap ---
-    if actor is None:
-        actor = _default_actor("bootstrap_legacy")
-
-    # Construct a LocalFsBackend for the bootstrap.
-    # We don't have a timeline_id yet, so use a temporary one.
-    backend = LocalFsBackend(timeline_id="", timeline_home=tdir)
-    new_timeline_id, _identity = backend.bootstrap_legacy(actor=actor)
-
-    # Now resolve the backend with the newly written identity.
-    timeline_id, tdir_resolved, backend_resolved, _ = _resolve_or_bootstrap_backend(
-        project_slug, slug, root=root, actor=actor, supabase_options=supabase_options,
+    detail = (
+        f"timeline '{slug}' has an event log ({jsonl_path.name}) but no identity sidecar"
+        if jsonl_path.is_file()
+        else f"timeline '{slug}' has no identity sidecar"
     )
-    return timeline_id, tdir_resolved, backend_resolved, True
+    raise TimelineEditError(
+        f"{detail}. Runtime legacy bootstrap is disabled; run the Sprint 2 "
+        "migration before editing this timeline."
+    )
 
 
 def _resolve_backend(
@@ -263,10 +237,10 @@ class PackWriteResult:
     """Event-stream version after appending all events (including bootstrap)."""
 
     event_ids: list[str]
-    """ULID event ids of every event appended (bootstrap + domain), in order."""
+    """ULID event ids of every event appended, in order."""
 
     attempts: int
-    """Number of events appended (bootstrap + domain)."""
+    """Number of events appended."""
 
     backend_name: str
     """Name of the backend that serviced the append (e.g. ``"local_fs"``)."""
@@ -284,7 +258,7 @@ class PackWriteResult:
     """Filesystem path to the timeline directory (for compatibility outputs)."""
 
     bootstrap_emitted: bool = False
-    """True when ``timeline.imported`` was emitted before the first domain event."""
+    """Always False; kept for compatibility with older result consumers."""
 
     # Ancillary handles (populated by callers that track artifacts).
     artifact_handles: dict[str, Any] = field(default_factory=dict)
@@ -308,11 +282,8 @@ def pack_write_gateway(
     """Centralized append-then-materialize gateway for pack / worker writes.
 
     Accepts the **managed binding tuple** produced by
-    ``bind_managed_timeline()``, resolves the event-log backend through
-    the legacy bootstrap seam (only true-legacy timelines with no identity
-    sidecar get ``timeline.imported``; created timelines with provenance
-    ``"created"`` accept bare first domain events), appends every event,
-    materializes compatibility outputs synchronously, and returns a
+    ``bind_managed_timeline()``, resolves an identity-backed event-log backend,
+    appends every event, materializes compatibility outputs synchronously, and returns a
     normalised ``PackWriteResult``.
 
     Scope note
@@ -391,10 +362,8 @@ def pack_write_gateway(
             via=existing_via + [actor_via],
         )
 
-    # 2. Resolve backend through the legacy bootstrap seam.
-    #    Only true-legacy timelines (no identity sidecar, compatibility
-    #    files present) get timeline.imported bootstrap.  Created timelines
-    #    with provenance "created" accept bare first domain events.
+    # 2. Resolve an identity-backed backend. Legacy timelines without an
+    #    identity sidecar are rejected until migrated.
     resolved_timeline_id, timeline_home, backend, bootstrap_emitted = \
         _resolve_or_bootstrap_backend(
             project_slug,

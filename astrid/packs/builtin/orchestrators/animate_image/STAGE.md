@@ -43,7 +43,7 @@ Both calls inline files as base64 `data:` URIs (no separate upload). Requires `F
 ## Example
 
 ```bash
-python3 -m astrid.packs.builtin.animate_image.run \
+python3 -m astrid.packs.builtin.orchestrators.animate_image.run \
   --style-image ~/Desktop/cGh6S8rc_400x400.jpg \
   --ref-video ~/Desktop/Input.mov \
   --out runs/animate-image-001

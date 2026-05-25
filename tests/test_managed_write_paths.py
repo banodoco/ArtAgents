@@ -2,7 +2,7 @@
 
 Proves:
 1. Managed flows emit correct event kinds and order
-   (arrangement.replaced; timeline.imported only for true-legacy timelines).
+   (timeline.config_replaced; timeline.imported only for true-legacy timelines).
 2. Compatibility outputs remain byte-equivalent after managed writes.
 3. verify_chain() passes for pack-produced timeline fixtures.
 4. Actor attribution including actor.via chaining.
@@ -19,9 +19,11 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
+from astrid import timeline as timeline_contract
 from astrid.core.project import paths as project_paths
 from astrid.core.project.project import create_project
 from astrid.core.timeline._edit_helpers import pack_write_gateway, PackWriteResult
@@ -32,18 +34,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _arrangement_event(clips: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Build an arrangement.replaced event spec with a simple clips payload."""
+    """Build a runtime-safe full TimelineConfig replacement event."""
+    config: dict[str, Any] = {"tracks": [], "clips": []}
+    if clips:
+        config["tracks"] = [{"id": "v1", "kind": "visual", "label": "Video"}]
+        config["clips"] = [
+            {
+                "id": str(clip.get("id", f"clip-{index}")),
+                "at": float(index),
+                "track": "v1",
+                "clipType": "media",
+                "asset": str(clip.get("asset", clip.get("id", f"asset-{index}"))),
+            }
+            for index, clip in enumerate(clips)
+        ]
     return {
-        "kind": "arrangement.replaced",
-        "payload": {"arrangement": {"clips": clips or []}},
+        "kind": "timeline.config_replaced",
+        "payload": {"config": config},
     }
 
 
 def _arrangement_event_dict(config: dict[str, Any]) -> dict[str, Any]:
-    """Build an arrangement.replaced event spec with the given config."""
+    """Build a runtime-safe full TimelineConfig replacement event."""
+    payload = {"tracks": [], "clips": []}
+    payload.update(dict(config))
     return {
-        "kind": "arrangement.replaced",
-        "payload": {"arrangement": dict(config)},
+        "kind": "timeline.config_replaced",
+        "payload": {"config": payload},
     }
 
 
@@ -96,7 +113,7 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
         return [e.kind for e in events]
 
     def test_first_managed_write_no_bootstrap_for_created_timeline(self):
-        """First managed write on a created timeline emits arrangement.replaced
+        """First managed write on a created timeline emits timeline.config_replaced
         directly — NO timeline.imported bootstrap."""
         ulid, tdir = self._find_timeline_ulid_and_dir()
 
@@ -112,8 +129,8 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
         self.assertFalse(result.bootstrap_emitted,
                          "created timeline must NOT bootstrap")
         kinds = self._read_event_kinds(tdir)
-        self.assertEqual(kinds[0], "arrangement.replaced",
-                         f"First event should be arrangement.replaced, got {kinds}")
+        self.assertEqual(kinds[0], "timeline.config_replaced",
+                         f"First event should be timeline.config_replaced, got {kinds}")
 
     def test_subsequent_managed_write_no_bootstrap(self):
         """Both first and second writes skip bootstrap for created timelines."""
@@ -220,7 +237,17 @@ class ManagedWriteCompatibilityOutputTest(unittest.TestCase):
 
         timeline_config = {
             "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
-            "clips": [{"id": "clip_1", "track": "v1", "at": 0.0, "from": 0.0, "to": 5.0}],
+            "clips": [
+                {
+                    "id": "clip_1",
+                    "track": "v1",
+                    "clipType": "media",
+                    "asset": "asset_1",
+                    "at": 0.0,
+                    "from": 0.0,
+                    "to": 5.0,
+                }
+            ],
             "theme": "test-theme",
         }
 
@@ -246,8 +273,8 @@ class ManagedWriteCompatibilityOutputTest(unittest.TestCase):
         self.assertIsNotNone(found)
         ulid, tdir = found
 
-        config1 = {"tracks": [{"id": "v1", "kind": "visual"}], "clips": [], "theme": "t1"}
-        config2 = {"tracks": [{"id": "v1", "kind": "visual"}], "clips": [{"id": "c1"}], "theme": "t2"}
+        config1 = {"tracks": [{"id": "v1", "kind": "visual", "label": "Video"}], "clips": [], "theme": "t1"}
+        config2 = {"tracks": [{"id": "v1", "kind": "visual", "label": "Video"}], "clips": [], "theme": "t2"}
 
         pack_write_gateway(
             project_slug="comp-proj",
@@ -316,7 +343,7 @@ class ManagedWriteActorAttributionTest(unittest.TestCase):
 
         events = self._read_domain_events("actor2-proj", "actor2-tl")
         domain_event = events[-1]
-        self.assertEqual(domain_event.kind, "arrangement.replaced")
+        self.assertEqual(domain_event.kind, "timeline.config_replaced")
         self.assertEqual(domain_event.actor.type, "system")
         self.assertEqual(domain_event.actor.id, "builtin.cut:test-run-001")
 
@@ -539,8 +566,8 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
         create_project("multi-proj")
         create_timeline("multi-proj", "multi-tl")
 
-    def test_multiple_arrangement_replaced_events_in_order(self):
-        """Multiple arrangement.replaced events appended in order (no bootstrap
+    def test_multiple_config_replaced_events_in_order(self):
+        """Multiple timeline.config_replaced events appended in order (no bootstrap
         for created timelines)."""
         from astrid.core.timeline.paths import find_timeline_by_slug
 
@@ -582,10 +609,74 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
         all_events = backend.read_events(limit=10)
         kinds = [e.kind for e in all_events]
 
-        self.assertEqual(kinds[0], "arrangement.replaced")
-        self.assertEqual(kinds[1], "arrangement.replaced")
-        self.assertEqual(kinds[2], "arrangement.replaced")
+        self.assertEqual(kinds[0], "timeline.config_replaced")
+        self.assertEqual(kinds[1], "timeline.config_replaced")
+        self.assertEqual(kinds[2], "timeline.config_replaced")
         self.assertEqual(len(kinds), 3)
+
+
+class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
+    """Pack-managed full writes use validated timeline.config_replaced configs."""
+
+    def _capture_gateway_events(self):
+        captured: list[dict[str, Any]] = []
+
+        def fake_gateway(*args, **kwargs):
+            captured.extend(kwargs["events"])
+            return SimpleNamespace(new_version=17)
+
+        return captured, fake_gateway
+
+    def _assert_single_valid_config_replaced_event(self, event: dict[str, Any]) -> None:
+        self.assertEqual(event["kind"], "timeline.config_replaced")
+        payload = event["payload"]
+        self.assertIsInstance(payload, dict)
+        config = payload["config"]
+        self.assertEqual(timeline_contract.validate_timeline_config_for_container(config), config)
+
+    def test_cut_refine_and_assemble_emit_config_replaced_payloads(self):
+        from astrid.core.timeline import _edit_helpers
+        from astrid.packs.builtin.executors.cut import run as cut_run
+        from astrid.packs.builtin.executors.refine import run as refine_run
+        from astrid.packs.iteration.executors.assemble import run as assemble_run
+
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 0,
+                    "track": "v1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+        }
+        args = SimpleNamespace(project="demo", timeline_slug="primary")
+
+        for emit in (
+            lambda: cut_run._emit_cut_managed_events(args, config),
+            lambda: refine_run._emit_refine_managed_events(args, config),
+            lambda: assemble_run._emit_assemble_managed_events("demo", "primary", config),
+        ):
+            captured, fake_gateway = self._capture_gateway_events()
+            with patch.object(_edit_helpers, "pack_write_gateway", fake_gateway):
+                self.assertEqual(emit(), 17)
+            self.assertEqual(len(captured), 1)
+            self._assert_single_valid_config_replaced_event(captured[0])
+
+    def test_named_managed_sources_do_not_emit_arrangement_replaced(self):
+        managed_sources = [
+            ROOT / "astrid/packs/builtin/executors/cut/run.py",
+            ROOT / "astrid/packs/builtin/orchestrators/hype/run.py",
+            ROOT / "astrid/packs/builtin/executors/refine/run.py",
+            ROOT / "astrid/packs/iteration/executors/assemble/run.py",
+            ROOT / "astrid/core/worker/banodoco_worker.py",
+        ]
+        for path in managed_sources:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn('"kind": "arrangement.replaced"', source, str(path))
+            self.assertNotIn("'kind': 'arrangement.replaced'", source, str(path))
 
 
 if __name__ == "__main__":

@@ -158,4 +158,5 @@ def test_for_each_autoclose_optional_body_raises(tmp_path: Path, monkeypatch: py
             project_root=project_root,
             slug="probe",
             run_id="r1",
+            append_fn=lambda _event: _event,
         )

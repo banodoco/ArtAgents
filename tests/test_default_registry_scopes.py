@@ -21,8 +21,8 @@ class DefaultRegistryScopeTest(unittest.TestCase):
         self.assertEqual(youtube.metadata["source"], "pack")
         self.assertEqual(youtube.metadata["source_pack"], "upload")
         self.assertNotIn("pack_id", youtube.metadata)
-        self.assertTrue(youtube.metadata["executor_root"].endswith("astrid/packs/upload/youtube"))
-        self.assertTrue(youtube.metadata["manifest_file"].endswith("astrid/packs/upload/youtube/executor.yaml"))
+        self.assertTrue(youtube.metadata["executor_root"].endswith("astrid/packs/upload/executors/youtube"))
+        self.assertTrue(youtube.metadata["manifest_file"].endswith("astrid/packs/upload/executors/youtube/executor.yaml"))
 
         for executor_id, folder in (
             ("builtin.audio_understand", "audio_understand"),
@@ -34,8 +34,8 @@ class DefaultRegistryScopeTest(unittest.TestCase):
                 self.assertEqual(action.metadata["source"], "pack")
                 self.assertEqual(action.metadata["source_pack"], "builtin")
                 self.assertNotIn("pack_id", action.metadata)
-                self.assertTrue(action.metadata["executor_root"].endswith(f"astrid/packs/builtin/{folder}"))
-                self.assertTrue(action.metadata["manifest_file"].endswith(f"astrid/packs/builtin/{folder}/executor.yaml"))
+                self.assertTrue(action.metadata["executor_root"].endswith(f"astrid/packs/builtin/executors/{folder}"))
+                self.assertTrue(action.metadata["manifest_file"].endswith(f"astrid/packs/builtin/executors/{folder}/executor.yaml"))
 
         vibecomfy = canonical.get("external.vibecomfy.run")
         self.assertEqual(vibecomfy.kind, "external")

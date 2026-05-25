@@ -15,16 +15,23 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.packs.builtin.executors.generate_image_openai.run import _candidate_env_files, _read_env_value
 from astrid.audit import AuditContext
+from astrid.core.util.media import ffprobe_duration_seconds
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 
 SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")
 SILENCE_END_RE = re.compile(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)")
 CUT_EPSILON_SEC = 0.05
 HALLUCINATION_DENYLIST = {".", "Thanks for watching!", "Please subscribe!", "Thank you.", "Thank you so much.", "All right.", "Get out of here."}
 PYANNOTE_PIPELINE = "pyannote/speaker-diarization-3.1"
-def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, check=True, capture_output=True, text=True)
+def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd,
+        check=kwargs.pop("check", True),
+        capture_output=kwargs.pop("capture_output", True),
+        text=kwargs.pop("text", True),
+        **kwargs,
+    )
 def read_env_value(env_path: Path, key: str) -> str:
     return _read_env_value(env_path, key)
 
@@ -62,20 +69,7 @@ def resolve_dirs(audio_path: Path, out_dir: Path | None, cache_dir: Path | None)
     out_path = out_dir.resolve() if out_dir else (audio_path.parent / audio_path.stem).resolve()
     return out_path, cache_dir.resolve() if cache_dir else out_path / "cache"
 def probe_duration(media_path: Path) -> float:
-    return float(
-        run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "default=noprint_wrappers=1:nokey=1",
-                str(media_path),
-            ]
-        ).stdout.strip()
-    )
+    return ffprobe_duration_seconds(media_path, runner=run)
 def parse_silence_windows(stderr: str, duration_sec: float) -> list[dict[str, float]]:
     windows: list[dict[str, float]] = []
     current_start: float | None = None
@@ -285,7 +279,9 @@ def transcribe_to_outputs(audio_path: Path, out_dir: Path, cache_dir: Path, clie
     return write_transcripts(out_dir, segments, audit), summary, metadata_path
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from ..asset_cache import run as asset_cache; args.audio = Path(asset_cache.resolve_input(args.audio, want="path"))
+    from ..asset_cache import run as asset_cache
+
+    args.audio = Path(asset_cache.resolve_input(args.audio, want="path"))
     audio_path = args.audio.resolve()
     if not audio_path.is_file():
         raise SystemExit(f"Audio file not found: {audio_path}")

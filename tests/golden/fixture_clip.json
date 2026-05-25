@@ -15,8 +15,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-1",
-        "kind": "visual",
-        "asset_id": "asset-a",
+        "kind": "visual", "track_id": "visual", "asset_id": "asset-a",
         "position": null
       },
       "expected_version": null,
@@ -37,8 +36,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-2",
-        "kind": "audio",
-        "asset_id": "asset-b",
+        "kind": "audio", "track_id": "audio", "asset_id": "asset-b",
         "position": {
           "mode": "after",
           "ref_clip_id": "clip-1"
@@ -62,8 +60,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-3",
-        "kind": "visual",
-        "asset_id": "asset-c",
+        "kind": "visual", "track_id": "visual", "asset_id": "asset-c",
         "position": {
           "mode": "index",
           "index": 0
@@ -221,22 +218,23 @@
     "clips": [
       {
         "id": "clip-2",
-        "kind": "audio",
-        "asset_id": "asset-b",
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": "background music"
+        "at": 0.0,
+        "track": "audio",
+        "clipType": "media",
+        "asset": "asset-b"
       },
       {
         "id": "clip-1",
-        "kind": "visual",
-        "asset_id": "asset-a",
-        "start": 2.5,
-        "duration": 10.0,
-        "text": "Hello world",
-        "note": ""
+        "at": 2.5,
+        "track": "visual",
+        "clipType": "media",
+        "asset": "asset-a",
+        "hold": 10.0,
+        "text": {
+          "content": "Hello world"
+        }
       }
-    ]
+    ],
+    "tracks": []
   }
 }

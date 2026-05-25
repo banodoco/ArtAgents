@@ -29,6 +29,7 @@ from astrid.core.timeline.clip_edits import (
     set_clip_text,
     swap_clips,
 )
+from astrid.core.timeline.track_edits import track_add
 from astrid.core.timeline.crud import create_timeline, show_timeline
 from astrid.core.timeline.eventlog import (
     EventLogBackend,
@@ -53,7 +54,6 @@ from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
 )
-from astrid.core.timeline.model import Assembly
 from astrid.core.timeline.paths import (
     assembly_head_path,
     assembly_identity_path,
@@ -92,6 +92,24 @@ def project_tree(tmp_projects_root: Path) -> Path:
 def demo_timeline(project_tree: Path) -> dict:
     """Create a timeline and return its metadata dict."""
     result = create_timeline("demo", "primary", name="Primary Timeline", root=project_tree)
+    track_add(
+        "demo",
+        "primary",
+        track_id="visual",
+        kind="visual",
+        label="Visual",
+        actor=_actor("seed"),
+        root=project_tree,
+    )
+    track_add(
+        "demo",
+        "primary",
+        track_id="audio",
+        kind="audio",
+        label="Audio",
+        actor=_actor("seed"),
+        root=project_tree,
+    )
     return {
         "ulid": result["ulid"],
         "slug": "primary",
@@ -143,11 +161,12 @@ class TestAddClip:
 
         # Verify assembly.json was updated
         assembly = _read_assembly_json(tdir)
-        clips = assembly["assembly"]["clips"]
+        clips = assembly["clips"]
         assert len(clips) == 1
         assert clips[0]["id"] == "asset_v1"
-        assert clips[0]["kind"] == "visual"
-        assert clips[0]["asset_id"] == "asset_v1"
+        assert clips[0]["clipType"] == "media"
+        assert clips[0]["track"] == "visual"
+        assert clips[0]["asset"] == "asset_v1"
 
         # Verify event chain is valid
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
@@ -168,7 +187,7 @@ class TestAddClip:
         add_clip("demo", "primary", kind="text", asset_id="third", actor=_actor(), root=demo_timeline["root"])
 
         assembly = _read_assembly_json(tdir)
-        clips = assembly["assembly"]["clips"]
+        clips = assembly["clips"]
         assert len(clips) == 3
         # second was inserted at index 0
         assert clips[0]["id"] == "second"
@@ -186,7 +205,7 @@ class TestAddClip:
         ulid = demo_timeline["ulid"]
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
         assembly = _read_assembly_json(tdir)
-        assert assembly["assembly"]["clips"][0]["id"] == "a"
+        assert assembly["clips"][0]["id"] == "a"
 
     def test_add_clip_rejects_invalid_kind(self, demo_timeline: dict) -> None:
         with pytest.raises(ClipEditError, match="kind must be"):
@@ -272,7 +291,7 @@ class TestRemoveClip:
 
         # Verify assembly.json no longer has the clip
         assembly = _read_assembly_json(tdir)
-        assert len(assembly["assembly"]["clips"]) == 0
+        assert len(assembly["clips"]) == 0
 
     def test_remove_nonexistent_clip_noops(self, demo_timeline: dict) -> None:
         ulid = demo_timeline["ulid"]
@@ -285,7 +304,7 @@ class TestRemoveClip:
 
         # Clip "keep" still exists
         assembly = _read_assembly_json(tdir)
-        assert len(assembly["assembly"]["clips"]) == 1
+        assert len(assembly["clips"]) == 1
 
     def test_remove_clip_rejects_empty_clip_id(self, demo_timeline: dict) -> None:
         with pytest.raises(ClipEditError, match="clip_id must be"):
@@ -319,7 +338,7 @@ class TestMoveClip:
         assert event.payload.position.mode == "before"
 
         assembly = _read_assembly_json(tdir)
-        ids = [c["id"] for c in assembly["assembly"]["clips"]]
+        ids = [c["id"] for c in assembly["clips"]]
         assert ids == ["c", "a", "b"]
 
     def test_move_clip_requires_position(self, demo_timeline: dict) -> None:
@@ -354,9 +373,9 @@ class TestRetimeClip:
         assert event.payload.duration == 10.0
 
         assembly = _read_assembly_json(tdir)
-        clip = assembly["assembly"]["clips"][0]
-        assert clip["start"] == 3.5
-        assert clip["duration"] == 10.0
+        clip = assembly["clips"][0]
+        assert clip["at"] == 3.5
+        assert clip["hold"] == 10.0
 
     def test_retime_rejects_negative_start(self, demo_timeline: dict) -> None:
         add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
@@ -393,7 +412,7 @@ class TestSwapClips:
         assert event.payload.clip_b_id == "b"
 
         assembly = _read_assembly_json(tdir)
-        ids = [c["id"] for c in assembly["assembly"]["clips"]]
+        ids = [c["id"] for c in assembly["clips"]]
         assert ids == ["b", "a"]
 
     def test_swap_rejects_same_ids(self, demo_timeline: dict) -> None:
@@ -426,7 +445,7 @@ class TestReplaceClip:
         assert event.payload.with_asset_id == "new_asset"
 
         assembly = _read_assembly_json(tdir)
-        assert assembly["assembly"]["clips"][0]["asset_id"] == "new_asset"
+        assert assembly["clips"][0]["asset"] == "new_asset"
 
     def test_replace_rejects_empty_with_asset_id(self, demo_timeline: dict) -> None:
         add_clip("demo", "primary", kind="visual", asset_id="old", actor=_actor(), root=demo_timeline["root"])
@@ -458,7 +477,7 @@ class TestSetClipText:
         assert event.payload.text == "Hello World"
 
         assembly = _read_assembly_json(tdir)
-        assert assembly["assembly"]["clips"][0]["text"] == "Hello World"
+        assert assembly["clips"][0]["text"] == {"content": "Hello World"}
 
     def test_set_text_accepts_empty_string(self, demo_timeline: dict) -> None:
         add_clip("demo", "primary", kind="text", asset_id="t1", actor=_actor(), root=demo_timeline["root"])
@@ -470,7 +489,7 @@ class TestSetClipText:
 
 
 class TestAnnotateClip:
-    def test_annotate_updates_note_field(self, demo_timeline: dict) -> None:
+    def test_annotate_is_non_container_event_and_does_not_mutate_assembly(self, demo_timeline: dict) -> None:
         ulid = demo_timeline["ulid"]
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
 
@@ -490,7 +509,7 @@ class TestAnnotateClip:
         assert event.payload.note == "This is an important clip"
 
         assembly = _read_assembly_json(tdir)
-        assert assembly["assembly"]["clips"][0]["note"] == "This is an important clip"
+        assert "params" not in assembly["clips"][0]
 
     def test_annotate_rejects_non_string_note(self, demo_timeline: dict) -> None:
         add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
@@ -511,9 +530,9 @@ class TestAssemblyShapeEdgeCases:
         add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
 
         assembly = _read_assembly_json(tdir)
-        assert "clips" in assembly["assembly"]
-        assert isinstance(assembly["assembly"]["clips"], list)
-        assert len(assembly["assembly"]["clips"]) == 1
+        assert "clips" in assembly
+        assert isinstance(assembly["clips"], list)
+        assert len(assembly["clips"]) == 1
 
     def test_existing_clips_updated_in_place(self, demo_timeline: dict) -> None:
         """Case (b): existing assembly with 'clips' → updated in place."""
@@ -524,7 +543,7 @@ class TestAssemblyShapeEdgeCases:
         add_clip("demo", "primary", kind="audio", asset_id="a1", actor=_actor(), root=demo_timeline["root"])
 
         assembly = _read_assembly_json(tdir)
-        assert len(assembly["assembly"]["clips"]) == 2
+        assert len(assembly["clips"]) == 2
 
     def test_assembly_regenerated_from_event_stream(self, demo_timeline: dict) -> None:
         """Under m4 regeneration, assembly.json is fully regenerated from the
@@ -537,11 +556,9 @@ class TestAssemblyShapeEdgeCases:
         add_clip("demo", "primary", kind="visual", asset_id="v1", actor=_actor(), root=demo_timeline["root"])
 
         # Manually inject an unrelated key into assembly.json
-        assembly = Assembly.from_json(tdir / "assembly.json")
-        new_assembly_dict = dict(assembly.assembly)
+        new_assembly_dict = dict(_read_assembly_json(tdir))
         new_assembly_dict["other_key"] = "preserved_value"
-        new_assembly = Assembly(schema_version=1, assembly=new_assembly_dict)
-        new_assembly.write(tdir / "assembly.json")
+        (tdir / "assembly.json").write_text(json.dumps(new_assembly_dict), encoding="utf-8")
 
         # Now add another clip — assembly.json is regenerated from the event stream,
         # so the manually injected key is overwritten.
@@ -550,8 +567,8 @@ class TestAssemblyShapeEdgeCases:
         assembly_after = _read_assembly_json(tdir)
         # The manually injected key is NOT preserved because assembly.json is
         # fully regenerated from the canonical event stream.
-        assert "other_key" not in assembly_after["assembly"]
-        assert len(assembly_after["assembly"]["clips"]) == 2
+        assert "other_key" not in assembly_after
+        assert len(assembly_after["clips"]) == 2
 
     def test_assembly_regenerated_even_from_corrupted_file(
         self, demo_timeline: dict
@@ -562,8 +579,9 @@ class TestAssemblyShapeEdgeCases:
         tdir = timeline_dir("demo", ulid, root=demo_timeline["root"])
 
         # Replace assembly.json with incompatible shape
-        bad_assembly = Assembly(schema_version=1, assembly={"some_other_key": "value"})
-        bad_assembly.write(tdir / "assembly.json")
+        (tdir / "assembly.json").write_text(
+            json.dumps({"some_other_key": "value"}), encoding="utf-8"
+        )
 
         # Under m4, add_clip regenerates assembly.json from the event stream
         # before applying the new event.  Since the event stream is empty
@@ -572,8 +590,8 @@ class TestAssemblyShapeEdgeCases:
         assert event.kind == "clip.added"
 
         assembly_after = _read_assembly_json(tdir)
-        assert "clips" in assembly_after["assembly"]
-        assert len(assembly_after["assembly"]["clips"]) == 1
+        assert "clips" in assembly_after
+        assert len(assembly_after["clips"]) == 1
 
 
 # ── Supabase-selected paths ─────────────────────────────────────────────────
@@ -735,22 +753,22 @@ class TestHashChainIntegrity:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
         events = backend.read_events()
-        assert len(events) == 10
+        assert len(events) == 12
         assert backend.verify_chain().ok is True
 
         # Verify final assembly.json state
         assembly = _read_assembly_json(tdir)
-        clips = assembly["assembly"]["clips"]
+        clips = assembly["clips"]
         assert len(clips) == 2  # a was removed
         clip_ids = {c["id"] for c in clips}
         assert clip_ids == {"b", "c"}
         for c in clips:
             if c["id"] == "b":
-                assert c["start"] == 2.0
-                assert c["duration"] == 8.0
-                assert c["note"] == "Background music"
+                assert c["at"] == 2.0
+                assert c["hold"] == 8.0
+                assert "params" not in c
             if c["id"] == "c":
-                assert c["text"] == "Caption"
+                assert c["text"] == {"content": "Caption"}
 
 
 # ── missing timeline error ──────────────────────────────────────────────────

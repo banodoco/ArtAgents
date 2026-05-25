@@ -4,8 +4,8 @@ gate_command on a parallel events copy (FLAG-P5-003 — divergence here would
 silently mis-print the cursor in cmd_next/cmd_status). Also verifies peek
 does NOT write to events.jsonl (hash before/after).
 
-Rewritten for Sprint 3 collapsed Step schema: CodeStep/AttestedStep/NestedStep
-replaced with Step(adapter=…, requires_ack=…, children=…).
+Rewritten for Sprint 3 collapsed Step schema: leaves and groups are both
+Step(adapter=..., requires_ack=..., children=...).
 """
 
 from __future__ import annotations

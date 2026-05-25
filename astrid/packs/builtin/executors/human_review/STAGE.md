@@ -12,7 +12,7 @@ HTML page + JSON data, and gets back validated JSON.
 ## CLI
 
 ```
-python3 -m astrid.packs.builtin.human_review.run \
+python3 -m astrid.packs.builtin.executors.human_review.run \
   --html <path>            # file or dir; served at /
   --data <path>            # JSON file, served at /data.json (read-only)
   --serve /prefix=<dir>    # repeatable; static mount

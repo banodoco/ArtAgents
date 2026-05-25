@@ -28,6 +28,7 @@ from astrid.core.timeline.events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
+    ClipRetrackedPayload,
     ClipRetimedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
@@ -42,6 +43,7 @@ from astrid.core.timeline.events.schema import (
     ThemeSetPayload,
     TimelineActor,
     TimelineBranchedFromPayload,
+    TimelineConfigReplacedPayload,
     TimelineCreatedPayload,
     TimelineErasedPayload,
     TimelineEvent,
@@ -426,21 +428,38 @@ class ClipPayloadSchemaTest(unittest.TestCase):
             clip_id="clip-1",
             kind="visual",
             asset_id="asset-1",
+            track_id="visual",
             position=ClipPosition(mode="index", index=0),
         )
         self.assertEqual(payload.clip_id, "clip-1")
         self.assertEqual(payload.kind, "visual")
         self.assertEqual(payload.asset_id, "asset-1")
+        self.assertEqual(payload.track_id, "visual")
         obj = payload.to_json_obj()
         self.assertEqual(obj["clip_id"], "clip-1")
         self.assertEqual(obj["kind"], "visual")
+        self.assertEqual(obj["track_id"], "visual")
         self.assertEqual(obj["position"], {"mode": "index", "index": 0})
+
+    def test_clip_added_payload_accepts_explicit_track_id(self) -> None:
+        payload = ClipAddedPayload(
+            clip_id="clip-1",
+            kind="text",
+            asset_id="asset-1",
+            track_id="captions",
+        )
+        self.assertEqual(payload.to_json_obj()["track_id"], "captions")
+
+    def test_clip_added_rejects_empty_track_id(self) -> None:
+        with self.assertRaises(TimelineEventSchemaError):
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a", track_id="")
 
     def test_clip_added_payload_position_from_dict(self) -> None:
         payload = ClipAddedPayload(
             clip_id="clip-2",
             kind="audio",
             asset_id="asset-2",
+            track_id="audio",
             position={"mode": "after", "ref_clip_id": "c0"},
         )
         self.assertIsInstance(payload.position, ClipPosition)
@@ -448,15 +467,15 @@ class ClipPayloadSchemaTest(unittest.TestCase):
 
     def test_clip_added_rejects_empty_clip_id(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
-            ClipAddedPayload(clip_id="", kind="visual", asset_id="a")
+            ClipAddedPayload(clip_id="", kind="visual", asset_id="a", track_id="visual")
 
     def test_clip_added_rejects_invalid_kind(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
-            ClipAddedPayload(clip_id="c1", kind="invalid", asset_id="a")  # type: ignore[arg-type]
+            ClipAddedPayload(clip_id="c1", kind="invalid", asset_id="a", track_id="visual")  # type: ignore[arg-type]
 
     def test_clip_added_rejects_empty_asset_id(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
-            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="")
+            ClipAddedPayload(clip_id="c1", kind="visual", asset_id="", track_id="visual")
 
     # ------------------------------------------------------------------
     # ClipRemovedPayload
@@ -570,9 +589,10 @@ class ClipPayloadSchemaTest(unittest.TestCase):
         tid = str(uuid4())
 
         cases = [
-            ("clip.added", ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1")),
+            ("clip.added", ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual")),
             ("clip.removed", ClipRemovedPayload(clip_id="c1")),
             ("clip.moved", ClipMovedPayload(clip_id="c1", position=ClipPosition(mode="index", index=0))),
+            ("clip.retracked", ClipRetrackedPayload(clip_id="c1", track_id="v2")),
             ("clip.retimed", ClipRetimedPayload(clip_id="c1", start=0.0, duration=5.0)),
             ("clip.swapped", ClipSwappedPayload(clip_a_id="a", clip_b_id="b")),
             ("clip.replaced", ClipReplacedPayload(clip_id="c1", with_asset_id="a2")),
@@ -788,8 +808,11 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_track_added_payload_validates(self) -> None:
-        payload = TrackAddedPayload(track_id="trk-1", kind="visual")
-        self.assertEqual(payload.to_json_obj(), {"track_id": "trk-1", "kind": "visual"})
+        payload = TrackAddedPayload(track_id="trk-1", kind="visual", label="Track")
+        self.assertEqual(
+            payload.to_json_obj(),
+            {"track_id": "trk-1", "kind": "visual", "label": "Track"},
+        )
 
     def test_track_added_with_label(self) -> None:
         payload = TrackAddedPayload(track_id="trk-1", kind="audio", label="music")
@@ -799,11 +822,15 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
 
     def test_track_added_rejects_empty_track_id(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
-            TrackAddedPayload(track_id="", kind="visual")
+            TrackAddedPayload(track_id="", kind="visual", label="Track")
 
     def test_track_added_rejects_invalid_kind(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
-            TrackAddedPayload(track_id="trk-1", kind="caption")  # type: ignore[arg-type]
+            TrackAddedPayload(track_id="trk-1", kind="caption", label="Track")  # type: ignore[arg-type]
+
+    def test_track_added_rejects_missing_label_from_runtime_dict(self) -> None:
+        with self.assertRaises(TypeError):
+            TrackAddedPayload(track_id="trk-1", kind="visual")  # type: ignore[call-arg]
 
     def test_track_added_rejects_empty_label(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
@@ -938,7 +965,7 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
             ("effect.tuned", EffectTunedPayload(clip_id="c1", effect_id="e1", param="blur", value=5)),
             ("theme.set", ThemeSetPayload(theme_id="theme-01")),
             ("theme.overridden", ThemeOverriddenPayload(override_id="visual.brightness", value=0.8)),
-            ("track.added", TrackAddedPayload(track_id="trk-1", kind="visual")),
+            ("track.added", TrackAddedPayload(track_id="trk-1", kind="visual", label="Track")),
             ("track.removed", TrackRemovedPayload(track_id="trk-1")),
             ("audio.bound", AudioBoundPayload(clip_id="c1", asset_id="a1")),
             ("audio.unbound", AudioUnboundPayload(clip_id="c1")),
@@ -946,6 +973,7 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
             ("pool.asset_removed", PoolAssetRemovedPayload(asset_id="asset-1")),
             ("pool.asset_scored", PoolAssetScoredPayload(asset_id="asset-1", score=0.5)),
             ("arrangement.replaced", ArrangementReplacedPayload(arrangement={"clips": []})),
+            ("timeline.config_replaced", TimelineConfigReplacedPayload(config={"tracks": [], "clips": []})),
         ]
 
         for kind, payload in cases:
@@ -1036,6 +1064,19 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
         p5 = event5.payload
         assert isinstance(p5, ArrangementReplacedPayload)
         self.assertEqual(p5.arrangement, {"clips": [{"id": "x"}]})
+
+        # timeline.config_replaced from dict
+        event6 = TimelineEvent.new(
+            timeline_id=tid,
+            ts="2026-05-20T12:00:00Z",
+            actor=actor,
+            kind="timeline.config_replaced",
+            payload={"config": {"tracks": [], "clips": []}},
+        )
+        self.assertIsInstance(event6.payload, TimelineConfigReplacedPayload)
+        p6 = event6.payload
+        assert isinstance(p6, TimelineConfigReplacedPayload)
+        self.assertEqual(p6.config, {"tracks": [], "clips": []})
 
 
 class RecoveryAndErasureSchemaTest(unittest.TestCase):
@@ -1386,6 +1427,49 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
             )
 
     # ------------------------------------------------------------------
+    # timeline.config_replaced
+    # ------------------------------------------------------------------
+
+    def test_timeline_config_replaced_payload_validates_and_deep_copies(self) -> None:
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [],
+        }
+        payload = TimelineConfigReplacedPayload(config=config)
+        payload.config["tracks"][0]["label"] = "Changed"
+
+        self.assertEqual(config["tracks"][0]["label"], "Video")
+        obj = payload.to_json_obj()
+        obj["config"]["tracks"][0]["label"] = "Again"
+        self.assertEqual(payload.config["tracks"][0]["label"], "Changed")
+
+    def test_timeline_config_replaced_event_round_trips(self) -> None:
+        event = TimelineEvent.new(
+            timeline_id=self.tid,
+            ts="2026-05-21T12:00:00Z",
+            actor=self.actor,
+            kind="timeline.config_replaced",
+            payload=TimelineConfigReplacedPayload(config={"tracks": [], "clips": []}),
+        )
+        self.assertEqual(event.kind, "timeline.config_replaced")
+        self.assertIsInstance(event.payload, TimelineConfigReplacedPayload)
+        text = canonical_json_text(event, exclude_hash=True)
+        restored = TimelineEvent.from_dict(json.loads(text))
+        self.assertEqual(restored.kind, "timeline.config_replaced")
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+
+    def test_timeline_config_replaced_rejects_wrappers_and_legacy_keys(self) -> None:
+        invalid_configs = [
+            {"schema_version": 1, "assembly": {"tracks": [], "clips": []}},
+            {"tracks": [], "clips": [], "pool": {"entries": []}},
+            {"tracks": [], "clips": [], "arrangement": {"clips": []}},
+        ]
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises(TimelineEventSchemaError):
+                    TimelineConfigReplacedPayload(config=config)
+
+    # ------------------------------------------------------------------
     # timeline.recovered
     # ------------------------------------------------------------------
 
@@ -1409,7 +1493,7 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
                 anchor_event_id=generate_event_ulid(),
                 anchor_type="snapshot",
                 reason="restore-from-checkpoint",
-                projected_state_summary={"clips": 5},
+                projected_state_summary={"tracks": [], "clips": []},
             ),
         )
         self.assertEqual(event.kind, "timeline.recovered")
@@ -1433,6 +1517,24 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
                 anchor_type="event",
                 reason="",
             )
+
+    def test_timeline_recovered_rejects_wrappers_and_legacy_configs(self) -> None:
+        invalid_configs = [
+            {},
+            {"schema_version": 1, "assembly": {"tracks": [], "clips": []}},
+            {"tracks": [], "clips": [], "pool": {"entries": []}},
+            {"tracks": [], "clips": [], "arrangement": {"clips": []}},
+            {"tracks": [], "clips": [{"id": "old", "kind": "visual", "asset_id": "a1"}]},
+        ]
+        for config in invalid_configs:
+            with self.subTest(config=config):
+                with self.assertRaises(TimelineEventSchemaError):
+                    TimelineRecoveredPayload(
+                        anchor_event_id=generate_event_ulid(),
+                        anchor_type="event",
+                        reason="bad-state",
+                        projected_state_summary=config,
+                    )
 
     # ------------------------------------------------------------------
     # timeline.reverted
@@ -1520,7 +1622,7 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
             ts="2026-05-21T12:00:00Z",
             actor=self.actor,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
             source_backend="supabase",
             source_timeline_id=str(uuid4()),
             source_event_id=generate_event_ulid(),
@@ -1550,7 +1652,7 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
             ts="2026-05-21T12:00:00Z",
             actor=self.actor,
             kind="clip.added",
-            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+            payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
         )
         obj = event.to_json_obj()
         self.assertNotIn("source_backend", obj)
@@ -1566,7 +1668,7 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
                 ts="2026-05-21T12:00:00Z",
                 actor=self.actor,
                 kind="clip.added",
-                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
                 source_backend="",
             )
 
@@ -1577,7 +1679,7 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
                 ts="2026-05-21T12:00:00Z",
                 actor=self.actor,
                 kind="clip.added",
-                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
                 source_timeline_id="not-a-uuid",
             )
 
@@ -1588,7 +1690,7 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
                 ts="2026-05-21T12:00:00Z",
                 actor=self.actor,
                 kind="clip.added",
-                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1"),
+                payload=ClipAddedPayload(clip_id="c1", kind="visual", asset_id="a1", track_id="visual"),
                 source_version=True,  # type: ignore[arg-type]
             )
 

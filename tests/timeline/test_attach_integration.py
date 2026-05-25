@@ -47,7 +47,7 @@ def _seed_timeline(
     tdir = projects_root / project_slug / "timelines" / ulid
     tdir.mkdir(parents=True, exist_ok=True)
     (tdir / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
+        json.dumps({"clips": [], "tracks": []}), encoding="utf-8"
     )
     (tdir / "manifest.json").write_text(
         json.dumps(
@@ -192,13 +192,11 @@ class TestNoDefaultTimeline:
         """When no --timeline and no default and multiple timelines exist and
         stdin is not a tty, error with hint.
 
-        Sprint-N contract update: a single non-default timeline is now
-        auto-selected (with an informational stderr note), so we seed *two*
-        non-default timelines to force the disambiguation error path.
+        The project-level default_timeline_id=None sentinel means no default.
+        Even a single non-default timeline must be requested explicitly.
         """
         projects = env["projects"]
         _seed_timeline(projects, "demo", slug="alpha", is_default=False)
-        _seed_timeline(projects, "demo", slug="beta", is_default=False)
         _write_project_json(projects, "demo")
 
         buf = StringIO()

@@ -158,6 +158,75 @@ class SchemaContractTest(unittest.TestCase):
         # at render time via Timeline.for_render(), never written back.
         timeline.validate_timeline({"clips": []}, strict=False)
 
+    def test_canonical_empty_timeline_is_raw_runtime_container(self) -> None:
+        config = timeline.canonical_empty_timeline()
+
+        self.assertEqual(config, {"clips": [], "tracks": []})
+        timeline.validate_timeline_config_for_container(config)
+
+        config["clips"].append({"id": "mutated"})  # type: ignore[attr-defined]
+        self.assertEqual(timeline.canonical_empty_timeline(), {"clips": [], "tracks": []})
+
+    def test_container_validation_rejects_empty_and_legacy_shapes(self) -> None:
+        invalid_shapes = [
+            {},
+            {"clips": []},
+            {"tracks": []},
+            {"schema_version": 1, "assembly": {"clips": [], "tracks": []}},
+            {"clips": [], "tracks": [], "pool": {"entries": []}},
+            {"clips": [], "tracks": [], "arrangement": {"clips": []}},
+        ]
+
+        for config in invalid_shapes:
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    timeline.validate_timeline_config_for_container(config)
+
+    def test_container_validation_returns_json_safe_copy_without_mutating_input(self) -> None:
+        config = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [
+                {
+                    "id": "c1",
+                    "at": 0,
+                    "track": "v1",
+                    "clipType": "text",
+                    "hold": 2,
+                    "text": {"content": "Hello"},
+                }
+            ],
+        }
+        original = {
+            "tracks": [dict(config["tracks"][0])],
+            "clips": [dict(config["clips"][0])],
+        }
+
+        validated = timeline.validate_timeline_config_for_container(config)
+        validated["tracks"][0]["label"] = "Changed"  # type: ignore[index]
+        validated["clips"][0]["text"]["content"] = "Changed"  # type: ignore[index]
+
+        self.assertEqual(config, original)
+
+    def test_canonical_timeline_config_digest_is_stable_and_caller_safe(self) -> None:
+        config = {
+            "clips": [],
+            "tracks": [{"kind": "visual", "label": "Video", "id": "v1"}],
+            "theme_overrides": {"visual": {"canvas": {"fps": 24, "width": 1920}}},
+        }
+        reordered = {
+            "theme_overrides": {"visual": {"canvas": {"width": 1920, "fps": 24}}},
+            "tracks": [{"label": "Video", "id": "v1", "kind": "visual"}],
+            "clips": [],
+        }
+
+        before = str(config)
+        self.assertTrue(timeline.timeline_configs_equal(config, reordered))
+        self.assertEqual(
+            timeline.timeline_config_digest(config),
+            timeline.timeline_config_digest(reordered),
+        )
+        self.assertEqual(str(config), before)
+
     def test_validate_timeline_rejects_empty_or_non_string_theme(self) -> None:
         with self.assertRaisesRegex(ValueError, "Timeline.theme must be a non-empty slug"):
             timeline.validate_timeline({"theme": "", "clips": []}, strict=False)

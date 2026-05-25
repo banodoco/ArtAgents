@@ -61,35 +61,35 @@ See:
 
 ```bash
 # Cloud text-to-image
-python -m astrid.packs.builtin.generate_image.run \
+python -m astrid.packs.builtin.executors.generate_image.run \
   --model flux-dev --mode t2i --execution cloud \
   --prompt "a serene mountain lake at dawn" --out ./out
 
 # Local text-to-image (requires vibecomfy + ComfyUI)
-python -m astrid.packs.builtin.generate_image.run \
+python -m astrid.packs.builtin.executors.generate_image.run \
   --model z-image --mode t2i --execution local \
   --prompt "a serene mountain lake at dawn" --out ./out
 
 # Image-to-image (cloud)
-python -m astrid.packs.builtin.generate_image.run \
+python -m astrid.packs.builtin.executors.generate_image.run \
   --model flux-dev --mode i2i --execution cloud \
   --prompt "turn this into a watercolor painting" \
   --image-ref ./input.png --out ./out
 
 # Image-to-image (local)
-python -m astrid.packs.builtin.generate_image.run \
+python -m astrid.packs.builtin.executors.generate_image.run \
   --model z-image --mode i2i --execution local \
   --prompt "turn this into a watercolor painting" \
   --image-ref ./input.png --out ./out
 
 # Instruction-guided edit
-python -m astrid.packs.builtin.generate_image.run \
+python -m astrid.packs.builtin.executors.generate_image.run \
   --model qwen-image-edit --mode edit --execution cloud \
   --prompt "replace the background with a forest" \
   --image-ref ./input.png --out ./out
 
 # Multiple images with seed
-python -m astrid.packs.builtin.generate_image.run \
+python -m astrid.packs.builtin.executors.generate_image.run \
   --model flux-schnell --mode t2i --execution cloud \
   --prompt "cyberpunk city" --count 3 --seed 42 --out ./out
 ```

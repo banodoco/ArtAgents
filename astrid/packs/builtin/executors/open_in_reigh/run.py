@@ -30,7 +30,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from .....timeline import Timeline
+from astrid.timeline import Timeline
 
 
 DEFAULT_REIGH_APP = Path("/Users/peteromalley/Documents/reigh-workspace/reigh-app")

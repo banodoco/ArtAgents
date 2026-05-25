@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-from .....audit import register_outputs
+from astrid.audit import register_outputs
 
 
 def build_parser() -> argparse.ArgumentParser:

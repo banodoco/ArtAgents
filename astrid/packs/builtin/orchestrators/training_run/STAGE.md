@@ -42,7 +42,7 @@ python3 -m astrid orchestrators run builtin.training_run -- \
 Direct module form:
 
 ```bash
-python3 -m astrid.packs.builtin.training_run.run \
+python3 -m astrid.packs.builtin.orchestrators.training_run.run \
   --config configs/training-run.json \
   --dry-run
 ```
@@ -89,7 +89,7 @@ python3 -m astrid orchestrators run builtin.training_run -- \
 Direct module form:
 
 ```bash
-python3 -m astrid.packs.builtin.training_run.run resume \
+python3 -m astrid.packs.builtin.orchestrators.training_run.run resume \
   --out runs/training/my-run \
   --pick final
 ```

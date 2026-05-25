@@ -26,7 +26,7 @@ python3 -m astrid executors run builtin.html_canvas_effect \
 Run directly:
 
 ```bash
-python3 -m astrid.packs.builtin.html_canvas_effect.run \
+python3 -m astrid.packs.builtin.executors.html_canvas_effect.run \
   --effect-id glass-product-card \
   --label "Glass Product Card" \
   --out runs/html-canvas-effect/report.json
@@ -42,7 +42,7 @@ Output:
 Render the preview through the normal renderer:
 
 ```bash
-python3 -m astrid.packs.builtin.render.run \
+python3 -m astrid.packs.builtin.executors.render.run \
   --timeline runs/html-canvas-effect/timeline.json \
   --assets runs/html-canvas-effect/assets.json \
   --out runs/html-canvas-effect/preview.mp4

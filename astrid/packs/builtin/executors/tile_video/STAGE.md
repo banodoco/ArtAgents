@@ -23,7 +23,7 @@ python3 -m astrid executors run builtin.tile_video \
 Direct invocation:
 
 ```bash
-python3 -m astrid.packs.builtin.tile_video.run \
+python3 -m astrid.packs.builtin.executors.tile_video.run \
   --video path/to/source.mp4 \
   --out runs/tile_video/example \
   --grid 4x4 --overlap 0.25 --trim 15

@@ -15,7 +15,7 @@ python3 -m astrid executors inspect builtin.foley_review --json
 Run:
 
 ```bash
-python3 -m astrid.packs.builtin.foley_review.run \
+python3 -m astrid.packs.builtin.executors.foley_review.run \
   --manifest runs/foley_map/example/tiles.json \
   --out runs/foley_map/example/review.html
 ```

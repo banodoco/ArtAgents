@@ -31,6 +31,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Literal
 
+from astrid.core.util.time import utc_now_iso
+
 try:
     from filelock import FileLock, Timeout
 except ImportError:  # pragma: no cover - exercised only without optional dep.
@@ -152,7 +154,7 @@ def _lock_for(path: Path) -> Any:
 
 
 def _now() -> str:
-    return dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 def is_url(value: str | Path) -> bool:

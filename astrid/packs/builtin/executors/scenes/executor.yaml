@@ -67,6 +67,13 @@
       "name": "scenes",
       "path_template": "{out}/scenes.json",
       "type": "file"
+    },
+    {
+      "description": "",
+      "mode": "create_or_replace",
+      "name": "scene_items",
+      "path_template": "{out}/scene_items.json",
+      "type": "file"
     }
   ],
   "pipeline_requirements": [

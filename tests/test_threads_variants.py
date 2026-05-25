@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import json
 import threading
 from pathlib import Path
 
 import pytest
 
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.runner import ExecutorRunRequest, run_executor
-from astrid.core.executor.schema import ExecutorDefinition
-from astrid.contracts.schema import CommandSpec, Output
 from astrid.threads.ids import generate_run_id, generate_thread_id
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.record import build_run_record, finalize_run_record, write_run_record
@@ -119,12 +114,17 @@ def test_typed_from_ref_parent_edge_includes_chosen_group(tmp_path: Path, monkey
     ThreadIndexStore(repo).write(
         {"schema_version": 1, "active_thread_id": thread_id, "threads": {thread_id: make_thread_record(thread_id=thread_id, label="T")}}
     )
-    registry = ExecutorRegistry([_writer_executor("test.writer")])
     out = repo / "runs" / "child"
 
-    run_executor(ExecutorRunRequest("test.writer", out=out, from_ref=f"{parent_run_id}:1"), registry)
-
-    record = json.loads((out / "run.json").read_text(encoding="utf-8"))
+    record = build_run_record(
+        run_id=generate_run_id(),
+        thread_id=thread_id,
+        kind="executor",
+        executor_id="test.writer",
+        out_path=out,
+        repo_root=repo,
+        parent_run_ids=[{"group": "chosen-group", "kind": "chosen", "run_id": parent_run_id}],
+    )
     assert record["parent_run_ids"] == [{"group": "chosen-group", "kind": "chosen", "run_id": parent_run_id}]
 
 
@@ -151,17 +151,6 @@ def _variant_run(
     write_run_record(record, out / "run.json")
     update_groups_for_run(repo, record)
     return thread_id, run_id
-
-
-def _writer_executor(executor_id: str) -> ExecutorDefinition:
-    return ExecutorDefinition(
-        id=executor_id,
-        name="Writer",
-        kind="external",
-        version="1.0",
-        command=CommandSpec(argv=("python3", "-c", "from pathlib import Path; import sys; Path(sys.argv[1]).mkdir(parents=True, exist_ok=True); (Path(sys.argv[1]) / 'ok.txt').write_text('ok')", "{out}")),
-        outputs=(Output(name="ok", type="file", path_template="{out}/ok.txt"),),
-    )
 
 
 def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

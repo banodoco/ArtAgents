@@ -19,10 +19,9 @@ from astrid.core.project.run import (
     ProjectRunContext,
     finalize_project_run,
     prepare_project_run,
-    project_thread_env,
+    project_run_env,
     reject_project_with_out,
 )
-from astrid.threads import wrapper as thread_wrapper
 
 from .registry import OrchestratorRegistry, load_default_registry
 from .schema import OrchestratorDefinition, OrchestratorKind, OrchestratorValidationError, RuntimeKind
@@ -47,9 +46,6 @@ class OrchestratorRunRequest:
     dry_run: bool = False
     python_exec: str | None = None
     verbose: bool = False
-    thread: str | None = None
-    variants: int | None = None
-    from_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -145,15 +141,12 @@ def run_orchestrator(request: OrchestratorRunRequest, registry: OrchestratorRegi
     active_registry = registry or load_default_registry()
     orchestrator = active_registry.get(request.orchestrator_id)
     project_context, effective_request = _prepare_project_request(request, orchestrator)
-    context = None if project_context is not None else thread_wrapper.begin_orchestrator_run(effective_request, orchestrator)
     try:
         result = _run_orchestrator_inner(effective_request, orchestrator)
     except Exception as exc:
-        thread_wrapper.finalize_exception(context, exc)
         if project_context is not None:
             _finalize_project_orchestrator(project_context, effective_request, status="error", returncode=-1, error=exc)
         raise
-    thread_wrapper.finalize_result(context, result)
     if project_context is not None:
         _finalize_project_orchestrator(
             project_context,
@@ -238,10 +231,9 @@ def _run_command_orchestrator(
         list(command),
         cwd=cwd,
         env={
-            **os.environ,
+            **_base_subprocess_env(),
             **env,
             **_project_subprocess_env(request),
-            **thread_wrapper.subprocess_env(),
             "ASTRID_INTERNAL_INVOCATION": "1",
         },
         check=False,
@@ -497,7 +489,11 @@ def _finalize_project_orchestrator(
 
 
 def _project_subprocess_env(request: OrchestratorRunRequest) -> dict[str, str]:
-    return project_thread_env() if request.project else {}
+    return project_run_env() if request.project else {}
+
+
+def _base_subprocess_env() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if not key.startswith("ASTRID_THREAD")}
 
 
 def _has_cli_option(args: tuple[str, ...], option: str) -> bool:

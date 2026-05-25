@@ -14,7 +14,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 
 from astrid.core.project.project import create_project
+from astrid.core.project.paths import PROJECTS_ROOT_ENV
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.model import Session
+from astrid.core.session.paths import session_path
 from astrid.core.task.lifecycle import cmd_start
+from astrid.core.timeline.crud import create_timeline
 from astrid.orchestrate.compile import compile_to_path
 
 
@@ -47,6 +52,32 @@ def make_pack(packs_root: Path, pack: str, module_name: str, body: str) -> Path:
     module_path = pack_dir / f"{module_name}.py"
     module_path.write_text(body, encoding="utf-8")
     return module_path
+
+
+def bind_writer_session(
+    projects_root: Path,
+    project: str,
+    *,
+    run_id: str | None = None,
+    sid: str | None = None,
+) -> Session:
+    sid = sid or f"S-{project}-{run_id or 'pending'}"
+    os.environ[PROJECTS_ROOT_ENV] = str(projects_root)
+    os.environ[ASTRID_SESSION_ID_ENV] = sid
+    sess = Session(
+        id=sid,
+        project=project,
+        agent_id="claude-1",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        run_id=run_id,
+    )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
+    return sess
 
 
 def setup_packs_and_compile(
@@ -83,6 +114,8 @@ def setup_run(
     """
     packs, projects = setup_packs_and_compile(tmp_path, pack, module_name, body, qualified_id)
     create_project(project, root=projects, exist_ok=True)
+    create_timeline(project, "main", root=projects, is_default=True)
+    bind_writer_session(projects, project)
     os.environ["ASTRID_ACTOR"] = start_actor
     with redirect_stdout(io.StringIO()):
         rc = cmd_start(

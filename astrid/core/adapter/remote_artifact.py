@@ -1,4 +1,4 @@
-"""Remote-artifact adapter — dispatches a remote job, polls, fetches artifacts with checksums."""
+"""Provider-neutral remote-artifact adapter contract."""
 
 from __future__ import annotations
 
@@ -6,245 +6,199 @@ import json
 import os
 import shlex
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 
-from astrid.core.adapter import (
-    CompleteResult,
-    CompleteStatus,
-    DispatchResult,
-    PollResult,
-    PollStatus,
-    RunContext,
-)
-from astrid.core.adapter.remote_artifact_fetch import FetchResult, fetch_artifacts
+from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
+from astrid.core.util.time import utc_now_milliseconds
 
 
 def _step_dir(run_ctx: RunContext) -> Path:
-    """Resolve runs/<run>/steps/<id>/v<N>/... for this dispatch."""
-    base = run_ctx.project_root / "runs" / run_ctx.run_id / "steps"
-    for segment in run_ctx.plan_step_path:
-        base = base / segment
-    base = base / f"v{run_ctx.step_version}"
-    if run_ctx.iteration is not None:
-        base = base / "iterations" / f"{run_ctx.iteration:03d}"
-    elif run_ctx.item_id is not None:
-        base = base / "items" / run_ctx.item_id
-    return base
+    return step_dir_for_context(
+        run_ctx.project_root,
+        run_ctx.run_id,
+        run_ctx.plan_step_path,
+        run_ctx.step_version,
+        iteration=run_ctx.iteration,
+        item_id=run_ctx.item_id,
+    )
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+def _read_json(path: Path) -> dict[str, object]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_state(path: Path, state: dict[str, object]) -> None:
+    write_json_sidecar(path, state)
+
+
+def _update_state(path: Path, updates: dict[str, object]) -> dict[str, object]:
+    state = _read_json(path)
+    state.update(updates)
+    _write_state(path, state)
+    return state
+
+
+def _read_cost_sidecar(step_dir: Path) -> CostEntry | None:
+    candidate = step_dir / "produces" / "cost.json"
+    if not candidate.exists():
+        return None
+    payload = _read_json(candidate)
+    amount = payload.get("amount")
+    currency = payload.get("currency")
+    source = payload.get("source")
+    if not isinstance(amount, (int, float)) or not isinstance(currency, str) or not isinstance(source, str):
+        return None
+    return CostEntry(amount=float(amount), currency=currency, source=source)
 
 
 class RemoteArtifactAdapter:
-    """Adapter for steps targeting a remote executor pack.
-
-    ``dispatch()`` spawns the step's *command* (the executor pack invocation)
-    as a detached subprocess and captures the remote job ID from its stdout.
-    ``poll()`` checks subprocess liveness.  ``complete()`` verifies every
-    declared artifact via :func:`fetch_artifacts` and returns ``awaiting_fetch``
-    when any artifact is missing or has a checksum mismatch.
-    """
+    """Dispatches a provider-neutral command and completes from fetched artifacts."""
 
     name = "remote-artifact"
 
     def dispatch(self, step: Step, run_ctx: RunContext) -> DispatchResult:
         if step.command is None or not step.command.strip():
-            return DispatchResult(
-                status="rejected",
-                reason="remote-artifact adapter requires a non-empty command",
-            )
+            return DispatchResult(status="rejected", reason="remote-artifact adapter requires a non-empty command")
         step_dir = _step_dir(run_ctx)
         step_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            argv = list(run_ctx.canonical_argv) if run_ctx.canonical_argv else shlex.split(step.command)
+        except ValueError as exc:
+            return DispatchResult(status="rejected", reason=f"command not shell-parseable: {exc}")
 
         log_path = step_dir / "subprocess.log"
-
-        try:
-            argv = shlex.split(step.command)
-        except ValueError as exc:
-            return DispatchResult(
-                status="rejected",
-                reason=f"command not shell-parseable: {exc}",
-            )
-
         log_handle = open(log_path, "ab")
         try:
             proc = subprocess.Popen(
                 argv,
                 cwd=str(run_ctx.project_root),
-                stdout=subprocess.PIPE,
+                stdout=log_handle,
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
-                env={**os.environ},
+                env={**os.environ, **(run_ctx.task_env or {})},
             )
         except (FileNotFoundError, OSError) as exc:
             log_handle.close()
-            return DispatchResult(
-                status="rejected", reason=f"spawn failed: {exc}"
-            )
-
-        # Read the first stdout line as the remote job ID.
-        started_at = _utc_now_iso()
-        job_id: str | None = None
-        try:
-            if proc.stdout is not None:
-                line = proc.stdout.readline()
-                if line:
-                    job_id = line.decode("utf-8", errors="replace").strip()
-                    # Write captured line + remainder into log.
-                    log_handle.write(line)
-                    # Drain remaining stdout into log asynchronously via a copy loop.
-                    # We launch a thread to tee stdout into the log.
-                    import threading
-
-                    def _tee_stdout() -> None:
-                        if proc.stdout is None:
-                            return
-                        try:
-                            for chunk in iter(lambda: proc.stdout.read(4096), b""):
-                                log_handle.write(chunk)
-                                log_handle.flush()
-                        except (ValueError, OSError):
-                            pass
-
-                    threading.Thread(target=_tee_stdout, daemon=True).start()
-        except Exception:
-            pass
+            return DispatchResult(status="rejected", reason=f"spawn failed: {exc}")
         finally:
             log_handle.close()
 
-        # Persist remote state sidecar.
-        poll_interval = getattr(step, "poll_interval_seconds", 30) or 30
-        remote_state = {
+        started_at = utc_now_milliseconds()
+        job_id = argv[-1] if argv else f"pid-{proc.pid}"
+        state = {
+            "schema_version": 1,
+            "provider": "provider-neutral",
             "job_id": job_id,
             "started_at": started_at,
-            "command": step.command,
-            "poll_interval_seconds": poll_interval,
+            "status": "running",
+            "command": run_ctx.canonical_command or step.command,
+            "display_command": run_ctx.display_command,
+            "task_env": run_ctx.task_env or {},
+            "poll_interval_seconds": step.poll_interval_seconds,
             "pid": proc.pid,
+            "artifacts": [
+                {"name": entry.name, "path": entry.path, "sha256": entry.checksum}
+                for entry in step.produces
+            ],
         }
-        (step_dir / "remote_state.json").write_text(
-            json.dumps(remote_state), encoding="utf-8"
+        _write_state(step_dir / "remote_state.json", state)
+        write_json_sidecar(
+            step_dir / "dispatch.json",
+            {
+                "adapter": self.name,
+                "provider": "provider-neutral",
+                "command": run_ctx.canonical_command or step.command,
+                "display_command": run_ctx.display_command,
+                "task_env": run_ctx.task_env or {},
+                "pid": proc.pid,
+                "started_at": started_at,
+                "runpod_smoke_manifest": {
+                    "provider": "runpod",
+                    "job_id": job_id,
+                    "artifacts": state["artifacts"],
+                },
+            },
         )
-
-        # Also write a returncode sidecar placeholder for the executor.
         (step_dir / "returncode").write_text("-1", encoding="utf-8")
-
-        return DispatchResult(
-            status="dispatched", pid=proc.pid, started_at=started_at
-        )
+        return DispatchResult(status="dispatched", pid=proc.pid, started_at=started_at)
 
     def poll(self, step: Step, run_ctx: RunContext) -> PollResult:
-        remote_state_path = _step_dir(run_ctx) / "remote_state.json"
-        if not remote_state_path.exists():
+        state_path = _step_dir(run_ctx) / "remote_state.json"
+        if not state_path.exists():
             return PollResult(status="pending")
-
+        state = _read_json(state_path)
+        status = state.get("status")
+        if status == "awaiting_fetch":
+            return PollResult(status="done")
+        if status == "failed":
+            return PollResult(status="failed")
+        if status == "done":
+            return PollResult(status="done")
         try:
-            state = json.loads(remote_state_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            pid = int(state.get("pid", 0))
+        except (TypeError, ValueError):
             return PollResult(status="failed")
-
-        pid = state.get("pid", 0)
-        if pid is None or pid <= 0:
+        if pid <= 0:
             return PollResult(status="failed")
-
         try:
             os.kill(pid, 0)
         except ProcessLookupError:
+            _update_state(state_path, {"status": "done"})
             return PollResult(status="done")
         except PermissionError:
             return PollResult(status="running")
         return PollResult(status="running")
 
     def complete(self, step: Step, run_ctx: RunContext) -> CompleteResult:
-        """Verify artifacts and classify completion.
+        from astrid.core.adapter.remote_artifact_fetch import fetch_artifacts
 
-        Returns ``awaiting_fetch`` when any produce is missing or has
-        a checksum mismatch.  Returns ``failed`` only when the subprocess
-        itself reported a non-zero exit.
-        """
         step_dir = _step_dir(run_ctx)
         returncode_path = step_dir / "returncode"
-        returncode: int | None = None
-        if returncode_path.exists():
-            try:
-                returncode = int(returncode_path.read_text(encoding="utf-8").strip())
-            except ValueError:
-                returncode = None
-
-        cost = _read_cost_sidecar(step_dir)
-
-        # If the subprocess failed hard, fail the step.
-        if returncode is not None and returncode != 0 and returncode != -1:
+        if not returncode_path.exists():
+            return CompleteResult(status="failed", reason="returncode sidecar missing", cost=_read_cost_sidecar(step_dir))
+        try:
+            returncode = int(returncode_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return CompleteResult(status="failed", reason="returncode sidecar invalid", cost=_read_cost_sidecar(step_dir))
+        if returncode != 0:
+            _update_state(step_dir / "remote_state.json", {"status": "failed", "returncode": returncode})
             return CompleteResult(
                 status="failed",
                 returncode=returncode,
-                reason=f"subprocess exited with returncode={returncode}",
-                cost=cost,
+                reason=f"remote command exited with returncode={returncode}",
+                cost=_read_cost_sidecar(step_dir),
             )
 
-        # Run artifact fetch + checksum verification.
-        fetch_result: FetchResult = fetch_artifacts(step, run_ctx)
-
-        if fetch_result.status == "completed":
-            return CompleteResult(
-                status="completed", returncode=returncode or 0, cost=cost
-            )
-
-        if fetch_result.status == "awaiting_fetch":
-            # Persist missing/mismatched into remote_state.json so the gate's
-            # record_dispatch_complete can read them via _read_awaiting_fetch_items.
-            _persist_fetch_items(step_dir, fetch_result)
-            return CompleteResult(
-                status="awaiting_fetch",
-                returncode=returncode,
-                reason=fetch_result.reason,
-                cost=cost,
-            )
-
-        return CompleteResult(
-            status="failed",
-            returncode=returncode,
-            reason=fetch_result.reason,
-            cost=cost,
-        )
+        state_path = step_dir / "remote_state.json"
+        state = _read_json(state_path)
+        manifest_obj = state.get("manifest")
+        manifest = manifest_obj if isinstance(manifest_obj, dict) else None
+        result = fetch_artifacts(step, run_ctx, manifest=manifest)  # type: ignore[arg-type]
+        state.update({
+            "fetched": result.fetched,
+            "missing": result.missing,
+            "mismatched": result.mismatched,
+            "checksums": result.checksums,
+            "fetch_status": result.status,
+        })
+        _write_state(state_path, state)
+        if result.status == "completed":
+            _update_state(state_path, {"status": "done", "returncode": returncode})
+            return CompleteResult(status="completed", returncode=returncode, cost=_read_cost_sidecar(step_dir))
+        if result.status == "awaiting_fetch":
+            _update_state(state_path, {"status": "awaiting_fetch", "returncode": returncode})
+            reason = result.reason or f"awaiting remote artifacts: missing={result.missing!r} mismatched={result.mismatched!r}"
+            return CompleteResult(status="awaiting_fetch", returncode=returncode, cost=_read_cost_sidecar(step_dir), reason=reason)
+        _update_state(state_path, {"status": "failed", "returncode": returncode})
+        return CompleteResult(status="failed", returncode=returncode, cost=_read_cost_sidecar(step_dir), reason=result.reason)
 
 
-def _persist_fetch_items(step_dir: Path, fetch_result: FetchResult) -> None:
-    """Write missing/mismatched artifact names into remote_state.json."""
-    remote_state_path = step_dir / "remote_state.json"
-    try:
-        if remote_state_path.exists():
-            state = json.loads(remote_state_path.read_text(encoding="utf-8"))
-        else:
-            state = {}
-    except (json.JSONDecodeError, OSError):
-        state = {}
-    state["missing"] = fetch_result.missing
-    state["mismatched"] = fetch_result.mismatched
-    remote_state_path.write_text(json.dumps(state), encoding="utf-8")
-
-
-def _read_cost_sidecar(step_dir: Path) -> CostEntry | None:
-    """Honor the hype-spike G2 convention: subprocess MAY write produces/cost.json."""
-    candidate = step_dir / "produces" / "cost.json"
-    if not candidate.exists():
-        return None
-    try:
-        payload = json.loads(candidate.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    amount = payload.get("amount")
-    currency = payload.get("currency")
-    source = payload.get("source")
-    if (
-        not isinstance(amount, (int, float))
-        or not isinstance(currency, str)
-        or not isinstance(source, str)
-    ):
-        return None
-    return CostEntry(amount=float(amount), currency=currency, source=source)
+__all__ = ["RemoteArtifactAdapter"]
