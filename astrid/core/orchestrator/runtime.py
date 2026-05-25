@@ -40,7 +40,7 @@ def resolve_orchestrator_runtime(
     PR #8's ``PackResolver``.
 
     Args:
-        orchestrator_id: Qualified id, e.g. ``"builtin.hype"``.
+        orchestrator_id: Qualified id, e.g. ``"video_editing.hype"``.
         registry: Optional pre-built registry.  When *None* a default
             registry is constructed using *extra_pack_roots*.
         extra_pack_roots: Extra pack root directories forwarded to the

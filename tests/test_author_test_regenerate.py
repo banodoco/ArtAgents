@@ -28,7 +28,7 @@ def test_author_test_regenerate_rewrites_golden(tmp_path: Path) -> None:
     err = io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         rc = author_cli.main(
-            ["test", "builtin.hype", "--fixture", "smoke", "--regenerate"],
+            ["test", "video_editing.hype", "--fixture", "smoke", "--regenerate"],
             packs_root=packs,
         )
     assert rc == 0, f"stdout={out.getvalue()!r} stderr={err.getvalue()!r}"

@@ -3,7 +3,7 @@ tier: discovery
 description: |
   Agent receives a capability description ("judge a video against a brief
   and emit editorial notes") that is already covered by
-  `builtin.editor_review`. The brief explicitly instructs them to search
+  `editorial.editor_review`. The brief explicitly instructs them to search
   first. Failure mode probed: agent jumps straight to scaffolding a new
   executor/orchestrator under `astrid/packs/` instead of running
   `executors search` / `orchestrators search` and finding the existing
@@ -15,7 +15,7 @@ brief: search_before_authoring.md
 priming:
   - create_project: $SLUG
 
-target_orchestrator: builtin.editor_review
+target_orchestrator: editorial.editor_review
 
 agents:
   - model: deepseek-v4-pro
@@ -25,7 +25,7 @@ agents:
 acceptance:
   # Machine-graded
   - no_aborts
-  - tool_used: builtin.editor_review
+  - tool_used: editorial.editor_review
   # Subjective
   - subjective:
       - used_orchestrators_search_or_list
@@ -59,8 +59,8 @@ assessment:
       - id: invoked_via_canonical_cli
         question: |
           Did the agent invoke editor_review via `astrid orchestrators
-          run builtin.editor_review` rather than `python -m
-          astrid.packs.builtin.editor_review` or a direct import?
+          run editorial.editor_review` rather than `python -m
+          astrid.packs.editorial.editor_review` or a direct import?
         evidence: [stderr]
         grading: pass_fail
         weight: 2
@@ -79,7 +79,7 @@ assessment:
           `orchestrators search`/`list` call.
       - id: found_editor_review
         question: |
-          Did the agent find `builtin.editor_review` and identify it as
+          Did the agent find `editorial.editor_review` and identify it as
           the right tool, rather than missing it and falling through to
           authoring?
         evidence: [stderr, report]
@@ -88,7 +88,7 @@ assessment:
       - id: report_shape_intact
         question: |
           Does the report's "what tools you discovered" section name
-          `builtin.editor_review` with the discovery path that surfaced
+          `editorial.editor_review` with the discovery path that surfaced
           it?
         evidence: [report]
         grading: pass_fail

@@ -44,12 +44,12 @@ def _orchestrator_definition(orchestrator_id: str, *, name: str = "Demo") -> Orc
 class RegistryLookupSemanticsTest(unittest.TestCase):
     def test_executor_registry_get_resolves_alias_and_applies_override_by_canonical_id(self) -> None:
         resolver = AliasResolver()
-        resolver.register_alias("builtin.legacy_shots", "builtin.shots")
+        resolver.register_alias("builtin.legacy_shots", "editorial.shots")
         with tempfile.TemporaryDirectory() as tmp:
             override_store = OverrideStore(project_root=tmp)
-            override_store.set_override("executor", "builtin.shots", "local.shots")
+            override_store.set_override("executor", "editorial.shots", "local.shots")
             registry = ExecutorRegistry(alias_resolver=resolver, override_store=override_store)
-            registry.register(_executor_definition("builtin.shots", name="Shots"))
+            registry.register(_executor_definition("editorial.shots", name="Shots"))
             registry.register(_executor_definition("local.shots", name="Local Shots"))
 
             result = registry.get("builtin.legacy_shots")
@@ -71,12 +71,12 @@ class RegistryLookupSemanticsTest(unittest.TestCase):
 
     def test_orchestrator_registry_get_resolves_alias_and_applies_override_by_canonical_id(self) -> None:
         resolver = AliasResolver()
-        resolver.register_alias("builtin.legacy_hype", "builtin.hype")
+        resolver.register_alias("builtin.legacy_hype", "video_editing.hype")
         with tempfile.TemporaryDirectory() as tmp:
             override_store = OverrideStore(project_root=tmp)
-            override_store.set_override("orchestrator", "builtin.hype", "local.hype")
+            override_store.set_override("orchestrator", "video_editing.hype", "local.hype")
             registry = OrchestratorRegistry(alias_resolver=resolver, override_store=override_store)
-            registry.register(_orchestrator_definition("builtin.hype", name="Hype"))
+            registry.register(_orchestrator_definition("video_editing.hype", name="Hype"))
             registry.register(_orchestrator_definition("local.hype", name="Local Hype"))
 
             result = registry.get("builtin.legacy_hype")

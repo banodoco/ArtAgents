@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://astrid.builtin-training/schemas/run-state.schema.json",
   "title": "RunState",
-  "description": "Canonical run state for builtin.dataset_build. Includes ownership/version fields for stale-save detection.",
+  "description": "Canonical run state for training.dataset_build. Includes ownership/version fields for stale-save detection.",
   "type": "object",
   "required": ["run_id", "writer_id", "state_version", "created_at", "updated_at", "status"],
   "additionalProperties": false,

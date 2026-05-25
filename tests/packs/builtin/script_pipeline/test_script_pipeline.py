@@ -1,4 +1,4 @@
-"""builtin.script_pipeline fake-mode coverage."""
+"""editorial.script_pipeline fake-mode coverage."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from astrid.packs.builtin.executors.script_pipeline import run as script_run
+from astrid.packs.editorial.executors.script_pipeline import run as script_run
 
 
 def test_fake_mode_writes_candidates_selected_and_manifest(tmp_path: Path) -> None:

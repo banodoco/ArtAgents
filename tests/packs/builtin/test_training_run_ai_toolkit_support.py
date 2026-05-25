@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from astrid.packs.builtin.orchestrators.dataset_build.interfaces import ArtifactPullResult, RemoteExecResult, RunPodHandle
-from astrid.packs.builtin.orchestrators.training_run.ai_toolkit import register, review, stage, train
-from astrid.packs.builtin.orchestrators.training_run.ai_toolkit.train import Checkpoint
+from astrid.packs.training.orchestrators.dataset_build.interfaces import ArtifactPullResult, RemoteExecResult, RunPodHandle
+from astrid.packs.training.orchestrators.training_run.ai_toolkit import register, review, stage, train
+from astrid.packs.training.orchestrators.training_run.ai_toolkit.train import Checkpoint
 
 
 class FakeRemoteBackend:
@@ -137,7 +137,7 @@ def test_register_pulls_verifies_and_writes_registration_metadata(tmp_path: Path
 
 
 def test_ai_toolkit_support_modules_do_not_hardcode_ssh_key_paths() -> None:
-    package_root = Path("astrid/packs/builtin/orchestrators/training_run/ai_toolkit")
+    package_root = Path("astrid/packs/training/orchestrators/training_run/ai_toolkit")
     checked = list(package_root.glob("*.py"))
     assert checked
     forbidden = (".ssh", "id_rsa", "/Users/")

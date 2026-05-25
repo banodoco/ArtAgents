@@ -1,4 +1,4 @@
-"""Seinfeld-by-config parity coverage for builtin.training_run."""
+"""Seinfeld-by-config parity coverage for training.training_run."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from typing import Any
 import pytest
 import yaml
 
-from astrid.packs.builtin.orchestrators.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
-from astrid.packs.builtin.orchestrators.training_run.defaults import AI_TOOLKIT_LTX_DEFAULTS, RUNPOD_LTX_DEFAULTS
-import astrid.packs.builtin.orchestrators.training_run.run as training_run_module
-from astrid.packs.builtin.orchestrators.training_run.run import main as training_run_main
+from astrid.packs.training.orchestrators.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
+from astrid.packs.training.orchestrators.training_run.defaults import AI_TOOLKIT_LTX_DEFAULTS, RUNPOD_LTX_DEFAULTS
+import astrid.packs.training.orchestrators.training_run.run as training_run_module
+from astrid.packs.training.orchestrators.training_run.run import main as training_run_main
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_CONFIG = REPO_ROOT / "examples" / "configs" / "training" / "seinfeld-training.yaml"

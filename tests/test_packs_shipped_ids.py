@@ -48,12 +48,12 @@ class ShippedPackAlignmentTest(unittest.TestCase):
     def test_known_non_builtin_ids_resolve_to_their_packs(self) -> None:
         registry = load_executor_registry()
         cases = [
-            ("external.moirae", "external"),
-            ("external.vibecomfy.run", "external"),
-            ("external.vibecomfy.validate", "external"),
+            ("moirae.moirae", "moirae"),
+            ("vibecomfy.run", "vibecomfy"),
+            ("vibecomfy.validate", "vibecomfy"),
             ("iteration.prepare", "iteration"),
             ("iteration.assemble", "iteration"),
-            ("upload.youtube", "upload"),
+            ("youtube.upload", "youtube"),
         ]
         for executor_id, pack in cases:
             with self.subTest(executor_id=executor_id):

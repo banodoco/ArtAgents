@@ -19,7 +19,7 @@ For every shipped pack id in ``PORTFOLIO_PACK_IDS`` we prove:
   present on every per-component manifest with a valid ``kind``.
 
 Step 16.4 — the Phase 8 anchor — exercises the subprocess shift
-end-to-end for the ``builtin.asset_cache`` executor. The rejection
+end-to-end for the ``training.asset_cache`` executor. The rejection
 rationale for ``transcribe`` and ``validate`` is documented inline; see
 also ``MIGRATION_NOTES.md`` and plan ``§Step 16.4``.
 """
@@ -50,17 +50,28 @@ from astrid.packs.validate import validate_pack
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKS_DIR = REPO_ROOT / "astrid" / "packs"
 
-PORTFOLIO_PACK_IDS = ["builtin", "external", "iteration", "upload"]
+PORTFOLIO_PACK_IDS = [
+    "rendering",
+    "training",
+    "iteration",
+    "youtube",
+    "vibecomfy",
+    "moirae",
+    "runpod",
+]
 
 
 # One executor per pack to exercise the dispatch path. Each is picked
 # specifically because it has a runtime.command.argv block in its
 # manifest, so the runner reaches ``_run_external_executor``.
 REPRESENTATIVE_EXECUTORS: dict[str, str] = {
-    "builtin": "builtin.asset_cache",
-    "external": "external.vibecomfy.validate",
+    "rendering": "rendering.render",
+    "training": "training.asset_cache",
     "iteration": "iteration.prepare",
-    "upload": "upload.youtube",
+    "youtube": "youtube.upload",
+    "vibecomfy": "vibecomfy.validate",
+    "moirae": "moirae.moirae",
+    "runpod": "runpod.session",
 }
 
 
@@ -101,12 +112,9 @@ def test_resolver_discovers_pack(packs_index: dict, pack_id: str) -> None:
     assert pack is not None, f"pack {pack_id!r} not discovered"
     assert pack.id == pack_id
     assert pack.root.is_dir()
-    # Content roots are mandatory for packs that ship components, but
-    # the 'external' pack has executors at its root and no content: block.
-    if pack_id != "external":
-        assert pack.content, (
-            f"pack {pack_id!r} must declare content roots in pack.yaml"
-        )
+    assert pack.content, (
+        f"pack {pack_id!r} must declare content roots in pack.yaml"
+    )
 
 
 @pytest.mark.parametrize("pack_id", PORTFOLIO_PACK_IDS)
@@ -132,10 +140,9 @@ def test_pack_manifest_v1_compliant(pack_id: str) -> None:
         f"{pack_yaml}: schema_version must be 1, got {doc.get('schema_version')!r}"
     )
     content_val = doc.get("content")
-    if pack_id != "external":
-        assert isinstance(content_val, dict) and content_val, (
-            f"{pack_yaml}: must declare a non-empty content:{{}} block"
-        )
+    assert isinstance(content_val, dict) and content_val, (
+        f"{pack_yaml}: must declare a non-empty content:{{}} block"
+    )
 
 
 @pytest.mark.parametrize("pack_id", PORTFOLIO_PACK_IDS)
@@ -255,7 +262,10 @@ def test_packs_inspect_emits_structured_output(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("pack_id", PORTFOLIO_PACK_IDS)
+DISPATCH_PACK_IDS = [pack_id for pack_id in PORTFOLIO_PACK_IDS if pack_id != "rendering"]
+
+
+@pytest.mark.parametrize("pack_id", DISPATCH_PACK_IDS)
 def test_representative_executor_dispatches_external(pack_id: str) -> None:
     """The pack's representative executor goes through the external path.
 
@@ -304,8 +314,8 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
         if not port.required:
             continue
         inputs[port.name] = inputs.get(port.name, "x")
-    # upload.youtube needs richer inputs to pass its special-cased path.
-    if executor_id == "upload.youtube":
+    # youtube.upload needs richer inputs to pass its special-cased path.
+    if executor_id == "youtube.upload":
         inputs.update({"video_url": "https://example.com/v.mp4",
                        "title": "t", "description": "d"})
 
@@ -319,8 +329,8 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
 
     with mock.patch.object(runner_mod, "_run_external_executor", _fake_external), \
          mock.patch.object(runner_mod, "_run_builtin_executor", _fake_builtin):
-        if executor_id == "upload.youtube":
-            # upload.youtube has its own dispatch branch that calls the
+        if executor_id == "youtube.upload":
+            # youtube.upload has its own dispatch branch that calls the
             # external uploader directly, not _run_external_executor. The
             # other four packs cover the external-dispatch parity claim;
             # for upload, we still assert it never hits the in-process
@@ -334,9 +344,9 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
         else:
             runner_mod.run_executor(request, registry)
 
-    if executor_id == "upload.youtube":
+    if executor_id == "youtube.upload":
         assert not builtin_called["hit"], (
-            "upload.youtube unexpectedly dispatched through "
+            "youtube.upload unexpectedly dispatched through "
             "run_builtin_executor (the in-process built-in path)"
         )
     else:
@@ -421,14 +431,14 @@ def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
 def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,
                                              monkeypatch: pytest.MonkeyPatch
                                              ) -> None:
-    """Step 16.4 anchor: ``builtin.asset_cache`` runs as a real subprocess.
+    """Step 16.4 anchor: ``training.asset_cache`` runs as a real subprocess.
 
     Asserts:
       * exit code 0
       * stdout contains the canonical empty-cache prune line
         ``removed=0 freed_bytes=0`` (asset_cache/run.py:501)
       * stdout contains the runner's joined argv prefix
-        ``-m astrid.packs.builtin.executors.asset_cache.run --prune-older-than``
+        ``-m astrid.packs.training.executors.asset_cache.run --prune-older-than``
         which is ONLY emitted on the ``_run_external_executor`` path
         (``_cmd_run`` calls ``shlex.join(result.command)`` and the
         in-process builtin path does NOT populate ``result.command``).
@@ -456,7 +466,7 @@ def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,
     r = subprocess.run(
         [
             sys.executable, "-m", "astrid", "executors", "run",
-            "builtin.asset_cache",
+            "training.asset_cache",
             "--input", "prune_older_than=365",
             "--input", "prune_days=365",
             "--python-exec", sys.executable,
@@ -480,7 +490,7 @@ def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,
     # _run_external_executor (the in-process builtin path returns no
     # ``command`` on the result).
     assert (
-        "-m astrid.packs.builtin.executors.asset_cache.run "
+        "-m astrid.packs.training.executors.asset_cache.run "
         "--prune-older-than"
     ) in r.stdout, (
         "expected runner to log the external argv prefix (external "

@@ -6,7 +6,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from astrid.packs.external.runpod import run as runpod_run
+from astrid.packs.runpod.executors.provision import run as runpod_run
 
 
 def _handle() -> dict:

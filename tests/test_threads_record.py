@@ -71,12 +71,12 @@ def test_thread_compatibility_env_is_ignored_by_generic_runtime(tmp_path: Path, 
 def test_upload_youtube_is_zero_artifact_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     with mock.patch(
-        "astrid.packs.upload.executors.youtube.src.social_publish.publish_youtube_video",
+        "astrid.packs.youtube.executors.upload.src.social_publish.publish_youtube_video",
         return_value={"url": "https://youtube.example/video"},
     ):
         result = run_executor(
             ExecutorRunRequest(
-                "upload.youtube",
+                "youtube.upload",
                 out="",
                 inputs={
                     "video_url": "https://example.invalid/video.mp4",

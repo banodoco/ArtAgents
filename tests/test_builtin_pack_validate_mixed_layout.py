@@ -89,24 +89,79 @@ dependencies: {{}}
     _write(pack_root / "elements" / "effects" / name / "component.tsx", "export const Component = () => null;\n")
 
 
-def test_builtin_pack_validation_discovers_actual_mixed_layout_manifests(monkeypatch: Any) -> None:
-    expected_executors = {
-        path.relative_to(BUILTIN_PACK_ROOT)
-        for path in (BUILTIN_PACK_ROOT / "executors").glob("*/executor.yaml")
-    }
-    expected_orchestrators = {
-        path.relative_to(BUILTIN_PACK_ROOT)
-        for path in (BUILTIN_PACK_ROOT / "orchestrators").glob("*/orchestrator.yaml")
-    }
-    expected_elements = {
-        path.relative_to(BUILTIN_PACK_ROOT)
-        for path in (BUILTIN_PACK_ROOT / "elements").glob("*/*/element.yaml")
-    }
-    assert expected_executors
-    assert expected_orchestrators
-    assert expected_elements
+def test_pack_validation_discovers_manifests_via_declared_roots(
+    monkeypatch: Any,
+    tmp_path: Path,
+) -> None:
+    pack_root = tmp_path / "rendering"
+    _write(
+        pack_root / "pack.yaml",
+        """schema_version: 1
+id: rendering
+name: Rendering Test Pack
+version: 0.1.0
+agent:
+  purpose: Testing
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+""",
+    )
+    _write(pack_root / "AGENTS.md", "# Rendering Test Pack\n")
+    _write(pack_root / "README.md", "# Rendering Test Pack\n")
+    _write(
+        pack_root / "executors" / "render" / "executor.yaml",
+        """schema_version: 1
+id: rendering.render
+name: Render
+kind: built_in
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+""",
+    )
+    _write(pack_root / "executors" / "render" / "run.py", "def main():\n    return None\n")
+    _write(pack_root / "executors" / "render" / "STAGE.md", "# Render\n")
+    _write(
+        pack_root / "orchestrators" / "hype" / "orchestrator.yaml",
+        """schema_version: 1
+id: rendering.hype
+name: Hype
+kind: built_in
+version: 0.1.0
+runtime:
+  kind: python
+  module: run
+  function: main
+""",
+    )
+    _write(pack_root / "orchestrators" / "hype" / "run.py", "def main():\n    return None\n")
+    _write(pack_root / "orchestrators" / "hype" / "STAGE.md", "# Hype\n")
+    _write(
+        pack_root / "elements" / "effects" / "text_card" / "element.yaml",
+        """schema_version: 1
+id: text_card
+kind: effect
+pack_id: rendering
+metadata:
+  name: Text Card
+schema: {}
+defaults: {}
+dependencies: {}
+""",
+    )
+    _write(
+        pack_root / "elements" / "effects" / "text_card" / "component.tsx",
+        "export const Component = () => null;\n",
+    )
 
-    validator = PackValidator(BUILTIN_PACK_ROOT)
+    expected_executors = {Path("executors/render/executor.yaml")}
+    expected_orchestrators = {Path("orchestrators/hype/orchestrator.yaml")}
+    expected_elements = {Path("elements/effects/text_card/element.yaml")}
+
+    validator = PackValidator(pack_root)
     seen: dict[str, set[Path]] = {"executor": set(), "orchestrator": set(), "element": set()}
     original_validate_manifest = validator._validate_manifest
 

@@ -8,15 +8,15 @@ from pathlib import Path
 from astrid.core.element.schema import load_element_definition
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
-from astrid.packs.builtin.executors.html_canvas_effect.run import main, scaffold
+from astrid.packs.rendering.executors.html_canvas_effect.run import main, scaffold
 
 
 class HtmlCanvasEffectExecutorTest(unittest.TestCase):
     def test_executor_is_discoverable(self) -> None:
         registry = load_executor_registry()
-        executor = registry.get("builtin.html_canvas_effect")
+        executor = registry.get("rendering.html_canvas_effect")
 
-        self.assertEqual(executor.metadata["runtime_module"], "astrid.packs.builtin.executors.html_canvas_effect.run")
+        self.assertEqual(executor.metadata["runtime_module"], "astrid.packs.rendering.executors.html_canvas_effect.run")
         self.assertIn("HtmlInCanvas", executor.description)
 
     def test_scaffold_writes_local_effect_and_report(self) -> None:
@@ -46,7 +46,7 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
             self.assertEqual(manifest["id"], "glass-product-card")
             self.assertEqual(manifest["pack_id"], "local")
             self.assertTrue(manifest["metadata"]["render_requirements"]["uses_html_in_canvas"])
-            self.assertEqual(manifest["metadata"]["render_requirements"]["final_renderer"], "builtin.render")
+            self.assertEqual(manifest["metadata"]["render_requirements"]["final_renderer"], "rendering.render")
 
             element = load_element_definition(element_root, kind="effects", source="pack:local", editable=True, priority=10)
             self.assertEqual(element.id, "glass-product-card")
@@ -79,7 +79,7 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
             result = executors_cli.main(
                 [
                     "run",
-                    "builtin.html_canvas_effect",
+                    "rendering.html_canvas_effect",
                     "--input",
                     "effect_id=glass-product-card",
                     "--out",
@@ -89,7 +89,7 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
             )
 
         self.assertEqual(result, 0, stderr.getvalue())
-        self.assertIn("astrid.packs.builtin.executors.html_canvas_effect.run", stdout.getvalue())
+        self.assertIn("astrid.packs.rendering.executors.html_canvas_effect.run", stdout.getvalue())
 
 
 if __name__ == "__main__":

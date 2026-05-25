@@ -1,7 +1,7 @@
 # Iteration Assemble Executor
 
 `iteration.assemble` consumes the outputs from `iteration.prepare` and writes
-the render adapter files for `builtin.render`.
+the render adapter files for `rendering.render`.
 
 Inputs:
 

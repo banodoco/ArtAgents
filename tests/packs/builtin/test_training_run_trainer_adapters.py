@@ -8,12 +8,12 @@ from pathlib import Path
 import pytest
 import yaml
 
-from astrid.packs.builtin.orchestrators.training_run.trainer_adapters import (
+from astrid.packs.training.orchestrators.training_run.trainer_adapters import (
     ADAPTERS,
     TrainerAdapterRegistryError,
     get_trainer_adapter,
 )
-from astrid.packs.builtin.orchestrators.training_run.trainer_adapters.ai_toolkit_ltx import AiToolkitLtxTrainerAdapter
+from astrid.packs.training.orchestrators.training_run.trainer_adapters.ai_toolkit_ltx import AiToolkitLtxTrainerAdapter
 
 
 def _manifest(path: Path) -> Path:
@@ -129,7 +129,7 @@ def test_ai_toolkit_adapter_requires_config_owned_prompt_and_review_fields(tmp_p
 
 
 def test_generic_training_run_adapter_code_does_not_embed_seinfeld_defaults() -> None:
-    package_root = Path("astrid/packs/builtin/orchestrators/training_run")
+    package_root = Path("astrid/packs/training/orchestrators/training_run")
     checked = [
         path
         for path in package_root.rglob("*.py")

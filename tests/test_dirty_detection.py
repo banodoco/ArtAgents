@@ -41,8 +41,8 @@ class TestDetectLocalEdits:
             (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
             (root / "config.json").write_text('{"key": "value"}\n', encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.render", upstream_version="1.0.0")
-            result = detect_local_edits(root, forked_from="builtin.render")
+            write_fork_state(root, forked_from="rendering.render", upstream_version="1.0.0")
+            result = detect_local_edits(root, forked_from="rendering.render")
             assert result == "clean"
 
     def test_file_change_returns_dirty(self):
@@ -51,12 +51,12 @@ class TestDetectLocalEdits:
             root = Path(tmp)
             (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.render", upstream_version="1.0.0")
+            write_fork_state(root, forked_from="rendering.render", upstream_version="1.0.0")
 
             # Change the file
             (root / "main.py").write_text("print('world')\n", encoding="utf-8")
 
-            result = detect_local_edits(root, forked_from="builtin.render")
+            result = detect_local_edits(root, forked_from="rendering.render")
             assert result == "dirty"
 
     def test_new_file_returns_dirty(self):
@@ -65,12 +65,12 @@ class TestDetectLocalEdits:
             root = Path(tmp)
             (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.render", upstream_version="1.0.0")
+            write_fork_state(root, forked_from="rendering.render", upstream_version="1.0.0")
 
             # Add a new file
             (root / "extra.py").write_text("# extra\n", encoding="utf-8")
 
-            result = detect_local_edits(root, forked_from="builtin.render")
+            result = detect_local_edits(root, forked_from="rendering.render")
             assert result == "dirty"
 
     def test_deleted_file_returns_dirty(self):
@@ -80,12 +80,12 @@ class TestDetectLocalEdits:
             (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
             (root / "extra.py").write_text("# extra\n", encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.render", upstream_version="1.0.0")
+            write_fork_state(root, forked_from="rendering.render", upstream_version="1.0.0")
 
             # Delete a file
             (root / "extra.py").unlink()
 
-            result = detect_local_edits(root, forked_from="builtin.render")
+            result = detect_local_edits(root, forked_from="rendering.render")
             assert result == "dirty"
 
     def test_no_fork_state_file_returns_clean(self):
@@ -94,7 +94,7 @@ class TestDetectLocalEdits:
             root = Path(tmp)
             (root / "file.txt").write_text("hello\n", encoding="utf-8")
 
-            result = detect_local_edits(root, forked_from="builtin.render")
+            result = detect_local_edits(root, forked_from="rendering.render")
             # Falls through git check (not a worktree) → hash fallback → no fork state → clean
             assert result == "clean"
 
@@ -106,12 +106,12 @@ class TestDetectLocalEdits:
             sub.mkdir()
             (sub / "nested.py").write_text("x = 1\n", encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.render", upstream_version="1.0.0")
+            write_fork_state(root, forked_from="rendering.render", upstream_version="1.0.0")
 
             # Change nested file
             (sub / "nested.py").write_text("x = 2\n", encoding="utf-8")
 
-            result = detect_local_edits(root, forked_from="builtin.render")
+            result = detect_local_edits(root, forked_from="rendering.render")
             assert result == "dirty"
 
 
@@ -124,11 +124,11 @@ class TestWriteReadForkState:
             root = Path(tmp)
             (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.shots", upstream_version="2.0.0")
+            write_fork_state(root, forked_from="editorial.shots", upstream_version="2.0.0")
 
             state = read_fork_state(root)
             assert state is not None
-            assert state["forked_from"] == "builtin.shots"
+            assert state["forked_from"] == "editorial.shots"
             assert state["upstream_version"] == "2.0.0"
             assert "file_hashes" in state
             assert isinstance(state["file_hashes"], dict)
@@ -146,7 +146,7 @@ class TestWriteReadForkState:
             custom_hashes = {"a.py": "abc123", "b.py": "def456"}
             write_fork_state(
                 root,
-                forked_from="builtin.render",
+                forked_from="rendering.render",
                 upstream_version="1.0.0",
                 file_hashes=custom_hashes,
             )
@@ -160,14 +160,14 @@ class TestWriteReadForkState:
             root = Path(tmp)
             (root / "main.py").write_text("print('hello')\n", encoding="utf-8")
 
-            write_fork_state(root, forked_from="builtin.render", upstream_version="1.0.0")
+            write_fork_state(root, forked_from="rendering.render", upstream_version="1.0.0")
 
             # Now re-read the state — the fork state file itself should not be in hashes
             state = read_fork_state(root)
             assert ".astrid_fork_state.json" not in state["file_hashes"]
 
             # Writing again should produce clean (hashes haven't changed for actual content)
-            result = detect_local_edits(root, forked_from="builtin.render")
+            result = detect_local_edits(root, forked_from="rendering.render")
             assert result == "clean"
 
 

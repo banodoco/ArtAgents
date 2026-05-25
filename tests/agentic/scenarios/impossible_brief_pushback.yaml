@@ -73,7 +73,7 @@ assessment:
       - id: alternative_proposed
         question: |
           Did the agent propose or use an appropriate alternative such as
-          `builtin.visual_understand` / `builtin.understand --mode visual`
+          `understanding.visual_understand` / `understanding.understand --mode visual`
           for image analysis? Covers alternative_proposed.
         evidence: [report, stderr]
         grading: pass_fail_partial

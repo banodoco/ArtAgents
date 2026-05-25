@@ -10,21 +10,21 @@ executors or orchestrators, and they should not be used as compatibility shims.
 Use the built-in dataset pipeline with the Seinfeld example config:
 
 ```bash
-python3 -m astrid start builtin.dataset_build --project <project>
-python3 -m astrid orchestrators run builtin.dataset_build -- --config examples/configs/dataset/seinfeld-dataset.yaml
+python3 -m astrid start training.dataset_build --project <project>
+python3 -m astrid orchestrators run training.dataset_build -- --config examples/configs/dataset/seinfeld-dataset.yaml
 ```
 
 Use the built-in training pipeline with the Seinfeld training config:
 
 ```bash
-python3 -m astrid orchestrators run builtin.training_run -- --config examples/configs/training/seinfeld-training.yaml --dry-run
-python3 -m astrid orchestrators run builtin.training_run -- --config examples/configs/training/seinfeld-training.yaml --confirm-spend
+python3 -m astrid orchestrators run training.training_run -- --config examples/configs/training/seinfeld-training.yaml --dry-run
+python3 -m astrid orchestrators run training.training_run -- --config examples/configs/training/seinfeld-training.yaml --confirm-spend
 ```
 
 Use the built-in script pipeline with the Seinfeld preset:
 
 ```bash
-python3 -m astrid executors inspect builtin.script_pipeline --json
+python3 -m astrid executors inspect editorial.script_pipeline --json
 python3 -m astrid.packs.builtin.executors.script_pipeline.run --preset seinfeld --fake --produces-dir runs/seinfeld-script/produces
 python3 -m astrid.packs.builtin.executors.script_pipeline.run --preset seinfeld --produces-dir runs/seinfeld-script/produces
 ```
@@ -33,7 +33,7 @@ The direct module command above is useful when no Astrid session is bound. In a
 bound session, prefer the executor gateway:
 
 ```bash
-python3 -m astrid executors run builtin.script_pipeline -- --preset seinfeld --produces-dir runs/seinfeld-script/produces
+python3 -m astrid executors run editorial.script_pipeline -- --preset seinfeld --produces-dir runs/seinfeld-script/produces
 ```
 
 ## Archived Contents
@@ -52,11 +52,11 @@ python3 -m astrid executors run builtin.script_pipeline -- --preset seinfeld --p
 
 ## Migration Notes
 
-- `seinfeld.dataset_build` becomes `builtin.dataset_build` plus
+- `seinfeld.dataset_build` becomes `training.dataset_build` plus
   `examples/configs/dataset/seinfeld-dataset.yaml`.
-- `seinfeld.lora_train` becomes `builtin.training_run` plus
+- `seinfeld.lora_train` becomes `training.training_run` plus
   `examples/configs/training/seinfeld-training.yaml`.
-- `seinfeld.script_pipeline` becomes `builtin.script_pipeline` plus the
+- `seinfeld.script_pipeline` becomes `editorial.script_pipeline` plus the
   `seinfeld` preset in `astrid/packs/builtin/script_pipeline/presets/`.
 - Historical docs may still mention deleted `seinfeld.*` ids because they
   preserve prototype context. Active docs and examples should point at the

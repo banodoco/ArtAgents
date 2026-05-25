@@ -10,7 +10,7 @@ brief: timeline_transition.md
 priming:
   - create_project: $SLUG
 
-target_orchestrator: builtin.hype
+target_orchestrator: video_editing.hype
 
 agents:
   - model: deepseek-v4-pro

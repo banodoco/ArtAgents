@@ -19,7 +19,7 @@ from astrid.core.task import gate as task_gate
 from astrid.core.task.active_run import write_active_run
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.task.plan import compute_plan_hash
-from astrid.packs.builtin.orchestrators.hype import run as hype_run
+from astrid.packs.video_editing.orchestrators.hype import run as hype_run
 
 
 def test_pipeline_dispatch_calls_top_gate_and_executor_reentry(
@@ -68,7 +68,7 @@ def test_orchestrator_runner_rejects_before_project_run_side_effects(
 
     with patch("astrid.core.task.gate.gate_command", wraps=task_gate.gate_command) as gate_spy:
         with pytest.raises(OrchestratorRunnerError, match="astrid next --project demo"):
-            run_orchestrator(OrchestratorRunRequest(orchestrator_id="builtin.hype", project="demo"))
+            run_orchestrator(OrchestratorRunRequest(orchestrator_id="video_editing.hype", project="demo"))
 
     assert gate_spy.call_count == 1
     assert gate_spy.call_args.kwargs["reentry"] is True

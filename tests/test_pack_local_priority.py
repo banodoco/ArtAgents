@@ -42,30 +42,30 @@ class TestExecutorPriorityLocalVsNonLocal:
     def test_local_10_first_then_30(self):
         """Register local (10) first, then non-local (30) — local wins."""
         registry = ExecutorRegistry()
-        registry.register(_make_exec_def("builtin.shots", priority=10, pack_id="local"))
-        registry.register(_make_exec_def("builtin.shots", priority=30, pack_id="builtin"))
+        registry.register(_make_exec_def("editorial.shots", priority=10, pack_id="local"))
+        registry.register(_make_exec_def("editorial.shots", priority=30, pack_id="builtin"))
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         assert winner.metadata["source_pack"] == "local"
         assert winner.metadata["priority"] == 10
 
     def test_nonlocal_30_first_then_10(self):
         """Register non-local (30) first, then local (10) — local wins."""
         registry = ExecutorRegistry()
-        registry.register(_make_exec_def("builtin.shots", priority=30, pack_id="builtin"))
-        registry.register(_make_exec_def("builtin.shots", priority=10, pack_id="local"))
+        registry.register(_make_exec_def("editorial.shots", priority=30, pack_id="builtin"))
+        registry.register(_make_exec_def("editorial.shots", priority=10, pack_id="local"))
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         assert winner.metadata["source_pack"] == "local"
         assert winner.metadata["priority"] == 10
 
     def test_both_priority_30_fifo(self):
         """Two definitions with same priority — first registered wins (stable sort)."""
         registry = ExecutorRegistry()
-        registry.register(_make_exec_def("builtin.shots", priority=30, pack_id="builtin"))
-        registry.register(_make_exec_def("builtin.shots", priority=30, pack_id="external"))
+        registry.register(_make_exec_def("editorial.shots", priority=30, pack_id="builtin"))
+        registry.register(_make_exec_def("editorial.shots", priority=30, pack_id="external"))
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         # First registered wins with same priority
         assert winner.metadata["source_pack"] == "builtin"
 
@@ -74,7 +74,7 @@ class TestExecutorPriorityLocalVsNonLocal:
         registry = ExecutorRegistry()
         registry.register(
             ExecutorDefinition(
-                id="builtin.shots",
+                id="editorial.shots",
                 name="shots",
                 kind="built_in",
                 version="1.0.0",
@@ -83,7 +83,7 @@ class TestExecutorPriorityLocalVsNonLocal:
         )
         registry.register(
             ExecutorDefinition(
-                id="builtin.shots",
+                id="editorial.shots",
                 name="shots_local",
                 kind="built_in",
                 version="2.0.0",
@@ -91,7 +91,7 @@ class TestExecutorPriorityLocalVsNonLocal:
             )
         )
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         assert winner.metadata["source_pack"] == "local"
 
     def test_priority_as_string_coerced_to_int(self):
@@ -100,7 +100,7 @@ class TestExecutorPriorityLocalVsNonLocal:
         # Simulate a manifest with priority as string (odd but possible)
         registry.register(
             ExecutorDefinition(
-                id="builtin.shots",
+                id="editorial.shots",
                 name="shots",
                 kind="built_in",
                 version="1.0.0",
@@ -109,7 +109,7 @@ class TestExecutorPriorityLocalVsNonLocal:
         )
         registry.register(
             ExecutorDefinition(
-                id="builtin.shots",
+                id="editorial.shots",
                 name="shots_src",
                 kind="built_in",
                 version="1.0.0",
@@ -117,7 +117,7 @@ class TestExecutorPriorityLocalVsNonLocal:
             )
         )
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         assert winner.metadata["source_pack"] == "local"
 
 
@@ -127,38 +127,38 @@ class TestOrchestratorPriorityLocalVsNonLocal:
     def test_local_10_first_then_30(self):
         """Register local (10) first, then non-local (30) — local wins."""
         registry = OrchestratorRegistry()
-        registry.register(_make_orch_def("builtin.hype", priority=10, pack_id="local"))
-        registry.register(_make_orch_def("builtin.hype", priority=30, pack_id="builtin"))
+        registry.register(_make_orch_def("video_editing.hype", priority=10, pack_id="local"))
+        registry.register(_make_orch_def("video_editing.hype", priority=30, pack_id="builtin"))
 
-        winner = registry.get("builtin.hype")
+        winner = registry.get("video_editing.hype")
         assert winner.metadata["source_pack"] == "local"
 
     def test_nonlocal_30_first_then_10(self):
         """Register non-local (30) first, then local (10) — local wins."""
         registry = OrchestratorRegistry()
-        registry.register(_make_orch_def("builtin.hype", priority=30, pack_id="builtin"))
-        registry.register(_make_orch_def("builtin.hype", priority=10, pack_id="local"))
+        registry.register(_make_orch_def("video_editing.hype", priority=30, pack_id="builtin"))
+        registry.register(_make_orch_def("video_editing.hype", priority=10, pack_id="local"))
 
-        winner = registry.get("builtin.hype")
+        winner = registry.get("video_editing.hype")
         assert winner.metadata["source_pack"] == "local"
 
     def test_both_same_priority_stable_sort(self):
         """Same priority — first registered wins."""
         registry = OrchestratorRegistry()
-        registry.register(_make_orch_def("builtin.hype", priority=30, pack_id="builtin"))
-        registry.register(_make_orch_def("builtin.hype", priority=30, pack_id="external"))
+        registry.register(_make_orch_def("video_editing.hype", priority=30, pack_id="builtin"))
+        registry.register(_make_orch_def("video_editing.hype", priority=30, pack_id="external"))
 
-        winner = registry.get("builtin.hype")
+        winner = registry.get("video_editing.hype")
         assert winner.metadata["source_pack"] == "builtin"
 
     def test_three_definitions_with_different_priorities(self):
         """Three definitions — lowest priority number wins."""
         registry = OrchestratorRegistry()
-        registry.register(_make_orch_def("builtin.hype", priority=50, pack_id="experimental"))
-        registry.register(_make_orch_def("builtin.hype", priority=30, pack_id="builtin"))
-        registry.register(_make_orch_def("builtin.hype", priority=10, pack_id="local"))
+        registry.register(_make_orch_def("video_editing.hype", priority=50, pack_id="experimental"))
+        registry.register(_make_orch_def("video_editing.hype", priority=30, pack_id="builtin"))
+        registry.register(_make_orch_def("video_editing.hype", priority=10, pack_id="local"))
 
-        winner = registry.get("builtin.hype")
+        winner = registry.get("video_editing.hype")
         assert winner.metadata["source_pack"] == "local"
 
 

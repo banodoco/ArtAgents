@@ -75,7 +75,7 @@ def test_hype_metadata_gets_denormalized_pipeline_provenance_and_survives_index_
     (out / "hype.metadata.json").write_text(json.dumps({"pipeline": {"steps_run": ["cut"]}, "clips": {}, "sources": {}}), encoding="utf-8")
 
     record = finalize_run_record(
-        build_run_record(run_id=generate_run_id(), thread_id=thread_id, kind="executor", executor_id="builtin.cut", out_path=out, repo_root=repo),
+        build_run_record(run_id=generate_run_id(), thread_id=thread_id, kind="executor", executor_id="video_editing.cut", out_path=out, repo_root=repo),
         repo_root=repo,
         out_path=out,
         returncode=0,

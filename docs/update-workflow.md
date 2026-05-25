@@ -74,7 +74,7 @@ happens), you can promote those edits to a proper fork:
 
 ```bash
 # Fork the edited capability into your local pack, preserving changes
-python3 -m astrid executors fork builtin.render --overwrite
+python3 -m astrid executors fork rendering.render --overwrite
 ```
 
 The `--overwrite` flag replaces any existing fork. Without it, the fork command
@@ -88,14 +88,14 @@ pristine and makes dirty detection meaningful.
 Once you have a fork, tell the system to use it:
 
 ```bash
-# Route builtin.render → local.render
-python3 -m astrid executors override set builtin.render local.render
+# Route rendering.render → local.render
+python3 -m astrid executors override set rendering.render local.render
 
 # List active overrides
 python3 -m astrid executors override list
 
 # Remove when done
-python3 -m astrid executors override remove builtin.render
+python3 -m astrid executors override remove rendering.render
 ```
 
 Overrides are persisted in `astrid/packs/local/.overrides.json` and survive
@@ -111,7 +111,7 @@ python3 -m astrid executors dirty list
 python3 -m astrid executors inspect local.render --json | python3 -m json.tool
 
 # 3. If happy, set the override to make it the default
-python3 -m astrid executors override set builtin.render local.render
+python3 -m astrid executors override set rendering.render local.render
 
 # 4. Verify the override is active
 python3 -m astrid executors override list
@@ -121,13 +121,13 @@ python3 -m astrid executors override list
 
 ```bash
 # 1. Remove the override (if set)
-python3 -m astrid executors override remove builtin.render
+python3 -m astrid executors override remove rendering.render
 
 # 2. Delete the fork directory
 rm -rf astrid/packs/local/executors/render/
 
 # 3. Re-fork from the original
-python3 -m astrid executors fork builtin.render
+python3 -m astrid executors fork rendering.render
 ```
 
 ## Deferred Work

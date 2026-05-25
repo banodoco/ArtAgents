@@ -138,7 +138,7 @@ class DoctorSetupTest(unittest.TestCase):
             (mixed_orchestrator / "executor.yaml").write_text(
                 "\n".join(
                     [
-                        "id: external.vibecomfy.run",
+                        "id: vibecomfy.run",
                         "name: VibeComfy Run",
                         "kind: external",
                         "version: '1.0'",
@@ -155,7 +155,7 @@ class DoctorSetupTest(unittest.TestCase):
             (misplaced_executor / "executor.yaml").write_text(
                 "\n".join(
                     [
-                        "id: builtin.render",
+                        "id: rendering.render",
                         "name: Render",
                         "kind: built_in",
                         "version: '1.0'",
@@ -176,7 +176,7 @@ class DoctorSetupTest(unittest.TestCase):
             "orchestrator folder contains executor metadata: astrid/packs/external/vibecomfy",
             detail,
         )
-        self.assertIn("executor 'builtin.render' must live in pack 'builtin' but was found in pack 'external'", detail)
+        self.assertIn("executor 'rendering.render' must live in pack 'rendering' but was found in pack 'external'", detail)
 
 
 if __name__ == "__main__":

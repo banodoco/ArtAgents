@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from astrid.packs.builtin.orchestrators.dataset_build.artifacts import sidecar_hashes, write_hashed_sidecar
-from astrid.packs.builtin.orchestrators.dataset_build.caption_validation import validate_accepted_captions
-from astrid.packs.builtin.orchestrators.dataset_build.items import make_candidate_item
+from astrid.packs.training.orchestrators.dataset_build.artifacts import sidecar_hashes, write_hashed_sidecar
+from astrid.packs.training.orchestrators.dataset_build.caption_validation import validate_accepted_captions
+from astrid.packs.training.orchestrators.dataset_build.items import make_candidate_item
 
 
 def _accepted_item(tmp_path: Path) -> dict:

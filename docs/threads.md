@@ -58,7 +58,7 @@ and health-smell lines are not active user-facing runtime behavior.
 Before rendering an iteration video, inspect the lineage:
 
 ```bash
-python3 -m astrid.packs.builtin.orchestrators.iteration_video.run inspect <lineage-id-or-active>
+python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect <lineage-id-or-active>
 ```
 
 Inspect does not render and does not dispatch summarization. It reports detected
@@ -69,11 +69,12 @@ lineage.
 The render path is:
 
 ```text
-iteration.prepare -> iteration.assemble -> builtin.render -> finalize
+iteration.prepare -> iteration.assemble -> rendering.render -> finalize
 ```
 
 `iteration.assemble` writes canonical `iteration.*` files and render-compatible
-`hype.timeline.json` plus `hype.assets.json`. `builtin.render` consumes that
+`hype.timeline.json` plus `hype.assets.json`. `rendering.render` (legacy alias:
+`builtin.render`) consumes that
 exact `hype.*` pair and emits `hype.mp4`; the iteration-video orchestrator then
 records `iteration.mp4` with the other canonical iteration outputs.
 

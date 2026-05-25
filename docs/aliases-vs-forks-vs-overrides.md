@@ -112,16 +112,16 @@ source.
 
 ```bash
 # Shallow fork — copy just this capability
-python3 -m astrid executors fork builtin.render
-python3 -m astrid orchestrators fork builtin.hype
+python3 -m astrid executors fork rendering.render
+python3 -m astrid orchestrators fork video_editing.hype
 python3 -m astrid elements fork effects text-card
 
 # Deep fork — recursively fork all child executors/orchestrators too
-python3 -m astrid executors fork builtin.generate_image --deep
-python3 -m astrid orchestrators fork builtin.hype --deep
+python3 -m astrid executors fork generation.generate_image --deep
+python3 -m astrid orchestrators fork video_editing.hype --deep
 
 # Overwrite an existing fork
-python3 -m astrid executors fork builtin.render --overwrite
+python3 -m astrid executors fork rendering.render --overwrite
 ```
 
 ### Fork Provenance
@@ -161,17 +161,17 @@ thread-safe in-memory mapping of `(type, id) → target_id`, persisted to
 consulted after alias resolution.
 
 **Canonical-id keying:** Override keys are the *canonical* capability id, not
-the alias. When a caller requests `builtin.render` (an alias), the registry
-first resolves it to `rendering.render` (the canonical id), then checks the
-override store for `("executor", "rendering.render")`. This means one override
-covers all aliases that point to the same canonical target — you do not need to
-set separate overrides for each alias.
+the alias. When a caller requests `builtin.render` (a legacy alias), the
+registry first resolves it to `rendering.render` (the canonical id), then
+checks the override store for `("executor", "rendering.render")`. This means
+one override covers all aliases that point to the same canonical target — you
+do not need to set separate overrides for each alias.
 
 ### Override Commands
 
 ```bash
-# Route all requests for builtin.render to your local fork
-python3 -m astrid executors override set builtin.render local.render
+# Route all requests for rendering.render to your local fork
+python3 -m astrid executors override set rendering.render local.render
 
 # Route an element to a replacement
 python3 -m astrid elements override set effects text-card effects my-text-card
@@ -182,17 +182,17 @@ python3 -m astrid orchestrators override list
 python3 -m astrid elements override list
 
 # Remove an override
-python3 -m astrid executors override remove builtin.render
+python3 -m astrid executors override remove rendering.render
 ```
 
 ### Common Override Pattern: Fork + Override
 
-1. Fork the capability: `python3 -m astrid executors fork builtin.render`
+1. Fork the capability: `python3 -m astrid executors fork rendering.render`
 2. Edit the local copy at `astrid/packs/local/executors/render/`
-3. Set the override: `python3 -m astrid executors override set builtin.render local.render`
+3. Set the override: `python3 -m astrid executors override set rendering.render local.render`
 
-Now every consumer that references `builtin.render` gets your customized version
-transparently.
+Now every consumer that references `rendering.render` (or its legacy alias
+`builtin.render`) gets your customized version transparently.
 
 **When to use:** You have a fork (or another pack's capability) and want it to
 be the default resolution for a given id.

@@ -29,7 +29,7 @@ def test_author_test_reports_drift_with_unified_diff(tmp_path: Path) -> None:
     err = io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
         rc = author_cli.main(
-            ["test", "builtin.hype", "--fixture", "smoke"],
+            ["test", "video_editing.hype", "--fixture", "smoke"],
             packs_root=packs,
         )
     assert rc == 1, f"stdout={out.getvalue()!r} stderr={err.getvalue()!r}"

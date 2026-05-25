@@ -13,7 +13,7 @@ class CanonicalAliasTest(unittest.TestCase):
 
         registry = load_orchestrator_registry()
 
-        self.assertIn("builtin.hype", registry.as_mapping())
+        self.assertIn("video_editing.hype", registry.as_mapping())
         self.assertIsInstance(registry, OrchestratorRegistry)
 
     def test_executor_api_uses_canonical_implementation(self) -> None:
@@ -22,8 +22,8 @@ class CanonicalAliasTest(unittest.TestCase):
 
         registry = load_executor_registry()
 
-        self.assertIn("builtin.transcribe", registry.as_mapping())
-        self.assertIn("external.vibecomfy.run", registry.as_mapping())
+        self.assertIn("editorial.transcribe", registry.as_mapping())
+        self.assertIn("vibecomfy.run", registry.as_mapping())
         self.assertIsInstance(registry, ExecutorRegistry)
 
     def test_legacy_public_packages_are_absent(self) -> None:

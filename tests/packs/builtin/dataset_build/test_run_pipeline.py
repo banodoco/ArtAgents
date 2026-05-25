@@ -9,10 +9,10 @@ from typing import Any
 import yaml
 import pytest
 
-from astrid.packs.builtin.orchestrators.dataset_build import run as dataset_run
-from astrid.packs.builtin.orchestrators.dataset_build.items import config_hash, make_candidate_item
-from astrid.packs.builtin.orchestrators.dataset_build.state import make_initial_state, read_review_state, set_status, write_review_state
-from astrid.packs.builtin.orchestrators.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
+from astrid.packs.training.orchestrators.dataset_build import run as dataset_run
+from astrid.packs.training.orchestrators.dataset_build.items import config_hash, make_candidate_item
+from astrid.packs.training.orchestrators.dataset_build.state import make_initial_state, read_review_state, set_status, write_review_state
+from astrid.packs.training.orchestrators.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
 
 
 def _config(tmp_path: Path, media_dir: Path) -> Path:
@@ -426,7 +426,7 @@ def test_dataset_build_resume_uses_existing_review_state_authoritatively(tmp_pat
     config.setdefault("output", {})["run_dir"] = str(out_dir.resolve())
     existing = make_initial_state(
         run_id="fixture-run",
-        writer_id="builtin.dataset_build",
+        writer_id="training.dataset_build",
         config_hash=config_hash(config),
         buckets=config.get("buckets"),
         status="preview_ready",
@@ -687,7 +687,7 @@ def test_dataset_build_resume_rejects_config_hash_mismatch_without_mutating_stat
     out_dir.mkdir()
     existing = make_initial_state(
         run_id="fixture-run",
-        writer_id="builtin.dataset_build",
+        writer_id="training.dataset_build",
         config_hash="different-config",
         status="preview_ready",
     )
@@ -713,7 +713,7 @@ def test_acquire_candidates_embeds_initial_and_top_up_request_in_provider_config
     run_dir.mkdir()
     state = make_initial_state(
         run_id="fixture-run",
-        writer_id="builtin.dataset_build",
+        writer_id="training.dataset_build",
         config_hash="hash",
         status="acquiring",
     )
@@ -962,7 +962,7 @@ def test_dataset_build_dry_run_prints_plan_without_creating_artifacts(tmp_path: 
     assert exit_code == 0
     assert not out_dir.exists()
     payload = json.loads(capsys.readouterr().out)
-    assert payload["orchestrator"] == "builtin.dataset_build"
+    assert payload["orchestrator"] == "training.dataset_build"
     assert [stage["stage_id"] for stage in payload["filter_stages"]] == ["duration_filter"]
     assert payload["fixture_mode"] is True
     assert payload["budget_limits"]["max_api_calls"] == 1

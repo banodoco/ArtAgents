@@ -1,4 +1,4 @@
-"""Executor-manifest + execution validation tests for builtin.generate_image.
+"""Executor-manifest + execution validation tests for generation.generate_image.
 
 Covers:
   (a) Manifest validation — executor.yaml passes load_executor_manifest.
@@ -26,7 +26,7 @@ from astrid.core.util.http import Transport
 # Path to the executor manifest
 _EXECUTOR_YAML = (
     Path(__file__).resolve().parents[4]
-    / "astrid/packs/builtin/executors/generate_image/executor.yaml"
+    / "astrid/packs/generation/executors/generate_image/executor.yaml"
 )
 
 
@@ -87,7 +87,7 @@ _logging_transport_with_upload.calls = []  # type: ignore[attr-defined]
 def test_manifest_loads() -> None:
     """load_executor_manifest succeeds on the shipped executor.yaml."""
     manifest = load_executor_manifest(str(_EXECUTOR_YAML))
-    assert manifest.id == "builtin.generate_image"
+    assert manifest.id == "generation.generate_image"
     assert manifest.kind == "built_in"
     assert manifest.version == "2.0"
     # v2 executor has 13 inputs: mode, prompt, prompts_file, model, image_ref,
@@ -103,7 +103,7 @@ def test_manifest_loads() -> None:
 
 def test_execution_invalid_value(tmp_path: Path) -> None:
     """Invoking run with --execution both exits non-zero with message naming legal values."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     out = tmp_path / "out"
     with pytest.raises(SystemExit) as exc:
@@ -130,7 +130,7 @@ def test_requires_violation_no_http(tmp_path: Path) -> None:
 
     We inject a transport that records every call and assert the log is empty.
     """
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
     from astrid.core.util.http import default_client
 
     class CallLog:
@@ -189,7 +189,7 @@ def test_v1_model_id_rejected(tmp_path: Path) -> None:
     In v2, modes are separate from model IDs.  'flux-dev-img2img' is not a
     valid v2 model ID — the correct v2 invocation is 'flux-dev --mode i2i'.
     """
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     out = tmp_path / "out"
     # flux-dev-img2img does not exist in the v2 registry — should fail
@@ -212,7 +212,7 @@ def test_v1_model_id_rejected(tmp_path: Path) -> None:
 
 def test_edit_mode_rejects_negative_prompt(tmp_path: Path) -> None:
     """qwen-image-edit in edit mode drops --negative-prompt as unsupported (SD-003)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     import astrid.core.util.http as http_mod
 
@@ -262,7 +262,7 @@ def test_edit_mode_rejects_negative_prompt(tmp_path: Path) -> None:
 
 def test_edit_mode_rejects_strength(tmp_path: Path) -> None:
     """qwen-image-edit in edit mode drops --strength as unsupported (SD-003)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     import astrid.core.util.http as http_mod
 
@@ -311,7 +311,7 @@ def test_edit_mode_rejects_strength(tmp_path: Path) -> None:
 
 def test_per_entry_model_override_without_mode_rejected(tmp_path: Path) -> None:
     """Per-entry model override without 'mode' field is rejected (FLAG-004)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     prompts_file = tmp_path / "prompts.jsonl"
     prompts_file.write_text(
@@ -339,7 +339,7 @@ def test_per_entry_model_override_without_mode_rejected(tmp_path: Path) -> None:
 
 def test_per_entry_model_override_mode_mismatch_rejected(tmp_path: Path) -> None:
     """Per-entry model override with mode different from CLI --mode is rejected (FLAG-004)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     prompts_file = tmp_path / "prompts.jsonl"
     prompts_file.write_text(

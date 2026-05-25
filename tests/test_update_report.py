@@ -42,9 +42,9 @@ class TestUpdateCheck:
     def test_not_forked_returns_error(self):
         """Not-forked capability returns error='not_forked'."""
         registry = ExecutorRegistry()
-        registry.register(_make_exec_def("builtin.shots"))
+        registry.register(_make_exec_def("editorial.shots"))
 
-        result = update_check("builtin.shots", registry, capability_type="executor")
+        result = update_check("editorial.shots", registry, capability_type="executor")
         assert result["error"] == "not_forked"
         assert "not forked" in result["report"]
 
@@ -58,7 +58,7 @@ class TestUpdateCheck:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
@@ -77,7 +77,7 @@ class TestUpdateCheck:
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 **common,
                 metadata={"source": "pack", "source_pack": "builtin"},
@@ -91,21 +91,21 @@ class TestUpdateCheck:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
 
         result = update_check("local.shots", registry, capability_type="executor")
         assert result["recommendation"] == "up_to_date"
-        assert result["forked_from"] == "builtin.shots"
+        assert result["forked_from"] == "editorial.shots"
 
     def test_version_difference_detected(self):
         """Version difference between local and upstream is flagged."""
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="2.0.0",
                 metadata={"source": "pack", "source_pack": "builtin"},
             )
@@ -117,14 +117,14 @@ class TestUpdateCheck:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
 
         result = update_check("local.shots", registry, capability_type="executor")
         assert result["recommendation"] == "safe_to_update"
-        assert result["forked_from"] == "builtin.shots"
+        assert result["forked_from"] == "editorial.shots"
         assert result["upstream_version"] == "2.0.0"
         assert result["local_version"] == "1.0.0"
 
@@ -133,7 +133,7 @@ class TestUpdateCheck:
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 description="New improved description",
                 metadata={"source": "pack", "source_pack": "builtin"},
@@ -147,7 +147,7 @@ class TestUpdateCheck:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
@@ -162,7 +162,7 @@ class TestUpdateCheck:
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 isolation=IsolationMetadata(network=False),
                 metadata={"source": "pack", "source_pack": "builtin"},
@@ -176,7 +176,7 @@ class TestUpdateCheck:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
@@ -193,9 +193,9 @@ class TestUpdateApply:
     def test_apply_not_forked_returns_error(self):
         """Not-forked capability cannot be updated."""
         registry = ExecutorRegistry()
-        registry.register(_make_exec_def("builtin.shots"))
+        registry.register(_make_exec_def("editorial.shots"))
 
-        result = update_apply("builtin.shots", registry, capability_type="executor")
+        result = update_apply("editorial.shots", registry, capability_type="executor")
         assert result.get("error") == "not_forked"
         assert result.get("applied") is False
 
@@ -204,7 +204,7 @@ class TestUpdateApply:
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 metadata={"source": "pack", "source_pack": "builtin"},
             )
@@ -216,7 +216,7 @@ class TestUpdateApply:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
@@ -229,7 +229,7 @@ class TestUpdateApply:
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 isolation=IsolationMetadata(network=False),
                 metadata={"source": "pack", "source_pack": "builtin"},
@@ -243,7 +243,7 @@ class TestUpdateApply:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )
@@ -261,7 +261,7 @@ class TestUpdateApply:
             upstream_root.mkdir()
             (upstream_root / "executor.yaml").write_text(
                 json.dumps({
-                    "id": "builtin.shots",
+                    "id": "editorial.shots",
                     "name": "shots",
                     "kind": "built_in",
                     "version": "2.0.0",
@@ -283,7 +283,7 @@ class TestUpdateApply:
                     "version": "1.0.0",
                     "command": {"argv": ["echo", "hello"]},
                     "cache": {"mode": "none"},
-                    "metadata": {"forked_from": "builtin.shots"},
+                    "metadata": {"forked_from": "editorial.shots"},
                 }) + "\n",
                 encoding="utf-8",
             )
@@ -292,7 +292,7 @@ class TestUpdateApply:
             registry = ExecutorRegistry()
             registry.register(
                 _make_exec_def(
-                    "builtin.shots",
+                    "editorial.shots",
                     version="2.0.0",
                     metadata={
                         "source": "pack",
@@ -308,7 +308,7 @@ class TestUpdateApply:
                     metadata={
                         "source": "pack",
                         "source_pack": "local",
-                        "forked_from": "builtin.shots",
+                        "forked_from": "editorial.shots",
                         "content_root": str(local_root),
                     },
                 )
@@ -323,7 +323,7 @@ class TestUpdateApply:
             assert report_path.is_file()
             report_data = json.loads(report_path.read_text(encoding="utf-8"))
             assert report_data["capability_id"] == "local.shots"
-            assert report_data["forked_from"] == "builtin.shots"
+            assert report_data["forked_from"] == "editorial.shots"
 
             # Verify upstream content was copied to local root
             updated_run = (local_root / "run.py").read_text(encoding="utf-8")
@@ -338,7 +338,7 @@ class TestUpdateReportSafetyEscalations:
         registry = ExecutorRegistry()
         registry.register(
             _make_exec_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 isolation=IsolationMetadata(network=False, binaries=("ffmpeg",)),
                 metadata={"source": "pack", "source_pack": "builtin"},
@@ -352,7 +352,7 @@ class TestUpdateReportSafetyEscalations:
                 metadata={
                     "source": "pack",
                     "source_pack": "local",
-                    "forked_from": "builtin.shots",
+                    "forked_from": "editorial.shots",
                 },
             )
         )

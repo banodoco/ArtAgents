@@ -102,7 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run or dry-run one orchestrator.",
         description=(
             "Run or dry-run one orchestrator.\n\n"
-            "Orchestrators with a command runtime (most built-ins like builtin.hype) "
+            "Orchestrators with a command runtime (most built-ins like video_editing.hype) "
             "accept their pack-specific arguments via passthrough AFTER a literal `--`:\n\n"
             "    astrid orchestrators run <id> --project <slug> -- --pack-arg <value> ...\n\n"
             "To discover an orchestrator's pack-specific args:\n"
@@ -134,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.set_defaults(handler=_cmd_new)
 
     fork_parser = subparsers.add_parser("fork", help="Fork an orchestrator into the local pack (astrid/packs/local).")
-    fork_parser.add_argument("orchestrator_id", help="Qualified orchestrator id to fork (e.g., builtin.hype).")
+    fork_parser.add_argument("orchestrator_id", help="Qualified orchestrator id to fork (e.g., video_editing.hype).")
     fork_parser.add_argument("--overwrite", action="store_true", help="Replace an existing local fork.")
     fork_parser.add_argument("--deep", action="store_true", help="Also recursively fork all child executors and orchestrators.")
     fork_parser.set_defaults(handler=_cmd_fork)

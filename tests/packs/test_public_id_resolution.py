@@ -25,22 +25,22 @@ from astrid.core.orchestrator.registry import (
 # The six 3-segment ids that survive only because the qualified_id regex was
 # relaxed in Step 9.0. These are the load-bearing cases for this test.
 PRESERVED_EXECUTOR_IDS = [
-    "external.runpod.provision",
-    "external.runpod.exec",
-    "external.runpod.teardown",
-    "external.runpod.session",
-    "external.vibecomfy.run",
-    "external.vibecomfy.validate",
+    "runpod.provision",
+    "runpod.exec",
+    "runpod.teardown",
+    "runpod.session",
+    "vibecomfy.run",
+    "vibecomfy.validate",
     # One canonical 2-segment id per remaining pack — sanity checks that the
     # regex relaxation did not regress the common case either.
-    "builtin.asset_cache",
+    "training.asset_cache",
     "iteration.prepare",
-    "upload.youtube",
+    "youtube.upload",
 ]
 
 # One canonical orchestrator per pack that ships orchestrators.
 PRESERVED_ORCHESTRATOR_IDS = [
-    "builtin.hype",
+    "video_editing.hype",
 ]
 
 

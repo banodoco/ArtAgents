@@ -11,10 +11,10 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from astrid.packs.builtin.executors.asset_cache import run as asset_cache
-from astrid.packs.builtin.executors.cut import run as cut
+from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid.packs.video_editing.executors.cut import run as cut
 from astrid import timeline
-from astrid.packs.builtin.executors.render.run import _RangeHTTPRequestHandler
+from astrid.packs.rendering.executors.render.run import _RangeHTTPRequestHandler
 
 
 class UrlPipelineSmokeTests(unittest.TestCase):

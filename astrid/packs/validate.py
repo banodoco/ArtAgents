@@ -33,6 +33,8 @@ from astrid.core.pack import (
     _optional_pack_aliases,
     pack_taxonomy_from_manifest,
     pack_manifest_path,
+    validate_content_id_in_pack,
+    validate_element_pack_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -388,31 +390,7 @@ class PackValidator:
         """Validate all component manifests declared via content roots."""
         if self._pack_data is None:
             return
-
-        if self._is_builtin_pack():
-            self._validate_discovered_builtin_components(content)
-            return
-
-        # Executors
-        exec_root_rel = content.get("executors", "executors")
-        if isinstance(exec_root_rel, str) and exec_root_rel.strip():
-            exec_root = self.pack_root / exec_root_rel
-            if exec_root.is_dir():
-                self._validate_component_dir(exec_root, "executor")
-
-        # Orchestrators
-        orch_root_rel = content.get("orchestrators", "orchestrators")
-        if isinstance(orch_root_rel, str) and orch_root_rel.strip():
-            orch_root = self.pack_root / orch_root_rel
-            if orch_root.is_dir():
-                self._validate_component_dir(orch_root, "orchestrator")
-
-        # Elements
-        elem_root_rel = content.get("elements", "elements")
-        if isinstance(elem_root_rel, str) and elem_root_rel.strip():
-            elem_root = self.pack_root / elem_root_rel
-            if elem_root.is_dir():
-                self._validate_element_dir(elem_root)
+        self._validate_discovered_components(content)
 
     def _validate_component_dir(
         self, root_dir: Path, manifest_kind: str
@@ -458,13 +436,6 @@ class PackValidator:
 
                 self._validate_element_manifest_file(kind_dir.name, manifest_path)
 
-    def _is_builtin_pack(self) -> bool:
-        return (
-            self._pack_data is not None
-            and self._pack_data.get("id") == "builtin"
-            and self.pack_root.name == "builtin"
-        )
-
     def _pack_definition_for_discovery(self, content: dict[str, Any]) -> PackDefinition:
         data = self._pack_data or {}
         status = str(data.get("status") or "active")
@@ -486,20 +457,24 @@ class PackValidator:
             **taxonomy,
         )
 
-    def _validate_discovered_builtin_components(self, content: dict[str, Any]) -> None:
+    def _validate_discovered_components(self, content: dict[str, Any]) -> None:
         pack = self._pack_definition_for_discovery(content)
         for comp_dir in iter_executor_roots(pack):
             manifest_path = self._find_component_manifest(comp_dir, "executor")
             if manifest_path is not None:
-                self._validate_component_manifest_file(comp_dir, manifest_path, "executor")
+                self._validate_component_manifest_file(
+                    pack, comp_dir, manifest_path, "executor"
+                )
         for comp_dir in iter_orchestrator_roots(pack):
             manifest_path = self._find_component_manifest(comp_dir, "orchestrator")
             if manifest_path is not None:
-                self._validate_component_manifest_file(comp_dir, manifest_path, "orchestrator")
+                self._validate_component_manifest_file(
+                    pack, comp_dir, manifest_path, "orchestrator"
+                )
         for kind, elem_dir in iter_element_roots(pack):
             manifest_path = self._find_component_manifest(elem_dir, "element")
             if manifest_path is not None:
-                self._validate_element_manifest_file(kind, manifest_path)
+                self._validate_element_manifest_file(pack, kind, manifest_path)
 
     def _find_component_manifest(self, component_dir: Path, manifest_kind: str) -> Path | None:
         names = {
@@ -515,6 +490,7 @@ class PackValidator:
 
     def _validate_component_manifest_file(
         self,
+        pack: PackDefinition,
         component_dir: Path,
         manifest_path: Path,
         manifest_kind: str,
@@ -533,6 +509,14 @@ class PackValidator:
             if manifest_kind in self._pack_capability_locations:
                 self._pack_capability_locations[manifest_kind][component_id] = rel
             self._register_aliases(data, rel)
+            try:
+                validate_content_id_in_pack(
+                    component_id,
+                    pack,
+                    content_type=manifest_kind,
+                )
+            except ValueError as exc:
+                self.errors.append(f"{rel}: {exc}")
 
         self._validate_runtime_entrypoints(component_dir, data, manifest_kind, rel)
 
@@ -542,7 +526,12 @@ class PackValidator:
         if not stage_path.is_file():
             self.warnings.append(f"{self._rel(stage_path)}: STAGE.md not found")
 
-    def _validate_element_manifest_file(self, kind: str, manifest_path: Path) -> None:
+    def _validate_element_manifest_file(
+        self,
+        pack: PackDefinition,
+        kind: str,
+        manifest_path: Path,
+    ) -> None:
         data = self._load_yaml(manifest_path)
         if data is None:
             return
@@ -558,6 +547,14 @@ class PackValidator:
             else:
                 self._register_capability_id(element_id, rel)
             self._register_aliases(data, rel)
+        try:
+            validate_element_pack_id(
+                data.get("pack_id"),
+                pack,
+                element_root=manifest_path.parent,
+            )
+        except ValueError as exc:
+            self.errors.append(f"{rel}: {exc}")
 
     def _validate_runtime_entrypoints(
         self,

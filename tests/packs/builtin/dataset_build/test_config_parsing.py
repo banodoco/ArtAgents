@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from astrid.packs.builtin.orchestrators.dataset_build.config import (
+from astrid.packs.training.orchestrators.dataset_build.config import (
     MISSING_SCHEMA_VERSION_SOURCE,
     MISSING_SCHEMA_VERSION_WARNING,
     BudgetPreflightError,
@@ -316,7 +316,7 @@ def test_preflight_rejects_api_backed_transcript_filter_without_secret(tmp_path:
     path = _write_json(tmp_path / "transcript-preflight.json", data)
     parsed = load_dataset_config(path)
 
-    with pytest.raises(SecretPreflightError, match="filter.transcript.builtin.transcribe"):
+    with pytest.raises(SecretPreflightError, match="filter.transcript.editorial.transcribe"):
         preflight_budget_and_secrets(parsed, env={})
 
 
@@ -334,4 +334,4 @@ def test_preflight_does_not_require_secret_for_near_duplicate_filter(tmp_path: P
 def test_env_example_documents_dataset_build_secrets() -> None:
     text = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "OPENAI_API_KEY=" in text
-    assert "builtin.dataset_build" in text
+    assert "training.dataset_build" in text

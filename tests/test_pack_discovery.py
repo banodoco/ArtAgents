@@ -125,14 +125,14 @@ class PackDiscoveryTest(unittest.TestCase):
 
         self.assertGreaterEqual(len(executor_registry.list()), 51)
         self.assertGreaterEqual(len(orchestrator_registry.list()), 5)
-        self.assertIn("builtin.cut", executor_registry.as_mapping())
-        self.assertIn("external.moirae", executor_registry.as_mapping())
+        self.assertIn("video_editing.cut", executor_registry.as_mapping())
+        self.assertIn("moirae.moirae", executor_registry.as_mapping())
         self.assertIn("media.clip_extract", executor_registry.as_mapping())
         self.assertEqual(
             sorted(executor.id for executor in executor_registry.list() if "clip_extract" in executor.id),
             ["media.clip_extract"],
         )
-        self.assertIn("builtin.hype", orchestrator_registry.as_mapping())
+        self.assertIn("video_editing.hype", orchestrator_registry.as_mapping())
 
     def test_canonical_content_roots_are_used_for_discovery(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -227,7 +227,7 @@ class PackDiscoveryTest(unittest.TestCase):
     def test_misplaced_executor_id_fails_pack_alignment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = write_pack(Path(tmp) / "packs", "builtin")
-            write_executor(pack_root, "moirae", "external.moirae")
+            write_executor(pack_root, "moirae", "moirae.moirae")
             packs = discover_packs(Path(tmp) / "packs")
 
             with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
@@ -237,7 +237,7 @@ class PackDiscoveryTest(unittest.TestCase):
     def test_misplaced_orchestrator_id_fails_pack_alignment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pack_root = write_pack(Path(tmp) / "packs", "external")
-            write_orchestrator(pack_root, "hype", "builtin.hype")
+            write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(Path(tmp) / "packs")
 
             with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
@@ -255,7 +255,7 @@ class PackDiscoveryTest(unittest.TestCase):
                     load_pack_elements()
 
     def test_qualified_id_pack_segment_helper_rejects_bare_ids(self) -> None:
-        self.assertEqual(qualified_id_pack_id("builtin.cut"), "builtin")
+        self.assertEqual(qualified_id_pack_id("video_editing.cut"), "video_editing")
         with self.assertRaisesRegex(PackValidationError, "must be qualified"):
             qualified_id_pack_id("cut")
 

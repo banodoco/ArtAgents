@@ -1,0 +1,31 @@
+schema_version: 1
+id: foley
+name: Astrid Foley
+version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: media
+stability: stable
+support: core
+visibility: visible
+description: Foley processing executors and orchestration.
+content:
+  executors: executors
+  orchestrators: orchestrators
+aliases:
+- kind: executor
+  alias: builtin.foley_review
+  canonical_id: foley.foley_review
+  deprecated: true
+  deprecation_message: Moved to foley.foley_review
+- kind: executor
+  alias: builtin.tile_video
+  canonical_id: foley.tile_video
+  deprecated: true
+  deprecation_message: Moved to foley.tile_video
+- kind: orchestrator
+  alias: builtin.foley_map
+  canonical_id: foley.foley_map
+  deprecated: true
+  deprecation_message: Moved to foley.foley_map

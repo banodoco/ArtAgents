@@ -20,7 +20,7 @@ from astrid.orchestrate import (
 
 
 def _valid_argv() -> list:
-    return ["python3", "-m", "astrid", "executors", "run", "builtin.transcribe", "--project", "demo"]
+    return ["python3", "-m", "astrid", "executors", "run", "editorial.transcribe", "--project", "demo"]
 
 
 class TestTypedHandle:
@@ -43,7 +43,7 @@ class TestArgvGuards:
         with pytest.raises(OrchestrateDefinitionError) as excinfo:
             code(
                 "bad",
-                argv=["python3", "-m", "astrid", "orchestrators", "run", "builtin.hype"],
+                argv=["python3", "-m", "astrid", "orchestrators", "run", "video_editing.hype"],
             )
         assert "orchestrators" in str(excinfo.value).lower()
 

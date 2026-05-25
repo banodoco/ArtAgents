@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.packs.builtin.executors.render import run as render_remotion
+from astrid.packs.rendering.executors.render import run as render_remotion
 from astrid import timeline
 
 

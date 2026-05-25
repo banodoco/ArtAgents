@@ -15,7 +15,7 @@ from referencing import Registry, Resource
 ROOT = Path(__file__).resolve().parents[4]
 DOCS_CONTRACTS = ROOT / "docs" / "megaplan" / "epics" / "builtin-training" / "contracts"
 DOCS_SCHEMAS = DOCS_CONTRACTS / "schemas"
-RUNTIME_PACKAGE = ROOT / "astrid" / "packs" / "builtin" / "orchestrators" / "dataset_build"
+RUNTIME_PACKAGE = ROOT / "astrid" / "packs" / "training" / "orchestrators" / "dataset_build"
 RUNTIME_SCHEMAS = RUNTIME_PACKAGE / "schemas"
 
 SCHEMA_VERSION_SOURCE_PROPERTY = {

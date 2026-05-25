@@ -170,9 +170,9 @@ def test_start_builtin_canonical_orchestrators_ignore_stale_build_json_and_use_r
     projects_root.mkdir()
 
     for qualified_id in (
-        "builtin.hype",
-        "builtin.event_talks",
-        "builtin.thumbnail_maker",
+        "video_editing.hype",
+        "video_editing.event_talks",
+        "video_editing.thumbnail_maker",
     ):
         _, name = qualified_id.split(".", 1)
         build_dir = packs_root / "builtin" / "build"
@@ -206,13 +206,13 @@ def test_start_builtin_canonical_orchestrators_ignore_stale_build_json_and_use_r
             str(source.resolve()): hashlib.sha256(source.read_bytes()).hexdigest()
         }
 
-        if qualified_id == "builtin.hype":
+        if qualified_id == "video_editing.hype":
             brief = proj_root / "brief.txt"
             brief.write_text("make it punchy\n", encoding="utf-8")
             expected_consumes[str(brief.resolve())] = hashlib.sha256(
                 brief.read_bytes()
             ).hexdigest()
-        elif qualified_id == "builtin.event_talks":
+        elif qualified_id == "video_editing.event_talks":
             transcript = proj_root / "transcript.json"
             transcript.write_text('{"segments":[]}\n', encoding="utf-8")
             expected_consumes[str(transcript.resolve())] = hashlib.sha256(
@@ -249,9 +249,9 @@ def test_start_builtin_canonical_orchestrators_ignore_stale_build_json_and_use_r
         )
         assert "STALE_COMPILED_CONTENT" not in plan_text
         assert "stale-step" not in plan_text
-        if qualified_id == "builtin.event_talks":
+        if qualified_id == "video_editing.event_talks":
             assert str((proj_root / "transcript.json").resolve()) in plan_text
-        if qualified_id == "builtin.thumbnail_maker":
+        if qualified_id == "video_editing.thumbnail_maker":
             assert "dramatic speaker on stage" in plan_text
 
 
@@ -266,8 +266,8 @@ def test_canonical_start_creates_task_events_not_pack_audit_log(
     projects_root.mkdir()
 
     for qualified_id in (
-        "builtin.event_talks",
-        "builtin.thumbnail_maker",
+        "video_editing.event_talks",
+        "video_editing.thumbnail_maker",
     ):
         _, name = qualified_id.split(".", 1)
         # Seed stale build JSON so we can also verify it is ignored
@@ -299,7 +299,7 @@ def test_canonical_start_creates_task_events_not_pack_audit_log(
         source = proj_root / "source.mp4"
         source.write_bytes(f"audit-source-{qualified_id}".encode("utf-8"))
 
-        if qualified_id == "builtin.event_talks":
+        if qualified_id == "video_editing.event_talks":
             (proj_root / "transcript.json").write_text('{"segments":[]}\n', encoding="utf-8")
         else:
             (proj_root / "query.txt").write_text("test query\n", encoding="utf-8")
@@ -358,7 +358,7 @@ def test_canonical_step_reentry_records_completion_and_events_verify_bypasses_ga
     (proj_root / "transcript.json").write_text('{"segments":[]}\n', encoding="utf-8")
 
     assert cmd_start(
-        ["builtin.event_talks", "--project", slug, "--name", run_id],
+        ["video_editing.event_talks", "--project", slug, "--name", run_id],
         packs_root=packs_root,
         projects_root=projects_root,
     ) == 0
@@ -406,3 +406,38 @@ def test_canonical_step_reentry_records_completion_and_events_verify_bypasses_ga
         os.environ.pop("ASTRID_TASK_PROJECT", None)
         os.environ.pop("ASTRID_TASK_RUN_ID", None)
         os.environ.pop("ASTRID_TASK_STEP_ID", None)
+
+
+def test_start_accepts_legacy_alias_but_records_canonical_orchestrator_id(
+    tmp_path: Path,
+) -> None:
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+
+    slug = "legacy-hype"
+    run_id = "run-legacy-hype"
+    create_project(slug, root=projects_root)
+    create_timeline(slug, "main", root=projects_root, is_default=True)
+    bind_writer_session(projects_root, slug, sid="S-legacy-hype")
+
+    proj_root = projects_root / slug
+    (proj_root / "source.mp4").write_bytes(b"fake mp4 bytes")
+    (proj_root / "brief.txt").write_text("make it punchy\n", encoding="utf-8")
+
+    stdout = io.StringIO()
+    with redirect_stdout(stdout):
+        rc = cmd_start(
+            ["builtin.hype", "--project", slug, "--name", run_id],
+            projects_root=projects_root,
+        )
+
+    assert rc == 0
+    assert stdout.getvalue().splitlines()[0] == "started video_editing.hype"
+
+    run_json = json.loads(
+        (proj_root / "runs" / run_id / "run.json").read_text(encoding="utf-8")
+    )
+    assert run_json["tool_id"] == "video_editing.hype"
+
+    agent_md = (proj_root / "runs" / run_id / "AGENT.md").read_text(encoding="utf-8")
+    assert "QUALIFIED ORCHESTRATOR: video_editing.hype" in agent_md

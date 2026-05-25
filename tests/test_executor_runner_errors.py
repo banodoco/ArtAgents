@@ -12,14 +12,17 @@ from __future__ import annotations
 
 import sys
 import textwrap
+import types
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from astrid._paths import executor_argv, resolve_executor_runtime_module
 from astrid.contracts.schema import CommandInputArg, CommandSpec, Output, Port
 from astrid.core.executor.cli import main as executor_cli_main
 from astrid.core.executor.registry import ExecutorRegistry
+from astrid.core.executor import runner as executor_runner
 from astrid.core.executor.runner import (
     ExecutorRunRequest,
     ExecutorRunnerError,
@@ -128,7 +131,7 @@ def test_command_input_args_reject_duplicate_values_without_repeatability(tmp_pa
 def test_builtin_render_expands_semantic_timeline_assets_and_out_argv(tmp_path: Path) -> None:
     command = build_executor_command(
         ExecutorRunRequest(
-            executor_id="builtin.render",
+            executor_id="rendering.render",
             out=tmp_path / "render",
             inputs={
                 "timeline": tmp_path / "hype.timeline.json",
@@ -142,7 +145,7 @@ def test_builtin_render_expands_semantic_timeline_assets_and_out_argv(tmp_path: 
     assert command == (
         "/opt/python",
         "-m",
-        "astrid.packs.builtin.executors.render.run",
+        "astrid.packs.rendering.executors.render.run",
         "--timeline",
         str(tmp_path / "hype.timeline.json"),
         "--assets",
@@ -156,7 +159,7 @@ def test_builtin_render_rejects_legacy_assets_input_name(tmp_path: Path) -> None
     with pytest.raises(ExecutorRunnerError, match="missing required input\\(s\\): assets_registry"):
         build_executor_command(
             ExecutorRunRequest(
-                executor_id="builtin.render",
+                executor_id="rendering.render",
                 out=tmp_path / "render",
                 inputs={
                     "timeline": tmp_path / "hype.timeline.json",
@@ -173,7 +176,7 @@ def test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when
 ) -> None:
     registry = load_default_registry()
     base_request = ExecutorRunRequest(
-        executor_id="builtin.render",
+        executor_id="rendering.render",
         out=tmp_path / "render",
         inputs={
             "timeline": "timeline.json",
@@ -185,7 +188,7 @@ def test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when
 
     themed = build_executor_command(
         ExecutorRunRequest(
-            executor_id="builtin.render",
+            executor_id="rendering.render",
             out=tmp_path / "render",
             inputs={
                 "timeline": "timeline.json",
@@ -197,6 +200,25 @@ def test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when
         registry,
     )
     assert themed[-2:] == ("--theme", "theme.json")
+
+
+def test_executor_argv_resolves_canonical_id_and_bare_pipeline_step() -> None:
+    assert executor_argv("rendering.render", "/opt/python") == [
+        "/opt/python",
+        "-m",
+        "astrid.packs.rendering.executors.render.run",
+    ]
+    assert executor_argv("render", "/opt/python") == [
+        "/opt/python",
+        "-m",
+        "astrid.packs.rendering.executors.render.run",
+    ]
+    assert resolve_executor_runtime_module("upload.youtube") == "astrid.packs.youtube.executors.upload.run"
+
+
+def test_executor_argv_rejects_non_pipeline_bare_name() -> None:
+    with pytest.raises(ValueError, match="could not resolve executor step 'upload'"):
+        executor_argv("upload", "/opt/python")
 
 
 def test_executors_run_rejects_arbitrary_passthrough_after_double_dash() -> None:
@@ -313,16 +335,66 @@ def test_builtin_executor_unknown_pipeline_step(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# upload.youtube built-in — required input
+# youtube.upload built-in — required input
 # ---------------------------------------------------------------------------
 
 
 def test_upload_youtube_requires_video_url(tmp_path: Path) -> None:
-    executor = _executor(executor_id="upload.youtube", argv=None)
+    executor = _executor(executor_id="youtube.upload", argv=None)
     registry = _registry(executor)
 
     with pytest.raises(ExecutorRunnerError, match="video_url is required"):
-        run_executor(ExecutorRunRequest(executor_id="upload.youtube", out=tmp_path), registry)
+        run_executor(ExecutorRunRequest(executor_id="youtube.upload", out=tmp_path), registry)
+
+
+def test_upload_youtube_alias_dispatches_through_canonical_special_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from astrid.packs.youtube.executors.upload.src import social_publish
+
+    called: dict[str, Any] = {}
+
+    def _fake_publish(**kwargs: Any) -> dict[str, Any]:
+        called.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(social_publish, "publish_youtube_video", _fake_publish)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id="upload.youtube",
+            out=tmp_path,
+            inputs={
+                "video_url": "https://example.com/video.mp4",
+                "title": "Title",
+                "description": "Desc",
+            },
+        ),
+        load_default_registry(),
+    )
+
+    assert result.executor_id == "youtube.upload"
+    assert result.payload == {"ok": True}
+    assert called["video_url"] == "https://example.com/video.mp4"
+
+
+def test_pipeline_module_uses_orchestrator_runtime_module_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_pipeline = types.SimpleNamespace()
+    fake_registry = types.SimpleNamespace(
+        get=lambda _executor_id: types.SimpleNamespace(metadata={"runtime_module": "fake.pipeline"})
+    )
+
+    monkeypatch.setattr("astrid.core.orchestrator.registry.load_default_registry", lambda: fake_registry)
+    monkeypatch.setattr(executor_runner, "import_module", lambda name: fake_pipeline if name == "fake.pipeline" else None)
+
+    executor_runner._pipeline_module.cache_clear()
+    try:
+        assert executor_runner._pipeline_module() is fake_pipeline
+    finally:
+        executor_runner._pipeline_module.cache_clear()
 
 
 # ---------------------------------------------------------------------------

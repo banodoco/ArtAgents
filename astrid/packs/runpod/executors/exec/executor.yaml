@@ -1,0 +1,160 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.runpod.executors.exec.run",
+      "exec",
+      "--produces-dir",
+      "{out}/produces"
+    ],
+    "input_args": [
+      {
+        "input": "pod_handle",
+        "flag": "--pod-handle"
+      },
+      {
+        "input": "local_root",
+        "flag": "--local-root",
+        "optional": true
+      },
+      {
+        "input": "remote_root",
+        "flag": "--remote-root",
+        "optional": true
+      },
+      {
+        "input": "remote_script",
+        "flag": "--remote-script",
+        "optional": true
+      },
+      {
+        "input": "timeout",
+        "flag": "--timeout",
+        "optional": true
+      },
+      {
+        "input": "upload_mode",
+        "flag": "--upload-mode",
+        "optional": true
+      },
+      {
+        "input": "excludes",
+        "flag": "--excludes",
+        "optional": true
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "input": "pod_handle",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Reattach to a provisioned pod, ship a script, execute it, and download artifacts. Leaves pod alive.",
+  "graph": {
+    "consumes": [
+      "pod_handle"
+    ],
+    "provides": [
+      "exec_result",
+      "artifact_dir",
+      "cost"
+    ]
+  },
+  "id": "runpod.exec",
+  "inputs": [
+    {
+      "description": "Path to the pod_handle.json from a prior provision step.",
+      "name": "pod_handle",
+      "required": true,
+      "type": "file"
+    },
+    {
+      "description": "Local directory to upload to the pod.",
+      "name": "local_root",
+      "required": false,
+      "type": "path"
+    },
+    {
+      "description": "Remote path on the pod where the script runs.",
+      "name": "remote_root",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Path to the script to execute on the pod.",
+      "name": "remote_script",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Execution timeout in seconds.",
+      "name": "timeout",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "description": "Upload mode: sftp_walk or tarball.",
+      "name": "upload_mode",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Glob patterns to exclude from upload.",
+      "name": "excludes",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "network": true,
+    "requirements": [
+      "runpod-lifecycle>=0.3"
+    ]
+  },
+  "keywords": [
+    "runpod",
+    "gpu",
+    "exec",
+    "execute",
+    "script"
+  ],
+  "kind": "external",
+  "metadata": {
+    "catalog_source": "none_declared",
+    "cli_module": "astrid.packs.runpod.executors.exec.run",
+    "command_names": [
+      "provision",
+      "exec",
+      "teardown",
+      "pull",
+      "session"
+    ],
+    "homepage": "https://github.com/peteromallet/runpod-lifecycle",
+    "network_behavior": {
+      "provision": true,
+      "exec": true,
+      "teardown": true,
+      "pull": true,
+      "session": true
+    },
+    "nodes": [],
+    "pack_id": "runpod",
+    "prompts": [],
+    "requirements": [
+      "runpod-lifecycle>=0.3"
+    ],
+    "requirements_source": "requirements.txt",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.runpod.executors.exec.run"
+  },
+  "name": "RunPod Exec",
+  "short_description": "Execute a script on an existing RunPod pod and download artifacts.",
+  "version": "0.1.0"
+}

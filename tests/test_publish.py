@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from astrid.packs.builtin.executors.publish import run as publish  # noqa: E402  (path tweak above is intentional)
+from astrid.packs.reigh.executors.publish import run as publish  # noqa: E402  (path tweak above is intentional)
 
 
 def _make_jwt(payload: dict) -> str:
@@ -234,7 +234,7 @@ class CLIStartupRejectionTest(unittest.TestCase):
 
 
 class PublishLocalReadOnlyRegressionTest(unittest.TestCase):
-    """Prove ``builtin.publish`` remains a read consumer for local canonical
+    """Prove ``reigh.publish`` remains a read consumer for local canonical
     state.  It must not write ``assembly.json``, ``hype.timeline.json``,
     arrangement blobs, or any other local timeline-container file.
 

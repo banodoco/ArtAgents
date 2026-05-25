@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid.packs.builtin.orchestrators.logo_ideas import run as logo_ideas
+from astrid.packs.video_editing.orchestrators.logo_ideas import run as logo_ideas
 from astrid.core.util.http import HttpClient
 from astrid.core.util import secrets
 

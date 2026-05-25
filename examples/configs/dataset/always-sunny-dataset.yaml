@@ -1,7 +1,7 @@
 schema_version: 1
 media_type: video
 dataset_id: always-sunny-chaos-v1
-description: Generic builtin.dataset_build config for an Always Sunny-style LTX training dataset.
+description: "Generic training.dataset_build config for an Always Sunny-style LTX training dataset (legacy alias: builtin.dataset_build)."
 
 sources:
   - provider: youtube

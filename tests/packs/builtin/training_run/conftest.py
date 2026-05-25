@@ -8,8 +8,8 @@ from typing import Any, Callable
 
 import pytest
 
-from astrid.packs.builtin.orchestrators.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
-import astrid.packs.builtin.orchestrators.training_run.run as training_run_module
+from astrid.packs.training.orchestrators.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
+import astrid.packs.training.orchestrators.training_run.run as training_run_module
 
 
 @pytest.fixture

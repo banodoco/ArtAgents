@@ -158,7 +158,7 @@ class TestPacksValidateCLI(unittest.TestCase):
         builtin = next(pack for pack in listed["packs"] if pack["id"] == "builtin")
         self.assertIn("content", builtin)
         self.assertIn("agent", builtin)
-        self.assertEqual(builtin["status"], "active")
+        self.assertEqual(builtin["status"], "deprecated")
         self.assertEqual(builtin["visibility"], "visible")
         self.assertEqual(builtin["taxonomy"]["domain"], "system")
         self.assertEqual(builtin["origin"], "builtin")
@@ -188,7 +188,7 @@ class TestPacksValidateCLI(unittest.TestCase):
         status_result = _run_packs("status", "--domain", "system", cwd=str(_REPO_ROOT))
         self.assertEqual(status_result.returncode, 0, status_result.stderr)
         self.assertIn("taxonomy: domain=system", status_result.stdout)
-        self.assertIn("builtin\tactive\tvisible", status_result.stdout)
+        self.assertIn("builtin\tdeprecated\tvisible", status_result.stdout)
 
         inspect_result = _run_packs("inspect", "builtin", cwd=str(_REPO_ROOT))
         self.assertEqual(inspect_result.returncode, 0, inspect_result.stderr)

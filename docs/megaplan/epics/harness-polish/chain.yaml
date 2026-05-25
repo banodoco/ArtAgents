@@ -1,0 +1,84 @@
+# Epic: Harness Polish — get the non-pack core to :chefskiss:
+# Spec for `megaplan chain start --spec docs/megaplan/epics/harness-polish/chain.yaml`
+# See EPIC.md for the vision, the m4 sanctioned-seam decision, sequencing, and profile rationale.
+# Packs are OUT of scope except the m1 submodule ref and the m4 sanctioned seam (see EPIC.md).
+#
+# LAUNCH STEP (do at launch, NOT before pack-taxonomy m4 finishes): set
+#   execution.adaptive_critique = true   (project config / .megaplan config)
+# so ALL six milestones get adaptive critique. The chain spec can't carry it per-milestone;
+# premium (m3) + partnered (m5b) already default it ON, directed (m1/m2/m4/m5a) default it OFF.
+# This config is repo-wide — fine as a default, just be aware it affects other megaplan runs too.
+
+base_branch: main      # integration line carrying the recent taxonomy/alias merges
+
+milestones:
+  - label: m1
+    idea: docs/megaplan/epics/harness-polish/m1-hygiene-and-safety.md
+    branch: epic/polish/m1-hygiene-and-safety
+    profile: directed               # tier 2 — bumped from solo: now also folds contributor-onboarding + a CLI guard, which benefit from a premium plan
+    robustness: light
+    depth: low
+    vendor: codex
+    notes: "ZERO cross-epic collision — safe to run first. Hygiene: untrack secrets+artifacts, fix gitignore root-misses, remove dead seinfeld submodule, fix npm machine paths, ruff+mypy ON over astrid/ as an ADVISORY/baseline CI lane (must not turn later milestones red under stop_chain). FOLDED dev-loop (HA4): declare runpod_lifecycle + dep-audit via doctor, add [project] to pyproject, one env story, wire doctor into CI. FOLDED user gremlins (HA2): unknown-command→error guard (pipeline.py:347, additive else only), README invocation fixes. History scrub + key rotation = HUMAN follow-ups in PR body."
+
+  - label: m2
+    idea: docs/megaplan/epics/harness-polish/m2-test-integrity.md
+    branch: epic/polish/m2-test-integrity
+    profile: directed               # tier 2 — bugs diagnosed to exact lines; test-harness execution, not novel reasoning (downgraded from partnered on right-sizing)
+    robustness: full
+    depth: low
+    vendor: codex
+    notes: "Make green mean green: fix double-executing test_runner (named test test_runner_dispatches_exactly_once), delete KNOWN_FAILURES denylist, remove zombie skips, kill ALL time.sleep races incl. tests/adapter/test_remote_artifact_real.py:277 (mirror production Popen.wait at core/adapter/local.py:58-66), decide opt-in-test CI lane policy. Real product bugs found here are handed to m3."
+
+  - label: m3
+    idea: docs/megaplan/epics/harness-polish/m3-runtime-correctness.md
+    branch: epic/polish/m3-runtime-correctness
+    profile: premium                # tier 4 — production-incident stakes: silent run stalls / corrupted event log
+    robustness: thorough            # nameable stakes; thorough ALREADY RUNS prep, so no separate with_prep flag
+    depth: high
+    vendor: codex
+    prep_direction: "FIRST design the error model by reading the existing good pattern (narrow-catch+surface at core/element/cli.py:42-44 and the EventLogError hierarchy at core/task/events.py:56-81) — error-model.md describes post-fix reality, not a new base-class layer. THEN trace every gate.py/pipeline.py path where a step can fail to emit a terminal event and design the single _finalize_step choke-point. Build a COMPLETE inventory of every `except`/`assert` in non-pack astrid/ (50+ except sites exist; the 6 named are a start) and triage each. Determine threads/ ThreadIndexStore liveness (concurrent in-process callers?) and write the verdict. The step-model ground truth is the CODE, not the contradictory planning docs."
+    notes: "Single _finalize_step choke-point guarantees terminal events (don't patch N paths). Fix vanishing events, discarded inline-check result, repeat.until swallowing gate errors, for_each control-flow. Full silent-except/assert inventory + one error model + assert→raise. Default audit-ledger verification. json_schema validates beyond `required` or renamed-with-rationale. Four NAMED regression tests. Writes the threads/ liveness verdict for m5a."
+
+  - label: m4
+    idea: docs/megaplan/epics/harness-polish/m4-dependency-inversion.md
+    branch: epic/polish/m4-dependency-inversion
+    profile: directed               # tier 2 — mechanical find-replace once prep re-baselines; high depth + prep cover the one design call
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true                 # RE-BASELINE against post-pack-taxonomy-m4 tree (audit line numbers are stale) + design the inversion
+    prep_direction: "FIRST re-baseline: pack-taxonomy m4 physically migrated packs and the audit's pipeline.py concrete-import line numbers (:268,272,340) are already stale — grep the CURRENT tree for every static `astrid.core.* -> astrid.packs.*` and `-> astrid.orchestrate.*` import. Design the inversion per EPIC.md: define a PackResolver Protocol in core/, resolve via manifest metadata + importlib.import_module(manifest.runtime_module) (dynamic, no static pack import), discovery STAYS in packs implementing the Protocol and is injected at the entrypoint. Add runtime.entrypoint/callable to the 3 orchestrator + youtube manifests (sanctioned seam, metadata only). Decide hype get_step_registry vs whitelist. Neutral home for DEFAULT_PACKS_ROOT + media util to break core<->verify. EXTEND existing OrchestratorRegistry/ElementRegistry — do not invent. Contract extends structure.py:validate_repo_structure(), not importlinter."
+    notes: "RUN ONLY AFTER pack-taxonomy m4 merges to main (it's moving the same files). core/ stops STATICALLY importing packs/ (dynamic resolution is fine) and orchestrate/. PackResolver Protocol in core; discovery stays in packs implementing it. runner.py hype+youtube become dynamic resolutions (NOT deferred). Break core<->verify. De-dup ALL _sha256 + _now_iso/_utc_now_iso copies (7+ sites) into a named core/util surface. DEFER lifecycle.py + pipeline.py de-inversion (incl. DI-threading) to m5b. ALSO build HA3's validate_migration_completion() guard here. Layering+migration contracts green = m4 handoff."
+
+  - label: m5a
+    idea: docs/megaplan/epics/harness-polish/m5a-taxonomy-deadcode-docs.md
+    branch: epic/polish/m5a-deadcode-docs
+    profile: directed               # tier 2 — deletions + docs + the migration guard; low residual complexity
+    robustness: full
+    depth: low
+    vendor: codex
+    notes: "RUN AFTER pack-taxonomy m4 merges. Kill NON-CLI zombies (threads/wrapper no-ops per m3's liveness verdict, builtin/_legacy, Performer aliases incl. the SECOND __all__ in contracts/__init__.py, the 3 sys.modules hacks). Enforce HA3's validate_migration_completion() guard GREEN after cleanup. Docs truth pass; pick ONE canonical plan doc. TAXONOMY RENAMES ARE OUT — handed to the pack-taxonomy epic which owns them and is actively working them. No pipeline.py / packs/cli.py edits (m5b)."
+
+  - label: m5b
+    idea: docs/megaplan/epics/harness-polish/m5b-structure-split-cli.md
+    branch: epic/polish/m5b-structure-split-cli
+    profile: partnered              # tier 3 — god-module splits along real domain seams + CLI unification + deferred de-inversion; genuinely cross-cutting
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true                 # full skips prep; RE-BASELINE (stale line numbers) + find the right seams in the 2000-line module
+    prep_direction: "RE-BASELINE first — pack-taxonomy m4 moved files and audit line numbers are stale; grep the CURRENT tree. Read astrid/timeline.py and astrid/core/task/lifecycle.py and PROPOSE domain seams BEFORE planning the split — mirror core/element/ and core/orchestrator/ (schema/registry/cli/runner). Identify which public names need a back-compat import shim. Map where m4's deferred lifecycle.py + pipeline.py de-inversion (incl. DI-threading the PackResolver) lands in the new sub-modules. Confirm m4's contract exemptions can be removed cleanly."
+    notes: "RUN LAST — after pack-taxonomy m4 (pipeline.py/CLI) has merged. Split timeline.py + lifecycle.py along NAMED domain seams (not by line count) with line-cap + import-surface-stable tests. Unify CLI dispatch mirroring core/element/cli.py argparse delegation; remove dup build_parser/dead cmd_list; fix silent fallthrough-to-hype + help drift. ABSORB the deferred m4 lifecycle.py + pipeline.py de-inversion so de-inverted imports land in the right sub-modules. Behavior- and import-surface-preserving; m4 contract stays green with the exemptions removed."
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+merge_policy: review                # review each milestone's PR before it merges into base
+
+driver:
+  robustness: full
+  auto_approve: true
+  max_iterations: 90
+  poll_sleep: 8.0

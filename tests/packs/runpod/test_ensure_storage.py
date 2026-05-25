@@ -137,7 +137,7 @@ def test_require_existing_storage_fails_without_creating_when_missing() -> None:
 def test_provision_does_not_auto_create_storage() -> None:
     """provision executor does NOT invoke ensure_storage or create_storage."""
     # Read the run.py source and verify no auto-create paths
-    run_py = Path(__file__).parent.parent.parent.parent / "astrid" / "packs" / "external" / "runpod" / "run.py"
+    run_py = Path(__file__).parent.parent.parent.parent / "astrid" / "packs" / "runpod" / "executors" / "provision" / "run.py"
     source = run_py.read_text()
     # The cmd_provision function should NOT reference ensure_storage
     # or Pod.create_storage
@@ -154,7 +154,7 @@ def test_storage_free_provision_and_session_do_not_probe_or_create_storage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Storage-free executor modes do not call get_storage or create_storage."""
-    from astrid.packs.external.runpod.run import cmd_provision, cmd_session
+    from astrid.packs.runpod.executors.provision.run import cmd_provision, cmd_session
 
     pod = MagicMock()
     pod.id = "pod-storage-free"

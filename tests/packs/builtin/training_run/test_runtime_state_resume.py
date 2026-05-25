@@ -8,7 +8,7 @@ from typing import Callable
 
 import pytest
 
-from astrid.packs.builtin.orchestrators.training_run.run import main as training_run_main
+from astrid.packs.training.orchestrators.training_run.run import main as training_run_main
 
 
 def test_dry_run_writes_plan_without_network_gpu_or_runpod_calls(

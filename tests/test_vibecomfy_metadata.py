@@ -17,14 +17,14 @@ class VibeComfyStructuredMetadataTest(unittest.TestCase):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            result = executors_cli.main(["inspect", "external.vibecomfy.run", "--json"])
+            result = executors_cli.main(["inspect", "vibecomfy.run", "--json"])
 
         self.assertEqual(result, 0, stderr.getvalue())
         payload = json.loads(stdout.getvalue())
         metadata = payload["metadata"]
 
-        self.assertEqual(payload["id"], "external.vibecomfy.run")
-        self.assertEqual(payload["command"]["argv"], ["{python_exec}", "-m", "astrid.packs.external.vibecomfy.run", "run", "{workflow}"])
+        self.assertEqual(payload["id"], "vibecomfy.run")
+        self.assertEqual(payload["command"]["argv"], ["{python_exec}", "-m", "astrid.packs.vibecomfy.executors.run.run", "run", "{workflow}"])
         self.assertEqual(payload["isolation"]["requirements"], ["vibecomfy"])
         self.assertTrue(payload["isolation"]["network"])
         self.assertEqual(metadata["pack_id"], "vibecomfy")
@@ -51,7 +51,7 @@ class VibeComfyStructuredMetadataTest(unittest.TestCase):
         self.assertEqual(metadata["prompts"], [])
 
     def test_vibecomfy_validate_metadata_is_structured_and_network_false(self) -> None:
-        validate = load_default_registry().get("external.vibecomfy.validate")
+        validate = load_default_registry().get("vibecomfy.validate")
 
         self.assertFalse(validate.isolation.network)
         self.assertEqual(validate.metadata["vibecomfy_command"], "validate")
@@ -75,7 +75,7 @@ class VibeComfyStructuredMetadataTest(unittest.TestCase):
                 "\n".join(
                     [
                         "executors:",
-                        "  - id: external.vibecomfy.run",
+                        "  - id: vibecomfy.run",
                         "    name: VibeComfy Run",
                         "    kind: external",
                         "    version: 0.1.0",
@@ -104,7 +104,7 @@ class VibeComfyStructuredMetadataTest(unittest.TestCase):
             executors = load_folder_executors(executor_root)
 
         by_id = {executor.id: executor for executor in executors}
-        run = by_id["external.vibecomfy.run"]
+        run = by_id["vibecomfy.run"]
         self.assertEqual(run.metadata["catalog_source"], "none_declared")
         self.assertEqual(run.metadata["workflows"], [])
         self.assertEqual(run.metadata["nodes"], [])

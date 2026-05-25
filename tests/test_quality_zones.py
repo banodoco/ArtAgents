@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from astrid.domains.hype import enriched_arrangement
-from astrid.packs.builtin.executors.quality_zones import run as quality_zones
+from astrid.packs.editorial.executors.quality_zones import run as quality_zones
 
 
 class QualityZonesTest(unittest.TestCase):
@@ -42,7 +42,7 @@ class QualityZonesTest(unittest.TestCase):
             out_path.write_text(json.dumps(cached, indent=2) + "\n", encoding="utf-8")
 
             self.assertEqual(quality_zones._load_cached_payload(out_path, source_sha256), cached)
-            with mock.patch("quality_zones.compute", side_effect=AssertionError("compute should not run on cache hit")):
+            with mock.patch.object(quality_zones, "compute", side_effect=AssertionError("compute should not run on cache hit")):
                 self.assertEqual(quality_zones.main([str(source_path), "--out", str(out_path)]), 0)
             self.assertEqual(json.loads(out_path.read_text(encoding="utf-8")), cached)
 

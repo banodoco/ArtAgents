@@ -34,7 +34,7 @@
   "cost_estimate": {
     "summarize_calls": 4,
     "uncached_summarize_calls": 4,
-    "summarizer_model_version": "builtin.understand.v1",
+    "summarizer_model_version": "understanding.understand.v1",
     "cost_per_call": 0.009,
     "estimated_cost": 0.036
   }

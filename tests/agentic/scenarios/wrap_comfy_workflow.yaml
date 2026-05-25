@@ -3,8 +3,8 @@ tier: authoring
 description: |
   Agent is handed a ComfyUI workflow JSON at `/tmp/example_comfy.json`
   and asked to wrap it as an Astrid executor. The agent must discover
-  the existing comfy-wrapping path (`external.vibecomfy.run` /
-  `external.vibecomfy.validate`) rather than rolling their own ComfyUI
+  the existing comfy-wrapping path (`vibecomfy.run` /
+  `vibecomfy.validate`) rather than rolling their own ComfyUI
   HTTP client. The end state is an executor that, given a prompt,
   routes through VibeComfy to run the workflow and emits the resulting
   image as an output artifact.
@@ -13,7 +13,7 @@ description: |
     - Agent invents an ad-hoc ComfyUI HTTP client instead of finding
       `external.vibecomfy`.
     - Agent builds an orchestrator when an executor (or pair: executor
-      wrapping `external.vibecomfy.run`) is the right tool.
+      wrapping `vibecomfy.run`) is the right tool.
     - Agent doesn't parameterize the prompt — they hard-code the example
       from the JSON and call it done.
     - Agent ships a non-runnable scaffold that doesn't actually load
@@ -104,7 +104,7 @@ assessment:
         question: |
           Did the agent ship an executor (folder + executor.yaml +
           run.py) that loads `/tmp/example_comfy.json` and routes
-          through `external.vibecomfy.run`, producing an image
+          through `vibecomfy.run`, producing an image
           artifact when run end-to-end (or at least under --dry-run)?
         evidence: [project_tree, stderr, report]
         grading: pass_fail
@@ -125,7 +125,7 @@ assessment:
         question: |
           Did the agent avoid writing their own ComfyUI HTTP client
           (no `requests.post(... '/prompt')` or `comfy_client.py` from
-          scratch), and instead delegate to `external.vibecomfy.run`?
+          scratch), and instead delegate to `vibecomfy.run`?
         evidence: [project_tree, stderr]
         grading: pass_fail
         weight: 2
@@ -136,8 +136,8 @@ assessment:
   graded:
       - id: discovered_comfy_wrapping_path
         question: |
-          Did the agent discover `external.vibecomfy.run` /
-          `external.vibecomfy.validate` (via `astrid executors search
+          Did the agent discover `vibecomfy.run` /
+          `vibecomfy.validate` (via `astrid executors search
           comfy` or browsing external packs) BEFORE writing any ad-hoc
           HTTP code?
         evidence: [stderr, report]

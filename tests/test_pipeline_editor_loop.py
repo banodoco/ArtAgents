@@ -8,8 +8,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from astrid.packs.builtin.executors.editor_review import run as editor_review
-from astrid.packs.builtin.orchestrators.hype import run as pipeline
+from astrid.packs.editorial.executors.editor_review import run as editor_review
+from astrid.packs.video_editing.orchestrators.hype import run as pipeline
 from astrid import timeline
 
 
@@ -298,8 +298,8 @@ class PipelineEditorLoopTest(unittest.TestCase):
             )
 
         self.assertEqual(result, 0)
-        self.assertEqual(inspect_calls[0][3], str(brief_dir.resolve()))
-        self.assertNotEqual(inspect_calls[0][3], str(run_dir.resolve()))
+        self.assertIn(str(brief_dir.resolve()), inspect_calls[0])
+        self.assertNotIn(str(run_dir.resolve()), inspect_calls[0])
 
     def test_no_hype_mp4_copy_in_frame_sampling(self) -> None:
         root = self.make_workspace()

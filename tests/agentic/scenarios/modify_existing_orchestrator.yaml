@@ -2,12 +2,12 @@ name: modify_existing_orchestrator
 tier: authoring
 description: |
   Agent is asked to add a new attested "review" step at the end of the
-  existing `builtin.hype` orchestrator that writes a one-line verdict,
+  existing `video_editing.hype` orchestrator that writes a one-line verdict,
   without breaking the existing flow. This probes the "modify, don't
   rewrite" path: can the agent locate the right file, understand the DSL
   shape it's editing, and add one step in a non-destructive way?
 
-  `builtin.hype` lives at both `astrid/packs/builtin/hype/` (the legacy
+  `video_editing.hype` lives at both `astrid/packs/builtin/hype/` (the legacy
   Stage-based runtime) AND `astrid/packs/builtin/hype.py` (the DSL-
   flavored sibling used by the author smoke fixture). The right edit
   target is the DSL file. Misidentifying which one to touch is itself
@@ -16,12 +16,12 @@ description: |
   Failure modes this probes:
     - Agent edits the wrong file (hype/ folder vs hype.py).
     - Agent rewrites the orchestrator instead of appending one step.
-    - Agent's edit doesn't compile (`astrid author check builtin.hype`
+    - Agent's edit doesn't compile (`astrid author check video_editing.hype`
       fails).
     - Agent breaks existing steps' shape or ids.
     - Agent never validates with `astrid author check` before declaring done.
 
-target_orchestrator: builtin.hype
+target_orchestrator: video_editing.hype
 
 brief: modify_existing_orchestrator.md
 
@@ -65,7 +65,7 @@ assessment:
           steps, OR the new file has fewer steps than the original.
       - id: recompiled_cleanly
         question: |
-          Did `astrid author check builtin.hype` exit 0 after the edit?
+          Did `astrid author check video_editing.hype` exit 0 after the edit?
         evidence: [stderr]
         grading: pass_fail
         weight: 2

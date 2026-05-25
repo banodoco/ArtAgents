@@ -3,7 +3,7 @@ import io
 import json
 from pathlib import Path
 
-from astrid.packs.builtin.orchestrators.iteration_video import run as iteration_video
+from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.schema import make_thread_record
@@ -42,7 +42,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
     with contextlib.redirect_stdout(stdout):
         result = run_orchestrator(
             OrchestratorRunRequest(
-                orchestrator_id="builtin.iteration_video",
+                orchestrator_id="video_editing.iteration_video",
                 out=out_dir,
                 inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
                 orchestrator_args=("--max-iterations", "7", "--direction", "label only", "--clip-mode", "hold"),
@@ -98,7 +98,7 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
     )
     cache_dir = repo / ".astrid" / "iteration_cache"
     cache_dir.mkdir(parents=True)
-    (cache_dir / f"{ROOT_RUN_ID}__builtin.understand.v1.json").write_text("{}\n", encoding="utf-8")
+    (cache_dir / f"{ROOT_RUN_ID}__understanding.understand.v1.json").write_text("{}\n", encoding="utf-8")
 
     def fail_prepare(*args, **kwargs):  # pragma: no cover - should never be called
         raise AssertionError("inspect must not summarize")
@@ -121,9 +121,9 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
 
 
 def test_iteration_video_orchestrator_declares_no_cut_child() -> None:
-    manifest = _read_json(Path("astrid/packs/builtin/orchestrators/iteration_video/orchestrator.yaml"))
-    assert manifest["child_executors"] == ["iteration.prepare", "iteration.assemble", "builtin.render"]
-    assert "builtin.cut" not in manifest["child_executors"]
+    manifest = _read_json(Path("astrid/packs/video_editing/orchestrators/iteration_video/orchestrator.yaml"))
+    assert manifest["child_executors"] == ["iteration.prepare", "iteration.assemble", "rendering.render"]
+    assert "video_editing.cut" not in manifest["child_executors"]
 
 
 def _write_thread(repo: Path) -> None:
@@ -180,7 +180,7 @@ def _record(
         "run_id": run_id,
         "thread_id": THREAD_ID,
         "parent_run_ids": parent_run_ids or [],
-        "executor_id": "builtin.generate_image_openai",
+        "executor_id": "generation.generate_image_openai",
         "orchestrator_id": None,
         "kind": "executor",
         "status": "succeeded",

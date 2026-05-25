@@ -28,10 +28,10 @@ Copy any shipped capability into your pack for customization:
 
 ```bash
 # Fork an executor into your local pack
-python3 -m astrid executors fork builtin.render
+python3 -m astrid executors fork rendering.render
 
 # Fork an orchestrator
-python3 -m astrid orchestrators fork builtin.hype
+python3 -m astrid orchestrators fork video_editing.hype
 
 # Fork an element
 python3 -m astrid elements fork effects text-card
@@ -50,19 +50,20 @@ Once you have a fork, you can redirect all consumers to use your version:
 
 ```bash
 # Set the override
-python3 -m astrid executors override set builtin.render local.render
+python3 -m astrid executors override set rendering.render local.render
 
 # Verify it's active
 python3 -m astrid executors override list
 ```
 
-Now any code, orchestrator, or agent that asks for `builtin.render` gets
-`local.render` instead. The original is untouched.
+Now any code, orchestrator, or agent that asks for `rendering.render` (or its
+legacy alias `builtin.render`) gets `local.render` instead. The original is
+untouched.
 
 To revert:
 
 ```bash
-python3 -m astrid executors override remove builtin.render
+python3 -m astrid executors override remove rendering.render
 ```
 
 ## Detecting Local Edits (Dirty Check)

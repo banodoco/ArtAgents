@@ -338,14 +338,14 @@ class ManagedWriteActorAttributionTest(unittest.TestCase):
             timeline_ulid="",
             timeline_event_stream_id="",
             events=[_arrangement_event()],
-            actor=TimelineActor(type="system", id="builtin.cut:test-run-001", display="builtin.cut"),
+            actor=TimelineActor(type="system", id="video_editing.cut:test-run-001", display="video_editing.cut"),
         )
 
         events = self._read_domain_events("actor2-proj", "actor2-tl")
         domain_event = events[-1]
         self.assertEqual(domain_event.kind, "timeline.config_replaced")
         self.assertEqual(domain_event.actor.type, "system")
-        self.assertEqual(domain_event.actor.id, "builtin.cut:test-run-001")
+        self.assertEqual(domain_event.actor.id, "video_editing.cut:test-run-001")
 
     def test_agent_actor_with_human_via_chaining(self):
         """Agent actor with human via preserves chained provenance."""
@@ -466,7 +466,7 @@ class ManagedWritePackWriteResultTest(unittest.TestCase):
             timeline_ulid=ulid,
             timeline_event_stream_id="",
             events=[_arrangement_event()],
-            actor=TimelineActor(type="system", id="builtin.cut:hash123", display="builtin.cut"),
+            actor=TimelineActor(type="system", id="video_editing.cut:hash123", display="video_editing.cut"),
         )
 
         # Verify all fields packs expect.
@@ -497,7 +497,7 @@ class ManagedWritePackWriteResultTest(unittest.TestCase):
             timeline_ulid=ulid,
             timeline_event_stream_id="",
             events=[_arrangement_event()],
-            actor=TimelineActor(type="system", id="builtin.hype:editor_micro_fix", display="builtin.hype"),
+            actor=TimelineActor(type="system", id="video_editing.hype:editor_micro_fix", display="video_editing.hype"),
         )
         self.assertFalse(result1.bootstrap_emitted,
                          "created timeline first write must NOT bootstrap")
@@ -509,7 +509,7 @@ class ManagedWritePackWriteResultTest(unittest.TestCase):
             timeline_ulid=ulid,
             timeline_event_stream_id="",
             events=[_arrangement_event([{"id": "trimmed_clip"}])],
-            actor=TimelineActor(type="system", id="builtin.hype:editor_micro_fix", display="builtin.hype"),
+            actor=TimelineActor(type="system", id="video_editing.hype:editor_micro_fix", display="video_editing.hype"),
         )
 
         self.assertFalse(result.bootstrap_emitted,
@@ -636,8 +636,8 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
 
     def test_cut_refine_and_assemble_emit_config_replaced_payloads(self):
         from astrid.core.timeline import _edit_helpers
-        from astrid.packs.builtin.executors.cut import run as cut_run
-        from astrid.packs.builtin.executors.refine import run as refine_run
+        from astrid.packs.video_editing.executors.cut import run as cut_run
+        from astrid.packs.editorial.executors.refine import run as refine_run
         from astrid.packs.iteration.executors.assemble import run as assemble_run
 
         config = {
@@ -667,9 +667,9 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
 
     def test_named_managed_sources_do_not_emit_arrangement_replaced(self):
         managed_sources = [
-            ROOT / "astrid/packs/builtin/executors/cut/run.py",
-            ROOT / "astrid/packs/builtin/orchestrators/hype/run.py",
-            ROOT / "astrid/packs/builtin/executors/refine/run.py",
+            ROOT / "astrid/packs/video_editing/executors/cut/run.py",
+            ROOT / "astrid/packs/video_editing/orchestrators/hype/run.py",
+            ROOT / "astrid/packs/editorial/executors/refine/run.py",
             ROOT / "astrid/packs/iteration/executors/assemble/run.py",
             ROOT / "astrid/core/worker/banodoco_worker.py",
         ]

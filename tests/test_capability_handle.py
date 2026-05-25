@@ -45,7 +45,7 @@ from astrid.core.element.schema import (
 
 def _make_executor(**overrides) -> ExecutorDefinition:
     kwargs: dict = dict(
-        id="builtin.render",
+        id="rendering.render",
         name="Render Executor",
         kind="built_in",
         version="1.0.0",
@@ -57,7 +57,7 @@ def _make_executor(**overrides) -> ExecutorDefinition:
         command=CommandSpec(argv=("render.sh",)),
         cache=CachePolicy(),
         conditions=(),
-        graph=GraphMetadata(depends_on=("builtin.transcribe",)),
+        graph=GraphMetadata(depends_on=("editorial.transcribe",)),
         clip_kinds_supported=(),
         pipeline_requirements=(),
         isolation=IsolationMetadata(network=False),
@@ -80,7 +80,7 @@ def _make_orchestrator(**overrides) -> OrchestratorDefinition:
         keywords=("pipeline",),
         inputs=(Port(name="brief", type="string"),),
         outputs=(Output(name="result", type="json"),),
-        child_executors=("builtin.render", "builtin.transcribe"),
+        child_executors=("rendering.render", "editorial.transcribe"),
         child_orchestrators=(),
         cache=CachePolicy(),
         isolation=IsolationMetadata(network=True),
@@ -123,12 +123,12 @@ class TestCapabilityHandleRoundTrip:
     def test_to_dict_includes_all_fields(self):
         prov = Provenance(source="pack", pack_id="builtin", manifest_path="", content_root="")
         safety = SafetyDeclaration(network=True)
-        alias = AliasRecord(alias="render", canonical_id="builtin.render")
+        alias = AliasRecord(alias="render", canonical_id="rendering.render")
         port = Port(name="input", type="path")
         out = Output(name="result", type="path")
 
         handle = CapabilityHandle(
-            canonical_id="builtin.render",
+            canonical_id="rendering.render",
             local_id="render",
             pack_id="builtin",
             kind="built_in",
@@ -152,7 +152,7 @@ class TestCapabilityHandleRoundTrip:
 
         d = handle.to_dict()
 
-        assert d["canonical_id"] == "builtin.render"
+        assert d["canonical_id"] == "rendering.render"
         assert d["local_id"] == "render"
         assert d["pack_id"] == "builtin"
         assert d["kind"] == "built_in"
@@ -243,9 +243,9 @@ class TestExecutorToCapabilityHandle:
         ex = _make_executor()
         h = executor_to_handle(ex)
 
-        assert h.canonical_id == "builtin.render"
+        assert h.canonical_id == "rendering.render"
         assert h.local_id == "render"
-        assert h.pack_id == "builtin"
+        assert h.pack_id == "rendering"
         assert h.kind == "built_in"
         assert h.name == "Render Executor"
         assert h.version == "1.0.0"

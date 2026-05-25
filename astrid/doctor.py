@@ -165,7 +165,7 @@ def _check_repo_structure() -> str:
 
 def _check_vibecomfy_metadata() -> str:
     registry = load_executor_registry()
-    run = registry.get("external.vibecomfy.run")
+    run = registry.get("vibecomfy.run")
     metadata = run.metadata
     required = {
         "pack_id": "vibecomfy",
@@ -181,7 +181,7 @@ def _check_vibecomfy_metadata() -> str:
         raise RuntimeError("missing workflow input contract")
     if not run.isolation.network:
         raise RuntimeError("VibeComfy run executor should declare network access")
-    return "external.vibecomfy.run metadata visible"
+    return "vibecomfy.run metadata visible"
 
 
 def _check_remotion_config() -> str:
