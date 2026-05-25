@@ -28,6 +28,12 @@ from astrid.packs.validate import validate_pack
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _EXAMPLES_MINIMAL = _REPO_ROOT / "examples" / "packs" / "minimal"
+_EXAMPLE_PACKS = {
+    "minimal": _EXAMPLES_MINIMAL,
+    "file_summarizer": _REPO_ROOT / "examples" / "packs" / "file_summarizer",
+    "text_digest": _REPO_ROOT / "examples" / "packs" / "text_digest",
+    "text_review": _REPO_ROOT / "examples" / "packs" / "text_review",
+}
 
 
 def _chdir_context(path: Path):
@@ -134,6 +140,14 @@ class TestPacksValidateCLI(unittest.TestCase):
             cwd=str(_REPO_ROOT),
         )
         self.assertEqual(result.returncode, 0)
+
+    def test_validate_examples_only_packs_by_explicit_path(self) -> None:
+        for pack_id, pack_root in _EXAMPLE_PACKS.items():
+            with self.subTest(pack_id=pack_id):
+                self.assertTrue(pack_root.is_dir(), f"example pack missing: {pack_root}")
+                result = _run_packs("validate", str(pack_root), cwd=str(_REPO_ROOT))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("valid:", result.stdout)
 
     def test_packs_list_inspect_and_status_subcommands(self) -> None:
         list_result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
@@ -638,43 +652,49 @@ class TestCLIBackwardCompat(unittest.TestCase):
 
 
 class TestTaxonomyHiddenPackBehavior(unittest.TestCase):
-    """Prove: hidden packs are excluded from default discovery but visible
-    with --show-hidden; both text_review capabilities are absent from default."""
+    """Prove: example-only packs are absent from runtime discovery, even with
+    --show-hidden, but remain valid when addressed by explicit example paths."""
+
+    _EXAMPLES_ONLY_PACK_IDS = {
+        "clip_tools",
+        "video_tools",
+        "file_summarizer",
+        "text_digest",
+        "text_review",
+    }
 
     def test_default_discovery_excludes_text_review(self) -> None:
         result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
         self.assertEqual(result.returncode, 0, result.stderr)
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
-        self.assertNotIn("text_review", pack_ids)
+        self.assertTrue(self._EXAMPLES_ONLY_PACK_IDS.isdisjoint(pack_ids))
 
-    def test_show_hidden_includes_text_review(self) -> None:
+    def test_show_hidden_excludes_examples_only_packs(self) -> None:
         result = _run_packs("list", "--json", "--show-hidden", cwd=str(_REPO_ROOT))
         self.assertEqual(result.returncode, 0, result.stderr)
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
-        self.assertIn("text_review", pack_ids)
+        self.assertTrue(self._EXAMPLES_ONLY_PACK_IDS.isdisjoint(pack_ids))
 
     def test_status_default_excludes_text_review(self) -> None:
         result = _run_packs("status", "--json", cwd=str(_REPO_ROOT))
         self.assertEqual(result.returncode, 0, result.stderr)
         status = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in status["packs"]}
-        self.assertNotIn("text_review", pack_ids)
+        self.assertTrue(self._EXAMPLES_ONLY_PACK_IDS.isdisjoint(pack_ids))
 
-    def test_status_show_hidden_includes_text_review(self) -> None:
+    def test_status_show_hidden_excludes_examples_only_packs(self) -> None:
         result = _run_packs("status", "--json", "--show-hidden", cwd=str(_REPO_ROOT))
         self.assertEqual(result.returncode, 0, result.stderr)
         status = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in status["packs"]}
-        self.assertIn("text_review", pack_ids)
+        self.assertTrue(self._EXAMPLES_ONLY_PACK_IDS.isdisjoint(pack_ids))
 
-    def test_inspect_text_review_works_despite_hidden(self) -> None:
+    def test_inspect_text_review_fails_because_it_is_example_only(self) -> None:
         result = _run_packs("inspect", "text_review", "--json", cwd=str(_REPO_ROOT))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        inspected = json.loads(result.stdout)
-        self.assertEqual(inspected["id"], "text_review")
-        self.assertEqual(inspected.get("visibility"), "hidden")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unknown pack 'text_review'", result.stderr)
 
     def test_visible_packs_present_in_default_discovery(self) -> None:
         result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
@@ -713,7 +733,7 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
         self.assertIn("external", pack_ids)
-        # text_review has no explicit install_tier, defaults to "default"
+        # Example-only packs are not runtime-discovered even with --show-hidden.
         self.assertNotIn("text_review", pack_ids)
 
     def test_pack_type_filter_includes_only_matching(self) -> None:
@@ -739,7 +759,7 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
         self.assertIn("external", pack_ids)
-        # text_review has default support="project"
+        # Example-only packs are not runtime-discovered even with --show-hidden.
         self.assertNotIn("text_review", pack_ids)
 
     def test_combined_filters(self) -> None:

@@ -1,0 +1,80 @@
+{
+  "plan_id": "text_digest.smart_summarize",
+  "steps": [
+    {
+      "adapter": "local",
+      "command": "python3 -c 'import os, shutil; src = os.environ.get('\"'\"'ASTRID_TASK_INPUT_TEXT'\"'\"') or '\"'\"'examples/packs/text_digest/fixtures/smart_summarize/input.txt'\"'\"'; dst_dir = os.environ['\"'\"'ASTRID_TASK_PRODUCES_DIR'\"'\"']; os.makedirs(dst_dir, exist_ok=True); shutil.copyfile(src, os.path.join(dst_dir, '\"'\"'input.txt'\"'\"'))'",
+      "id": "read_input",
+      "produces": {
+        "input.txt": {
+          "check": {
+            "check_id": "file_nonempty",
+            "params": {},
+            "sentinel": true
+          },
+          "path": "input.txt"
+        }
+      }
+    },
+    {
+      "ack": {
+        "kind": "agent"
+      },
+      "adapter": "manual",
+      "command": "echo summarize_text",
+      "id": "summarize_text",
+      "instructions": "Read the text staged at $ASTRID_PROJECTS_ROOT/$ASTRID_TASK_PROJECT/runs/$ASTRID_TASK_RUN_ID/steps/read_input/v1/produces/input.txt\nWrite a summary JSON to $ASTRID_PROJECTS_ROOT/$ASTRID_TASK_PROJECT/runs/$ASTRID_TASK_RUN_ID/steps/summarize_text/v1/produces/summary.json\nShape: {\"line_count\": <int>, \"word_count\": <int>, \"char_count\": <int>, \"notes\": \"<one sentence>\"}.\nThen run `astrid ack` to advance.",
+      "produces": {
+        "summary.json": {
+          "check": {
+            "check_id": "json_schema",
+            "params": {
+              "schema": {
+                "properties": {
+                  "char_count": {
+                    "type": "integer"
+                  },
+                  "line_count": {
+                    "type": "integer"
+                  },
+                  "notes": {
+                    "type": "string"
+                  },
+                  "word_count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "line_count",
+                  "word_count",
+                  "char_count",
+                  "notes"
+                ],
+                "type": "object"
+              }
+            },
+            "sentinel": false
+          },
+          "path": "summary.json"
+        }
+      },
+      "requires_ack": true
+    },
+    {
+      "adapter": "local",
+      "command": "python3 -c 'import json, os; summary_path = os.path.join(os.environ['\"'\"'ASTRID_PROJECTS_ROOT'\"'\"'], os.environ['\"'\"'ASTRID_TASK_PROJECT'\"'\"'], '\"'\"'runs'\"'\"', os.environ['\"'\"'ASTRID_TASK_RUN_ID'\"'\"'], '\"'\"'steps'\"'\"', '\"'\"'summarize_text'\"'\"', '\"'\"'v1'\"'\"', '\"'\"'produces'\"'\"', '\"'\"'summary.json'\"'\"'); summary = json.load(open(summary_path)) if os.path.exists(summary_path) else {}; wc = summary.get('\"'\"'word_count'\"'\"', 0); verdict = '\"'\"'large'\"'\"' if wc > 50 else '\"'\"'small'\"'\"'; out = os.path.join(os.environ['\"'\"'ASTRID_TASK_PRODUCES_DIR'\"'\"'], '\"'\"'verdict.json'\"'\"'); json.dump({'\"'\"'verdict'\"'\"': verdict, '\"'\"'word_count'\"'\"': wc}, open(out, '\"'\"'w'\"'\"'))'",
+      "id": "write_verdict",
+      "produces": {
+        "verdict.json": {
+          "check": {
+            "check_id": "file_nonempty",
+            "params": {},
+            "sentinel": true
+          },
+          "path": "verdict.json"
+        }
+      }
+    }
+  ],
+  "version": 2
+}

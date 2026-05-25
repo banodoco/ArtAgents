@@ -246,23 +246,31 @@ pack.yaml: missing required field id
 executors/my_exec/run.py: runtime entrypoint file not found
 ```
 
-## Reference Example
+## Reference Examples
 
-A complete minimal pack is at `examples/packs/minimal/`. It contains:
+The `examples/packs/` directory contains teaching packs that demonstrate
+pack authoring patterns. These packs are **not** runtime-discovered (they
+live under `examples/packs/`, not `astrid/packs/`). See
+[`examples/README.md`](../examples/README.md) for the full listing.
+
+The canonical minimal example is `examples/packs/minimal/`:
 
 - One executor (`minimal.ingest_assets`): ingests and validates
   project assets.
 - One orchestrator (`minimal.make_trailer`): coordinates asset
   ingestion and assembly.
 
-Validate it with:
+Additional examples demonstrate more complex patterns:
+`file_summarizer` (multi-step text pipeline), `text_digest`
+(agent-in-the-loop text pipelines), `text_review` (machine summary +
+agent verdict), and `media` (pack with elements and schemas).
+
+Validate any example pack with:
 
 ```bash
 python3 -m astrid packs validate examples/packs/minimal
+python3 -m astrid packs validate examples/packs/file_summarizer
 ```
-
-This example lives at the repo root and is *not* a built-in
-discovered pack — it demonstrates the external pack contract.
 
 ## Legacy Templates
 
