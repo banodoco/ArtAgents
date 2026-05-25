@@ -22,11 +22,33 @@ jobs:
           cache-dependency-path: |
             requirements.txt
             requirements-dev.txt
+            pyproject.toml
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-dev.txt
+
+      - name: Validate editable install (advisory)
+        continue-on-error: true
+        run: |
+          python -m pip install -e '.[dev]'
+          echo "Editable install validation passed (advisory only)"
+
+      - name: Run doctor check (advisory)
+        continue-on-error: true
+        run: |
+          python -m astrid doctor --json
+
+      - name: Run Ruff baseline check (advisory)
+        continue-on-error: true
+        run: |
+          python scripts/reshape/compare_ruff_baseline.py
+
+      - name: Run mypy baseline check (advisory)
+        continue-on-error: true
+        run: |
+          python scripts/reshape/compare_mypy_baseline.py
 
       - name: Run local CI mirror
         run: bash scripts/reshape/run_ci_checks.sh

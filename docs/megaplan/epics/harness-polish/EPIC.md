@@ -118,6 +118,51 @@ seams without trying to re-layer all of `astrid/`.
   command-exits-0) — an unattended `auto_approve` run must not be able to claim a deliverable it
   didn't land.
 
+## Open security follow-ups
+
+The following credential exposures were confirmed in tracked Git history during
+the m1 hygiene audit. These are **human-action follow-ups** — no automated rewrite
+of history is permitted per the non-negotiable constraint above.
+
+### Tracked-history credential exposure
+
+| Credential | Exposure | Rotation required |
+|---|---|---|
+| `FAL_KEY` | Tracked in Git history (committed in prior revisions) | Yes — rotate at [fal.ai dashboard](https://fal.ai/dashboard) |
+| `FIREWORKS_API_KEY` | Tracked in Git history (committed in prior revisions) | Yes — rotate at [Fireworks AI dashboard](https://fireworks.ai/api-keys) |
+
+### Required human actions
+
+1. **Key rotation — fal.ai**: Log into the [fal.ai dashboard](https://fal.ai/dashboard) →
+   API Keys → delete any keys whose values appear in Git history → create new keys
+   with minimum required scope. Reference: [fal.ai authentication docs](https://fal.ai/docs/api-reference/platform-apis/authentication)
+   (rotate keys regularly, scope to least privilege).
+
+2. **Key rotation — Fireworks AI**: Log into the [Fireworks AI dashboard](https://fireworks.ai/api-keys) →
+   API Keys → revoke any keys whose values appear in Git history → create new keys.
+   Reference: [Fireworks AI key management](https://fireworks.ai/api-keys).
+
+3. **Manual history-scrub review**: Conduct a targeted review of Git history for
+   any remaining credential exposure beyond the two named keys, without rewriting
+   history. The review must confirm that:
+   - No additional secrets (AWS keys, RunPod tokens, Supabase keys, etc.) are
+     embedded in historical commits.
+   - The `.env.example` template remains the only env-file tracked (no real `.env`
+     with live values).
+   - Any findings are addressed by key rotation in the vendor dashboard (not by
+     history rewrite).
+
+4. **PR body inclusion**: The m1 PR description must include this security
+   follow-ups section so reviewers are aware of the outstanding human actions
+   before merge.
+
+### Status
+
+- [ ] `FAL_KEY` rotated in fal.ai dashboard
+- [ ] `FIREWORKS_API_KEY` rotated in Fireworks AI dashboard
+- [ ] Manual history-scrub review completed
+- [ ] PR body includes security follow-ups
+
 ## Profile rationale (per megaplan-decision, default-lower-then-audit)
 - m1 mechanical → `solo`; `light` (low blast radius).
 - m2 → `directed`: the bugs are diagnosed to exact line numbers; it's test-harness execution, not

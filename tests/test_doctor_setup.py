@@ -28,6 +28,8 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertEqual(result, 0, stderr)
         self.assertIn("Astrid doctor", stdout)
         self.assertIn("[ok] python:", stdout)
+        self.assertIn("[ok] dependency audit:", stdout)
+        self.assertIn("[ok] env template:", stdout)
         self.assertIn("[ok] executor registry:", stdout)
         self.assertIn("[ok] orchestrator registry:", stdout)
         self.assertIn("[ok] element registry:", stdout)
@@ -43,6 +45,8 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertIn("repo structure", {item["name"] for item in payload["checks"]})
         self.assertIn("vibecomfy metadata", {item["name"] for item in payload["checks"]})
+        self.assertIn("dependency audit", {item["name"] for item in payload["checks"]})
+        self.assertIn("env template", {item["name"] for item in payload["checks"]})
 
     def test_doctor_required_check_failure_returns_nonzero(self) -> None:
         with mock.patch.object(doctor, "load_executor_registry", side_effect=RuntimeError("registry exploded")):
@@ -61,6 +65,154 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("[warn] optional binary ffmpeg: not found on PATH", stdout)
         self.assertEqual(strict_result, 1, strict_stderr)
         self.assertIn("[warn] optional binary ffmpeg: not found on PATH", strict_stdout)
+
+    def test_dependency_audit_and_env_template_succeed_for_minimal_project(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "astrid").mkdir()
+            (root / "astrid" / "app.py").write_text("import requests\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "tmp"',
+                        'version = "0.0.0"',
+                        "dependencies = [",
+                        '  "requests>=2",',
+                        "]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / ".env.example").write_text(
+                "\n".join(
+                    [
+                        "# Required: populate for API calls",
+                        "OPENAI_API_KEY=",
+                        "# Optional: only for alternate providers",
+                        "GEMINI_API_KEY=",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env_file = root / ".env"
+            env_file.write_text("OPENAI_API_KEY=test-value\n", encoding="utf-8")
+
+            dependency_check = doctor._check_dependency_audit(repo_root=root)
+            env_check = doctor._check_env_template(repo_root=root, environ={}, env_candidates=[env_file])
+
+        self.assertEqual(dependency_check.status, "ok")
+        self.assertIn("third-party import", dependency_check.detail)
+        self.assertEqual(env_check.status, "ok")
+        self.assertIn("required key(s) present", env_check.detail)
+
+    def test_env_template_check_fails_for_missing_required_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".env.example").write_text(
+                "\n".join(
+                    [
+                        "# Required: populate for API calls",
+                        "OPENAI_API_KEY=",
+                        "# Optional: alternate provider",
+                        "GEMINI_API_KEY=",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            env_file = root / ".env"
+            env_file.write_text("GEMINI_API_KEY=unused\n", encoding="utf-8")
+
+            check = doctor._check_env_template(repo_root=root, environ={}, env_candidates=[env_file])
+
+        self.assertEqual(check.status, "fail")
+        self.assertIn("OPENAI_API_KEY", check.detail)
+
+    def test_dependency_audit_fails_for_undeclared_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "astrid").mkdir()
+            (root / "astrid" / "app.py").write_text("import requests\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "tmp"',
+                        'version = "0.0.0"',
+                        "dependencies = [",
+                        '  "filelock>=3.13",',
+                        "]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            check = doctor._check_dependency_audit(repo_root=root)
+
+        self.assertEqual(check.status, "fail")
+        self.assertIn("requests", check.detail)
+
+    def test_dependency_audit_ignores_pack_imports(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "astrid" / "packs" / "demo").mkdir(parents=True)
+            (root / "astrid" / "core").mkdir(parents=True)
+            (root / "astrid" / "core" / "app.py").write_text("import json\n", encoding="utf-8")
+            (root / "astrid" / "packs" / "demo" / "run.py").write_text("import requests\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "tmp"',
+                        'version = "0.0.0"',
+                        "dependencies = [",
+                        '  "filelock>=3.13",',
+                        "]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            check = doctor._check_dependency_audit(repo_root=root)
+
+        self.assertEqual(check.status, "ok")
+
+    def test_dependency_audit_warns_for_missing_private_runpod_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "astrid").mkdir()
+            (root / "astrid" / "app.py").write_text("import runpod_lifecycle\n", encoding="utf-8")
+            (root / "pyproject.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "tmp"',
+                        'version = "0.0.0"',
+                        "dependencies = [",
+                        '  "filelock>=3.13",',
+                        "]",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            real_find_spec = doctor.importlib.util.find_spec
+
+            def fake_find_spec(name: str):
+                if name == "runpod_lifecycle":
+                    return None
+                return real_find_spec(name)
+
+            with mock.patch.object(doctor.importlib.util, "find_spec", side_effect=fake_find_spec), mock.patch.object(
+                doctor.importlib.metadata,
+                "packages_distributions",
+                return_value={"filelock": ["filelock"]},
+            ):
+                check = doctor._check_dependency_audit(repo_root=root)
+
+        self.assertEqual(check.status, "warn")
+        self.assertFalse(check.required)
+        self.assertIn("runpod-lifecycle", check.detail)
 
     def test_setup_dry_run_does_not_mutate_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

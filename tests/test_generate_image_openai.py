@@ -49,28 +49,28 @@ def test_generate_image_rejects_invalid_gpt_image_2_size():
         main(["--prompt", "bad size", "--size", "1000x1000", "--dry-run"])
 
 
-def test_load_api_key_reads_this_env_by_default(monkeypatch, tmp_path):
+def test_load_api_key_reads_env_by_default(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    (tmp_path / "this.env").write_text("OPENAI_API_KEY=from-this-env\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert load_api_key("OPENAI_API_KEY") == "from-this-env"
+    assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
 
 
 def test_load_api_key_prefers_process_env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "from-process-env")
-    (tmp_path / "this.env").write_text("OPENAI_API_KEY=from-this-env\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
     assert load_api_key("OPENAI_API_KEY") == "from-process-env"
 
 
-def test_llm_client_key_loader_reads_this_env(monkeypatch, tmp_path):
+def test_llm_client_key_loader_reads_env(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    (tmp_path / "this.env").write_text("ANTHROPIC_API_KEY=from-this-env\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-this-env"
+    assert _load_api_key(None, "ANTHROPIC_API_KEY") == "from-dot-env"
 
 
 def test_packs_that_used_generate_image_env_helpers_read_shared_env(monkeypatch, tmp_path):

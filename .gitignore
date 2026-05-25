@@ -71,6 +71,15 @@ plan_v1.revised.md
 
 # Generated orchestrator build artifacts (compiled DSL JSON)
 astrid/packs/*/build/
+examples/packs/*/build/
+
+# Generated Remotion type files (produced by scripts/gen_remotion_types.py)
+remotion/src/*.generated.*
+remotion/src/effects.types.*
+remotion/src/types.augmentations.*
+
+# Allow-list intentional assets that would otherwise be caught by broad globs
+!docs/assets/astrid-orchestration.png
 
 # Megaplan working state
 plan_revision.json

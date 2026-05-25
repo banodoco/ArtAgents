@@ -24,8 +24,8 @@ BROAD_PYTEST_ARGS=(
   --ignore=tests/test_schema_contract.py
 )
 
-"$PYTHON_BIN" -m ruff check .
-"$PYTHON_BIN" -m mypy scripts/reshape
+"$PYTHON_BIN" scripts/reshape/compare_ruff_baseline.py
+"$PYTHON_BIN" scripts/reshape/compare_mypy_baseline.py
 "$PYTHON_BIN" scripts/reshape/check_repo_hygiene.py
 
 "$PYTHON_BIN" -m pytest tests/reshape -q

@@ -24,9 +24,13 @@ Give this to your agents to get started:
 ◇                                                                            ◇
 ┃                           ◇  Getting Started  ◇                            ┃
 ┃            git clone https://github.com/peteromallet/Astrid.git            ┃
-┃         python3 -m astrid [executors|orchestrators|elements] list          ┃
-┃     python3 -m astrid [executors|orchestrators|elements] inspect <id>      ┃
+┃            python3 -m astrid [executors|orchestrators] list                 ┃
+┃           python3 -m astrid elements list <kind>                           ┃
+┃        python3 -m astrid [executors|orchestrators] inspect <id>            ┃
+┃       python3 -m astrid elements inspect <kind> <element_id>               ┃
 ┃       python3 -m astrid [executors|orchestrators] run <id> -- <args>       ┃
+┃       python3 -m astrid doctor       # health check                        ┃
+┃       python3 -m astrid setup        # configure local env                 ┃
 ◇                                                                            ◇
 ┃                          ◇  Make Something New  ◇                          ┃
 ┃            copy docs/templates/{executor,orchestrator,element}/            ┃
@@ -35,7 +39,7 @@ Give this to your agents to get started:
 ┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳          ask the maker what they must do           ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳         docs/ideas.md has a thought or two         ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳          runs/ is where the outputs stay           ╳ ╳ ╳ ╳ ╳   ┃
+┃   ╳ ╳ ╳ ╳ ╳       out/runs/ is where the outputs stay           ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳          just begin, you'll find your way          ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
 ┃ ·                                                                        · ┃

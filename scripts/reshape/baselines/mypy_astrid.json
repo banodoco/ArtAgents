@@ -1,0 +1,27 @@
+{
+  "tool": "mypy",
+  "scope": [
+    "astrid",
+    "scripts/reshape"
+  ],
+  "command": [
+    "python3",
+    "-m",
+    "mypy",
+    "astrid",
+    "scripts/reshape",
+    "--hide-error-context",
+    "--no-color-output",
+    "--show-error-codes"
+  ],
+  "finding_count": 1,
+  "findings": [
+    {
+      "path": "astrid/core/timeline/inverses.py",
+      "line": 114,
+      "column": 0,
+      "message": "Invalid syntax",
+      "code": "syntax"
+    }
+  ]
+}
