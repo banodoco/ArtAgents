@@ -149,7 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.set_defaults(handler=_cmd_new)
 
     fork_parser = subparsers.add_parser("fork", help="Fork an executor into the local pack (astrid/packs/local).")
-    fork_parser.add_argument("executor_id", help="Qualified executor id to fork (e.g., builtin.render).")
+    fork_parser.add_argument("executor_id", help="Qualified executor id to fork (e.g., rendering.render).")
     fork_parser.add_argument("--overwrite", action="store_true", help="Replace an existing local fork.")
     fork_parser.add_argument("--deep", action="store_true", help="Also recursively fork all depended-on executors.")
     fork_parser.set_defaults(handler=_cmd_fork)
@@ -873,7 +873,7 @@ def _emit_uuid_handoff_metadata(
 
 
 def _executor_needs_out(executor: ExecutorDefinition) -> bool:
-    if executor.id == "upload.youtube":
+    if executor.id == "youtube.upload":
         return False
     if executor.kind == "built_in" and "pipeline_step" in executor.metadata:
         return True

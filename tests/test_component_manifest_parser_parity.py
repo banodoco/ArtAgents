@@ -17,12 +17,17 @@ from astrid.core.orchestrator.registry import (
 from astrid.core.orchestrator.schema import load_orchestrator_manifest
 from astrid.packs.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
 
-BUILTIN_PACK_ROOT = REPO_ROOT / "astrid" / "packs" / "builtin"
+PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
+PACK_ROOTS = tuple(sorted(path for path in PACKS_ROOT.iterdir() if (path / "pack.yaml").is_file()))
 
 BUILTIN_MANIFESTS: dict[str, tuple[Path, ...]] = {
-    "executor": tuple(sorted((BUILTIN_PACK_ROOT / "executors").glob("*/executor.yaml"))),
-    "orchestrator": tuple(sorted((BUILTIN_PACK_ROOT / "orchestrators").glob("*/orchestrator.yaml"))),
-    "element": tuple(sorted((BUILTIN_PACK_ROOT / "elements").glob("*/*/element.yaml"))),
+    "executor": tuple(
+        sorted(path for pack_root in PACK_ROOTS for path in (pack_root / "executors").glob("*/executor.yaml"))
+    ),
+    "orchestrator": tuple(
+        sorted(path for pack_root in PACK_ROOTS for path in (pack_root / "orchestrators").glob("*/orchestrator.yaml"))
+    ),
+    "element": tuple(sorted((PACKS_ROOT / "rendering" / "elements").glob("*/*/element.yaml"))),
 }
 
 
@@ -30,12 +35,17 @@ def _rel(path: Path) -> str:
     return str(path.relative_to(REPO_ROOT))
 
 
+def _pack_root_for(manifest_path: Path) -> Path:
+    relative = manifest_path.relative_to(PACKS_ROOT)
+    return PACKS_ROOT / relative.parts[0]
+
+
 def _assert_direct_json_schema_accepts(
     payload: dict[str, Any],
     manifest_kind: str,
     manifest_path: Path,
 ) -> None:
-    validator = PackValidator(BUILTIN_PACK_ROOT)
+    validator = PackValidator(_pack_root_for(manifest_path))
     schema_path = KNOWN_SCHEMA_VERSIONS[1][manifest_kind]
     schema, registry = validator._load_schema(schema_path, manifest_kind, 1)
     errors = sorted(
@@ -49,7 +59,7 @@ def _assert_pack_validator_accepts(
     manifest_path: Path,
     manifest_kind: str,
 ) -> dict[str, Any]:
-    validator = PackValidator(BUILTIN_PACK_ROOT)
+    validator = PackValidator(_pack_root_for(manifest_path))
     payload = validator.validate_component_manifest(manifest_path, manifest_kind)
     assert validator.errors == [], _rel(manifest_path)
     assert payload is not None, _rel(manifest_path)
@@ -78,7 +88,7 @@ def _assert_element_runtime_accepts(manifest_path: Path) -> None:
     parsed = load_element_definition(
         element_root,
         kind=folder_kind,
-        source="pack:builtin",
+        source="pack:rendering",
         editable=False,
         priority=30,
     )

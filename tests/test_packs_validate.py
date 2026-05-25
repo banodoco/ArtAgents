@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from astrid.packs.validate import PackValidator, ValidationError, validate_pack
 
@@ -74,6 +75,52 @@ runtime:
         )
         _write(comp_dir / "run.py", "# Test executor\nprint('hello')\n")
         _write(comp_dir / "STAGE.md", "# Test Executor\n\nPurpose: Testing.\n")
+
+    def write_valid_orchestrator(
+        self,
+        root: Path,
+        orch_path: str = "orchestrators/test_orch",
+        orch_id: str = "test_pack.test_orch",
+    ) -> None:
+        comp_dir = root / orch_path
+        _write(
+            comp_dir / "orchestrator.yaml",
+            f"""schema_version: 1
+id: {orch_id}
+name: Test Orchestrator
+version: 0.1.0
+runtime:
+  kind: python
+  module: run
+  function: main
+""",
+        )
+        _write(comp_dir / "run.py", "def main():\n    return None\n")
+        _write(comp_dir / "STAGE.md", "# Test Orchestrator\n")
+
+    def write_valid_element(
+        self,
+        root: Path,
+        element_path: str = "elements/effects/test_effect",
+        *,
+        element_id: str = "test_effect",
+        pack_id: str = "test_pack",
+    ) -> None:
+        comp_dir = root / element_path
+        _write(
+            comp_dir / "element.yaml",
+            f"""schema_version: 1
+id: {element_id}
+kind: effect
+pack_id: {pack_id}
+metadata:
+  name: Test Effect
+schema: {{}}
+defaults: {{}}
+dependencies: {{}}
+""",
+        )
+        _write(comp_dir / "component.tsx", "export const Component = () => null;\n")
 
 
 class TestValidPack(MinimalPackTestCase):
@@ -161,6 +208,67 @@ agent:
 
 
 class TestLayoutValidation(MinimalPackTestCase):
+    def test_non_builtin_pack_uses_discovery_iterators_for_declared_content_roots(self) -> None:
+        from astrid.core.pack import (
+            iter_element_roots as real_iter_element_roots,
+            iter_executor_roots as real_iter_executor_roots,
+            iter_orchestrator_roots as real_iter_orchestrator_roots,
+        )
+
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: capability_roots/executors
+  orchestrators: capability_roots/orchestrators
+  elements: capability_roots/elements
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Test Pack\n")
+        _write(root / "README.md", "# Test Pack\n")
+        self.write_valid_executor(
+            root,
+            "capability_roots/executors/test_exec",
+            "test_pack.test_exec",
+        )
+        self.write_valid_orchestrator(
+            root,
+            "capability_roots/orchestrators/test_orch",
+            "test_pack.test_orch",
+        )
+        self.write_valid_element(
+            root,
+            "capability_roots/elements/effects/test_effect",
+        )
+
+        with (
+            mock.patch(
+                "astrid.packs.validate.iter_executor_roots",
+                side_effect=real_iter_executor_roots,
+            ) as executor_roots,
+            mock.patch(
+                "astrid.packs.validate.iter_orchestrator_roots",
+                side_effect=real_iter_orchestrator_roots,
+            ) as orchestrator_roots,
+            mock.patch(
+                "astrid.packs.validate.iter_element_roots",
+                side_effect=real_iter_element_roots,
+            ) as element_roots,
+        ):
+            errors, _warnings = validate_pack(root)
+
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        executor_roots.assert_called_once()
+        orchestrator_roots.assert_called_once()
+        element_roots.assert_called_once()
+
     def test_duplicate_capability_ids_are_errors(self) -> None:
         root = self.make_pack_root()
         self.write_valid_pack(root)
@@ -168,6 +276,39 @@ class TestLayoutValidation(MinimalPackTestCase):
         self.write_valid_executor(root, "executors/second", "test_pack.duplicate")
         errors, _ = validate_pack(root)
         self.assertTrue(any("duplicate capability id" in error for error in errors), errors)
+
+    def test_misplaced_executor_id_is_an_error(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_executor(root, "executors/test_exec", "rendering.render")
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any("belongs to pack 'rendering' but was found in pack 'test_pack'" in error for error in errors),
+            errors,
+        )
+
+    def test_misplaced_orchestrator_id_is_an_error(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_orchestrator(root, "orchestrators/test_orch", "video_editing.hype")
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any(
+                "belongs to pack 'video_editing' but was found in pack 'test_pack'" in error
+                for error in errors
+            ),
+            errors,
+        )
+
+    def test_misplaced_element_pack_id_is_an_error(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_element(root, "elements/effects/test_effect", pack_id="rendering")
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any("declares pack_id 'rendering' but was found in pack 'test_pack'" in error for error in errors),
+            errors,
+        )
 
     def test_alias_targets_must_exist(self) -> None:
         root = self.make_pack_root()
@@ -210,6 +351,154 @@ agent:
         errors, warnings = validate_pack(root)
         self.assertEqual(errors, [])
         self.assertTrue(any("unsupported content root" in warning for warning in warnings), warnings)
+
+    def test_non_builtin_pack_standard_content_roots_validates(self) -> None:
+        """A non-builtin pack with standard content roots (executors, orchestrators, elements)
+        should pass validation using discovery-based iterators."""
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack with standard content roots.
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Test Pack\n")
+        _write(root / "README.md", "# Test Pack\n")
+        self.write_valid_executor(root, "executors/test_exec", "test_pack.test_exec")
+        self.write_valid_orchestrator(root, "orchestrators/test_orch", "test_pack.test_orch")
+        self.write_valid_element(
+            root, "elements/effects/test_effect", element_id="test_effect", pack_id="test_pack"
+        )
+
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_non_builtin_pack_with_aliases_and_standard_roots_validates(self) -> None:
+        """A non-builtin pack with standard content roots and pack-level aliases
+        should pass validation."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_executor(root, "executors/test_exec", "test_pack.test_exec")
+        self.write_valid_orchestrator(root, "orchestrators/test_orch", "test_pack.test_orch")
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack with aliases.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy_exec
+    canonical_id: test_pack.test_exec
+    deprecated: true
+    deprecation_message: Use test_pack.test_exec instead.
+  - kind: orchestrator
+    alias: test_pack.legacy_orch
+    canonical_id: test_pack.test_orch
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_non_builtin_pack_rejects_executor_with_wrong_pack_prefix(self) -> None:
+        """An executor in a non-builtin pack whose qualified id prefix does not
+        match the containing pack should be rejected with a clear error."""
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: other_pack
+name: Other Pack
+version: 0.1.0
+description: A pack that should not contain test_pack capabilities.
+content:
+  executors: executors
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Other Pack\n")
+        _write(root / "README.md", "# Other Pack\n")
+        # Write executor with a qualified id whose pack prefix is test_pack, not other_pack
+        self.write_valid_executor(root, "executors/wrong_pack", "test_pack.some_exec")
+
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any("belongs to pack 'test_pack' but was found in pack 'other_pack'" in error for error in errors),
+            errors,
+        )
+
+    def test_non_builtin_pack_rejects_orchestrator_with_wrong_pack_prefix(self) -> None:
+        """An orchestrator in a non-builtin pack whose qualified id prefix does not
+        match the containing pack should be rejected."""
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: other_pack
+name: Other Pack
+version: 0.1.0
+description: A pack that should not contain foreign capabilities.
+content:
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Other Pack\n")
+        _write(root / "README.md", "# Other Pack\n")
+        self.write_valid_orchestrator(
+            root, "orchestrators/foreign_orch", "video_editing.hype"
+        )
+
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any("belongs to pack 'video_editing' but was found in pack 'other_pack'" in error for error in errors),
+            errors,
+        )
+
+    def test_non_builtin_pack_rejects_element_with_wrong_pack_id(self) -> None:
+        """An element whose pack_id does not match the containing pack should be rejected."""
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: other_pack
+name: Other Pack
+version: 0.1.0
+description: Another test pack.
+content:
+  elements: elements
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Other Pack\n")
+        _write(root / "README.md", "# Other Pack\n")
+        self.write_valid_element(
+            root, "elements/effects/wrong_elem", element_id="wrong_elem", pack_id="rendering"
+        )
+
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any("declares pack_id 'rendering' but was found in pack 'other_pack'" in error for error in errors),
+            errors,
+        )
 
 
 class TestSchemaVersionErrors(MinimalPackTestCase):

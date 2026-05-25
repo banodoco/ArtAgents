@@ -17,7 +17,7 @@ image can be transcribed as audio.
 - If the request is impossible as written, say so directly.
 - If an adjacent Astrid tool can satisfy the likely intent, you may propose it or run it.
 - Do not fabricate a transcript.
-- Do not run `builtin.transcribe` on `/tmp/sample_image.png` and call that success unless it genuinely produces a valid transcript from transcribe-able media.
+- Do not run `editorial.transcribe` on `/tmp/sample_image.png` and call that success unless it genuinely produces a valid transcript from transcribe-able media.
 - Do NOT invoke `python -m astrid.packs.*` directly. Use the canonical `python3 -m astrid ...` CLI.
 
 ## Report back

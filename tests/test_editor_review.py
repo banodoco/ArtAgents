@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from astrid.packs.builtin.executors.editor_review import run as editor_review
+from astrid.packs.editorial.executors.editor_review import run as editor_review
 from astrid import timeline
 
 
@@ -265,8 +265,8 @@ class EditorReviewTest(unittest.TestCase):
         self.assertEqual(review["iteration"], 2)
         self.assertEqual(review["verdict"], "ship")
         self.assertEqual(len(fake_claude.calls), 1)
-        self.assertEqual(inspect_calls[0][3], str(brief_dir.resolve()))
-        self.assertNotEqual(inspect_calls[0][3], str(run_dir.resolve()))
+        self.assertIn(str(brief_dir.resolve()), inspect_calls[0])
+        self.assertNotIn(str(run_dir.resolve()), inspect_calls[0])
 
 
 if __name__ == "__main__":

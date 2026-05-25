@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from astrid.packs.builtin.orchestrators.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
-import astrid.packs.builtin.orchestrators.training_run.run as training_run_module
-from astrid.packs.builtin.orchestrators.training_run.config import (
+from astrid.packs.training.orchestrators.dataset_build.interfaces import ArtifactPullResult, CostEstimate, ProviderCapabilities, RemoteExecResult, RunPodHandle
+import astrid.packs.training.orchestrators.training_run.run as training_run_module
+from astrid.packs.training.orchestrators.training_run.config import (
     TrainingRunBudgetError,
     TrainingRunConfigError,
     TrainingRunSecretError,
@@ -19,13 +19,13 @@ from astrid.packs.builtin.orchestrators.training_run.config import (
     preflight_secrets,
     preflight_training_run,
 )
-from astrid.packs.builtin.orchestrators.training_run.manifest import (
+from astrid.packs.training.orchestrators.training_run.manifest import (
     compatibility_manifest_path,
     normalize_ai_toolkit_manifest,
     seed_from_dataset_run,
 )
-from astrid.packs.builtin.orchestrators.training_run.run import main as training_run_main
-from astrid.packs.builtin.orchestrators.training_run.state import (
+from astrid.packs.training.orchestrators.training_run.run import main as training_run_main
+from astrid.packs.training.orchestrators.training_run.state import (
     make_initial_state,
     read_last_run_state,
     record_failure,

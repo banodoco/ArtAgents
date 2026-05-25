@@ -7,10 +7,10 @@ import wave
 from pathlib import Path
 from unittest import mock
 
-from astrid.packs.builtin.executors.arrange import run as arrange
-from astrid.packs.builtin.executors.cut import run as cut
-from astrid.packs.builtin.orchestrators.hype import run as pipeline
-from astrid.packs.builtin.executors.pool_merge import run as pool_merge
+from astrid.packs.editorial.executors.arrange import run as arrange
+from astrid.packs.video_editing.executors.cut import run as cut
+from astrid.packs.video_editing.orchestrators.hype import run as pipeline
+from astrid.packs.training.executors.pool_merge import run as pool_merge
 from astrid import timeline
 
 

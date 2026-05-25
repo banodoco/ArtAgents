@@ -14,7 +14,7 @@
       "group": "logo-concepts"
     }
   ],
-  "executor_id": "builtin.understand",
+  "executor_id": "understanding.understand",
   "orchestrator_id": null,
   "kind": "executor",
   "status": "succeeded",

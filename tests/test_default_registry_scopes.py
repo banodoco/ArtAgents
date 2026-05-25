@@ -11,62 +11,62 @@ class DefaultRegistryScopeTest(unittest.TestCase):
         canonical = load_executor_registry()
         canonical_ids = set(canonical.as_mapping())
 
-        self.assertIn("builtin.render", canonical_ids)
-        self.assertIn("upload.youtube", canonical_ids)
-        self.assertIn("external.moirae", canonical_ids)
-        self.assertIn("external.vibecomfy.run", canonical_ids)
-        self.assertIn("external.vibecomfy.validate", canonical_ids)
+        self.assertIn("rendering.render", canonical_ids)
+        self.assertIn("youtube.upload", canonical_ids)
+        self.assertIn("moirae.moirae", canonical_ids)
+        self.assertIn("vibecomfy.run", canonical_ids)
+        self.assertIn("vibecomfy.validate", canonical_ids)
 
-        youtube = canonical.get("upload.youtube")
+        youtube = canonical.get("youtube.upload")
         self.assertEqual(youtube.metadata["source"], "pack")
-        self.assertEqual(youtube.metadata["source_pack"], "upload")
+        self.assertEqual(youtube.metadata["source_pack"], "youtube")
         self.assertNotIn("pack_id", youtube.metadata)
-        self.assertTrue(youtube.metadata["executor_root"].endswith("astrid/packs/upload/executors/youtube"))
-        self.assertTrue(youtube.metadata["manifest_file"].endswith("astrid/packs/upload/executors/youtube/executor.yaml"))
+        self.assertTrue(youtube.metadata["executor_root"].endswith("astrid/packs/youtube/executors/upload"))
+        self.assertTrue(youtube.metadata["manifest_file"].endswith("astrid/packs/youtube/executors/upload/executor.yaml"))
 
         for executor_id, folder in (
-            ("builtin.audio_understand", "audio_understand"),
-            ("builtin.visual_understand", "visual_understand"),
-            ("builtin.video_understand", "video_understand"),
+            ("understanding.audio_understand", "audio_understand"),
+            ("understanding.visual_understand", "visual_understand"),
+            ("understanding.video_understand", "video_understand"),
         ):
             with self.subTest(executor_id=executor_id):
                 action = canonical.get(executor_id)
                 self.assertEqual(action.metadata["source"], "pack")
-                self.assertEqual(action.metadata["source_pack"], "builtin")
+                self.assertEqual(action.metadata["source_pack"], "understanding")
                 self.assertNotIn("pack_id", action.metadata)
-                self.assertTrue(action.metadata["executor_root"].endswith(f"astrid/packs/builtin/executors/{folder}"))
-                self.assertTrue(action.metadata["manifest_file"].endswith(f"astrid/packs/builtin/executors/{folder}/executor.yaml"))
+                self.assertTrue(action.metadata["executor_root"].endswith(f"astrid/packs/understanding/executors/{folder}"))
+                self.assertTrue(action.metadata["manifest_file"].endswith(f"astrid/packs/understanding/executors/{folder}/executor.yaml"))
 
-        vibecomfy = canonical.get("external.vibecomfy.run")
+        vibecomfy = canonical.get("vibecomfy.run")
         self.assertEqual(vibecomfy.kind, "external")
         self.assertEqual(vibecomfy.metadata["pack_id"], "vibecomfy")
-        self.assertEqual(vibecomfy.metadata["source_pack"], "external")
+        self.assertEqual(vibecomfy.metadata["source_pack"], "vibecomfy")
         self.assertEqual(vibecomfy.metadata["source"], "pack")
-        self.assertTrue(vibecomfy.metadata["executor_root"].endswith("astrid/packs/external/vibecomfy"))
+        self.assertTrue(vibecomfy.metadata["executor_root"].endswith("astrid/packs/vibecomfy/executors/run"))
 
     def test_default_orchestrator_registries_do_not_classify_vibecomfy_as_orchestrator(self) -> None:
         canonical = load_orchestrator_registry(executor_registry=load_executor_registry())
         canonical_ids = set(canonical.as_mapping())
 
-        self.assertIn("builtin.hype", canonical_ids)
-        self.assertIn("builtin.event_talks", canonical_ids)
-        self.assertIn("builtin.thumbnail_maker", canonical_ids)
+        self.assertIn("video_editing.hype", canonical_ids)
+        self.assertIn("video_editing.event_talks", canonical_ids)
+        self.assertIn("video_editing.thumbnail_maker", canonical_ids)
         self.assertFalse(any("vibecomfy" in orchestrator_id for orchestrator_id in canonical_ids))
-        self.assertFalse(any(orchestrator_id == "upload.youtube" for orchestrator_id in canonical_ids))
+        self.assertFalse(any(orchestrator_id == "youtube.upload" for orchestrator_id in canonical_ids))
         with self.assertRaises(KeyError):
-            canonical.get("external.vibecomfy.run")
+            canonical.get("vibecomfy.run")
 
     def test_canonical_builtin_executor_runtime_module(self) -> None:
         canonical = load_executor_registry()
-        render = canonical.get("builtin.render")
-        self.assertEqual(render.metadata["runtime_module"], "astrid.packs.builtin.executors.render.run")
+        render = canonical.get("rendering.render")
+        self.assertEqual(render.metadata["runtime_module"], "astrid.packs.rendering.executors.render.run")
 
     def test_external_executor_roots_are_pack_native(self) -> None:
         registry = load_executor_registry()
 
-        self.assertTrue(registry.get("external.moirae").metadata["executor_root"].endswith("astrid/packs/external/moirae"))
+        self.assertTrue(registry.get("moirae.moirae").metadata["executor_root"].endswith("astrid/packs/moirae/executors/moirae"))
         self.assertTrue(
-            registry.get("external.vibecomfy.run").metadata["executor_root"].endswith("astrid/packs/external/vibecomfy")
+            registry.get("vibecomfy.run").metadata["executor_root"].endswith("astrid/packs/vibecomfy/executors/run")
         )
 
 

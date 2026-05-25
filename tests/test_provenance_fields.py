@@ -47,7 +47,7 @@ from astrid.core.element.schema import (
 
 def _make_executor(**overrides) -> ExecutorDefinition:
     kwargs: dict = dict(
-        id="builtin.render",
+        id="rendering.render",
         name="Render Executor",
         kind="built_in",
         version="1.0.0",

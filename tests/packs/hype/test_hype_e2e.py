@@ -1,6 +1,6 @@
-"""End-to-end test of builtin.hype port against tiny fixture project (Sprint 5a T14).
+"""End-to-end test of video_editing.hype port against tiny fixture project (Sprint 5a T14).
 
-Mock RunPod at ``external.runpod.session`` boundary; no live calls.
+Mock RunPod at ``runpod.session`` boundary; no live calls.
 Verifies:
 - Initial plan v2 emitted with stable plan hash
 - Dynamic plan mutation via ``add-step`` (shot count discovered after cut)
@@ -76,7 +76,7 @@ def _build_synthetic_hype_run(
     Returns ``(project_root, run_dir, source_path, plan_path)``.
     """
     from astrid.core.orchestrator.plan_template import emit_plan_json
-    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
+    from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
 
     proj_root = tmp_path / "projects" / slug
     run_dir = proj_root / "runs" / run_id
@@ -114,7 +114,7 @@ def _build_synthetic_hype_run(
             {"source": str(source_path), "sha256": src_sha256},
         ],
         "plan_hash": compute_plan_hash(str(plan_path)),
-        "orchestrator": "builtin.hype",
+        "orchestrator": "video_editing.hype",
     }
     (run_dir / "run.json").write_text(
         json.dumps(run_json, indent=2), encoding="utf-8"
@@ -259,11 +259,11 @@ def test_initial_plan_v2_emission(tmp_path: Path) -> None:
     assert "validate" in child_ids
 
     executor_leaf_ids = {
-        "transcribe": "builtin.transcribe",
-        "scenes": "builtin.scenes",
-        "cut": "builtin.cut",
-        "render": "builtin.render",
-        "validate": "builtin.validate",
+        "transcribe": "editorial.transcribe",
+        "scenes": "editorial.scenes",
+        "cut": "video_editing.cut",
+        "render": "rendering.render",
+        "validate": "editorial.validate",
     }
     for child in top["children"]:
         if child["id"] not in executor_leaf_ids:
@@ -336,12 +336,12 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
 
     rc, stdout, stderr = _capture_stdout_stderr(
         cmd_start,
-        ["builtin.hype", "--project", slug, "--name", "run-hype-start"],
+        ["video_editing.hype", "--project", slug, "--name", "run-hype-start"],
         packs_root=tmp_path / "empty-packs",
         projects_root=projects_root,
     )
     assert rc == 0, stderr
-    assert "started builtin.hype" in stdout
+    assert "started video_editing.hype" in stdout
     run_dir = projects_root / slug / "runs" / "run-hype-start"
     plan_path = projects_root / slug / "plan.json"
     run_plan_path = run_dir / "plan.json"
@@ -355,7 +355,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     assert "children" in plan_data["steps"][0]
 
     run_json = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
-    assert run_json["tool_id"] == "builtin.hype"
+    assert run_json["tool_id"] == "video_editing.hype"
     assert run_json["metadata"]["plan_hash"].startswith("sha256:")
     assert {
         (entry["source"], entry["sha256"]) for entry in run_json["consumes"]
@@ -387,7 +387,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
         "astrid",
         "executors",
         "run",
-        "builtin.transcribe",
+        "editorial.transcribe",
     )
     assert rendered_transcribe.task_env["ASTRID_TASK_PROJECT"] == slug
     assert rendered_transcribe.task_env["ASTRID_TASK_RUN_ID"] == "run-hype-start"
@@ -399,7 +399,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     )
     assert rc == 0, next_stderr
     assert "ASTRID_TASK_PROJECT=demo" in next_stdout
-    assert "python3 -m astrid executors run builtin.transcribe" in next_stdout
+    assert "python3 -m astrid executors run editorial.transcribe" in next_stdout
     assert "add --project" not in next_stdout
     assert "uses task env instead of a local --project" in next_stdout
 
@@ -500,7 +500,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
         projects_root=projects_root,
     )
     assert rc == 0, next_stderr
-    assert "builtin.render" in next_stdout
+    assert "rendering.render" in next_stdout
 
     kinds = [event["kind"] for event in read_events(run_dir / "events.jsonl")]
     assert kinds.count("step_dispatched") == 3
@@ -512,7 +512,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
 def test_generated_hype_render_command_parses_to_required_downstream_render_argv(
     tmp_path: Path,
 ) -> None:
-    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
+    from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
 
     run_dir = tmp_path / "runs" / "r-hype"
     run_dir.mkdir(parents=True)
@@ -547,7 +547,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
         "astrid",
         "executors",
         "run",
-        "builtin.render",
+        "rendering.render",
     )
     out = rendered_argv[rendered_argv.index("--out") + 1]
     input_values = [
@@ -557,7 +557,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
     ]
     downstream_argv = build_executor_command(
         ExecutorRunRequest(
-            "builtin.render",
+            "rendering.render",
             out=out,
             inputs=_parse_input_values(input_values),
             python_exec="/opt/python",
@@ -568,7 +568,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
     assert downstream_argv[:3] == (
         "/opt/python",
         "-m",
-        "astrid.packs.builtin.executors.render.run",
+        "astrid.packs.rendering.executors.render.run",
     )
     assert downstream_argv[3:] == (
         "--timeline",
@@ -585,7 +585,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
 def test_plan_hash_different_for_different_plans(tmp_path: Path) -> None:
     """Two plans with different run_ids produce different hashes."""
     from astrid.core.orchestrator.plan_template import emit_plan_json
-    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
+    from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
 
     slug = "demo"
     proj_root = tmp_path / "projects" / slug
@@ -678,7 +678,7 @@ def test_run_json_consumes_populated(tmp_path: Path) -> None:
     assert run_json_path.exists()
 
     data = json.loads(run_json_path.read_text(encoding="utf-8"))
-    assert data["orchestrator"] == "builtin.hype"
+    assert data["orchestrator"] == "video_editing.hype"
     assert "plan_hash" in data
     assert data["plan_hash"].startswith("sha256:")
 
@@ -738,7 +738,7 @@ def test_dynamic_add_step_shot_count_discovery(tmp_path: Path) -> None:
             "--run-id", "run-hype-1",
             "--step-id", "shot_detail_01",
             "--adapter", "local",
-            "--command", "python3 -m astrid.packs.builtin.render_shot --shot 01",
+            "--command", "python3 -m astrid.packs.rendering.render_shot --shot 01",
             "--after", "hype/cut",
         ],
         projects_root=tmp_path / "projects",
@@ -789,7 +789,7 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
             "--run-id", "run-hype-1",
             "--step-id", "extra_render",
             "--adapter", "local",
-            "--command", "python3 -m astrid.packs.external.runpod session --extra",
+            "--command", "python3 -m astrid.packs.runpod.executors.provision session --extra",
             "--into", "hype",
         ],
         projects_root=tmp_path / "projects",

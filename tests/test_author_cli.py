@@ -150,7 +150,7 @@ def bad():
     return [
         code(
             "delegate",
-            argv=["python3", "-m", "astrid", "orchestrators", "run", "builtin.hype"],
+            argv=["python3", "-m", "astrid", "orchestrators", "run", "video_editing.hype"],
         ),
     ]
 ''',

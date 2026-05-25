@@ -270,8 +270,8 @@ already exist.
 - Do not print or hardcode API keys; use `--env-file` or nearby `.env` files.
 - Do not edit `plan.json` or `events.jsonl` by hand during task-mode runs.
 - Treat curated tool stages as protected unless explicitly asked to edit them,
-  notably `astrid/packs/external/moirae/STAGE.md` and
-  `astrid/packs/external/vibecomfy/STAGE.md`.
+  notably `astrid/packs/moirae/executors/moirae/STAGE.md` and
+  `astrid/packs/vibecomfy/executors/run/STAGE.md`.
 - Orchestrators may call declared child orchestrators; executors must not call orchestrators.
 
 After adding or renaming effects, animations, transitions, or theme elements:
@@ -290,14 +290,14 @@ python3 scripts/gen_capability_index.py
 
 ## Common Defaults
 
-Built-in orchestrators: `builtin.hype`, `builtin.event_talks`,
-`builtin.thumbnail_maker`.
+Built-in orchestrators: `video_editing.hype`, `video_editing.event_talks`,
+`video_editing.thumbnail_maker`.
 
-Built-in executors include `builtin.transcribe`, `builtin.cut`,
-`builtin.render`, `builtin.validate`, `builtin.understand` (audio/visual/video
-dispatcher; pass `--mode {audio,visual,video}`), `builtin.generate_image_openai`, and
-the rest of the pipeline. External executors include `external.moirae` and
-`external.vibecomfy.run` (executor only, not an orchestrator).
+Built-in executors include `editorial.transcribe`, `video_editing.cut`,
+`rendering.render`, `editorial.validate`, `understanding.understand` (audio/visual/video
+dispatcher; pass `--mode {audio,visual,video}`), `generation.generate_image_openai`, and
+the rest of the pipeline. External executors include `moirae.moirae` and
+`vibecomfy.run` (executor only, not an orchestrator).
 
 Element source priority: active theme →
 `astrid/packs/local/elements/<kind>/<id>` (gitignored scratch pack) →
@@ -309,7 +309,7 @@ rewriting the element's `pack_id` to `local`.
 python3 -m astrid elements fork effects text-card
 ```
 
-Before rendering an iteration video, run `python3 -m astrid.packs.builtin.orchestrators.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a non-binding variant lineage WITHIN a pack and is UNRELATED to the removed `astrid thread` CLI verb or to session binding. Threads as a generic user-facing runtime concept were retired in Sprint 1 (DEC-001); the internal `astrid.threads` library is retained for pack lineage utilities.
+Before rendering an iteration video, run `python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a non-binding variant lineage WITHIN a pack and is UNRELATED to the removed `astrid thread` CLI verb or to session binding. Threads as a generic user-facing runtime concept were retired in Sprint 1 (DEC-001); the internal `astrid.threads` library is retained for pack lineage utilities.
 
 ## Pack Model
 
@@ -389,72 +389,72 @@ orchestrator, or element manifests.
 
 | id | short_description |
 | --- | --- |
-| `builtin.arrange` | Compose a brief-specific shot arrangement from the source clip pool. |
-| `builtin.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
-| `builtin.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
-| `builtin.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
-| `builtin.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
-| `builtin.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
-| `builtin.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
-| `builtin.generate_image` | Generate images from text prompts via local or cloud backends. v2: model→mode→backend. |
-| `builtin.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
-| `builtin.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes. |
-| `builtin.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
-| `builtin.human_notes` | Convert human editorial notes into structured pipeline inputs. |
-| `builtin.human_review` | Serve a small HTML page locally, collect human decisions as JSON, block until submit. |
-| `builtin.inspect_cut` | Inspect a generated cut run directory and report timeline/asset health. |
-| `builtin.open_in_reigh` | Copy or stage generated timeline+assets for handoff into a Reigh project. |
-| `builtin.pool_build` | Build the candidate clip pool from triaged source-video scenes. |
-| `builtin.pool_merge` | Merge multiple candidate clip pools into a unified pool for arrangement. |
-| `builtin.publish` | Publish a finished timeline + assets pair into a Reigh project via API. |
-| `builtin.quality_zones` | Tag arrangement clips with per-zone quality grades for downstream picks. |
-| `builtin.quote_scout` | Scan a transcript for quotable lines suitable for hype clips. |
-| `builtin.refine` | Apply targeted reviewer-driven refinements to an existing arrangement. |
-| `builtin.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
-| `builtin.render` | Render a hype timeline to hype.mp4 through the Remotion compositor. |
-| `builtin.scene_describe` | Caption each detected scene with a vision model for downstream selection. |
-| `builtin.scenes` | Detect source-video scene boundaries with ffmpeg-driven analysis. |
-| `builtin.script_pipeline` | Generate short scripts through rough attempts, synthesis, style pass, and optional judging. |
-| `builtin.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |
-| `builtin.shots` | Slice scenes into shot windows for downstream pool building. |
-| `builtin.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
-| `builtin.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
-| `builtin.tile_video` | Crop a video into an MxN grid of overlapping spatial tiles plus first-frame PNGs. |
-| `builtin.transcribe` | Transcribe source audio to transcript.json via Whisper. |
-| `builtin.triage` | Triage source-video scenes by quality before pool building. |
-| `builtin.understand` | Dispatch to the audio, visual, or video understanding executor based on --mode. |
-| `builtin.validate` | Validate the rendered video against its declared timeline and metadata. |
-| `builtin.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
-| `builtin.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
-| `builtin.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
-| `external.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
-| `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
-| `external.runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
-| `external.runpod.provision` | Provision a RunPod GPU pod and emit a pod handle for later exec/teardown. |
-| `external.runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
-| `external.runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
-| `external.runpod.teardown` | Terminate a RunPod pod. Idempotent. |
-| `external.vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
-| `external.vibecomfy.validate` | Validate a VibeComfy / ComfyUI workflow JSON without executing it. |
+| `editorial.arrange` | Compose a brief-specific shot arrangement from the source clip pool. |
+| `editorial.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
+| `editorial.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
+| `editorial.human_notes` | Convert human editorial notes into structured pipeline inputs. |
+| `editorial.human_review` | Serve a small HTML page locally, collect human decisions as JSON, block until submit. |
+| `editorial.inspect_cut` | Inspect a generated cut run directory and report timeline/asset health. |
+| `editorial.quality_zones` | Tag arrangement clips with per-zone quality grades for downstream picks. |
+| `editorial.quote_scout` | Scan a transcript for quotable lines suitable for hype clips. |
+| `editorial.refine` | Apply targeted reviewer-driven refinements to an existing arrangement. |
+| `editorial.scenes` | Detect source-video scene boundaries with ffmpeg-driven analysis. |
+| `editorial.script_pipeline` | Generate short scripts through rough attempts, synthesis, style pass, and optional judging. |
+| `editorial.shots` | Slice scenes into shot windows for downstream pool building. |
+| `editorial.transcribe` | Transcribe source audio to transcript.json via Whisper. |
+| `editorial.triage` | Triage source-video scenes by quality before pool building. |
+| `editorial.validate` | Validate the rendered video against its declared timeline and metadata. |
+| `fal.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
+| `foley.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
+| `foley.tile_video` | Crop a video into an MxN grid of overlapping spatial tiles plus first-frame PNGs. |
+| `generation.generate_image` | Generate images from text prompts via local or cloud backends. v2: model→mode→backend. |
+| `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
+| `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes. |
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
-| `upload.youtube` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
+| `moirae.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
+| `reigh.open_in_reigh` | Copy or stage generated timeline+assets for handoff into a Reigh project. |
+| `reigh.publish` | Publish a finished timeline + assets pair into a Reigh project via API. |
+| `reigh.reigh_data` | Fetch canonical Reigh project data through the reigh-data Edge Function. |
+| `reigh.spatial_audio_page` | Build a static page that mixes Foley tracks anchored to spatial rectangles via Web Audio. |
+| `rendering.html_canvas_effect` | Scaffold a local Remotion HTML-in-canvas effect element. |
+| `rendering.render` | Render a hype timeline to hype.mp4 through the Remotion compositor. |
+| `rendering.sprite_sheet` | Generate, slice, and preview GPT Image sprite sheets for batch image work. |
+| `runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
+| `runpod.provision` | Provision a RunPod GPU pod and emit a pod handle for later exec/teardown. |
+| `runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
+| `runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
+| `runpod.teardown` | Terminate a RunPod pod. Idempotent. |
+| `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
+| `training.pool_build` | Build the candidate clip pool from triaged source-video scenes. |
+| `training.pool_merge` | Merge multiple candidate clip pools into a unified pool for arrangement. |
+| `training.search_loras` | Search Hugging Face Hub for LoRAs associated with a base model. |
+| `understanding.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
+| `understanding.scene_describe` | Caption each detected scene with a vision model for downstream selection. |
+| `understanding.understand` | Dispatch to the audio, visual, or video understanding executor based on --mode. |
+| `understanding.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
+| `understanding.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
+| `vibecomfy.run` | Run a VibeComfy / ComfyUI workflow JSON through the VibeComfy CLI. |
+| `vibecomfy.validate` | Validate a VibeComfy / ComfyUI workflow JSON without executing it. |
+| `video_editing.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
+| `youtube.upload` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
+| `youtube.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
 
 ### Orchestrators
 
 | id | short_description |
 | --- | --- |
-| `builtin.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
-| `builtin.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
-| `builtin.event_talks` | Orchestrate event-talk template, search, holding-screen, and render commands into a finished video. |
-| `builtin.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
-| `builtin.hype` | Run the canonical hype editing pipeline end-to-end (transcribe → cut → render → validate). |
-| `builtin.iteration_video` | Prepare an iteration graph, assemble render inputs, render through builtin.render, and finalize iteration video outputs. |
-| `builtin.logo_ideas` | Generate a grid of distinct logo concepts via Kimi K2 prompts + GPT Image 2 (or z-image) renders. |
-| `builtin.thumbnail_maker` | Plan source evidence and thumbnail generation candidates for a video/query pair. |
-| `builtin.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
-| `builtin.vary_grid` | Iterative grid editor: take an existing grid image and emit a new grid of variations via fal. |
+| `foley.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
+| `training.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
+| `training.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
+| `video_editing.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |
+| `video_editing.event_talks` | Orchestrate event-talk template, search, holding-screen, and render commands into a finished video. |
+| `video_editing.hype` | Run the canonical hype editing pipeline end-to-end (transcribe → cut → render → validate). |
+| `video_editing.iteration_video` | Prepare an iteration graph, assemble render inputs, render, and finalize iteration video outputs. |
+| `video_editing.logo_ideas` | Generate a grid of distinct logo concepts via Kimi K2 prompts + GPT Image 2 (or z-image) renders. |
+| `video_editing.thumbnail_maker` | Plan source evidence and thumbnail generation candidates for a video/query pair. |
+| `video_editing.vary_grid` | Iterative grid editor: take an existing grid image and emit a new grid of variations via fal. |
 
 ### Elements
 
@@ -598,7 +598,7 @@ You should not need ffmpeg's `atrim` / `afade` / `amix` for any normal "music un
 ```bash
 PYENV_VERSION=3.11.11 \
 ASTRID_TIMELINE_COMPOSITION_SRC=$(pwd)/remotion/node_modules/@banodoco/timeline-composition/typescript/src \
-python3 -m astrid.packs.builtin.executors.render.run \
+python3 -m astrid.packs.rendering.executors.render.run \
   --timeline runs/<my-run>/timeline.json \
   --assets runs/<my-run>/assets.json \
   --out runs/<my-run>/composed.mp4

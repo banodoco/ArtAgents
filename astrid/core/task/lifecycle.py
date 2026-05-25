@@ -5,6 +5,8 @@ cmd_runs_ls (FLAG-P5-006): natural completion does not clear active_run.json
 in V1, so the lister surfaces only 'aborted' vs 'in-progress'.
 cmd_start (SD-007): does not silently invoke compile when the pre-built JSON
 manifest is missing — prints the compile recovery and returns non-zero.
+Author-test replays are the exception: they deliberately use compiled smoke
+plans even for orchestrators that normally build dynamic start plans.
 """
 
 from __future__ import annotations
@@ -34,8 +36,14 @@ from astrid.core.project.paths import (
     validate_run_id,
 )
 from astrid.core.project.project import ProjectError, require_project
+from astrid.core.alias_resolver import (
+    _register_pack_aliases,
+    create_shared_alias_resolver,
+    extract_pack_aliases,
+)
 from astrid.core.project.run import resolve_required_project_timeline
 from astrid.core.project.schema import build_run_record
+from astrid.core.pack import discover_packs
 from astrid.core.session.lease import (
     release_writer_lease,
     write_lease_init,
@@ -149,6 +157,20 @@ def _qualified_split(qualified_id: str) -> tuple[str, str]:
     return pack, name
 
 
+def _canonical_orchestrator_id(
+    orchestrator_id: str,
+    *,
+    packs_root: Path,
+) -> str:
+    """Resolve legacy orchestrator aliases to the canonical id for start-time checks."""
+    packs = discover_packs(root=packs_root, include_hidden=True)
+    if not packs:
+        return orchestrator_id
+    resolver = create_shared_alias_resolver()
+    _register_pack_aliases(resolver, extract_pack_aliases(packs, kind="orchestrator"))
+    return resolver.resolve(orchestrator_id)
+
+
 def _generate_run_id() -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"run-{stamp}-{secrets.token_hex(4)}"
@@ -184,7 +206,7 @@ def _project_file(proj_root: Path, name: str) -> Path | None:
 def _hype_project_inputs(
     proj_root: Path,
 ) -> tuple[Path | None, Path | None, Path | None, list[dict[str, str]]]:
-    """Resolve conventional project-local inputs for ``astrid start builtin.hype``."""
+    """Resolve conventional project-local inputs for ``astrid start video_editing.hype``."""
     video = _default_project_video(proj_root)
     brief = _project_file(proj_root, "brief.txt")
     theme = _project_file(proj_root, "theme.json")
@@ -226,8 +248,8 @@ def _build_canonical_start_plan(
     run_dir: Path,
     run_id: str,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    if orchestrator_id == "builtin.hype":
-        from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
+    if orchestrator_id == "video_editing.hype":
+        from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
 
         video, brief, theme, consumes = _hype_project_inputs(proj_root)
         return (
@@ -241,8 +263,8 @@ def _build_canonical_start_plan(
             ),
             consumes,
         )
-    if orchestrator_id == "builtin.event_talks":
-        from astrid.packs.builtin.orchestrators.event_talks.plan_template import build_plan_v2
+    if orchestrator_id == "video_editing.event_talks":
+        from astrid.packs.video_editing.orchestrators.event_talks.plan_template import build_plan_v2
 
         source, transcript, consumes = _event_talks_project_inputs(proj_root)
         return (
@@ -255,8 +277,8 @@ def _build_canonical_start_plan(
             ),
             consumes,
         )
-    if orchestrator_id == "builtin.thumbnail_maker":
-        from astrid.packs.builtin.orchestrators.thumbnail_maker.plan_template import build_plan_v2
+    if orchestrator_id == "video_editing.thumbnail_maker":
+        from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import build_plan_v2
 
         source, query_text, consumes = _thumbnail_maker_project_inputs(proj_root)
         return (
@@ -307,8 +329,13 @@ def cmd_start(
         )
         return 1
 
+    resolved_orchestrator_id = _canonical_orchestrator_id(
+        args.orchestrator_id,
+        packs_root=_resolve_packs_root(packs_root),
+    )
+
     try:
-        pack, name = _qualified_split(args.orchestrator_id)
+        pack, name = _qualified_split(resolved_orchestrator_id)
     except ValueError as exc:
         _print_err(f"start: {exc}")
         return 1
@@ -320,18 +347,23 @@ def cmd_start(
         )
         return 1
 
-    uses_dynamic_start_plan = args.orchestrator_id in {
-        "builtin.hype",
-        "builtin.event_talks",
-        "builtin.thumbnail_maker",
+    uses_dynamic_start_plan = resolved_orchestrator_id in {
+        "video_editing.hype",
+        "video_editing.event_talks",
+        "video_editing.thumbnail_maker",
     }
+    if uses_dynamic_start_plan:
+        from astrid.core.task.env import is_author_test_mode
+
+        if is_author_test_mode():
+            uses_dynamic_start_plan = False
     if not uses_dynamic_start_plan:
         packs = _resolve_packs_root(packs_root)
         build_path = packs / pack / "build" / f"{name}.json"
         if not build_path.is_file():
             _print_err(
                 f"start: compiled plan not found at {build_path}; "
-                f"recovery: astrid author compile {args.orchestrator_id}"
+                f"recovery: astrid author compile {resolved_orchestrator_id}"
             )
             return 1
 
@@ -394,13 +426,15 @@ def cmd_start(
     if uses_dynamic_start_plan:
         try:
             compiled_payload, consumes = _build_canonical_start_plan(
-                args.orchestrator_id,
+                resolved_orchestrator_id,
                 proj_root=proj_root,
                 run_dir=run_dir,
                 run_id=run_id,
             )
         except Exception as exc:
-            _print_err(f"start: failed to build {args.orchestrator_id} task plan: {exc}")
+            _print_err(
+                f"start: failed to build {resolved_orchestrator_id} task plan: {exc}"
+            )
             return 1
 
     plan_path = proj_root / "plan.json"
@@ -418,7 +452,7 @@ def cmd_start(
     run_record = build_run_record(
         slug,
         run_id,
-        tool_id=args.orchestrator_id,
+        tool_id=resolved_orchestrator_id,
         kind="orchestrator",
         status="prepared",
         out=run_dir,
@@ -468,14 +502,14 @@ def cmd_start(
 
     agent_md = _AGENT_MD_TEMPLATE.format(
         preamble=PROHIBITION_PREAMBLE,
-        qualified_id=args.orchestrator_id,
+        qualified_id=resolved_orchestrator_id,
         run_id=run_id,
         slug=slug,
         timeline_id=timeline_id,
     )
     (run_dir / "AGENT.md").write_text(agent_md, encoding="utf-8")
 
-    print(f"started {args.orchestrator_id}")
+    print(f"started {resolved_orchestrator_id}")
     print(f"  project:   {slug}")
     print(f"  timeline:  {timeline_slug}")
     print(f"  run-id:    {run_id}")
@@ -1142,16 +1176,16 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
     # Each `<pack>/build/<name>.json` corresponds to qualified id
     # `<pack>.<name>`. Defensive — never raises if a pack dir is missing.
     #
-    # Canonical orchestrators (builtin.hype, builtin.event_talks,
-    # builtin.thumbnail_maker) build their plans dynamically at start
+    # Canonical orchestrators (video_editing.hype, video_editing.event_talks,
+    # video_editing.thumbnail_maker) build their plans dynamically at start
     # time via plan_template.build_plan_v2(). Their compiled build JSON
     # artifacts (if present) are NOT product surface — they must never
     # be treated as the canonical plan source or discovered from the
     # build/ directory for listing/suggestion purposes.
     _CANONICAL_DYNAMIC_IDS = {
-        "builtin.hype",
-        "builtin.event_talks",
-        "builtin.thumbnail_maker",
+        "video_editing.hype",
+        "video_editing.event_talks",
+        "video_editing.thumbnail_maker",
     }
     try:
         from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT

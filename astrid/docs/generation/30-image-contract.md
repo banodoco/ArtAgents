@@ -1,7 +1,7 @@
 # Image Modality Contract (schema_version: 2)
 
 **Status**: Implemented (Sprint 02 — v2 model → mode → backend taxonomy)
-**Executor**: `builtin.generate_image`
+**Executor**: `generation.generate_image`
 **Escape hatch**: `external.vibecomfy` (LoRAs, IP-adapter, controlnet, custom samplers,
 graph composition)
 

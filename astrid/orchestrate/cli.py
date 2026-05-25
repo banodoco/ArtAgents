@@ -313,6 +313,14 @@ def _fixture_dir_for_run(pack_root: Path, fixture_name: str) -> Optional[Path]:
     return fixture_dir
 
 
+def _author_test_roots(root: Path, pack: str) -> tuple[Path, ...]:
+    primary = root / pack
+    if pack == "builtin":
+        return (primary,)
+    builtin = root / "builtin"
+    return (primary, builtin)
+
+
 def _cmd_test(
     qid: str,
     fixture_name: str,
@@ -340,8 +348,19 @@ def _cmd_test(
             _print_err(f"author test {qid}: compile failed: {exc}")
             return 1
 
-    golden_path = pack_root / "golden" / f"{fixture_name}.events.jsonl"
-    fixture_dir = _fixture_dir_for_run(pack_root, fixture_name)
+    candidate_roots = _author_test_roots(root, pack)
+    golden_path = candidate_roots[0] / "golden" / f"{fixture_name}.events.jsonl"
+    for candidate_root in candidate_roots:
+        candidate = candidate_root / "golden" / f"{fixture_name}.events.jsonl"
+        if candidate.is_file():
+            golden_path = candidate
+            break
+
+    fixture_dir = None
+    for candidate_root in candidate_roots:
+        fixture_dir = _fixture_dir_for_run(candidate_root, fixture_name)
+        if fixture_dir is not None:
+            break
 
     with tempfile.TemporaryDirectory() as scratch:
         projects_root = Path(scratch)
@@ -469,7 +488,7 @@ def _cmd_explain(qid: str, packs_root: Optional[Path]) -> int:
     # <pack>/<name>/ with its own orchestrator.yaml + run.py (the production
     # runtime). When both exist the DSL file is typically a smoke-test
     # fixture, NOT the real pipeline. The cross_pack_composition agent
-    # flagged `astrid author explain builtin.hype` as "actively misleading"
+    # flagged `astrid author explain video_editing.hype` as "actively misleading"
     # because it printed the trivial fixture instead of the real
     # transcribe → cut → render → validate pipeline.
     try:

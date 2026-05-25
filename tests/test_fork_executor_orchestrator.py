@@ -108,29 +108,29 @@ class TestExecutorFork:
         with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
             src_root = Path(src_tmp) / "src_executor"
             src_root.mkdir()
-            _write_executor_manifest(src_root, "builtin.shots")
+            _write_executor_manifest(src_root, "editorial.shots")
 
             registry = ExecutorRegistry()
             registry.register(
                 _make_executor_def(
-                    "builtin.shots",
+                    "editorial.shots",
                     metadata={"content_root": str(src_root), "source": "pack", "source_pack": "builtin"},
                 )
             )
 
-            target = registry.fork("builtin.shots", project_root=proj_tmp)
+            target = registry.fork("editorial.shots", project_root=proj_tmp)
 
             assert target.exists()
             assert target.is_dir()
             # Manifest rewritten to local.<local_id>
             manifest = json.loads((target / "executor.yaml").read_text(encoding="utf-8"))
             assert manifest["id"] == "local.shots"
-            assert manifest["metadata"]["forked_from"] == "builtin.shots"
+            assert manifest["metadata"]["forked_from"] == "editorial.shots"
             # Fork state file exists
             fork_state_path = target / ".astrid_fork_state.json"
             assert fork_state_path.is_file()
             fork_state = json.loads(fork_state_path.read_text(encoding="utf-8"))
-            assert fork_state["forked_from"] == "builtin.shots"
+            assert fork_state["forked_from"] == "editorial.shots"
             assert fork_state["upstream_version"] == "1.0.0"
 
     def test_shallow_fork_overwrite(self):
@@ -138,21 +138,21 @@ class TestExecutorFork:
         with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
             src_root = Path(src_tmp) / "src_executor"
             src_root.mkdir()
-            _write_executor_manifest(src_root, "builtin.shots")
+            _write_executor_manifest(src_root, "editorial.shots")
             # Also write a marker file
             (src_root / "run.py").write_text("# original\n", encoding="utf-8")
 
             registry = ExecutorRegistry()
             registry.register(
                 _make_executor_def(
-                    "builtin.shots",
+                    "editorial.shots",
                     metadata={"content_root": str(src_root), "source": "pack", "source_pack": "builtin"},
                 )
             )
 
-            target1 = registry.fork("builtin.shots", project_root=proj_tmp)
+            target1 = registry.fork("editorial.shots", project_root=proj_tmp)
             # Overwrite it with the same source (idempotent)
-            target2 = registry.fork("builtin.shots", project_root=proj_tmp, overwrite=True)
+            target2 = registry.fork("editorial.shots", project_root=proj_tmp, overwrite=True)
             assert target1 == target2
             assert target1.exists()
 
@@ -161,19 +161,19 @@ class TestExecutorFork:
         with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
             src_root = Path(src_tmp) / "src_executor"
             src_root.mkdir()
-            _write_executor_manifest(src_root, "builtin.shots")
+            _write_executor_manifest(src_root, "editorial.shots")
 
             registry = ExecutorRegistry()
             registry.register(
                 _make_executor_def(
-                    "builtin.shots",
+                    "editorial.shots",
                     metadata={"content_root": str(src_root), "source": "pack", "source_pack": "builtin"},
                 )
             )
 
-            registry.fork("builtin.shots", project_root=proj_tmp)
+            registry.fork("editorial.shots", project_root=proj_tmp)
             with pytest.raises(ExecutorRegistryError, match="already exists"):
-                registry.fork("builtin.shots", project_root=proj_tmp)
+                registry.fork("editorial.shots", project_root=proj_tmp)
 
     def test_deep_fork_forks_dependencies(self):
         """Deep fork recursively forks depends_on executors."""
@@ -240,41 +240,41 @@ class TestOrchestratorFork:
         with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
             src_root = Path(src_tmp) / "src_orch"
             src_root.mkdir()
-            _write_orchestrator_manifest(src_root, "builtin.hype")
+            _write_orchestrator_manifest(src_root, "video_editing.hype")
 
             registry = OrchestratorRegistry()
             registry.register(
                 _make_orchestrator_def(
-                    "builtin.hype",
+                    "video_editing.hype",
                     metadata={"content_root": str(src_root), "source": "pack", "source_pack": "builtin"},
                 )
             )
 
-            target = registry.fork("builtin.hype", project_root=proj_tmp)
+            target = registry.fork("video_editing.hype", project_root=proj_tmp)
 
             assert target.exists()
             manifest = json.loads((target / "orchestrator.yaml").read_text(encoding="utf-8"))
             assert manifest["id"] == "local.hype"
             fork_state = json.loads((target / ".astrid_fork_state.json").read_text(encoding="utf-8"))
-            assert fork_state["forked_from"] == "builtin.hype"
+            assert fork_state["forked_from"] == "video_editing.hype"
 
     def test_shallow_fork_overwrite(self):
         """Fork first, then overwrite."""
         with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
             src_root = Path(src_tmp) / "src_orch"
             src_root.mkdir()
-            _write_orchestrator_manifest(src_root, "builtin.hype")
+            _write_orchestrator_manifest(src_root, "video_editing.hype")
 
             registry = OrchestratorRegistry()
             registry.register(
                 _make_orchestrator_def(
-                    "builtin.hype",
+                    "video_editing.hype",
                     metadata={"content_root": str(src_root), "source": "pack", "source_pack": "builtin"},
                 )
             )
 
-            target1 = registry.fork("builtin.hype", project_root=proj_tmp)
-            target2 = registry.fork("builtin.hype", project_root=proj_tmp, overwrite=True)
+            target1 = registry.fork("video_editing.hype", project_root=proj_tmp)
+            target2 = registry.fork("video_editing.hype", project_root=proj_tmp, overwrite=True)
             assert target1 == target2
             assert target1.exists()
 
@@ -283,19 +283,19 @@ class TestOrchestratorFork:
         with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
             src_root = Path(src_tmp) / "src_orch"
             src_root.mkdir()
-            _write_orchestrator_manifest(src_root, "builtin.hype")
+            _write_orchestrator_manifest(src_root, "video_editing.hype")
 
             registry = OrchestratorRegistry()
             registry.register(
                 _make_orchestrator_def(
-                    "builtin.hype",
+                    "video_editing.hype",
                     metadata={"content_root": str(src_root), "source": "pack", "source_pack": "builtin"},
                 )
             )
 
-            registry.fork("builtin.hype", project_root=proj_tmp)
+            registry.fork("video_editing.hype", project_root=proj_tmp)
             with pytest.raises(OrchestratorRegistryError, match="already exists"):
-                registry.fork("builtin.hype", project_root=proj_tmp)
+                registry.fork("video_editing.hype", project_root=proj_tmp)
 
     def test_deep_fork_forks_child_executors(self):
         """Deep fork of orchestrator also forks child executors via ExecutorRegistry."""
@@ -306,7 +306,7 @@ class TestOrchestratorFork:
 
             src_exec = Path(tmp) / "src_exec"
             src_exec.mkdir()
-            _write_executor_manifest(src_exec, "builtin.render")
+            _write_executor_manifest(src_exec, "rendering.render")
 
             proj = Path(tmp) / "project"
             proj.mkdir()
@@ -314,7 +314,7 @@ class TestOrchestratorFork:
             exec_registry = ExecutorRegistry()
             exec_registry.register(
                 _make_executor_def(
-                    "builtin.render",
+                    "rendering.render",
                     metadata={"content_root": str(src_exec), "source": "pack", "source_pack": "builtin"},
                 )
             )
@@ -323,7 +323,7 @@ class TestOrchestratorFork:
             orch_registry.register(
                 _make_orchestrator_def(
                     "builtin.pipeline",
-                    child_executors=("builtin.render",),
+                    child_executors=("rendering.render",),
                     metadata={"content_root": str(src_orch), "source": "pack", "source_pack": "builtin"},
                 )
             )
@@ -358,20 +358,20 @@ class TestPriorityShadowing:
         registry = ExecutorRegistry()
         registry.register(
             _make_executor_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 metadata={"priority": 30, "source": "pack", "source_pack": "builtin"},
             )
         )
         registry.register(
             _make_executor_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="2.0.0",
                 metadata={"priority": 10, "source": "pack", "source_pack": "local"},
             )
         )
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         assert winner.version == "2.0.0"
         assert winner.metadata["source_pack"] == "local"
 
@@ -380,20 +380,20 @@ class TestPriorityShadowing:
         registry = ExecutorRegistry()
         registry.register(
             _make_executor_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="2.0.0",
                 metadata={"priority": 10, "source": "pack", "source_pack": "local"},
             )
         )
         registry.register(
             _make_executor_def(
-                "builtin.shots",
+                "editorial.shots",
                 version="1.0.0",
                 metadata={"priority": 30, "source": "pack", "source_pack": "builtin"},
             )
         )
 
-        winner = registry.get("builtin.shots")
+        winner = registry.get("editorial.shots")
         assert winner.version == "2.0.0"
         assert winner.metadata["source_pack"] == "local"
 
@@ -402,20 +402,20 @@ class TestPriorityShadowing:
         registry = OrchestratorRegistry()
         registry.register(
             _make_orchestrator_def(
-                "builtin.hype",
+                "video_editing.hype",
                 version="1.0.0",
                 metadata={"priority": 30, "source": "pack", "source_pack": "builtin"},
             )
         )
         registry.register(
             _make_orchestrator_def(
-                "builtin.hype",
+                "video_editing.hype",
                 version="2.0.0",
                 metadata={"priority": 10, "source": "pack", "source_pack": "local"},
             )
         )
 
-        winner = registry.get("builtin.hype")
+        winner = registry.get("video_editing.hype")
         assert winner.version == "2.0.0"
         assert winner.metadata["source_pack"] == "local"
 

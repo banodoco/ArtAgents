@@ -11,7 +11,7 @@ Start from a strict dataset config. The checked-in examples are lightweight
 templates with placeholder licensed sources and ignored `runs/` outputs.
 
 ```bash
-python3 -m astrid orchestrators run builtin.dataset_build -- \
+python3 -m astrid orchestrators run training.dataset_build -- \
   --config examples/configs/dataset/seinfeld-dataset.yaml \
   --out runs/seinfeld-dataset
 ```
@@ -19,7 +19,7 @@ python3 -m astrid orchestrators run builtin.dataset_build -- \
 For a CI or fixture-style run, pass review decisions explicitly:
 
 ```bash
-python3 -m astrid orchestrators run builtin.dataset_build -- \
+python3 -m astrid orchestrators run training.dataset_build -- \
   --config examples/configs/dataset/seinfeld-dataset.yaml \
   --out runs/seinfeld-dataset \
   --review-decisions fixtures/builtin-training/review-decisions.json
@@ -31,7 +31,7 @@ directory.
 
 ## 2. Review And Finalize
 
-Without `--review-decisions`, `builtin.dataset_build` starts the generic human
+Without `--review-decisions`, `training.dataset_build` starts the generic human
 review UI and waits for submit. Review accepts, rejects, or edits captions, and
 accepted captions are propagated to sibling caption sidecars before manifest
 export. The training workflow should consume the finalized
@@ -49,7 +49,7 @@ builds the ai-toolkit config, writes `planned_cost.json`, and performs no
 network, GPU, or RunPod calls.
 
 ```bash
-python3 -m astrid orchestrators run builtin.training_run -- \
+python3 -m astrid orchestrators run training.training_run -- \
   --config examples/configs/training/seinfeld-training.yaml \
   --dry-run
 ```
@@ -57,7 +57,7 @@ python3 -m astrid orchestrators run builtin.training_run -- \
 To use an existing finalized dataset run explicitly:
 
 ```bash
-python3 -m astrid orchestrators run builtin.training_run -- \
+python3 -m astrid orchestrators run training.training_run -- \
   --config examples/configs/training/seinfeld-training.yaml \
   --manifest runs/seinfeld-dataset/ai-toolkit-ltx.manifest.json \
   --out runs/seinfeld-lora \
@@ -71,7 +71,7 @@ artifacts and spend cap first, then confirm spend for the live run.
 
 ```bash
 RUNPOD_API_KEY=... HF_TOKEN=... \
-python3 -m astrid orchestrators run builtin.training_run -- \
+python3 -m astrid orchestrators run training.training_run -- \
   --config examples/configs/training/seinfeld-training.yaml \
   --confirm-spend
 ```
@@ -94,7 +94,7 @@ Resume with the chosen checkpoint. Registration pulls the selected
 the pod unless `--skip-teardown` is supplied intentionally.
 
 ```bash
-python3 -m astrid orchestrators run builtin.training_run -- \
+python3 -m astrid orchestrators run training.training_run -- \
   resume \
   --out runs/seinfeld-lora \
   --pick final \
@@ -105,7 +105,7 @@ Use `--dry-run` with `resume` to inspect persisted state without mutating
 remote resources:
 
 ```bash
-python3 -m astrid orchestrators run builtin.training_run -- \
+python3 -m astrid orchestrators run training.training_run -- \
   resume \
   --out runs/seinfeld-lora \
   --dry-run \
@@ -119,7 +119,7 @@ Seinfeld and Always Sunny styles are data under
 `astrid/packs/builtin/script_pipeline/presets/`.
 
 ```bash
-python3 -m astrid executors run builtin.script_pipeline -- \
+python3 -m astrid executors run editorial.script_pipeline -- \
   --preset seinfeld \
   --produces-dir runs/seinfeld-script/produces
 ```

@@ -15,7 +15,7 @@ from astrid.core.project.run import ProjectRunContext, ProjectRunError, finalize
 from astrid.core.project.run import write_run_record
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.timeline.crud import create_timeline
-from astrid.packs.builtin.orchestrators.hype import run as hype_run
+from astrid.packs.video_editing.orchestrators.hype import run as hype_run
 
 
 def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
@@ -127,8 +127,8 @@ def test_prepare_project_run_is_central_chokepoint_for_project_callers(tmp_path:
         SimpleNamespace(id="builtin.noop"),
     )
     orchestrator_runner._prepare_project_request(
-        OrchestratorRunRequest(orchestrator_id="builtin.hype", project="demo"),
-        SimpleNamespace(id="builtin.hype", runtime=SimpleNamespace(kind="command"), metadata={}),
+        OrchestratorRunRequest(orchestrator_id="video_editing.hype", project="demo"),
+        SimpleNamespace(id="video_editing.hype", runtime=SimpleNamespace(kind="command"), metadata={}),
     )
     hype_run._prepare_project_main(["--project", "demo", "--brief", "hello"])
 

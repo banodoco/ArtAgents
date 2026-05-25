@@ -148,7 +148,7 @@ def _build_synthetic_completed_run(
             {"source": "/tmp/brief.txt", "sha256": "def456"},
         ],
         "plan_hash": "sha256:test1234",
-        "orchestrator": "builtin.hype",
+        "orchestrator": "video_editing.hype",
     }
     (run_dir / "run.json").write_text(
         json.dumps(run_json, indent=2), encoding="utf-8"
@@ -592,7 +592,7 @@ def test_run_cost_handles_missing_events(tmp_path: Path) -> None:
 def test_runpod_cost_sidecar_basis_is_executor_local_metadata(tmp_path: Path) -> None:
     """Local adapter cost parsing keeps the task cost model to amount/currency/source."""
     from astrid.core.adapter.local import _read_cost_sidecar
-    from astrid.packs.external.runpod.run import _write_cost_sidecar
+    from astrid.packs.runpod.executors.provision.run import _write_cost_sidecar
 
     step_dir = tmp_path / "run" / "steps" / "render" / "v1"
     produces = step_dir / "produces"

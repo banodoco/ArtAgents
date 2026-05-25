@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from astrid.packs.builtin.orchestrators.dataset_build.config import load_dataset_config
+from astrid.packs.training.orchestrators.dataset_build.config import load_dataset_config
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -11,7 +11,7 @@ EXAMPLE_CONFIG = ROOT / "examples" / "configs" / "dataset" / "seinfeld-dataset.y
 ALWAYS_SUNNY_CONFIG = ROOT / "examples" / "configs" / "dataset" / "always-sunny-dataset.yaml"
 MIGRATION_DOC = ROOT / "docs" / "builtin-dataset-build.md"
 TRAINING_WORKFLOW_DOC = ROOT / "docs" / "examples" / "training-workflow.md"
-BUILTIN_PACKAGE = ROOT / "astrid" / "packs" / "builtin" / "orchestrators" / "dataset_build"
+BUILTIN_PACKAGE = ROOT / "astrid" / "packs" / "training" / "orchestrators" / "dataset_build"
 ORCHESTRATOR = BUILTIN_PACKAGE / "orchestrator.yaml"
 SEINFELD_ARCHIVE = ROOT / "docs" / "examples" / "seinfeld"
 
@@ -48,16 +48,16 @@ def test_migration_docs_explain_m1_scope_and_no_compatibility_shim() -> None:
     assert "does not implement the M2b top-up loop" in text
     assert "no Seinfeld compatibility shim" in text
     assert "examples/configs/dataset/seinfeld-dataset.yaml" in text
-    assert "python3 -m astrid orchestrators run builtin.dataset_build --" in text
+    assert "python3 -m astrid orchestrators run training.dataset_build --" in text
     assert "python3 -m astrid.packs." + "seinfeld" not in text
 
 
 def test_training_workflow_doc_uses_canonical_builtin_commands() -> None:
     text = TRAINING_WORKFLOW_DOC.read_text(encoding="utf-8")
 
-    assert "python3 -m astrid orchestrators run builtin.dataset_build --" in text
-    assert "python3 -m astrid orchestrators run builtin.training_run --" in text
-    assert "python3 -m astrid executors run builtin.script_pipeline --" in text
+    assert "python3 -m astrid orchestrators run training.dataset_build --" in text
+    assert "python3 -m astrid orchestrators run training.training_run --" in text
+    assert "python3 -m astrid executors run editorial.script_pipeline --" in text
     assert "review_state.json" in text
     assert "ai-toolkit-ltx.manifest.json" in text
     assert "checkpoints/checkpoint_manifest.json" in text
@@ -88,9 +88,9 @@ def test_historical_seinfeld_archive_contains_migration_materials() -> None:
     assert missing == []
 
     readme = (SEINFELD_ARCHIVE / "README.md").read_text(encoding="utf-8")
-    assert "builtin.dataset_build" in readme
-    assert "builtin.training_run" in readme
-    assert "builtin.script_pipeline" in readme
+    assert "training.dataset_build" in readme
+    assert "training.training_run" in readme
+    assert "editorial.script_pipeline" in readme
     assert "compatibility shims" in readme
 
 
@@ -109,8 +109,8 @@ def test_builtin_dataset_build_code_has_no_seinfeld_literals() -> None:
 def test_dataset_build_orchestrator_metadata_declares_m2b_discovery_outputs() -> None:
     metadata = json.loads(ORCHESTRATOR.read_text(encoding="utf-8"))
 
-    assert "builtin.transcribe" in metadata["child_executors"]
-    assert "builtin.visual_understand" in metadata["child_executors"]
-    assert "builtin.video_understand" in metadata["child_executors"]
+    assert "editorial.transcribe" in metadata["child_executors"]
+    assert "understanding.visual_understand" in metadata["child_executors"]
+    assert "understanding.video_understand" in metadata["child_executors"]
     outputs = {output["name"]: output for output in metadata["outputs"]}
     assert outputs["quality_report.json"]["path_template"] == "{out}/quality_report.json"

@@ -1,4 +1,4 @@
-"""Phase 9 author-test pass: replay against the committed builtin.hype/smoke
+"""Phase 9 author-test pass: replay against the committed video_editing.hype/smoke
 golden and assert exit 0 with the expected ok line."""
 
 from __future__ import annotations
@@ -13,6 +13,6 @@ def test_author_test_passes_against_committed_golden() -> None:
     out = io.StringIO()
     err = io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        rc = author_cli.main(["test", "builtin.hype", "--fixture", "smoke"])
+        rc = author_cli.main(["test", "video_editing.hype", "--fixture", "smoke"])
     assert rc == 0, f"stdout={out.getvalue()!r} stderr={err.getvalue()!r}"
-    assert "ok builtin.hype --fixture smoke" in out.getvalue()
+    assert "ok video_editing.hype --fixture smoke" in out.getvalue()

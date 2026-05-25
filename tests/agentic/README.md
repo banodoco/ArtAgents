@@ -7,7 +7,7 @@ A test class distinct from the rest of the suite. These tests run a real LLM
 The point: **prompts, skill docs, error messages, and discovery surfaces
 are interfaces.** Unit tests can't tell you "this instruction is confusing
 to an LLM" or "the agent rolled their own pipeline because they couldn't
-find `builtin.hype`." Agentic tests can.
+find `video_editing.hype`." Agentic tests can.
 
 ## When to run
 
@@ -78,7 +78,7 @@ name: vague_video_request
 tier: discovery
 description: |
   Agent receives an open-ended request ("make a video from this footage")
-  and must discover `builtin.hype` rather than rolling their own pipeline.
+  and must discover `video_editing.hype` rather than rolling their own pipeline.
 priming:
   - create_project: ${slug}
 brief: vague_video_request.md
@@ -87,7 +87,7 @@ agents:
     count: 3              # parallel runs for variance
 acceptance:
   - events_contain: run_completed
-  - tool_used: builtin.hype
+  - tool_used: video_editing.hype
   - shell_calls_under: 40
   - no_aborts
   - subjective:                       # graded from the agent's narrative report

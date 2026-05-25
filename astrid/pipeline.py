@@ -15,7 +15,7 @@ concrete caller session before it mutates the target lease; anonymous takeover
 is outside the contract.
 
 Subcommands dispatch to focused module CLIs. Brief / video flags fall
-through to the ``builtin.hype`` orchestrator resolved through the
+through to the ``video_editing.hype`` orchestrator resolved through the
 orchestrator registry.
 """
 
@@ -265,15 +265,15 @@ def _dispatch(raw: list[str]) -> int:
         from .core.task.claim import cmd_unclaim
         return cmd_unclaim(raw[1:])
     if raw and raw[0] == "publish":
-        from .packs.builtin.executors.publish import run as publish
+        from .packs.reigh.executors.publish import run as publish
 
         return publish.main(raw[1:])
     if raw and raw[0] == "publish-youtube":
-        from .packs.upload.executors.youtube import run as publish_youtube
+        from .packs.youtube.executors.upload import run as publish_youtube
 
         return publish_youtube.main(raw[1:])
     if raw and raw[0] == "upload-youtube":
-        from .packs.upload.executors.youtube import run as publish_youtube
+        from .packs.youtube.executors.upload import run as publish_youtube
 
         return publish_youtube.main(raw[1:])
     if raw and raw[0] == "skills":
@@ -337,7 +337,7 @@ def _dispatch(raw: list[str]) -> int:
     if raw and raw[0] == "events":
         return _dispatch_events(raw[1:])
     if raw and raw[0] == "reigh-data":
-        from .packs.builtin.executors.reigh_data import run as reigh_data
+        from .packs.reigh.executors.reigh_data import run as reigh_data
 
         return reigh_data.main(raw[1:])
     if raw and raw[0] == "worker":
@@ -721,11 +721,11 @@ def _run_default_brief_orchestrator(argv: list[str]) -> int:
     from .core.orchestrator.registry import load_default_registry
 
     registry = load_default_registry()
-    orchestrator = registry.get("builtin.hype")
+    orchestrator = registry.get("video_editing.hype")
     runtime_module = orchestrator.metadata.get("runtime_module")
     runtime_entrypoint = orchestrator.metadata.get("runtime_entrypoint", "main")
     if not isinstance(runtime_module, str) or not runtime_module:
-        raise RuntimeError("builtin.hype manifest is missing metadata.runtime_module")
+        raise RuntimeError("video_editing.hype manifest is missing metadata.runtime_module")
     module = import_module(runtime_module)
     entrypoint = getattr(module, runtime_entrypoint)
     return int(entrypoint(argv))
@@ -810,8 +810,8 @@ Browse available tools:
   python3 -m astrid modalities list
 
 Inspect before running:
-  python3 -m astrid orchestrators inspect builtin.hype --json
-  python3 -m astrid executors inspect builtin.render --json
+  python3 -m astrid orchestrators inspect video_editing.hype --json
+  python3 -m astrid executors inspect rendering.render --json
   python3 -m astrid elements inspect effects text-card --json
   python3 -m astrid modalities inspect generic_card --json
 

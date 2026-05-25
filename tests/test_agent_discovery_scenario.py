@@ -4,11 +4,11 @@ Simulates how a cold agent discovers capabilities, searches for specific
 executors, and inspects a capability definition — without ever reading
 source files (run.py, executor.yaml, orchestrator.yaml) directly.
 
-Pre-step verified the inspect output shape for builtin.generate_image:
+Pre-step verified the inspect output shape for generation.generate_image:
   _capability: { canonical_id, kind, name, safety: { network, ... } }
   inputs: [{ name, type, required, description, ... }]
   outputs: [{ name, description, type, mode, path_template }]
-  command.argv: ["{python_exec}", "-m", "astrid.packs.builtin.executors.generate_image.run", ...]
+  command.argv: ["{python_exec}", "-m", "astrid.packs.generation.executors.generate_image.run", ...]
 """
 
 from __future__ import annotations
@@ -48,17 +48,17 @@ def test_agent_discovery_scenario() -> None:
     hits = results["hits"]
     assert len(hits) > 0, "Expected at least one search hit for 'image'"
     hit_ids = {h["id"] for h in hits}
-    assert "builtin.generate_image" in hit_ids, (
-        f"Expected builtin.generate_image in search results, got: {sorted(hit_ids)}"
+    assert "generation.generate_image" in hit_ids, (
+        f"Expected generation.generate_image in search results, got: {sorted(hit_ids)}"
     )
 
-    # ── Step 3: Inspect builtin.generate_image via subprocess ──────────────
-    detail = _run_json(["executors", "inspect", "builtin.generate_image", "--json"])
+    # ── Step 3: Inspect generation.generate_image via subprocess ──────────────
+    detail = _run_json(["executors", "inspect", "generation.generate_image", "--json"])
 
     # Verify _capability identity block
     cap = detail["_capability"]
     assert "canonical_id" in cap, "_capability.canonical_id missing"
-    assert cap["canonical_id"] == "builtin.generate_image"
+    assert cap["canonical_id"] == "generation.generate_image"
     assert "kind" in cap, "_capability.kind missing"
     assert isinstance(cap["kind"], str) and len(cap["kind"]) > 0
     assert "name" in cap, "_capability.name missing"

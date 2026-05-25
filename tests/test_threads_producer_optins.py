@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrid.packs.builtin.executors.generate_image_openai.run import _variant_artifacts_for_generated_images
-from astrid.packs.builtin.orchestrators.logo_ideas.run import _variant_artifacts_for_logo_ideas
+from astrid.packs.generation.executors.generate_image_openai.run import _variant_artifacts_for_generated_images
+from astrid.packs.video_editing.orchestrators.logo_ideas.run import _variant_artifacts_for_logo_ideas
 
 
 def test_generate_image_variant_artifact_metadata() -> None:

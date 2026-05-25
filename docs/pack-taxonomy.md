@@ -67,18 +67,19 @@ Current shipped domains:
 
 | Domain | Packs |
 |---|---|
-| `system` | `builtin` — core Astrid runtime capabilities |
-| `integration` | `external` — connections to external services |
-| `development` | `iteration` — author-test-iterate tooling |
-| `media` | `media` — media processing (clipping, transcoding) |
-| `infrastructure` | `upload` — file transfer and storage |
+| `media` | `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley` — media creation and editing |
+| `integration` | `reigh`, `youtube`, `fal`, `vibecomfy`, `moirae` — connections to external services |
+| `development` | `iteration`, `training` — author-test-iterate tooling and model training |
+| `infrastructure` | `runpod` — GPU provisioning and execution |
+| `system` | `builtin` (shell, hidden), `external` (shell, hidden), `upload` (shell, hidden) — legacy namespace shells |
 | `general` | scaffolded packs, local scratch pack |
 
-**`hype` is not a domain.** The `builtin.hype` orchestrator lives inside the
-`builtin` pack (domain `system`). An orchestrator id like `builtin.hype`
+**`hype` is not a domain.** The `video_editing.hype` orchestrator lives inside the
+`video_editing` pack (domain `media`). An orchestrator id like `video_editing.hype`
 identifies a *capability*, not a pack taxonomy category. If you find yourself
 wanting a `hype` domain, stop — what you really want is a capability filter
-(`executors search hype` or `orchestrators search hype`).
+(`executors search hype` or `orchestrators search hype`). The legacy id
+`builtin.hype` is preserved as a deprecated pack-level alias.
 
 ### `stability`
 
@@ -115,8 +116,9 @@ These terms are easy to confuse. Here is the definitive distinction:
 (executors, orchestrators, elements). The pack is the *container*.
 
 **Capability** — Something a pack can *do*. An executor, orchestrator, or
-element. Identified by a qualified id like `builtin.hype` or
-`media.clip_extract`.
+element. Identified by a qualified id like `video_editing.hype` or
+`media.clip_extract`. The legacy id `builtin.hype` is preserved as a
+deprecated alias.
 
 **Bundle** — A pack whose `pack_type` is `bundle`. Bundles group other packs
 but do not contain their own executors or orchestrators. Installing a bundle
@@ -261,8 +263,12 @@ python3 -m astrid packs inspect upload
 Not every pack directory in the repository is a runtime-discovered pack:
 
 - **`astrid/packs/`** — Runtime packs. Discovered by `packs list`, `packs status`,
-  and capability searches. Currently: `builtin`, `external`, `iteration`,
-  `media`, `upload`, plus the dynamically-created `local` scratch pack.
+  and capability searches. Currently: `rendering`, `understanding`, `generation`,
+  `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`,
+  `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, plus the
+  dynamically-created `local` scratch pack. The legacy `builtin`, `external`,
+  and `upload` packs are hidden shells that preserve backward compatibility
+  through pack-level aliases.
 
 - **`examples/packs/`** — Teaching packs. These are committed reference examples
   that demonstrate pack authoring patterns (multi-step pipelines, agent-attested

@@ -86,16 +86,16 @@ class ElementInstallTest(unittest.TestCase):
 
     def test_executor_install_paths_use_executor_cache_root_for_vibecomfy_and_moirae(self) -> None:
         registry = load_executor_registry()
-        vibe_run = registry.get("external.vibecomfy.run")
-        vibe_validate = registry.get("external.vibecomfy.validate")
-        moirae = registry.get("external.moirae")
+        vibe_run = registry.get("vibecomfy.run")
+        vibe_validate = registry.get("vibecomfy.validate")
+        moirae = registry.get("moirae.moirae")
 
         self.assertEqual(executor_environment_path(vibe_run), executor_environment_path(vibe_validate))
         self.assertEqual(executor_python_path(vibe_run), executor_python_path(vibe_validate))
         self.assertEqual(executor_environment_path(vibe_run), REPO_ROOT / ".astrid" / "venvs" / "vibecomfy" / "venv")
-        self.assertEqual(executor_environment_path(moirae), REPO_ROOT / ".astrid" / "venvs" / "external.moirae" / "venv")
+        self.assertEqual(executor_environment_path(moirae), REPO_ROOT / ".astrid" / "venvs" / "moirae.moirae" / "venv")
         self.assertTrue(str(executor_environment_path(vibe_run)).endswith(".astrid/venvs/vibecomfy/venv"))
-        self.assertTrue(str(executor_environment_path(moirae)).endswith(".astrid/venvs/external.moirae/venv"))
+        self.assertTrue(str(executor_environment_path(moirae)).endswith(".astrid/venvs/moirae.moirae/venv"))
 
         vibe_plan = build_executor_install_plan(vibe_run)
         moirae_plan = build_executor_install_plan(moirae)

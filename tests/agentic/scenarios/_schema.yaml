@@ -35,7 +35,7 @@ priming:
   #   - env: { KEY: value }
 
 # OPTIONAL — declare an orchestrator this scenario expects the agent to use
-target_orchestrator: builtin.hype        # surfaces in `tool_used` criterion
+target_orchestrator: video_editing.hype        # surfaces in `tool_used` criterion
 
 # REQUIRED — at least one agent
 agents:
@@ -50,7 +50,7 @@ acceptance:
   - events_contain_count: { kind: step_attested, min: 3 }
   - no_aborts                            # zero run_aborted events
   - leaf_count_complete: 6
-  - tool_used: builtin.hype              # specific orchestrator was started
+  - tool_used: video_editing.hype              # specific orchestrator was started
   - no_cross_project_binding             # session never resolved to a sibling slug
 
   # Subjective (graded by a checker LLM from the agent's narrative report)

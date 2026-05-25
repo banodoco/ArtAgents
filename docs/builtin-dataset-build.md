@@ -1,13 +1,13 @@
 # Built-In Dataset Builder
 
-`builtin.dataset_build` is the generic reviewed video dataset builder. It replaces the hard-coded Seinfeld dataset path for M1 by moving source acquisition, bucket judging, captioning, review, and manifest export into config.
+`training.dataset_build` is the generic reviewed video dataset builder. It replaces the hard-coded Seinfeld dataset path for M1 by moving source acquisition, bucket judging, captioning, review, and manifest export into config.
 
 ## Invocation
 
 Run a no-network fixture smoke path:
 
 ```bash
-python3 -m astrid orchestrators run builtin.dataset_build -- \
+python3 -m astrid orchestrators run training.dataset_build -- \
   --config fixtures/builtin-training/dataset-config.json \
   --out runs/builtin-training-fixture \
   --review-decisions fixtures/builtin-training/review-decisions.json
@@ -17,12 +17,12 @@ Run the Seinfeld example after replacing source URLs and providing the required 
 
 ```bash
 OPENAI_API_KEY=... \
-python3 -m astrid orchestrators run builtin.dataset_build -- \
+python3 -m astrid orchestrators run training.dataset_build -- \
   --config examples/configs/dataset/seinfeld-dataset.yaml \
   --out runs/seinfeld-dataset
 ```
 
-For unattended runs, pass `--review-decisions <json>`. Without that flag, the orchestrator starts `builtin.human_review` with the generic review UI and waits for submit.
+For unattended runs, pass `--review-decisions <json>`. Without that flag, the orchestrator starts `editorial.human_review` (legacy alias: `builtin.human_review`) with the generic review UI and waits for submit.
 
 ## Migration From The Historical Seinfeld Dataset Builder
 
@@ -39,7 +39,7 @@ M1 reproduces the prototype's generic VLM bucket-judge and caption flow. It does
 
 Historical Seinfeld stage notes now live under `docs/examples/seinfeld/` as
 archive-only reference material. Active workflows should use
-`builtin.dataset_build`, `builtin.training_run`, and `builtin.script_pipeline`
+`training.dataset_build`, `training.training_run`, and `editorial.script_pipeline`
 with example configs or presets rather than direct pack-module execution.
 
 ## Outputs

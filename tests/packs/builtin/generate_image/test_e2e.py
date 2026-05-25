@@ -1,4 +1,4 @@
-"""End-to-end tests for builtin.generate_image with recorded fixtures (v2).
+"""End-to-end tests for generation.generate_image with recorded fixtures (v2).
 
 Uses canned fal JSON responses and an injected transport so CI runs
 end-to-end without burning fal credits.
@@ -143,7 +143,7 @@ def _restore_default_client() -> None:
 
 def test_e2e_cloud_flux_dev_t2i(tmp_path: Path) -> None:
     """Cloud execution with flux-dev t2i mode produces v2 manifest."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-dev")
     transport = state._transport
@@ -201,7 +201,7 @@ def test_e2e_cloud_flux_dev_t2i(tmp_path: Path) -> None:
 
 def test_e2e_cloud_z_image_t2i_negative_prompt(tmp_path: Path) -> None:
     """z-image cloud t2i with negative_prompt includes it in request."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-dev")
     transport = state._transport
@@ -246,7 +246,7 @@ def test_e2e_cloud_z_image_t2i_negative_prompt(tmp_path: Path) -> None:
 
 def test_e2e_cloud_flux_dev_i2i(tmp_path: Path) -> None:
     """Cloud execution with flux-dev i2i mode with --image-ref produces correct manifest."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-dev")
     transport = state._transport
@@ -294,7 +294,7 @@ def test_e2e_cloud_flux_dev_i2i(tmp_path: Path) -> None:
 
 def test_e2e_cloud_flux_schnell_t2i(tmp_path: Path) -> None:
     """Cloud execution with flux-schnell t2i mode produces v2 manifest."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-schnell")
     transport = state._transport
@@ -335,7 +335,7 @@ def test_e2e_cloud_flux_schnell_t2i(tmp_path: Path) -> None:
 
 def test_e2e_i2i_without_image_ref_fails_before_http(tmp_path: Path) -> None:
     """flux-dev i2i mode without --image-ref hard-fails before any HTTP call."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-dev")
     transport = state._transport
@@ -369,7 +369,7 @@ def test_e2e_i2i_without_image_ref_fails_before_http(tmp_path: Path) -> None:
 
 def test_e2e_flux_dev_t2i_unsupported_image_ref_warns(tmp_path: Path) -> None:
     """Passing image_ref to flux-dev t2i (unsupported) completes with warning (SD-004)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-dev")
     transport = state._transport
@@ -418,7 +418,7 @@ def test_e2e_cloud_never_imports_vibecomfy(tmp_path: Path) -> None:
     if "vibecomfy" in sys.modules:
         pytest.skip("vibecomfy already imported -- cannot test lazy-import")
 
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("flux-dev")
     transport = state._transport
@@ -467,7 +467,7 @@ def _comfyui_binary_present() -> bool:
 @pytest.mark.skipif(not _comfyui_binary_present(), reason="comfyui binary not on PATH")
 def test_e2e_local_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Smoke test: execution=local with z-image t2i mode runs without crashing."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     out = tmp_path / "out"
     code = main(
@@ -495,7 +495,7 @@ def test_e2e_local_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
 
 def test_e2e_edit_mode_rejects_negative_prompt(tmp_path: Path) -> None:
     """qwen-image-edit edit mode drops --negative-prompt with warning (SD-003)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("qwen-image-edit")
     transport = state._transport
@@ -539,7 +539,7 @@ def test_e2e_edit_mode_rejects_negative_prompt(tmp_path: Path) -> None:
 
 def test_e2e_edit_mode_rejects_strength(tmp_path: Path) -> None:
     """qwen-image-edit edit mode drops --strength with warning (SD-003)."""
-    from astrid.packs.builtin.executors.generate_image.run import main
+    from astrid.packs.generation.executors.generate_image.run import main
 
     state = _build_fal_transport("qwen-image-edit")
     transport = state._transport

@@ -12,6 +12,9 @@ its deliverable is *trust*, not coverage numbers.
   `subprocess.run(cmd_argv, ...)` on the same command — every code step runs twice. The
   production path (`astrid/pipeline.py:169-172`) correctly branches on `decision.adapter`. Update
   the harness to mirror production: when an adapter dispatched the step, do not re-run it.
+  **Deliverable check:** a named test `test_runner_dispatches_exactly_once` that mocks
+  `subprocess.run`/`Popen` and asserts exactly one execution per step. (Not "if feasible" — this is
+  the load-bearing m2 deliverable.)
   This bug also masks real runtime behavior, so fixing it may surface failures — that is expected
   and in-scope to investigate (but runtime *fixes* belong to m3; here, characterize + xfail with a
   tracking note if a genuine product bug surfaces, and hand it to m3).
@@ -26,9 +29,12 @@ its deliverable is *trust*, not coverage numbers.
   the validation it tests "has never existed in source." Either delete the test or (if the validation
   *should* exist) file it as a product gap for the relevant milestone — do not leave a forever-skipped
   test posing as coverage.
-- **Kill sleep-based races.** `tests/adapter/test_local.py:106,121,138,158,172` use `time.sleep(0.3)`
-  to wait for subprocesses then hand-write the returncode sidecar. Replace with deterministic waiting
-  (`Popen.wait()` / poll on the real completion signal). No `time.sleep` as a synchronization primitive.
+- **Kill sleep-based races — across the whole `tests/adapter/` directory, not just one file.**
+  `tests/adapter/test_local.py:106,121,138,158,172` use `time.sleep(0.3)`; the sibling
+  `tests/adapter/test_remote_artifact_real.py:277` uses `time.sleep(0.05)` ("give it a tiny moment
+  to exit") — same race-by-sleep anti-pattern. Replace ALL with deterministic waiting, mirroring the
+  **production** adapter at `astrid/.../adapter/local.py:58-66` which already uses `Popen` + real
+  completion signals. No `time.sleep` as a synchronization primitive anywhere in `tests/adapter/`.
 - **Decide the policy on opt-in-only tests** and apply it consistently:
   `tests/test_renderer_parity.py:56` (skips unless `ASTRID_RENDERER_PARITY=1`),
   `tests/packs/builtin/generate_image/.../test_e2e.py:466` (skipif on optional deps),
@@ -64,13 +70,16 @@ its deliverable is *trust*, not coverage numbers.
 - Don't make the suite slower in the default lane (no newly-unskipped heavyweight integration tests
   running by default — gate them behind a marker/lane instead).
 
-## Done criteria
-- `test_runner` runs each code step exactly once (assert/observe — add a guard test if feasible).
-- `KNOWN_FAILURES` is gone and `test_sprint1_regression.py` either passes honestly or is retired with rationale.
-- No `@pytest.mark.skip` remains whose reason is "the thing under test doesn't exist."
-- `tests/adapter/test_local.py` contains no `time.sleep(...)` used for synchronization.
-- Opt-in tests are either in a documented CI lane or out of the default suite — consistently.
-- A short `docs/megaplan/epics/harness-polish/m2-handoff.md` lists any real bugs found and handed to m3.
+## Done criteria (mechanically checkable)
+- Named test `test_runner_dispatches_exactly_once` exists and passes (mocks execution, asserts one call/step).
+- `grep -rn "KNOWN_FAILURES" tests/` returns empty; `test_sprint1_regression.py` passes honestly or is retired with rationale.
+- `grep -rn "pytest.mark.skip" tests/` shows no skip whose reason is "the thing under test doesn't exist."
+- `grep -rn "time.sleep" tests/adapter/` returns empty (no sleep-as-synchronization).
+- Opt-in test policy is recorded in `docs/ci-lanes.md` (marker→lane map) AND `pytest -m "not integration and not opt_in"`
+  (or the agreed marker) collects ZERO of the three enumerated opt-in tests.
+- The m3 bug-handoff list is recorded in `EPIC.md` (handoff section), not a separate file.
+- **CI-green policy:** the default `pytest` lane is configured to pass with zero allowed failures (no denylist
+  can return) — recorded in the CI config so the next milestone can't normalize red again.
 
 ## Touchpoints
 - `tests/agentic/.../test_runner.py:191-206`, `astrid/.../adapter/local.py:58-66`, `astrid/pipeline.py:169-172`

@@ -6,8 +6,8 @@ import inspect
 
 import pytest
 
-from astrid.packs.builtin.orchestrators.dataset_build.interfaces import ComputeBackend, RemoteExecutionBackend
-from astrid.packs.builtin.orchestrators.training_run.compute_backends import BackendRegistryError, get_compute_backend, get_remote_execution_backend
+from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeBackend, RemoteExecutionBackend
+from astrid.packs.training.orchestrators.training_run.compute_backends import BackendRegistryError, get_compute_backend, get_remote_execution_backend
 
 
 def test_compute_and_remote_execution_protocols_stay_separate() -> None:

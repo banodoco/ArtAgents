@@ -400,17 +400,17 @@ artifact generation and are not required to emit events.
 
 The bypass audit for m3.5 covers only **managed pack and worker write paths**:
 
-- `builtin.cut` with `--project` + `--timeline-slug`
-- `builtin.refine` with `--project` + `--timeline-slug`
+- `video_editing.cut` with `--project` + `--timeline-slug`
+- `editorial.refine` with `--project` + `--timeline-slug`
 - `iteration.assemble` with `--project` + `--timeline-slug`
-- `builtin.hype` with `--project` (managed local mutations)
+- `video_editing.hype` with `--project` (managed local mutations)
 - `open_in_reigh` (cross-boundary bridge)
 - `banodoco_worker` write-back
 
 Unmanaged file-only invocations of these packs are not in audit scope.
 The following sibling flows remain intentionally out of scope because they
 write run-local pipeline artifacts rather than timeline-container state:
-`builtin.arrange`, `builtin.pool_build`, `builtin.pool_merge`.
+`editorial.arrange`, `training.pool_build`, `training.pool_merge`.
 
 ## Publish Remote Writes (m6 Scope)
 

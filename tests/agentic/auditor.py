@@ -222,7 +222,7 @@ def _eval_tool_used(
     Earlier this criterion only accepted path (1), which silently
     failed every scenario where an agent legitimately reached the
     target via one-shot invocation (the canonical path for executors
-    like `builtin.transcribe` that have no associated plan).
+    like `editorial.transcribe` that have no associated plan).
     """
     if any(e.get("kind") == "run_started" for e in events):
         plan = _read_plan(slug)
@@ -247,8 +247,8 @@ def _eval_tool_used(
         rf"executors\s+run\s+{esc}\b",
         rf"orchestrators\s+run\s+{esc}\b",
         # "Ran/invoked/executed [... up to ~150 chars ...] <expected>".
-        # Covers "Ran `builtin.transcribe`", "Ran it: ... builtin.transcribe",
-        # "Ran a single invocation of `builtin.hype`", etc. Capped by the
+        # Covers "Ran `editorial.transcribe`", "Ran it: ... editorial.transcribe",
+        # "Ran a single invocation of `video_editing.hype`", etc. Capped by the
         # 150-char window to avoid catching mentions far from the verb.
         rf"(?:\bran\b|\binvoked\b|\bexecuted\b|invocation\s+of)\s+[^\n]{{0,150}}?[`']?{esc}[`']?",
         # "<expected> was run" / "<expected> ran successfully" / "<expected> ran with".

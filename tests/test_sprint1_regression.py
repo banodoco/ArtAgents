@@ -40,9 +40,9 @@ class TestExecutorsListRegression(unittest.TestCase):
         # Known built-in executors must still be present
         ids = {e.id for e in executors}
         required = {
-            "builtin.render",
-            "builtin.cut",
-            "builtin.transcribe",
+            "rendering.render",
+            "video_editing.cut",
+            "editorial.transcribe",
         }
         self.assertTrue(
             required.issubset(ids),
@@ -82,8 +82,8 @@ class TestExecutorsListRegression(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, f"executors list failed: {result.stderr}")
-        self.assertIn("builtin.render", result.stdout)
-        self.assertIn("builtin.cut", result.stdout)
+        self.assertIn("rendering.render", result.stdout)
+        self.assertIn("video_editing.cut", result.stdout)
 
 
 class TestOrchestratorsListRegression(unittest.TestCase):
@@ -96,8 +96,8 @@ class TestOrchestratorsListRegression(unittest.TestCase):
         self.assertGreater(len(orchestrators), 0)
 
         ids = {o.id for o in orchestrators}
-        # builtin.hype must always be present
-        self.assertIn("builtin.hype", ids, f"builtin.hype missing from orchestrator list: {ids}")
+        # video_editing.hype must always be present
+        self.assertIn("video_editing.hype", ids, f"video_editing.hype missing from orchestrator list: {ids}")
 
     def test_orchestrators_list_all_ids_are_qualified(self) -> None:
         registry = load_orchestrator_registry()
@@ -116,7 +116,7 @@ class TestOrchestratorsListRegression(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, f"orchestrators list failed: {result.stderr}")
-        self.assertIn("builtin.hype", result.stdout)
+        self.assertIn("video_editing.hype", result.stdout)
 
 
 class TestElementsListRegression(unittest.TestCase):
@@ -193,17 +193,17 @@ class TestPackDiscoveryRegression(unittest.TestCase):
 
         self.assertGreaterEqual(len(executor_registry.list()), 51)
         self.assertGreaterEqual(len(orchestrator_registry.list()), 5)
-        self.assertIn("builtin.cut", executor_registry.as_mapping())
-        self.assertIn("external.moirae", executor_registry.as_mapping())
+        self.assertIn("video_editing.cut", executor_registry.as_mapping())
+        self.assertIn("moirae.moirae", executor_registry.as_mapping())
         self.assertIn("media.clip_extract", executor_registry.as_mapping())
         self.assertEqual(
             sorted(executor.id for executor in executor_registry.list() if "clip_extract" in executor.id),
             ["media.clip_extract"],
         )
-        self.assertIn("builtin.hype", orchestrator_registry.as_mapping())
+        self.assertIn("video_editing.hype", orchestrator_registry.as_mapping())
 
     def test_qualified_id_pack_segment_helper_works(self) -> None:
-        self.assertEqual(qualified_id_pack_id("builtin.cut"), "builtin")
+        self.assertEqual(qualified_id_pack_id("video_editing.cut"), "video_editing")
         with self.assertRaises(PackValidationError):
             qualified_id_pack_id("cut")
 
@@ -242,12 +242,12 @@ class TestShippedPacksAlignmentRegression(unittest.TestCase):
     def test_known_non_builtin_ids_resolve_to_their_packs(self) -> None:
         registry = load_executor_registry()
         cases = [
-            ("external.moirae", "external"),
-            ("external.vibecomfy.run", "external"),
-            ("external.vibecomfy.validate", "external"),
+            ("moirae.moirae", "moirae"),
+            ("vibecomfy.run", "vibecomfy"),
+            ("vibecomfy.validate", "vibecomfy"),
             ("iteration.prepare", "iteration"),
             ("iteration.assemble", "iteration"),
-            ("upload.youtube", "upload"),
+            ("youtube.upload", "youtube"),
         ]
         for executor_id, pack in cases:
             with self.subTest(executor_id=executor_id):

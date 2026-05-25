@@ -26,7 +26,7 @@ from astrid.threads.record import sha256_file
 from astrid.threads.schema import SCHEMA_VERSION
 from astrid.threads.variants import selection_history
 
-UNDERSTAND_EXECUTOR_ID = "builtin.understand"
+UNDERSTAND_EXECUTOR_ID = "understanding.understand"
 DEFAULT_MAX_ITERATIONS = 200
 DEFAULT_SUMMARIZER_MODEL_VERSION = f"{UNDERSTAND_EXECUTOR_ID}.v1"
 DEFAULT_COST_PER_CALL = 0.009
@@ -285,7 +285,7 @@ def call_builtin_understand(node: RunNode, *, summarizer_model_version: str, sum
     command = [
         sys.executable,
         "-m",
-        "astrid.packs.builtin.executors.understand.run",
+        "astrid.packs.understanding.executors.understand.run",
         "--mode",
         mode,
         flag,

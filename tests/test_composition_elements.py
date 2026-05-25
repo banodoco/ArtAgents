@@ -21,7 +21,7 @@ _GENERATOR_SPEC.loader.exec_module(gen_effect_registry)
 
 class CompositionElementTest(unittest.TestCase):
     def _assert_animation_plugin(self, animation_id: str, kind: str) -> None:
-        root = ROOT / "astrid" / "packs" / "builtin" / "elements" / "animations" / animation_id
+        root = ROOT / "astrid" / "packs" / "rendering" / "elements" / "animations" / animation_id
         for filename in ("component.tsx", "element.yaml"):
             self.assertTrue((root / filename).is_file(), f"{root / filename} missing")
         self.assertEqual(effects_catalog.read_animation_meta(animation_id)["kind"], kind)
@@ -56,7 +56,7 @@ class CompositionElementTest(unittest.TestCase):
         }
         self.assertEqual(set(expected), set(effects_catalog.list_animation_ids()))
         for animation_id, kind in expected.items():
-            root = ROOT / "astrid" / "packs" / "builtin" / "elements" / "animations" / animation_id
+            root = ROOT / "astrid" / "packs" / "rendering" / "elements" / "animations" / animation_id
             for filename in ("component.tsx", "element.yaml"):
                 self.assertTrue((root / filename).is_file(), f"{root / filename} missing")
             self.assertEqual(effects_catalog.read_animation_meta(animation_id)["kind"], kind)
@@ -82,9 +82,9 @@ class CompositionElementTest(unittest.TestCase):
         transitions = gen_effect_registry.generate_element_registry("transitions")
 
         self.assertIn("'text-card'", effects)
-        self.assertRegex(effects, r"@pack-builtin-elements-effects/text-card/component")
-        self.assertRegex(animations, r"@pack-builtin-elements-animations/fade-up/component")
-        self.assertRegex(transitions, r"@pack-builtin-elements-transitions/cross-fade/component")
+        self.assertRegex(effects, r"@pack-rendering-elements-effects/text-card/component")
+        self.assertRegex(animations, r"@pack-rendering-elements-animations/fade-up/component")
+        self.assertRegex(transitions, r"@pack-rendering-elements-transitions/cross-fade/component")
 
     def test_hype_composition_preserves_absolute_sequence_path_with_transition_series(self) -> None:
         # Sprint 5: HypeComposition.tsx physically moved to

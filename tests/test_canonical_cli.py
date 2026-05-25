@@ -28,14 +28,14 @@ class CanonicalCliTest(unittest.TestCase):
         payload = json.loads(stdout)
         self.assertIn("orchestrators", payload)
         self.assertNotIn("conductors", payload)
-        self.assertIn("builtin.hype", {item["id"] for item in payload["orchestrators"]})
+        self.assertIn("video_editing.hype", {item["id"] for item in payload["orchestrators"]})
 
     def test_orchestrators_list_pack_filter(self) -> None:
-        result, stdout, stderr = self.capture(orchestrators_cli.main, ["list", "--pack", "builtin", "--json"])
+        result, stdout, stderr = self.capture(orchestrators_cli.main, ["list", "--pack", "video_editing", "--json"])
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
         self.assertTrue(payload["orchestrators"])
-        self.assertTrue(all(item["id"].startswith("builtin.") for item in payload["orchestrators"]))
+        self.assertTrue(all(item["id"].startswith("video_editing.") for item in payload["orchestrators"]))
 
     def test_orchestrator_help_uses_canonical_terms(self) -> None:
         stdout = io.StringIO()
@@ -49,38 +49,38 @@ class CanonicalCliTest(unittest.TestCase):
 
     def test_training_run_orchestrator_inspect_json(self) -> None:
         result, stdout, stderr = self.capture(
-            orchestrators_cli.main, ["inspect", "builtin.training_run", "--json"]
+            orchestrators_cli.main, ["inspect", "training.training_run", "--json"]
         )
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
-        self.assertEqual(payload["id"], "builtin.training_run")
+        self.assertEqual(payload["id"], "training.training_run")
         self.assertEqual(
             payload["metadata"]["runtime_module"],
-            "astrid.packs.builtin.orchestrators.training_run.run",
+            "astrid.packs.training.orchestrators.training_run.run",
         )
         self.assertEqual(payload["runtime"]["kind"], "command")
         self.assertEqual(
             payload["runtime"]["command"]["argv"][:3],
-            ["{python_exec}", "-m", "astrid.packs.builtin.orchestrators.training_run.run"],
+            ["{python_exec}", "-m", "astrid.packs.training.orchestrators.training_run.run"],
         )
         self.assertEqual(
             set(payload["child_executors"]),
             {
-                "external.runpod.provision",
-                "external.runpod.exec",
-                "external.runpod.pull",
-                "external.runpod.teardown",
-                "builtin.human_review",
+                "runpod.provision",
+                "runpod.exec",
+                "runpod.pull",
+                "runpod.teardown",
+                "editorial.human_review",
             },
         )
 
     def test_training_run_orchestrator_top_level_inspect_json_without_session(self) -> None:
         result, stdout, stderr = self.capture(
-            pipeline.main, ["orchestrators", "inspect", "builtin.training_run", "--json"]
+            pipeline.main, ["orchestrators", "inspect", "training.training_run", "--json"]
         )
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
-        self.assertEqual(payload["id"], "builtin.training_run")
+        self.assertEqual(payload["id"], "training.training_run")
 
     def test_executors_json_uses_canonical_key(self) -> None:
         result, stdout, stderr = self.capture(executors_cli.main, ["list", "--json"])
@@ -88,21 +88,21 @@ class CanonicalCliTest(unittest.TestCase):
         payload = json.loads(stdout)
         self.assertIn("executors", payload)
         self.assertNotIn("performers", payload)
-        self.assertIn("builtin.render", {item["id"] for item in payload["executors"]})
+        self.assertIn("rendering.render", {item["id"] for item in payload["executors"]})
 
     def test_executors_list_pack_filter(self) -> None:
-        result, stdout, stderr = self.capture(executors_cli.main, ["list", "--pack", "external", "--json"])
+        result, stdout, stderr = self.capture(executors_cli.main, ["list", "--pack", "runpod", "--json"])
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
         self.assertTrue(payload["executors"])
-        self.assertTrue(all(item["id"].startswith("external.") for item in payload["executors"]))
+        self.assertTrue(all(item["id"].startswith("runpod.") for item in payload["executors"]))
 
     def test_elements_list_pack_filter(self) -> None:
-        result, stdout, stderr = self.capture(elements_cli.main, ["list", "--pack", "builtin", "--json"])
+        result, stdout, stderr = self.capture(elements_cli.main, ["list", "--pack", "rendering", "--json"])
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
         self.assertTrue(payload["elements"])
-        self.assertTrue(all(item["metadata"]["pack_id"] == "builtin" for item in payload["elements"]))
+        self.assertTrue(all(item["metadata"]["pack_id"] == "rendering" for item in payload["elements"]))
 
     def test_executor_help_uses_canonical_terms(self) -> None:
         stdout = io.StringIO()
@@ -115,15 +115,15 @@ class CanonicalCliTest(unittest.TestCase):
         self.assertNotIn("instruments", help_text)
 
     def test_canonical_validate_install_and_run_paths(self) -> None:
-        result, stdout, stderr = self.capture(orchestrators_cli.main, ["validate", "builtin.hype"])
+        result, stdout, stderr = self.capture(orchestrators_cli.main, ["validate", "video_editing.hype"])
         self.assertEqual(result, 0, stderr)
-        self.assertIn("builtin.hype: ok", stdout)
+        self.assertIn("video_editing.hype: ok", stdout)
 
-        result, stdout, stderr = self.capture(executors_cli.main, ["validate", "builtin.render"])
+        result, stdout, stderr = self.capture(executors_cli.main, ["validate", "rendering.render"])
         self.assertEqual(result, 0, stderr)
-        self.assertIn("builtin.render: ok", stdout)
+        self.assertIn("rendering.render: ok", stdout)
 
-        result, stdout, stderr = self.capture(executors_cli.main, ["install", "builtin.render", "--dry-run"])
+        result, stdout, stderr = self.capture(executors_cli.main, ["install", "rendering.render", "--dry-run"])
         self.assertEqual(result, 0, stderr)
         self.assertIn("no install needed", stdout)
 
@@ -131,7 +131,7 @@ class CanonicalCliTest(unittest.TestCase):
             executors_cli.main,
             [
                 "run",
-                "builtin.render",
+                "rendering.render",
                 "--out",
                 "runs/example",
                 "--input",
@@ -142,7 +142,7 @@ class CanonicalCliTest(unittest.TestCase):
             ],
         )
         self.assertEqual(result, 0, stderr)
-        self.assertIn("astrid.packs.builtin.executors.render.run", stdout)
+        self.assertIn("astrid.packs.rendering.executors.render.run", stdout)
 
     def test_pipeline_dispatches_canonical_cli_modules(self) -> None:
         with mock.patch(
@@ -236,19 +236,19 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         result, stdout, stderr = self.capture(executors_cli.main, ["list"])
         self.assertEqual(result, 0, stderr)
         moirae_line = next(
-            line for line in stdout.splitlines() if line.startswith("external.moirae\t")
+            line for line in stdout.splitlines() if line.startswith("moirae.moirae\t")
         )
         # id, kind, name, short_description, invocation = 5 tab-separated columns
         self.assertEqual(moirae_line.count("\t"), 4)
         self.assertIn("Moirae", moirae_line)
         self.assertIn("terminal", moirae_line.lower())
-        self.assertIn("astrid executors run external.moirae", moirae_line)
+        self.assertIn("astrid executors run moirae.moirae", moirae_line)
 
     def test_executors_list_no_describe_drops_column(self) -> None:
         result, stdout, stderr = self.capture(executors_cli.main, ["list", "--no-describe"])
         self.assertEqual(result, 0, stderr)
         moirae_line = next(
-            line for line in stdout.splitlines() if line.startswith("external.moirae\t")
+            line for line in stdout.splitlines() if line.startswith("moirae.moirae\t")
         )
         self.assertEqual(moirae_line.count("\t"), 2)
 
@@ -260,7 +260,7 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         first_line = stdout.splitlines()[0]
         # score \t id \t kind \t short_description
         parts = first_line.split("\t")
-        self.assertEqual(parts[1], "external.moirae", first_line)
+        self.assertEqual(parts[1], "moirae.moirae", first_line)
 
     def test_executors_search_json_returns_hits(self) -> None:
         result, stdout, stderr = self.capture(
@@ -270,7 +270,7 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         payload = json.loads(stdout)
         self.assertIn("hits", payload)
         ids = [hit["id"] for hit in payload["hits"]]
-        self.assertIn("builtin.transcribe", ids)
+        self.assertIn("editorial.transcribe", ids)
 
     def test_executor_run_inputs_normalize_dashes_and_preserve_repeats(self) -> None:
         parsed = executors_cli._parse_input_values(
@@ -285,7 +285,7 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         )
         self.assertEqual(result, 0, stderr)
         first_line = stdout.splitlines()[0]
-        self.assertIn("builtin.foley_map", first_line)
+        self.assertIn("foley.foley_map", first_line)
 
     def test_elements_search_finds_fade_animation(self) -> None:
         result, stdout, stderr = self.capture(elements_cli.main, ["search", "fade"])

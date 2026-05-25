@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.packs.builtin.executors.cut import run as cut
+from astrid.packs.video_editing.executors.cut import run as cut
 
 
 ROOT = Path(__file__).resolve().parents[1]

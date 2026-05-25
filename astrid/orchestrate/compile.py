@@ -49,6 +49,19 @@ def _qualified_split(qualified_id: str) -> tuple[str, str]:
     return pack, name
 
 
+def _candidate_module_paths(root: Path, pack: str, name: str) -> tuple[Path, ...]:
+    pack_root = root / pack
+    candidates = [
+        pack_root / f"{name}.py",
+        pack_root / "orchestrators" / name / "run.py",
+        pack_root / "_legacy" / f"{name}.py",
+    ]
+    builtin_legacy = root / "builtin" / "_legacy" / f"{name}.py"
+    if builtin_legacy not in candidates:
+        candidates.append(builtin_legacy)
+    return tuple(candidates)
+
+
 def _load_module_isolated(module_path: Path, qualified_id: str):
     unique = f"_astrid_orchestrate_{qualified_id.replace('.', '_')}_{uuid.uuid4().hex}"
     spec = importlib.util.spec_from_file_location(unique, module_path)
@@ -83,37 +96,35 @@ def resolve_orchestrator(
         raise OrchestrateDefinitionError(
             f"orchestrator {qualified_id!r}: pack directory not found at {pack_root}"
         )
-    module_path = pack_root / f"{name}.py"
-    if not module_path.is_file():
+    first_missing = _candidate_module_paths(root, pack, name)[0]
+    for module_path in _candidate_module_paths(root, pack, name):
+        if not module_path.is_file():
+            continue
+        module = _load_module_isolated(module_path, qualified_id)
+        builders: list[_PlanBuilder] = [
+            value
+            for value in vars(module).values()
+            if isinstance(value, _PlanBuilder)
+        ]
+        if not builders:
+            continue
+        matching = [b for b in builders if b.plan_id == qualified_id]
+        if len(matching) == 1:
+            return matching[0]
+        if len(matching) > 1:
+            raise OrchestrateDefinitionError(
+                f"orchestrator {qualified_id!r}: module {module_path} defines "
+                f"multiple plans with plan_id {qualified_id!r}"
+            )
+        if len(builders) == 1:
+            return builders[0]
+        ids = sorted({b.plan_id for b in builders})
         raise OrchestrateDefinitionError(
-            f"orchestrator {qualified_id!r}: module file not found at {module_path}"
+            f"orchestrator {qualified_id!r}: module {module_path} defines multiple "
+            f"plans {ids}; declare exactly one with plan_id={qualified_id!r}"
         )
-    module = _load_module_isolated(module_path, qualified_id)
-
-    builders: list[_PlanBuilder] = [
-        value
-        for value in vars(module).values()
-        if isinstance(value, _PlanBuilder)
-    ]
-    if not builders:
-        raise OrchestrateDefinitionError(
-            f"orchestrator {qualified_id!r}: module {module_path} defines no "
-            "_PlanBuilder (use plan(...) or @orchestrator(...))"
-        )
-    matching = [b for b in builders if b.plan_id == qualified_id]
-    if len(matching) == 1:
-        return matching[0]
-    if len(matching) > 1:
-        raise OrchestrateDefinitionError(
-            f"orchestrator {qualified_id!r}: module {module_path} defines "
-            f"multiple plans with plan_id {qualified_id!r}"
-        )
-    if len(builders) == 1:
-        return builders[0]
-    ids = sorted({b.plan_id for b in builders})
     raise OrchestrateDefinitionError(
-        f"orchestrator {qualified_id!r}: module {module_path} defines multiple "
-        f"plans {ids}; declare exactly one with plan_id={qualified_id!r}"
+        f"orchestrator {qualified_id!r}: module file not found at {first_missing}"
     )
 
 

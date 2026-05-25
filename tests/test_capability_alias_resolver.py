@@ -52,12 +52,12 @@ class TestImportFromCore:
 class TestBasicRegisterResolve:
     def test_register_and_resolve_single_alias(self) -> None:
         resolver = AliasResolver()
-        resolver.register_alias("render", "builtin.render")
-        assert resolver.resolve("render") == "builtin.render"
+        resolver.register_alias("render", "rendering.render")
+        assert resolver.resolve("render") == "rendering.render"
 
     def test_resolve_idempotent_for_unknown_id(self) -> None:
         resolver = AliasResolver()
-        assert resolver.resolve("builtin.transcribe") == "builtin.transcribe"
+        assert resolver.resolve("editorial.transcribe") == "editorial.transcribe"
         assert resolver.resolve("some.random.thing") == "some.random.thing"
 
     def test_is_alias_positive(self) -> None:
@@ -74,7 +74,7 @@ class TestBasicRegisterResolve:
     def test_register_empty_alias_raises(self) -> None:
         resolver = AliasResolver()
         with pytest.raises(AliasResolutionError, match="non-empty"):
-            resolver.register_alias("", "builtin.render")
+            resolver.register_alias("", "rendering.render")
 
     def test_register_empty_canonical_raises(self) -> None:
         resolver = AliasResolver()
@@ -188,20 +188,20 @@ class TestDeprecatedAlias:
         resolver = AliasResolver()
         resolver.register_alias(
             "old_render",
-            "builtin.render",
+            "rendering.render",
             deprecated=True,
-            deprecation_message="Use 'builtin.render' directly",
+            deprecation_message="Use 'rendering.render' directly",
         )
-        assert resolver.resolve("old_render") == "builtin.render"
+        assert resolver.resolve("old_render") == "rendering.render"
         deprecated = resolver.list_deprecated()
         assert len(deprecated) == 1
         assert deprecated[0].alias == "old_render"
         assert deprecated[0].deprecated is True
-        assert deprecated[0].deprecation_message == "Use 'builtin.render' directly"
+        assert deprecated[0].deprecation_message == "Use 'rendering.render' directly"
 
     def test_non_deprecated_alias_not_in_list(self) -> None:
         resolver = AliasResolver()
-        resolver.register_alias("render", "builtin.render", deprecated=False)
+        resolver.register_alias("render", "rendering.render", deprecated=False)
         assert len(resolver.list_deprecated()) == 0
 
 
@@ -212,17 +212,17 @@ class TestDeprecatedAlias:
 class TestGetAliasesFor:
     def test_get_aliases_for_returns_direct_aliases(self) -> None:
         resolver = AliasResolver()
-        resolver.register_alias("r", "builtin.render")
-        resolver.register_alias("rend", "builtin.render")
-        resolver.register_alias("t", "builtin.transcribe")
-        aliases = resolver.get_aliases_for("builtin.render")
+        resolver.register_alias("r", "rendering.render")
+        resolver.register_alias("rend", "rendering.render")
+        resolver.register_alias("t", "editorial.transcribe")
+        aliases = resolver.get_aliases_for("rendering.render")
         assert len(aliases) == 2
         alias_names = {a.alias for a in aliases}
         assert alias_names == {"r", "rend"}
 
     def test_get_aliases_for_empty_when_no_aliases(self) -> None:
         resolver = AliasResolver()
-        assert resolver.get_aliases_for("builtin.render") == []
+        assert resolver.get_aliases_for("rendering.render") == []
 
     def test_get_aliases_for_only_finds_direct_aliases(self) -> None:
         """Chained aliases are not returned — only the ones pointing directly
@@ -287,14 +287,14 @@ class TestExtractPackAliases:
                 {
                     "kind": "executor",
                     "alias": "builtin.old_render",
-                    "canonical_id": "builtin.render",
+                    "canonical_id": "rendering.render",
                     "deprecated": True,
-                    "deprecation_message": "Use builtin.render",
+                    "deprecation_message": "Use rendering.render",
                 },
                 {
                     "kind": "orchestrator",
                     "alias": "builtin.old_hype",
-                    "canonical_id": "builtin.hype",
+                    "canonical_id": "video_editing.hype",
                 },
             ),
         )
@@ -305,7 +305,7 @@ class TestExtractPackAliases:
         assert list(executor_aliases) == ["builtin"]
         assert executor_aliases["builtin"][0]["alias"] == "builtin.old_render"
         assert executor_aliases["builtin"][0]["deprecated"] is True
-        assert executor_aliases["builtin"][0]["deprecation_message"] == "Use builtin.render"
+        assert executor_aliases["builtin"][0]["deprecation_message"] == "Use rendering.render"
         assert executor_aliases["builtin"][0]["source_pack_id"] == "builtin"
         assert list(orchestrator_aliases) == ["builtin"]
         assert orchestrator_aliases["builtin"][0]["alias"] == "builtin.old_hype"
@@ -407,68 +407,68 @@ class TestDefaultRegistryPackAliasLoading:
             packs_root = Path(tmp) / "packs"
             pack_root = _write_pack(
                 packs_root,
-                "builtin",
+                "rendering",
                 aliases="\n".join(
                     [
                         "  - kind: executor",
                         "    alias: builtin.legacy_render",
-                        "    canonical_id: builtin.render",
+                        "    canonical_id: rendering.render",
                         "    deprecated: true",
-                        "    deprecation_message: use builtin.render",
+                        "    deprecation_message: use rendering.render",
                         "  - kind: orchestrator",
                         "    alias: builtin.legacy_hype",
-                        "    canonical_id: builtin.hype",
+                        "    canonical_id: video_editing.hype",
                     ]
                 ),
             )
-            _write_executor(pack_root, "render", "builtin.render")
+            _write_executor(pack_root, "render", "rendering.render")
             packs = discover_packs(packs_root)
 
             with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
         assert registry.alias_resolver is not None
-        assert registry.alias_resolver.resolve("builtin.legacy_render") == "builtin.render"
+        assert registry.alias_resolver.resolve("builtin.legacy_render") == "rendering.render"
         assert registry.alias_resolver.is_alias("builtin.legacy_hype") is False
-        aliases = registry.alias_resolver.get_aliases_for("builtin.render")
+        aliases = registry.alias_resolver.get_aliases_for("rendering.render")
         assert len(aliases) == 1
-        assert aliases[0].source_pack_id == "builtin"
+        assert aliases[0].source_pack_id == "rendering"
         assert aliases[0].deprecated is True
-        assert aliases[0].deprecation_message == "use builtin.render"
+        assert aliases[0].deprecation_message == "use rendering.render"
 
     def test_orchestrator_default_registry_loads_only_orchestrator_pack_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             packs_root = Path(tmp) / "packs"
             pack_root = _write_pack(
                 packs_root,
-                "builtin",
+                "video_editing",
                 aliases="\n".join(
                     [
                         "  - kind: executor",
                         "    alias: builtin.legacy_render",
-                        "    canonical_id: builtin.render",
+                        "    canonical_id: rendering.render",
                         "  - kind: orchestrator",
                         "    alias: builtin.legacy_hype",
-                        "    canonical_id: builtin.hype",
+                        "    canonical_id: video_editing.hype",
                         "    deprecated: true",
-                        "    deprecation_message: use builtin.hype",
+                        "    deprecation_message: use video_editing.hype",
                     ]
                 ),
             )
-            _write_orchestrator(pack_root, "hype", "builtin.hype")
+            _write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(packs_root)
 
             with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
         assert registry.alias_resolver is not None
-        assert registry.alias_resolver.resolve("builtin.legacy_hype") == "builtin.hype"
+        assert registry.alias_resolver.resolve("builtin.legacy_hype") == "video_editing.hype"
         assert registry.alias_resolver.is_alias("builtin.legacy_render") is False
-        aliases = registry.alias_resolver.get_aliases_for("builtin.hype")
+        aliases = registry.alias_resolver.get_aliases_for("video_editing.hype")
         assert len(aliases) == 1
-        assert aliases[0].source_pack_id == "builtin"
+        assert aliases[0].source_pack_id == "video_editing"
         assert aliases[0].deprecated is True
-        assert aliases[0].deprecation_message == "use builtin.hype"
+        assert aliases[0].deprecation_message == "use video_editing.hype"
 
 
 # ---------------------------------------------------------------------------
@@ -588,7 +588,7 @@ class TestEdgeCases:
     def test_whitespace_alias_raises(self) -> None:
         resolver = AliasResolver()
         with pytest.raises(AliasResolutionError):
-            resolver.register_alias("   ", "builtin.render")
+            resolver.register_alias("   ", "rendering.render")
 
     def test_whitespace_canonical_raises(self) -> None:
         resolver = AliasResolver()
@@ -598,9 +598,9 @@ class TestEdgeCases:
     def test_overwrite_alias(self) -> None:
         """Re-registering an alias overwrites the previous mapping."""
         resolver = AliasResolver()
-        resolver.register_alias("r", "builtin.render")
-        resolver.register_alias("r", "builtin.transcribe")
-        assert resolver.resolve("r") == "builtin.transcribe"
+        resolver.register_alias("r", "rendering.render")
+        resolver.register_alias("r", "editorial.transcribe")
+        assert resolver.resolve("r") == "editorial.transcribe"
 
     def test_alias_chain_to_self_via_existing(self) -> None:
         """Register B→A when A→B already exists should be rejected as cycle."""
@@ -1395,8 +1395,8 @@ class TestSearchAliasIntegration:
 # ---------------------------------------------------------------------------
 # T11: Representative migrated-pack fixtures — deprecated old ids that
 # resolve to new canonical ids via pack.yaml aliases.  These temp-pack
-# tests prove the migration path (builtin.render → rendering.render,
-# external.vibecomfy.run → vibecomfy.run, etc.) without moving any real
+# tests prove the migration path (rendering.render → rendering.render,
+# vibecomfy.run → vibecomfy.run, etc.) without moving any real
 # source-tree capability files.
 # ---------------------------------------------------------------------------
 
@@ -1466,7 +1466,7 @@ class TestMigratedPackAliasFixtures:
     # -- registry lookup via deprecated alias -----------------------------
 
     def test_deprecated_alias_builtin_render_resolves_to_rendering_render(self) -> None:
-        """``builtin.render`` (deprecated) → ``rendering.render`` (canonical)."""
+        """``rendering.render`` (deprecated) → ``rendering.render`` (canonical)."""
         with tempfile.TemporaryDirectory() as tmp:
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1499,7 +1499,7 @@ class TestMigratedPackAliasFixtures:
             assert record.source_pack_id == "rendering"
 
     def test_deprecated_alias_external_vibecomfy_run_resolves_to_vibecomfy_run(self) -> None:
-        """``external.vibecomfy.run`` (deprecated) → ``vibecomfy.run`` (canonical)."""
+        """``vibecomfy.run`` (deprecated) → ``vibecomfy.run`` (canonical)."""
         with tempfile.TemporaryDirectory() as tmp:
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1530,7 +1530,7 @@ class TestMigratedPackAliasFixtures:
             assert record.source_pack_id == "vibecomfy"
 
     def test_orchestrator_alias_builtin_hype_resolves_to_video_editing_hype(self) -> None:
-        """``builtin.hype`` (deprecated) → ``video_editing.hype`` (canonical)."""
+        """``video_editing.hype`` (deprecated) → ``video_editing.hype`` (canonical)."""
         with tempfile.TemporaryDirectory() as tmp:
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1559,7 +1559,7 @@ class TestMigratedPackAliasFixtures:
             assert record.deprecated is True
 
     def test_media_transcribe_alias_to_canonical_executor(self) -> None:
-        """``builtin.transcribe`` (non-deprecated alias) → ``media.transcribe``."""
+        """``editorial.transcribe`` (non-deprecated alias) → ``media.transcribe``."""
         with tempfile.TemporaryDirectory() as tmp:
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1567,7 +1567,7 @@ class TestMigratedPackAliasFixtures:
                 "media",
                 aliases="\n".join([
                     "  - kind: executor",
-                    "    alias: builtin.transcribe",
+                    "    alias: editorial.transcribe",
                     "    canonical_id: media.transcribe",
                 ]),
             )
@@ -1577,19 +1577,81 @@ class TestMigratedPackAliasFixtures:
             with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
-            result = registry.get("builtin.transcribe")
+            result = registry.get("editorial.transcribe")
             assert result.id == "media.transcribe"
 
             assert registry.alias_resolver is not None
-            record = registry.alias_resolver.get_record("builtin.transcribe")
+            record = registry.alias_resolver.get_record("editorial.transcribe")
             assert record.canonical_id == "media.transcribe"
             assert record.deprecated is False
+
+    def test_deprecated_alias_external_runpod_session_resolves_to_runpod_session(self) -> None:
+        """``runpod.session`` (deprecated) → ``runpod.session`` (canonical)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            packs_root = Path(tmp) / "packs"
+            pack_root = self._write_pack(
+                packs_root,
+                "runpod",
+                aliases="\n".join([
+                    "  - kind: executor",
+                    "    alias: external.runpod.session",
+                    "    canonical_id: runpod.session",
+                    "    deprecated: true",
+                    "    deprecation_message: Moved to runpod.session",
+                ]),
+            )
+            self._write_executor(pack_root, "session", "runpod.session")
+            packs = discover_packs(packs_root)
+
+            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+                registry = load_executor_registry()
+
+            result = registry.get("external.runpod.session")
+            assert result.id == "runpod.session"
+
+            assert registry.alias_resolver is not None
+            record = registry.alias_resolver.get_record("external.runpod.session")
+            assert record.canonical_id == "runpod.session"
+            assert record.deprecated is True
+            assert record.deprecation_message == "Moved to runpod.session"
+            assert record.source_pack_id == "runpod"
+
+    def test_deprecated_alias_upload_youtube_resolves_to_youtube_upload(self) -> None:
+        """``youtube.upload`` (deprecated) → ``youtube.upload`` (canonical)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            packs_root = Path(tmp) / "packs"
+            pack_root = self._write_pack(
+                packs_root,
+                "youtube",
+                aliases="\n".join([
+                    "  - kind: executor",
+                    "    alias: upload.youtube",
+                    "    canonical_id: youtube.upload",
+                    "    deprecated: true",
+                    "    deprecation_message: Moved to youtube.upload",
+                ]),
+            )
+            self._write_executor(pack_root, "upload", "youtube.upload")
+            packs = discover_packs(packs_root)
+
+            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+                registry = load_executor_registry()
+
+            result = registry.get("upload.youtube")
+            assert result.id == "youtube.upload"
+
+            assert registry.alias_resolver is not None
+            record = registry.alias_resolver.get_record("upload.youtube")
+            assert record.canonical_id == "youtube.upload"
+            assert record.deprecated is True
+            assert record.deprecation_message == "Moved to youtube.upload"
+            assert record.source_pack_id == "youtube"
 
     # -- CLI inspect: JSON output with alias/deprecation metadata ---------
 
     def test_executor_inspect_json_via_deprecated_alias_returns_canonical_with_metadata(self) -> None:
-        """Executing ``executors inspect builtin.render --json`` against a
-        temp pack whose pack.yaml declares ``builtin.render → rendering.render``
+        """Executing ``executors inspect rendering.render --json`` against a
+        temp pack whose pack.yaml declares ``rendering.render → rendering.render``
         should return the canonical definition and carry alias + deprecation
         metadata in the ``_capability`` block."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -1646,8 +1708,8 @@ class TestMigratedPackAliasFixtures:
             assert "deprecated" not in payload.get("metadata", {})
 
     def test_orchestrator_inspect_json_via_deprecated_alias_returns_canonical_with_metadata(self) -> None:
-        """Executing ``orchestrators inspect builtin.hype --json`` against a
-        temp pack whose pack.yaml declares ``builtin.hype → video_editing.hype``
+        """Executing ``orchestrators inspect video_editing.hype --json`` against a
+        temp pack whose pack.yaml declares ``video_editing.hype → video_editing.hype``
         should return the canonical definition and carry alias + deprecation
         metadata in the ``_capability`` block."""
         with tempfile.TemporaryDirectory() as tmp:

@@ -144,8 +144,8 @@ def test_stop_line_unbound_gate_has_no_transitional_extras() -> None:
         ["runpod", "volumes", "ls"],
         ["author", "test", "pack.thing", "--project", "demo"],
         ["sessions", "detach"],
-        ["executors", "inspect", "builtin.render"],
-        ["orchestrators", "inspect", "builtin.hype"],
+        ["executors", "inspect", "rendering.render"],
+        ["orchestrators", "inspect", "video_editing.hype"],
         ["elements", "inspect", "effects", "text-card"],
         ["timelines", "ls"],
     ]

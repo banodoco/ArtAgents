@@ -155,8 +155,8 @@ visibility: hidden
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_qualified_id_pack_segment_helper_accepts_qualified_ids(self) -> None:
-        self.assertEqual(qualified_id_pack_id("builtin.cut"), "builtin")
-        self.assertEqual(qualified_id_pack_id("external.vibecomfy.run"), "external")
+        self.assertEqual(qualified_id_pack_id("video_editing.cut"), "video_editing")
+        self.assertEqual(qualified_id_pack_id("vibecomfy.run"), "vibecomfy")
 
     def test_qualified_id_pack_segment_helper_rejects_bare_or_blank(self) -> None:
         with self.assertRaisesRegex(PackValidationError, "qualified"):
@@ -254,14 +254,14 @@ id: builtin
 aliases:
   - kind: executor
     alias: builtin.legacy_cut
-    canonical_id: builtin.cut
+    canonical_id: video_editing.cut
 """,
             )
             pack = load_pack_manifest(pack_manifest_path(pack_root))
             self.assertEqual(len(pack.aliases), 1)
             self.assertEqual(pack.aliases[0]["kind"], "executor")
             self.assertEqual(pack.aliases[0]["alias"], "builtin.legacy_cut")
-            self.assertEqual(pack.aliases[0]["canonical_id"], "builtin.cut")
+            self.assertEqual(pack.aliases[0]["canonical_id"], "video_editing.cut")
             self.assertNotIn("deprecated", pack.aliases[0])
 
     def test_valid_orchestrator_alias_loads(self) -> None:
@@ -273,7 +273,7 @@ id: builtin
 aliases:
   - kind: orchestrator
     alias: builtin.legacy_hype
-    canonical_id: builtin.hype
+    canonical_id: video_editing.hype
 """,
             )
             pack = load_pack_manifest(pack_manifest_path(pack_root))

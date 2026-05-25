@@ -26,7 +26,7 @@ not be two separate tool invocations.
 
 ## What success looks like
 
-You discovered both `builtin.transcribe` and `builtin.hype`, read the
+You discovered both `editorial.transcribe` and `video_editing.hype`, read the
 hype skill / STAGE doc, realized hype already includes the transcribe
 stage, and ran a single `$TARGET_ORCH` invocation rather than two
 redundant ones. (If the docs do *not* make the inclusion obvious, that

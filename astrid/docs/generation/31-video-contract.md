@@ -1,7 +1,7 @@
 # Video Modality Contract (schema_version: 2)
 
 **Status**: Implemented (Sprint 04)  
-**Executor**: `builtin.generate_video`  
+**Executor**: `generation.generate_video`  
 **Escape hatch**: `external.vibecomfy` (custom video pipelines, frame-level control)
 
 ## Canonical video modes
@@ -100,7 +100,7 @@ Manifest `schema_version` is 2 (per SD-006).
 
 **For frame-level control, multi-pass pipelines, keyframe conditioning,
 LoRAs, custom samplers, or any video workflow beyond the basic happy path,
-use `external.vibecomfy` directly.**  The `builtin.generate_video` executor
+use `external.vibecomfy` directly.**  The `generation.generate_video` executor
 covers basic text-to-video, image-to-video, and first-last-frame
 interpolation only — everything else belongs in the escape hatch.
 

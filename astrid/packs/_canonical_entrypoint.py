@@ -2,7 +2,7 @@
 
 Each pack's ``run.py`` ``__main__`` block should call
 ``guard_canonical_entrypoint("<pack_id>")`` *before* any other logic. The
-guard refuses direct invocation (e.g. ``python -m astrid.packs.builtin.orchestrators.hype.run``)
+guard refuses direct invocation (e.g. ``python -m astrid.packs.video_editing.orchestrators.hype.run``)
 and only allows the call to proceed when launched from the canonical Astrid
 runners, which set ``ASTRID_INTERNAL_INVOCATION=1`` in the subprocess env.
 """

@@ -11,9 +11,10 @@ from astrid.core.orchestrator.registry import load_default_registry
 from astrid.core.orchestrator.schema import load_orchestrator_manifest
 from astrid.packs.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
 
-BUILTIN_PACK_ROOT = REPO_ROOT / "astrid" / "packs" / "builtin"
+PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
+PACK_ROOTS = tuple(sorted(path for path in PACKS_ROOT.iterdir() if (path / "pack.yaml").is_file()))
 BUILTIN_ORCHESTRATOR_MANIFESTS = tuple(
-    sorted((BUILTIN_PACK_ROOT / "orchestrators").glob("*/orchestrator.yaml"))
+    sorted(path for pack_root in PACK_ROOTS for path in (pack_root / "orchestrators").glob("*/orchestrator.yaml"))
 )
 
 
@@ -30,6 +31,11 @@ def _orchestrator_validator() -> jsonschema.Draft7Validator:
 def _schema_errors(payload: dict[str, Any]) -> list[str]:
     validator = _orchestrator_validator()
     return sorted(error.message for error in validator.iter_errors(payload))
+
+
+def _pack_root_for(manifest_path):
+    relative = manifest_path.relative_to(PACKS_ROOT)
+    return PACKS_ROOT / relative.parts[0]
 
 
 def test_all_builtin_orchestrator_manifests_validate_against_json_schema() -> None:
@@ -52,10 +58,10 @@ def test_all_builtin_orchestrator_manifests_validate_against_json_schema() -> No
 
 
 def test_pack_validator_loads_every_builtin_orchestrator_manifest() -> None:
-    validator = PackValidator(BUILTIN_PACK_ROOT)
     failures: dict[str, list[str]] = {}
 
     for manifest_path in BUILTIN_ORCHESTRATOR_MANIFESTS:
+        validator = PackValidator(_pack_root_for(manifest_path))
         before = list(validator.errors)
         payload = validator.validate_component_manifest(manifest_path, "orchestrator")
         if payload is None or validator.errors != before:
@@ -86,7 +92,7 @@ def test_all_builtin_orchestrator_manifests_parse_through_runtime_and_registry()
 
 def test_orchestrator_schema_accepts_legacy_python_cli_runtime_shape() -> None:
     payload = load_manifest_mapping(
-        BUILTIN_PACK_ROOT / "orchestrators" / "hype" / "orchestrator.yaml",
+        PACKS_ROOT / "video_editing" / "orchestrators" / "hype" / "orchestrator.yaml",
         manifest_kind="orchestrator",
     )
     legacy_payload = deepcopy(payload)
@@ -103,7 +109,7 @@ def test_orchestrator_schema_accepts_legacy_python_cli_runtime_shape() -> None:
 
 def test_orchestrator_schema_rejects_missing_schema_version() -> None:
     payload = load_manifest_mapping(
-        BUILTIN_PACK_ROOT / "orchestrators" / "hype" / "orchestrator.yaml",
+        PACKS_ROOT / "video_editing" / "orchestrators" / "hype" / "orchestrator.yaml",
         manifest_kind="orchestrator",
     )
     payload.pop("schema_version")

@@ -74,10 +74,10 @@ class ElementRegistryTest(unittest.TestCase):
         self.assertEqual(animation_fade.kind, "animations")
         self.assertEqual(transition_fade.kind, "transitions")
         self.assertNotEqual(animation_fade.root, transition_fade.root)
-        self.assertTrue(str(animation_fade.root).endswith("astrid/packs/builtin/elements/animations/fade"))
-        self.assertTrue(str(transition_fade.root).endswith("astrid/packs/builtin/elements/transitions/fade"))
+        self.assertTrue(str(animation_fade.root).endswith("astrid/packs/rendering/elements/animations/fade"))
+        self.assertTrue(str(transition_fade.root).endswith("astrid/packs/rendering/elements/transitions/fade"))
 
-    def test_builtin_pack_defaults_are_discovered_with_pack_source(self) -> None:
+    def test_rendering_pack_defaults_are_discovered_with_pack_source(self) -> None:
         from unittest import mock
 
         from astrid.core.element import registry as registry_module
@@ -98,10 +98,10 @@ class ElementRegistryTest(unittest.TestCase):
             self.assertIn(("animations", "fade"), by_key)
             self.assertIn(("transitions", "cross-fade"), by_key)
             text_card = registry.get("effects", "text-card")
-            self.assertEqual(text_card.source, "pack:builtin")
+            self.assertEqual(text_card.source, "pack:rendering")
             self.assertFalse(text_card.editable)
             self.assertEqual(text_card.metadata["label"], "Text Card")
-            self.assertEqual(text_card.metadata["pack_id"], "builtin")
+            self.assertEqual(text_card.metadata["pack_id"], "rendering")
             self.assertEqual(
                 text_card.fork_target,
                 Path("astrid/packs/local/elements/effects/text-card"),
@@ -133,7 +133,7 @@ class ElementRegistryTest(unittest.TestCase):
         self.assertEqual(len(text_card_conflicts), 1)
         self.assertEqual(
             [item.source for item in text_card_conflicts[0].shadowed],
-            ["pack:builtin"],
+            ["pack:rendering"],
         )
 
     def test_local_pack_wins_over_builtin_and_fork_target_uses_local_pack(self) -> None:

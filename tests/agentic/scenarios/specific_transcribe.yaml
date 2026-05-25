@@ -2,7 +2,7 @@ name: specific_transcribe
 tier: discovery
 description: |
   Agent receives a specific, well-scoped request to transcribe an audio
-  file. The canonical Astrid answer is `builtin.transcribe`. Failure mode
+  file. The canonical Astrid answer is `editorial.transcribe`. Failure mode
   probed: agent skips the registry and writes a one-off whisper wrapper
   (or pip-installs openai-whisper, or calls the OpenAI API directly)
   instead of finding the existing executor.
@@ -12,7 +12,7 @@ brief: specific_transcribe.md
 priming:
   - create_project: $SLUG
 
-target_orchestrator: builtin.transcribe
+target_orchestrator: editorial.transcribe
 
 agents:
   - model: deepseek-v4-pro
@@ -22,7 +22,7 @@ agents:
 acceptance:
   # Machine-graded
   - no_aborts
-  - tool_used: builtin.transcribe
+  - tool_used: editorial.transcribe
   # Subjective
   - subjective:
       - found_transcribe_executor
@@ -44,15 +44,15 @@ assessment:
       - id: invoked_via_canonical_cli
         question: |
           Did the agent invoke the tool via `astrid executors run
-          builtin.transcribe ...`, as opposed to `python -m
-          astrid.packs.builtin.executors.transcribe.run ...` or a direct import?
+          editorial.transcribe ...`, as opposed to `python -m
+          astrid.packs.editorial.executors.transcribe.run ...` or a direct import?
         evidence: [stderr]
         grading: pass_fail
         weight: 2
         failure_mode: |
-          Stderr or report shows `python3? -m astrid.packs.builtin.transcribe`
-          or `from astrid.packs.builtin.executors.transcribe import` instead of
-          `astrid executors run builtin.transcribe`.
+          Stderr or report shows `python3? -m astrid.packs.editorial.transcribe`
+          or `from astrid.packs.editorial.executors.transcribe import` instead of
+          `astrid executors run editorial.transcribe`.
       - id: did_not_install_own_whisper
         question: |
           Did the agent avoid pip-installing `openai-whisper`, writing a
@@ -78,7 +78,7 @@ assessment:
   graded:
       - id: discovered_via_canonical_search
         question: |
-          Did the agent discover `builtin.transcribe` via the canonical CLI
+          Did the agent discover `editorial.transcribe` via the canonical CLI
           path (`astrid executors search transcribe` or `astrid executors
           list`), as opposed to grepping source files or reading
           astrid/packs/ directly?

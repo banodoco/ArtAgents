@@ -1,7 +1,7 @@
 # Adapter Packs
 
 How adapter packs wrap separately-owned external substrates — VibeComfy, RunPod,
-fal.ai, Moirae — and how they differ from builtin packs.
+fal.ai, Moirae — and how they differ from core capability packs.
 
 ## What Makes a Pack an Adapter
 
@@ -10,22 +10,29 @@ a tool, service, or runtime that Astrid does not own or ship. The pack provides
 the manifest, entrypoint, and integration glue; the substrate provides the
 actual work.
 
-The canonical example is the `external` pack at `astrid/packs/external/`.
+Each external substrate now lives in its own direct-child pack (e.g., `fal`,
+`vibecomfy`, `runpod`, `moirae`). The legacy `external` pack is a hidden
+shell that preserves backward compatibility through pack-level aliases
+(`external.moirae` → `moirae.moirae`, etc.).
 
-## The `external` Pack
+## Adapter Packs
 
-Shipped with Astrid. Contains adapters for four external substrates:
+Shipped with Astrid. Each pack adapts one external substrate:
 
-| Executor ID | Substrate | What it does |
-|---|---|---|
-| `external.moirae` | [Moirae](https://github.com/peteromallet/Moirae) | Terminal-as-cinema video renderer |
-| `external.fal_foley` | fal.ai | AI sound effect generation |
-| `external.vibecomfy.run` | VibeComfy/ComfyUI | Local image generation via ComfyUI workflows |
-| `external.vibecomfy.validate` | VibeComfy/ComfyUI | Validate ComfyUI workflow JSON |
-| `external.runpod.provision` | RunPod | Provision GPU pods |
-| `external.runpod.exec` | RunPod | Execute commands on remote pods |
-| `external.runpod.teardown` | RunPod | Tear down GPU pods |
-| `external.runpod.session` | RunPod | Manage interactive pod sessions |
+| Pack | Executor IDs | Substrate | What it does |
+|---|---|---|---|
+| `fal` | `fal.fal_foley` | fal.ai | AI sound effect generation |
+| `vibecomfy` | `vibecomfy.run`, `vibecomfy.validate` | VibeComfy/ComfyUI | Local image generation via ComfyUI workflows |
+| `runpod` | `runpod.provision`, `runpod.exec`, `runpod.teardown`, `runpod.session`, `runpod.pull` | RunPod | GPU pod provisioning and execution |
+| `moirae` | `moirae.moirae` | [Moirae](https://github.com/peteromallet/Moirae) | Terminal-as-cinema video renderer |
+| `youtube` | `youtube.youtube_audio`, `youtube.upload` | YouTube | Video/audio download and upload |
+| `reigh` | `reigh.open_in_reigh`, `reigh.publish`, `reigh.reigh_data`, `reigh.spatial_audio_page` | Reigh | Project handoff and publishing |
+
+Legacy ids under `external.*` (e.g., `external.runpod.session`,
+`external.vibecomfy.run`, `external.moirae`) remain functional as deprecated
+pack-level aliases. See
+[aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
+alias mechanics.
 
 ## Manifest Conventions
 
@@ -33,7 +40,7 @@ Adapter executor manifests declare `kind: external` in their component metadata:
 
 ```json
 {
-  "id": "external.moirae",
+  "id": "moirae.moirae",
   "kind": "external",
   "isolation": {
     "mode": "subprocess",
@@ -53,7 +60,7 @@ wraps a third-party substrate. The `_capability` block in inspect output
 preserves this:
 
 ```bash
-python3 -m astrid executors inspect external.moirae --json
+python3 -m astrid executors inspect moirae.moirae --json
 # → "_capability": { "kind": "external", ... }
 ```
 
@@ -68,9 +75,9 @@ Key manifest conventions for adapters:
   (e.g., `"explicit_check_only"` means the adapter checks availability but
   doesn't auto-install)
 
-## How Adapter Packs Differ from Builtin Packs
+## How Adapter Packs Differ from Core Capability Packs
 
-| Aspect | Builtin Pack | Adapter Pack |
+| Aspect | Core Capability Pack | Adapter Pack |
 |---|---|---|
 | Ownership | Astrid owns the substrate | Third party owns the substrate |
 | Trust | Fully trusted; runs in-process or subprocess | Trust limited to the adapter layer |
@@ -99,14 +106,14 @@ appropriately. The `run.py` entrypoint should be a thin wrapper that:
 
 ## Discovery
 
-Adapter executors appear in normal search and list output alongside builtins.
-Agents can identify them by the `kind: external` field in the `_capability`
-block during inspect:
+Adapter executors appear in normal search and list output alongside core
+capabilities. Agents can identify them by the `kind: external` field in the
+`_capability` block during inspect:
 
 ```bash
 python3 -m astrid executors search runpod --json
-python3 -m astrid executors list --json --pack external
+python3 -m astrid executors list --json --pack runpod
 ```
 
-The search surface treats adapter executors the same as builtins — they're
-first-class capabilities.
+The search surface treats adapter executors the same as core capabilities —
+they're first-class capabilities.

@@ -136,8 +136,8 @@ JSON to force a pool.
 
 **No brief file exists.** Briefs are first-class input artifacts today. Use
 `examples/briefs/` as samples. If the user repeatedly asks from a topic, add a
-`builtin.generate_brief` executor and call it from a topic-to-video
-orchestrator.
+`generation.generate_brief` executor (or its legacy alias `builtin.generate_brief`)
+and call it from a topic-to-video orchestrator.
 
 **Render is missing assets.** Rendering consumes the timeline and assets pair
 created by cut. Do not skip cut unless both `hype.timeline.json` and
@@ -151,8 +151,9 @@ brief and then delegates to the existing hype or render flow.
 
 All shipped content lives under packs at `astrid/packs/<pack>/`. Executor and
 orchestrator ids must be qualified — `<pack>.<name>` — and the first segment
-must equal the owning pack's id (e.g. `builtin.cut` lives in `packs/builtin/`,
-`external.vibecomfy.run` lives in `packs/external/`). Element ids stay bare and
+must equal the owning pack's id (e.g. `video_editing.cut` lives in
+`packs/video_editing/`, `vibecomfy.run` lives in `packs/vibecomfy/`). Element
+ids stay bare and
 are scoped by `kind` (`effects`, `animations`, `transitions`).
 
 Terminology note: pack placement, capability identity, aliases/deprecation,
@@ -229,7 +230,7 @@ plan = build_plan_template(
     steps=[
         build_leaf_template(
             "render",
-            command="python3 -m astrid.packs.builtin.executors.render.run ...",
+            command="python3 -m astrid.packs.rendering.executors.render.run ...",
             produces=[file_output("video", "hype.mp4")],
             cost=cost_entry(0, source="local"),
         )
@@ -242,8 +243,8 @@ Then run:
 ```bash
 python3 -m astrid next
 python3 -m astrid doctor
-python3 -m astrid executors inspect builtin.example --json
-python3 -m astrid orchestrators inspect builtin.example --json
+python3 -m astrid executors inspect rendering.example --json
+python3 -m astrid orchestrators inspect video_editing.example --json
 python3 -m astrid elements inspect effects example-card --json
 ```
 

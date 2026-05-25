@@ -8,7 +8,7 @@ from typing import Callable
 
 import yaml
 
-from astrid.packs.builtin.orchestrators.training_run.run import main as training_run_main
+from astrid.packs.training.orchestrators.training_run.run import main as training_run_main
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 EXAMPLE_CONFIG = REPO_ROOT / "examples" / "configs" / "training" / "seinfeld-training.yaml"

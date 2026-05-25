@@ -32,8 +32,8 @@ see [docs/pack-taxonomy.md](pack-taxonomy.md).
 
 | Kind | CLI path | Purpose | Example |
 |---|---|---|---|
-| Executor | `executors` | Single-step tool (render, transcribe, generate) | `builtin.render` |
-| Orchestrator | `orchestrators` | Multi-step pipeline (plan → execute → verify) | `builtin.hype` |
+| Executor | `executors` | Single-step tool (render, transcribe, generate) | `rendering.render` |
+| Orchestrator | `orchestrators` | Multi-step pipeline (plan → execute → verify) | `video_editing.hype` |
 | Element | `elements` | Reusable render building block (effect, animation) | `effects/text-card` |
 
 ## Step-by-Step Discovery Flow
@@ -85,8 +85,8 @@ tables.
 
 ```bash
 # The inspect shape reveals the _capability identity block + full definition
-python3 -m astrid executors inspect builtin.generate_image --json
-python3 -m astrid orchestrators inspect builtin.hype --json
+python3 -m astrid executors inspect generation.generate_image --json
+python3 -m astrid orchestrators inspect video_editing.hype --json
 python3 -m astrid elements inspect effects text-card --json
 ```
 
@@ -102,10 +102,10 @@ specific pack.
 
 Every inspect response includes a `_capability` section with:
 
-- `canonical_id` — the fully-qualified id (e.g., `"builtin.generate_image"`)
+- `canonical_id` — the fully-qualified id (e.g., `"generation.generate_image"`)
 - `local_id` — the id without pack prefix (e.g., `"generate_image"`)
 - `kind` — `"executor"`, `"orchestrator"`, or the element kind
-- `pack_id` — owning pack (e.g., `"builtin"`)
+- `pack_id` — owning pack (e.g., `"generation"`)
 - `aliases` — list of public alias names
 - `deprecated` / `deprecation_message` / `deprecated_alternatives`
 - `provenance` — `source` (pack or active_theme), `version`, `content_root`

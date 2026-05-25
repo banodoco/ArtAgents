@@ -63,7 +63,7 @@ class OverrideStore:
     def list_overrides(self) -> dict[str, dict[str, str]]:
         """Return all overrides grouped by type.
 
-        Returns a dict like ``{"executor": {"builtin.shots": "local.shots"}}``.
+        Returns a dict like ``{"executor": {"editorial.shots": "local.shots"}}``.
         """
         with self._lock:
             result: dict[str, dict[str, str]] = {}

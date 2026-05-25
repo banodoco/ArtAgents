@@ -34,7 +34,7 @@ class QualifiedIdEnforcementTest(unittest.TestCase):
         with self.assertRaisesRegex(ExecutorValidationError, "graph.depends_on"):
             validate_executor_definition(
                 {
-                    "id": "builtin.cut",
+                    "id": "video_editing.cut",
                     "name": "Cut",
                     "kind": "built_in",
                     "version": "1.0",
@@ -57,7 +57,7 @@ class QualifiedIdEnforcementTest(unittest.TestCase):
         with self.assertRaisesRegex(OrchestratorValidationError, "orchestrator.child_executors"):
             validate_orchestrator_definition(
                 {
-                    "id": "builtin.hype",
+                    "id": "video_editing.hype",
                     "name": "Hype",
                     "kind": "built_in",
                     "version": "1.0",
@@ -71,18 +71,18 @@ class QualifiedIdEnforcementTest(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertIn("executor id must be qualified", stderr)
 
-        result, stdout, stderr = _capture(executors_cli.main, ["inspect", "builtin.cut"])
+        result, stdout, stderr = _capture(executors_cli.main, ["inspect", "video_editing.cut"])
         self.assertEqual(result, 0, stderr)
-        self.assertIn("id: builtin.cut", stdout)
+        self.assertIn("id: video_editing.cut", stdout)
 
     def test_cli_rejects_bare_orchestrator_lookup_and_accepts_qualified_id(self) -> None:
         result, _, stderr = _capture(orchestrators_cli.main, ["inspect", "hype"])
         self.assertEqual(result, 2)
         self.assertIn("orchestrator id must be qualified", stderr)
 
-        result, stdout, stderr = _capture(orchestrators_cli.main, ["inspect", "builtin.hype"])
+        result, stdout, stderr = _capture(orchestrators_cli.main, ["inspect", "video_editing.hype"])
         self.assertEqual(result, 0, stderr)
-        self.assertIn("id: builtin.hype", stdout)
+        self.assertIn("id: video_editing.hype", stdout)
 
 
 if __name__ == "__main__":

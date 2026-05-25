@@ -9,8 +9,8 @@ from typing import Sequence
 
 import pytest
 
-from astrid.packs.builtin.orchestrators.dataset_build.interfaces import RunPodHandle
-from astrid.packs.builtin.orchestrators.training_run.compute_backends import (
+from astrid.packs.training.orchestrators.dataset_build.interfaces import RunPodHandle
+from astrid.packs.training.orchestrators.training_run.compute_backends import (
     BackendExecutionError,
     BackendRegistryError,
     RunPodComputeBackend,
@@ -33,7 +33,7 @@ class RecordingRunner:
         self.calls.append(call)
         produces = Path(_arg_value(call, "--produces-dir"))
         produces.mkdir(parents=True, exist_ok=True)
-        command = call[call.index("astrid.packs.external.runpod.run") + 1]
+        command = call[call.index("astrid.packs.runpod.executors.provision.run") + 1]
         if command == "provision":
             (produces / "pod_handle.json").write_text(
                 json.dumps(

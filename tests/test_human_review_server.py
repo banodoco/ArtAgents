@@ -6,8 +6,8 @@ from io import BytesIO
 from pathlib import Path
 from types import MethodType
 
-from astrid.packs.builtin.orchestrators.dataset_build.state import make_initial_state, read_review_state, write_review_state
-from astrid.packs.builtin.executors.human_review.run import make_handler_class
+from astrid.packs.training.orchestrators.dataset_build.state import make_initial_state, read_review_state, write_review_state
+from astrid.packs.editorial.executors.human_review.run import make_handler_class
 
 
 def _handler(tmp_path: Path, *, data: object, state: dict | None = None) -> tuple[type, str, Path, Path]:

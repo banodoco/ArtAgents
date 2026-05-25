@@ -9,6 +9,8 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
+from functools import lru_cache
+from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
@@ -35,13 +37,21 @@ class ExecutorRunnerError(ExecutorValidationError):
     """Raised when a executor cannot be prepared or executed."""
 
 
+@lru_cache(maxsize=1)
 def _pipeline_module():
-    from astrid.packs.builtin.orchestrators.hype import run as pipeline
+    from astrid.core.orchestrator.registry import load_default_registry as load_default_orchestrator_registry
+
+    registry = load_default_orchestrator_registry()
+    orchestrator = registry.get("video_editing.hype")
+    runtime_module = orchestrator.metadata.get("runtime_module")
+    if not isinstance(runtime_module, str) or not runtime_module:
+        raise ExecutorRunnerError("video_editing.hype manifest is missing metadata.runtime_module")
+    pipeline = import_module(runtime_module)
 
     return pipeline
 
 
-def _builtin_steps_by_name() -> Mapping[str, Any]:
+def _pipeline_steps_by_name() -> Mapping[str, Any]:
     pipeline = _pipeline_module()
     steps = {step.name: step for step in pipeline.build_pool_steps()}
     missing = [name for name in pipeline.STEP_ORDER if name not in steps]
@@ -176,8 +186,8 @@ def _canonicalize_runner_argv_paths(argv: Sequence[str]) -> tuple[str, ...]:
 
 
 def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
-    if executor.id == "upload.youtube":
-        return _run_upload_youtube(request)
+    if executor.id == "youtube.upload":
+        return _run_upload_youtube(request, executor.id)
     values = _request_values(request)
     _validate_required_inputs(executor, values)
     condition_result = evaluate_conditions(executor, values)
@@ -206,17 +216,17 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
     return _run_external_executor(executor, request, values)
 
 
-def _run_upload_youtube(request: ExecutorRunRequest) -> ExecutorRunResult:
+def _run_upload_youtube(request: ExecutorRunRequest, executor_id: str) -> ExecutorRunResult:
     inputs = dict(request.inputs)
     if request.dry_run:
         return ExecutorRunResult(
-            executor_id=request.executor_id,
+            executor_id=executor_id,
             kind="built_in",
             dry_run=True,
-            payload={"would_run": "upload.youtube", "inputs": inputs},
+            payload={"would_run": "youtube.upload", "inputs": inputs},
         )
 
-    from astrid.packs.upload.executors.youtube.src.social_publish import publish_youtube_video
+    from astrid.packs.youtube.executors.upload.src.social_publish import publish_youtube_video
 
     result = publish_youtube_video(
         video_url=_required_input(inputs, "video_url"),
@@ -227,7 +237,7 @@ def _run_upload_youtube(request: ExecutorRunRequest) -> ExecutorRunResult:
         playlist_id=_optional_input(inputs, "playlist_id"),
         made_for_kids=bool(_optional_input(inputs, "made_for_kids") or False),
     )
-    return ExecutorRunResult(executor_id=request.executor_id, kind="built_in", payload=result)
+    return ExecutorRunResult(executor_id=executor_id, kind="built_in", payload=result)
 
 
 @dataclass(frozen=True)
@@ -616,7 +626,7 @@ def _step_for_executor(executor: ExecutorDefinition) -> Any:
     step_name = executor.metadata.get("pipeline_step")
     if not isinstance(step_name, str):
         raise ExecutorRunnerError(f"built-in executor {executor.id!r} is missing metadata.pipeline_step")
-    steps = _builtin_steps_by_name()
+    steps = _pipeline_steps_by_name()
     if step_name not in steps:
         raise ExecutorRunnerError(f"built-in executor {executor.id!r} references unknown pipeline step {step_name!r}")
     return steps[step_name]

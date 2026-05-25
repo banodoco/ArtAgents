@@ -3,7 +3,7 @@ tier: discovery
 description: |
   Agent receives a multi-step request implying two stages: transcribe and
   edit-to-hype-reel. The naive read is "I need two tools: transcribe +
-  hype". The correct Astrid answer is "just run `builtin.hype` — it
+  hype". The correct Astrid answer is "just run `video_editing.hype` — it
   already runs transcribe internally". Failure mode probed: agent
   composes a redundant pipeline (transcribe then hype with --skip-transcribe
   flags or duplicate work) because the hype skill doc didn't make the
@@ -14,7 +14,7 @@ brief: cross_pack_composition.md
 priming:
   - create_project: $SLUG
 
-target_orchestrator: builtin.hype
+target_orchestrator: video_editing.hype
 
 agents:
   - model: deepseek-v4-pro
@@ -23,12 +23,12 @@ agents:
 
 acceptance:
   # Machine-graded. Discovery-tier scenario: the signal we care about
-  # is the *composition decision* (one invocation of `builtin.hype`,
+  # is the *composition decision* (one invocation of `video_editing.hype`,
   # not two separate stages). A `--dry-run` against a placeholder
   # video is enough to demonstrate that — we don't require the
   # downstream pipeline to actually finish on synthetic input.
   - no_aborts
-  - tool_used: builtin.hype
+  - tool_used: video_editing.hype
   # Subjective
   - subjective:
       - discovered_hype_includes_transcribe
@@ -49,20 +49,20 @@ assessment:
   enforced:
       - id: composed_correctly
         question: |
-          Did the agent invoke `builtin.hype` exactly once for the
+          Did the agent invoke `video_editing.hype` exactly once for the
           composed pipeline (not transcribe-then-hype, not duplicate
           runs)?
         evidence: [stderr, events]
         grading: pass_fail
         weight: 2
         failure_mode: |
-          Stderr shows back-to-back `executors run builtin.transcribe`
-          AND `orchestrators run builtin.hype` invocations on the same
+          Stderr shows back-to-back `executors run editorial.transcribe`
+          AND `orchestrators run video_editing.hype` invocations on the same
           media.
       - id: invoked_via_canonical_cli
         question: |
           Did the agent invoke hype via `astrid orchestrators run
-          builtin.hype` rather than `python -m astrid.packs.builtin.hype`
+          video_editing.hype` rather than `python -m astrid.packs.video_editing.hype`
           or a direct import?
         evidence: [stderr]
         grading: pass_fail
@@ -71,7 +71,7 @@ assessment:
       - id: discovered_hype_includes_transcribe
         question: |
           Did the agent discover (and call out explicitly in their
-          narrative) that `builtin.hype` already runs `builtin.transcribe`
+          narrative) that `video_editing.hype` already runs `editorial.transcribe`
           internally, rather than treating them as two separate stages?
         evidence: [report, stderr]
         grading: pass_fail
@@ -83,7 +83,7 @@ assessment:
       - id: read_hype_skill
         question: |
           Did the agent read the hype STAGE/SKILL doc (via `astrid
-          orchestrators inspect builtin.hype`, or reading STAGE.md
+          orchestrators inspect video_editing.hype`, or reading STAGE.md
           directly) BEFORE running it?
         evidence: [stderr, report]
         grading: pass_fail
