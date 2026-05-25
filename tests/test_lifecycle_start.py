@@ -46,6 +46,11 @@ def test_start_writes_active_run_with_correct_hash(tmp_path: Path) -> None:
     assert active["run_id"] == "r1"
     plan_hash = compute_plan_hash(projects / "p" / "plan.json")
     assert active["plan_hash"] == plan_hash
+    run_plan = json.loads(
+        (projects / "p" / "runs" / "r1" / "plan.json").read_text(encoding="utf-8")
+    )
+    project_plan = json.loads((projects / "p" / "plan.json").read_text(encoding="utf-8"))
+    assert run_plan == project_plan
 
 
 def test_events_jsonl_starts_with_plan_initialized_then_run_started(tmp_path: Path) -> None:

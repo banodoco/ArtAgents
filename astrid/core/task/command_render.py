@@ -15,6 +15,8 @@ from astrid.core.task.env import (
 )
 from astrid.core.task.plan import STEP_PATH_SEP, Step
 
+INTERNAL_INVOCATION_ENV = "ASTRID_INTERNAL_INVOCATION"
+
 
 @dataclass(frozen=True)
 class RenderedTaskCommand:
@@ -56,6 +58,7 @@ def task_env_for_context(
     item_id: str | None = None,
 ) -> dict[str, str]:
     env = {
+        INTERNAL_INVOCATION_ENV: "1",
         TASK_PROJECT_ENV: slug,
         TASK_RUN_ID_ENV: run_id,
         TASK_STEP_ID_ENV: STEP_PATH_SEP.join(plan_step_path),
@@ -132,6 +135,7 @@ def strip_task_env_prefix(command: str) -> str:
     except ValueError:
         return command
     task_keys = {
+        INTERNAL_INVOCATION_ENV,
         TASK_PROJECT_ENV,
         TASK_RUN_ID_ENV,
         TASK_STEP_ID_ENV,

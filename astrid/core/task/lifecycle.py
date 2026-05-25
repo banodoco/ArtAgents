@@ -405,6 +405,7 @@ def cmd_start(
 
     plan_path = proj_root / "plan.json"
     write_json_atomic(plan_path, compiled_payload)
+    write_json_atomic(run_dir / "plan.json", compiled_payload)
 
     try:
         plan = load_plan(plan_path)

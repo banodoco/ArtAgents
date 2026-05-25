@@ -346,9 +346,10 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     plan_path = projects_root / slug / "plan.json"
     run_plan_path = run_dir / "plan.json"
     assert plan_path.exists()
-    assert run_plan_path.exists() is False
+    assert run_plan_path.exists()
 
     plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert json.loads(run_plan_path.read_text(encoding="utf-8")) == plan_data
     assert plan_data["version"] == 2
     assert plan_data["steps"][0]["id"] == "hype"
     assert "children" in plan_data["steps"][0]

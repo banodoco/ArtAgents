@@ -637,6 +637,13 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
             sha = hashlib.sha256(dst.read_bytes()).hexdigest()
             manifest_entries.append((rel, sha))
 
+        def _add_bytes(data: bytes, rel: str) -> None:
+            dst = tmpdir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(data)
+            sha = hashlib.sha256(data).hexdigest()
+            manifest_entries.append((rel, sha))
+
         # Collect unique contributing runs across all timelines
         seen_runs: set[str] = set()
         all_run_ids: list[str] = []
@@ -684,10 +691,24 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
             if not run_root.is_dir():
                 continue
 
-            # Copy plan.json
-            plan_path = proj_root / "plan.json"
+            # Copy the run's own plan snapshot. Older runs may only have the
+            # initial plan embedded in events.jsonl; export that snapshot
+            # rather than the mutable project-level plan cache.
+            plan_path = run_root / "plan.json"
             if plan_path.is_file():
                 _add_file(plan_path, f"runs/{run_id}/plan.json")
+            else:
+                plan_payload = _run_initial_plan_payload(run_root / "events.jsonl")
+                if plan_payload is not None:
+                    data = json.dumps(
+                        plan_payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    _add_bytes(
+                        data,
+                        f"runs/{run_id}/plan.json",
+                    )
 
             # Copy events.jsonl
             events_path = run_root / "events.jsonl"
@@ -720,6 +741,19 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
 
     print(f"exported project '{args.project}' to {out_path}")
     return 0
+
+
+def _run_initial_plan_payload(events_path: Path) -> dict[str, object] | None:
+    if not events_path.is_file():
+        return None
+    from astrid.core.task.events import read_events
+
+    for event in read_events(events_path):
+        if event.get("kind") == "plan_initialized" and isinstance(
+            event.get("plan"), dict
+        ):
+            return event["plan"]
+    return None
 
 
 # ---------------------------------------------------------------------------
