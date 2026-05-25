@@ -10,6 +10,7 @@ import pytest
 from astrid.core.task.claim import (
     CLAIM_KIND,
     UNCLAIM_KIND,
+    active_claims_by_step,
     _make_claim_event,
     _make_unclaim_event,
     _parse_for_flag,
@@ -19,11 +20,11 @@ from astrid.core.task.claim import (
 
 def test_claim_event_shape() -> None:
     event = _make_claim_event(
-        "s1", claimed_by="agent-1", claimed_by_kind="agent", writer_epoch=1
+        "s1", claimed_by="agent:agent-1", claimed_by_kind="agent", writer_epoch=1
     )
     assert event["kind"] == CLAIM_KIND
     assert event["step"] == "s1"
-    assert event["claimed_by"] == "agent-1"
+    assert event["claimed_by"] == "agent:agent-1"
     assert event["claimed_by_kind"] == "agent"
     assert event["writer_epoch"] == 1
     assert "ts" in event
@@ -31,31 +32,36 @@ def test_claim_event_shape() -> None:
 
 def test_unclaim_event_shape() -> None:
     event = _make_unclaim_event(
-        "parent/child", unclaimed_by="human-bob", unclaimed_by_kind="actor", writer_epoch=3
+        "parent/child", unclaimed_by="human:bob", unclaimed_by_kind="human", writer_epoch=3
     )
     assert event["kind"] == UNCLAIM_KIND
     assert event["step"] == "parent/child"
-    assert event["unclaimed_by"] == "human-bob"
-    assert event["unclaimed_by_kind"] == "actor"
+    assert event["unclaimed_by"] == "human:bob"
+    assert event["unclaimed_by_kind"] == "human"
     assert event["writer_epoch"] == 3
 
 
 def test_parse_for_flag_agent() -> None:
     ident, kind = _parse_for_flag("agent:gpt-5")
-    assert ident == "gpt-5"
+    assert ident == "agent:gpt-5"
     assert kind == "agent"
 
 
 def test_parse_for_flag_human() -> None:
     ident, kind = _parse_for_flag("human:Alice")
-    assert ident == "Alice"
-    assert kind == "actor"
+    assert ident == "human:Alice"
+    assert kind == "human"
 
 
 def test_parse_for_flag_rejects_bare_string() -> None:
     import sys
     with pytest.raises(SystemExit):
         _parse_for_flag("nobody")
+
+
+def test_parse_for_flag_rejects_legacy_actor_prefix() -> None:
+    with pytest.raises(SystemExit):
+        _parse_for_flag("actor:bob")
 
 
 def test_parse_for_flag_rejects_empty_agent() -> None:
@@ -80,3 +86,27 @@ def test_build_parser_has_claim_and_unclaim() -> None:
             assert 'unclaim' in action.choices
             return
     pytest.fail("No _SubParsersAction found")
+
+
+def test_active_claims_reads_legacy_actor_events_as_human_only() -> None:
+    events = [
+        {
+            "kind": CLAIM_KIND,
+            "step": "review",
+            "claimed_by": "actor:bob",
+            "claimed_by_kind": "actor",
+        }
+    ]
+    assert active_claims_by_step(events) == {"review": "human:bob"}
+
+
+def test_active_claims_unclaim_clears_matching_identity() -> None:
+    events = [
+        _make_claim_event(
+            "review", claimed_by="human:bob", claimed_by_kind="human", writer_epoch=1
+        ),
+        _make_unclaim_event(
+            "review", unclaimed_by="human:bob", unclaimed_by_kind="human", writer_epoch=2
+        ),
+    ]
+    assert active_claims_by_step(events) == {}

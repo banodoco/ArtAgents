@@ -7,7 +7,9 @@ import keyword
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
+from typing import Literal as _Literal
+from typing import get_args as _get_args
 
 from astrid.contracts.schema import (
     CACHE_MODES,
@@ -17,19 +19,23 @@ from astrid.contracts.schema import (
     CacheMode,
     CachePolicy,
     CapabilityHandle,
+    CommandInputArg,
     CommandSpec,
     IsolationMetadata,
     IsolationMode,
-    Output as ExecutorOutput,
     OutputMode,
-    Port as ExecutorPort,
     PortType,
     Provenance,
     SafetyDeclaration,
 )
+from astrid.contracts.schema import (
+    Output as ExecutorOutput,
+)
+from astrid.contracts.schema import (
+    Port as ExecutorPort,
+)
+from astrid.core.manifest import ManifestParseError, load_manifest_payload
 from astrid.timeline import ClipClassifiedKind
-
-from typing import Literal as _Literal, get_args as _get_args
 
 ExecutorKind = _Literal["built_in", "external"]
 ExternalRuntimeMode = _Literal["api", "package"]
@@ -48,6 +54,7 @@ CLIP_KIND_VALUES = tuple(kind.value for kind in ClipClassifiedKind)
 PIPELINE_REQUIREMENT_FACTS = {
     "arrangement",
     "assets",
+    "assets_registry",
     "audio",
     "brief",
     "generative_visuals_enabled",
@@ -110,9 +117,7 @@ def _validate_in_allowed(value: str, allowed: frozenset[str], path: str) -> None
         raise ExecutorValidationError(f"{path} must be one of {sorted(allowed)}")
 
 
-from typing import TypeVar as _TypeVar
-
-_LiteralT = _TypeVar("_LiteralT")
+_LiteralT = TypeVar("_LiteralT")
 
 
 def _require_literal(value: Any, allowed: frozenset[str], path: str, literal_type: type[_LiteralT]) -> _LiteralT:
@@ -274,13 +279,10 @@ def load_executor_manifest_definitions(path: str | Path) -> tuple[ExecutorDefini
 
 
 def _load_manifest_payload(path: Path) -> Any:
-    text = path.read_text(encoding="utf-8")
     try:
-        return json.loads(text)
-    except json.JSONDecodeError as json_exc:
-        if path.suffix.lower() not in {".yaml", ".yml"}:
-            raise ValueError(f"invalid JSON: {json_exc.msg}") from json_exc
-    return _parse_yaml_subset(text)
+        return load_manifest_payload(path, manifest_kind="executor")
+    except ManifestParseError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def _validate_manifest_payload(raw: Any) -> tuple[ExecutorDefinition, ...]:
@@ -448,7 +450,22 @@ def _parse_command(raw: Any, path: str) -> CommandSpec | None:
         if not isinstance(key, str) or not isinstance(value, str):
             raise ExecutorValidationError(f"{path}.env keys and values must be strings")
         env[key] = value
-    return CommandSpec(argv=argv, cwd=cwd, env=env)
+    input_args = tuple(
+        _parse_command_input_arg(item, f"{path}.input_args[{index}]")
+        for index, item in enumerate(_optional_list(data, "input_args", f"{path}.input_args"))
+    )
+    return CommandSpec(argv=argv, cwd=cwd, env=env, input_args=input_args)
+
+
+def _parse_command_input_arg(raw: Any, path: str) -> CommandInputArg:
+    data = _require_mapping(raw, path)
+    input_name = _require_string(data, "input", f"{path}.input")
+    return CommandInputArg(
+        input=input_name,
+        flag=_optional_nullable_string(data, "flag", f"{path}.flag"),
+        repeatable=_optional_bool(data, "repeatable", f"{path}.repeatable", default=False),
+        optional=_optional_bool(data, "optional", f"{path}.optional", default=False),
+    )
 
 
 def _parse_cache(raw: Any, path: str) -> CachePolicy:
@@ -705,6 +722,13 @@ def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:
     for key, value in command.env.items():
         _validate_non_empty_string(key, "command.env key")
         _validate_placeholders(value, placeholders, f"command.env[{key!r}]")
+    for index, mapping in enumerate(command.input_args):
+        path = f"command.input_args[{index}]"
+        _validate_non_empty_string(mapping.input, f"{path}.input")
+        if mapping.input not in placeholders:
+            raise ExecutorValidationError(f"{path}.input references unknown input {mapping.input!r}")
+        if mapping.flag is not None:
+            _validate_non_empty_string(mapping.flag, f"{path}.flag")
 
 
 SHORT_DESCRIPTION_MAX_LEN = 120
@@ -734,24 +758,24 @@ def _validate_capability_text(
             f"{manifest_id}: keywords has {len(keywords)} entries; max is {KEYWORDS_MAX_COUNT}"
         )
     seen: set[str] = set()
-    for index, keyword in enumerate(keywords):
-        if len(keyword) > KEYWORD_MAX_LEN:
+    for index, keyword_value in enumerate(keywords):
+        if len(keyword_value) > KEYWORD_MAX_LEN:
             raise error_cls(
-                f"{manifest_id}: keywords[{index}] is {len(keyword)} chars; max is {KEYWORD_MAX_LEN}"
+                f"{manifest_id}: keywords[{index}] is {len(keyword_value)} chars; max is {KEYWORD_MAX_LEN}"
             )
-        if any(ch.isspace() for ch in keyword):
+        if any(ch.isspace() for ch in keyword_value):
             raise error_cls(
-                f"{manifest_id}: keywords[{index}] {keyword!r} must not contain whitespace"
+                f"{manifest_id}: keywords[{index}] {keyword_value!r} must not contain whitespace"
             )
-        if keyword.lower() != keyword:
+        if keyword_value.lower() != keyword_value:
             raise error_cls(
-                f"{manifest_id}: keywords[{index}] {keyword!r} must be lowercase"
+                f"{manifest_id}: keywords[{index}] {keyword_value!r} must be lowercase"
             )
-        if keyword in seen:
+        if keyword_value in seen:
             raise error_cls(
-                f"{manifest_id}: keywords[{index}] {keyword!r} is a duplicate"
+                f"{manifest_id}: keywords[{index}] {keyword_value!r} is a duplicate"
             )
-        seen.add(keyword)
+        seen.add(keyword_value)
 
 
 def _validate_placeholders(value: str, allowed: set[str], path: str) -> None:
@@ -885,142 +909,6 @@ def _drop_none(value: Any) -> Any:
     if isinstance(value, list):
         return [_drop_none(item) for item in value]
     return value
-
-
-def _parse_yaml_subset(text: str) -> Any:
-    lines = _yaml_lines(text)
-    if not lines:
-        raise ValueError("empty YAML manifest")
-    value, index = _parse_yaml_block(lines, 0, lines[0][0])
-    if index != len(lines):
-        raise ValueError(f"unexpected indentation near line {lines[index][2]}")
-    return value
-
-
-def _yaml_lines(text: str) -> list[tuple[int, str, int]]:
-    result: list[tuple[int, str, int]] = []
-    for line_number, raw_line in enumerate(text.splitlines(), start=1):
-        if "\t" in raw_line[: len(raw_line) - len(raw_line.lstrip())]:
-            raise ValueError(f"tabs are not supported in YAML indentation at line {line_number}")
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        result.append((len(raw_line) - len(raw_line.lstrip(" ")), _strip_yaml_comment(stripped), line_number))
-    return result
-
-
-def _strip_yaml_comment(value: str) -> str:
-    in_quote: str | None = None
-    for index, char in enumerate(value):
-        if char in {"'", '"'} and (index == 0 or value[index - 1] != "\\"):
-            in_quote = None if in_quote == char else char if in_quote is None else in_quote
-        if char == "#" and in_quote is None and (index == 0 or value[index - 1].isspace()):
-            return value[:index].rstrip()
-    return value
-
-
-def _parse_yaml_block(lines: list[tuple[int, str, int]], index: int, indent: int) -> tuple[Any, int]:
-    if lines[index][0] < indent:
-        raise ValueError(f"unexpected indentation near line {lines[index][2]}")
-    if lines[index][1].startswith("- "):
-        return _parse_yaml_list(lines, index, indent)
-    return _parse_yaml_mapping(lines, index, indent)
-
-
-def _parse_yaml_mapping(lines: list[tuple[int, str, int]], index: int, indent: int) -> tuple[dict[str, Any], int]:
-    result: dict[str, Any] = {}
-    while index < len(lines):
-        line_indent, content, line_number = lines[index]
-        if line_indent < indent:
-            break
-        if line_indent > indent:
-            raise ValueError(f"unexpected nested mapping at line {line_number}")
-        if content.startswith("- "):
-            break
-        key, value_text = _split_yaml_key_value(content, line_number)
-        if value_text == "":
-            if index + 1 >= len(lines) or lines[index + 1][0] <= indent:
-                result[key] = {}
-                index += 1
-            else:
-                result[key], index = _parse_yaml_block(lines, index + 1, lines[index + 1][0])
-        else:
-            result[key] = _parse_yaml_scalar(value_text, line_number)
-            index += 1
-    return result, index
-
-
-def _parse_yaml_list(lines: list[tuple[int, str, int]], index: int, indent: int) -> tuple[list[Any], int]:
-    result: list[Any] = []
-    while index < len(lines):
-        line_indent, content, line_number = lines[index]
-        if line_indent < indent:
-            break
-        if line_indent != indent or not content.startswith("- "):
-            break
-        item_text = content[2:].strip()
-        if item_text == "":
-            if index + 1 >= len(lines) or lines[index + 1][0] <= indent:
-                result.append(None)
-                index += 1
-            else:
-                item, index = _parse_yaml_block(lines, index + 1, lines[index + 1][0])
-                result.append(item)
-            continue
-        if ":" in item_text and not item_text.startswith(("'", '"')):
-            key, value_text = _split_yaml_key_value(item_text, line_number)
-            item: dict[str, Any] = {}
-            if value_text == "":
-                if index + 1 >= len(lines) or lines[index + 1][0] <= indent:
-                    item[key] = {}
-                    index += 1
-                else:
-                    item[key], index = _parse_yaml_block(lines, index + 1, lines[index + 1][0])
-            else:
-                item[key] = _parse_yaml_scalar(value_text, line_number)
-                index += 1
-            while index < len(lines) and lines[index][0] > indent and not lines[index][1].startswith("- "):
-                nested_indent = lines[index][0]
-                nested, index = _parse_yaml_mapping(lines, index, nested_indent)
-                item.update(nested)
-            result.append(item)
-        else:
-            result.append(_parse_yaml_scalar(item_text, line_number))
-            index += 1
-    return result, index
-
-
-def _split_yaml_key_value(content: str, line_number: int) -> tuple[str, str]:
-    if ":" not in content:
-        raise ValueError(f"expected key: value at line {line_number}")
-    key, value = content.split(":", 1)
-    key = key.strip()
-    if not key:
-        raise ValueError(f"empty key at line {line_number}")
-    return key, value.strip()
-
-
-def _parse_yaml_scalar(value: str, line_number: int) -> Any:
-    if value in {"[]", "{}"} or value.startswith(("[", "{", '"')):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"invalid JSON-compatible scalar at line {line_number}: {exc.msg}") from exc
-    if value.startswith("'") and value.endswith("'"):
-        return value[1:-1]
-    lowered = value.lower()
-    if lowered in {"true", "false"}:
-        return lowered == "true"
-    if lowered in {"null", "~"}:
-        return None
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        return value
 
 
 __all__ = [

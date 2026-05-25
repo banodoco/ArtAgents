@@ -14,10 +14,14 @@ from astrid.core.executor.schema import ExecutorDefinition
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
-from astrid.threads.ids import is_ulid
+from astrid.threads.record import build_run_record, finalize_run_record
 
 
-def test_executor_success_writes_run_json_index_and_output_integrity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FW0"
+RUN_ID = "01ARZ3NDEKTSV4RRFFQ69G5FW1"
+
+
+def test_executor_runtime_does_not_bind_thread_or_inject_thread_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     out = repo / "runs" / "success"
     registry = ExecutorRegistry([_writer_executor("test.writer")])
@@ -25,33 +29,12 @@ def test_executor_success_writes_run_json_index_and_output_integrity(tmp_path: P
     result = run_executor(ExecutorRunRequest("test.writer", out=out), registry)
 
     assert result.returncode == 0
-    record = _read_json(out / "run.json")
-    assert record["schema_version"] == 1
-    assert is_ulid(record["run_id"])
-    assert is_ulid(record["thread_id"])
-    assert record["executor_id"] == "test.writer"
-    assert record["orchestrator_id"] is None
-    assert record["kind"] == "executor"
-    assert record["status"] == "succeeded"
-    assert record["returncode"] == 0
-    assert record["started_at"]
-    assert record["ended_at"]
-    assert record["out_path"] == "runs/success"
-    assert record["parent_run_ids"] == []
-    assert record["output_artifacts"][0]["path"] == "runs/success/result.txt"
-    assert record["output_artifacts"][0]["sha256"]
-    assert record["output_artifacts"][0]["role"] == "other"
-    assert "host_id" not in record
-    assert "chosen_from_groups" not in record
-    assert "preview_modes" not in json.dumps(record)
-    assert (out / "result.txt").read_text(encoding="utf-8").startswith("1:")
-
-    index = _read_json(repo / ".astrid" / "threads.json")
-    assert index["active_thread_id"] == record["thread_id"]
-    assert record["run_id"] in index["threads"][record["thread_id"]]["run_ids"]
+    assert (out / "result.txt").read_text(encoding="utf-8") == ":"
+    assert not (out / "run.json").exists()
+    assert not (repo / ".astrid" / "threads.json").exists()
 
 
-def test_executor_nonzero_and_exception_finalize_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_executor_runtime_errors_do_not_finalize_thread_records(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     failed_out = repo / "runs" / "failed"
     registry = ExecutorRegistry([_exit_executor("test.exits", 7), _requires_input_executor("test.requires")])
@@ -59,31 +42,18 @@ def test_executor_nonzero_and_exception_finalize_records(tmp_path: Path, monkeyp
     result = run_executor(ExecutorRunRequest("test.exits", out=failed_out), registry)
 
     assert result.returncode == 7
-    failed = _read_json(failed_out / "run.json")
-    assert failed["status"] == "failed"
-    assert failed["returncode"] == 7
+    assert not (failed_out / "run.json").exists()
 
     error_out = repo / "runs" / "error"
     with pytest.raises(ExecutorRunnerError):
         run_executor(ExecutorRunRequest("test.requires", out=error_out), registry)
-    errored = _read_json(error_out / "run.json")
-    assert errored["status"] == "error"
-    assert errored["returncode"] == -1
-    assert errored["error"]["type"] == "ExecutorRunnerError"
-    assert "missing required input" in errored["error"]["message"]
+    assert not (error_out / "run.json").exists()
+    assert not (repo / ".astrid" / "threads.json").exists()
 
 
-def test_noop_gates_skip_run_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_thread_compatibility_env_is_ignored_by_generic_runtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     registry = ExecutorRegistry([_writer_executor("test.writer"), _exit_executor("test.noout", 0)])
-
-    cases = [
-        ExecutorRunRequest("test.writer", out=repo / "runs" / "dry", dry_run=True),
-        ExecutorRunRequest("test.writer", out=repo / "runs" / "none", thread="@none"),
-        ExecutorRunRequest("test.noout", out=""),
-    ]
-    for request in cases:
-        run_executor(request, registry)
 
     monkeypatch.setenv("ASTRID_THREADS_OFF", "1")
     run_executor(ExecutorRunRequest("test.writer", out=repo / "runs" / "off"), registry)
@@ -92,10 +62,10 @@ def test_noop_gates_skip_run_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     run_executor(ExecutorRunRequest("test.writer", out=repo / "runs" / "inherited"), registry)
     monkeypatch.delenv("ASTRID_THREAD_INHERITED")
 
-    assert not (repo / "runs" / "dry" / "run.json").exists()
-    assert not (repo / "runs" / "none" / "run.json").exists()
     assert not (repo / "runs" / "off" / "run.json").exists()
     assert not (repo / "runs" / "inherited" / "run.json").exists()
+    assert (repo / "runs" / "off" / "result.txt").read_text(encoding="utf-8") == ":"
+    assert (repo / "runs" / "inherited" / "result.txt").read_text(encoding="utf-8") == ":"
 
 
 def test_upload_youtube_is_zero_artifact_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -119,36 +89,35 @@ def test_upload_youtube_is_zero_artifact_noop(tmp_path: Path, monkeypatch: pytes
     assert not (repo / ".astrid").exists()
 
 
-def test_redaction_private_brief_and_external_service_trim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_internal_thread_record_redaction_private_brief_and_external_service_trim(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     out = repo / "runs" / "private-case"
     private = out / "private"
     private.mkdir(parents=True)
     brief = private / "brief.txt"
     brief.write_text("secret brief", encoding="utf-8")
-    registry = ExecutorRegistry([_writer_executor("test.writer")])
-
-    run_executor(
-        ExecutorRunRequest(
-            "test.writer",
-            out=out,
-            brief=brief,
-            inputs={
-                "OPENAI_API_KEY": "sk-test",
-                "external_service_calls": [
-                    {
-                        "model": "gpt-image-2",
-                        "model_version": "2026-01-01",
-                        "request_id": "req_123",
-                        "latency_ms": 99,
-                    }
-                ],
-            },
-        ),
-        registry,
+    record = build_run_record(
+        run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        kind="executor",
+        executor_id="test.writer",
+        out_path=out,
+        repo_root=repo,
+        brief=brief,
+        cli_args=["--input=OPENAI_API_KEY=sk-test"],
+        inputs={
+            "OPENAI_API_KEY": "sk-test",
+            "external_service_calls": [
+                {
+                    "model": "gpt-image-2",
+                    "model_version": "2026-01-01",
+                    "request_id": "req_123",
+                    "latency_ms": 99,
+                }
+            ],
+        },
     )
 
-    record = _read_json(out / "run.json")
     assert "sk-test" not in json.dumps(record)
     assert any(arg == "--input=OPENAI_API_KEY=***REDACTED***" for arg in record["cli_args_redacted"])
     assert record["brief_content_sha256"]
@@ -162,7 +131,7 @@ def test_redaction_private_brief_and_external_service_trim(tmp_path: Path, monke
     ]
 
 
-def test_orchestrator_command_runtime_writes_record_and_propagates_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_orchestrator_command_runtime_does_not_bind_thread_or_propagate_thread_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     out = repo / "runs" / "orch"
     registry = OrchestratorRegistry([_writer_orchestrator("test.orch")])
@@ -170,24 +139,26 @@ def test_orchestrator_command_runtime_writes_record_and_propagates_context(tmp_p
     result = run_orchestrator(OrchestratorRunRequest("test.orch", out=out), registry)
 
     assert result.returncode == 0
-    record = _read_json(out / "run.json")
-    assert record["kind"] == "orchestrator"
-    assert record["orchestrator_id"] == "test.orch"
-    assert record["executor_id"] is None
     env_text = (out / "orch-env.txt").read_text(encoding="utf-8")
-    assert env_text.startswith("1:")
-    assert record["thread_id"] in env_text
+    assert env_text == ":"
+    assert not (out / "run.json").exists()
+    assert not (repo / ".astrid" / "threads.json").exists()
 
 
-def test_typed_from_ref_parent_edge(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_internal_thread_record_preserves_parent_lineage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path, monkeypatch)
     out = repo / "runs" / "chosen"
     parent_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-    registry = ExecutorRegistry([_writer_executor("test.writer")])
 
-    run_executor(ExecutorRunRequest("test.writer", out=out, from_ref=f"{parent_run_id}:2"), registry)
-
-    record = _read_json(out / "run.json")
+    record = build_run_record(
+        run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        kind="executor",
+        executor_id="test.writer",
+        out_path=out,
+        repo_root=repo,
+        parent_run_ids=[{"kind": "chosen", "run_id": parent_run_id}],
+    )
     assert record["parent_run_ids"] == [{"kind": "chosen", "run_id": parent_run_id}]
 
 

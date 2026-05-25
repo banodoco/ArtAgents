@@ -14,25 +14,28 @@ import dataclasses
 import hashlib
 import json
 import shlex
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
+from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir
-from astrid.core.task.active_run import read_active_run
+from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision
+from astrid.core.task.cas import intern, link_into_produces
+from astrid.core.project.sidecar import write_json_sidecar, write_text_sidecar
 from astrid.core.task.env import (
     apply_task_run_env,
     is_author_test_mode,
     is_in_task_run,
     task_actor_env,
 )
+from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.events import (
-    append_event,
     canonical_event_json,
     make_cursor_rewind_event,
     make_for_each_expanded_event,
     make_item_attested_event,
+    make_item_completed_event,
     make_item_started_event,
     make_iteration_exhausted_event,
     make_iteration_failed_event,
@@ -47,28 +50,28 @@ from astrid.core.task.events import (
     make_step_dispatched_event,
     make_step_failed_event,
     read_events,
-    verify_chain,
 )
-from astrid.core.task.cas import intern, link_into_produces
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     AckRule,
-    CostEntry,
     ProducesEntry,
+    RepeatForEach,
+    RepeatUntil,
     Step,
+    TaskPlan,
+    TaskPlanError,
+    compute_plan_hash,
+    is_legacy_repeat_until_condition,
     is_attested_kind,
     is_code_kind,
     is_group_step,
     iter_steps_with_path,
-    RepeatForEach,
-    RepeatUntil,
-    TaskPlan,
-    compute_plan_hash,
     load_plan,
     parse_from_ref,
+    parse_repeat_until_expression,
+    resolve_produces_ref,
     step_dir_for_path,
 )
-
 
 ITERATE_FEEDBACK_PREFIX = "iterate_feedback="
 
@@ -107,6 +110,7 @@ class GateDecision:
     step_version: int = 1
     adapter: str | None = None
     pid: int | None = None
+    dispatch_event_hash: str | None = None
     # Only populated by _dispatch_attested path; code-step rewinds go through
     # the event log only. See FLAG-S1-005 (correctness-2 / callers-2): we MUST
     # NOT populate this from record_dispatch_complete — code-step rewinds are
@@ -118,9 +122,9 @@ class GateDecision:
 @dataclass(frozen=True)
 class AttestedArgs:
     agent: str | None
-    actor: str | None
-    evidence: tuple[str, ...]
+    evidence: tuple[str, ...] = ()
     item: str | None = None
+    human: str | None = None
 
 
 @dataclass
@@ -131,6 +135,13 @@ class _Frame:
     iteration: int | None = None
     item_id: str | None = None
     repeat_step_id: str | None = None
+
+
+@dataclass
+class _PendingProduces:
+    names: set[str]
+    step_version: int
+    dispatch_event_hash: str | None = None
 
 
 @dataclass
@@ -167,7 +178,8 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
     advance.
     """
     frames: list[_Frame] = [_Frame(plan=plan, path_prefix=(), child_index=0)]
-    pending: list[set[str] | None] = [None]
+    pending: list[_PendingProduces | None] = [None]
+    latest_dispatch: dict[str, tuple[int, str | None]] = {}
     for_each_progress: dict[str, dict[str, Any]] = {}
     pinned_failure: tuple[str, str] | None = None
     for event in events:
@@ -239,11 +251,19 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
         elif kind == "iteration_failed":
             if frames[-1].repeat_step_id is None:
                 continue
+            found = _repeat_host_for_top_frame(frames)
+            if found is not None:
+                _parent, host = found
+                if not _event_matches_step_version(event, host):
+                    continue
             frames.pop()
             pending.pop()
             pending[-1] = None
         elif kind == "for_each_expanded":
             host_path = _path_str_from_event(event)
+            host_step = _current_step_for_path(frames, host_path)
+            if host_step is not None and not _event_matches_step_version(event, host_step):
+                continue
             items = tuple(event.get("item_ids") or ())
             for_each_progress.setdefault(host_path, {"items": items, "completed": set()})
             for_each_progress[host_path]["items"] = items
@@ -252,6 +272,8 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
             if top.child_index >= len(top.plan.steps):
                 continue
             host_step = top.plan.steps[top.child_index]
+            if not _event_matches_step_version(event, host_step):
+                continue
             item_id = event.get("item_id")
             if not isinstance(item_id, str):
                 continue
@@ -261,6 +283,9 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
             host_path = _path_str_from_event(event)
             item_id = event.get("item_id")
             if not isinstance(item_id, str):
+                continue
+            item_step = _current_item_step(frames, item_id)
+            if item_step is not None and not _event_matches_step_version(event, item_step):
                 continue
             entry = for_each_progress.setdefault(host_path, {"items": (), "completed": set()})
             entry["completed"].add(item_id)
@@ -299,12 +324,26 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                 and frames[-1].repeat_step_id is not None
                 and frames[-1].item_id is None
                 and frames[-1].child_index >= len(frames[-1].plan.steps)
+                and not _top_frame_needs_repeat_until_evaluation(frames)
             ):
                 frames.pop()
                 pending.pop()
                 frames[-1].child_index += 1
                 pending[-1] = None
             top = frames[-1]
+            event_path = _path_str_from_event(event)
+            if (
+                top.repeat_step_id is not None
+                and top.item_id is None
+                and top.child_index >= len(top.plan.steps)
+                and kind == "step_completed"
+                and event_path == STEP_PATH_SEP.join(top.path_prefix + (top.repeat_step_id,))
+            ):
+                frames.pop()
+                pending.pop()
+                frames[-1].child_index += 1
+                pending[-1] = None
+                continue
             if top.child_index >= len(top.plan.steps):
                 continue
             step = top.plan.steps[top.child_index]
@@ -313,9 +352,17 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
             # the host. Verify the event's step path matches the current
             # child before consuming it as an advance signal — otherwise the
             # autoclose silently skips past the host's sibling.
-            event_path = _path_str_from_event(event)
             expected_path = STEP_PATH_SEP.join(list(top.path_prefix) + [step.id])
             if event_path and event_path != expected_path:
+                continue
+            if not _event_matches_step_version(event, step):
+                continue
+            dispatch_event_hash = _current_dispatch_hash(
+                latest_dispatch, expected_path, step.version
+            )
+            if kind == "step_completed" and not _event_matches_dispatch_hash(
+                event, dispatch_event_hash
+            ):
                 continue
             produces = getattr(step, "produces", ())
             # Skipped steps bypass produces-check gating entirely — the
@@ -325,18 +372,32 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                 top.child_index += 1
                 pending[-1] = None
             else:
-                pending[-1] = {entry.name for entry in produces}
+                pending[-1] = _PendingProduces(
+                    names={entry.name for entry in produces},
+                    step_version=step.version,
+                    dispatch_event_hash=dispatch_event_hash,
+                )
         elif kind == "produces_check_passed":
             current = pending[-1]
             if current is not None:
+                if not _event_matches_pending(event, current):
+                    continue
                 name = event.get("produces_name")
-                current.discard(name)
-                if not current:
+                current.names.discard(name)
+                if not current.names:
                     frames[-1].child_index += 1
                     pending[-1] = None
         elif kind in ("produces_check_failed", "cursor_rewind"):
-            pending[-1] = None
+            current = pending[-1]
+            if current is None or _event_matches_pending(event, current):
+                pending[-1] = None
         elif kind == "step_dispatched":
+            event_path = _path_str_from_event(event)
+            if event_path:
+                latest_dispatch[event_path] = (
+                    _event_step_version(event),
+                    event.get("hash") if isinstance(event.get("hash"), str) else None,
+                )
             pending[-1] = None
         # run_started / iteration_exhausted: no-op for cursor
     _finalize_cursor(frames, pending, for_each_progress)
@@ -367,9 +428,43 @@ def _make_item_frame(host_step: Any, parent_prefix: tuple[str, ...], item_id: st
     )
 
 
+def _repeat_host_for_top_frame(frames: list[_Frame]) -> tuple[_Frame, Step] | None:
+    if len(frames) < 2:
+        return None
+    top = frames[-1]
+    if top.repeat_step_id is None or top.item_id is not None:
+        return None
+    parent = frames[-2]
+    if parent.child_index >= len(parent.plan.steps):
+        return None
+    host = parent.plan.steps[parent.child_index]
+    if host.id != top.repeat_step_id:
+        return None
+    return parent, host
+
+
+def _top_frame_needs_repeat_until_evaluation(frames: list[_Frame]) -> bool:
+    found = _repeat_host_for_top_frame(frames)
+    if found is None:
+        return False
+    _parent, host = found
+    repeat = getattr(host, "repeat", None)
+    return (
+        isinstance(repeat, RepeatUntil)
+        and not is_legacy_repeat_until_condition(repeat.condition)
+    )
+
+
+def _current_repeat_context(frames: Sequence[_Frame]) -> tuple[int | None, str | None]:
+    for frame in reversed(frames):
+        if frame.repeat_step_id is not None:
+            return frame.iteration, frame.item_id
+    return None, None
+
+
 def _finalize_cursor(
     frames: list[_Frame],
-    pending: list[set[str] | None],
+    pending: list[_PendingProduces | None],
     for_each_progress: dict[str, dict[str, Any]],
 ) -> None:
     """Pop exhausted iteration/item frames after event replay.
@@ -397,6 +492,8 @@ def _finalize_cursor(
                 frames[-1].child_index += 1
                 pending[-1] = None
         else:
+            if _top_frame_needs_repeat_until_evaluation(frames):
+                break
             frames.pop()
             pending.pop()
             frames[-1].child_index += 1
@@ -411,6 +508,71 @@ def _path_str_from_event(event: dict[str, Any]) -> str:
     return pid if isinstance(pid, str) else ""
 
 
+def _event_step_version(event: dict[str, Any]) -> int:
+    raw = event.get("step_version", 1)
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+        return raw
+    return 1
+
+
+def _event_matches_step_version(event: dict[str, Any], step: Step) -> bool:
+    return _event_step_version(event) == step.version
+
+
+def _current_dispatch_hash(
+    latest_dispatch: dict[str, tuple[int, str | None]],
+    path_str: str,
+    step_version: int,
+) -> str | None:
+    version_and_hash = latest_dispatch.get(path_str)
+    if version_and_hash is None:
+        return None
+    version, dispatch_hash = version_and_hash
+    if version != step_version:
+        return None
+    return dispatch_hash
+
+
+def _event_matches_dispatch_hash(
+    event: dict[str, Any],
+    current_dispatch_hash: str | None,
+) -> bool:
+    event_hash = event.get("dispatch_event_hash")
+    if event_hash is None:
+        return True
+    return isinstance(event_hash, str) and event_hash == current_dispatch_hash
+
+
+def _event_matches_pending(event: dict[str, Any], pending: _PendingProduces) -> bool:
+    if _event_step_version(event) != pending.step_version:
+        return False
+    return _event_matches_dispatch_hash(event, pending.dispatch_event_hash)
+
+
+def _current_item_step(frames: Sequence[_Frame], item_id: str) -> Step | None:
+    top = frames[-1]
+    if top.item_id == item_id and top.plan.steps:
+        return top.plan.steps[0]
+    if top.child_index < len(top.plan.steps):
+        candidate = top.plan.steps[top.child_index]
+        if getattr(candidate, "repeat", None) is not None:
+            return candidate
+    return None
+
+
+def _current_step_for_path(frames: Sequence[_Frame], path_str: str) -> Step | None:
+    path_tuple = tuple(path_str.split(STEP_PATH_SEP)) if path_str else ()
+    if not path_tuple:
+        return None
+    for frame in reversed(frames):
+        candidate_path = frame.path_prefix + (
+            frame.plan.steps[frame.child_index].id,
+        ) if frame.child_index < len(frame.plan.steps) else ()
+        if candidate_path == path_tuple:
+            return frame.plan.steps[frame.child_index]
+    return None
+
+
 def _auto_traverse_to_leaf(
     *,
     slug: str,
@@ -422,8 +584,8 @@ def _auto_traverse_to_leaf(
     append_fn: Callable[[dict[str, Any]], Any],
     raise_on_exhausted: bool,
 ) -> tuple[Any, tuple[str, ...]] | None:
-    """Walk the cursor through nested entries and repeat-host expansions until we
-    land on a CodeStep / AttestedStep leaf. Mutates ``cursor.frames`` and pushes
+    """Walk the cursor through group entries and repeat-host expansions until we
+    land on a dispatchable leaf. Mutates ``cursor.frames`` and pushes
     auto-traversal events through ``append_fn``. ``events_view`` must be the list
     that ``append_fn`` extends (or that mirrors the on-disk log) so the helpers
     that scan prior events (``_count_iteration_failed``, the ``for_each_expanded``
@@ -441,6 +603,15 @@ def _auto_traverse_to_leaf(
         if cursor.top_exhausted:
             top = cursor.frames[-1]
             if top.repeat_step_id is not None:
+                if _top_frame_needs_repeat_until_evaluation(cursor.frames):
+                    _evaluate_exhausted_repeat_until_frame(
+                        slug=slug,
+                        cursor=cursor,
+                        project_root=project_root,
+                        run_id=run_id,
+                        append_fn=append_fn,
+                    )
+                    continue
                 # Defensive: _finalize_cursor should have popped these already.
                 cursor.frames.pop()
                 cursor.frames[-1].child_index += 1
@@ -556,9 +727,7 @@ def peek_current_step(
     if leaf is None:
         return PeekResult(step=None, path_tuple=(), iteration=None, item_id=None, exhausted=True)
     step, path_tuple = leaf
-    top = cursor.frames[-1]
-    iteration = top.iteration if top.repeat_step_id is not None else None
-    item_id = top.item_id if top.repeat_step_id is not None else None
+    iteration, item_id = _current_repeat_context(cursor.frames)
     return PeekResult(
         step=step,
         path_tuple=path_tuple,
@@ -576,7 +745,7 @@ def gate_command(
     root: str | Path | None = None,
     reentry: bool = False,
 ) -> GateDecision:
-    active_run = read_active_run(slug, root=root)
+    active_run = read_current_run_state(slug, root=root)
     if active_run is None:
         if not is_in_task_run(slug):
             return GateDecision(active=False)
@@ -584,10 +753,6 @@ def gate_command(
 
     project_root = project_dir(slug, root=root)
     plan_path = project_root / "plan.json"
-    plan_hash = compute_plan_hash(plan_path)
-    if plan_hash != active_run["plan_hash"]:
-        _reject(slug, "plan.json hash does not match active_run.json pin", abort=True)
-
     run_id = active_run["run_id"]
     events_path = project_root / "runs" / run_id / "events.jsonl"
     # Sprint 1 (T9 / DEC-007): the tail-only CAS in append_event_locked is
@@ -596,21 +761,31 @@ def gate_command(
     # callable for that purpose). Removing the per-verb O(n) re-walk here
     # is an acceptable trade-off documented in the brief.
 
-    plan = load_plan(plan_path)
     events = read_events(events_path)
+    from astrid.core.task.plan_verbs import (
+        apply_mutations,
+        initial_plan_hash_from_events,
+    )
+    plan_hash = initial_plan_hash_from_events(events) or compute_plan_hash(plan_path)
+    if plan_hash != active_run["plan_hash"]:
+        _reject(slug, "plan.json hash does not match active_run.json pin", abort=True)
+
+    plan = apply_mutations(load_plan(plan_path), events)
     cursor = derive_cursor(plan, events, slug=slug)
     if cursor.pinned_failure is not None:
         reason, _host_path = cursor.pinned_failure
         raise TaskRunGateError(reason=reason, recovery=f"astrid abort --project {slug}")
     run_started_actor = _find_run_started_actor(events)
 
-    # Auto-traverse: nested_entered/exited for nested plans; iteration_started/
+    # Auto-traverse: nested_entered/exited for group steps; iteration_started/
     # for_each_expanded/item_started for repeat hosts. We loop until we land on a
-    # dispatchable leaf (CodeStep or AttestedStep) inside the appropriate frame.
+    # dispatchable leaf inside the appropriate frame.
+    with writer_context_for_project(slug, root=root) as writer:
+        pass
     events_view = list(events)
 
     def _gate_append(ev: dict[str, Any]) -> None:
-        append_event(events_path, ev)
+        writer.append(ev)
         events_view.append(ev)
 
     leaf = _auto_traverse_to_leaf(
@@ -627,11 +802,9 @@ def gate_command(
         # Defensive: raise_on_exhausted=True should always raise inside the helper.
         _reject(slug, "plan is exhausted", abort=True)
     current_step, current_path = leaf
-    top = cursor.frames[-1]
     path_str = STEP_PATH_SEP.join(current_path)
 
-    iteration = top.iteration if top.repeat_step_id is not None else None
-    item_id = top.item_id if top.repeat_step_id is not None else None
+    iteration, item_id = _current_repeat_context(cursor.frames)
 
     if is_code_kind(current_step):
         return _dispatch_code(
@@ -646,6 +819,10 @@ def gate_command(
             project_root=project_root,
             iteration=iteration,
             item_id=item_id,
+            append_fn=writer.append,
+            session=writer.session,
+            run_dir=writer.run_dir,
+            writer_epoch_at_dispatch=writer.expected_writer_epoch,
         )
     if is_attested_kind(current_step):
         return _dispatch_attested(
@@ -660,6 +837,10 @@ def gate_command(
             project_root=project_root,
             iteration=iteration,
             item_id=item_id,
+            append_fn=writer.append,
+            session=writer.session,
+            run_dir=writer.run_dir,
+            writer_epoch_at_dispatch=writer.expected_writer_epoch,
         )
     raise TaskRunGateError(
         reason=f"unexpected step kind: {type(current_step).__name__}",
@@ -698,9 +879,116 @@ def _make_exhaust_override_step(slug: str, host_path: str) -> Step:
         adapter="manual",
         command=f"ack --project {slug} --step {override_path}",
         instructions="repeat.until max_iterations exhausted; human override required to advance",
-        ack=AckRule(kind="actor"),
+        ack=AckRule(kind="human"),
         requires_ack=True,
         assignee="any-human",
+    )
+
+
+def _json_field(value: Any, field_path: tuple[str, ...], artifact_path: Path) -> Any:
+    current = value
+    for field in field_path:
+        if not isinstance(current, dict) or field not in current:
+            raise TaskRunGateError(
+                reason=f"repeat.until cannot read JSON field {field!r} in {artifact_path}",
+                recovery="fix the produced JSON and rerun the current step",
+            )
+        current = current[field]
+    return current
+
+
+def _evaluate_repeat_until_expression(
+    *,
+    plan: TaskPlan,
+    repeat: RepeatUntil,
+    host_path: tuple[str, ...],
+    iteration: int,
+    slug: str,
+    project_root: Path,
+    run_id: str,
+) -> tuple[bool, str]:
+    try:
+        expr = parse_repeat_until_expression(repeat.condition)
+        resolved = resolve_produces_ref(plan, expr.ref, base_path=host_path)
+        target_iteration = (
+            iteration
+            if resolved.step_path[: len(host_path)] == host_path
+            else None
+        )
+        step_dir = step_dir_for_path(
+            slug,
+            run_id,
+            resolved.step_path,
+            step_version=resolved.step.version,
+            iteration=target_iteration,
+            root=project_root.parent,
+        )
+        artifact_path = step_dir / "produces" / resolved.produces.path
+        payload = json.loads(artifact_path.read_text(encoding="utf-8"))
+        value = _json_field(payload, resolved.json_path, artifact_path)
+    except (TaskPlanError, TaskRunGateError, FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+        return False, f"repeat.until unresolved: {exc}"
+
+    if expr.op == "==":
+        passed = value == expr.literal
+    elif expr.op == "!=":
+        passed = value != expr.literal
+    else:
+        passed = value in expr.literal
+    if passed:
+        return True, "repeat.until satisfied"
+    return False, f"repeat.until not satisfied: {value!r} {expr.op} {expr.literal!r}"
+
+
+def _evaluate_exhausted_repeat_until_frame(
+    *,
+    slug: str,
+    cursor: CursorPath,
+    project_root: Path,
+    run_id: str,
+    append_fn: Callable[[dict[str, Any]], Any],
+) -> None:
+    found = _repeat_host_for_top_frame(cursor.frames)
+    if found is None:
+        cursor.frames.pop()
+        cursor.frames[-1].child_index += 1
+        return
+    parent, host = found
+    repeat = getattr(host, "repeat", None)
+    top = cursor.frames[-1]
+    if not isinstance(repeat, RepeatUntil) or top.iteration is None:
+        cursor.frames.pop()
+        parent.child_index += 1
+        return
+    host_path = parent.path_prefix + (host.id,)
+    passed, reason = _evaluate_repeat_until_expression(
+        plan=cursor.frames[0].plan,
+        repeat=repeat,
+        host_path=host_path,
+        iteration=top.iteration,
+        slug=slug,
+        project_root=project_root,
+        run_id=run_id,
+    )
+    cursor.frames.pop()
+    if passed:
+        append_fn(
+            make_step_completed_event(
+                STEP_PATH_SEP.join(host_path),
+                0,
+                adapter=host.adapter,
+                step_version=host.version,
+            )
+        )
+        parent.child_index += 1
+        return
+    append_fn(
+        make_iteration_failed_event(
+            host_path,
+            top.iteration,
+            reason=reason,
+            step_version=host.version,
+        )
     )
 
 
@@ -757,23 +1045,34 @@ def _resolve_for_each_items(
     *,
     slug: str,
     repeat: RepeatForEach,
+    parent_prefix: tuple[str, ...] = (),
     project_root: Path,
     run_id: str,
+    events: Sequence[dict[str, Any]],
 ) -> tuple[str, ...]:
     if repeat.items_source == "static":
         items = repeat.items
     else:
         target_id, produces_name = parse_from_ref(repeat.from_ref or "")
-        prior_step_dir = step_dir_for_path(slug, run_id, (target_id,), step_version=1, root=project_root.parent)
-        # Find the prior step's declared produces path. We need the plan for that.
-        # We re-load plan.json which is allowed at gate_command (not in derive_cursor).
+        # Find the prior step's declared produces path in the replayed projection;
+        # a superseded producer must read from the cursor's current version, not v1.
         plan = load_plan(project_root / "plan.json")
-        target_step = next((s for s in plan.steps if s.id == target_id), None)
+        from astrid.core.task.plan_verbs import apply_mutations
+        effective = apply_mutations(plan, events)
+        target_path = parent_prefix + (target_id,)
+        target_step = next((s for path, s in iter_steps_with_path(effective) if path == target_path), None)
         if target_step is None:
             raise TaskRunGateError(
                 reason=f"for_each.from references unknown sibling step {target_id!r}",
                 recovery=f"astrid abort --project {slug}",
             )
+        prior_step_dir = step_dir_for_path(
+            slug,
+            run_id,
+            target_path,
+            step_version=target_step.version,
+            root=project_root.parent,
+        )
         produces_entry = next((p for p in target_step.produces if p.name == produces_name), None)
         if produces_entry is None:
             raise TaskRunGateError(
@@ -823,9 +1122,16 @@ def _enter_repeat_for_each(
         None,
     )
     if existing is None:
-        items = _resolve_for_each_items(slug=slug, repeat=repeat, project_root=project_root, run_id=run_id)
+        items = _resolve_for_each_items(
+            slug=slug,
+            repeat=repeat,
+            parent_prefix=parent_prefix,
+            project_root=project_root,
+            run_id=run_id,
+            events=events,
+        )
         path_tuple = parent_prefix + (host.id,)
-        append_fn(make_for_each_expanded_event(path_tuple, items))
+        append_fn(make_for_each_expanded_event(path_tuple, items, step_version=host.version))
         cursor.for_each_progress[path_str] = {"items": items, "completed": set()}
     else:
         items = tuple(existing.get("item_ids") or ())
@@ -848,7 +1154,7 @@ def _enter_repeat_for_each(
     if target_item in completed:
         _reject(slug, f"for_each --item {target_item!r} already completed", abort=False)
     path_tuple = parent_prefix + (host.id,)
-    append_fn(make_item_started_event(path_tuple, target_item))
+    append_fn(make_item_started_event(path_tuple, target_item, step_version=host.version))
     cursor.frames.append(_make_item_frame(host, parent_prefix, target_item))
     return target_item
 
@@ -879,6 +1185,7 @@ def _make_run_ctx(
     project_root: Path,
     iteration: int | None = None,
     item_id: str | None = None,
+    rendered: Any = None,
 ):
     """Return a RunContext for adapter dispatch. Return type is adapter.RunContext (lazy import)."""
     from astrid.core.adapter import RunContext
@@ -891,6 +1198,11 @@ def _make_run_ctx(
         step_version=step_version,
         iteration=iteration,
         item_id=item_id,
+        canonical_command=getattr(rendered, "canonical_command", None),
+        canonical_argv=getattr(rendered, "canonical_argv", ()),
+        display_command=getattr(rendered, "display_command", None),
+        task_env=getattr(rendered, "task_env", None),
+        produces_root=getattr(rendered, "produces_root", None),
     )
 
 
@@ -907,26 +1219,43 @@ def _dispatch_code(
     project_root: Path,
     iteration: int | None = None,
     item_id: str | None = None,
+    append_fn: Callable[[dict[str, Any]], Any],
+    session: Any = None,
+    run_dir: Path | None = None,
+    writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
-    if command != step.command:
+    try:
+        rendered = render_task_command(
+            step,
+            slug=slug,
+            run_id=run_id,
+            project_root=project_root,
+            plan_step_path=path_tuple,
+            iteration=iteration,
+            item_id=item_id,
+        )
+    except ValueError as exc:
+        _reject(slug, str(exc), abort=False)
+    incoming_canonical = _normalize_command_string(strip_task_env_prefix(command))
+    if incoming_canonical != rendered.canonical_command:
         _reject(slug, "incoming command does not match plan[cursor]", abort=False)
 
     adapter = _resolve_adapter(step)
     step_version = step.version
     run_ctx = _make_run_ctx(
         slug, run_id, path_tuple, step_version, project_root,
-        iteration=iteration, item_id=item_id,
+        iteration=iteration, item_id=item_id, rendered=rendered,
     )
 
     if reentry:
         # FLAG-P3-005: scan back to the latest event for THIS plan_step_id rather than events[-1];
         # produces_check_failed must permit redispatch (cursor hasn't advanced).
         events = read_events(events_path)
-        latest = _latest_event_for_step(events, path_str)
+        latest = _latest_event_for_step(events, path_str, step_version=step_version)
         if (
             isinstance(latest, dict)
             and latest.get("kind") == "step_dispatched"
-            and latest.get("command") == command
+            and latest.get("command") == rendered.canonical_command
         ):
             apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
             return _code_decision(
@@ -942,10 +1271,49 @@ def _dispatch_code(
                 item_id=item_id,
                 adapter=step.adapter,
                 step_version=step_version,
+                dispatch_event_hash=latest.get("hash") if isinstance(latest.get("hash"), str) else None,
+                session=session,
+                run_dir=run_dir,
+                writer_epoch_at_dispatch=writer_epoch_at_dispatch,
+            )
+        if latest is None:
+            apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
+            dispatched = make_step_dispatched_event(
+                path_str,
+                rendered.canonical_command,
+                adapter=step.adapter,
+                step_version=step_version,
+                pid=None,
+            )
+            appended = append_fn(dispatched)
+            dispatch_event_hash = (
+                appended.get("hash")
+                if isinstance(appended, dict) and isinstance(appended.get("hash"), str)
+                else None
+            )
+            return _code_decision(
+                run_id=run_id,
+                slug=slug,
+                path_str=path_str,
+                path_tuple=path_tuple,
+                events_path=events_path,
+                produces=step.produces,
+                project_root=project_root,
+                reentry=True,
+                iteration=iteration,
+                item_id=item_id,
+                adapter=step.adapter,
+                step_version=step_version,
+                dispatch_event_hash=dispatch_event_hash,
+                session=session,
+                run_dir=run_dir,
+                writer_epoch_at_dispatch=writer_epoch_at_dispatch,
             )
         if isinstance(latest, dict) and latest.get("kind") == "produces_check_failed":
             apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
-            dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
+            dispatch_result, dispatch_event_hash = _adapter_dispatch(
+                adapter, step, run_ctx, path_str, rendered.canonical_command, append_fn
+            )
             return _code_decision(
                 run_id=run_id,
                 slug=slug,
@@ -960,11 +1328,17 @@ def _dispatch_code(
                 adapter=step.adapter,
                 step_version=step_version,
                 pid=dispatch_result.pid if dispatch_result else None,
+                dispatch_event_hash=dispatch_event_hash,
+                session=session,
+                run_dir=run_dir,
+                writer_epoch_at_dispatch=writer_epoch_at_dispatch,
             )
         _reject(slug, "incoming command does not match plan[cursor]", abort=False)
 
     apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
-    dispatch_result = _adapter_dispatch(adapter, step, run_ctx, path_str, command, events_path)
+    dispatch_result, dispatch_event_hash = _adapter_dispatch(
+        adapter, step, run_ctx, path_str, rendered.canonical_command, append_fn
+    )
     return _code_decision(
         run_id=run_id,
         slug=slug,
@@ -979,6 +1353,10 @@ def _dispatch_code(
         adapter=step.adapter,
         step_version=step_version,
         pid=dispatch_result.pid if dispatch_result else None,
+        dispatch_event_hash=dispatch_event_hash,
+        session=session,
+        run_dir=run_dir,
+        writer_epoch_at_dispatch=writer_epoch_at_dispatch,
     )
 
 
@@ -988,7 +1366,7 @@ def _adapter_dispatch(
     run_ctx,
     path_str: str,
     command: str,
-    events_path: Path,
+    append_fn: Callable[[dict[str, Any]], Any],
 ):
     """Call adapter.dispatch() and emit step_dispatched. Returns DispatchResult or None on reject."""
     result = adapter.dispatch(step, run_ctx)
@@ -1001,8 +1379,11 @@ def _adapter_dispatch(
         step_version=run_ctx.step_version,
         pid=result.pid,
     )
-    append_event(events_path, dispatched)
-    return result
+    appended = append_fn(dispatched)
+    dispatch_event_hash = (
+        appended.get("hash") if isinstance(appended, dict) and isinstance(appended.get("hash"), str) else None
+    )
+    return result, dispatch_event_hash
 
 
 def _code_decision(
@@ -1020,6 +1401,10 @@ def _code_decision(
     adapter: str | None = None,
     step_version: int = 1,
     pid: int | None = None,
+    dispatch_event_hash: str | None = None,
+    session: Any = None,
+    run_dir: Path | None = None,
+    writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
     return GateDecision(
         active=True,
@@ -1037,13 +1422,25 @@ def _code_decision(
         adapter=adapter,
         step_version=step_version,
         pid=pid,
+        dispatch_event_hash=dispatch_event_hash,
+        run_dir=run_dir,
+        writer_epoch_at_dispatch=writer_epoch_at_dispatch,
+        session_id=getattr(session, "id", None),
+        session=session,
     )
 
 
-def _latest_event_for_step(events: Sequence[dict[str, Any]], path_str: str) -> dict[str, Any] | None:
+def _latest_event_for_step(
+    events: Sequence[dict[str, Any]],
+    path_str: str,
+    *,
+    step_version: int | None = None,
+) -> dict[str, Any] | None:
     path_list = path_str.split(STEP_PATH_SEP)
     for ev in reversed(events):
         if not isinstance(ev, dict):
+            continue
+        if step_version is not None and _event_step_version(ev) != step_version:
             continue
         if ev.get("plan_step_id") == path_str:
             return ev
@@ -1065,6 +1462,10 @@ def _dispatch_attested(
     project_root: Path,
     iteration: int | None = None,
     item_id: str | None = None,
+    append_fn: Callable[[dict[str, Any]], Any],
+    session: Any = None,
+    run_dir: Path | None = None,
+    writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
     matched, args = match_attested_command(command, step.command)
     if not matched:
@@ -1084,12 +1485,19 @@ def _dispatch_attested(
             attestor_kind=attestor_kind,
             attestor_id=attestor_id,
             evidence=args.evidence,
+            step_version=step.version,
         )
     else:
-        event = make_step_attested_event(path_str, attestor_kind, attestor_id, args.evidence)
+        event = make_step_attested_event(
+            path_str,
+            attestor_kind,
+            attestor_id,
+            args.evidence,
+            step_version=step.version,
+        )
     if is_author_test_mode():
         event["source"] = "author_test"
-    append_event(events_path, event)
+    append_fn(event)
     # FLAG-S1-001 / all_locations-3: after appending item_attested, route
     # through the centralized autoclose helper. Any future site that emits
     # item_attested MUST also call this helper, or for_each host closure
@@ -1101,6 +1509,7 @@ def _dispatch_attested(
             project_root=project_root,
             slug=slug,
             run_id=run_id,
+            append_fn=append_fn,
         )
     decision = GateDecision(
         active=True,
@@ -1117,6 +1526,10 @@ def _dispatch_attested(
         item_id=item_id,
         adapter=step.adapter,
         step_version=step.version,
+        run_dir=run_dir,
+        writer_epoch_at_dispatch=writer_epoch_at_dispatch,
+        session_id=getattr(session, "id", None),
+        session=session,
     )
     if step.produces:
         # FLAG-S1-005: detect a fresh produces_check_failed pair attributable
@@ -1140,12 +1553,12 @@ def _dispatch_attested(
         feedback = _extract_iterate_feedback(args.evidence)
         if feedback is not None:
             write_iteration_feedback(decision, feedback)
-            append_event(
-                events_path,
+            append_fn(
                 make_iteration_failed_event(
                     path_tuple,
                     iteration,
                     reason="iterate_feedback",
+                    step_version=step.version,
                 ),
             )
     return decision
@@ -1158,6 +1571,7 @@ def _maybe_autoclose_for_each_host(
     project_root: Path,
     slug: str,
     run_id: str,
+    append_fn: Callable[[dict[str, Any]], Any],
 ) -> None:
     """Append a synthetic ``step_attested`` for a for_each host once all items
     are attested. SD-001: attestor is always ``system`` / ``gate.autoclose``
@@ -1172,6 +1586,9 @@ def _maybe_autoclose_for_each_host(
     plan_path = project_root / "plan.json"
     try:
         plan = load_plan(plan_path)
+        from astrid.core.task.plan_verbs import apply_mutations
+        events = read_events(events_path) if events_path.exists() else []
+        plan = apply_mutations(plan, events)
     except Exception:
         return
     host_step = None
@@ -1185,9 +1602,8 @@ def _maybe_autoclose_for_each_host(
         raise AssertionError(
             "for_each autoclose: optional body bodies not yet supported (FLAG-S1-004 / SD-004)"
         )
-    events = read_events(events_path) if events_path.exists() else []
     path_list = list(path_tuple)
-    item_attested_count = 0
+    item_attested_ids: set[str] = set()
     has_host_step_attested = False
     for ev in events:
         if not isinstance(ev, dict):
@@ -1198,7 +1614,9 @@ def _maybe_autoclose_for_each_host(
                 "for_each autoclose: optional body bodies not yet supported (FLAG-S1-004 / SD-004)"
             )
         if kind == "item_attested" and ev.get("plan_step_path") == path_list:
-            item_attested_count += 1
+            item_id = ev.get("item_id")
+            if isinstance(item_id, str):
+                item_attested_ids.add(item_id)
         if kind == "step_attested":
             ev_id = ev.get("plan_step_id")
             if ev_id == STEP_PATH_SEP.join(path_tuple):
@@ -1207,7 +1625,7 @@ def _maybe_autoclose_for_each_host(
         return
     # Resolve expected total: prefer for_each_expanded (covers items_source='from'),
     # fall back to static items declared on the host.
-    expected_total: int | None = None
+    expected_items: set[str] | None = None
     for ev in events:
         if (
             isinstance(ev, dict)
@@ -1216,23 +1634,95 @@ def _maybe_autoclose_for_each_host(
         ):
             raw = ev.get("item_ids") or []
             if isinstance(raw, list):
-                expected_total = len(raw)
+                expected_items = {item for item in raw if isinstance(item, str)}
                 break
-    if expected_total is None:
+    if expected_items is None:
         repeat = host_step.repeat
         if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
-            expected_total = len(repeat.items)
-    if expected_total is None or item_attested_count != expected_total:
+            expected_items = set(repeat.items)
+    if expected_items is None or item_attested_ids != expected_items:
         return
     auto_event = make_step_attested_event(
         STEP_PATH_SEP.join(path_tuple),
         "system",
         "gate.autoclose",
         ("auto-close: all items attested",),
+        step_version=host_step.version,
     )
     if is_author_test_mode():
         auto_event["source"] = "author_test"
-    append_event(events_path, auto_event)
+    append_fn(auto_event)
+
+
+def _maybe_autocomplete_for_each_host(
+    *,
+    decision: GateDecision,
+    returncode: int,
+    cost: dict[str, Any] | None,
+) -> None:
+    """Append a host ``step_completed`` when all code-repeat items completed."""
+    if (
+        not decision.active
+        or decision.events_path is None
+        or decision.project_root is None
+        or decision.run_id is None
+        or decision.item_id is None
+    ):
+        return
+    plan_path = decision.project_root / "plan.json"
+    try:
+        plan = load_plan(plan_path)
+        from astrid.core.task.plan_verbs import apply_mutations
+
+        events = read_events(decision.events_path) if decision.events_path.exists() else []
+        plan = apply_mutations(plan, events)
+    except Exception:
+        return
+    host_step = None
+    for tup, step in iter_steps_with_path(plan):
+        if tup == decision.plan_step_path:
+            host_step = step
+            break
+    if host_step is None or not isinstance(getattr(host_step, "repeat", None), RepeatForEach):
+        return
+
+    path_list = list(decision.plan_step_path)
+    completed_items: set[str] = set()
+    expected_items: set[str] | None = None
+    has_host_completed = False
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("kind") == "step_completed" and ev.get("plan_step_path") == path_list:
+            if _event_matches_step_version(ev, host_step):
+                has_host_completed = True
+        if ev.get("kind") == "item_completed" and ev.get("plan_step_path") == path_list:
+            if _event_matches_step_version(ev, host_step):
+                item_id = ev.get("item_id")
+                if isinstance(item_id, str):
+                    completed_items.add(item_id)
+        if ev.get("kind") == "for_each_expanded" and ev.get("plan_step_path") == path_list:
+            raw = ev.get("item_ids") or []
+            if isinstance(raw, list):
+                expected_items = {item for item in raw if isinstance(item, str)}
+    if has_host_completed:
+        return
+    if expected_items is None:
+        repeat = host_step.repeat
+        if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
+            expected_items = set(repeat.items)
+    if expected_items is None or completed_items != expected_items:
+        return
+    _append_via_decision(
+        decision,
+        make_step_completed_event(
+            STEP_PATH_SEP.join(decision.plan_step_path),
+            returncode,
+            cost=cost,
+            adapter=decision.adapter,
+            step_version=host_step.version,
+        ),
+    )
 
 
 def _extract_iterate_feedback(evidence: tuple[str, ...]) -> str | None:
@@ -1255,7 +1745,7 @@ def write_iteration_feedback(decision: GateDecision, feedback: str) -> None:
         decision.slug,
         decision.run_id,
         decision.plan_step_path,
-        step_version=1,
+        step_version=decision.step_version,
         iteration=decision.iteration,
         root=decision.project_root.parent,
     )
@@ -1267,7 +1757,7 @@ def write_iteration_feedback(decision: GateDecision, feedback: str) -> None:
             decision.slug,
             decision.run_id,
             decision.plan_step_path,
-            step_version=1,
+            step_version=decision.step_version,
             iteration=decision.iteration - 1,
             root=decision.project_root.parent,
         )
@@ -1280,22 +1770,18 @@ def write_iteration_feedback(decision: GateDecision, feedback: str) -> None:
             except (json.JSONDecodeError, OSError):
                 cumulative = []
     cumulative.append(feedback)
-    feedback_path.write_text(
-        json.dumps(cumulative, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    write_json_sidecar(feedback_path, cumulative)
 
 
 def match_attested_command(incoming: str, expected_prefix: str) -> tuple[bool, AttestedArgs]:
-    """Strip ``--agent``/``--actor``/``--evidence``/``--item`` (repeatable evidence)
-    tokens from ``incoming`` and compare the canonical remainder to ``expected_prefix``.
+    """Strip identity/evidence/item tokens and compare the canonical remainder.
     """
     try:
         tokens = shlex.split(incoming)
     except ValueError:
-        return False, AttestedArgs(agent=None, actor=None, evidence=())
+        return False, AttestedArgs(agent=None)
     agent: str | None = None
-    actor: str | None = None
+    human: str | None = None
     item: str | None = None
     evidence: list[str] = []
     remaining: list[str] = []
@@ -1306,8 +1792,8 @@ def match_attested_command(incoming: str, expected_prefix: str) -> tuple[bool, A
             agent = tokens[i + 1]
             i += 2
             continue
-        if token == "--actor" and i + 1 < len(tokens):
-            actor = tokens[i + 1]
+        if token == "--human" and i + 1 < len(tokens):
+            human = tokens[i + 1]
             i += 2
             continue
         if token == "--item" and i + 1 < len(tokens):
@@ -1320,9 +1806,18 @@ def match_attested_command(incoming: str, expected_prefix: str) -> tuple[bool, A
             continue
         remaining.append(token)
         i += 1
+    try:
+        expected_tokens = shlex.split(expected_prefix)
+    except ValueError:
+        return False, AttestedArgs(
+            agent=agent, human=human, evidence=tuple(evidence), item=item
+        )
     rejoined = " ".join(shlex.quote(token) for token in remaining)
-    matched = rejoined == expected_prefix
-    return matched, AttestedArgs(agent=agent, actor=actor, evidence=tuple(evidence), item=item)
+    expected = " ".join(shlex.quote(token) for token in expected_tokens)
+    matched = rejoined == expected
+    return matched, AttestedArgs(
+        agent=agent, human=human, evidence=tuple(evidence), item=item
+    )
 
 
 def validate_attested_identity(
@@ -1331,35 +1826,49 @@ def validate_attested_identity(
     step: Step,
     args: AttestedArgs,
     run_started_actor: str | None,
-) -> tuple[Literal["agent", "actor"], str]:
-    if args.agent is None and args.actor is None:
-        _reject(slug, "attested step requires --agent or --actor", abort=False)
-    if args.agent is not None and args.actor is not None:
-        _reject(slug, "attested step rejects both --agent and --actor", abort=False)
+) -> tuple[Literal["agent", "human"], str]:
+    human = args.human
+    supplied = sum(value is not None for value in (args.agent, args.human))
+    if supplied == 0:
+        _reject(slug, "attested step requires --agent or --human", abort=False)
+    if supplied > 1:
+        _reject(slug, "attested step rejects multiple identity flags", abort=False)
     if step.ack.kind == "agent":
         if args.agent is None:
             _reject(slug, "attested step ack.kind=agent requires --agent", abort=False)
         return "agent", args.agent
-    # ack.kind == "actor"
-    if args.actor is None:
-        _reject(slug, "attested step ack.kind=actor requires --actor", abort=False)
+    # ack.kind == "human"; legacy plan ack.kind="actor" is normalized at load time.
+    if human is None:
+        _reject(slug, "attested step ack.kind=human requires --human", abort=False)
     if is_author_test_mode():
         # Author-test mode: skip ASTRID_ACTOR-match and self-ack checks so the
-        # harness can drive attestations under a synthetic actor. Canonical kind
-        # ("actor") is preserved — author-test provenance rides on event["source"].
-        return "actor", args.actor
-    if task_actor_env() != args.actor:
-        _reject(slug, "attested --actor does not match ASTRID_ACTOR env", abort=False)
-    # FLAG-005: self-ack rejection only applies to actor attestations because agents
+        # harness can drive attestations under a synthetic human identity.
+        return "human", human
+    if task_actor_env() != human:
+        _reject(slug, "attested --human does not match ASTRID_ACTOR env", abort=False)
+    # FLAG-005: self-ack rejection only applies to human attestations because agents
     # do not start runs in V1; an agent_id on run_started would be required to
     # symmetrically block agent self-acks, which is out of scope for Phase 2.
     if (
         run_started_actor is not None
-        and run_started_actor == args.actor
-        and task_actor_env() == args.actor
+        and run_started_actor == human
+        and task_actor_env() == human
     ):
         _reject(slug, "self-ack rejected", abort=False)
-    return "actor", args.actor
+    return "human", human
+
+
+def _append_via_decision(decision: GateDecision, event: dict[str, Any]) -> dict[str, Any]:
+    if decision.session is None:
+        raise TaskRunGateError(
+            reason="writer session missing for task-run mutation",
+            recovery=f"astrid attach {decision.slug or '<project>'}",
+        )
+    with writer_context_from_decision(
+        decision,
+        root=decision.project_root.parent if decision.project_root is not None else None,
+    ) as writer:
+        return writer.append(event)
 
 
 def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
@@ -1385,6 +1894,8 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
     adapter = _resolve_adapter(step) if step else None
 
     if adapter is not None:
+        if returncode != -1:
+            write_text_sidecar(_step_dir_from_run_ctx(run_ctx) / "returncode", f"{returncode}\n")
         complete_result = adapter.complete(step, run_ctx)
         cost_dict: dict[str, Any] | None = None
         if complete_result.cost is not None:
@@ -1398,43 +1909,71 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
         if step is not None and step.requires_ack:
             return
         if complete_result.status == "failed":
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_step_failed_event(
                     decision.plan_step_id,
                     complete_result.returncode,
                     reason=complete_result.reason,
                     cost=cost_dict,
                     adapter=decision.adapter,
+                    step_version=decision.step_version,
+                    dispatch_event_hash=decision.dispatch_event_hash,
                 ),
             )
         elif complete_result.status == "awaiting_fetch":
             missing, mismatched = _read_awaiting_fetch_items(run_ctx)
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_step_awaiting_fetch_event(
                     decision.plan_step_id,
                     missing=missing,
                     mismatched=mismatched,
                     reason=complete_result.reason,
                     adapter=decision.adapter,
+                    step_version=decision.step_version,
+                    dispatch_event_hash=decision.dispatch_event_hash,
                 ),
             )
         else:
-            append_event(
-                decision.events_path,
-                make_step_completed_event(
-                    decision.plan_step_id,
-                    returncode if returncode != -1 else (complete_result.returncode or 0),
+            completed_returncode = returncode if returncode != -1 else (complete_result.returncode or 0)
+            if decision.item_id is not None:
+                _append_via_decision(
+                    decision,
+                    make_item_completed_event(
+                        decision.plan_step_path,
+                        decision.item_id,
+                        completed_returncode,
+                        step_version=decision.step_version,
+                    ),
+                )
+                _maybe_autocomplete_for_each_host(
+                    decision=decision,
+                    returncode=completed_returncode,
                     cost=cost_dict,
-                    adapter=decision.adapter,
-                ),
-            )
+                )
+            else:
+                _append_via_decision(
+                    decision,
+                    make_step_completed_event(
+                        decision.plan_step_id,
+                        completed_returncode,
+                        cost=cost_dict,
+                        adapter=decision.adapter,
+                        step_version=decision.step_version,
+                        dispatch_event_hash=decision.dispatch_event_hash,
+                    ),
+                )
     else:
         # Legacy path: no adapter info on decision — use raw returncode.
-        append_event(
-            decision.events_path,
-            make_step_completed_event(decision.plan_step_id, returncode),
+        _append_via_decision(
+            decision,
+            make_step_completed_event(
+                decision.plan_step_id,
+                returncode,
+                step_version=decision.step_version,
+                dispatch_event_hash=decision.dispatch_event_hash,
+            ),
         )
 
     if decision.produces:
@@ -1511,7 +2050,7 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
         decision.slug,
         decision.run_id,
         decision.plan_step_path,
-        step_version=1,
+        step_version=decision.step_version,
         iteration=decision.iteration,
         item_id=decision.item_id,
         root=projects_root,
@@ -1521,41 +2060,48 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
         artifact_path = produces_root / entry.path
         result = entry.check.run(artifact_path)
         if not result.ok:
-            append_event(
-                decision.events_path,
+            _append_via_decision(
+                decision,
                 make_produces_check_failed_event(
                     decision.plan_step_path,
                     entry.name,
                     check_id=entry.check.check_id,
                     reason=result.reason,
+                    step_version=decision.step_version,
+                    dispatch_event_hash=decision.dispatch_event_hash,
                 ),
             )
             if decision.iteration is not None:
-                append_event(
-                    decision.events_path,
+                _append_via_decision(
+                    decision,
                     make_iteration_failed_event(
                         decision.plan_step_path,
                         decision.iteration,
                         reason=f"produces check failed: {entry.name}",
+                        step_version=decision.step_version,
                     ),
                 )
             else:
-                append_event(
-                    decision.events_path,
+                _append_via_decision(
+                    decision,
                     make_cursor_rewind_event(
                         decision.plan_step_path,
                         reason=f"produces check failed: {entry.name}",
+                        step_version=decision.step_version,
+                        dispatch_event_hash=decision.dispatch_event_hash,
                     ),
                 )
             return False
         cas_sha256 = _intern_produces_artifact(decision, artifact_path)
-        append_event(
-            decision.events_path,
+        _append_via_decision(
+            decision,
             make_produces_check_passed_event(
                 decision.plan_step_path,
                 entry.name,
                 check_id=entry.check.check_id,
                 cas_sha256=cas_sha256,
+                step_version=decision.step_version,
+                dispatch_event_hash=decision.dispatch_event_hash,
             ),
         )
     return True
@@ -1580,9 +2126,15 @@ def record_step_attested(
     """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
-    append_event(
-        decision.events_path,
-        make_step_attested_event(decision.plan_step_id, attestor_kind, attestor_id, evidence),
+    _append_via_decision(
+        decision,
+        make_step_attested_event(
+            decision.plan_step_id,
+            attestor_kind,
+            attestor_id,
+            evidence,
+            step_version=decision.step_version,
+        ),
     )
 
 
@@ -1590,8 +2142,8 @@ def record_nested_entered(decision: GateDecision, child_plan_hash: str) -> None:
     """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
-    append_event(
-        decision.events_path,
+    _append_via_decision(
+        decision,
         make_nested_entered_event(decision.plan_step_id, child_plan_hash),
     )
 
@@ -1600,19 +2152,22 @@ def record_nested_exited(decision: GateDecision, returncode: int) -> None:
     """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
-    append_event(
-        decision.events_path,
+    _append_via_decision(
+        decision,
         make_nested_exited_event(decision.plan_step_id, returncode),
     )
 
 
 def command_for_argv(argv: Sequence[str]) -> str:
     tokens = [str(token) for token in argv]
-    if len(tokens) >= 3 and Path(tokens[0]).name.startswith("python") and tokens[1:3] == ["-m", "astrid"]:
-        tokens = tokens[3:]
-    elif tokens and Path(tokens[0]).name.endswith("astrid"):
-        tokens = tokens[1:]
     return " ".join(shlex.quote(token) for token in tokens)
+
+
+def _normalize_command_string(command: str) -> str:
+    try:
+        return shlex.join(shlex.split(command))
+    except ValueError:
+        return command
 
 
 def _compute_inline_plan_hash(plan: TaskPlan) -> str:
@@ -1623,6 +2178,10 @@ def _compute_inline_plan_hash(plan: TaskPlan) -> str:
 def _find_run_started_actor(events: Sequence[dict[str, Any]]) -> str | None:
     for event in events:
         if event.get("kind") == "run_started":
+            started_by = event.get("started_by")
+            if isinstance(started_by, str) and started_by.startswith("human:"):
+                return started_by[len("human:"):]
+            # Legacy read compatibility for pre-T5 run_started events.
             actor = event.get("actor")
             return actor if isinstance(actor, str) else None
     return None

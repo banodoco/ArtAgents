@@ -4,10 +4,9 @@
 .. note::
 
     This module produces **standalone** ``hype.timeline.json`` artifacts for
-    the Remotion renderer.  These are NOT project-timeline containers
-    (``assembly.json`` / ``assembly.jsonl``).  Migrating cut/hype clip assembly
-    to emit ``clip.*`` events through the project-timeline ``EventLogBackend``
-    is deferred to **m3.5** (pack/worker write-path sweep)."""
+    the Remotion renderer.  In managed mode the same validated raw
+    ``TimelineConfig`` is emitted to the project timeline as
+    ``timeline.config_replaced`` before these run-local artifacts are written."""
 
 
 from __future__ import annotations
@@ -20,12 +19,13 @@ import csv
 import hashlib
 import json
 import subprocess
-from datetime import datetime, timezone
+import sys
 from pathlib import Path
 from typing import Any, Sequence
 
 from ..asset_cache import run as asset_cache
 from ....audit import AuditContext
+from astrid.core.util.time import utc_now_seconds
 from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
 from ....theme_schema import load_theme, theme_root
 from ...._paths import PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT
@@ -35,6 +35,7 @@ from ....timeline import (
     METADATA_VERSION,
     PipelineMetadata,
     TimelineConfig,
+    canonical_timeline_config,
     load_arrangement,
     load_metadata,
     load_pool,
@@ -273,13 +274,9 @@ def probe_asset(path: Path | str) -> dict[str, Any]:
     }
 
 def probe_video_duration(video_path: Path) -> float:
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(result.stdout.strip())
+    from astrid.core.util.media import ffprobe_duration_seconds
+
+    return ffprobe_duration_seconds(video_path)
 
 def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
     asset_paths: dict[str, Path] = {}
@@ -845,7 +842,7 @@ def build_metadata_from_arrangement(
         steps_run.insert(-1, "arrange")
     return {
         "version": METADATA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_at": utc_now_seconds(),
         "pipeline": {
             "steps_run": steps_run,
             "tool_versions": _tool_fingerprints(PACKAGE_ROOT),
@@ -1001,7 +998,7 @@ def build_resume_metadata(
     sources = {key: dict(value) for key, value in prior_sources.items()} if isinstance(prior_sources, dict) else {}
     return {
         "version": METADATA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "generated_at": utc_now_seconds(),
         "pipeline": {
             "steps_run": ["cut"],
             "tool_versions": {"cut.py": "sprint3"},
@@ -1062,6 +1059,7 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     timeline_path_out = out_dir / "hype.timeline.json"
     assets_path_out = out_dir / "hype.assets.json"
     metadata_path_out = out_dir / "hype.metadata.json"
+    canonical_timeline_config(config)
     save_timeline(config, timeline_path_out)
     if out_dir == assets_path_in.parent.resolve():
         save_registry(registry, assets_path_out)
@@ -1100,7 +1098,7 @@ def _emit_cut_managed_events(
     args: argparse.Namespace, timeline: dict[str, Any],
     *, actor_via: Any | None = None,
 ) -> int:
-    """Emit arrangement.replaced event through the pack write gateway.
+    """Emit timeline.config_replaced event through the pack write gateway.
 
     Called when cut runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written.  The gateway
@@ -1124,10 +1122,11 @@ def _emit_cut_managed_events(
         display="builtin.cut",
         via=[actor_via] if actor_via is not None else None,
     )
+    config = canonical_timeline_config(timeline)
     events = [
         {
-            "kind": "arrangement.replaced",
-            "payload": {"arrangement": dict(timeline)},
+            "kind": "timeline.config_replaced",
+            "payload": {"config": config},
         }
     ]
     result = pack_write_gateway(
@@ -1283,6 +1282,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     edl_path = write_edl(edl_rows, out_dir, asset_paths, asset_urls)
     timeline_path = out_dir / "hype.timeline.json"
+    canonical_timeline_config(timeline)
     # m3.5 managed mode: emit events through the gateway before writing
     # compatibility outputs.
     if managed:

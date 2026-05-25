@@ -22,7 +22,7 @@ def test_author_test_reports_drift_with_unified_diff(tmp_path: Path) -> None:
     lines = golden.read_text(encoding="utf-8").splitlines()
     # Flip the first line's "kind" to a value that cannot match (write the
     # munged line back; downstream lines remain untouched).
-    lines[0] = lines[0].replace('"run_started"', '"BOGUS_KIND"', 1)
+    lines[0] = lines[0].replace('"plan_initialized"', '"BOGUS_KIND"', 1)
     golden.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     out = io.StringIO()

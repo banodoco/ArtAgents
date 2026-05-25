@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -33,7 +32,9 @@ class TrainingRunStateError(ValueError):
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    from astrid.core.util.time import utc_now_iso as _utc_now_iso
+
+    return _utc_now_iso()
 
 
 def last_run_path(run_dir_or_path: str | Path) -> Path:

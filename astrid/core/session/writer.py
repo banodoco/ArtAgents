@@ -1,5 +1,19 @@
 """WriterContext: the session-scoped gate around every mutating verb.
 
+Sprint 1 writer-boundary contract:
+
+* Normal production task-run mutations flow through
+  ``TaskRunWriter``/``WriterContext.append()``. The context resolves the bound
+  session, performs any legacy active/current-run migration before writer-auth,
+  reads the canonical lease, and carries the captured writer epoch into the
+  locked append.
+* ``astrid.core.task.events`` stays a generic event transport layer. It does
+  not know about sessions or projects; production command code must not call
+  raw append helpers directly for task-run events.
+* Missing or malformed canonical lease state is a hard writer-auth failure
+  after migration has had its chance to repair legacy state. Do not paper over
+  lease read errors by treating a task run as orphaned.
+
 On entry, WriterContext:
 
 1. Reads ``<project>/current_run.json``. If the on-disk ``run_id`` does not
@@ -33,13 +47,15 @@ WriterContext that performs the same writer-auth check on entry.
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from astrid.core.project.current_run import read_current_run
+from astrid.core.project.current_run import (
+    migrate_legacy_active_run_before_writer_auth,
+    read_current_run,
+)
 from astrid.core.project.paths import project_dir
-from astrid.core.session.lease import read_lease
 from astrid.core.session.model import Session, now_iso
 from astrid.core.session.paths import session_path
 from astrid.core.task.events import (
@@ -78,6 +94,82 @@ class _HasSession(Protocol):
     session: Session
 
 
+@dataclass(frozen=True)
+class TaskRunWriter:
+    """Authenticated task-run writer state captured from the canonical lease."""
+
+    session: Session
+    run_dir: Path
+    expected_writer_epoch: int
+    plan_hash: str
+
+
+def open_task_run_writer(
+    session: Session,
+    *,
+    root: str | Path | None = None,
+) -> TaskRunWriter:
+    """Authenticate ``session`` as the current task-run writer.
+
+    Legacy active/current-run migration gets exactly one chance before the
+    canonical lease read. After that, missing or malformed lease state fails
+    closed and only the session id named in ``lease.attached_session_id`` may
+    mutate the run.
+    """
+
+    from astrid.core.session import lease as lease_mod
+
+    migrate_legacy_active_run_before_writer_auth(
+        session.project,
+        root=root,
+        session_id=session.id,
+    )
+
+    on_disk_run_id = read_current_run(session.project, root=root)
+    if on_disk_run_id != session.run_id:
+        session = replace(session, run_id=on_disk_run_id, last_used_at=now_iso())
+        session.to_json(session_path(session.id))
+
+    if session.run_id is None:
+        raise NoRunBoundError(session.id, session.project)
+
+    run_dir = project_dir(session.project, root=root) / "runs" / session.run_id
+    lease_path = run_dir / lease_mod.LEASE_FILENAME
+    if not lease_path.is_file():
+        raise lease_mod.LeaseError(f"missing lease {lease_path}")
+
+    lease = lease_mod.read_lease(run_dir)
+    attached = lease.get("attached_session_id")
+    if attached != session.id:
+        raise NotWriterError(session_id=session.id, writer_id=attached)
+    return TaskRunWriter(
+        session=session,
+        run_dir=run_dir,
+        expected_writer_epoch=lease["writer_epoch"],
+        plan_hash=lease["plan_hash"],
+    )
+
+
+def writer_context_for_project(
+    slug: str,
+    *,
+    root: str | Path | None = None,
+) -> WriterContext:
+    """Resolve the bound session for ``slug`` and return a WriterContext.
+
+    Command modules use this at mutating boundaries instead of reading
+    ``lease.json`` directly. The returned context still performs the normal
+    migration, lease existence, session-id, and epoch capture checks on entry.
+    """
+
+    from astrid.core.session.binding import resolve_current_session
+
+    session = resolve_current_session(slug=slug)
+    if session is None:
+        raise NoRunBoundError("", slug)
+    return WriterContext(session, root=root)
+
+
 class WriterContext:
     """Auto-rebinding writer-auth gate around the locked event-append helper."""
 
@@ -89,35 +181,11 @@ class WriterContext:
         self.plan_hash: str = ""
 
     def __enter__(self) -> "WriterContext":
-        # (1) Auto-rebind to the on-disk current_run.json if it has moved
-        # since the session was minted. This SILENTLY rewrites the session
-        # file when run_id changes; tests that snapshot the file pre-verb
-        # must refresh() after.
-        on_disk_run_id = read_current_run(self.session.project, root=self._root)
-        if on_disk_run_id != self.session.run_id:
-            self.session = replace(
-                self.session, run_id=on_disk_run_id, last_used_at=now_iso()
-            )
-            self.session.to_json(session_path(self.session.id))
-
-        # (2) Refuse to mutate without a bound run.
-        if self.session.run_id is None:
-            raise NoRunBoundError(self.session.id, self.session.project)
-
-        # (3) Compute run_dir.
-        self.run_dir = (
-            project_dir(self.session.project, root=self._root)
-            / "runs"
-            / self.session.run_id
-        )
-
-        # (4) Read lease + (5) writer-auth + (6) capture epoch/plan_hash.
-        lease = read_lease(self.run_dir)
-        attached = lease.get("attached_session_id")
-        if attached != self.session.id:
-            raise NotWriterError(session_id=self.session.id, writer_id=attached)
-        self.expected_writer_epoch = lease["writer_epoch"]
-        self.plan_hash = lease["plan_hash"]
+        writer = open_task_run_writer(self.session, root=self._root)
+        self.session = writer.session
+        self.run_dir = writer.run_dir
+        self.expected_writer_epoch = writer.expected_writer_epoch
+        self.plan_hash = writer.plan_hash
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:

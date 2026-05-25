@@ -11,11 +11,11 @@ import argparse
 import hashlib
 import json
 import uuid
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from ....audit import AuditContext
+from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 from ....theme_schema import load_theme
 from ...._paths import WORKSPACE_ROOT
@@ -110,7 +110,7 @@ REVISE_SYSTEM_PREFIX = (
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return utc_now_seconds()
 
 
 def _sha256_bytes(raw: bytes) -> str:

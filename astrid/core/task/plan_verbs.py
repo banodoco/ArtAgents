@@ -4,26 +4,25 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import json
 import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
+from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.events import (
     EVENTS_FILENAME,
-    LEASE_FILENAME,
-    append_event_locked,
     read_events,
 )
 from astrid.core.task.plan import (
     ADAPTERS,
+    LEGACY_ASSIGNEES,
     SUPERSEDE_SCOPES,
-    AckRule,
     Step,
-    SupersededRef,
     TaskPlan,
     TaskPlanError,
+    _validate_plan,
     iter_steps_with_path,
     load_plan,
 )
@@ -34,6 +33,7 @@ from astrid.core.task.validator import (
 
 
 PLAN_MUTATED_KIND = "plan_mutated"
+PLAN_INITIALIZED_KIND = "plan_initialized"
 STEP_TOMBSTONED_KIND = "plan_step_tombstoned"  # rendered inside plan_mutated.diff.op
 
 
@@ -42,9 +42,30 @@ STEP_TOMBSTONED_KIND = "plan_step_tombstoned"  # rendered inside plan_mutated.di
 # -----------------------------------------------------------------------------
 
 
+def initial_plan_from_events(events: Sequence[dict[str, Any]]) -> TaskPlan | None:
+    for ev in events:
+        if not isinstance(ev, dict) or ev.get("kind") != PLAN_INITIALIZED_KIND:
+            continue
+        payload = ev.get("plan")
+        if isinstance(payload, dict):
+            return _validate_plan(payload)
+    return None
+
+
+def initial_plan_hash_from_events(events: Sequence[dict[str, Any]]) -> str | None:
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("kind") in {PLAN_INITIALIZED_KIND, "run_started"}:
+            plan_hash = ev.get("plan_hash")
+            if isinstance(plan_hash, str) and plan_hash:
+                return plan_hash
+    return None
+
+
 def apply_mutations(plan: TaskPlan, events: Sequence[dict[str, Any]]) -> TaskPlan:
-    """Replay plan_mutated events in order onto ``plan`` to derive the effective tree."""
-    current = plan
+    """Replay plan_initialized + plan_mutated events into the effective tree."""
+    current = initial_plan_from_events(events) or plan
     for ev in events:
         if not isinstance(ev, dict) or ev.get("kind") != PLAN_MUTATED_KIND:
             continue
@@ -309,47 +330,47 @@ def _dispatched_step_paths(events: Sequence[dict[str, Any]]) -> set[str]:
 # -----------------------------------------------------------------------------
 
 
-def _make_plan_mutated_event(actor: str, writer_epoch: int, diff: dict[str, Any]) -> dict[str, Any]:
+def _make_plan_mutated_event(author: str, writer_epoch: int, diff: dict[str, Any]) -> dict[str, Any]:
     from astrid.core.task.events import _utc_now_iso  # internal helper reuse
     return {
         "kind": PLAN_MUTATED_KIND,
-        "actor": actor,
+        "author": author,
         "writer_epoch": writer_epoch,
         "diff": diff,
         "ts": _utc_now_iso(),
     }
 
 
+def _author_from_args(args, slug: str) -> str:
+    return args.author or f"agent:{slug}"
+
+
+def _reject_legacy_assignee(assignee: str | None, *, verb: str) -> bool:
+    if assignee in LEGACY_ASSIGNEES:
+        _print_err(
+            f"plan {verb}: assignee {assignee!r} is legacy read-only; "
+            "use system, any-human, agent:<id>, or human:<name>"
+        )
+        return True
+    return False
+
+
 def _run_dir(slug: str, run_id: str, root: str | Path | None) -> Path:
     return project_dir(slug, root=root) / "runs" / run_id
 
 
-def _read_lease_epoch(run_dir: Path) -> int:
-    lease_path = run_dir / LEASE_FILENAME
-    if not lease_path.exists():
-        raise TaskPlanError(f"lease not found at {lease_path}")
-    try:
-        payload = json.loads(lease_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise TaskPlanError(f"malformed lease.json at {lease_path}: {exc}") from exc
-    return int(payload.get("writer_epoch", 0))
+def _plan_path_for_run(run_dir: Path) -> Path:
+    run_plan = run_dir / "plan.json"
+    if run_plan.exists():
+        return run_plan
+    return run_dir.parent.parent / "plan.json"
 
 
-def _load_effective_plan(run_dir: Path) -> tuple[TaskPlan, list[dict[str, Any]]]:
-    plan = load_plan(run_dir / "plan.json")
+def _load_effective_plan(run_dir: Path) -> tuple[TaskPlan, list[dict[str, Any]], Path]:
+    plan_path = _plan_path_for_run(run_dir)
+    plan = load_plan(plan_path)
     events = read_events(run_dir / EVENTS_FILENAME)
-    return apply_mutations(plan, events), events
-
-
-def _emit(run_dir: Path, event: dict[str, Any], expected_epoch: int) -> dict[str, Any]:
-    from astrid.core.task.events import _peek_tail_hash
-    prev_hash = _peek_tail_hash(run_dir / EVENTS_FILENAME)
-    return append_event_locked(
-        run_dir,
-        event,
-        expected_writer_epoch=expected_epoch,
-        expected_prev_hash=prev_hash,
-    )
+    return apply_mutations(plan, events), events, plan_path
 
 
 def _print_err(msg: str) -> None:
@@ -358,30 +379,45 @@ def _print_err(msg: str) -> None:
 
 def _validate_and_emit(
     run_dir: Path,
+    plan_path: Path,
+    slug: str,
+    projects_root: Path | None,
+    run_id: str,
     prior_plan: TaskPlan,
     proposed_plan: TaskPlan,
     *,
     diff: dict[str, Any],
-    actor: str,
-    expected_epoch: int,
+    author: str,
 ) -> int:
     try:
-        validate_mutation(
-            prior_plan,
-            proposed_plan,
-            lease_epoch_actual=_read_lease_epoch(run_dir),
-            lease_epoch_expected=expected_epoch,
-        )
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            if writer.session.run_id != run_id:
+                _print_err(
+                    f"plan: run {run_id!r} is not the active writer run "
+                    f"({writer.session.run_id!r})"
+                )
+                return 1
+            validate_mutation(
+                prior_plan,
+                proposed_plan,
+                lease_epoch_actual=writer.expected_writer_epoch,
+                lease_epoch_expected=writer.expected_writer_epoch,
+            )
+            event = _make_plan_mutated_event(
+                author=author,
+                writer_epoch=writer.expected_writer_epoch,
+                diff=diff,
+            )
+            writer.append(event)
+            emitted_epoch = writer.expected_writer_epoch
+            write_json_atomic(plan_path, proposed_plan.to_dict())
     except MutationInvariantError as exc:
         _print_err(f"plan: rejected at {exc.invariant_id} ({exc.element}): {exc.reason}")
         return 1
-    event = _make_plan_mutated_event(actor=actor, writer_epoch=expected_epoch, diff=diff)
-    try:
-        _emit(run_dir, event, expected_epoch)
-    except Exception as exc:  # StaleTailError / StaleEpochError / EventLogError
+    except Exception as exc:  # StaleTailError / StaleEpochError / EventLogError / auth
         _print_err(f"plan: event-append failed: {exc}")
         return 1
-    print(f"plan_mutated [{diff.get('op')}] emitted at writer_epoch={expected_epoch}")
+    print(f"plan_mutated [{diff.get('op')}] emitted at writer_epoch={emitted_epoch}")
     return 0
 
 
@@ -395,7 +431,7 @@ def _dispatch_add(args, projects_root: Path | None) -> int:
     slug = validate_project_slug(args.project)
     run_id = validate_run_id(args.run_id)
     run_dir = _run_dir(slug, run_id, projects_root)
-    prior_plan, events = _load_effective_plan(run_dir)
+    prior_plan, events, plan_path = _load_effective_plan(run_dir)
 
     step_payload: dict[str, Any] = {
         "id": args.step_id,
@@ -403,6 +439,8 @@ def _dispatch_add(args, projects_root: Path | None) -> int:
         "command": args.command,
     }
     if args.assignee:
+        if _reject_legacy_assignee(args.assignee, verb="add-step"):
+            return 1
         step_payload["assignee"] = args.assignee
     if args.requires_ack:
         step_payload["requires_ack"] = True
@@ -420,10 +458,10 @@ def _dispatch_add(args, projects_root: Path | None) -> int:
         _print_err(f"plan add-step: {exc}")
         return 1
 
-    actor = args.actor or f"agent:{slug}"
+    author = _author_from_args(args, slug)
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, plan_path, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, author=author,
     )
 
 
@@ -433,7 +471,7 @@ def cmd_plan_edit_step(argv: Sequence[str], *, projects_root: Path | None = None
     slug = validate_project_slug(args.project)
     run_id = validate_run_id(args.run_id)
     run_dir = _run_dir(slug, run_id, projects_root)
-    prior_plan, events = _load_effective_plan(run_dir)
+    prior_plan, events, plan_path = _load_effective_plan(run_dir)
 
     if args.step in _dispatched_step_paths(events):
         _print_err(f"plan edit-step: {args.step!r} is dispatched; use supersede-step to bump version")
@@ -443,6 +481,8 @@ def cmd_plan_edit_step(argv: Sequence[str], *, projects_root: Path | None = None
     if args.command is not None:
         fields["command"] = args.command
     if args.assignee is not None:
+        if _reject_legacy_assignee(args.assignee, verb="edit-step"):
+            return 1
         fields["assignee"] = args.assignee
     if not fields:
         _print_err("plan edit-step: no editable fields provided (--command, --assignee)")
@@ -454,10 +494,10 @@ def cmd_plan_edit_step(argv: Sequence[str], *, projects_root: Path | None = None
         _print_err(f"plan edit-step: {exc}")
         return 1
 
-    actor = args.actor or f"agent:{slug}"
+    author = _author_from_args(args, slug)
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, plan_path, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, author=author,
     )
 
 
@@ -467,7 +507,7 @@ def cmd_plan_remove_step(argv: Sequence[str], *, projects_root: Path | None = No
     slug = validate_project_slug(args.project)
     run_id = validate_run_id(args.run_id)
     run_dir = _run_dir(slug, run_id, projects_root)
-    prior_plan, events = _load_effective_plan(run_dir)
+    prior_plan, events, plan_path = _load_effective_plan(run_dir)
 
     if args.step in _dispatched_step_paths(events):
         _print_err(
@@ -483,10 +523,10 @@ def cmd_plan_remove_step(argv: Sequence[str], *, projects_root: Path | None = No
         _print_err(f"plan remove-step: {exc}")
         return 1
 
-    actor = args.actor or f"agent:{slug}"
+    author = _author_from_args(args, slug)
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, plan_path, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, author=author,
     )
 
 
@@ -496,7 +536,7 @@ def cmd_plan_supersede_step(argv: Sequence[str], *, projects_root: Path | None =
     slug = validate_project_slug(args.project)
     run_id = validate_run_id(args.run_id)
     run_dir = _run_dir(slug, run_id, projects_root)
-    prior_plan, events = _load_effective_plan(run_dir)
+    prior_plan, events, plan_path = _load_effective_plan(run_dir)
 
     # Find current version of the target step.
     target_path = tuple(args.step.split("/"))
@@ -515,7 +555,7 @@ def cmd_plan_supersede_step(argv: Sequence[str], *, projects_root: Path | None =
         "command": args.command or current_step.command,
         "version": new_version,
     }
-    if current_step.assignee != "system":
+    if current_step.assignee != "system" and current_step.assignee not in LEGACY_ASSIGNEES:
         new_step_payload["assignee"] = current_step.assignee
     if current_step.requires_ack:
         new_step_payload["requires_ack"] = True
@@ -523,6 +563,8 @@ def cmd_plan_supersede_step(argv: Sequence[str], *, projects_root: Path | None =
     diff: dict[str, Any] = {
         "op": "supersede",
         "path": args.step,
+        "from_version": current_step.version,
+        "from_step": _superseded_archive_payload(current_step, to_version=new_version, scope=args.scope),
         "to_version": new_version,
         "scope": args.scope,
         "step": new_step_payload,
@@ -533,11 +575,17 @@ def cmd_plan_supersede_step(argv: Sequence[str], *, projects_root: Path | None =
         _print_err(f"plan supersede-step: {exc}")
         return 1
 
-    actor = args.actor or f"agent:{slug}"
+    author = _author_from_args(args, slug)
     return _validate_and_emit(
-        run_dir, prior_plan, proposed,
-        diff=diff, actor=actor, expected_epoch=_read_lease_epoch(run_dir),
+        run_dir, plan_path, slug, projects_root, run_id, prior_plan, proposed,
+        diff=diff, author=author,
     )
+
+
+def _superseded_archive_payload(step: Step, *, to_version: int, scope: str) -> dict[str, Any]:
+    payload = _step_to_payload(step)
+    payload["superseded_by"] = {"to_version": to_version, "scope": scope}
+    return payload
 
 
 # -----------------------------------------------------------------------------
@@ -548,7 +596,7 @@ def cmd_plan_supersede_step(argv: Sequence[str], *, projects_root: Path | None =
 def _common_parent_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--run-id", required=True, help="run id (under runs/<run-id>/)")
-    parser.add_argument("--actor", default=None, help="actor (default: agent:<project>)")
+    parser.add_argument("--author", default=None, help="canonical author (default: agent:<project>)")
 
 
 def _add_step_parser() -> argparse.ArgumentParser:
@@ -557,7 +605,7 @@ def _add_step_parser() -> argparse.ArgumentParser:
     p.add_argument("--step-id", required=True, help="new step id")
     p.add_argument("--command", required=True, help="step command (dispatch payload)")
     p.add_argument("--adapter", default="local", choices=list(ADAPTERS), help="adapter")
-    p.add_argument("--assignee", default=None, help="assignee form (system|any-agent|any-human|agent:<id>|human:<name>)")
+    p.add_argument("--assignee", default=None, help="assignee form (system|any-human|agent:<id>|human:<name>)")
     p.add_argument("--requires-ack", action="store_true", help="require astrid ack before completion")
     pos = p.add_mutually_exclusive_group()
     pos.add_argument("--after", default=None, help="insert after this step path")
@@ -664,6 +712,7 @@ def _route_subverb(fn, argv: Sequence[str], projects_root: Path | None) -> int:
 
 
 __all__ = [
+    "PLAN_INITIALIZED_KIND",
     "PLAN_MUTATED_KIND",
     "apply_mutations",
     "build_parser",
@@ -672,4 +721,6 @@ __all__ = [
     "cmd_plan_edit_step",
     "cmd_plan_remove_step",
     "cmd_plan_supersede_step",
+    "initial_plan_from_events",
+    "initial_plan_hash_from_events",
 ]

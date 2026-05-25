@@ -1,105 +1,148 @@
-# Hype-spike findings — Sprint 3 schema/adapter port
+# Hype Spike Findings - Sprint 3 Editor-Review Repeat
 
-**Branch:** `reshape/sprint-3-hype-spike` (throwaway; pushed for archival, NEVER merged into `reshape/sprint-3`)
-**Ported:** first three `builtin.hype` steps (transcribe → cut → render) as a paper port at `.spike/hype_first_three_ported.py`
-**Status:** NO stop-line tripped. Dynamic discovery is expressible. Schema mostly fits with three should-tier revisions; one must-tier clarification.
+**Spike fixture:** `.tmp/sprint3_hype_editor_review_spike.py`
+**Generated evidence:** `.tmp/sprint3_hype_editor_review_spike/`
+**Status:** tested. The editor-review loop is expressible with group `repeat.until` resolving a descendant produce through `re_export`. No schema redesign stop-line tripped.
 
----
+## Tested Shape
 
-## STOP-LINE check
+The spike modelled the minimal Hype spine needed for the Sprint 3 schema lock:
 
-The brief's stop-line is *"dynamic discovery cannot be expressed by static-tree schema"*. Specifically: hype's middle phase fans out across discovered scenes (`for_each item in scenes.json.scenes`). Verdict:
+```text
+transcribe -> cut -> render -> editor_review
+```
 
-- The new schema's `repeat.for_each.from_ref` referring to a prior-sibling `produces` name **does** express this. The validator (T7's I5 invariant) resolves `transcribe.produces.scenes_list` → real prior produces → tree is well-formed.
-- No `schema-redesign.md` required. Proceed to T6.
+`editor_review` is a group step carrying the repeat:
 
-The remaining findings are revisions — none block sprint-3 schema lock.
+```json
+{
+  "id": "editor_review",
+  "children": [
+    {
+      "id": "review",
+      "adapter": "manual",
+      "command": "editor-review",
+      "requires_ack": true,
+      "produces": {
+        "verdict": {
+          "path": "editor_review.json",
+          "check": {"check_id": "file_nonempty", "params": {}, "sentinel": false}
+        }
+      }
+    },
+    {
+      "id": "refine",
+      "adapter": "local",
+      "command": "python -m astrid.packs.builtin.refine",
+      "produces": {
+        "patch": {
+          "path": "refine.patch.json",
+          "check": {"check_id": "file_nonempty", "params": {}, "sentinel": false}
+        }
+      }
+    }
+  ],
+  "repeat": {
+    "until": "editor_review.produces.verdict.status == \"approved\"",
+    "max_iterations": 2,
+    "on_exhaust": "escalate"
+  },
+  "re_export": {
+    "verdict": "review.produces.verdict"
+  }
+}
+```
 
----
+The descendant artifact is written at the versioned iteration path:
 
-## Gap G1 — Group-step `produces` aggregation is under-specified (MUST clarify before T7)
+```text
+steps/editor_review/review/v1/iterations/001/produces/editor_review.json
+steps/editor_review/review/v1/iterations/002/produces/editor_review.json
+```
 
-**Symptom:** the brief reads *"Group step has children, no command. Its `produces` aggregates from descendants."* but does not pin down:
-- Is the parent's `produces` map the *union* of descendant produces, or is the parent allowed to declare its own *new* names that re-export descendant artifacts under different paths?
-- On sibling-id uniqueness (Invariant I2): are descendant `produces` names checked against the parent's own `produces` map, or only against the parent's children?
-- If a tombstoned descendant has a name in the aggregated map, what happens at I3 (produces-ref integrity)?
+The group expression intentionally references `editor_review.produces.verdict`, not `editor_review.review.produces.verdict`. The group boundary owns the public produce name and resolves it through `re_export` to the descendant leaf.
 
-**Hype impact:** the real hype pipeline has 15 leaf executors that any future `hype` group step would aggregate. Two distinct artifacts can share short names across nested groups (`final_video` in render, `final_video` in editor_review). Today the legacy `nested` kind sidesteps this because group-step `produces` is opaque.
+## Spike Result
 
-**Proposed lock-in (T6/T7):**
-- Group `produces` declarations are **fresh names**, not auto-aggregation. The group declares which descendant artifacts get *re-exported* under the group's namespace via explicit `re_export: {name: child-step-id.produces.name}` syntax, OR group declares no produces at all and downstream callers reference `group_id/child_id.produces.name`.
-- I2 sibling-id uniqueness checks group `produces` keys against *other group siblings* only, never against descendants.
-- I3 dangling-ref check follows the explicit `re_export` chain.
+Command:
 
-**Schema revision needed:** add `re_export: dict[str, str] | None` to `Step` (group-step-only). Lock during T6.
+```bash
+PYTHONPATH=. python3 .tmp/sprint3_hype_editor_review_spike.py
+```
 
-**Status (T6):** LANDED. `Step.re_export: tuple[tuple[str, str], ...] | None` added; `__post_init__` rejects re_export on leaf steps; `_validate_step` parses `re_export` from JSON (rejects on non-group, non-dict, empty, or malformed `<child-id>.produces.<name>` refs); `_step_to_dict` round-trips. Full descendant-resolution (does each ref actually resolve to a real produces?) deferred to T7 validator I3.
+Observed result:
 
----
+```json
+{
+  "expression": "editor_review.produces.verdict.status == \"approved\"",
+  "first_iteration_result": false,
+  "second_iteration_result": true,
+  "missing_data_fails_closed": true,
+  "group_re_export": {"verdict": "review.produces.verdict"}
+}
+```
 
-## Gap G2 — Cost field needs a sidecar convention for local-adapter steps
+The first fixture wrote `{"status": "revise"}` and evaluated false. The second fixture wrote `{"status": "approved"}` and evaluated true. A missing third-iteration artifact raised during resolution, so the runtime can fail closed instead of treating missing data as approval.
 
-**Symptom:** brief says completion events carry `cost: {amount, currency, source}` when an adapter declares one. Local adapter is a subprocess. Subprocesses *cannot* mutate the parent's outbound event payload — they exit with a return code and produce files. The schema declares the field but the wire is missing.
+Production validation now accepts this expression grammar. Before the Sprint 3
+implementation landed, the same fixture failed with the enum-era error:
 
-**Hype impact:** transcribe calls Gemini (paid API). render calls Remotion (GPU minutes). Both have real per-step USD cost that needs to surface. If cost only flows from "the adapter declared it", local-adapter steps can never declare cost — which makes the field a Sprint-4/5a-only signal and removes hype's primary use case.
+```text
+TaskPlanError: plan steps[3].repeat.until must be one of 'user_approves','verifier_passes','quorum', got 'editor_review.produces.verdict.status == "approved"'
+```
 
-**Proposed lock-in:**
-- Local-adapter convention: subprocess MAY write `produces/<step-id>/v<N>/cost.json` containing `{amount, currency, source}`. T11's local-adapter `complete()` reads it if present, populates `CompleteResult.cost`. If absent, cost is omitted (NOT null — per the watch-item).
-- Document this in the local-adapter docstring and in `docs/reshape/sprint-3/async-completion.md` (T25).
+That rejection is now migration-history context only; new plans should use the
+expression form below.
 
-**Schema revision needed:** none — `CostEntry` shape already correct. Convention-level, documented at T11.
+## Locked Grammar
 
----
+Sprint 3 should implement only the grammar the spike exercised:
 
-## Gap G3 — Command interpolation grammar is unspecified
+```text
+until:   <ref> <op> <literal>
+ref:     <step-path>.produces.<name>[.<json-field>*]
+op:      == | != | in
+literal: JSON string | number | boolean | null | JSON array for in
+```
 
-**Symptom:** the spike port writes things like `--source {source} --transcribe {transcribe.produces.transcribe}`. The schema accepts a `command: str` but doesn't define how `{...}` placeholders get resolved. The legacy hype pack used `{python_exec}` and `{orchestrator_args}` substitution that lived in orchestrator.yaml's `runtime.command.argv`.
+Reference rules:
 
-**Hype impact:** every leaf step's command needs at minimum: `{source}` (run input), `{out}` (project root output dir), `{step.produces.NAME}` (prior produces resolution), `{python_exec}` (interpreter path). Without a grammar, three options exist: (a) shell `$VAR` expansion via subprocess env, (b) explicit `{...}` placeholder list with kernel-side substitution at dispatch time, (c) make the executor pack responsible.
+- `step-path` is a dot-separated path from the plan root.
+- If `step-path` points at a leaf, `<name>` must be a declared produce on that leaf.
+- If `step-path` points at a group, `<name>` must be present in the group's `re_export` map and resolve to a descendant `<child-path>.produces.<name>`.
+- JSON field traversal after the produce name is runtime-only. Schema validation can prove the produce exists, but it cannot prove arbitrary fields inside the future JSON payload.
+- Literals use JSON syntax. Strings are double-quoted in plan JSON, e.g. `"approved"` inside the expression string.
 
-**Proposed lock-in (recommend in T11):**
-- Local adapter pre-substitutes a fixed set: `{run_root}`, `{step_root}` (the `steps/<id>/v<N>/` dir), `{python_exec}`, plus `{X.produces.Y}` resolved from the effective plan at dispatch time.
-- Anything else stays literal — escape with `{{`.
-- Document at T25.
+Boolean composition (`and`, `or`, parentheses) is out of scope for Sprint 3. The editor-review loop only needs one comparison.
 
-**Schema revision needed:** none. Convention-level, but **call out in T11's docstring** so packs don't assume shell-style.
+## Runtime Implications
 
----
+- `repeat.until` must be legal on group and leaf steps.
+- The cursor should evaluate the expression after each completed iteration of the repeated host.
+- Evaluation must read the produced JSON from the current iteration's versioned step directory. For the tested group shape, that means resolving the group alias to `steps/editor_review/review/v1/iterations/<NNN>/produces/editor_review.json`.
+- Missing files, malformed JSON, missing fields, unresolved `re_export`, and unsupported operators must fail closed. They should not advance the repeat as satisfied.
+- `max_iterations` and `on_exhaust` remain the exhaustion controls.
+- New v2 plans should not special-case legacy conditions such as `user_approves`, `verifier_passes`, or `quorum`. Those strings belong only in migration/read compatibility.
 
-## Gap G4 — "local" adapter name conflates "runs locally" with "runs on cheap CPU"
+## Schema And Validator Implications
 
-**Symptom:** transcribe and render both technically run via `python -m ...` on the host, but transcribe calls a remote LLM API and render uses GPU. Calling these "local" is descriptively correct (the subprocess is local) but semantically misleading for cost/queue/scheduling purposes.
+- `RepeatUntil.condition` must change from a literal enum to a parsed expression string.
+- Plan validation should parse the expression and reject malformed grammar.
+- Static validation should resolve the step path and produce name where knowable.
+- For group references, validation must follow `re_export`; a group does not auto-aggregate descendant produces.
+- Mutation validation must run the same expression and `re_export` checks as initial plan validation.
+- Existing `re_export` stays group-only. The spike confirms that explicit re-export is the right boundary for descendant produces and avoids implicit aggregation ambiguity.
 
-**Hype impact:** Sprint 4 (RunPod lift) and Sprint 5a (`remote-artifact`) both need to distinguish "run a local subprocess that *internally* hits a paid backend" from "queue this on a remote GPU". With three adapter slots filled, the natural future evolution is `remote-artifact` taking over render in Sprint 5a — but transcribe is awkwardly *not* remote-artifact (the LLM is fire-and-forget, not an artifact pull).
+## Decision
 
-**Proposed lock-in:** no schema change for Sprint 3. Document in the hype-spike findings (this file) that `local` is the right label for the subprocess-with-side-effects pattern; the cost sidecar (G2) is sufficient. Revisit in Sprint 4 if a "remote-invoke" adapter becomes needed distinct from `remote-artifact`.
+Use this final loop shape:
 
-**Schema revision needed:** none.
+```text
+editor_review.repeat.until =
+  editor_review.produces.verdict.status == "approved"
 
----
+editor_review.re_export.verdict =
+  review.produces.verdict
+```
 
-## Gap G5 — Step.repeat.for_each materialisation timing is unclear
-
-**Symptom:** when `cut.repeat.for_each.from_ref = "transcribe.produces.scenes_list"`, the items list is unknown until *after* transcribe completes. The current cursor / `_Frame` model assumes plan tree is fully knowable at run-start.
-
-**Hype impact:** spike's port collapses scenes into cut for brevity, but the real hype pipeline DOES fan out on discovered scenes. T9 (cursor extension) needs to know: items materialise via the existing `for_each_expanded` event (Sprint 1 primitive) — which the spike validated still applies to the collapsed schema.
-
-**Proposed lock-in:** none — Sprint 1's `for_each_expanded` event mechanism already covers this. **Note the dependency in T9's task notes** so the cursor extension preserves the deferred-materialisation path. Not a schema gap, just a watch-item for T9.
-
-**Schema revision needed:** none.
-
----
-
-## Summary
-
-| # | Gap | Severity | Resolves at |
-|---|-----|----------|-------------|
-| G1 | Group-step `produces` aggregation under-specified | **must** (blocks T7) | T6 schema lock |
-| G2 | Cost sidecar convention for local-adapter | should | T11 + T25 |
-| G3 | Command-interpolation grammar | should | T11 + T25 |
-| G4 | `local` adapter name semantic overload | nit | future sprint |
-| G5 | `for_each.from_ref` deferred materialisation | watch-item | T9 |
-
-**Net:** schema survives the hype shape. One must-tier addition (`re_export` on group steps) lands during T6 alongside the DRAFT-marker removal. Two should-tier conventions documented during T11+T25. No stop-line tripped — proceed.
-
-**Spike branch disposition:** push `reshape/sprint-3-hype-spike` to origin for archival. Do NOT merge into `reshape/sprint-3`. T6 switches back and folds the G1 schema revision in by hand.
+This is enough for Hype's editor-review repeat loop, keeps descendant implementation details behind the group boundary, and gives Step 4 a narrow grammar to implement and test.

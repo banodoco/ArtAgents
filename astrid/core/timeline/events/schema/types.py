@@ -6,9 +6,12 @@ import os
 import re
 import threading
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
+
+from astrid import timeline as timeline_contract
 
 from .version import EVENT_SCHEMA_VERSION
 
@@ -20,6 +23,7 @@ TimelineEventKind = Literal[
     "timeline.tombstoned",
     "timeline.deleted",
     "timeline.imported",
+    "timeline.config_replaced",
     "timeline.recovered",
     "timeline.reverted",
     "timeline.branched_from",
@@ -27,6 +31,7 @@ TimelineEventKind = Literal[
     "clip.added",
     "clip.removed",
     "clip.moved",
+    "clip.retracked",
     "clip.retimed",
     "clip.swapped",
     "clip.replaced",
@@ -310,6 +315,21 @@ class TimelineImportedPayload:
         return {"snapshot": dict(self.snapshot), "source": self.source}
 
 
+@dataclass(frozen=True)
+class TimelineConfigReplacedPayload:
+    config: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        try:
+            config = timeline_contract.validate_timeline_config_for_container(self.config)
+        except Exception as exc:
+            raise TimelineEventSchemaError(str(exc)) from exc
+        object.__setattr__(self, "config", config)
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"config": deepcopy(self.config)}
+
+
 # ---------------------------------------------------------------------------
 # clip.* payload models
 #
@@ -323,6 +343,7 @@ class ClipAddedPayload:
     clip_id: str
     kind: ClipKind
     asset_id: str
+    track_id: str
     position: ClipPosition | dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
@@ -331,6 +352,7 @@ class ClipAddedPayload:
             raise TimelineEventSchemaError(
                 "payload.kind must be 'visual', 'audio', or 'text'"
             )
+        _require_nonempty_str(self.track_id, "payload.track_id")
         _require_nonempty_str(self.asset_id, "payload.asset_id")
         coerced = _coerce_clip_position(self.position, "payload.position")
         if coerced is not self.position:
@@ -340,6 +362,7 @@ class ClipAddedPayload:
         result: dict[str, Any] = {
             "clip_id": self.clip_id,
             "kind": self.kind,
+            "track_id": self.track_id,
             "asset_id": self.asset_id,
         }
         if self.position is not None:
@@ -376,6 +399,19 @@ class ClipMovedPayload:
             "clip_id": self.clip_id,
             "position": self.position.to_json_obj(),
         }
+
+
+@dataclass(frozen=True)
+class ClipRetrackedPayload:
+    clip_id: str
+    track_id: str
+
+    def __post_init__(self) -> None:
+        _require_nonempty_str(self.clip_id, "payload.clip_id")
+        _require_nonempty_str(self.track_id, "payload.track_id")
+
+    def to_json_obj(self) -> dict[str, Any]:
+        return {"clip_id": self.clip_id, "track_id": self.track_id}
 
 
 @dataclass(frozen=True)
@@ -602,20 +638,16 @@ class ThemeOverriddenPayload:
 class TrackAddedPayload:
     track_id: str
     kind: TrackKind
-    label: str | None = None
+    label: str
 
     def __post_init__(self) -> None:
         _require_nonempty_str(self.track_id, "payload.track_id")
         if self.kind not in {"visual", "audio"}:
             raise TimelineEventSchemaError("payload.kind must be 'visual' or 'audio'")
-        if self.label is not None:
-            _require_nonempty_str(self.label, "payload.label")
+        _require_nonempty_str(self.label, "payload.label")
 
     def to_json_obj(self) -> dict[str, Any]:
-        result: dict[str, Any] = {"track_id": self.track_id, "kind": self.kind}
-        if self.label is not None:
-            result["label"] = self.label
-        return result
+        return {"track_id": self.track_id, "kind": self.kind, "label": self.label}
 
 
 @dataclass(frozen=True)
@@ -776,7 +808,13 @@ class TimelineRecoveredPayload:
             raise TimelineEventSchemaError("payload.anchor_type must be 'event' or 'snapshot'")
         _require_nonempty_str(self.reason, "payload.reason")
         if self.projected_state_summary is not None:
-            _validate_jsonable(self.projected_state_summary, "payload.projected_state_summary")
+            try:
+                projected_state_summary = timeline_contract.validate_timeline_config_for_container(
+                    self.projected_state_summary
+                )
+            except Exception as exc:
+                raise TimelineEventSchemaError(str(exc)) from exc
+            object.__setattr__(self, "projected_state_summary", projected_state_summary)
 
     def to_json_obj(self) -> dict[str, Any]:
         result: dict[str, Any] = {
@@ -785,7 +823,7 @@ class TimelineRecoveredPayload:
             "reason": self.reason,
         }
         if self.projected_state_summary is not None:
-            result["projected_state_summary"] = dict(self.projected_state_summary)
+            result["projected_state_summary"] = deepcopy(self.projected_state_summary)
         return result
 
 
@@ -887,6 +925,7 @@ PayloadModel = (
     | TimelineTombstonedPayload
     | TimelineDeletedPayload
     | TimelineImportedPayload
+    | TimelineConfigReplacedPayload
     | TimelineRecoveredPayload
     | TimelineRevertedPayload
     | TimelineBranchedFromPayload
@@ -895,6 +934,7 @@ PayloadModel = (
     | ClipAddedPayload
     | ClipRemovedPayload
     | ClipMovedPayload
+    | ClipRetrackedPayload
     | ClipRetimedPayload
     | ClipSwappedPayload
     | ClipReplacedPayload
@@ -925,6 +965,7 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "timeline.tombstoned": TimelineTombstonedPayload,
     "timeline.deleted": TimelineDeletedPayload,
     "timeline.imported": TimelineImportedPayload,
+    "timeline.config_replaced": TimelineConfigReplacedPayload,
     "timeline.recovered": TimelineRecoveredPayload,
     "timeline.reverted": TimelineRevertedPayload,
     "timeline.branched_from": TimelineBranchedFromPayload,
@@ -932,6 +973,7 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "clip.added": ClipAddedPayload,
     "clip.removed": ClipRemovedPayload,
     "clip.moved": ClipMovedPayload,
+    "clip.retracked": ClipRetrackedPayload,
     "clip.retimed": ClipRetimedPayload,
     "clip.swapped": ClipSwappedPayload,
     "clip.replaced": ClipReplacedPayload,

@@ -8,8 +8,6 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from astrid.core.runpod.sweeper import POD_HANDLE_FILENAME
 
 
@@ -41,6 +39,24 @@ def _write_stale_handle(projects_root: Path, project: str, run_id: str, step_id:
     produces_dir = projects_root / project / "runs" / run_id / "steps" / step_id / "v1" / "produces"
     produces_dir.mkdir(parents=True)
     handle_path = produces_dir / POD_HANDLE_FILENAME
+    handle_path.write_text(json.dumps(_make_stale_handle(pod_id=run_id)))
+    return handle_path
+
+
+def _write_noncanonical_stale_handle(projects_root: Path, project: str, run_id: str) -> Path:
+    """Write a stale pod_handle.json under a non-produces path that sweep must ignore."""
+    handle_path = (
+        projects_root
+        / project
+        / "runs"
+        / run_id
+        / "steps"
+        / "step-a"
+        / "v1"
+        / "scratch"
+        / POD_HANDLE_FILENAME
+    )
+    handle_path.parent.mkdir(parents=True)
     handle_path.write_text(json.dumps(_make_stale_handle(pod_id=run_id)))
     return handle_path
 
@@ -79,6 +95,20 @@ def test_doctor_reports_zero_stale_when_none() -> None:
             assert "no stale" in check.detail.lower()
 
 
+def test_doctor_ignores_stale_noncanonical_handles() -> None:
+    """Doctor only warns for stale canonical pod handles under produces/."""
+    with tempfile.TemporaryDirectory() as tmp:
+        projects_root = Path(tmp)
+        _write_noncanonical_stale_handle(projects_root, "proj", "run-scratch")
+
+        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
+            from astrid.doctor import _check_runpod_stale_handles
+
+            check = _check_runpod_stale_handles()
+            assert check.status == "ok"
+            assert "no stale" in check.detail.lower()
+
+
 def test_doctor_handles_missing_projects_root() -> None:
     """_check_runpod_stale_handles returns ok when projects root missing."""
     with patch("astrid.core.project.paths.resolve_projects_root", return_value=Path("/nonexistent/path/xyz")):
@@ -100,7 +130,9 @@ def test_doctor_does_not_mutate() -> None:
         projects_root = Path(tmp)
         _write_stale_handle(projects_root, "proj", "run-readonly", "step-x")
 
-        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
+        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root), \
+             patch("runpod_lifecycle.discovery.terminate") as terminate, \
+             patch("astrid.core.runpod.sweeper.append_runpod_sweeper_event") as append_event:
             from astrid.doctor import _check_runpod_stale_handles
 
             # This should NOT import or call discovery.terminate / append_event_locked
@@ -112,6 +144,8 @@ def test_doctor_does_not_mutate() -> None:
             # Verify the handle file was NOT deleted or modified
             handle_path = projects_root / "proj" / "runs" / "run-readonly" / "steps" / "step-x" / "v1" / "produces" / POD_HANDLE_FILENAME
             assert handle_path.is_file(), "doctor must not delete or modify pod_handle.json"
+            terminate.assert_not_called()
+            append_event.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

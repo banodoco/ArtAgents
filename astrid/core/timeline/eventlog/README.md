@@ -41,14 +41,13 @@ Writer contract:
 - write newline-terminated canonical JSONL
 - update side files with atomic temp-file -> fsync -> rename
 
-Bootstrap contract (m4):
+Bootstrap contract:
 
 - post-m1 created timelines are distinguished by `assembly.identity.json`
   with provenance `"created"` — they accept bare first domain events
   (no `timeline.imported`)
-- only true-legacy timelines (no identity sidecar, compatibility files
-  present) bootstrap via `timeline.imported` on first append; the identity
-  sidecar is then written with provenance `"imported"`
+- timelines without an identity sidecar fail closed. Legacy conversion is
+  handled only by the Sprint 2 migration scripts.
 - `timeline.deleted` is terminal for future appends
 
 ## Backend selection in m1
@@ -97,7 +96,6 @@ export entry point.
 Current read-side lifecycle handling is intentionally narrower than the schema
 surface. `project_display(...)` only branches on:
 
-- `timeline.imported`
 - `timeline.created`
 - `timeline.renamed`
 - `timeline.default_set`
@@ -112,7 +110,8 @@ This is the repository contract today across `crud.py`, `projector.py`,
 
 | kind | schema-defined | projected by `project_display()` | backend-enforced today | emitted by CRUD/CLI today |
 | --- | --- | --- | --- | --- |
-| `timeline.imported` | yes | yes | yes, `LocalFsBackend` bootstraps it on first append for true legacy timelines | no |
+| `timeline.imported` | yes | migration-only legacy | no; runtime bootstrap is disabled | no |
+| `timeline.config_replaced` | yes | no | no special backend rule | no |
 | `timeline.created` | yes | yes | no | no |
 | `timeline.renamed` | yes | yes | no special backend rule | yes, `rename_timeline()` only |
 | `timeline.default_set` | yes | yes | no | no |

@@ -7,6 +7,10 @@ import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+from typing import Literal as _Literal
+from typing import TypeVar as _TypeVar
+from typing import cast as _cast
+from typing import get_args as _get_args
 
 from astrid.contracts.schema import (
     CACHE_MODES,
@@ -26,7 +30,7 @@ from astrid.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
-from typing import Literal as _Literal, TypeVar as _TypeVar, cast as _cast, get_args as _get_args
+from astrid.core.manifest import ManifestParseError, load_manifest_payload
 
 OrchestratorKind = _Literal["built_in", "external"]
 RuntimeKind = _Literal["python", "command"]
@@ -146,11 +150,9 @@ def validate_orchestrator_definition(raw: Any) -> OrchestratorDefinition:
 def load_orchestrator_manifest(path: str | Path) -> OrchestratorDefinition:
     manifest_path = Path(path)
     try:
-        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise OrchestratorValidationError(f"orchestrator manifest not found: {manifest_path}") from exc
-    except json.JSONDecodeError as exc:
-        raise OrchestratorValidationError(f"invalid JSON-compatible orchestrator manifest {manifest_path}: {exc.msg}") from exc
+        raw = load_manifest_payload(manifest_path, manifest_kind="orchestrator")
+    except ManifestParseError as exc:
+        raise OrchestratorValidationError(f"invalid orchestrator manifest {manifest_path}: {exc}") from exc
     try:
         return validate_orchestrator_definition(raw)
     except OrchestratorValidationError as exc:

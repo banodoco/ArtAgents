@@ -24,27 +24,26 @@ from astrid.core.task.events import (
 )
 from astrid.core.task.lifecycle import cmd_ack
 
-
 _ATTESTED_REVIEW = '''from astrid.orchestrate import orchestrator, attested
 @orchestrator("demo.review")
-def main(): return [attested("review", command="review.sh", instructions="please review", ack="actor")]
+def main(): return [attested("review", command="review.sh", instructions="please review", ack="human")]
 '''
 
 _ATTESTED_PRODUCES = '''from astrid.orchestrate import orchestrator, attested
 from astrid.verify import json_file
 @orchestrator("demo.with_produces")
-def main(): return [attested("review", command="review.sh", instructions="check", ack="actor", produces={"out": json_file()})]
+def main(): return [attested("review", command="review.sh", instructions="check", ack="human", produces={"out": json_file()})]
 '''
 
 _ITER = '''from astrid.orchestrate import orchestrator, attested, repeat_until
 @orchestrator("demo.iter")
-def main(): return [attested("review", command="r.sh", instructions="ok", ack="actor",
+def main(): return [attested("review", command="r.sh", instructions="ok", ack="human",
     repeat=repeat_until(condition="user_approves", max_iterations=3, on_exhaust="fail"))]
 '''
 
 _NON_USER_APPROVES = '''from astrid.orchestrate import orchestrator, attested, repeat_until
 @orchestrator("demo.va")
-def main(): return [attested("review", command="r.sh", instructions="ok", ack="actor",
+def main(): return [attested("review", command="r.sh", instructions="ok", ack="human",
     repeat=repeat_until(condition="verifier_passes", max_iterations=3, on_exhaust="fail"))]
 '''
 
@@ -61,6 +60,79 @@ def _ack(packs: Path, projects: Path, *args: str) -> tuple[int, str, str]:
     return rc, buf.getvalue(), err.getvalue()
 
 
+def _replace_lease_writer(run_dir: Path, writer_id: str | None) -> None:
+    lease_path = run_dir / "lease.json"
+    lease = json.loads(lease_path.read_text(encoding="utf-8"))
+    lease["attached_session_id"] = writer_id
+    lease_path.write_text(json.dumps(lease), encoding="utf-8")
+
+
+def test_stop_line_reader_retry_ack_does_not_mutate_events(tmp_path: Path) -> None:
+    packs, projects = setup_run(
+        tmp_path,
+        "demo",
+        "with_produces",
+        _ATTESTED_PRODUCES,
+        "demo.with_produces",
+        run_id="rsr",
+    )
+    os.environ["ASTRID_ACTOR"] = "alice"
+    run_dir = projects / "p" / "runs" / "rsr"
+    events_path = run_dir / "events.jsonl"
+    append_event(events_path, make_step_attested_event("review", "human", "alice", ()))
+    append_event(
+        events_path,
+        make_produces_check_failed_event(
+            ("review",), "out", check_id="json_file:v1", reason="missing"
+        ),
+    )
+    _replace_lease_writer(run_dir, "SOME-OTHER-WRITER")
+    before = events_path.read_bytes()
+
+    rc, _out, err = _ack(
+        packs,
+        projects,
+        "review",
+        "--project",
+        "p",
+        "--decision",
+        "retry",
+        "--human",
+        "alice",
+    )
+
+    assert rc != 0
+    assert "writer" in err.lower() or "session" in err.lower()
+    assert events_path.read_bytes() == before
+
+
+def test_stop_line_reader_iterate_ack_does_not_mutate_events(tmp_path: Path) -> None:
+    packs, projects = setup_run(tmp_path, "demo", "iter", _ITER, "demo.iter", run_id="rsi")
+    os.environ["ASTRID_ACTOR"] = "alice"
+    run_dir = projects / "p" / "runs" / "rsi"
+    events_path = run_dir / "events.jsonl"
+    _replace_lease_writer(run_dir, "SOME-OTHER-WRITER")
+    before = events_path.read_bytes()
+
+    rc, _out, err = _ack(
+        packs,
+        projects,
+        "review",
+        "--project",
+        "p",
+        "--decision",
+        "iterate",
+        "--human",
+        "alice",
+        "--feedback",
+        "try again",
+    )
+
+    assert rc != 0
+    assert "writer" in err.lower() or "session" in err.lower()
+    assert events_path.read_bytes() == before
+
+
 def test_a_approve_attested_review_sh_writes_step_attested(tmp_path: Path) -> None:
     """FLAG-P5-001 regression: command='review.sh' (NOT 'ack --step ...')."""
     packs, projects = setup_run(
@@ -68,7 +140,7 @@ def test_a_approve_attested_review_sh_writes_step_attested(tmp_path: Path) -> No
         start_actor="bob",
     )
     os.environ["ASTRID_ACTOR"] = "alice"
-    rc, out, err = _ack(packs, projects, "review", "--project", "p", "--decision", "approve", "--actor", "alice")
+    rc, out, err = _ack(packs, projects, "review", "--project", "p", "--decision", "approve", "--human", "alice")
     assert rc == 0, f"out={out!r} err={err!r}"
     events = [json.loads(line) for line in (projects/"p"/"runs"/"ra"/"events.jsonl").read_text().splitlines()]
     assert any(e["kind"] == "step_attested" and e["plan_step_id"] == "review" for e in events)
@@ -86,7 +158,7 @@ def test_c_approve_both_flags_argparse_rejects(tmp_path: Path) -> None:
     os.environ["ASTRID_ACTOR"] = "alice"
     rc, _, _ = _ack(
         packs, projects, "review", "--project", "p", "--decision", "approve",
-        "--agent", "ag1", "--actor", "alice",
+        "--agent", "ag1", "--human", "alice",
     )
     assert rc != 0
 
@@ -94,19 +166,19 @@ def test_c_approve_both_flags_argparse_rejects(tmp_path: Path) -> None:
 def test_d_approve_actor_not_matching_astrid_actor_rejected(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "review", _ATTESTED_REVIEW, "demo.review", run_id="rd")
     os.environ["ASTRID_ACTOR"] = "alice"
-    rc, _, err = _ack(packs, projects, "review", "--project", "p", "--decision", "approve", "--actor", "carol")
+    rc, _, err = _ack(packs, projects, "review", "--project", "p", "--decision", "approve", "--human", "carol")
     assert rc != 0
     assert "ASTRID_ACTOR" in err
 
 
 def test_e_self_ack_rejected(tmp_path: Path) -> None:
-    """run_started.actor == --actor == ASTRID_ACTOR triggers self-ack rejection."""
+    """run_started.human == --human == ASTRID_ACTOR triggers self-ack rejection."""
     packs, projects = setup_run(
         tmp_path, "demo", "review", _ATTESTED_REVIEW, "demo.review", run_id="re",
         start_actor="alice",
     )
     os.environ["ASTRID_ACTOR"] = "alice"
-    rc, _, err = _ack(packs, projects, "review", "--project", "p", "--decision", "approve", "--actor", "alice")
+    rc, _, err = _ack(packs, projects, "review", "--project", "p", "--decision", "approve", "--human", "alice")
     assert rc != 0
     assert "self-ack" in err
 
@@ -122,7 +194,7 @@ def test_f_retry_without_identity_rejected(tmp_path: Path) -> None:
 def test_g_retry_without_prior_verifier_failure_rejected(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "review", _ATTESTED_REVIEW, "demo.review", run_id="rg")
     os.environ["ASTRID_ACTOR"] = "alice"
-    rc, _, err = _ack(packs, projects, "review", "--project", "p", "--decision", "retry", "--actor", "alice")
+    rc, _, err = _ack(packs, projects, "review", "--project", "p", "--decision", "retry", "--human", "alice")
     assert rc != 0
     assert "produces_check_failed" in err
 
@@ -133,12 +205,12 @@ def test_h_retry_after_produces_check_failed_appends_cursor_rewind(tmp_path: Pat
     )
     os.environ["ASTRID_ACTOR"] = "alice"
     events_path = projects / "p" / "runs" / "rh" / "events.jsonl"
-    append_event(events_path, make_step_attested_event("review", "actor", "alice", ()))
+    append_event(events_path, make_step_attested_event("review", "human", "alice", ()))
     append_event(
         events_path,
         make_produces_check_failed_event(("review",), "out", check_id="json_file:v1", reason="missing"),
     )
-    rc, _, _ = _ack(packs, projects, "review", "--project", "p", "--decision", "retry", "--actor", "alice")
+    rc, _, _ = _ack(packs, projects, "review", "--project", "p", "--decision", "retry", "--human", "alice")
     assert rc == 0
     last = json.loads(events_path.read_text().splitlines()[-1])
     assert last["kind"] == "cursor_rewind"
@@ -158,7 +230,7 @@ def test_j_iterate_non_user_approves_rejected(tmp_path: Path) -> None:
     os.environ["ASTRID_ACTOR"] = "alice"
     rc, _, err = _ack(
         packs, projects, "review", "--project", "p", "--decision", "iterate",
-        "--actor", "alice", "--feedback", "x",
+        "--human", "alice", "--feedback", "x",
     )
     assert rc != 0
     assert "verifier_passes" in err
@@ -170,12 +242,12 @@ def test_k_iterate_cumulative_feedback(tmp_path: Path) -> None:
     os.environ["ASTRID_ACTOR"] = "alice"
     rc1, _, _ = _ack(
         packs, projects, "review", "--project", "p", "--decision", "iterate",
-        "--actor", "alice", "--feedback", "less verbose",
+        "--human", "alice", "--feedback", "less verbose",
     )
     assert rc1 == 0
     rc2, _, _ = _ack(
         packs, projects, "review", "--project", "p", "--decision", "iterate",
-        "--actor", "alice", "--feedback", "even shorter",
+        "--human", "alice", "--feedback", "even shorter",
     )
     assert rc2 == 0
     fb2 = projects / "p" / "runs" / "rk" / "steps" / "review" / "v1" / "iterations" / "002" / "feedback.json"
@@ -189,7 +261,7 @@ def test_k_iterate_cumulative_feedback(tmp_path: Path) -> None:
 def test_l_approve_on_code_step_rejected(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "code", _CODE, "demo.code", run_id="rl")
     os.environ["ASTRID_ACTOR"] = "alice"
-    rc, _, err = _ack(packs, projects, "step_a", "--project", "p", "--decision", "approve", "--actor", "alice")
+    rc, _, err = _ack(packs, projects, "step_a", "--project", "p", "--decision", "approve", "--human", "alice")
     assert rc != 0
     assert "code steps advance via subprocess" in err
 

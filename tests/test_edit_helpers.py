@@ -31,18 +31,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _arrangement_event(clips: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Build an arrangement.replaced event spec with a simple clips payload."""
+    """Build a runtime-safe full TimelineConfig replacement event."""
+    config: dict[str, Any] = {"tracks": [], "clips": []}
+    if clips:
+        config["tracks"] = [{"id": "v1", "kind": "visual", "label": "Video"}]
+        config["clips"] = [
+            {
+                "id": str(clip.get("id", f"clip-{index}")),
+                "at": float(index),
+                "track": "v1",
+                "clipType": "media",
+                "asset": str(clip.get("asset", clip.get("id", f"asset-{index}"))),
+            }
+            for index, clip in enumerate(clips)
+        ]
     return {
-        "kind": "arrangement.replaced",
-        "payload": {"arrangement": {"clips": clips or []}},
+        "kind": "timeline.config_replaced",
+        "payload": {"config": config},
     }
 
 
 def _arrangement_event_dict(config: dict[str, Any]) -> dict[str, Any]:
-    """Build an arrangement.replaced event spec with the given config."""
+    """Build a runtime-safe full TimelineConfig replacement event."""
+    payload = {"tracks": [], "clips": []}
+    payload.update(dict(config))
     return {
-        "kind": "arrangement.replaced",
-        "payload": {"arrangement": dict(config)},
+        "kind": "timeline.config_replaced",
+        "payload": {"config": payload},
     }
 
 
@@ -260,7 +275,7 @@ class GatewayActorAttributionTest(unittest.TestCase):
         self.assertGreaterEqual(len(events_list), 1, "should have at least 1 domain event")
 
         domain_event = events_list[0]
-        self.assertEqual(domain_event.kind, "arrangement.replaced")
+        self.assertEqual(domain_event.kind, "timeline.config_replaced")
 
         # TimelineEvent.actor is a TimelineActor dataclass.
         domain_actor = domain_event.actor

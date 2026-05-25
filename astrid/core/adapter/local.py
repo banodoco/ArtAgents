@@ -7,28 +7,29 @@ import os
 import shlex
 import signal
 import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
+from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.util.time import utc_now_milliseconds
 
 
 def _step_dir(run_ctx: RunContext) -> Path:
     """Resolve runs/<run>/steps/<id>/v<N>/[iterations|items]/... for this dispatch."""
-    base = run_ctx.project_root / "runs" / run_ctx.run_id / "steps"
-    for segment in run_ctx.plan_step_path:
-        base = base / segment
-    base = base / f"v{run_ctx.step_version}"
-    if run_ctx.iteration is not None:
-        base = base / "iterations" / f"{run_ctx.iteration:03d}"
-    elif run_ctx.item_id is not None:
-        base = base / "items" / run_ctx.item_id
-    return base
+    return step_dir_for_context(
+        run_ctx.project_root,
+        run_ctx.run_id,
+        run_ctx.plan_step_path,
+        run_ctx.step_version,
+        iteration=run_ctx.iteration,
+        item_id=run_ctx.item_id,
+    )
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return utc_now_milliseconds()
 
 
 class LocalAdapter:
@@ -48,7 +49,7 @@ class LocalAdapter:
         # POSIX: start_new_session detaches from the controlling terminal so the
         # child survives the parent tab being closed.
         try:
-            argv = shlex.split(step.command)
+            argv = list(run_ctx.canonical_argv) if run_ctx.canonical_argv else shlex.split(step.command)
         except ValueError as exc:
             return DispatchResult(status="rejected", reason=f"command not shell-parseable: {exc}")
 
@@ -61,7 +62,7 @@ class LocalAdapter:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
-                env={**os.environ},
+                env={**os.environ, **(run_ctx.task_env or {})},
             )
         except (FileNotFoundError, OSError) as exc:
             log_handle.close()
@@ -70,9 +71,15 @@ class LocalAdapter:
             log_handle.close()
 
         started_at = _utc_now_iso()
-        meta_path.write_text(
-            json.dumps({"pid": proc.pid, "started_at": started_at, "command": step.command}),
-            encoding="utf-8",
+        write_json_sidecar(
+            meta_path,
+            {
+                "pid": proc.pid,
+                "started_at": started_at,
+                "command": run_ctx.canonical_command or step.command,
+                "display_command": run_ctx.display_command,
+                "task_env": run_ctx.task_env or {},
+            },
         )
         return DispatchResult(status="dispatched", pid=proc.pid, started_at=started_at)
 
@@ -102,12 +109,22 @@ class LocalAdapter:
         """Inspect produces + exit-code sidecar to classify completion."""
         step_dir = _step_dir(run_ctx)
         returncode_path = step_dir / "returncode"
-        returncode: int | None = None
-        if returncode_path.exists():
-            try:
-                returncode = int(returncode_path.read_text(encoding="utf-8").strip())
-            except ValueError:
-                returncode = None
+        if not returncode_path.exists():
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason="returncode sidecar missing",
+                cost=_read_cost_sidecar(step_dir),
+            )
+        try:
+            returncode = int(returncode_path.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            return CompleteResult(
+                status="failed",
+                returncode=None,
+                reason="returncode sidecar invalid",
+                cost=_read_cost_sidecar(step_dir),
+            )
 
         # Produces checks: every declared produces.path must exist (non-empty file)
         # under the canonical ``step_dir/produces/<path>`` layout (hype-spike G2).

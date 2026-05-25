@@ -195,6 +195,8 @@ class TestResolvePullDestination:
         identity = read_json(dest.identity_path)
         assert identity["provenance"] == "imported"
         assert "source_timeline_id" not in identity  # None was passed
+        assembly = read_json(dest.target.timeline_home / "assembly.json")
+        assert assembly == {"clips": [], "tracks": []}
 
     def test_create_as_with_source_id(self, tmp_path: Path, monkeypatch):
         """--create --as with remote source timeline_id records it."""

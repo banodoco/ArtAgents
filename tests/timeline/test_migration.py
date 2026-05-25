@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
+from astrid import timeline as timeline_contract
 from astrid.threads.ids import generate_ulid, is_ulid
 
 # Milestone 8 library imports
@@ -25,7 +29,7 @@ from astrid.core.timeline.migration import (
     write_resumable_checkpoint,
 )
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
-from astrid.core.timeline.events.schema import TimelineActor
+from astrid.core.timeline.events.schema import TimelineActor, TimelineEvent
 
 # ---------------------------------------------------------------------------
 # Path to the migration script
@@ -35,6 +39,27 @@ _MIGRATION_SCRIPT = (
     Path(__file__).resolve().parent.parent.parent
     / "scripts" / "migrations" / "sprint-2" / "migrate_timelines.py"
 )
+
+_LEGACY_DECODERS = _MIGRATION_SCRIPT.parent / "legacy_decoders.py"
+_EVENTLOG_REWRITE = _MIGRATION_SCRIPT.parent / "eventlog_rewrite.py"
+
+
+def _load_legacy_decoders():
+    spec = importlib.util.spec_from_file_location("sprint2_legacy_decoders", _LEGACY_DECODERS)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_eventlog_rewrite():
+    spec = importlib.util.spec_from_file_location("sprint2_eventlog_rewrite", _EVENTLOG_REWRITE)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def _run_migration(root: Path, *, apply: bool = False, force: bool = False) -> subprocess.CompletedProcess:
@@ -130,6 +155,290 @@ class TestNeitherLegacy:
         assert not tdir.exists() or not any(tdir.iterdir())
 
 
+class TestSprint2LegacyDecoders:
+    def test_unwraps_wrapped_and_raw_assemblies_without_mutating_inputs(self) -> None:
+        decoders = _load_legacy_decoders()
+        wrapped = {"schema_version": 1, "assembly": {"clips": [{"id": "c1"}]}}
+        raw = {"clips": [], "tracks": []}
+
+        unwrapped = decoders.unwrap_legacy_assembly(wrapped)
+        assert unwrapped == {"clips": [{"id": "c1"}]}
+        unwrapped["clips"][0]["id"] = "changed"
+        assert wrapped["assembly"]["clips"][0]["id"] == "c1"
+        assert decoders.unwrap_legacy_assembly(raw) == raw
+
+    def test_decodes_old_imported_and_recovered_full_state_snapshots(self) -> None:
+        decoders = _load_legacy_decoders()
+        imported = {
+            "assembly.json": {
+                "schema_version": 1,
+                "assembly": {"clips": [], "tracks": []},
+            }
+        }
+        recovered = {
+            "projected_state_summary": {
+                "schema_version": 1,
+                "assembly": {"clips": [], "tracks": []},
+            }
+        }
+
+        assert decoders.decode_old_imported_snapshot(imported) == {"clips": [], "tracks": []}
+        assert decoders.decode_old_recovered_snapshot(recovered) == {"clips": [], "tracks": []}
+
+    def test_track_added_backfills_label_from_exact_nonempty_track_id(self) -> None:
+        decoders = _load_legacy_decoders()
+
+        assert decoders.backfill_track_added_payload({
+            "track_id": "camera-a",
+            "kind": "visual",
+        }) == {"track_id": "camera-a", "kind": "visual", "label": "camera-a"}
+        assert decoders.backfill_track_added_payload({
+            "track_id": "a1",
+            "kind": "audio",
+            "label": "Dialogue",
+        }) == {"track_id": "a1", "kind": "audio", "label": "Dialogue"}
+
+        for payload in [
+            {"kind": "visual"},
+            {"track_id": "", "kind": "visual"},
+            {"track_id": "v1", "kind": "subtitle"},
+        ]:
+            with pytest.raises(decoders.LegacyDecodeError):
+                decoders.backfill_track_added_payload(payload)
+
+    def test_converts_old_clip_payloads_and_projected_clips(self) -> None:
+        decoders = _load_legacy_decoders()
+
+        assert decoders.convert_old_clip_added_payload({
+            "clip_id": "c1",
+            "kind": "visual",
+            "asset_id": "asset-1",
+        }) == {
+            "id": "c1",
+            "at": 0.0,
+            "track": "visual",
+            "clipType": "media",
+            "asset": "asset-1",
+            "hold": 0.0,
+        }
+        assert decoders.convert_old_projected_clip({
+            "id": "title",
+            "kind": "text",
+            "start": 2,
+            "duration": 3,
+            "text": "Hello",
+        }) == {
+            "id": "title",
+            "at": 2.0,
+            "track": "text",
+            "clipType": "text",
+            "hold": 3.0,
+            "text": {"content": "Hello"},
+        }
+
+    def test_arrangement_replaced_conversion_preserves_timeline_config_only(self) -> None:
+        decoders = _load_legacy_decoders()
+        valid_config = {"tracks": [], "clips": []}
+        legacy_arrangement = {"clips": [{"uuid": "u1", "order": 1}]}
+
+        assert decoders.convert_legacy_arrangement_replaced_payload({"arrangement": valid_config}) == valid_config
+        assert decoders.convert_legacy_arrangement_replaced_payload({
+            "arrangement": legacy_arrangement,
+        }) == {"clips": [], "tracks": []}
+
+
+class TestSprint2EventLogRewrite:
+    def test_recomputes_changed_and_downstream_hashes_and_refreshes_head(
+        self,
+        local_fs_backend: LocalFsBackend,
+    ) -> None:
+        rewrite = _load_eventlog_rewrite()
+        actor = TimelineActor(type="agent", id="migration:rewrite-test")
+        backend = local_fs_backend
+        backend.append_event(
+            backend.timeline_id,
+            "clip.added",
+            {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1"},
+            actor=actor,
+        )
+        backend.append_event(
+            backend.timeline_id,
+            "clip.retimed",
+            {"clip_id": "c1", "start": 1.0, "duration": 2.0},
+            actor=actor,
+        )
+        backend.append_event(
+            backend.timeline_id,
+            "track.added",
+            {"track_id": "v1", "kind": "visual", "label": "Video"},
+            actor=actor,
+        )
+        before = backend.read_events()
+        mutated_middle = TimelineEvent.from_dict({
+            **before[1].to_json_obj(),
+            "payload": {"clip_id": "c1", "start": 5.0, "duration": 6.0},
+        })
+
+        result = rewrite.rewrite_local_fs_event_log_from_index(
+            timeline_home=backend.timeline_home,
+            events=[before[0], mutated_middle, before[2]],
+            first_changed_index=1,
+        )
+
+        after = backend.read_events()
+        head = backend.head()
+        assert backend.verify_chain().ok is True
+        assert after[0].hash == before[0].hash
+        assert after[1].hash != before[1].hash
+        assert after[1].prev_hash == after[0].hash
+        assert after[2].hash != before[2].hash
+        assert after[2].prev_hash == after[1].hash
+        assert head.last_event_id == after[-1].event_id
+        assert head.last_hash == after[-1].hash
+        assert head.event_count == 3
+        assert result["rewritten_count"] == 2
+
+
+class TestSprint2ApplyEventPayloadMigration:
+    def _raw_event(
+        self,
+        *,
+        timeline_id: str,
+        kind: str,
+        payload: dict,
+        prev_hash: str | None,
+        hash_value: str,
+    ) -> dict:
+        return {
+            "event_id": generate_ulid(),
+            "timeline_id": timeline_id,
+            "ts": "2026-05-24T00:00:00Z",
+            "actor": {"type": "agent", "id": "migration:test"},
+            "prev_hash": prev_hash,
+            "hash": hash_value,
+            "kind": kind,
+            "payload": payload,
+            "expected_version": None,
+            "schema_version": 1,
+            "txn_id": None,
+        }
+
+    def test_force_apply_converts_legacy_event_payloads_and_verifies_chain(self, tmp_path: Path) -> None:
+        pdir = _seed_project(tmp_path, "demo")
+        timeline_ulid = generate_ulid()
+        timeline_id = str(uuid4())
+        tdir = pdir / "timelines" / timeline_ulid
+        tdir.mkdir(parents=True)
+        (tdir / "assembly.json").write_text(
+            json.dumps({"schema_version": 1, "assembly": {"tracks": [], "clips": []}}),
+            encoding="utf-8",
+        )
+        (tdir / "assembly.identity.json").write_text(
+            json.dumps({"schema_version": 1, "timeline_id": timeline_id}),
+            encoding="utf-8",
+        )
+
+        imported = self._raw_event(
+            timeline_id=timeline_id,
+            kind="timeline.imported",
+            payload={"snapshot": {"assembly.json": {"schema_version": 1, "assembly": {"tracks": [], "clips": []}}}, "source": "legacy_local"},
+            prev_hash=None,
+            hash_value="old-imported",
+        )
+        recovered = self._raw_event(
+            timeline_id=timeline_id,
+            kind="timeline.recovered",
+            payload={
+                "anchor_event_id": imported["event_id"],
+                "anchor_type": "event",
+                "reason": "legacy recovery",
+                "projected_state_summary": {"schema_version": 1, "assembly": {"tracks": [], "clips": []}},
+            },
+            prev_hash="old-imported",
+            hash_value="old-recovered",
+        )
+        arranged = self._raw_event(
+            timeline_id=timeline_id,
+            kind="arrangement.replaced",
+            payload={"arrangement": {"tracks": [], "clips": []}},
+            prev_hash="old-recovered",
+            hash_value="old-arranged",
+        )
+        track_added = self._raw_event(
+            timeline_id=timeline_id,
+            kind="track.added",
+            payload={"track_id": "visual", "kind": "visual"},
+            prev_hash="old-arranged",
+            hash_value="old-track",
+        )
+        (tdir / "assembly.jsonl").write_text(
+            "\n".join(json.dumps(e, sort_keys=True) for e in [imported, recovered, arranged, track_added]) + "\n",
+            encoding="utf-8",
+        )
+        (tdir / "assembly.head.json").write_text(
+            json.dumps(
+                {
+                    "timeline_id": timeline_id,
+                    "last_event_id": track_added["event_id"],
+                    "last_hash": "old-track",
+                    "event_count": 4,
+                    "version": 4,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        result = _run_migration(tmp_path, apply=True, force=True)
+
+        assert result.returncode == 0, result.stderr
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=tdir)
+        assert backend.verify_chain().ok is True
+        events = backend.read_events()
+        assert [event.kind for event in events] == [
+            "timeline.config_replaced",
+            "timeline.recovered",
+            "timeline.config_replaced",
+            "track.added",
+        ]
+        assert events[0].payload.config == {"tracks": [], "clips": []}
+        assert events[1].payload.projected_state_summary == {"tracks": [], "clips": []}
+        assert events[3].payload.label == "visual"
+        assert json.loads((tdir / "assembly.json").read_text()) == {"tracks": [], "clips": []}
+
+        manifest = json.loads((tmp_path / ".astrid-migration-snapshots" / "sprint-2" / "manifest.json").read_text())
+        assert manifest["status"] == "applied"
+        snapshotted = {Path(entry["path"]).name for entry in manifest["entries"]}
+        assert {"assembly.json", "assembly.jsonl", "assembly.head.json"} <= snapshotted
+
+
+class TestSprint2Rollback:
+    def test_apply_failure_restores_original_files_and_hashes(self, tmp_path: Path) -> None:
+        pdir = _seed_project(tmp_path, "demo")
+        _add_legacy_project_timeline(pdir, {"tracks": [], "clips": []})
+        run_id = generate_ulid()
+        rdir = _add_run(pdir, run_id, with_run_json=True, with_legacy_timeline=True)
+        run_json = rdir / "run.json"
+        run_data = json.loads(run_json.read_text())
+        run_data["status"] = "not-a-valid-status"
+        run_json.write_text(json.dumps(run_data), encoding="utf-8")
+
+        original_project_timeline = (pdir / "timeline.json").read_bytes()
+        original_run_timeline = (rdir / "timeline.json").read_bytes()
+        original_run_json_hash = hashlib.sha256(run_json.read_bytes()).hexdigest()
+
+        result = _run_migration(tmp_path, apply=True)
+
+        assert result.returncode == 1
+        assert "rollback" not in result.stderr.lower() or "rollback failed" not in result.stderr.lower()
+        assert (pdir / "timeline.json").read_bytes() == original_project_timeline
+        assert (rdir / "timeline.json").read_bytes() == original_run_timeline
+        assert hashlib.sha256(run_json.read_bytes()).hexdigest() == original_run_json_hash
+        tdir = pdir / "timelines"
+        assert not tdir.exists() or not any(child.is_dir() for child in tdir.iterdir())
+        manifest = json.loads((tmp_path / ".astrid-migration-snapshots" / "sprint-2" / "manifest.json").read_text())
+        assert manifest["status"] == "rolled_back"
+
+
 # ---------------------------------------------------------------------------
 # Test: project-only legacy file
 # ---------------------------------------------------------------------------
@@ -164,9 +473,9 @@ class TestProjectOnlyLegacy:
         # Legacy file is removed.
         assert not (pdir / "timeline.json").exists()
 
-        # Assembly content preserved.
+        # Non-container legacy project blobs become a raw empty TimelineConfig.
         assembly = json.loads((children[0] / "assembly.json").read_text())
-        assert assembly["assembly"] == {"version": 1, "elements": ["intro"]}
+        assert assembly == timeline_contract.canonical_empty_timeline()
 
         # Display says default.
         display = json.loads((children[0] / "display.json").read_text())
@@ -237,9 +546,9 @@ class TestBothLegacy:
         assert len(children) == 1
         ulid = children[0].name
 
-        # Assembly came from project-level file.
+        # Non-container project-level legacy blobs become a raw empty TimelineConfig.
         assembly = json.loads((children[0] / "assembly.json").read_text())
-        assert assembly["assembly"] == {"project_level": True}
+        assert assembly == timeline_contract.canonical_empty_timeline()
 
         # Manifest has contributing run.
         manifest = json.loads((children[0] / "manifest.json").read_text())
@@ -465,7 +774,7 @@ class TestLocalFsClassification:
 class TestLocalFsApplyImport:
     """Library-level tests: import_from_legacy_local with LocalFsBackend."""
 
-    def test_fresh_import_appends_single_event(self, tmp_path: Path) -> None:
+    def test_runtime_legacy_import_is_disabled(self, tmp_path: Path) -> None:
         home, tlid = _make_legacy_timeline_home(tmp_path)
         backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
         actor = TimelineActor(type="agent", id="test")
@@ -473,40 +782,14 @@ class TestLocalFsApplyImport:
         result = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        assert result["ok"] is True
-        assert result["imported"] is True
-        assert result["parity_ok"] is True
-        assert result["event_id"] is not None
+        assert result["ok"] is False
+        assert result["imported"] is False
+        assert result["parity_ok"] is None
+        assert result["event_id"] is None
+        assert "scripts/migrations/sprint-2" in result["detail"]
+        assert backend.read_events() == []
 
-        events = backend.read_events()
-        assert len(events) == 1
-        assert events[0].kind == "timeline.imported"
-
-    def test_imported_event_has_legacy_local_source(self, tmp_path: Path) -> None:
-        home, tlid = _make_legacy_timeline_home(tmp_path)
-        backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
-        actor = TimelineActor(type="agent", id="test")
-
-        import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
-        events = backend.read_events()
-        assert events[0].kind == "timeline.imported"
-        assert events[0].payload.source == "legacy_local"
-
-    def test_import_preserves_assembly_content(self, tmp_path: Path) -> None:
-        content = {"assembly": {"version": 1, "clips": [{"id": "c1", "kind": "visual"}]}}
-        home, tlid = _make_legacy_timeline_home(tmp_path, assembly_content=content)
-        backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
-        actor = TimelineActor(type="agent", id="test")
-
-        result = import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
-        assert result["parity_ok"] is True
-
-    def test_source_assembly_json_never_mutated(self, tmp_path: Path) -> None:
-        """Source blob (assembly.json) must never be mutated during import."""
+    def test_runtime_legacy_import_does_not_mutate_source(self, tmp_path: Path) -> None:
         content = {"assembly": {"version": 1, "clips": []}}
         home, tlid = _make_legacy_timeline_home(tmp_path, assembly_content=content)
         original_bytes = (home / "assembly.json").read_bytes()
@@ -517,110 +800,66 @@ class TestLocalFsApplyImport:
             backend=backend, timeline_home=home, actor=actor
         )
 
-        # assembly.json unchanged
         assert (home / "assembly.json").read_bytes() == original_bytes
         assert json.loads((home / "assembly.json").read_text()) == content
 
 
-# ---------------------------------------------------------------------------
-# LocalFs: rerun idempotence
-# ---------------------------------------------------------------------------
-
-
 class TestLocalFsIdempotence:
-    """Library-level tests: import_from_legacy_local must be idempotent."""
+    """Runtime import remains consistently disabled on rerun."""
 
-    def test_second_import_is_noop(self, tmp_path: Path) -> None:
+    def test_second_import_is_same_rejection(self, tmp_path: Path) -> None:
         home, tlid = _make_legacy_timeline_home(tmp_path)
         backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
         actor = TimelineActor(type="agent", id="test")
 
-        # First import
         result1 = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        assert result1["imported"] is True
-
-        # Second import — must be a no-op
         result2 = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        assert result2["imported"] is False
-        assert result2["parity_ok"] is True
-        assert result2["ok"] is True
-        assert "Already imported" in result2["detail"]
+
+        assert result1 == result2
+        assert backend.read_events() == []
 
     def test_no_duplicate_events_on_rerun(self, tmp_path: Path) -> None:
         home, tlid = _make_legacy_timeline_home(tmp_path)
         backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
         actor = TimelineActor(type="agent", id="test")
 
-        import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
-        import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
-        import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
+        for _ in range(3):
+            import_from_legacy_local(
+                backend=backend, timeline_home=home, actor=actor
+            )
 
         events = backend.read_events()
-        assert len(events) == 1, (
-            f"Expected exactly 1 event after 3 imports, got {len(events)}"
-        )
-
-    def test_idempotent_preserves_original_event_id(self, tmp_path: Path) -> None:
-        home, tlid = _make_legacy_timeline_home(tmp_path)
-        backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
-        actor = TimelineActor(type="agent", id="test")
-
-        result1 = import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
-        original_id = result1["event_id"]
-
-        result2 = import_from_legacy_local(
-            backend=backend, timeline_home=home, actor=actor
-        )
-        # No new event — the same event_id is reported back
-        assert result2["event_id"] == original_id
-
-
-# ---------------------------------------------------------------------------
-# LocalFs: parity failure leaving source blobs unchanged
-# ---------------------------------------------------------------------------
-
+        assert events == []
 
 class TestLocalFsParityFailure:
-    """Library-level tests: parity failure must leave source blobs unchanged."""
+    """Disabled runtime import leaves source blobs unchanged."""
 
     def test_parity_failure_after_source_change(self, tmp_path: Path) -> None:
-        """Import succeeds, then source changes — re-import detects parity failure."""
+        """Source changes do not affect the consistent runtime rejection."""
         content_v1 = {"assembly": {"version": 1, "clips": [{"id": "c1", "kind": "visual"}]}}
         home, tlid = _make_legacy_timeline_home(tmp_path, assembly_content=content_v1)
         backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
         actor = TimelineActor(type="agent", id="test")
 
-        # Initial import succeeds
         result1 = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        assert result1["parity_ok"] is True
-        assert len(backend.read_events()) == 1
+        assert result1["ok"] is False
 
-        # Modify assembly.json on disk to simulate a source change
         content_v2 = {"assembly": {"version": 2, "clips": [{"id": "c2", "kind": "audio"}]}}
         (home / "assembly.json").write_text(json.dumps(content_v2), encoding="utf-8")
 
-        # Re-import with changed source — parity must fail
         result2 = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
         assert result2["imported"] is False
-        assert result2["parity_ok"] is False
+        assert result2["parity_ok"] is None
         assert result2["ok"] is False
-        assert "parity does NOT hold" in result2["detail"]
+        assert backend.read_events() == []
 
     def test_parity_failure_leaves_source_blobs_intact(self, tmp_path: Path) -> None:
         """After parity failure, assembly.json must retain its (modified) content."""
@@ -629,20 +868,20 @@ class TestLocalFsParityFailure:
         backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
         actor = TimelineActor(type="agent", id="test")
 
-        import_from_legacy_local(
+        result = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
+        assert result["ok"] is False
 
         # Change source
         content_v2 = {"assembly": {"version": 42, "extras": True}}
         (home / "assembly.json").write_text(json.dumps(content_v2), encoding="utf-8")
         original_bytes_v2 = (home / "assembly.json").read_bytes()
 
-        # Parity failure on re-import
         result = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        assert result["parity_ok"] is False
+        assert result["parity_ok"] is None
 
         # Blob unchanged — still has v2 content
         assert (home / "assembly.json").read_bytes() == original_bytes_v2
@@ -655,10 +894,11 @@ class TestLocalFsParityFailure:
         backend = LocalFsBackend(timeline_id=tlid, timeline_home=home)
         actor = TimelineActor(type="agent", id="test")
 
-        import_from_legacy_local(
+        result = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        event_count_before = len(backend.read_events())
+        assert result["ok"] is False
+        assert len(backend.read_events()) == 0
 
         # Modify source and re-import
         (home / "assembly.json").write_text(
@@ -667,13 +907,9 @@ class TestLocalFsParityFailure:
         result = import_from_legacy_local(
             backend=backend, timeline_home=home, actor=actor
         )
-        assert result["parity_ok"] is False
+        assert result["parity_ok"] is None
 
-        event_count_after = len(backend.read_events())
-        assert event_count_after == event_count_before, (
-            f"Expected {event_count_before} events, got {event_count_after} "
-            f"— parity failure must not mutate the event log"
-        )
+        assert backend.read_events() == []
 
 
 # ---------------------------------------------------------------------------
@@ -843,7 +1079,7 @@ def supabase_config_actor() -> TimelineActor:
 class TestSupabaseConfigImport:
     """Tests for import_supabase_config using the FakeSupabaseTransport."""
 
-    CONFIG = {"track": "visual", "clipType": "text", "text": "Hello World", "hold": 1.0}
+    CONFIG = {"tracks": [], "clips": []}
 
     def test_fresh_import_appends_event(self, supabase_backend_with_fake, supabase_config_actor):
         backend = supabase_backend_with_fake
@@ -862,9 +1098,9 @@ class TestSupabaseConfigImport:
 
         events = backend.read_events()
         assert len(events) == 1
-        assert events[0].kind == "timeline.imported"
+        assert events[0].kind == "timeline.config_replaced"
 
-    def test_imported_event_has_supabase_config_source(
+    def test_config_replaced_event_stores_raw_config(
         self, supabase_backend_with_fake, supabase_config_actor
     ):
         backend = supabase_backend_with_fake
@@ -876,7 +1112,7 @@ class TestSupabaseConfigImport:
             actor=supabase_config_actor,
         )
         events = backend.read_events()
-        assert events[0].payload.source == "supabase_config"
+        assert events[0].payload.config == self.CONFIG
 
     def test_idempotent_skip_already_imported(
         self, supabase_backend_with_fake, supabase_config_actor
@@ -923,8 +1159,8 @@ class TestSupabaseConfigImport:
         # Pre-populate with a clip.added event
         backend2.append_event(
             "00000000-0000-0000-0000-000000000002",
-            "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            "track.added",
+            {"track_id": "visual", "kind": "visual", "label": "Visual"},
             actor=supabase_config_actor,
         )
 
@@ -943,14 +1179,14 @@ class TestSupabaseConfigImport:
         # Original event still there, no extra events
         events = backend2.read_events()
         assert len(events) == 1
-        assert events[0].kind == "clip.added"
+        assert events[0].kind == "track.added"
 
     def test_parity_failure_config_as_snapshot_sd2(
         self, supabase_backend_with_fake, supabase_config_actor
     ):
-        """SD2: parity is config-as-snapshot — snapshot['config'] == source config."""
+        """Parity checks the validated raw TimelineConfig payload."""
         backend = supabase_backend_with_fake
-        config = {"track": "visual", "clipType": "text", "text": "Original"}
+        config = {"tracks": [], "clips": []}
 
         # Import original config
         r1 = import_supabase_config(
@@ -963,7 +1199,10 @@ class TestSupabaseConfigImport:
         assert r1["parity_ok"] is True
 
         # Re-import with a different config — parity must fail
-        different_config = {"track": "audio", "clipType": "music", "text": "Changed"}
+        different_config = {
+            "tracks": [{"id": "audio", "kind": "audio", "label": "Audio"}],
+            "clips": [],
+        }
         r2 = import_supabase_config(
             backend=backend,
             project_id="proj-1",
@@ -974,7 +1213,7 @@ class TestSupabaseConfigImport:
         assert r2["imported"] is False
         assert r2["parity_ok"] is False
         assert r2["ok"] is False
-        assert "config-as-snapshot parity does NOT hold" in r2["detail"]
+        assert "TimelineConfig parity does NOT hold" in r2["detail"]
 
         # No duplicate events
         assert len(backend.read_events()) == 1
@@ -996,12 +1235,28 @@ class TestSupabaseConfigImport:
         assert result["skipped_state"] == "no_config"
         assert len(backend.read_events()) == 0
 
-    def test_no_config_is_not_mutated_on_parity_failure(
+    def test_invalid_non_container_config_is_rejected(
+        self, supabase_backend_with_fake, supabase_config_actor
+    ):
+        backend = supabase_backend_with_fake
+        result = import_supabase_config(
+            backend=backend,
+            project_id="proj-1",
+            timeline_id=backend.timeline_id,
+            config={"track": "visual", "clipType": "text"},
+            actor=supabase_config_actor,
+        )
+        assert result["ok"] is False
+        assert result["imported"] is False
+        assert result["skipped_state"] == "invalid_config"
+        assert len(backend.read_events()) == 0
+
+    def test_config_event_is_not_mutated_on_parity_failure(
         self, supabase_backend_with_fake, supabase_config_actor
     ):
         """The original event snapshot is preserved when parity fails."""
         backend = supabase_backend_with_fake
-        config = {"track": "visual", "clipType": "text", "text": "Snap"}
+        config = {"tracks": [], "clips": []}
 
         import_supabase_config(
             backend=backend,
@@ -1011,23 +1266,19 @@ class TestSupabaseConfigImport:
             actor=supabase_config_actor,
         )
 
-        # Read the stored snapshot
         events = backend.read_events()
-        stored_snapshot = events[0].payload.snapshot
-        assert stored_snapshot["config"] == config
+        assert events[0].payload.config == config
 
-        # Parity-failing re-import with different config
         import_supabase_config(
             backend=backend,
             project_id="proj-1",
             timeline_id=backend.timeline_id,
-            config={"track": "audio"},
+            config={"tracks": [{"id": "audio", "kind": "audio", "label": "Audio"}], "clips": []},
             actor=supabase_config_actor,
         )
 
-        # Stored snapshot unchanged
         events = backend.read_events()
-        assert events[0].payload.snapshot["config"] == config
+        assert events[0].payload.config == config
 
     def test_supabase_resumability_with_checkpoint(self, tmp_path: Path) -> None:
         """Checkpoints work for Supabase migration tracking."""

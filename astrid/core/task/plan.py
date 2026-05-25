@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,9 +19,10 @@ STEP_PATH_SEP = "/"
 
 AdapterKind = Literal["local", "manual", "remote-artifact"]
 ADAPTERS: tuple[AdapterKind, ...] = ("local", "manual", "remote-artifact")
-AssigneeForm = Literal["system", "any-agent", "any-human", "agent", "actor"]
+AssigneeForm = Literal["system", "any-human", "agent", "human"]
 SupersedeScope = Literal["all", "future-iterations", "future-items"]
 SUPERSEDE_SCOPES: tuple[SupersedeScope, ...] = ("all", "future-iterations", "future-items")
+LEGACY_ASSIGNEES: frozenset[str] = frozenset({"any-agent"})
 
 
 class TaskPlanError(ValueError):
@@ -29,7 +31,7 @@ class TaskPlanError(ValueError):
 
 @dataclass(frozen=True)
 class AckRule:
-    kind: Literal["agent", "actor"]
+    kind: Literal["agent", "human"]
 
 
 @dataclass(frozen=True)
@@ -42,11 +44,31 @@ class ProducesEntry:
 
 @dataclass(frozen=True)
 class RepeatUntil:
-    condition: Literal["user_approves", "verifier_passes", "quorum"]
+    condition: str
     max_iterations: int
     on_exhaust: Literal["escalate", "fail"]
     quorum_n: int | None = None
     kind: Literal["until"] = "until"
+
+
+RepeatUntilOperator = Literal["==", "!=", "in"]
+LEGACY_REPEAT_UNTIL_CONDITIONS: frozenset[str] = frozenset(
+    {"user_approves", "verifier_passes", "quorum"}
+)
+
+
+@dataclass(frozen=True)
+class RepeatProducesRef:
+    step_path: tuple[str, ...]
+    produces_name: str
+    json_path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RepeatUntilExpression:
+    ref: RepeatProducesRef
+    op: RepeatUntilOperator
+    literal: Any
 
 
 @dataclass(frozen=True)
@@ -75,7 +97,7 @@ class SupersededRef:
 
 @dataclass(frozen=True)
 class Step:
-    """Single collapsed step shape — replaces CodeStep/AttestedStep/NestedStep."""
+    """Single collapsed step shape for both leaves and groups."""
 
     id: str
     adapter: AdapterKind = "local"
@@ -104,7 +126,7 @@ class Step:
 
     @property
     def plan(self) -> "TaskPlan | None":
-        """Compat shim for legacy NestedStep.plan access. Returns None on leaves."""
+        """Inline child plan for group steps. Returns None on leaves."""
         if self.children is None:
             return None
         return TaskPlan(plan_id=f"_inline_{self.id}", version=2, steps=self.children)
@@ -148,35 +170,13 @@ def is_leaf_step(step: "Step") -> bool:
 
 
 def is_code_kind(step: "Step") -> bool:
-    """Legacy CodeStep semantics: leaf, no ack required."""
+    """True for an automatically completing leaf step."""
     return is_leaf_step(step) and not step.requires_ack
 
 
 def is_attested_kind(step: "Step") -> bool:
-    """Legacy AttestedStep semantics: leaf, requires_ack."""
+    """True for a leaf step that requires explicit attestation."""
     return is_leaf_step(step) and step.requires_ack
-
-
-# Legacy aliases kept ONLY so cross-module imports survive the T2→T3 window.
-# These classes are never constructed by the validator anymore. T3 will rewrite
-# isinstance dispatches and these placeholders are removed in T3/T24.
-class _LegacyStepPlaceholder:
-    """Placeholder so legacy `from .plan import CodeStep` imports do not crash mid-sweep."""
-
-
-class CodeStep(_LegacyStepPlaceholder):
-    pass
-
-
-class AttestedStep(_LegacyStepPlaceholder):
-    pass
-
-
-class NestedStep(_LegacyStepPlaceholder):
-    pass
-
-
-TaskPlanStep = Step  # legacy alias
 
 
 @dataclass(frozen=True)
@@ -191,6 +191,14 @@ class TaskPlan:
             "version": self.version,
             "steps": [_step_to_dict(step) for step in self.steps],
         }
+
+
+@dataclass(frozen=True)
+class ResolvedProducesRef:
+    step_path: tuple[str, ...]
+    step: Step
+    produces: ProducesEntry
+    json_path: tuple[str, ...]
 
 
 def load_plan(plan_path: str | Path) -> TaskPlan:
@@ -275,13 +283,160 @@ def parse_from_ref(from_ref: str) -> tuple[str, str]:
     return from_ref[:idx], from_ref[idx + len(sep):]
 
 
+_REPEAT_UNTIL_RE = re.compile(r"^\s*(?P<ref>.+?)\s+(?P<op>==|!=|in)\s+(?P<literal>.+?)\s*$")
+
+
+def is_legacy_repeat_until_condition(condition: str) -> bool:
+    """True for pre-expression repeat.until condition names kept for migration compatibility."""
+    return condition in LEGACY_REPEAT_UNTIL_CONDITIONS
+
+
+def parse_repeat_produces_ref(ref: str) -> RepeatProducesRef:
+    left, sep, right = ref.partition(".produces.")
+    if not sep:
+        raise TaskPlanError(
+            f"repeat.until ref must match '<step-path>.produces.<name>[.<json-field>*]', got {ref!r}"
+        )
+    step_path = tuple(part for part in left.split(".") if part)
+    if not step_path:
+        raise TaskPlanError(f"repeat.until ref has empty step path: {ref!r}")
+    right_parts = right.split(".")
+    produces_name = right_parts[0] if right_parts else ""
+    if not produces_name:
+        raise TaskPlanError(f"repeat.until ref has empty produces name: {ref!r}")
+    json_path = tuple(part for part in right_parts[1:] if part)
+    if len(json_path) != max(0, len(right_parts) - 1):
+        raise TaskPlanError(f"repeat.until ref has empty JSON field segment: {ref!r}")
+    return RepeatProducesRef(
+        step_path=step_path,
+        produces_name=produces_name,
+        json_path=json_path,
+    )
+
+
+def parse_repeat_until_expression(condition: str) -> RepeatUntilExpression:
+    match = _REPEAT_UNTIL_RE.fullmatch(condition)
+    if match is None:
+        raise TaskPlanError(
+            "repeat.until must match '<ref> <op> <literal>' where op is ==, !=, or in"
+        )
+    ref = parse_repeat_produces_ref(match.group("ref"))
+    op = cast(RepeatUntilOperator, match.group("op"))
+    literal_src = match.group("literal")
+    try:
+        literal = json.loads(literal_src)
+    except json.JSONDecodeError:
+        # Compatibility for the first red contract test and hand-authored notes
+        # that used shell/Python-style quotes before the spike locked JSON
+        # literals. New docs use JSON double-quoted strings.
+        if len(literal_src) >= 2 and literal_src[0] == literal_src[-1] == "'":
+            literal = literal_src[1:-1]
+        else:
+            raise TaskPlanError(
+                f"repeat.until literal must be JSON (or a single-quoted string compatibility literal), got {literal_src!r}"
+            )
+    if op == "in" and not isinstance(literal, list):
+        raise TaskPlanError("repeat.until 'in' literal must be a JSON array")
+    return RepeatUntilExpression(ref=ref, op=op, literal=literal)
+
+
+def find_step_by_path(plan: TaskPlan, step_path: tuple[str, ...]) -> Step | None:
+    steps = plan.steps
+    current: Step | None = None
+    for segment in step_path:
+        current = next((step for step in steps if step.id == segment), None)
+        if current is None:
+            return None
+        steps = current.children or ()
+    return current
+
+
+def resolve_produces_ref(
+    plan: TaskPlan,
+    ref: RepeatProducesRef,
+    *,
+    base_path: tuple[str, ...] = (),
+) -> ResolvedProducesRef:
+    step_path = ref.step_path
+    step = find_step_by_path(plan, step_path)
+    if step is None and base_path:
+        step_path = base_path + ref.step_path
+        step = find_step_by_path(plan, step_path)
+    if step is None:
+        raise TaskPlanError(
+            f"repeat.until references unknown step path {'.'.join(ref.step_path)!r}"
+        )
+    produces = next((entry for entry in step.produces if entry.name == ref.produces_name), None)
+    if produces is not None:
+        return ResolvedProducesRef(
+            step_path=step_path,
+            step=step,
+            produces=produces,
+            json_path=ref.json_path,
+        )
+    if step.children is None or step.re_export is None:
+        raise TaskPlanError(
+            f"repeat.until references unknown produces {ref.produces_name!r} on step path {'.'.join(ref.step_path)!r}"
+        )
+    re_export_ref = next((target for name, target in step.re_export if name == ref.produces_name), None)
+    if re_export_ref is None:
+        raise TaskPlanError(
+            f"repeat.until references group produces {ref.produces_name!r} without a re_export on {'.'.join(ref.step_path)!r}"
+        )
+    child_ref = parse_repeat_produces_ref(re_export_ref)
+    if child_ref.json_path:
+        raise TaskPlanError(
+            f"re_export target {re_export_ref!r} must reference a produce, not a JSON field"
+        )
+    child_path = step_path + child_ref.step_path
+    child_step = find_step_by_path(plan, child_path)
+    if child_step is None:
+        raise TaskPlanError(
+            f"re_export target {re_export_ref!r} under {'.'.join(ref.step_path)!r} references unknown descendant"
+        )
+    child_produces = next(
+        (entry for entry in child_step.produces if entry.name == child_ref.produces_name),
+        None,
+    )
+    if child_produces is None:
+        raise TaskPlanError(
+            f"re_export target {re_export_ref!r} references unknown produces {child_ref.produces_name!r}"
+        )
+    return ResolvedProducesRef(
+        step_path=child_path,
+        step=child_step,
+        produces=child_produces,
+        json_path=ref.json_path,
+    )
+
+
+def _assert_repeat_until_refs(plan: TaskPlan) -> None:
+    for path, step in iter_steps_with_path(plan):
+        repeat = step.repeat
+        if not isinstance(repeat, RepeatUntil):
+            continue
+        if is_legacy_repeat_until_condition(repeat.condition):
+            continue
+        expr = parse_repeat_until_expression(repeat.condition)
+        try:
+            resolve_produces_ref(plan, expr.ref, base_path=path)
+        except TaskPlanError as exc:
+            raise TaskPlanError(
+                f"step {'/'.join(path)!r}.repeat.until has invalid ref: {exc}"
+            ) from exc
+
+
 def _parse_assignee(assignee: str, *, step_id: str) -> tuple[AssigneeForm, str | None]:
     """Validate assignee string and return (form, identity-or-None)."""
     if not isinstance(assignee, str) or not assignee:
         raise TaskPlanError(f"step {step_id!r}: assignee must be a non-empty string")
-    if assignee in ("system", "any-agent", "any-human"):
+    if assignee in ("system", "any-human"):
         return cast(AssigneeForm, assignee), None
-    for prefix, kind in (("agent:", "agent"), ("human:", "actor")):
+    if assignee in LEGACY_ASSIGNEES:
+        # Read/migration compatibility only. New writers must use a concrete
+        # agent:<id> assignment or any-human.
+        return "agent", None
+    for prefix, kind in (("agent:", "agent"), ("human:", "human")):
         if assignee.startswith(prefix):
             ident = assignee[len(prefix):]
             if not ident:
@@ -290,8 +445,17 @@ def _parse_assignee(assignee: str, *, step_id: str) -> tuple[AssigneeForm, str |
                 )
             return cast(AssigneeForm, kind), ident
     raise TaskPlanError(
-        f"step {step_id!r}: assignee must be one of 'system'|'any-agent'|'any-human'|'agent:<id>'|'human:<name>', got {assignee!r}"
+        f"step {step_id!r}: assignee must be one of 'system'|'any-human'|'agent:<id>'|'human:<name>', got {assignee!r}"
     )
+
+
+def normalize_ack_kind(kind: str) -> Literal["agent", "human"]:
+    if kind == "actor":
+        # Legacy read compatibility for pre-taxonomy-collapse plans.
+        return "human"
+    if kind in {"agent", "human"}:
+        return cast(Literal["agent", "human"], kind)
+    raise TaskPlanError(f"ack.kind must be 'agent' or 'human', got {kind!r}")
 
 
 def _step_to_dict(step: Step) -> dict[str, Any]:
@@ -397,6 +561,7 @@ def _validate_plan(payload: Any, *, _is_root: bool = True) -> TaskPlan:
     plan = TaskPlan(plan_id=plan_id, version=2, steps=tuple(validated_steps))
     if _is_root:
         _assert_unique_paths(plan)
+        _assert_repeat_until_refs(plan)
     return plan
 
 
@@ -414,8 +579,17 @@ def _validate_step(step: Any, index: int, prior_siblings: list[Step]) -> Step:
             f"plan steps[{index}].adapter must be one of {ADAPTERS}, got {adapter!r}"
         )
 
-    legacy_kind = step.get("kind")
-    requires_ack = step.get("requires_ack", legacy_kind == "attested")
+    if "kind" in step:
+        raise TaskPlanError(
+            f"plan steps[{index}].kind is legacy v1 schema; "
+            "run scripts/migrations/sprint-3/migrate_plans.py to migrate it"
+        )
+    if "plan" in step:
+        raise TaskPlanError(
+            f"plan steps[{index}].plan is legacy v1 inline child-plan schema; "
+            "run scripts/migrations/sprint-3/migrate_plans.py to migrate it"
+        )
+    requires_ack = step.get("requires_ack", False)
     if not isinstance(requires_ack, bool):
         raise TaskPlanError(f"plan steps[{index}].requires_ack must be a bool")
 
@@ -453,11 +627,11 @@ def _validate_step(step: Any, index: int, prior_siblings: list[Step]) -> Step:
         if not isinstance(ack_raw, dict):
             raise TaskPlanError(f"plan steps[{index}].ack must be an object")
         ack_kind = ack_raw.get("kind")
-        if ack_kind not in {"agent", "actor"}:
+        if ack_kind not in {"agent", "human", "actor"}:
             raise TaskPlanError(
-                f"plan steps[{index}].ack.kind must be 'agent' or 'actor', got {ack_kind!r}"
+                f"plan steps[{index}].ack.kind must be 'agent' or 'human', got {ack_kind!r}"
             )
-        ack = AckRule(kind=ack_kind)
+        ack = AckRule(kind=normalize_ack_kind(ack_kind))
 
     cost_raw = step.get("cost")
     cost: CostEntry | None = None
@@ -660,10 +834,11 @@ def _validate_repeat(raw: Any, index: int, prior_siblings: list[Step]) -> Repeat
 
 def _validate_repeat_until(raw: dict[str, Any], index: int) -> RepeatUntil:
     condition = raw.get("until")
-    if condition not in {"user_approves", "verifier_passes", "quorum"}:
-        raise TaskPlanError(
-            f"plan steps[{index}].repeat.until must be one of 'user_approves','verifier_passes','quorum', got {condition!r}"
-        )
+    if not isinstance(condition, str) or not condition:
+        raise TaskPlanError(f"plan steps[{index}].repeat.until must be a non-empty string")
+    is_legacy = is_legacy_repeat_until_condition(condition)
+    if not is_legacy:
+        parse_repeat_until_expression(condition)
     max_iterations = raw.get("max_iterations")
     if not isinstance(max_iterations, int) or isinstance(max_iterations, bool) or max_iterations < 1:
         raise TaskPlanError(
@@ -682,7 +857,7 @@ def _validate_repeat_until(raw: dict[str, Any], index: int) -> RepeatUntil:
             )
     elif quorum_n is not None:
         raise TaskPlanError(
-            f"plan steps[{index}].repeat.quorum_n only valid when until='quorum'"
+            f"plan steps[{index}].repeat.quorum_n only valid for legacy until='quorum'"
         )
     return RepeatUntil(
         condition=condition,

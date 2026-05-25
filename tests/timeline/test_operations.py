@@ -17,6 +17,13 @@ from astrid.core.timeline.projection import ProjectionError
 _ACTOR = TimelineActor(type="agent", id="recovery-test")
 
 
+def _raw_config(label: str = "Video") -> dict:
+    return {
+        "tracks": [{"id": "v1", "kind": "visual", "label": label}],
+        "clips": [],
+    }
+
+
 class TestRecoverToEvent:
     """Tests for recover_to_event()."""
 
@@ -25,13 +32,7 @@ class TestRecoverToEvent:
     ):
         """Recover to an anchor event: chain verified, timeline.recovered appended."""
         from astrid.core.timeline import observability as obs_mod
-        from astrid.core.timeline import eventlog as evlog_mod
         from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
-        from astrid.core.timeline.eventlog.types import (
-            EventLogHead,
-            EventLogVerification,
-        )
-        from astrid.core.timeline.eventlog import EventLogTarget
         from astrid.core.timeline.observability import ResolvedTarget
 
         timeline_id = str(uuid4())
@@ -54,13 +55,8 @@ class TestRecoverToEvent:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
-            actor=_ACTOR,
-        )
-        e2 = backend.append_event(
-            timeline_id, "track.added",
-            {"track_id": "t1", "kind": "visual"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -81,25 +77,26 @@ class TestRecoverToEvent:
         result = recover_to_event(
             "test-project",
             "test-tl",
-            e2.event_id,
+            e1.event_id,
             _ACTOR,
             "test recovery",
         )
 
         assert isinstance(result, RecoveryResult)
-        assert result.anchor_event_id == e2.event_id
+        assert result.anchor_event_id == e1.event_id
         assert result.anchor_type == "event"
         assert result.reason == "test recovery"
         # A new timeline.recovered event was appended
         assert result.new_event_id is not None
-        assert result.new_version == 3  # 2 existing + 1 recovery
+        assert result.new_version == 2  # 1 existing + 1 recovery
         assert "clip_count" in result.projected_head_summary
         assert len(result.regenerated_artifact_paths) >= 2
 
         # Verify the recovery event exists
         events = backend.read_events()
-        assert len(events) == 3
+        assert len(events) == 2
         assert events[-1].kind == "timeline.recovered"
+        assert events[-1].payload.projected_state_summary == _raw_config()
 
     def test_recover_to_event_refuses_broken_chain(
         self, tmp_path: Path, monkeypatch
@@ -128,8 +125,8 @@ class TestRecoverToEvent:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -156,7 +153,7 @@ class TestRecoverToEvent:
                 + timeline_id
                 + '","ts":"2026-05-21T00:00:00Z","actor":{"type":"agent","id":"x"},'
                 + '"prev_hash":"wrong-hash","hash":"also-wrong","kind":"clip.added",'
-                + '"payload":{"clip_id":"bad","kind":"visual","asset_id":"x"},'
+                + '"payload":{"clip_id":"bad","kind":"visual","track_id":"visual","asset_id":"x"},'
                 + '"schema_version":2}\n'
             )
 
@@ -196,8 +193,8 @@ class TestRecoverToEvent:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -254,8 +251,8 @@ class TestRecoverToSnapshot:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -282,14 +279,7 @@ class TestRecoverToSnapshot:
                 "version": 1,
                 "event_count": 1,
             },
-            snapshot_assembly={
-                "clips": [{"id": "c1", "kind": "visual", "asset_id": "a1"}],
-                "tracks": [],
-                "theme": "",
-                "theme_overrides": {},
-                "pool": {"entries": []},
-                "arrangement": {"clips": []},
-            },
+            snapshot_assembly=_raw_config(),
             actor=_ACTOR,
             reason="snapshot recovery test",
         )
@@ -301,6 +291,7 @@ class TestRecoverToSnapshot:
 
         events = backend.read_events()
         assert events[-1].kind == "timeline.recovered"
+        assert events[-1].payload.projected_state_summary == _raw_config()
 
     def test_recover_to_snapshot_mismatched_identity(
         self, tmp_path: Path, monkeypatch
@@ -329,8 +320,8 @@ class TestRecoverToSnapshot:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -357,7 +348,7 @@ class TestRecoverToSnapshot:
                     "last_hash": e1.hash,
                     "version": 1,
                 },
-                snapshot_assembly={"clips": []},
+                snapshot_assembly=_raw_config(),
                 actor=_ACTOR,
                 reason="should fail",
             )
@@ -389,8 +380,8 @@ class TestRecoverToSnapshot:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -417,7 +408,7 @@ class TestRecoverToSnapshot:
                     "last_hash": "wrong-hash-12345",
                     "version": 1,
                 },
-                snapshot_assembly={"clips": []},
+                snapshot_assembly=_raw_config(),
                 actor=_ACTOR,
                 reason="should fail",
             )
@@ -449,8 +440,8 @@ class TestRecoverToSnapshot:
 
         backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
         e1 = backend.append_event(
-            timeline_id, "clip.added",
-            {"clip_id": "c1", "kind": "visual", "asset_id": "a1"},
+            timeline_id, "timeline.config_replaced",
+            {"config": _raw_config()},
             actor=_ACTOR,
         )
 
@@ -470,8 +461,6 @@ class TestRecoverToSnapshot:
         # Break the chain by appending a malformed event
         events_path = home / "assembly.jsonl"
         # Corrupt: write a second event with wrong prev_hash to break chain
-        with open(events_path, "r") as f:
-            content = f.read()
         with open(events_path, "a") as f:
             # Write a valid-looking event but with a wrong prev_hash
             f.write(
@@ -479,7 +468,7 @@ class TestRecoverToSnapshot:
                 + timeline_id
                 + '","ts":"2026-05-21T00:00:00Z","actor":{"type":"agent","id":"x"},'
                 + '"prev_hash":"wrong-hash","hash":"also-wrong","kind":"clip.added",'
-                + '"payload":{"clip_id":"bad","kind":"visual","asset_id":"x"},'
+                + '"payload":{"clip_id":"bad","kind":"visual","track_id":"visual","asset_id":"x"},'
                 + '"schema_version":2}\n'
             )
 
@@ -493,7 +482,143 @@ class TestRecoverToSnapshot:
                     "last_hash": e1.hash,
                     "version": 1,
                 },
-                snapshot_assembly={"clips": []},
+                snapshot_assembly=_raw_config(),
                 actor=_ACTOR,
                 reason="should fail",
             )
+
+    def test_recover_to_snapshot_rejects_unrelated_valid_config(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Snapshot config must match the replayed anchor projection."""
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+        from astrid.core.timeline.observability import ResolvedTarget
+
+        timeline_id = str(uuid4())
+        home = tmp_path / "timelines" / "01J00000000000000000000008"
+        home.mkdir(parents=True)
+
+        from astrid.core.project.jsonio import write_json_atomic
+        write_json_atomic(
+            home / "assembly.identity.json",
+            {
+                "schema_version": 1,
+                "timeline_id": timeline_id,
+                "timeline_ulid": "01J00000000000000000000008",
+                "backend": "local_fs",
+                "provenance": "imported",
+                "created_at": "2026-05-21T00:00:00Z",
+            },
+        )
+
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
+        e1 = backend.append_event(
+            timeline_id,
+            "timeline.config_replaced",
+            {"config": _raw_config("Video")},
+            actor=_ACTOR,
+        )
+
+        monkeypatch.setattr(
+            obs_mod,
+            "resolve_timeline_target",
+            lambda *a, **kw: ResolvedTarget(
+                backend="local_fs",
+                timeline_id=timeline_id,
+                timeline_ulid="01J00000000000000000000008",
+                timeline_home=home,
+                slug="test-tl8",
+                backend_name_display="local_fs",
+            ),
+        )
+
+        with pytest.raises(ProjectionError, match="snapshot TimelineConfig digest"):
+            recover_to_snapshot(
+                "test-project",
+                "test-tl8",
+                snapshot_metadata={
+                    "timeline_id": timeline_id,
+                    "last_event_id": e1.event_id,
+                    "last_hash": e1.hash,
+                    "version": 1,
+                },
+                snapshot_assembly=_raw_config("Unrelated"),
+                actor=_ACTOR,
+                reason="should fail",
+            )
+
+        assert [event.kind for event in backend.read_events()] == ["timeline.config_replaced"]
+
+    @pytest.mark.parametrize(
+        "snapshot_assembly",
+        [
+            {},
+            {"schema_version": 1, "assembly": {"tracks": [], "clips": []}},
+            {"tracks": [], "clips": [], "pool": {"entries": []}},
+            {"tracks": [], "clips": [], "arrangement": {"clips": []}},
+            {"clips": [{"id": "old", "kind": "visual", "track_id": "visual", "asset_id": "a1"}], "tracks": []},
+        ],
+    )
+    def test_recover_to_snapshot_rejects_wrapper_and_legacy_configs(
+        self, tmp_path: Path, monkeypatch, snapshot_assembly: dict
+    ):
+        """Snapshot recovery refuses non-raw runtime container shapes."""
+        from astrid.core.timeline import observability as obs_mod
+        from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+        from astrid.core.timeline.observability import ResolvedTarget
+
+        timeline_id = str(uuid4())
+        home = tmp_path / "timelines" / "01J00000000000000000000009"
+        home.mkdir(parents=True)
+
+        from astrid.core.project.jsonio import write_json_atomic
+        write_json_atomic(
+            home / "assembly.identity.json",
+            {
+                "schema_version": 1,
+                "timeline_id": timeline_id,
+                "timeline_ulid": "01J00000000000000000000009",
+                "backend": "local_fs",
+                "provenance": "imported",
+                "created_at": "2026-05-21T00:00:00Z",
+            },
+        )
+
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=home)
+        e1 = backend.append_event(
+            timeline_id,
+            "timeline.config_replaced",
+            {"config": _raw_config()},
+            actor=_ACTOR,
+        )
+
+        monkeypatch.setattr(
+            obs_mod,
+            "resolve_timeline_target",
+            lambda *a, **kw: ResolvedTarget(
+                backend="local_fs",
+                timeline_id=timeline_id,
+                timeline_ulid="01J00000000000000000000009",
+                timeline_home=home,
+                slug="test-tl9",
+                backend_name_display="local_fs",
+            ),
+        )
+
+        with pytest.raises(ProjectionError, match="valid raw TimelineConfig"):
+            recover_to_snapshot(
+                "test-project",
+                "test-tl9",
+                snapshot_metadata={
+                    "timeline_id": timeline_id,
+                    "last_event_id": e1.event_id,
+                    "last_hash": e1.hash,
+                    "version": 1,
+                },
+                snapshot_assembly=snapshot_assembly,
+                actor=_ACTOR,
+                reason="should fail",
+            )
+
+        assert [event.kind for event in backend.read_events()] == ["timeline.config_replaced"]

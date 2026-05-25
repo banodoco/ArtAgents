@@ -10,11 +10,11 @@ guard_canonical_entrypoint('builtin.scenes')
 import argparse
 import csv
 import json
-import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
 from ....audit import register_outputs
+from astrid.core.util.media import ffprobe_duration_seconds
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_output_paths(out_path: Path) -> tuple[Path, Path]:
+def resolve_output_paths(out_path: Path) -> tuple[Path, Path, Path]:
     resolved = out_path.resolve()
     if resolved.exists() and resolved.is_dir():
         json_path = resolved / "scenes.json"
@@ -46,7 +46,8 @@ def resolve_output_paths(out_path: Path) -> tuple[Path, Path]:
     else:
         json_path = resolved / "scenes.json"
     csv_path = json_path.with_name("scenes.csv")
-    return json_path, csv_path
+    items_path = json_path.with_name("scene_items.json")
+    return json_path, csv_path, items_path
 
 
 def timecode_seconds(value: Any) -> float:
@@ -56,22 +57,7 @@ def timecode_seconds(value: Any) -> float:
 
 
 def probe_duration(video_path: Path) -> float:
-    result = subprocess.run(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(result.stdout.strip())
+    return ffprobe_duration_seconds(video_path)
 
 
 def detect_scenes(video_path: Path, threshold: float) -> list[dict[str, float | int]]:
@@ -108,10 +94,16 @@ def detect_scenes(video_path: Path, threshold: float) -> list[dict[str, float | 
 
 
 def write_outputs(
-    scenes: list[dict[str, float | int]], json_path: Path, csv_path: Path
+    scenes: list[dict[str, float | int]],
+    json_path: Path,
+    csv_path: Path,
+    items_path: Path | None = None,
 ) -> None:
     json_path.parent.mkdir(parents=True, exist_ok=True)
+    items_path = items_path or json_path.with_name("scene_items.json")
     json_path.write_text(json.dumps(scenes, indent=2), encoding="utf-8")
+    scene_items = [f"scene-{int(scene['index']):04d}" for scene in scenes]
+    items_path.write_text(json.dumps(scene_items, indent=2), encoding="utf-8")
 
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -122,7 +114,11 @@ def write_outputs(
             )
     register_outputs(
         stage="scenes",
-        outputs=[("scenes", json_path, "Scene list"), ("scenes_csv", csv_path, "Scene CSV")],
+        outputs=[
+            ("scenes", json_path, "Scene list"),
+            ("scenes_csv", csv_path, "Scene CSV"),
+            ("scene_items", items_path, "Scene item ids"),
+        ],
         metadata={"scenes": len(scenes)},
     )
 
@@ -130,15 +126,17 @@ def write_outputs(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    from ..asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+    from ..asset_cache import run as asset_cache
+
+    args.video = Path(asset_cache.resolve_input(args.video, want="path"))
 
     video_path = args.video.resolve()
     if not video_path.is_file():
         raise SystemExit(f"Video file not found: {video_path}")
 
-    json_path, csv_path = resolve_output_paths(args.out)
+    json_path, csv_path, items_path = resolve_output_paths(args.out)
     scenes = detect_scenes(video_path, args.threshold)
-    write_outputs(scenes, json_path, csv_path)
+    write_outputs(scenes, json_path, csv_path, items_path)
     return 0
 
 

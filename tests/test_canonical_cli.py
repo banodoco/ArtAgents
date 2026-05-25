@@ -129,18 +129,32 @@ class CanonicalCliTest(unittest.TestCase):
 
         result, stdout, stderr = self.capture(
             executors_cli.main,
-            ["run", "builtin.render", "--out", "runs/example", "--brief", "brief.txt", "--dry-run"],
+            [
+                "run",
+                "builtin.render",
+                "--out",
+                "runs/example",
+                "--input",
+                "timeline=hype.timeline.json",
+                "--input",
+                "assets_registry=hype.assets.json",
+                "--dry-run",
+            ],
         )
         self.assertEqual(result, 0, stderr)
         self.assertIn("astrid.packs.builtin.render.run", stdout)
 
     def test_pipeline_dispatches_canonical_cli_modules(self) -> None:
-        with mock.patch.object(orchestrators_cli, "main", return_value=61) as main:
-            self.assertEqual(pipeline.main(["orchestrators", "list"]), 61)
-            main.assert_called_once_with(["list"])
-        with mock.patch.object(executors_cli, "main", return_value=62) as main:
-            self.assertEqual(pipeline.main(["executors", "list"]), 62)
-            main.assert_called_once_with(["list"])
+        with mock.patch(
+            "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+            return_value=object(),
+        ):
+            with mock.patch.object(orchestrators_cli, "main", return_value=61) as main:
+                self.assertEqual(pipeline.main(["orchestrators", "list"]), 61)
+                main.assert_called_once_with(["list"])
+            with mock.patch.object(executors_cli, "main", return_value=62) as main:
+                self.assertEqual(pipeline.main(["executors", "list"]), 62)
+                main.assert_called_once_with(["list"])
 
     def test_lifecycle_start_short_circuits_gate(self) -> None:
         """T21: pipeline.main(['start', ...]) routes to lifecycle.cmd_start
@@ -151,6 +165,10 @@ class CanonicalCliTest(unittest.TestCase):
         from astrid.core.task import lifecycle as lifecycle_module
 
         with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
             mock.patch.object(lifecycle_module, "cmd_start", return_value=71) as cmd_start_mock,
             mock.patch.object(task_gate, "gate_command") as gate_mock,
         ):
@@ -178,6 +196,10 @@ class CanonicalCliTest(unittest.TestCase):
             ("runs", "cmd_runs_ls", 76),
         ]:
             with (
+                mock.patch(
+                    "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                    return_value=object(),
+                ),
                 mock.patch.object(lifecycle_module, attr, return_value=rc_marker),
                 mock.patch.object(task_gate, "gate_command") as gate_mock,
             ):
@@ -190,12 +212,16 @@ class CanonicalCliTest(unittest.TestCase):
 
         # Confirm orchestrators list / executors list paths still work
         # unchanged after the lifecycle short-circuit was added (no shadow).
-        with mock.patch.object(orchestrators_cli, "main", return_value=81) as main:
-            self.assertEqual(pipeline.main(["orchestrators", "list"]), 81)
-            main.assert_called_once_with(["list"])
-        with mock.patch.object(executors_cli, "main", return_value=82) as main:
-            self.assertEqual(pipeline.main(["executors", "list"]), 82)
-            main.assert_called_once_with(["list"])
+        with mock.patch(
+            "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+            return_value=object(),
+        ):
+            with mock.patch.object(orchestrators_cli, "main", return_value=81) as main:
+                self.assertEqual(pipeline.main(["orchestrators", "list"]), 81)
+                main.assert_called_once_with(["list"])
+            with mock.patch.object(executors_cli, "main", return_value=82) as main:
+                self.assertEqual(pipeline.main(["executors", "list"]), 82)
+                main.assert_called_once_with(["list"])
 
 
 class CapabilityDiscoveryTest(unittest.TestCase):
@@ -246,12 +272,12 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         ids = [hit["id"] for hit in payload["hits"]]
         self.assertIn("builtin.transcribe", ids)
 
-    def test_executor_run_inputs_normalize_dashes_and_combine_repeats(self) -> None:
+    def test_executor_run_inputs_normalize_dashes_and_preserve_repeats(self) -> None:
         parsed = executors_cli._parse_input_values(
             ["match-mode=any", "match=photo", "match=realism"]
         )
         self.assertEqual(parsed["match_mode"], "any")
-        self.assertEqual(parsed["match"], "photo,realism")
+        self.assertEqual(parsed["match"], ["photo", "realism"])
 
     def test_orchestrators_search_finds_foley_pipeline(self) -> None:
         result, stdout, stderr = self.capture(

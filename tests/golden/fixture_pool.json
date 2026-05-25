@@ -119,17 +119,7 @@
     }
   ],
   "expected_assembly": {
-    "pool": {
-      "entries": [
-        {
-          "asset_id": "pool-asset-1",
-          "score": 0.85
-        },
-        {
-          "asset_id": "pool-asset-3",
-          "score": 0.0
-        }
-      ]
-    }
+    "clips": [],
+    "tracks": []
   }
 }

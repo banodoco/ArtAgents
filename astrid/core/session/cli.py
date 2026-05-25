@@ -4,27 +4,33 @@ The CLI gate (T8) routes everything outside the unbound allowlist into
 ``cmd_status`` / ``cmd_attach`` first so a fresh tab without a session
 gets a structured prompt rather than an opaque error.
 
+Takeover bootstrap contract: unbound ``astrid sessions takeover`` is an
+allowed entrypoint only when it first creates or selects a concrete caller
+session through the same identity/session path as ``attach``, persists that
+session, binds the tab, and then performs the lease takeover atomically. It
+must fail without mutation and point at ``astrid status`` when it cannot safely
+choose the project/run. Anonymous takeover is never valid.
+
 Output formats use literal template strings so tests can string-match.
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 import time
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from astrid.core.project.current_run import read_current_run
-from astrid.core.project.paths import project_dir, resolve_projects_root
+from astrid.core.project.paths import project_dir
 from astrid.core.project.project import ProjectError, require_project
 from astrid.core.timeline import crud as timeline_crud
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
 from astrid.core.session.binding import (
     ASTRID_SESSION_ID_ENV,
+    SESSION_FILE_NAME,
     SessionBindingError,
     resolve_current_session,
 )
@@ -73,7 +79,9 @@ NONE_PLACEHOLDER = "(none)"
 
 
 def _now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    from astrid.core.util.time import utc_now_iso
+
+    return utc_now_iso()
 
 
 def _parse_agent_override(raw: str) -> str:
@@ -169,6 +177,55 @@ def _find_reusable_session(slug: str, agent_id: str) -> Session | None:
         return sorted(candidates, key=lambda s: s.last_used_at or "", reverse=True)[0]
     # (4) Lease held by a different actor → defer to takeover flow.
     return None
+
+
+def _write_session_pointer(slug: str, session_id: str) -> None:
+    session_file = project_dir(slug) / SESSION_FILE_NAME
+    session_file.parent.mkdir(parents=True, exist_ok=True)
+    session_file.write_text(
+        f"{ASTRID_SESSION_ID_ENV}={session_id}\n", encoding="utf-8"
+    )
+    try:
+        session_file.chmod(0o600)
+    except OSError:
+        pass
+
+
+def _make_bootstrap_session(
+    *,
+    slug: str,
+    agent_id: str,
+    role: SessionRole,
+    run_id: str | None,
+    timeline_slug: str | None,
+    timeline_id: str | None,
+    now: str,
+) -> Session:
+    return Session(
+        id=generate_ulid(),
+        project=slug,
+        timeline=timeline_slug,
+        timeline_id=timeline_id,
+        run_id=run_id,
+        agent_id=agent_id,
+        attached_at=now,
+        last_used_at=now,
+        role=role,
+    )
+
+
+def _persist_bootstrap_session(
+    session: Session,
+    *,
+    error_prefix: str,
+) -> bool:
+    session.to_json(session_path(session.id))
+    try:
+        _write_session_pointer(session.project, session.id)
+    except OSError as exc:
+        print(f"{error_prefix}: could not bind session pointer: {exc}", file=sys.stderr)
+        return False
+    return True
 
 
 def _last_event_ts(run_dir: Path) -> str | None:
@@ -287,18 +344,11 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
             else _find_reusable_session(slug, agent_id)
         )
         if _reusable is not None:
-            from astrid.core.session.binding import SESSION_FILE_NAME as _SF
             refreshed = _reusable.with_changes(last_used_at=_now_iso())
             refreshed.to_json(session_path(refreshed.id))
             # File-bound session pointer (T9 / FLAG-S1-003).
             try:
-                session_file = project_dir(slug) / _SF
-                session_file.parent.mkdir(parents=True, exist_ok=True)
-                session_file.write_text(f"{refreshed.id}\n", encoding="utf-8")
-                try:
-                    session_file.chmod(0o600)
-                except OSError:
-                    pass
+                _write_session_pointer(slug, refreshed.id)
             except OSError:
                 pass
             print(ATTACH_HEADER_REUSED, file=out)
@@ -354,22 +404,6 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                         file=sys.stderr,
                     )
                     resolved_timeline_slug = None
-                elif len(available) == 1:
-                    choice = available[0]
-                    found = find_timeline_by_slug(slug, choice.slug)
-                    if found is None:
-                        print(
-                            f"attach: timeline '{choice.slug}' not found in project '{slug}'",
-                            file=sys.stderr,
-                        )
-                        return 2
-                    resolved_timeline_id = found[0]
-                    resolved_timeline_slug = choice.slug
-                    print(
-                        f"Using only timeline: {choice.slug}. "
-                        "Use --timeline to override.",
-                        file=sys.stderr,
-                    )
                 elif sys.stdin.isatty():
                     print("Available timelines:", file=sys.stderr)
                     for t in available:
@@ -415,37 +449,22 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
         # else: same session id (resumed) → writer
 
     if not args.session:
-        session = Session(
-            id=sid,
-            project=slug,
-            timeline=resolved_timeline_slug,
-            timeline_id=resolved_timeline_id,
-            run_id=on_disk_run_id,
+        session = _make_bootstrap_session(
+            slug=slug,
             agent_id=agent_id,
-            attached_at=_now_iso(),
-            last_used_at=_now_iso(),
             role=role,
+            run_id=on_disk_run_id,
+            timeline_slug=resolved_timeline_slug,
+            timeline_id=resolved_timeline_id,
+            now=_now_iso(),
         )
-        session.to_json(session_path(sid))
         # T9 / FLAG-S1-003: write a file-bound session pointer so subsequent
         # CLI calls in the same project survive ASTRID_SESSION_ID being lost
         # between terminal invocations. Mode 0o600 to prevent other-user
         # readability. .astrid-session is gitignored.
-        try:
-            from astrid.core.session.binding import SESSION_FILE_NAME as _SF
-            _attach_proj_root = project_dir(slug)
-            _attach_proj_root.mkdir(parents=True, exist_ok=True)
-            _session_pointer = _attach_proj_root / _SF
-            _session_pointer.write_text(
-                f"{ASTRID_SESSION_ID_ENV}={sid}\n", encoding="utf-8"
-            )
-            try:
-                import os as _os
-                _os.chmod(_session_pointer, 0o600)
-            except OSError:
-                pass
-        except Exception:
-            pass
+        if not _persist_bootstrap_session(session, error_prefix="attach"):
+            return 2
+        sid = session.id
         if getattr(args, "set_default", False):
             set_default_project(
                 slug,
@@ -520,6 +539,105 @@ def cmd_sessions_detach(args: argparse.Namespace, *, out: Any = None) -> int:
 # ----- cmd_sessions_takeover --------------------------------------------
 
 
+def _print_takeover_status_recovery(reason: str) -> None:
+    print(f"takeover: {reason}", file=sys.stderr)
+    print("first recovery action: astrid status", file=sys.stderr)
+
+
+def _resolve_unbound_takeover_target(target: str) -> tuple[str, str, Path, str | None] | None:
+    target_path = session_path(target)
+    if target_path.exists():
+        target_sess = Session.from_json(target_path)
+        if target_sess.run_id is None:
+            _print_takeover_status_recovery(
+                f"target session {target!r} is not bound to a run"
+            )
+            return None
+        run_dir = project_dir(target_sess.project) / "runs" / target_sess.run_id
+        if not (run_dir / EVENTS_FILENAME).exists():
+            _print_takeover_status_recovery(
+                f"target session {target!r} points at missing run "
+                f"{target_sess.run_id!r} in project {target_sess.project!r}"
+            )
+            return None
+        return target_sess.project, target_sess.run_id, run_dir, target_sess.id
+
+    matches: list[tuple[str, Path]] = []
+    for slug in discover_projects():
+        candidate = project_dir(slug) / "runs" / target
+        if (candidate / EVENTS_FILENAME).exists():
+            matches.append((slug, candidate))
+    if not matches:
+        _print_takeover_status_recovery(
+            f"{target!r} matches neither a session id nor a discovered run id"
+        )
+        return None
+    if len(matches) > 1:
+        projects = ", ".join(slug for slug, _ in matches)
+        _print_takeover_status_recovery(
+            f"run id {target!r} is ambiguous across projects: {projects}"
+        )
+        return None
+    slug, run_dir = matches[0]
+    return slug, target, run_dir, None
+
+
+def _bootstrap_takeover_session(
+    slug: str,
+    run_id: str,
+    *,
+    role: SessionRole,
+    out: Any,
+) -> Session | None:
+    try:
+        identity = _ensure_identity(out=out)
+        require_project(slug)
+    except (IdentityError, ProjectError) as exc:
+        print(f"takeover: {exc}", file=sys.stderr)
+        return None
+
+    now = _now_iso()
+    reusable = _find_reusable_session(slug, identity.agent_id)
+    if reusable is not None:
+        session = reusable.with_changes(
+            run_id=run_id,
+            role=role,
+            last_used_at=now,
+        )
+    else:
+        timeline_id = read_project_default(slug)
+        timeline_slug = (
+            find_timeline_slug_for_ulid(slug, timeline_id)
+            if timeline_id is not None
+            else None
+        )
+        session = _make_bootstrap_session(
+            slug=slug,
+            agent_id=identity.agent_id,
+            role=role,
+            run_id=run_id,
+            timeline_slug=timeline_slug,
+            timeline_id=timeline_id,
+            now=now,
+        )
+    if not _persist_bootstrap_session(session, error_prefix="takeover"):
+        return None
+    return session
+
+
+def _mark_takeover_session_writer(session: Session, run_id: str) -> None:
+    promoted = session.with_changes(
+        run_id=run_id,
+        role="writer",
+        last_used_at=_now_iso(),
+    )
+    promoted.to_json(session_path(promoted.id))
+    try:
+        _write_session_pointer(promoted.project, promoted.id)
+    except OSError:
+        pass
+
+
 def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
     if out is None:
         out = sys.stdout
@@ -531,49 +649,83 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
     except SessionBindingError as exc:
         print(f"takeover: {exc}", file=sys.stderr)
         return 2
+    bootstrapped_unbound = False
     if current is None:
-        print(
-            "takeover: caller not bound (ASTRID_SESSION_ID unset); attach first",
-            file=sys.stderr,
-        )
-        return 2
-
-    # Resolve the target: try session-id first, then run-id within the
-    # caller's project.
-    target_path = session_path(args.target)
-    target_run_dir: Path | None = None
-    prev_session_id: str | None = None
-    if target_path.exists():
-        target_sess = Session.from_json(target_path)
-        if target_sess.run_id is None:
+        resolved = _resolve_unbound_takeover_target(args.target)
+        if resolved is None:
+            return 2
+        slug, run_id, target_run_dir, prev_session_id = resolved
+        try:
+            lease = read_lease(target_run_dir)
+        except LeaseError as exc:
             print(
-                f"takeover: target session {args.target!r} is not bound to a run",
+                f"takeover: cannot read canonical lease for {target_run_dir.name!r}: {exc}",
                 file=sys.stderr,
             )
             return 2
-        target_run_dir = (
-            project_dir(target_sess.project) / "runs" / target_sess.run_id
+        role: SessionRole = (
+            "orphan-pending"
+            if lease.get("attached_session_id") is None
+            else "reader"
         )
-        prev_session_id = target_sess.id
+        current = _bootstrap_takeover_session(
+            slug,
+            run_id,
+            role=role,
+            out=out,
+        )
+        if current is None:
+            return 2
+        bootstrapped_unbound = True
     else:
-        # Treat as a run id within the caller's project.
-        candidate = project_dir(current.project) / "runs" / args.target
-        if not (candidate / "events.jsonl").exists():
+        # Resolve the target: try session-id first, then run-id within the
+        # caller's project.
+        target_path = session_path(args.target)
+        target_run_dir = None
+        prev_session_id = None
+        if target_path.exists():
+            target_sess = Session.from_json(target_path)
+            if target_sess.run_id is None:
+                print(
+                    f"takeover: target session {args.target!r} is not bound to a run",
+                    file=sys.stderr,
+                )
+                return 2
+            target_run_dir = (
+                project_dir(target_sess.project) / "runs" / target_sess.run_id
+            )
+            prev_session_id = target_sess.id
+        else:
+            # Treat as a run id within the caller's project.
+            candidate = project_dir(current.project) / "runs" / args.target
+            if not (candidate / EVENTS_FILENAME).exists():
+                print(
+                    f"takeover: {args.target!r} matches neither a session id nor a run id "
+                    f"in project {current.project!r}",
+                    file=sys.stderr,
+                )
+                return 2
+            target_run_dir = candidate
+            prev_session_id = None
+
+        assert target_run_dir is not None
+        try:
+            lease = read_lease(target_run_dir)
+        except LeaseError as exc:
             print(
-                f"takeover: {args.target!r} matches neither a session id nor a run id "
-                f"in project {current.project!r}",
+                f"takeover: cannot read canonical lease for {target_run_dir.name!r}: {exc}",
                 file=sys.stderr,
             )
             return 2
-        target_run_dir = candidate
-        lease = read_lease(target_run_dir)
+    if prev_session_id is None:
         prev_session_id = lease.get("attached_session_id")
-
-    assert target_run_dir is not None
-    lease = read_lease(target_run_dir)
     if lease.get("attached_session_id") is None:
         try:
-            updated = claim_orphan_lease(target_run_dir, new_session_id=current.id)
+            updated = claim_orphan_lease(
+                target_run_dir,
+                new_session_id=current.id,
+                force=args.force,
+            )
         except LeaseError as exc:
             print(f"takeover: {exc}", file=sys.stderr)
             return 2
@@ -582,27 +734,28 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
             f"writer={updated['attached_session_id']}",
             file=out,
         )
+        if bootstrapped_unbound:
+            _mark_takeover_session_writer(current, target_run_dir.name)
         return 0
 
-    if _is_target_warm(target_run_dir) and not args.force:
-        print(
-            f"takeover: target wrote within the last {STUCK_NO_EVENT_SECONDS}s; "
-            "may still be live elsewhere — confirm and re-run with --force",
-            file=sys.stderr,
+    try:
+        updated = bump_epoch_and_swap_session(
+            target_run_dir,
+            new_session_id=current.id,
+            prev_session_id=prev_session_id,
+            reason="cli-takeover",
+            force=args.force,
         )
+    except LeaseError as exc:
+        print(f"takeover: {exc}", file=sys.stderr)
         return 2
-
-    updated = bump_epoch_and_swap_session(
-        target_run_dir,
-        new_session_id=current.id,
-        prev_session_id=prev_session_id,
-        reason="cli-takeover",
-    )
     print(
         f"took over; writer_epoch={updated['writer_epoch']}, "
         f"writer={updated['attached_session_id']}",
         file=out,
     )
+    if bootstrapped_unbound:
+        _mark_takeover_session_writer(current, target_run_dir.name)
     return 0
 
 
@@ -749,12 +902,20 @@ def _render_bound_status(session: Session, *, out: Any) -> int:
             inbox_count = sum(1 for p in inbox_dir.iterdir() if p.is_file())
         # Role correction from the lease (the on-disk session role is just
         # a hint; the lease is authoritative).
+        lease_error: str | None = None
         try:
             lease = read_lease(run_dir)
-        except LeaseError:
+        except LeaseError as exc:
             lease = {"attached_session_id": None}
+            lease_error = str(exc)
         attached = lease.get("attached_session_id")
-        if attached is None:
+        if lease_error is not None:
+            role_line = "role: lease-error"
+            takeover_hint = (
+                f"lease error: {lease_error}; recovery: inspect {run_id}/lease.json "
+                "or migrate legacy active_run.json before writing"
+            )
+        elif attached is None:
             role_line = "role: orphan-pending"
             takeover_hint = TAKEOVER_HINT_ORPHAN.format(run_id=run_id)
         elif attached != session.id:

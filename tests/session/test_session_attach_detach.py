@@ -11,7 +11,8 @@ import pytest
 
 from astrid.core.project import paths as project_paths
 from astrid.core.project.current_run import write_current_run
-from astrid.core.session import cli, paths as session_paths
+from astrid.core.session import cli
+from astrid.core.session import paths as session_paths
 from astrid.core.session.identity import Identity, write_identity
 from astrid.core.session.lease import release_writer_lease, write_lease_init
 
@@ -23,57 +24,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     (tmp_path / "home").mkdir()
     write_identity(Identity(agent_id="claude-1", created_at="2026-05-11T00:00:00Z"))
     return {"home": tmp_path / "home", "projects": tmp_path / "projects"}
-
-
-def _seed_project(projects_root: Path, slug: str) -> Path:
-    pdir = projects_root / slug
-    pdir.mkdir(parents=True, exist_ok=True)
-
-    # Seed a default timeline so Sprint 2 resolution works.
-    from astrid.core.session.ulid import generate_ulid
-
-    timeline_ulid = generate_ulid()
-    tdir = pdir / "timelines" / timeline_ulid
-    tdir.mkdir(parents=True, exist_ok=True)
-    (tdir / "assembly.json").write_text(
-        json.dumps({"schema_version": 1, "assembly": {}}), encoding="utf-8"
-    )
-    (tdir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "contributing_runs": [],
-                "final_outputs": [],
-                "tombstoned_at": None,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tdir / "display.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "slug": "primary",
-                "name": "Primary",
-                "is_default": True,
-            }
-        ),
-        encoding="utf-8",
-    )
-    (pdir / "project.json").write_text(
-        json.dumps(
-            {
-                "created_at": "2026-05-11T00:00:00Z",
-                "name": slug,
-                "schema_version": 1,
-                "slug": slug,
-                "updated_at": "2026-05-11T00:00:00Z",
-                "default_timeline_id": timeline_ulid,
-            }
-        ),
-        encoding="utf-8",
-    )
-    return pdir
 
 
 def _args(**kw: object) -> argparse.Namespace:
@@ -92,8 +42,10 @@ def _args(**kw: object) -> argparse.Namespace:
 # ----- cmd_attach -------------------------------------------------------
 
 
-def test_attach_no_current_run_role_is_writer(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_attach_no_current_run_role_is_writer(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     rc = cli.cmd_attach(_args(), out=buf)
     assert rc == 0
@@ -108,11 +60,14 @@ def test_attach_no_current_run_role_is_writer(env: dict[str, Path]) -> None:
 
 
 def test_attach_noninteractive_identity_bootstrap_errors_cleanly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    seed_project,
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
-    _seed_project(tmp_path / "projects", "demo")
+    seed_project(tmp_path / "projects", "demo")
 
     def eof_input(_prompt: str) -> str:
         raise EOFError
@@ -126,12 +81,15 @@ def test_attach_noninteractive_identity_bootstrap_errors_cleanly(
 
 
 def test_attach_without_project_uses_default(
-    env: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seed_project,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     (env["home"] / "config.json").write_text(json.dumps({"default_project": "demo"}), encoding="utf-8")
     buf = StringIO()
     rc = cli.cmd_attach(_args(project=None), out=buf)
@@ -142,12 +100,16 @@ def test_attach_without_project_uses_default(
 
 
 def test_attach_without_project_rejects_missing_default(
-    env: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    env: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    seed_project,
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     (workspace / ".astrid").mkdir()
     (workspace / ".astrid" / "config.json").write_text(
         json.dumps({"default_project": "missing"}), encoding="utf-8"
@@ -159,7 +121,7 @@ def test_attach_without_project_rejects_missing_default(
     assert "astrid attach demo --default" in captured.err
 
 
-def test_attach_uses_only_timeline_when_no_default_timeline(
+def test_attach_requires_explicit_timeline_when_default_sentinel_is_none(
     env: dict[str, Path], capsys: pytest.CaptureFixture[str]
 ) -> None:
     from astrid.core.project.project import create_project
@@ -170,16 +132,19 @@ def test_attach_uses_only_timeline_when_no_default_timeline(
     buf = StringIO()
     rc = cli.cmd_attach(_args(), out=buf)
     captured = capsys.readouterr()
-    assert rc == 0
-    assert "Using only timeline: main" in captured.err
-    assert "timeline: main" in buf.getvalue()
+    assert rc == 2
+    assert "no default timeline; pass --timeline <slug>" in captured.err
+    assert not (env["projects"] / "demo" / cli.SESSION_FILE_NAME).exists()
 
 
 def test_attach_with_default_flag_writes_workspace_default(
-    env: dict[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    seed_project,
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     rc = cli.cmd_attach(_args(set_default=True), out=buf)
     assert rc == 0
@@ -190,9 +155,9 @@ def test_attach_with_default_flag_writes_workspace_default(
 
 
 def test_attach_to_held_run_yields_reader_role_with_takeover_hint(
-    env: dict[str, Path],
+    env: dict[str, Path], seed_project
 ) -> None:
-    pdir = _seed_project(env["projects"], "demo")
+    pdir = seed_project(env["projects"], "demo")
     run_dir = pdir / "runs" / "01RUN"
     run_dir.mkdir(parents=True)
     (run_dir / "events.jsonl").touch()
@@ -208,9 +173,9 @@ def test_attach_to_held_run_yields_reader_role_with_takeover_hint(
 
 
 def test_attach_to_orphan_lease_yields_orphan_pending_role(
-    env: dict[str, Path],
+    env: dict[str, Path], seed_project
 ) -> None:
-    pdir = _seed_project(env["projects"], "demo")
+    pdir = seed_project(env["projects"], "demo")
     run_dir = pdir / "runs" / "01RUN"
     run_dir.mkdir(parents=True)
     (run_dir / "events.jsonl").touch()
@@ -225,8 +190,10 @@ def test_attach_to_orphan_lease_yields_orphan_pending_role(
     assert "astrid sessions takeover 01RUN" in output
 
 
-def test_attach_with_session_resumes_existing(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_attach_with_session_resumes_existing(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     # Create an initial session.
     buf = StringIO()
     cli.cmd_attach(_args(), out=buf)
@@ -241,15 +208,19 @@ def test_attach_with_session_resumes_existing(env: dict[str, Path]) -> None:
     assert len(list((env["home"] / "sessions").iterdir())) == 1
 
 
-def test_attach_resume_missing_id_errors(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_attach_resume_missing_id_errors(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     rc = cli.cmd_attach(_args(session="NONEXISTENT"), out=buf)
     assert rc == 2
 
 
-def test_attach_as_agent_overrides_identity(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_attach_as_agent_overrides_identity(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     rc = cli.cmd_attach(_args(as_agent="agent:codex-1"), out=buf)
     assert rc == 0
@@ -258,21 +229,23 @@ def test_attach_as_agent_overrides_identity(env: dict[str, Path]) -> None:
     assert payload["agent_id"] == "codex-1"
 
 
-def test_attach_as_agent_rejects_malformed(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_attach_as_agent_rejects_malformed(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     buf = StringIO()
     rc = cli.cmd_attach(_args(as_agent="codex-1"), out=buf)  # missing "agent:" prefix
     assert rc == 2
 
 
 def test_status_honors_attach_as_override(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
 ) -> None:
     """Fix 2: `attach --as agent:<slug>` must win over the on-disk
     identity record when ``status`` reports the actor. The identity
     fixture seeds ``agent_id=claude-1``; we attach as ``foo`` and assert
     ``status`` prints ``agent: foo``, not the seeded identity."""
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     attach_buf = StringIO()
     rc = cli.cmd_attach(_args(as_agent="agent:foo"), out=attach_buf)
     assert rc == 0
@@ -299,9 +272,9 @@ def test_sessions_ls_empty(env: dict[str, Path]) -> None:
     assert "no sessions" in buf.getvalue()
 
 
-def test_sessions_ls_lists_all(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
-    _seed_project(env["projects"], "other")
+def test_sessions_ls_lists_all(env: dict[str, Path], seed_project) -> None:
+    seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "other")
     cli.cmd_attach(_args(project="demo"), out=StringIO())
     cli.cmd_attach(_args(project="other"), out=StringIO())
     buf = StringIO()
@@ -315,8 +288,10 @@ def test_sessions_ls_lists_all(env: dict[str, Path]) -> None:
 # ----- cmd_sessions_detach ----------------------------------------------
 
 
-def test_detach_by_id_removes_session_file(env: dict[str, Path]) -> None:
-    _seed_project(env["projects"], "demo")
+def test_detach_by_id_removes_session_file(
+    env: dict[str, Path], seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
     cli.cmd_attach(_args(), out=StringIO())
     sid = next(iter((env["home"] / "sessions").iterdir())).stem
     rc = cli.cmd_sessions_detach(argparse.Namespace(session_id=sid), out=StringIO())
@@ -325,9 +300,9 @@ def test_detach_by_id_removes_session_file(env: dict[str, Path]) -> None:
 
 
 def test_detach_without_id_uses_env(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
 ) -> None:
-    _seed_project(env["projects"], "demo")
+    seed_project(env["projects"], "demo")
     cli.cmd_attach(_args(), out=StringIO())
     sid = next(iter((env["home"] / "sessions").iterdir())).stem
     monkeypatch.setenv("ASTRID_SESSION_ID", sid)

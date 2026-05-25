@@ -62,14 +62,14 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
     timeline_ulid = result["ulid"]
     timeline_dir = proj_root / "timelines" / timeline_ulid
 
-    # Plan
-    plan_payload = {
-        "plan_id": "p-export",
+    # Project-level plan cache. Run exports must not blindly copy this mutable
+    # file into every run bundle.
+    project_plan_payload = {
+        "plan_id": "project-cache-plan",
         "version": 2,
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo done",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -77,14 +77,39 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
         ],
     }
     plan_path = proj_root / "plan.json"
-    plan_path.write_text(json.dumps(plan_payload), encoding="utf-8")
+    plan_path.write_text(json.dumps(project_plan_payload), encoding="utf-8")
     plan_hash = compute_plan_hash(plan_path)
 
     runs_dir = proj_root / "runs"
+    run1_plan_payload = {
+        "plan_id": "run-one-snapshot",
+        "version": 2,
+        "steps": [
+            {
+                "id": "s1",
+                "adapter": "local",
+                "command": "echo run-one",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+            },
+        ],
+    }
+    run2_plan_payload = {
+        "plan_id": "run-two-snapshot",
+        "version": 2,
+        "steps": [
+            {
+                "id": "s1",
+                "adapter": "local",
+                "command": "echo run-two",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+            },
+        ],
+    }
 
     # ── Run 1: completed ────────────────────────────────────────────────
     run1_root = runs_dir / R1
     run1_root.mkdir(parents=True, exist_ok=True)
+    (run1_root / "plan.json").write_text(json.dumps(run1_plan_payload), encoding="utf-8")
 
     events1 = _build_chain([
         {"kind": "run_started", "run_id": R1, "plan_hash": plan_hash, "ts": "2026-01-01T00:00:00Z"},
@@ -104,6 +129,7 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
     # ── Run 2: aborted ──────────────────────────────────────────────────
     run2_root = runs_dir / R2
     run2_root.mkdir(parents=True, exist_ok=True)
+    (run2_root / "plan.json").write_text(json.dumps(run2_plan_payload), encoding="utf-8")
 
     events2 = _build_chain([
         {"kind": "run_started", "run_id": R2, "plan_hash": plan_hash, "ts": "2026-01-01T01:00:00Z"},
@@ -137,6 +163,9 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
         "run2_id": R2,
         "runs_dir": runs_dir,
         "plan_hash": plan_hash,
+        "run1_plan": run1_plan_payload,
+        "run2_plan": run2_plan_payload,
+        "project_plan": project_plan_payload,
     }
 
 
@@ -175,6 +204,13 @@ def test_timeline_export_excludes_aborted_by_default(
         assert f"runs/{timeline_fixture['run1_id']}/plan.json" in names
         assert f"runs/{timeline_fixture['run1_id']}/run.json" in names
         assert f"runs/{timeline_fixture['run1_id']}/produces/output.mp4" in names
+        exported_plan = json.loads(
+            tf.extractfile(f"runs/{timeline_fixture['run1_id']}/plan.json")
+            .read()
+            .decode("utf-8")
+        )
+        assert exported_plan == timeline_fixture["run1_plan"]
+        assert exported_plan != timeline_fixture["project_plan"]
         # Aborted run excluded
         run2_in_names = any(timeline_fixture['run2_id'] in n for n in names)
         assert not run2_in_names, f"Aborted run {timeline_fixture['run2_id']} found in export"
@@ -215,6 +251,42 @@ def test_timeline_export_includes_aborted_with_flag(
         names = sorted(tf.getnames())
         assert f"runs/{timeline_fixture['run1_id']}/events.jsonl" in names
         assert f"runs/{timeline_fixture['run2_id']}/events.jsonl" in names
+        exported_plan = json.loads(
+            tf.extractfile(f"runs/{timeline_fixture['run2_id']}/plan.json")
+            .read()
+            .decode("utf-8")
+        )
+        assert exported_plan == timeline_fixture["run2_plan"]
+
+
+def test_timeline_export_dedupes_duplicate_manifest_runs(
+    tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.timeline import cli as tm_cli
+    from unittest.mock import MagicMock
+    import argparse
+
+    manifest_path = timeline_fixture["timeline_dir"] / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["contributing_runs"] = [
+        timeline_fixture["run1_id"],
+        timeline_fixture["run1_id"],
+        timeline_fixture["run2_id"],
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    mock_session = MagicMock()
+    mock_session.project = timeline_fixture["slug"]
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
+
+    out_path = tmp_projects_root / "bundle-deduped.tar.gz"
+    args = argparse.Namespace(slug="main-line", out=str(out_path), include_aborted=False)
+    rc = tm_cli.cmd_export(args)
+    assert rc == 0
+
+    with tarfile.open(out_path, "r:gz") as tf:
+        names = sorted(tf.getnames())
+        assert names.count(f"runs/{timeline_fixture['run1_id']}/events.jsonl") == 1
 
 
 # ── Project export ──────────────────────────────────────────────────────
@@ -244,4 +316,55 @@ def test_project_export_includes_all_timelines(
         assert f"timelines/{ulid}/manifest.json" in names
         assert f"timelines/{ulid}/display.json" in names
         assert f"runs/{timeline_fixture['run1_id']}/events.jsonl" in names
+        exported_plan = json.loads(
+            tf.extractfile(f"runs/{timeline_fixture['run1_id']}/plan.json")
+            .read()
+            .decode("utf-8")
+        )
+        assert exported_plan == timeline_fixture["run1_plan"]
         assert "MANIFEST.txt" in names
+
+
+def test_timeline_export_falls_back_to_plan_initialized_event(
+    tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Old runs without run-local plan.json still export their genesis plan."""
+    from astrid.core.timeline import cli as tm_cli
+    from unittest.mock import MagicMock
+    import argparse
+
+    run_root = timeline_fixture["runs_dir"] / timeline_fixture["run1_id"]
+    (run_root / "plan.json").unlink()
+    events = _build_chain([
+        {
+            "kind": "plan_initialized",
+            "run_id": timeline_fixture["run1_id"],
+            "plan": timeline_fixture["run1_plan"],
+            "plan_hash": timeline_fixture["plan_hash"],
+            "ts": "2026-01-01T00:00:00Z",
+        },
+        {
+            "kind": "run_started",
+            "run_id": timeline_fixture["run1_id"],
+            "plan_hash": timeline_fixture["plan_hash"],
+            "ts": "2026-01-01T00:00:01Z",
+        },
+        {"kind": "run_completed", "ts": "2026-01-01T00:00:02Z"},
+    ])
+    _write_events(run_root / "events.jsonl", events)
+
+    mock_session = MagicMock()
+    mock_session.project = timeline_fixture["slug"]
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
+
+    out_path = tmp_projects_root / "bundle-genesis-plan.tar.gz"
+    args = argparse.Namespace(slug="main-line", out=str(out_path), include_aborted=False)
+    assert tm_cli.cmd_export(args) == 0
+
+    with tarfile.open(out_path, "r:gz") as tf:
+        exported_plan = json.loads(
+            tf.extractfile(f"runs/{timeline_fixture['run1_id']}/plan.json")
+            .read()
+            .decode("utf-8")
+        )
+        assert exported_plan == timeline_fixture["run1_plan"]

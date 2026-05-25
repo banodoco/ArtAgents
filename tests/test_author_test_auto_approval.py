@@ -2,10 +2,10 @@
 
 Behavior under test:
   * cmd_start succeeds with ASTRID_AUTHOR_TEST=1 (FLAG-P9-001 — no guard).
-  * Without ASTRID_AUTHOR_TEST, an ack with --actor mismatching
+  * Without ASTRID_AUTHOR_TEST, an ack with --human mismatching
     ASTRID_ACTOR is rejected (existing self-ack-prep guard fires).
   * With ASTRID_AUTHOR_TEST=1, the same mismatched ack succeeds. The
-    resulting step_attested event keeps the canonical attestor_kind='actor'
+    resulting step_attested event keeps the canonical attestor_kind='human'
     (NOT 'author_test' — FLAG-P9-002) and gains source='author_test' on the
     way through _dispatch_attested.
 
@@ -15,9 +15,13 @@ active_run.json/plan.json by hand.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parent))
+from _lifecycle_fixtures import bind_writer_session  # noqa: E402
 
 from astrid.core.task.env import ASTRID_ACTOR, ASTRID_AUTHOR_TEST
 from astrid.core.task.events import read_events
@@ -35,7 +39,7 @@ def app():
             "review",
             command="review",
             instructions="approve",
-            ack="actor",
+            ack="human",
         ),
     ]
 '''
@@ -61,9 +65,12 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
     # Compile the demo pack first (cmd_start expects build/<orch>.json).
     from astrid.orchestrate.compile import compile_to_path
     from astrid.core.project.project import create_project
+    from astrid.core.timeline.crud import create_timeline
     compile_to_path("demo.app", packs_root=packs)
     # cmd_start requires the project to be registered before it accepts --project.
     create_project(slug, root=tmp_projects_root, exist_ok=True)
+    create_timeline(slug, "main", is_default=True, root=tmp_projects_root)
+    bind_writer_session(tmp_projects_root, slug)
 
     monkeypatch.setenv(ASTRID_ACTOR, "alice")
     monkeypatch.setenv(ASTRID_AUTHOR_TEST, "1")
@@ -74,7 +81,7 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
     )
     assert rc_start == 0, "cmd_start must not gate on ASTRID_AUTHOR_TEST (FLAG-P9-001)"
 
-    # Without ASTRID_AUTHOR_TEST, --actor mismatch must be rejected.
+    # Without ASTRID_AUTHOR_TEST, --human mismatch must be rejected.
     monkeypatch.delenv(ASTRID_AUTHOR_TEST, raising=False)
     rc_reject = cmd_ack(
         [
@@ -83,12 +90,12 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
             slug,
             "--decision",
             "approve",
-            "--actor",
+            "--human",
             "mallory",
         ],
         projects_root=tmp_projects_root,
     )
-    assert rc_reject != 0, "actor mismatch must be rejected without ASTRID_AUTHOR_TEST"
+    assert rc_reject != 0, "human mismatch must be rejected without ASTRID_AUTHOR_TEST"
 
     events_path = tmp_projects_root / slug / "runs" / "r1" / "events.jsonl"
     events_before = read_events(events_path)
@@ -96,7 +103,7 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
         ev.get("kind") == "step_attested" for ev in events_before
     ), "rejected ack must not write step_attested"
 
-    # With ASTRID_AUTHOR_TEST=1, the same mismatched --actor is accepted.
+    # With ASTRID_AUTHOR_TEST=1, the same mismatched --human is accepted.
     monkeypatch.setenv(ASTRID_AUTHOR_TEST, "1")
     rc_accept = cmd_ack(
         [
@@ -105,18 +112,19 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
             slug,
             "--decision",
             "approve",
-            "--actor",
+            "--human",
             "mallory",
         ],
         projects_root=tmp_projects_root,
     )
-    assert rc_accept == 0, "actor mismatch must be accepted with ASTRID_AUTHOR_TEST=1"
+    assert rc_accept == 0, "human mismatch must be accepted with ASTRID_AUTHOR_TEST=1"
 
     events = read_events(events_path)
     last = events[-1]
     assert last["kind"] == "step_attested"
-    # FLAG-P9-002: kind enum stays canonical ('actor'), NOT 'author_test'.
-    assert last["attestor_kind"] == "actor"
+    # FLAG-P9-002: kind enum stays canonical ('human'), NOT 'author_test'.
+    assert last["attestor_kind"] == "human"
+    assert last["attestor"] == "human:mallory"
     assert last["attestor_id"] == "mallory"
     # Provenance rides on a separate event['source'] field.
     assert last["source"] == "author_test"

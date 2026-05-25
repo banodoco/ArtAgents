@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import multiprocessing
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 @dataclass
@@ -74,8 +75,13 @@ def _snapshot_disk_state(run_dir: Path) -> dict[str, str]:
 
 def race_two_tabs(
     setup_fn: Callable[[], Path],
-    contended_command: list[str],
+    contended_command: list[str] | None = None,
     *,
+    p1_command: list[str] | None = None,
+    p2_command: list[str] | None = None,
+    env_overlay: Mapping[str, str | None] | None = None,
+    p1_env_overlay: Mapping[str, str | None] | None = None,
+    p2_env_overlay: Mapping[str, str | None] | None = None,
     expected_winner_count: int = 1,
     timeout_seconds: float = 10.0,
 ) -> RaceResult:
@@ -83,7 +89,14 @@ def race_two_tabs(
 
     Args:
         setup_fn: Creates the run and returns its directory path.
-        contended_command: The command list both processes will execute.
+        contended_command: The command list both processes will execute. Use
+            ``p1_command``/``p2_command`` for asymmetric races.
+        p1_command: Optional command override for process 1.
+        p2_command: Optional command override for process 2.
+        env_overlay: Environment updates applied to both subprocesses. A value
+            of ``None`` removes that variable.
+        p1_env_overlay: Environment updates applied only to process 1.
+        p2_env_overlay: Environment updates applied only to process 2.
         expected_winner_count: How many processes should succeed (exit code 0).
         timeout_seconds: Maximum time to wait for both processes.
 
@@ -92,22 +105,35 @@ def race_two_tabs(
     """
     # Create the run directory
     run_dir = setup_fn()
+    command_1 = p1_command or contended_command
+    command_2 = p2_command or contended_command
+    if command_1 is None or command_2 is None:
+        raise ValueError("race_two_tabs requires contended_command or both p1_command and p2_command")
 
     # Use spawn to avoid macOS fork issues
     ctx = multiprocessing.get_context("spawn")
     barrier = ctx.Barrier(2)
     output_queue = ctx.Queue()
 
-    # Inherit current environment for subprocess children
-    child_env = {**__import__("os").environ}
+    def build_env(child_overlay: Mapping[str, str | None] | None) -> dict[str, str]:
+        env = dict(os.environ)
+        for overlay in (env_overlay, child_overlay):
+            if overlay is None:
+                continue
+            for key, value in overlay.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = str(value)
+        return env
 
     p1 = ctx.Process(
         target=_run_and_capture,
-        args=(barrier, output_queue, contended_command, child_env),
+        args=(barrier, output_queue, command_1, build_env(p1_env_overlay)),
     )
     p2 = ctx.Process(
         target=_run_and_capture,
-        args=(barrier, output_queue, contended_command, child_env),
+        args=(barrier, output_queue, command_2, build_env(p2_env_overlay)),
     )
 
     p1_pid_val = 0

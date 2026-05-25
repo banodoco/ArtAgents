@@ -16,13 +16,15 @@ import asyncio
 import json
 import os
 import re
-import signal
+import shutil
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
+
+from astrid.core.util.time import utc_now_milliseconds
 
 # ---------------------------------------------------------------------------
 # Pinned GPU pricing fallback (USD/hr).
@@ -46,7 +48,7 @@ _PRICING_TABLE: dict[str, float] = {
 
 def _utc_now_iso() -> str:
     """Return current UTC timestamp in ISO 8601 with milliseconds."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    return utc_now_milliseconds()
 
 
 def _get_hourly_rate(api_key: str, gpu_type) -> float:
@@ -104,10 +106,190 @@ def _cost_amount(duration_seconds: float, hourly_rate: float) -> float:
     return duration_seconds * hourly_rate / 3600.0
 
 
+def _write_cost_sidecar(produces_dir: Path, *, duration_seconds: float, hourly_rate: float, basis_prefix: str) -> None:
+    _write_json(
+        produces_dir / "cost.json",
+        _cost_entry(
+            _cost_amount(duration_seconds, hourly_rate),
+            "runpod",
+            f"{basis_prefix}: {duration_seconds:.1f}s * ${hourly_rate}/hr",
+        ),
+    )
+
+
+def _artifact_records(root: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    if not root.is_dir():
+        return records
+    for path in sorted(p for p in root.rglob("*") if p.is_file()):
+        records.append(
+            {
+                "path": str(path.relative_to(root)),
+                "size_bytes": path.stat().st_size,
+            }
+        )
+    return records
+
+
+def _copy_detached_artifact_root(artifact_root: str | None, produces_dir: Path) -> tuple[str | None, list[dict[str, Any]]]:
+    """Copy only the substrate-returned artifact root into produces/artifact_dir."""
+    artifact_dst = produces_dir / "artifact_dir"
+    if artifact_dst.exists():
+        shutil.rmtree(artifact_dst)
+    artifact_dst.mkdir(parents=True, exist_ok=True)
+
+    if not artifact_root:
+        return str(artifact_dst), []
+
+    artifact_src = Path(artifact_root)
+    if not artifact_src.is_dir():
+        return str(artifact_dst), []
+
+    for item in artifact_src.iterdir():
+        dst = artifact_dst / item.name
+        if item.is_dir():
+            shutil.copytree(item, dst)
+        else:
+            shutil.copy2(item, dst)
+    return str(artifact_dst), _artifact_records(artifact_dst)
+
+
+def _termination_status(returncode: int, terminated: bool) -> str:
+    if terminated:
+        return "terminated"
+    if returncode == 0:
+        return "completed"
+    return "remote_failed"
+
+
+def _detached_exec_result(
+    result: Any,
+    *,
+    produces_dir: Path,
+    pod_id: str,
+    name_prefix: str,
+    remote_root: str,
+    upload_mode: str,
+    timeout: int,
+) -> dict[str, Any]:
+    artifact_root = str(result.artifact_root) if result.artifact_root else None
+    artifact_dir, artifact_paths = _copy_detached_artifact_root(artifact_root, produces_dir)
+    payload: dict[str, Any] = {
+        "returncode": int(result.returncode),
+        "stdout": str(result.stdout or ""),
+        "stderr": str(result.stderr or ""),
+        "terminated": bool(result.terminated),
+        "termination_status": _termination_status(int(result.returncode), bool(result.terminated)),
+        "artifact_root": artifact_root,
+        "artifact_dir": artifact_dir,
+        "artifact_paths": artifact_paths,
+        "breach_log": result.breach_log,
+        "breadcrumbs": {
+            "pod_id": pod_id,
+            "name_prefix": name_prefix,
+            "remote_root": remote_root,
+            "upload_mode": upload_mode,
+            "timeout": timeout,
+        },
+    }
+    if payload["returncode"] != 0:
+        diagnostics_dir = produces_dir / "diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        diagnostics_path = diagnostics_dir / "remote_exit.json"
+        _write_json(
+            diagnostics_path,
+            {
+                "returncode": payload["returncode"],
+                "termination_status": payload["termination_status"],
+                "stdout_tail": payload["stdout"][-4000:],
+                "stderr_tail": payload["stderr"][-4000:],
+                "artifact_dir": artifact_dir,
+                "artifact_paths": artifact_paths,
+                "breadcrumbs": payload["breadcrumbs"],
+            },
+        )
+        payload["diagnostics_path"] = str(diagnostics_path)
+    return payload
+
+
 def _host_hf_token_env_vars() -> dict[str, str]:
     """Return pod env vars sourced from the host process without inventing defaults."""
     token = os.environ.get("HF_TOKEN")
     return {"HF_TOKEN": token} if token else {}
+
+
+def _storage_required(args: argparse.Namespace) -> bool:
+    value = os.environ.get("RUNPOD_REQUIRE_STORAGE", "")
+    env_required = value.lower() in {"1", "true", "yes", "on"}
+    return bool(getattr(args, "require_storage", False) or env_required)
+
+
+def _preflight_storage(storage_name: str | None, *, required: bool, context: str) -> int:
+    if not required and not storage_name:
+        return 0
+
+    from astrid.core.runpod.storage import require_existing_storage
+
+    try:
+        asyncio.run(require_existing_storage(storage_name, context=context))
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _build_pod_handle(
+    *,
+    pod: Any,
+    ssh: dict[str, Any],
+    name_prefix: str,
+    terminate_at: str,
+    gpu_type: Any,
+    hourly_rate: float,
+    provisioned_at: str,
+    datacenter_id: str | None,
+    image: str,
+    container_disk_gb: int,
+    volume_in_gb: int,
+    storage_name: str | None,
+    network_volume_id: Any,
+    ports: str | None,
+) -> dict[str, Any]:
+    return {
+        "pod_id": pod.id,
+        "ssh": f"root@{ssh['ip']} -p {ssh['port']}",
+        "name": pod.name,
+        "name_prefix": name_prefix,
+        "terminate_at": terminate_at,
+        "gpu_type": gpu_type,
+        "hourly_rate": hourly_rate,
+        "provisioned_at": provisioned_at,
+        "config_snapshot": {
+            "api_key_ref": "RUNPOD_API_KEY",
+            "datacenter_id": datacenter_id,
+            "image": image,
+            "container_disk_in_gb": container_disk_gb,
+            "volume_in_gb": volume_in_gb,
+            "storage_name": storage_name,
+            "network_volume_id": network_volume_id,
+            "ports": ports or "8888/http,22/tcp",
+        },
+    }
+
+
+async def _terminate_pod_id(pod_id: str, config: Any, *, name: str | None = None) -> bool:
+    from runpod_lifecycle import get_pod
+
+    try:
+        pod = await get_pod(pod_id, config, name=name)
+        await pod.terminate()
+        return True
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "not found" in msg or "404" in msg or "does not exist" in msg:
+            return True
+        print(f"WARNING: session teardown error: {exc}", file=sys.stderr)
+        return False
 
 
 def _ssh_target_from_handle(handle: dict[str, Any]) -> tuple[str, str]:
@@ -167,7 +349,7 @@ def _load_handle_and_config(handle_path: Path) -> tuple[dict[str, Any], Any]:
         api_key=api_key,
         gpu_type=handle.get("gpu_type", "NVIDIA GeForce RTX 4090"),
         container_disk_gb=snap.get("container_disk_in_gb", 200),
-        storage_name=snap.get("network_volume_id"),
+        storage_name=snap.get("storage_name") or snap.get("network_volume_id"),
         ssh_public_key=os.environ.get("RUNPOD_SSH_PUBLIC_KEY"),
         ssh_private_key=os.environ.get("RUNPOD_SSH_PRIVATE_KEY"),
         ssh_public_key_path=os.environ.get("RUNPOD_SSH_PUBLIC_KEY_PATH"),
@@ -199,8 +381,13 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
     container_disk_gb = args.container_disk_gb or int(os.environ.get("RUNPOD_CONTAINER_DISK_GB", "200"))
     datacenter_id = args.datacenter_id or os.environ.get("RUNPOD_DATACENTER_ID")
     storage_name = args.storage_name or os.environ.get("RUNPOD_STORAGE_NAME")
+    storage_required = _storage_required(args)
     max_runtime = args.max_runtime_seconds or int(os.environ.get("RUNPOD_MAX_RUNTIME_SECONDS", "7200"))
     ports = getattr(args, "ports", None) or os.environ.get("RUNPOD_PORTS")
+
+    storage_rc = _preflight_storage(storage_name, required=storage_required, context="RunPod provision")
+    if storage_rc:
+        return storage_rc
 
     hourly_rate = _get_hourly_rate(api_key, gpu_type)
     provisioned_at = _utc_now_iso()
@@ -233,42 +420,32 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
         print(f"ERROR: provision failed: {exc}", file=sys.stderr)
         return 2
 
-    ssh_str = f"root@{ssh['ip']} -p {ssh['port']}"
     terminate_at_dt = datetime.now(timezone.utc).timestamp() + max_runtime
     terminate_at = datetime.fromtimestamp(terminate_at_dt, tz=timezone.utc).isoformat()
 
-    handle: dict[str, Any] = {
-        "pod_id": pod.id,
-        "ssh": ssh_str,
-        "name": pod.name,
-        "name_prefix": name_prefix,
-        "terminate_at": terminate_at,
-        "gpu_type": gpu_type,
-        "hourly_rate": hourly_rate,
-        "provisioned_at": provisioned_at,
-        "config_snapshot": {
-            "api_key_ref": "RUNPOD_API_KEY",
-            "datacenter_id": datacenter_id,
-            "image": image,
-            "container_disk_in_gb": container_disk_gb,
-            "volume_in_gb": config.disk_size_gb,
-            "network_volume_id": pod._storage_volume,
-            "ports": ports or "8888/http,22/tcp",
-        },
-    }
+    handle = _build_pod_handle(
+        pod=pod,
+        ssh=ssh,
+        name_prefix=name_prefix,
+        terminate_at=terminate_at,
+        gpu_type=gpu_type,
+        hourly_rate=hourly_rate,
+        provisioned_at=provisioned_at,
+        datacenter_id=datacenter_id,
+        image=image,
+        container_disk_gb=container_disk_gb,
+        volume_in_gb=config.disk_size_gb,
+        storage_name=storage_name,
+        network_volume_id=pod._storage_volume,
+        ports=ports,
+    )
 
     _write_json(produces_dir / "pod_handle.json", handle)
 
     duration = time.monotonic() - t0
-    _write_json(
-        produces_dir / "cost.json",
-        _cost_entry(
-            _cost_amount(duration, hourly_rate),
-            "runpod",
-            f"provision: {duration:.1f}s * ${hourly_rate}/hr",
-        ),
-    )
+    _write_cost_sidecar(produces_dir, duration_seconds=duration, hourly_rate=hourly_rate, basis_prefix="provision")
 
+    ssh_str = handle["ssh"]
     print(f"Provisioned pod {pod.id} ({gpu_type}) — ssh: {ssh_str}")
     return 0
 
@@ -322,14 +499,15 @@ def cmd_exec(args: argparse.Namespace, produces_dir: Path) -> int:
             terminate_after_exec=False,
             poll_interval=30,
         )
-        return {
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "terminated": result.terminated,
-            "artifact_root": str(result.artifact_root) if result.artifact_root else None,
-            "breach_log": result.breach_log,
-        }
+        return _detached_exec_result(
+            result,
+            produces_dir=produces_dir,
+            pod_id=str(handle["pod_id"]),
+            name_prefix=str(handle["name_prefix"]),
+            remote_root=remote_root,
+            upload_mode=upload_mode,
+            timeout=timeout,
+        )
 
     t0 = time.monotonic()
     try:
@@ -340,42 +518,11 @@ def cmd_exec(args: argparse.Namespace, produces_dir: Path) -> int:
 
     duration = time.monotonic() - t0
 
-    # Download artifacts into produces/artifact_dir
-    artifact_src = result.get("artifact_root")
-    artifact_dst = produces_dir / "artifact_dir"
-    if artifact_src:
-        artifact_src_path = Path(artifact_src)
-        if artifact_src_path.is_dir():
-            artifact_dst.mkdir(parents=True, exist_ok=True)
-            for item in artifact_src_path.iterdir():
-                dst = artifact_dst / item.name
-                if item.is_dir():
-                    import shutil
-
-                    if dst.exists():
-                        shutil.rmtree(dst)
-                    shutil.copytree(item, dst)
-                else:
-                    dst.write_bytes(item.read_bytes())
-            result["artifact_dir"] = str(artifact_dst)
-        else:
-            result["artifact_dir"] = None
-    else:
-        result["artifact_dir"] = None
-        artifact_dst.mkdir(parents=True, exist_ok=True)
-
     _write_json(produces_dir / "exec_result.json", result)
-    _write_json(
-        produces_dir / "cost.json",
-        _cost_entry(
-            _cost_amount(duration, hourly_rate),
-            "runpod",
-            f"exec: {duration:.1f}s * ${hourly_rate}/hr",
-        ),
-    )
+    _write_cost_sidecar(produces_dir, duration_seconds=duration, hourly_rate=hourly_rate, basis_prefix="exec")
 
     print(f"Exec complete: returncode={result['returncode']}, artifacts={result['artifact_dir']}")
-    return 0
+    return int(result["returncode"])
 
 
 # ---------------------------------------------------------------------------
@@ -478,14 +625,7 @@ def cmd_teardown(args: argparse.Namespace, produces_dir: Path) -> int:
 
     receipt["terminated_at"] = _utc_now_iso()
     _write_json(produces_dir / "teardown_receipt.json", receipt)
-    _write_json(
-        produces_dir / "cost.json",
-        _cost_entry(
-            _cost_amount(duration, hourly_rate),
-            "runpod",
-            f"teardown: {duration:.1f}s * ${hourly_rate}/hr",
-        ),
-    )
+    _write_cost_sidecar(produces_dir, duration_seconds=duration, hourly_rate=hourly_rate, basis_prefix="teardown")
 
     status = receipt["status"]
     if status == "terminated":
@@ -524,6 +664,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
     container_disk_gb = args.container_disk_gb or int(os.environ.get("RUNPOD_CONTAINER_DISK_GB", "200"))
     datacenter_id = args.datacenter_id or os.environ.get("RUNPOD_DATACENTER_ID")
     storage_name = args.storage_name or os.environ.get("RUNPOD_STORAGE_NAME")
+    storage_required = _storage_required(args)
     max_runtime = args.max_runtime_seconds or int(os.environ.get("RUNPOD_MAX_RUNTIME_SECONDS", "7200"))
     ports = getattr(args, "ports", None) or os.environ.get("RUNPOD_PORTS")
     remote_root = args.remote_root or "/workspace"
@@ -536,6 +677,10 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
         else "sftp_walk"
     )
     excludes = set(args.excludes.split(",")) if args.excludes else set()
+
+    storage_rc = _preflight_storage(storage_name, required=storage_required, context="RunPod session")
+    if storage_rc:
+        return storage_rc
 
     hourly_rate = _get_hourly_rate(api_key, gpu_type)
     provisioned_at = _utc_now_iso()
@@ -557,6 +702,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
 
     t0 = time.monotonic()
     pod_id: str | None = None
+    handle: dict[str, Any] | None = None
     handle_path = produces_dir / "pod_handle.json"
     exit_code = 99  # sentinel for crash-before-exec
 
@@ -570,29 +716,25 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
 
         pod, ssh = asyncio.run(_provision())
         pod_id = pod.id
-        ssh_str = f"root@{ssh['ip']} -p {ssh['port']}"
         terminate_at_dt = datetime.now(timezone.utc).timestamp() + max_runtime
         terminate_at = datetime.fromtimestamp(terminate_at_dt, tz=timezone.utc).isoformat()
 
-        handle: dict[str, Any] = {
-            "pod_id": pod_id,
-            "ssh": ssh_str,
-            "name": pod.name,
-            "name_prefix": name_prefix,
-            "terminate_at": terminate_at,
-            "gpu_type": gpu_type,
-            "hourly_rate": hourly_rate,
-            "provisioned_at": provisioned_at,
-            "config_snapshot": {
-                "api_key_ref": "RUNPOD_API_KEY",
-                "datacenter_id": datacenter_id,
-                "image": image,
-                "container_disk_in_gb": container_disk_gb,
-                "volume_in_gb": config.disk_size_gb,
-                "network_volume_id": pod._storage_volume,
-                "ports": ports or "8888/http,22/tcp",
-            },
-        }
+        handle = _build_pod_handle(
+            pod=pod,
+            ssh=ssh,
+            name_prefix=name_prefix,
+            terminate_at=terminate_at,
+            gpu_type=gpu_type,
+            hourly_rate=hourly_rate,
+            provisioned_at=provisioned_at,
+            datacenter_id=datacenter_id,
+            image=image,
+            container_disk_gb=container_disk_gb,
+            volume_in_gb=config.disk_size_gb,
+            storage_name=storage_name,
+            network_volume_id=pod._storage_volume,
+            ports=ports,
+        )
 
         # *** Write pod_handle.json IMMEDIATELY (sweeper breadcrumb) ***
         _write_json(handle_path, handle)
@@ -618,100 +760,69 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
                     terminate_after_exec=False,
                     poll_interval=30,
                 )
-                return {
-                    "returncode": result.returncode,
-                    "stdout": result.stdout,
-                    "stderr": result.stderr,
-                    "terminated": result.terminated,
-                    "artifact_root": str(result.artifact_root) if result.artifact_root else None,
-                    "breach_log": result.breach_log,
-                }
+                return _detached_exec_result(
+                    result,
+                    produces_dir=produces_dir,
+                    pod_id=str(pod_id),
+                    name_prefix=name_prefix,
+                    remote_root=remote_root,
+                    upload_mode=upload_mode,
+                    timeout=timeout,
+                )
 
             exec_result = asyncio.run(_exec())
             exit_code = exec_result["returncode"]
 
-            # Download artifacts into produces/artifact_dir
-            artifact_src = exec_result.get("artifact_root")
-            artifact_dst = produces_dir / "artifact_dir"
-            if artifact_src:
-                artifact_src_path = Path(artifact_src)
-                if artifact_src_path.is_dir():
-                    artifact_dst.mkdir(parents=True, exist_ok=True)
-                    for item in artifact_src_path.iterdir():
-                        dst = artifact_dst / item.name
-                        if item.is_dir():
-                            import shutil
-
-                            if dst.exists():
-                                shutil.rmtree(dst)
-                            shutil.copytree(item, dst)
-                        else:
-                            dst.write_bytes(item.read_bytes())
-                    exec_result["artifact_dir"] = str(artifact_dst)
-                else:
-                    exec_result["artifact_dir"] = None
-            else:
-                exec_result["artifact_dir"] = None
-                artifact_dst.mkdir(parents=True, exist_ok=True)
-
             _write_json(produces_dir / "exec_result.json", exec_result)
         else:
             # No script to execute — just an empty exec_result.
-            exec_result = {"returncode": 0, "stdout": "", "stderr": "", "artifact_dir": None}
+            exec_result = {
+                "returncode": 0,
+                "stdout": "",
+                "stderr": "",
+                "terminated": False,
+                "termination_status": "completed",
+                "artifact_root": None,
+                "artifact_dir": str(produces_dir / "artifact_dir"),
+                "artifact_paths": [],
+                "breadcrumbs": {
+                    "pod_id": pod_id,
+                    "name_prefix": name_prefix,
+                    "remote_root": remote_root,
+                    "upload_mode": upload_mode,
+                    "timeout": timeout,
+                },
+            }
             (produces_dir / "artifact_dir").mkdir(parents=True, exist_ok=True)
             _write_json(produces_dir / "exec_result.json", exec_result)
             exit_code = 0
 
         total_duration = time.monotonic() - t0
-        _write_json(
-            produces_dir / "cost.json",
-            _cost_entry(
-                _cost_amount(total_duration, hourly_rate),
-                "runpod",
-                f"session: {total_duration:.1f}s * ${hourly_rate}/hr",
-            ),
-        )
+        _write_cost_sidecar(produces_dir, duration_seconds=total_duration, hourly_rate=hourly_rate, basis_prefix="session")
 
         return exit_code
 
     except Exception as exc:
         print(f"ERROR: session failed: {exc}", file=sys.stderr)
         total_duration = time.monotonic() - t0
-        _write_json(
-            produces_dir / "cost.json",
-            _cost_entry(
-                _cost_amount(total_duration, hourly_rate),
-                "runpod",
-                f"session (failed): {total_duration:.1f}s * ${hourly_rate}/hr",
-            ),
-        )
+        _write_cost_sidecar(produces_dir, duration_seconds=total_duration, hourly_rate=hourly_rate, basis_prefix="session (failed)")
         return 2
 
     finally:
         # ---- teardown (guaranteed) ------------------------------------
         if pod_id:
+            teardown_ok = False
             try:
-
-                async def _final_teardown() -> None:
-                    from runpod_lifecycle import get_pod
-
-                    try:
-                        pod = await get_pod(pod_id, config)  # type: ignore[arg-type]
-                        await pod.terminate()
-                    except Exception as exc:
-                        msg = str(exc).lower()
-                        if "not found" in msg or "404" in msg or "does not exist" in msg:
-                            return
-                        print(f"WARNING: session teardown error: {exc}", file=sys.stderr)
-
-                asyncio.run(_final_teardown())
+                teardown_ok = asyncio.run(
+                    _terminate_pod_id(pod_id, config, name=handle.get("name") if handle else None)
+                )
             except Exception as exc:
                 print(f"WARNING: session teardown failed: {exc}", file=sys.stderr)
-            # Delete the breadcrumb on graceful teardown.
-            try:
-                handle_path.unlink(missing_ok=True)
-            except Exception:
-                pass
+            if teardown_ok:
+                try:
+                    handle_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -735,6 +846,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_prov.add_argument("--container-disk-gb", type=int, help="Container disk size in GB.")
     p_prov.add_argument("--datacenter-id", help="RunPod datacenter ID.")
     p_prov.add_argument("--ports", help="Comma-separated port spec for the pod (default: '8888/http,22/tcp').")
+    p_prov.add_argument("--require-storage", action="store_true", help="Require --storage-name to resolve before launch.")
 
     # --- exec ---
     p_exec = sub.add_parser("exec", help="Execute a script on an existing pod.")
@@ -771,6 +883,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sess.add_argument("--container-disk-gb", type=int, help="Container disk size in GB.")
     p_sess.add_argument("--datacenter-id", help="RunPod datacenter ID.")
     p_sess.add_argument("--ports", help="Comma-separated port spec for the pod (default: '8888/http,22/tcp').")
+    p_sess.add_argument("--require-storage", action="store_true", help="Require --storage-name to resolve before launch.")
     p_sess.add_argument("--local-root", help="Local directory to upload.")
     p_sess.add_argument("--remote-root", help="Remote path on the pod.")
     p_sess.add_argument("--remote-script", help="Script file path or inline command.")

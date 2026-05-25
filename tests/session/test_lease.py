@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+import inspect
 import multiprocessing as mp
 from pathlib import Path
 
 import pytest
 
 from astrid.core.session.lease import (
-    LEASE_DEFAULTS,
     LeaseError,
     bump_epoch_and_swap_session,
     claim_orphan_lease,
@@ -19,7 +19,6 @@ from astrid.core.session.lease import (
 )
 from astrid.core.task.events import (
     ZERO_HASH,
-    EventLogError,
     StaleEpochError,
     StaleTailError,
     append_event_locked,
@@ -28,8 +27,9 @@ from astrid.core.task.events import (
 )
 
 
-def test_read_lease_defaults_when_missing(tmp_path: Path) -> None:
-    assert read_lease(tmp_path) == dict(LEASE_DEFAULTS)
+def test_read_lease_missing_fails_closed(tmp_path: Path) -> None:
+    with pytest.raises(LeaseError, match="missing lease"):
+        read_lease(tmp_path)
 
 
 def test_write_lease_init_round_trip(tmp_path: Path) -> None:
@@ -39,6 +39,57 @@ def test_write_lease_init_round_trip(tmp_path: Path) -> None:
     assert on_disk["writer_epoch"] == 0
     assert on_disk["attached_session_id"] == "S1"
     assert on_disk["plan_hash"].startswith("sha256:")
+
+
+def test_stop_line_lease_rewriters_preserve_timeline_and_future_metadata(
+    tmp_path: Path,
+) -> None:
+    write_lease_init(
+        tmp_path,
+        session_id="S-OLD",
+        plan_hash="plan-hash",
+        timeline_id="01TIMELINE",
+    )
+    lease_path = tmp_path / "lease.json"
+    payload = json.loads(lease_path.read_text(encoding="utf-8"))
+    payload["future_metadata"] = {"kept": True}
+    lease_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    bumped = bump_epoch_and_swap_session(
+        tmp_path,
+        new_session_id="S-NEW",
+        prev_session_id="S-OLD",
+        reason="test",
+    )
+    assert bumped["timeline_id"] == "01TIMELINE"
+    assert bumped["future_metadata"] == {"kept": True}
+    assert read_lease(tmp_path)["future_metadata"] == {"kept": True}
+
+    released = release_writer_lease(tmp_path)
+    assert released["timeline_id"] == "01TIMELINE"
+    assert released["future_metadata"] == {"kept": True}
+
+    claimed = claim_orphan_lease(tmp_path, new_session_id="S-CLAIM", force=True)
+    assert claimed["timeline_id"] == "01TIMELINE"
+    assert claimed["future_metadata"] == {"kept": True}
+
+
+def test_stop_line_takeover_helpers_do_not_touch_events_before_lock() -> None:
+    for helper in (bump_epoch_and_swap_session, claim_orphan_lease):
+        source = inspect.getsource(helper)
+        before_lock = source.split("with events_path.open", 1)[0]
+        assert ".touch(" not in before_lock
+        assert ".touch(" not in source
+        assert source.index("_raise_if_events_file_warm") < source.index(
+            "append_event_to_locked_handle"
+        )
+
+
+def test_stop_line_takeover_cli_has_no_prelock_warm_decision() -> None:
+    from astrid.core.session import cli as session_cli
+
+    source = inspect.getsource(session_cli.cmd_sessions_takeover)
+    assert "_is_target_warm" not in source
 
 
 def test_bump_epoch_appends_takeover_event_with_post_bump_epoch(tmp_path: Path) -> None:
@@ -54,7 +105,7 @@ def test_bump_epoch_appends_takeover_event_with_post_bump_epoch(tmp_path: Path) 
     )
 
     updated = bump_epoch_and_swap_session(
-        tmp_path, new_session_id="S2", prev_session_id="S1", reason="manual"
+        tmp_path, new_session_id="S2", prev_session_id="S1", reason="manual", force=True
     )
     assert updated["writer_epoch"] == 1
     assert updated["attached_session_id"] == "S2"
@@ -116,10 +167,68 @@ def test_claim_orphan_lease_sets_writer_and_bumps_epoch(tmp_path: Path) -> None:
     assert takeover["reason"] == "orphan-claim"
 
 
-def test_claim_orphan_refuses_warm_lease(tmp_path: Path) -> None:
+def test_claim_orphan_refuses_attached_lease(tmp_path: Path) -> None:
     write_lease_init(tmp_path, session_id="S1", plan_hash="")
     with pytest.raises(LeaseError, match="orphan"):
         claim_orphan_lease(tmp_path, new_session_id="S2")
+
+
+def test_bump_epoch_refuses_warm_target_under_lock_without_mutation(tmp_path: Path) -> None:
+    write_lease_init(tmp_path, session_id="S1", plan_hash="")
+    append_event_locked(
+        tmp_path,
+        {"kind": "seed", "i": 0},
+        expected_writer_epoch=0,
+        expected_prev_hash=ZERO_HASH,
+    )
+    before_events = (tmp_path / "events.jsonl").read_bytes()
+    before_lease = (tmp_path / "lease.json").read_bytes()
+
+    with pytest.raises(LeaseError, match="--force"):
+        bump_epoch_and_swap_session(
+            tmp_path,
+            new_session_id="S2",
+            prev_session_id="S1",
+            reason="warm-test",
+        )
+
+    assert (tmp_path / "events.jsonl").read_bytes() == before_events
+    assert (tmp_path / "lease.json").read_bytes() == before_lease
+
+
+def test_claim_orphan_refuses_warm_target_under_lock_without_mutation(tmp_path: Path) -> None:
+    write_lease_init(tmp_path, session_id="S1", plan_hash="")
+    append_event_locked(
+        tmp_path,
+        {"kind": "seed", "i": 0},
+        expected_writer_epoch=0,
+        expected_prev_hash=ZERO_HASH,
+    )
+    release_writer_lease(tmp_path)
+    before_events = (tmp_path / "events.jsonl").read_bytes()
+    before_lease = (tmp_path / "lease.json").read_bytes()
+
+    with pytest.raises(LeaseError, match="--force"):
+        claim_orphan_lease(tmp_path, new_session_id="S2")
+
+    assert (tmp_path / "events.jsonl").read_bytes() == before_events
+    assert (tmp_path / "lease.json").read_bytes() == before_lease
+
+
+def test_claim_orphan_force_overrides_warm_guard(tmp_path: Path) -> None:
+    write_lease_init(tmp_path, session_id="S1", plan_hash="")
+    append_event_locked(
+        tmp_path,
+        {"kind": "seed", "i": 0},
+        expected_writer_epoch=0,
+        expected_prev_hash=ZERO_HASH,
+    )
+    release_writer_lease(tmp_path)
+
+    claimed = claim_orphan_lease(tmp_path, new_session_id="S2", force=True)
+
+    assert claimed["attached_session_id"] == "S2"
+    assert claimed["writer_epoch"] == 1
 
 
 def test_release_writer_lease_preserves_epoch_and_plan_hash(tmp_path: Path) -> None:
@@ -149,6 +258,15 @@ def test_read_lease_rejects_bad_epoch_type(tmp_path: Path) -> None:
         read_lease(tmp_path)
 
 
+def test_read_lease_rejects_missing_required_key(tmp_path: Path) -> None:
+    (tmp_path / "lease.json").write_text(
+        json.dumps({"writer_epoch": 0, "attached_session_id": None}),
+        encoding="utf-8",
+    )
+    with pytest.raises(LeaseError, match="missing required key"):
+        read_lease(tmp_path)
+
+
 def _concurrent_takeover_worker(barrier, run_dir_str: str, new_sid: str, result_q) -> None:
     """Module-level worker for the concurrent takeover test (spawn-pickleable)."""
 
@@ -157,7 +275,11 @@ def _concurrent_takeover_worker(barrier, run_dir_str: str, new_sid: str, result_
     barrier.wait()
     try:
         updated = bump_epoch_and_swap_session(
-            Path(run_dir_str), new_session_id=new_sid, prev_session_id="S1", reason="race"
+            Path(run_dir_str),
+            new_session_id=new_sid,
+            prev_session_id="S1",
+            reason="race",
+            force=True,
         )
         result_q.put({"sid": new_sid, "ok": True, "epoch": updated["writer_epoch"]})
     except Exception as exc:  # pragma: no cover - failure surfaces in assertion

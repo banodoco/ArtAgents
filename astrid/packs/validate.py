@@ -18,8 +18,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 import jsonschema
-import yaml
 from referencing import Registry, Resource
+
+from astrid.core.manifest import ManifestParseError, load_manifest_mapping
+from astrid.core.pack import (
+    ELEMENT_KINDS,
+    EXECUTOR_MANIFEST_NAMES,
+    ORCHESTRATOR_MANIFEST_NAMES,
+    PackDefinition,
+    iter_element_roots,
+    iter_executor_roots,
+    iter_orchestrator_roots,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +38,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
 
 KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
     1: {
@@ -99,7 +111,6 @@ def _normalize_jsonschema_error(
         return f"{prefix}: missing required field(s) — {msg}"
 
     if error.validator == "additionalProperties":
-        offending = error.message
         return f"{prefix}: unknown field(s) in {field}"
 
     if error.validator == "enum":
@@ -198,31 +209,30 @@ class PackValidator:
 
         return self.errors
 
+    def validate_component_manifest(
+        self,
+        manifest_path: str | Path,
+        manifest_kind: str,
+    ) -> dict[str, Any] | None:
+        """Load and schema-validate one component manifest.
+
+        This uses the same parsing and JSON Schema path as full pack validation,
+        without requiring callers to validate a whole pack tree.
+        """
+        path = Path(manifest_path)
+        data = self._load_yaml(path)
+        if data is None:
+            return None
+        self._validate_manifest(data, manifest_kind, self._rel(path))
+        return data
+
     def _load_yaml(self, path: Path) -> Optional[dict[str, Any]]:
         """Load a YAML file with safe_load. Returns None on error."""
         rel = self._rel(path)
         try:
-            text = path.read_text(encoding="utf-8")
-        except OSError as e:
-            self.errors.append(f"{rel}: cannot read file — {e}")
-            return None
-
-        try:
-            data = yaml.safe_load(text)
-        except yaml.YAMLError as e:
-            # Produce a clean error message
-            msg = str(e)
-            if hasattr(e, "problem_mark") and e.problem_mark:
-                mark = e.problem_mark
-                msg = f"{msg} (line {mark.line + 1}, column {mark.column + 1})"
-            self.errors.append(f"{rel}: invalid YAML — {msg}")
-            return None
-
-        if data is None:
-            self.errors.append(f"{rel}: empty YAML document")
-            return None
-        if not isinstance(data, dict):
-            self.errors.append(f"{rel}: expected a YAML mapping, got {type(data).__name__}")
+            data = load_manifest_mapping(path, manifest_kind="pack")
+        except ManifestParseError as e:
+            self.errors.append(f"{rel}: {e}")
             return None
 
         return data
@@ -237,16 +247,20 @@ class PackValidator:
 
         Returns the schema_version on success, None on failure.
         """
-        # Check schema_version first
+        # Pack and component manifests are schema-versioned. If a component
+        # omits schema_version, validate against v1 so the schema reports the
+        # same missing-field error direct JSON Schema validation would report.
         if "schema_version" not in data:
-            self.errors.append(f"{relpath}: missing required field schema_version")
-            return None
-
-        try:
-            version = _check_schema_version(data["schema_version"], relpath)
-        except ValidationError as e:
-            self.errors.append(str(e))
-            return None
+            if manifest_kind == "pack":
+                self.errors.append(f"{relpath}: missing required field schema_version")
+                return None
+            version = 1
+        else:
+            try:
+                version = _check_schema_version(data["schema_version"], relpath)
+            except ValidationError as e:
+                self.errors.append(str(e))
+                return None
 
         # Load and validate against JSON Schema
         schema_path = KNOWN_SCHEMA_VERSIONS[version].get(manifest_kind)
@@ -355,6 +369,10 @@ class PackValidator:
         if self._pack_data is None:
             return
 
+        if self._is_builtin_pack():
+            self._validate_discovered_builtin_components(content)
+            return
+
         # Executors
         exec_root_rel = content.get("executors", "executors")
         if isinstance(exec_root_rel, str) and exec_root_rel.strip():
@@ -380,57 +398,21 @@ class PackValidator:
         self, root_dir: Path, manifest_kind: str
     ) -> None:
         """Validate all component directories under a content root."""
-        manifest_name = f"{manifest_kind}.yaml"
         for comp_dir in sorted(root_dir.iterdir()):
             if not comp_dir.is_dir() or comp_dir.name.startswith("."):
                 continue
             if comp_dir.name == "__pycache__":
                 continue
 
-            manifest_path = comp_dir / manifest_name
-            if not manifest_path.is_file():
+            manifest_path = self._find_component_manifest(comp_dir, manifest_kind)
+            if manifest_path is None:
+                expected_path = comp_dir / f"{manifest_kind}.yaml"
                 self.errors.append(
-                    f"{self._rel(manifest_path)}: {manifest_kind} manifest not found"
+                    f"{self._rel(expected_path)}: {manifest_kind} manifest not found"
                 )
                 continue
 
-            data = self._load_yaml(manifest_path)
-            if data is None:
-                continue
-
-            rel = self._rel(manifest_path)
-            version = self._validate_manifest(data, manifest_kind, rel)
-            if version is None:
-                continue
-            component_id = data.get("id")
-            if isinstance(component_id, str):
-                self._register_capability_id(component_id, rel)
-                self._register_aliases(data, rel)
-
-            # Check runtime entrypoint exists
-            runtime = data.get("runtime", {})
-            if isinstance(runtime, dict):
-                entrypoint = runtime.get("entrypoint")
-                if isinstance(entrypoint, str) and entrypoint.strip():
-                    ep_path = comp_dir / entrypoint
-                    if not ep_path.is_file():
-                        self.errors.append(
-                            f"{self._rel(ep_path)}: runtime entrypoint file not found"
-                        )
-                    # IMPORTANT: Do NOT import or execute the file.
-                    # We only check its existence.
-
-            # Check STAGE.md
-            docs = data.get("docs", {})
-            if isinstance(docs, dict):
-                stage = docs.get("stage", "STAGE.md")
-            else:
-                stage = "STAGE.md"
-            stage_path = comp_dir / stage
-            if not stage_path.is_file():
-                self.warnings.append(
-                    f"{self._rel(stage_path)}: STAGE.md not found"
-                )
+            self._validate_component_manifest_file(comp_dir, manifest_path, manifest_kind)
 
     def _validate_element_dir(self, root_dir: Path) -> None:
         """Validate element directories under the elements content root."""
@@ -447,25 +429,223 @@ class PackValidator:
                 if elem_dir.name == "__pycache__":
                     continue
 
-                manifest_path = elem_dir / "element.yaml"
-                if not manifest_path.is_file():
+                manifest_path = self._find_component_manifest(elem_dir, "element")
+                if manifest_path is None:
                     self.errors.append(
-                        f"{self._rel(manifest_path)}: element manifest not found"
+                        f"{self._rel(elem_dir / 'element.yaml')}: element manifest not found"
                     )
                     continue
 
-                data = self._load_yaml(manifest_path)
-                if data is None:
-                    continue
+                self._validate_element_manifest_file(kind_dir.name, manifest_path)
 
-                rel = self._rel(manifest_path)
-                version = self._validate_manifest(data, "element", rel)
-                if version is None:
-                    continue
-                element_id = data.get("id")
-                if isinstance(element_id, str):
-                    self._register_capability_id(f"{kind_dir.name}/{element_id}", rel)
-                    self._register_aliases(data, rel)
+    def _is_builtin_pack(self) -> bool:
+        return (
+            self._pack_data is not None
+            and self._pack_data.get("id") == "builtin"
+            and self.pack_root.name == "builtin"
+        )
+
+    def _pack_definition_for_discovery(self, content: dict[str, Any]) -> PackDefinition:
+        data = self._pack_data or {}
+        return PackDefinition(
+            id=str(data.get("id") or self.pack_root.name),
+            name=str(data.get("name") or data.get("id") or self.pack_root.name),
+            version=str(data.get("version") or ""),
+            root=self.pack_root,
+            manifest_path=self.pack_root / "pack.yaml",
+            schema_version=data.get("schema_version"),
+            description=str(data.get("description") or ""),
+            status=str(data.get("status") or "active"),
+            visibility=str(data.get("visibility") or "visible"),
+            content=dict(content),
+            metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
+            agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
+        )
+
+    def _validate_discovered_builtin_components(self, content: dict[str, Any]) -> None:
+        pack = self._pack_definition_for_discovery(content)
+        for comp_dir in iter_executor_roots(pack):
+            manifest_path = self._find_component_manifest(comp_dir, "executor")
+            if manifest_path is not None:
+                self._validate_component_manifest_file(comp_dir, manifest_path, "executor")
+        for comp_dir in iter_orchestrator_roots(pack):
+            manifest_path = self._find_component_manifest(comp_dir, "orchestrator")
+            if manifest_path is not None:
+                self._validate_component_manifest_file(comp_dir, manifest_path, "orchestrator")
+        for kind, elem_dir in iter_element_roots(pack):
+            manifest_path = self._find_component_manifest(elem_dir, "element")
+            if manifest_path is not None:
+                self._validate_element_manifest_file(kind, manifest_path)
+
+    def _find_component_manifest(self, component_dir: Path, manifest_kind: str) -> Path | None:
+        names = {
+            "executor": EXECUTOR_MANIFEST_NAMES,
+            "orchestrator": ORCHESTRATOR_MANIFEST_NAMES,
+            "element": _ELEMENT_MANIFEST_NAMES,
+        }[manifest_kind]
+        for name in names:
+            candidate = component_dir / name
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def _validate_component_manifest_file(
+        self,
+        component_dir: Path,
+        manifest_path: Path,
+        manifest_kind: str,
+    ) -> None:
+        data = self._load_yaml(manifest_path)
+        if data is None:
+            return
+
+        rel = self._rel(manifest_path)
+        version = self._validate_manifest(data, manifest_kind, rel)
+        if version is None:
+            return
+        component_id = data.get("id")
+        if isinstance(component_id, str):
+            self._register_capability_id(component_id, rel)
+            self._register_aliases(data, rel)
+
+        self._validate_runtime_entrypoints(component_dir, data, manifest_kind, rel)
+
+        docs = data.get("docs", {})
+        stage = docs.get("stage", "STAGE.md") if isinstance(docs, dict) else "STAGE.md"
+        stage_path = component_dir / stage
+        if not stage_path.is_file():
+            self.warnings.append(f"{self._rel(stage_path)}: STAGE.md not found")
+
+    def _validate_element_manifest_file(self, kind: str, manifest_path: Path) -> None:
+        data = self._load_yaml(manifest_path)
+        if data is None:
+            return
+
+        rel = self._rel(manifest_path)
+        version = self._validate_manifest(data, "element", rel)
+        if version is None:
+            return
+        element_id = data.get("id")
+        if isinstance(element_id, str):
+            if kind in ELEMENT_KINDS:
+                self._register_capability_id(f"{kind}/{element_id}", rel)
+            else:
+                self._register_capability_id(element_id, rel)
+            self._register_aliases(data, rel)
+
+    def _validate_runtime_entrypoints(
+        self,
+        component_dir: Path,
+        data: dict[str, Any],
+        manifest_kind: str,
+        rel: str,
+    ) -> None:
+        if manifest_kind == "executor":
+            self._check_runtime_entrypoint(component_dir, data.get("entrypoint"), "entrypoint")
+            runtime = data.get("runtime", {})
+            if isinstance(runtime, dict):
+                self._check_runtime_entrypoint(component_dir, runtime.get("entrypoint"), "runtime entrypoint")
+                self._check_command_entrypoint(component_dir, runtime.get("command"))
+            self._check_command_entrypoint(component_dir, data.get("command"))
+            self._check_metadata_runtime_file(component_dir, data)
+            return
+
+        if manifest_kind != "orchestrator":
+            return
+
+        runtime = data.get("runtime", {})
+        if not isinstance(runtime, dict):
+            return
+        kind = runtime.get("kind")
+        if kind == "python":
+            self._check_python_module(component_dir, runtime.get("module"), rel, "runtime.module")
+        elif kind == "command":
+            self._check_command_entrypoint(component_dir, runtime.get("command"))
+
+    def _check_runtime_entrypoint(self, component_dir: Path, value: Any, label: str) -> None:
+        if not isinstance(value, str) or not value.strip():
+            return
+        if "{" in value or "}" in value:
+            return
+        entrypoint_path = component_dir / value
+        if not entrypoint_path.is_file():
+            self.errors.append(f"{self._rel(entrypoint_path)}: {label} file not found")
+
+    def _check_metadata_runtime_file(self, component_dir: Path, data: dict[str, Any]) -> None:
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return
+        self._check_runtime_entrypoint(component_dir, metadata.get("runtime_file"), "metadata.runtime_file")
+        self._check_python_module(
+            component_dir,
+            metadata.get("runtime_module"),
+            self._rel(component_dir),
+            "metadata.runtime_module",
+        )
+
+    def _check_command_entrypoint(self, component_dir: Path, command: Any) -> None:
+        if isinstance(command, dict):
+            argv = command.get("argv")
+        else:
+            argv = command
+        if not isinstance(argv, list):
+            return
+        parts = [part for part in argv if isinstance(part, str)]
+        for index, part in enumerate(parts):
+            if part == "-m" and index + 1 < len(parts):
+                self._check_python_module(
+                    component_dir,
+                    parts[index + 1],
+                    self._rel(component_dir),
+                    "command.argv module",
+                )
+                return
+        for part in parts:
+            if not self._looks_like_local_entrypoint(part):
+                continue
+            self._check_runtime_entrypoint(component_dir, part, "command.argv entrypoint")
+            return
+
+    def _looks_like_local_entrypoint(self, value: str) -> bool:
+        if not value or value.startswith("-") or "{" in value or "}" in value:
+            return False
+        return value.endswith(".py") or "/" in value or "\\" in value
+
+    def _check_python_module(
+        self,
+        component_dir: Path,
+        module: Any,
+        rel: str,
+        label: str,
+    ) -> None:
+        if not isinstance(module, str) or not module.strip():
+            return
+        if "{" in module or "}" in module:
+            return
+        module_path = self._module_path(component_dir, module)
+        if module_path is None:
+            return
+        if not module_path.is_file():
+            self.errors.append(
+                f"{rel}: {label} file not found for module {module!r}: {self._rel(module_path)}"
+            )
+
+    def _module_path(self, component_dir: Path, module: str) -> Path | None:
+        parts = module.split(".")
+        pack_id = self._pack_data.get("id") if self._pack_data is not None else None
+        if (
+            len(parts) >= 6
+            and parts[0:2] == ["astrid", "packs"]
+            and parts[2] == pack_id
+            and parts[3] in {"executors", "orchestrators"}
+            and parts[4] == component_dir.name
+        ):
+            return component_dir / Path(*parts[5:]).with_suffix(".py")
+        if module.startswith("astrid."):
+            return _REPO_ROOT / Path(*module.split(".")).with_suffix(".py")
+        if "." not in module:
+            return component_dir / f"{module}.py"
+        return component_dir / Path(*module.split(".")).with_suffix(".py")
 
     def _register_capability_id(self, capability_id: str, relpath: str) -> None:
         existing = self._capability_locations.get(capability_id)

@@ -10,51 +10,50 @@ manifest is missing — prints the compile recovery and returns non-zero.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import shlex
 import secrets
+import shlex
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
+from astrid.core.project.current_run import (
+    clear_current_run,
+    read_current_run,
+    read_current_run_state,
+    write_current_run,
+)
 from astrid.core.project.jsonio import write_json_atomic
-from astrid.core.project.project import ProjectError, require_project
 from astrid.core.project.paths import (
     project_dir,
     resolve_projects_root,
     validate_project_slug,
     validate_run_id,
 )
-from astrid.core.project.current_run import (
-    clear_current_run,
-    read_current_run,
-    write_current_run,
-)
+from astrid.core.project.project import ProjectError, require_project
+from astrid.core.project.run import resolve_required_project_timeline
+from astrid.core.project.schema import build_run_record
 from astrid.core.session.lease import (
-    read_lease,
     release_writer_lease,
     write_lease_init,
 )
-# Backward-compat shim: gate.py and lifecycle_ack.py still import these via
-# astrid.core.task.active_run during the T9 migration window. The shim
-# writes the new on-disk shape internally.
-from astrid.core.task.active_run import (
-    clear_active_run,
-    read_active_run,
-    write_active_run,
-)
+from astrid.core.session.writer import writer_context_for_project
+from astrid.core.task.claim import active_claims_by_step
+from astrid.core.task.command_render import render_task_command
 from astrid.core.task.env import task_actor_env
 from astrid.core.task.events import (
     EventLogError,
     _run_is_complete,
-    append_event,
+    make_plan_initialized_event,
     make_run_aborted_event,
     make_run_completed_event,
     make_run_started_event,
     make_step_awaiting_fetch_event,
     make_step_completed_event,
+    make_step_failed_event,
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
@@ -62,20 +61,20 @@ from astrid.core.task.inbox import consume_inbox_entry, pending_count, scan_inbo
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
-    Step,
+    compute_plan_hash,
     is_attested_kind,
     is_code_kind,
     is_group_step,
     is_leaf_step,
     iter_steps_with_path,
-    compute_plan_hash,
     load_plan,
     step_dir_for_path,
 )
+from astrid.core.task.plan_verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
+from astrid.core.timeline.crud import record_contributing_run
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
-
 
 _AGENT_MD_TEMPLATE = """{preamble}
 
@@ -89,7 +88,7 @@ FIRST COMMAND (Sprint 1 / T15)
 
 RECOVERY COMMANDS
 - See next legal action:    astrid next --project {slug}
-- Acknowledge attested:     astrid ack <step> --project {slug} --decision approve [--agent <id> | --actor <name>]
+- Acknowledge attested:     astrid ack <step> --project {slug} --decision approve [--agent <id> | --human <name>]
 - View run state:           astrid status --project {slug}
 - End the run:              astrid abort --project {slug}
 - Take over a stuck run:    astrid sessions takeover <run-id|session-id>
@@ -116,7 +115,7 @@ INBOX SURFACE
 - Consume-on-next: astrid next reads inbox/, validates each file against
   the current cursor, and appends a step_attested / item_attested /
   cursor_rewind / run_aborted event before computing the next step.
-- Agent attestations only — actor-ack steps must use `astrid ack` (the
+- Agent attestations only — human-ack steps must use `astrid ack` (the
   inbox file would be quarantined to inbox/.rejected/ otherwise).
 - WARNING: `astrid next` is state-mutating when inbox/ has files.
 """
@@ -153,6 +152,124 @@ def _qualified_split(qualified_id: str) -> tuple[str, str]:
 def _generate_run_id() -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"run-{stamp}-{secrets.token_hex(4)}"
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _append_consume(consumes: list[dict[str, str]], path: Path | None) -> None:
+    if path is None or not path.is_file():
+        return
+    resolved = path.resolve()
+    consumes.append({"source": str(resolved), "sha256": _sha256_file(resolved)})
+
+
+def _default_project_video(proj_root: Path) -> Path | None:
+    video = proj_root / "source.mp4"
+    if video.is_file():
+        return video
+    return next(iter(sorted(proj_root.glob("*.mp4"))), None)
+
+
+def _project_file(proj_root: Path, name: str) -> Path | None:
+    path = proj_root / name
+    return path if path.is_file() else None
+
+
+def _hype_project_inputs(
+    proj_root: Path,
+) -> tuple[Path | None, Path | None, Path | None, list[dict[str, str]]]:
+    """Resolve conventional project-local inputs for ``astrid start builtin.hype``."""
+    video = _default_project_video(proj_root)
+    brief = _project_file(proj_root, "brief.txt")
+    theme = _project_file(proj_root, "theme.json")
+    consumes: list[dict[str, str]] = []
+    for path in (video, brief, theme):
+        _append_consume(consumes, path)
+    return video, brief, theme, consumes
+
+
+def _event_talks_project_inputs(
+    proj_root: Path,
+) -> tuple[Path | None, Path | None, list[dict[str, str]]]:
+    source = _default_project_video(proj_root)
+    transcript = _project_file(proj_root, "transcript.json")
+    consumes: list[dict[str, str]] = []
+    for path in (source, transcript):
+        _append_consume(consumes, path)
+    return source, transcript, consumes
+
+
+def _thumbnail_maker_project_inputs(
+    proj_root: Path,
+) -> tuple[Path | None, str | None, list[dict[str, str]]]:
+    source = _default_project_video(proj_root)
+    query_path = _project_file(proj_root, "query.txt")
+    query_text = None
+    if query_path is not None:
+        query_text = query_path.read_text(encoding="utf-8").strip() or None
+    consumes: list[dict[str, str]] = []
+    for path in (source, query_path):
+        _append_consume(consumes, path)
+    return source, query_text, consumes
+
+
+def _build_canonical_start_plan(
+    orchestrator_id: str,
+    *,
+    proj_root: Path,
+    run_dir: Path,
+    run_id: str,
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    if orchestrator_id == "builtin.hype":
+        from astrid.packs.builtin.hype.plan_template import build_plan_v2
+
+        video, brief, theme, consumes = _hype_project_inputs(proj_root)
+        return (
+            build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=video,
+                brief=brief,
+                theme=theme,
+                run_id=run_id,
+            ),
+            consumes,
+        )
+    if orchestrator_id == "builtin.event_talks":
+        from astrid.packs.builtin.event_talks.plan_template import build_plan_v2
+
+        source, transcript, consumes = _event_talks_project_inputs(proj_root)
+        return (
+            build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=source,
+                transcript=transcript,
+                run_id=run_id,
+            ),
+            consumes,
+        )
+    if orchestrator_id == "builtin.thumbnail_maker":
+        from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2
+
+        source, query_text, consumes = _thumbnail_maker_project_inputs(proj_root)
+        return (
+            build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=source,
+                query=query_text,
+                run_id=run_id,
+            ),
+            consumes,
+        )
+    raise ValueError(f"unsupported canonical start orchestrator: {orchestrator_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -203,20 +320,28 @@ def cmd_start(
         )
         return 1
 
-    packs = _resolve_packs_root(packs_root)
-    build_path = packs / pack / "build" / f"{name}.json"
-    if not build_path.is_file():
-        _print_err(
-            f"start: compiled plan not found at {build_path}; "
-            f"recovery: astrid author compile {args.orchestrator_id}"
-        )
-        return 1
+    uses_dynamic_start_plan = args.orchestrator_id in {
+        "builtin.hype",
+        "builtin.event_talks",
+        "builtin.thumbnail_maker",
+    }
+    if not uses_dynamic_start_plan:
+        packs = _resolve_packs_root(packs_root)
+        build_path = packs / pack / "build" / f"{name}.json"
+        if not build_path.is_file():
+            _print_err(
+                f"start: compiled plan not found at {build_path}; "
+                f"recovery: astrid author compile {args.orchestrator_id}"
+            )
+            return 1
 
-    try:
-        compiled_payload = json.loads(build_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        _print_err(f"start: failed to read {build_path}: {exc}")
-        return 1
+        try:
+            compiled_payload = json.loads(build_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _print_err(f"start: failed to read {build_path}: {exc}")
+            return 1
+    else:
+        compiled_payload = {}
 
     # Resolve timeline ULID (timeline_id) and slug for display.
     timeline_id: str | None = None
@@ -241,54 +366,15 @@ def cmd_start(
                     f"Using default timeline: {timeline_slug}. "
                     f"Use --timeline to override."
                 )
-    # If still no timeline, list available timelines and error when a choice is
-    # needed; a project with zero timelines can still start a task run.
     if timeline_id is None:
-        from astrid.core.timeline.crud import list_timelines
-        available = list_timelines(slug, root=projects_root)
-        if available:
-            # Fix 5 (v6 dogfood): when exactly one timeline exists, auto-
-            # select it instead of bailing — the previous behaviour forced
-            # agents to re-issue the command with the obvious flag value.
-            # Multi-timeline projects still require explicit selection.
-            if len(available) == 1:
-                only = available[0]
-                found = find_timeline_by_slug(slug, only.slug, root=projects_root)
-                if found is None:
-                    _print_err(
-                        f"start: timeline {only.slug!r} not found in project {slug!r}"
-                    )
-                    return 1
-                timeline_id = found[0]
-                timeline_slug = only.slug
-                _print_err(
-                    f"(auto-selected only timeline {timeline_slug!r}; "
-                    f"pass --timeline explicitly to override)"
-                )
-            else:
-                _print_err("No default timeline; pass --timeline <slug>. Available:")
-                for ts in available:
-                    _print_err(f"  {ts.slug}  ({ts.name})")
-                return 1
-        else:
-            _print_err(
-                f"start: no timelines exist for project {slug!r}; "
-                "starting without a timeline. "
-                f"Create one later with `astrid timelines create <slug>`."
+        try:
+            timeline_id, timeline_slug = resolve_required_project_timeline(
+                slug,
+                root=projects_root,
             )
-
-    proj_root = project_dir(slug, root=projects_root)
-    proj_root.mkdir(parents=True, exist_ok=True)
-    plan_path = proj_root / "plan.json"
-    write_json_atomic(plan_path, compiled_payload)
-
-    try:
-        load_plan(plan_path)
-    except Exception as exc:
-        _print_err(f"start: compiled plan failed validation: {exc}")
-        return 1
-
-    plan_hash = compute_plan_hash(plan_path)
+        except Exception as exc:
+            _print_err(f"start: {exc}")
+            return 1
 
     if args.name is not None:
         try:
@@ -299,8 +385,54 @@ def cmd_start(
     else:
         run_id = _generate_run_id()
 
+    proj_root = project_dir(slug, root=projects_root)
+    proj_root.mkdir(parents=True, exist_ok=True)
     run_dir = proj_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    consumes: list[dict[str, str]] = []
+    if uses_dynamic_start_plan:
+        try:
+            compiled_payload, consumes = _build_canonical_start_plan(
+                args.orchestrator_id,
+                proj_root=proj_root,
+                run_dir=run_dir,
+                run_id=run_id,
+            )
+        except Exception as exc:
+            _print_err(f"start: failed to build {args.orchestrator_id} task plan: {exc}")
+            return 1
+
+    plan_path = proj_root / "plan.json"
+    write_json_atomic(plan_path, compiled_payload)
+    write_json_atomic(run_dir / "plan.json", compiled_payload)
+
+    try:
+        plan = load_plan(plan_path)
+    except Exception as exc:
+        _print_err(f"start: compiled plan failed validation: {exc}")
+        return 1
+
+    plan_hash = compute_plan_hash(plan_path)
+
+    run_record = build_run_record(
+        slug,
+        run_id,
+        tool_id=args.orchestrator_id,
+        kind="orchestrator",
+        status="prepared",
+        out=run_dir,
+        argv=["start", *list(argv)],
+        metadata={"plan_hash": plan_hash},
+        timeline_id=timeline_id,
+    )
+    if consumes:
+        run_record["consumes"] = consumes
+    write_json_atomic(
+        run_dir / "run.json",
+        run_record,
+    )
+    record_contributing_run(slug, timeline_id, run_id, root=projects_root)
 
     # Lease-first ordering: any reader that observes current_run.json is
     # guaranteed to find a corresponding lease.json. The session id on the
@@ -328,9 +460,11 @@ def cmd_start(
     )
     write_current_run(slug, run_id, root=projects_root)
 
-    events_path = run_dir / "events.jsonl"
     actor = task_actor_env()
-    append_event(events_path, make_run_started_event(run_id, plan_hash, actor=actor))
+    started_by = f"human:{actor}" if actor else None
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_plan_initialized_event(run_id, plan.to_dict(), plan_hash))
+        writer.append(make_run_started_event(run_id, plan_hash, started_by=started_by))
 
     agent_md = _AGENT_MD_TEMPLATE.format(
         preamble=PROHIBITION_PREAMBLE,
@@ -379,8 +513,8 @@ def cmd_abort(
         return 0
 
     run_dir = project_dir(slug, root=projects_root) / "runs" / run_id
-    events_path = run_dir / "events.jsonl"
-    append_event(events_path, make_run_aborted_event(run_id, reason=args.reason))
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_run_aborted_event(run_id, reason=args.reason))
     # DEC-010: clear the pointer AND release the writer lease so the run
     # is fully detached. A follow-up takeover would now see the lease as
     # orphan-pending.
@@ -498,7 +632,7 @@ def cmd_status(
         _print_err(f"status: {exc}")
         return 1
 
-    active_run = read_active_run(slug, root=projects_root)
+    active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         _print_err(
             f"status: no active run for project {slug!r}; "
@@ -512,8 +646,9 @@ def cmd_status(
     plan_path = proj_root / "plan.json"
     events_path = proj_root / "runs" / run_id / "events.jsonl"
 
-    plan = load_plan(plan_path)
     events = read_events(events_path)
+    plan = apply_mutations(load_plan(plan_path), events)
+    claims = active_claims_by_step(events)
     peek = peek_current_step(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
@@ -539,6 +674,9 @@ def cmd_status(
         if peek.step.produces:
             names = ", ".join(p.name for p in peek.step.produces)
             print(f"produces:  {names}")
+        claimed_identity = claims.get(path_str)
+        if peek.step.assignee != "system" or claimed_identity is not None:
+            print(f"owner:     {_format_claim_line(step=peek.step, claimed_identity=claimed_identity)}")
 
     pending = pending_count(proj_root / "runs" / run_id)
     if pending > 0:
@@ -590,6 +728,7 @@ def render_step_instructions(
     unknown token is left literal (best-effort, never crashes the CLI).
     """
     import os as _os
+
     from astrid.core.task.env import is_author_test_mode as _is_author_test_mode
 
     if text is None:
@@ -661,10 +800,35 @@ def _format_schema_requirements(step) -> str:
     return "\n".join(lines)
 
 
-def _format_ack_template(
-    *, path_str: str, slug: str, ack_kind: str, has_repeat_for_each: bool
+def _identity_parts(identity: str | None) -> tuple[str, str] | None:
+    if identity is None:
+        return None
+    if identity.startswith("agent:") and len(identity) > len("agent:"):
+        return "agent", identity[len("agent:"):]
+    if identity.startswith("human:") and len(identity) > len("human:"):
+        return "human", identity[len("human:"):]
+    return None
+
+
+def _ack_identity_token(
+    *, step, ack_kind: str, claimed_identity: str | None
 ) -> str:
-    identity = "--agent <id>" if ack_kind == "agent" else "--actor <name>"
+    claimed = _identity_parts(claimed_identity)
+    assignee = _identity_parts(getattr(step, "assignee", None))
+    if claimed is not None and claimed[0] == ack_kind:
+        return f"--{claimed[0]} {claimed[1]}"
+    if assignee is not None and assignee[0] == ack_kind:
+        return f"--{assignee[0]} {assignee[1]}"
+    return "--agent <id>" if ack_kind == "agent" else "--human <name>"
+
+
+def _format_ack_template(
+    *, path_str: str, slug: str, step, claimed_identity: str | None, has_repeat_for_each: bool
+) -> str:
+    ack_kind = step.ack.kind if step.ack is not None else "agent"
+    identity = _ack_identity_token(
+        step=step, ack_kind=ack_kind, claimed_identity=claimed_identity
+    )
     base = (
         f"astrid ack {path_str} --project {slug} --decision approve "
         f"{identity} [--evidence path ...]"
@@ -674,9 +838,18 @@ def _format_ack_template(
     return base
 
 
+def _format_claim_line(*, step, claimed_identity: str | None) -> str:
+    parts = [f"assignee: {getattr(step, 'assignee', 'system')}"]
+    if claimed_identity is not None:
+        parts.append(f"claimed: {claimed_identity}")
+    return "  ".join(parts)
+
+
 def _find_step_by_path(plan, path_tuple):
-    """Walk a TaskPlan to find the step at ``path_tuple`` (descending NestedStep
-    children). Returns the step or None if the path does not resolve.
+    """Walk a TaskPlan to find the step at ``path_tuple``.
+
+    Descends through group-step children and returns None if the path does not
+    resolve.
     """
     if not path_tuple:
         return None
@@ -849,7 +1022,8 @@ def _emit_run_completed_if_needed(
             return True
     if not _run_is_complete(plan, events):
         return False
-    append_event(events_path, make_run_completed_event(run_id))
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(make_run_completed_event(run_id))
     # Release the active-run pointer so the project is free for the next
     # orchestrator. Idempotent guard: only the first call gets past the
     # early-return above, so this fires exactly once per run.
@@ -967,6 +1141,18 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
     # Add DSL-compiled orchestrators discovered from build/*.json files.
     # Each `<pack>/build/<name>.json` corresponds to qualified id
     # `<pack>.<name>`. Defensive — never raises if a pack dir is missing.
+    #
+    # Canonical orchestrators (builtin.hype, builtin.event_talks,
+    # builtin.thumbnail_maker) build their plans dynamically at start
+    # time via plan_template.build_plan_v2(). Their compiled build JSON
+    # artifacts (if present) are NOT product surface — they must never
+    # be treated as the canonical plan source or discovered from the
+    # build/ directory for listing/suggestion purposes.
+    _CANONICAL_DYNAMIC_IDS = {
+        "builtin.hype",
+        "builtin.event_talks",
+        "builtin.thumbnail_maker",
+    }
     try:
         from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT
         if DEFAULT_PACKS_ROOT.is_dir():
@@ -977,7 +1163,9 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
                 if not build_dir.is_dir():
                     continue
                 for build_file in build_dir.glob("*.json"):
-                    ids.add(f"{pack_dir.name}.{build_file.stem}")
+                    qid = f"{pack_dir.name}.{build_file.stem}"
+                    if qid not in _CANONICAL_DYNAMIC_IDS:
+                        ids.add(qid)
     except Exception:
         pass
 
@@ -1004,10 +1192,10 @@ def _print_next_unbound_hint(
     *,
     target_slug: str | None = None,
 ) -> None:
-    """Universal port-of-call (#13): no session bound. Print exactly the
-    single legal next command, plus a short discovery list. Mirrors the
-    style of `astrid status` (no args) so an agent who knows only
-    `astrid next` lands here cleanly.
+    """Universal port-of-call (#13): no session bound.
+
+    Print exactly one legal next command. Broader discovery belongs to
+    ``astrid status``; ``next`` is the action surface.
 
     When ``target_slug`` is set (caller passed ``--project <slug>``), the
     hint targets that specific slug instead of listing discovered projects.
@@ -1016,33 +1204,32 @@ def _print_next_unbound_hint(
     automation that grep stderr keep matching.
     """
     if target_slug:
-        print(
-            f"no session bound — run `astrid status` to confirm, then "
-            f"`astrid attach {target_slug}` to bind this tab."
-        )
+        action = f"astrid attach {target_slug}"
+        print("no session bound.")
         print()
-        print(f"  astrid attach {target_slug}")
-        print()
-        print("after attach, `astrid next` will tell you the next legal action.")
+        print("next:")
+        print(f"  {action}")
         return
 
     slugs = _list_project_slugs(projects_root)
-    print("no session bound — run `astrid status` to list projects, "
-          "then `astrid attach <project>` to bind this tab.")
-    print()
-    if slugs:
-        print("attach an existing project:")
-        for s in slugs[:6]:
-            print(f"  astrid attach {s}")
-        if len(slugs) > 6:
-            print(f"  ({len(slugs) - 6} more — `astrid projects ls` for the full list)")
+    action: str
+    try:
+        from astrid.core.session.config import resolve_default_project
+        default = resolve_default_project()
+    except Exception:
+        default = None
+    if default and default in slugs:
+        action = "astrid attach"
+    elif len(slugs) == 1:
+        action = f"astrid attach {slugs[0]}"
+    elif slugs:
+        action = "astrid status"
     else:
-        print("no projects exist yet — create one:")
-        print("  astrid projects create <slug>")
-        print("then:")
-        print("  astrid attach <slug>")
+        action = "astrid projects create <slug>"
+    print("no session bound.")
     print()
-    print("after attach, `astrid next` will tell you the next legal action.")
+    print("next:")
+    print(f"  {action}")
 
 
 def _print_next_no_run_hint(slug: str, projects_root: Optional[Path]) -> None:
@@ -1232,17 +1419,14 @@ def cmd_next(
     except SessionBindingError as exc:
         _print_err(f"next: {exc}")
         return 1
-    # Only print the unbound discovery hint when truly unbound:
-    # neither a session resolved (env or file-fallback) NOR an explicit
-    # --project. With --project but no session, fall through — an active
-    # run may still exist on disk and the agent can proceed without a
-    # session (e.g. test harnesses, scripted recovery).
-    if session is None and not explicit_project and slug is None:
-        _print_next_unbound_hint(projects_root, target_slug=None)
-        return 0
-    if session is None and slug is None:
-        # explicit_project was False AND no slug auto-discovered: print hint.
-        _print_next_unbound_hint(projects_root, target_slug=None)
+    # No resolved session means no task-run action is legal yet. Even with
+    # --project, print the single attach action instead of inspecting run
+    # state anonymously.
+    if session is None:
+        _print_next_unbound_hint(
+            projects_root,
+            target_slug=slug if explicit_project else None,
+        )
         return 0
     if slug is None and session is not None:
         slug = session.project
@@ -1253,7 +1437,7 @@ def cmd_next(
         _print_err(f"next: {exc}")
         return 1
 
-    active_run = read_active_run(slug, root=projects_root)
+    active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         # SESSION BOUND, NO RUN: print orchestrator suggestions + the
         # exact `astrid start` template the agent should type next.
@@ -1275,6 +1459,8 @@ def cmd_next(
     try:
         from astrid.core.session.binding import (
             SessionBindingError as _SBErr,
+        )
+        from astrid.core.session.binding import (
             is_writer_for,
             resolve_current_session,
         )
@@ -1311,8 +1497,9 @@ def cmd_next(
         except (TaskRunGateError, OSError, EventLogError):
             continue
 
-    plan = load_plan(plan_path)
     events = read_events(events_path)
+    plan = apply_mutations(load_plan(plan_path), events)
+    claims = active_claims_by_step(events)
     peek = peek_current_step(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
@@ -1401,7 +1588,8 @@ def cmd_next(
                 actor_id="cli",
                 reason=args.reason,
             )
-            append_event(events_path, skip_event)
+            with writer_context_for_project(slug, root=projects_root) as writer:
+                writer.append(skip_event)
             print(f"skipped {STEP_PATH_SEP.join(peek.path_tuple)}")
             events = read_events(events_path)
             peek = peek_current_step(
@@ -1448,6 +1636,7 @@ def cmd_next(
         return 0
 
     path_str = STEP_PATH_SEP.join(peek.path_tuple)
+    claimed_identity = claims.get(path_str)
 
     _render_kwargs = dict(
         projects_root=projects_root,
@@ -1458,14 +1647,27 @@ def cmd_next(
         iteration=peek.iteration,
     )
 
+    if peek.step.assignee != "system" or claimed_identity is not None:
+        print(_format_claim_line(step=peek.step, claimed_identity=claimed_identity))
+        print()
+
     if is_code_kind(peek.step):
-        print(f"run: {render_step_instructions(peek.step.command, **_render_kwargs)}")
-        if not _command_has_project_arg(peek.step.command):
+        rendered = render_task_command(
+            peek.step,
+            slug=slug,
+            run_id=run_id,
+            project_root=proj_root,
+            plan_step_path=peek.path_tuple,
+            iteration=peek.iteration,
+            item_id=peek.item_id,
+        )
+        print(f"run: {render_step_instructions(rendered.display_command, **_render_kwargs)}")
+        if not _command_has_project_arg(rendered.canonical_command):
             print(
-                "warning: this code-step command has no --project argument, so running it "
-                "directly will not re-enter the Astrid task gate or advance the run. "
-                "Fix the authored plan so the step runs through `python3 -m astrid ... --project "
-                f"{slug}`."
+                "warning: this code-step command uses task env instead of a local --project "
+                "argument. The printed env-prefixed command is the copy/paste re-entry "
+                "form for a normal shell; adapters execute the canonical command under "
+                "the same task env."
             )
         print(
             "(rerun the same command if it failed; the gate detects re-entry "
@@ -1502,12 +1704,13 @@ def cmd_next(
             _format_ack_template(
                 path_str=path_str,
                 slug=slug,
-                ack_kind=(peek.step.ack.kind if peek.step.ack is not None else "agent"),
+                step=peek.step,
+                claimed_identity=claimed_identity,
                 has_repeat_for_each=host_has_for_each,
             )
         )
     else:
-        # Defensive: peek_current_step should never surface a NestedStep.
+        # Defensive: peek_current_step should never surface a group step.
         _print_err(f"next: unexpected step kind {type(peek.step).__name__}")
         return 1
 
@@ -1520,7 +1723,7 @@ def cmd_next(
                 slug,
                 run_id,
                 peek.path_tuple,
-                step_version=1,
+                step_version=peek.step.version,
                 iteration=prev_iter,
                 root=projects_root,
             )
@@ -1688,193 +1891,110 @@ def cmd_step_retry_fetch(
     *,
     projects_root: Optional[Path] = None,
 ) -> int:
-    """Retry artifact fetch for a step in ``awaiting_fetch`` state."""
-    from astrid.core.adapter.remote_artifact_fetch import fetch_artifacts
-    from astrid.core.task.plan_verbs import apply_mutations
-    from astrid.core.task.plan import iter_steps_with_path
-
+    """Retry fetching artifacts for a remote-artifact step awaiting fetch."""
     parser = argparse.ArgumentParser(prog="astrid step retry-fetch", add_help=True)
-    parser.add_argument("step_id", help="step id (e.g. transcribe, render)")
-    parser.add_argument("--run", default=None, dest="run_id", help="run id")
-    parser.add_argument("--project", default=None, help="project slug")
+    parser.add_argument("step")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--run", required=True)
+    parser.add_argument("--item", default=None, help="for_each item id")
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
-        return _system_exit_code(exc)
-
-    if args.project is not None:
-        try:
-            slug = validate_project_slug(args.project)
-        except Exception as exc:
-            _print_err(f"step retry-fetch: {exc}")
-            return 1
-    else:
-        _print_err("step retry-fetch: --project is required")
-        return 1
-
-    if args.run_id is not None:
-        try:
-            run_id = validate_run_id(args.run_id)
-        except Exception as exc:
-            _print_err(f"step retry-fetch: --run {exc}")
-            return 1
-    else:
-        current = read_current_run(slug, root=projects_root)
-        if current is None:
-            _print_err(
-                f"step retry-fetch: no active run for project {slug!r} "
-                f"and --run not specified"
-            )
-            return 1
-        run_id = current
-
-    proj_root = project_dir(slug, root=projects_root)
-    run_dir = proj_root / "runs" / run_id
-    if not run_dir.is_dir():
-        _print_err(
-            f"step retry-fetch: run {run_id!r} not found in project {slug!r}"
-        )
-        return 1
-
-    events_path = run_dir / "events.jsonl"
-    if not events_path.is_file():
-        _print_err(
-            f"step retry-fetch: no events.jsonl for run {run_id!r}"
-        )
-        return 1
-
-    events = read_events(events_path)
-    if not events:
-        _print_err(
-            f"step retry-fetch: empty events log for run {run_id!r}"
-        )
-        return 1
-
-    step_id = args.step_id
-    latest_event = _latest_event_for_step(events, step_id)
-    if latest_event is None:
-        _print_err(
-            f"step retry-fetch: no events found for step {step_id!r} "
-            f"in run {run_id!r}"
-        )
-        return 1
-
-    latest_kind = latest_event.get("kind")
-
-    if latest_kind == "step_completed":
-        _print_err(
-            f"step retry-fetch: step {step_id!r} is already completed"
-        )
-        return 0
-
-    if latest_kind == "step_failed":
-        _print_err(
-            f"step retry-fetch: step {step_id!r} is failed, not awaiting_fetch"
-        )
-        return 1
-
-    if latest_kind != "step_awaiting_fetch":
-        _print_err(
-            f"step retry-fetch: step {step_id!r} is in state "
-            f"{latest_kind!r}, expected awaiting_fetch"
-        )
-        return 1
-
-    plan_path = proj_root / "plan.json"
-    if not plan_path.is_file():
-        _print_err(
-            f"step retry-fetch: plan.json not found for project {slug!r}"
-        )
-        return 1
-
-    plan = load_plan(plan_path)
-    effective = apply_mutations(plan, events)
-
-    target_step: Step | None = None
-    target_path: tuple[str, ...] = ()
-    for path_tuple, s in iter_steps_with_path(effective):
-        if s.id == step_id and target_step is None:
-            target_step = s
-            target_path = path_tuple
-
-    if target_step is None:
-        _print_err(
-            f"step retry-fetch: step {step_id!r} not found in effective plan"
-        )
-        return 1
-
-    step_version = target_step.version
+        return int(exc.code)
 
     from astrid.core.adapter import RunContext
+    from astrid.core.adapter.remote_artifact_fetch import fetch_artifacts
 
-    run_ctx = RunContext(
+    slug = validate_project_slug(args.project)
+    run_id = validate_run_id(args.run)
+    proj_root = project_dir(slug, root=projects_root)
+    run_dir = proj_root / "runs" / run_id
+    events_path = run_dir / "events.jsonl"
+    plan = load_plan(proj_root / "plan.json")
+    events = read_events(events_path)
+    step_path = tuple(args.step.split(STEP_PATH_SEP))
+    step = _find_step_by_path(plan, step_path)
+    if step is None:
+        _print_err(f"step retry-fetch: unknown step {args.step!r}")
+        return 1
+    if step.adapter != "remote-artifact":
+        _print_err(f"step retry-fetch: {args.step} is not a remote-artifact step")
+        return 1
+    if step.version != 1 and not any(
+        event.get("step_version") == step.version and event.get("plan_step_path") == list(step_path)
+        for event in events
+    ):
+        _print_err(f"step retry-fetch: no v{step.version} events found for {args.step}")
+        return 1
+    latest = None
+    for event in reversed(events):
+        if not (
+            event.get("plan_step_path") == list(step_path)
+            or event.get("plan_step_id") == args.step
+        ):
+            continue
+        event_version = event.get("step_version", 1)
+        if event_version == step.version:
+            latest = event
+            break
+    if latest and latest.get("kind") == "step_completed":
+        print(f"step retry-fetch: {args.step} already completed")
+        return 0
+    if not latest or latest.get("kind") != "step_awaiting_fetch":
+        _print_err(f"step retry-fetch: {args.step} is not awaiting_fetch")
+        return 1
+
+    ctx = RunContext(
         slug=slug,
         run_id=run_id,
         project_root=proj_root,
-        plan_step_path=target_path,
-        step_version=step_version,
+        plan_step_path=step_path,
+        step_version=step.version,
+        item_id=args.item,
     )
-
-    fetch_result = fetch_artifacts(target_step, run_ctx)
-
-    if fetch_result.status == "completed":
-        path_str = STEP_PATH_SEP.join(target_path)
-        append_event(
-            events_path,
-            make_step_completed_event(
-                path_str,
-                0,
-                adapter="remote-artifact",
-            ),
-        )
-        print(f"step {step_id}: all artifacts fetched")
-
-        events_after = read_events(events_path)
-        plan_after = load_plan(plan_path)
-        if _run_is_complete(plan_after, events_after):
-            append_event(events_path, make_run_completed_event(run_id))
-            print(f"run {run_id}: completed")
+    result = fetch_artifacts(step, ctx)
+    if result.status == "completed":
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_step_completed_event(
+                    args.step,
+                    0,
+                    adapter=step.adapter,
+                    step_version=step.version,
+                )
+            )
+        events = read_events(events_path)
+        if _run_is_complete(plan, events):
+            _emit_run_completed_if_needed(plan, events, events_path, run_id, slug=slug, projects_root=projects_root)
         return 0
-
-    if fetch_result.status == "awaiting_fetch":
-        path_str = STEP_PATH_SEP.join(target_path)
-        append_event(
-            events_path,
-            make_step_awaiting_fetch_event(
-                path_str,
-                missing=list(fetch_result.missing),
-                mismatched=list(fetch_result.mismatched),
-                reason=fetch_result.reason,
-                adapter="remote-artifact",
-            ),
-        )
-        _print_err(
-            f"step {step_id}: still awaiting_fetch: "
-            f"missing={fetch_result.missing}, mismatched={fetch_result.mismatched}"
-        )
+    if result.status == "awaiting_fetch":
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_step_awaiting_fetch_event(
+                    args.step,
+                    missing=result.missing,
+                    mismatched=result.mismatched,
+                    reason=result.reason,
+                    adapter=step.adapter,
+                    step_version=step.version,
+                )
+            )
         return 1
-
-    _print_err(f"step retry-fetch: fetch failed: {fetch_result.reason}")
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(
+            make_step_failed_event(
+                args.step,
+                1,
+                reason=result.reason,
+                adapter=step.adapter,
+                step_version=step.version,
+            )
+        )
     return 1
 
 
-def _latest_event_for_step(
-    events: list[dict[str, Any]],
-    step_id: str,
-) -> dict[str, Any] | None:
-    """Return the latest event whose leaf step id matches *step_id*."""
-    latest: dict[str, Any] | None = None
-    for ev in events:
-        if not isinstance(ev, dict):
-            continue
-        path_list = ev.get("plan_step_path")
-        if isinstance(path_list, list) and path_list and path_list[-1] == step_id:
-            latest = ev
-    return latest
-
-
-from astrid.core.task.lifecycle_ack import cmd_ack  # noqa: E402
-from astrid.core.task.lifecycle_skip import cmd_skip  # noqa: E402
+from astrid.core.task.lifecycle_ack import cmd_ack  # noqa: E402,F401
+from astrid.core.task.lifecycle_skip import cmd_skip  # noqa: E402,F401
 
 __all__ = [
     "cmd_abort",

@@ -111,7 +111,7 @@ def variant_prefix_message(repo_root: Path, thread_id: str) -> str | None:
     if count <= 0:
         return None
     plural = "group" if count == 1 else "groups"
-    return f"{count} unresolved variant {plural}; run `python3 -m astrid thread keep <run-id>:<n>[,<n>]` or `<run-id>:none`."
+    return f"{count} unresolved variant {plural}; review outputs and record any keeper as non-binding lineage selection."
 
 
 def keep_selection(repo_root: Path, thread_id: str, selector: str, *, action: str = "keep") -> dict[str, Any]:

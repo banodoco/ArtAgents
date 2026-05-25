@@ -23,7 +23,6 @@ from astrid.core.task.events import read_events
 from astrid.core.task.run_audit import _cost_by_source, _run_status
 
 from . import (
-    arrangement_edits,
     audio_edits,
     clip_edits,
     crud,
@@ -77,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     ls_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
+    )
+    ls_parser.add_argument(
+        "--include-tombstoned",
+        action="store_true",
+        help="Include tombstoned timelines for audit views.",
     )
     ls_parser.set_defaults(handler=cmd_ls)
 
@@ -285,6 +289,13 @@ def build_parser() -> argparse.ArgumentParser:
     clip_add.add_argument("slug", help="Timeline slug.")
     clip_add.add_argument("--kind", required=True, choices=["visual", "audio", "text"], help="Clip kind.")
     clip_add.add_argument("--asset", required=True, help="Asset identifier.")
+    clip_add.add_argument(
+        "--track",
+        "--track-id",
+        required=True,
+        dest="track_id",
+        help="Existing target track identifier for the clip.",
+    )
     pos_group = clip_add.add_mutually_exclusive_group()
     pos_group.add_argument("--at", type=int, dest="at_index", help="Insert at 0-based index.")
     pos_group.add_argument("--after", dest="after_id", help="Insert after clip id.")
@@ -306,6 +317,20 @@ def build_parser() -> argparse.ArgumentParser:
     clip_move.add_argument("--to", required=True, dest="to_position", help="Target position: index, after:<id>, or before:<id>.")
     _add_expected_version_arg(clip_move)
     clip_move.set_defaults(handler=cmd_clip_move)
+
+    # clip retrack
+    clip_retrack = clip_subs.add_parser("retrack", help="Move a clip to a different track.")
+    clip_retrack.add_argument("slug", help="Timeline slug.")
+    clip_retrack.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
+    clip_retrack.add_argument(
+        "--track",
+        "--track-id",
+        required=True,
+        dest="track_id",
+        help="Existing target track identifier.",
+    )
+    _add_expected_version_arg(clip_retrack)
+    clip_retrack.set_defaults(handler=cmd_clip_retrack)
 
     # clip retime
     clip_retime = clip_subs.add_parser("retime", help="Change a clip's start time and duration.")
@@ -495,7 +520,10 @@ def build_parser() -> argparse.ArgumentParser:
     arr_subs = arr_parser.add_subparsers(dest="arrangement_command", required=True)
 
     # arrangement set
-    arr_set_p = arr_subs.add_parser("set", help="Replace the timeline arrangement from a JSON file.")
+    arr_set_p = arr_subs.add_parser(
+        "set",
+        help="Retired: arrangement replacement is migration-only legacy.",
+    )
     arr_set_p.add_argument("slug", help="Timeline slug.")
     arr_set_p.add_argument("--from-json", required=True, dest="from_json",
                            help="Path to a JSON file containing the new arrangement.")
@@ -832,19 +860,23 @@ def cmd_ls(args: argparse.Namespace) -> int:
         )
         return 2
 
-    rows = crud.list_timelines(project_slug)
+    rows = crud.list_timelines(
+        project_slug,
+        include_tombstoned=bool(getattr(args, "include_tombstoned", False)),
+    )
     if not rows:
         print(f"(no timelines in project '{project_slug}')")
         return 0
 
     # Table header.
-    print(f"{'SLUG':<20} {'NAME':<24} {'DEFAULT':<8} {'RUNS':>5} {'LAST FINALIZED':<20}")
-    print("-" * 80)
+    print(f"{'SLUG':<20} {'NAME':<24} {'DEFAULT':<8} {'RUNS':>5} {'TOMBSTONED':<20} {'LAST FINALIZED':<20}")
+    print("-" * 102)
     for row in rows:
         default_marker = "*" if row.is_default else ""
         last = row.last_finalized or "-"
+        tombstoned = row.tombstoned_at or "-"
         print(
-            f"{row.slug:<20} {row.name:<24} {default_marker:<8} {row.run_count:>5} {last:<20}"
+            f"{row.slug:<20} {row.name:<24} {default_marker:<8} {row.run_count:>5} {tombstoned:<20} {last:<20}"
         )
 
     return 0
@@ -876,7 +908,11 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 def cmd_show(args: argparse.Namespace) -> int:
     session = _require_session()
-    data = crud.show_timeline(session.project, args.slug)
+    data = crud.show_timeline(
+        session.project,
+        args.slug,
+        verify=bool(getattr(args, "verify", False)),
+    )
     if data is None:
         print(f"timeline '{args.slug}' not found", file=sys.stderr)
         return 1
@@ -912,9 +948,11 @@ def cmd_show(args: argparse.Namespace) -> int:
             "is_default": display.is_default,
             "tombstoned_at": manifest.tombstoned_at,
             "contributing_runs": manifest.contributing_runs,
-            "assembly": dict(assembly.assembly),
+            "assembly": dict(assembly),
             "final_outputs": outputs,
         }
+        if "verification" in data:
+            payload["verification"] = data["verification"]
         print(_json.dumps(payload, indent=2, default=str))
         return 0
 
@@ -928,13 +966,22 @@ def cmd_show(args: argparse.Namespace) -> int:
     print()
 
     print("Assembly:")
-    if assembly.assembly:
+    if assembly:
         import json as _json
 
-        print(f"  keys: {sorted(assembly.assembly.keys())}")
+        print(f"  keys: {sorted(assembly.keys())}")
     else:
         print("  (empty)")
     print()
+    if "verification" in data:
+        verification = data["verification"]
+        status = "ok" if verification.get("ok") else "failed"
+        print(f"Verification: {status}")
+        print(f"  event log: {verification.get('event_log')}")
+        print(f"  checked events: {verification.get('checked_events')}")
+        if verification.get("error"):
+            print(f"  error: {verification.get('error')}")
+        print()
 
     print(f"Final outputs ({len(manifest.final_outputs)}):")
     if not manifest.final_outputs:
@@ -1105,6 +1152,13 @@ def cmd_export(args: argparse.Namespace) -> int:
             sha = hashlib.sha256(dst.read_bytes()).hexdigest()
             manifest_entries.append((rel, sha))
 
+        def _add_bytes(data: bytes, rel: str) -> None:
+            dst = tmpdir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(data)
+            sha = hashlib.sha256(data).hexdigest()
+            manifest_entries.append((rel, sha))
+
         # Repair assembly.json from the event log before export (ensures the
         # exported tarball carries the current projected state even when the
         # on-disk compatibility file is stale).
@@ -1118,25 +1172,32 @@ def cmd_export(args: argparse.Namespace) -> int:
                 _add_file(src, name)
 
         # Copy contributing runs
-        for run_id in manifest.contributing_runs:
+        for run_id in _timeline_contributing_runs(proj_root, manifest.contributing_runs, include_aborted=include_aborted):
             run_root = runs_dir / run_id
             if not run_root.is_dir():
                 continue
 
-            # Filter aborted runs
-            events_path = run_root / "events.jsonl"
-            if events_path.exists():
-                events = read_events(events_path)
-                status = _run_status(events)
-                if status == "aborted" and not include_aborted:
-                    continue
-
-            # Copy plan.json (from project root)
-            plan_path = proj_root / "plan.json"
+            # Copy the run's own plan snapshot. Older runs may only have the
+            # initial plan embedded in events.jsonl; export that snapshot
+            # rather than the mutable project-level plan cache.
+            plan_path = run_root / "plan.json"
             if plan_path.is_file():
                 _add_file(plan_path, f"runs/{run_id}/plan.json")
+            else:
+                plan_payload = _run_initial_plan_payload(run_root / "events.jsonl")
+                if plan_payload is not None:
+                    data = json.dumps(
+                        plan_payload,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    _add_bytes(
+                        data,
+                        f"runs/{run_id}/plan.json",
+                    )
 
             # Copy events.jsonl
+            events_path = run_root / "events.jsonl"
             if events_path.is_file():
                 _add_file(events_path, f"runs/{run_id}/events.jsonl")
 
@@ -1168,6 +1229,19 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_initial_plan_payload(events_path: Path) -> dict[str, object] | None:
+    if not events_path.is_file():
+        return None
+    from astrid.core.task.events import read_events
+
+    for event in read_events(events_path):
+        if event.get("kind") == "plan_initialized" and isinstance(
+            event.get("plan"), dict
+        ):
+            return event["plan"]
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Handler: cost (Sprint 5b)
 # ---------------------------------------------------------------------------
@@ -1187,59 +1261,91 @@ def cmd_cost(args: argparse.Namespace) -> int:
     include_aborted = bool(getattr(args, "include_aborted", False))
 
     # Aggregate costs across all contributing runs
-    by_source: dict[str, float] = {}
+    by_source: dict[str, dict[str, Any]] = {}
     grand_total = 0.0
-    run_count = 0
+    run_ids = _timeline_contributing_runs(
+        proj_root,
+        manifest.contributing_runs,
+        include_aborted=include_aborted,
+    )
 
-    for run_id in manifest.contributing_runs:
-        run_root = runs_dir / run_id
-        if not run_root.is_dir():
-            continue
-        events_path = run_root / "events.jsonl"
-        if not events_path.exists():
-            continue
+    for run_id in run_ids:
+        events_path = runs_dir / run_id / "events.jsonl"
         events = read_events(events_path)
-
-        # Filter aborted runs
-        status = _run_status(events)
-        if status == "aborted" and not include_aborted:
-            continue
-
-        run_count += 1
         cost_summary = _cost_by_source(events)
-        for source, info in cost_summary.items():
-            if isinstance(info, dict):
-                amt = info.get("amount", 0)
-                by_source[source] = by_source.get(source, 0.0) + float(amt)
-                grand_total += float(amt)
+        grand_total += _merge_cost_summaries(by_source, cost_summary)
 
     json_out = bool(getattr(args, "json_out", False))
     if json_out:
         payload: dict[str, Any] = {
             "slug": args.slug,
             "project": session.project,
-            "contributing_runs": run_count,
+            "contributing_runs": len(run_ids),
             "total_runs_in_manifest": len(manifest.contributing_runs),
             "include_aborted": include_aborted,
             "grand_total": round(grand_total, 6),
-            "by_source": {
-                source: round(amt, 6) for source, amt in sorted(by_source.items())
-            },
+            "by_source": by_source,
         }
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"Cost rollup for timeline '{args.slug}' ({run_count} contributing runs):")
+    print(f"Cost rollup for timeline '{args.slug}' ({len(run_ids)} contributing runs):")
     print()
     if not by_source:
         print("  (no cost data)")
     else:
         for source in sorted(by_source):
-            amt = by_source[source]
+            amt = float(by_source[source].get("amount", 0.0))
             print(f"  {source:<20} ${amt:>10.4f}")
     print(f"  {'─' * 32}")
     print(f"  {'TOTAL':<20} ${grand_total:>10.4f}")
     return 0
+
+
+def _timeline_contributing_runs(
+    proj_root: Path,
+    run_ids: list[str] | tuple[str, ...],
+    *,
+    include_aborted: bool,
+) -> list[str]:
+    runs_dir = proj_root / "runs"
+    selected: list[str] = []
+    seen: set[str] = set()
+    for run_id in run_ids:
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        run_root = runs_dir / run_id
+        if not run_root.is_dir():
+            continue
+        events_path = run_root / "events.jsonl"
+        if events_path.exists():
+            events = read_events(events_path)
+            if _run_status(events) == "aborted" and not include_aborted:
+                continue
+        selected.append(run_id)
+    return selected
+
+
+def _merge_cost_summaries(
+    target: dict[str, dict[str, Any]],
+    incoming: dict[str, dict[str, Any]],
+) -> float:
+    added_total = 0.0
+    for source, info in incoming.items():
+        if not isinstance(info, dict):
+            continue
+        amount = float(info.get("amount", 0.0))
+        currency = str(info.get("currency", "USD"))
+        bucket = target.setdefault(
+            source,
+            {"amount": 0.0, "currency": currency, "source": source},
+        )
+        bucket["amount"] = round(float(bucket.get("amount", 0.0)) + amount, 6)
+        bucket["currency"] = currency
+        bucket["source"] = source
+        added_total += amount
+    return added_total
 
 
 # ---------------------------------------------------------------------------
@@ -1323,6 +1429,7 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
         args.slug,
         kind=args.kind,
         asset_id=args.asset,
+        track_id=getattr(args, "track_id", None),
         position=pos,
         actor=_timeline_actor_from_session(session),
         **extra,
@@ -1356,6 +1463,22 @@ def cmd_clip_move(args: argparse.Namespace) -> int:
         args.slug,
         clip_id=args.clip_id,
         position=pos,
+        actor=_timeline_actor_from_session(session),
+        **extra,
+    )
+    print(_clip_success(event, backend_name))
+    return 0
+
+
+def cmd_clip_retrack(args: argparse.Namespace) -> int:
+    session = _require_session()
+    backend_name = _resolve_clip_backend_name(session.project, args.slug)
+    extra = _expected_version_kwargs(args)
+    event = clip_edits.retrack_clip(
+        session.project,
+        args.slug,
+        clip_id=args.clip_id,
+        track_id=args.track_id,
         actor=_timeline_actor_from_session(session),
         **extra,
     )
@@ -1763,27 +1886,12 @@ def cmd_pool_score(args: argparse.Namespace) -> int:
 
 
 def cmd_arrangement_set(args: argparse.Namespace) -> int:
-    session = _require_session()
-    from_json_path = Path(args.from_json).expanduser().resolve()
-    if not from_json_path.is_file():
-        raise TimelineEditError(f"arrangement JSON file not found: {from_json_path}")
-    try:
-        arrangement_data = json.loads(from_json_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise TimelineEditError(f"--from-json must contain valid JSON: {exc.msg}") from exc
-    if not isinstance(arrangement_data, dict):
-        raise TimelineEditError("arrangement JSON file must contain a JSON object")
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
-    extra = _expected_version_kwargs(args)
-    event = arrangement_edits.arrangement_replace(
-        session.project,
-        args.slug,
-        arrangement=arrangement_data,
-        actor=_timeline_actor_from_session(session),
-        **extra,
+    _require_session()
+    raise TimelineEditError(
+        "arrangement set is retired: arrangement.replaced is migration-only "
+        "legacy. Use timeline.config_replaced with a raw TimelineConfig for "
+        "canonical full-timeline writes."
     )
-    print(_edit_success("arrangement", event, backend_name))
-    return 0
 
 
 def cmd_arrangement_show(args: argparse.Namespace) -> int:
@@ -2242,10 +2350,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 projection_parity_ok = False
                 projection_parity_error = f"failed to read assembly.json: {exc}"
             else:
-                if isinstance(existing, dict):
-                    existing_assembly = existing.get("assembly", existing)
-                else:
-                    existing_assembly = existing
+                existing_assembly = existing
                 if existing_assembly != replayed:
                     projection_parity_ok = False
                     diff_keys = _diff_keys(

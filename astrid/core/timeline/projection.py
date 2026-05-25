@@ -19,26 +19,16 @@ Lifecycle events
 * ``timeline.created``, ``timeline.renamed``, ``timeline.default_set``,
   ``timeline.tombstoned``, ``timeline.deleted`` are **intentional no-ops**
   for the assembly projection.
-* ``timeline.imported`` seeds the assembly state from the snapshot payload.
+* ``timeline.imported`` is migration-only legacy and is rejected by runtime
+  projection.
 
-``timeline.imported`` wrapper unwrap
-------------------------------------
+``timeline.imported`` migration boundary
+----------------------------------------
 
-``LocalFsBackend._build_imported_event()`` stores the full on-disk
-``assembly.json`` blob inside ``snapshot['assembly.json']``:
-
-.. code-block:: json
-
-    {"schema_version": 1, "assembly": { ... }}
-
-If ``snapshot['assembly.json']`` is a dict containing an ``"assembly"`` key
-whose value is itself a dict, the projector extracts that inner dict.
-Otherwise the raw value is used as the assembly body.
-
-This heuristic is safe because a bare assembly dict will never contain a
-top-level ``"assembly"`` key whose value is another dict (clip data has an
-``"assembly"`` field only inside arrangement-based shapes, and those are
-not top-level assembly dicts).
+Historical ``timeline.imported`` payloads and wrapper snapshots are decoded
+only by the Sprint 2 migration scripts. Runtime projection fails closed instead
+of silently converting wrapper, old full-state, or non-container read-model
+shapes.
 
 Dispatch conventions
 --------------------
@@ -61,18 +51,20 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Sequence
+import json
+from typing import Any, Literal, Sequence
+
+from astrid import timeline as timeline_contract
 
 from .events.schema import (
-    ArrangementReplacedPayload,
     AudioBoundPayload,
     AudioUnboundPayload,
     ClipAddedPayload,
-    ClipAnnotatedPayload,
     ClipMovedPayload,
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
+    ClipRetrackedPayload,
     ClipRetimedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
@@ -80,16 +72,11 @@ from .events.schema import (
     EffectRemovedPayload,
     EffectTunedPayload,
     ErasedPayload,
-    PoolAssetAddedPayload,
-    PoolAssetRemovedPayload,
-    PoolAssetScoredPayload,
     ThemeOverriddenPayload,
     ThemeSetPayload,
-    TimelineBranchedFromPayload,
-    TimelineErasedPayload,
+    TimelineConfigReplacedPayload,
     TimelineEvent,
     TimelineRecoveredPayload,
-    TimelineRevertedPayload,
     TrackAddedPayload,
     TrackRemovedPayload,
     TransitionRemovedPayload,
@@ -102,7 +89,7 @@ from .events.schema import (
 # ============================================================================
 
 
-@dataclass(frozen=True)
+@dataclass
 class ProjectionError(RuntimeError):
     """Raised when a single event cannot be projected onto the assembly.
 
@@ -123,7 +110,7 @@ class ProjectionError(RuntimeError):
         return f"projection error at event {self.event_id!r} ({self.kind!r}): {self.reason}"
 
 
-@dataclass(frozen=True)
+@dataclass
 class ErasedPayloadProjectionError(ProjectionError):
     """Raised when an erased event cannot be safely skipped in projection.
 
@@ -133,6 +120,54 @@ class ErasedPayloadProjectionError(ProjectionError):
     this error.
     """
 
+
+_PROJECTED_TOP_ALLOWED = frozenset({
+    "tracks",
+    "clips",
+    "theme",
+    "theme_overrides",
+})
+_PROJECTED_FORBIDDEN_CLIP_KEYS = frozenset({"kind", "asset_id", "start", "duration"})
+
+
+def _validate_projected_timeline_boundary(state: dict[str, Any]) -> dict[str, Any]:
+    """Validate the raw TimelineConfig projection boundary without registry lookups."""
+    if not isinstance(state, dict):
+        raise ValueError("projected TimelineConfig must be an object")
+    unknown = sorted(key for key in state if key not in _PROJECTED_TOP_ALLOWED)
+    if unknown:
+        raise ValueError(f"projected TimelineConfig has unknown key(s): {unknown}")
+    for key in ("clips", "tracks"):
+        if key not in state:
+            raise ValueError(f"projected TimelineConfig missing required key: {key}")
+        if not isinstance(state[key], list):
+            raise ValueError(f"projected TimelineConfig.{key} must be a list")
+    for index, track in enumerate(state["tracks"]):
+        if not isinstance(track, dict):
+            raise ValueError(f"projected TimelineConfig.tracks[{index}] must be an object")
+        if not isinstance(track.get("id"), str) or not track.get("id"):
+            raise ValueError(f"projected TimelineConfig.tracks[{index}].id must be a non-empty string")
+        if track.get("kind") not in {"visual", "audio"}:
+            raise ValueError(f"projected TimelineConfig.tracks[{index}].kind must be visual or audio")
+        if not isinstance(track.get("label"), str) or not track.get("label"):
+            raise ValueError(f"projected TimelineConfig.tracks[{index}].label must be a non-empty string")
+    for index, clip in enumerate(state["clips"]):
+        if not isinstance(clip, dict):
+            raise ValueError(f"projected TimelineConfig.clips[{index}] must be an object")
+        legacy = sorted(key for key in clip if key in _PROJECTED_FORBIDDEN_CLIP_KEYS)
+        if legacy:
+            raise ValueError(
+                f"projected TimelineConfig.clips[{index}] has legacy key(s): {legacy}"
+            )
+        for key in ("id", "track", "clipType"):
+            if not isinstance(clip.get(key), str) or not clip.get(key):
+                raise ValueError(
+                    f"projected TimelineConfig.clips[{index}].{key} must be a non-empty string"
+                )
+        if not isinstance(clip.get("at"), (int, float)) or isinstance(clip.get("at"), bool):
+            raise ValueError(f"projected TimelineConfig.clips[{index}].at must be a number")
+    return json.loads(json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False))
+
     def __str__(self) -> str:
         return (
             f"erased payload cannot be projected at event {self.event_id!r} "
@@ -141,17 +176,82 @@ class ErasedPayloadProjectionError(ProjectionError):
 
 
 # ============================================================================
-# Assembly key defaults (empty init shape)
+# Projection classification and assembly key defaults
 # ============================================================================
+
+ProjectionKindClassification = Literal[
+    "timeline_config_mutation",
+    "validated_full_config_replacement",
+    "metadata_noop",
+    "non_container_read_model",
+    "migration_only_legacy",
+]
+
+PROJECTOR_EVENT_CLASSIFICATION: dict[str, ProjectionKindClassification] = {
+    "timeline.created": "metadata_noop",
+    "timeline.renamed": "metadata_noop",
+    "timeline.default_set": "metadata_noop",
+    "timeline.tombstoned": "metadata_noop",
+    "timeline.deleted": "metadata_noop",
+    "timeline.reverted": "metadata_noop",
+    "timeline.branched_from": "metadata_noop",
+    "timeline.erased": "metadata_noop",
+    "timeline.imported": "migration_only_legacy",
+    "timeline.recovered": "validated_full_config_replacement",
+    "clip.added": "timeline_config_mutation",
+    "clip.removed": "timeline_config_mutation",
+    "clip.moved": "timeline_config_mutation",
+    "clip.retracked": "timeline_config_mutation",
+    "clip.retimed": "timeline_config_mutation",
+    "clip.swapped": "timeline_config_mutation",
+    "clip.replaced": "timeline_config_mutation",
+    "clip.text_set": "timeline_config_mutation",
+    "clip.annotated": "non_container_read_model",
+    "transition.set": "timeline_config_mutation",
+    "transition.removed": "timeline_config_mutation",
+    "effect.added": "timeline_config_mutation",
+    "effect.removed": "timeline_config_mutation",
+    "effect.tuned": "timeline_config_mutation",
+    "theme.set": "timeline_config_mutation",
+    "theme.overridden": "timeline_config_mutation",
+    "track.added": "timeline_config_mutation",
+    "track.removed": "timeline_config_mutation",
+    "audio.bound": "timeline_config_mutation",
+    "audio.unbound": "timeline_config_mutation",
+    "pool.asset_added": "non_container_read_model",
+    "pool.asset_removed": "non_container_read_model",
+    "pool.asset_scored": "non_container_read_model",
+    "arrangement.replaced": "migration_only_legacy",
+    "timeline.config_replaced": "validated_full_config_replacement",
+}
+
+MATERIALIZER_ALLOWED_CLASSIFICATIONS: frozenset[ProjectionKindClassification] = frozenset({
+    "timeline_config_mutation",
+    "validated_full_config_replacement",
+    "metadata_noop",
+})
+
+
+def classify_projector_event_kind(kind: str) -> ProjectionKindClassification:
+    """Return the planned container routing class for a timeline event kind."""
+    try:
+        return PROJECTOR_EVENT_CLASSIFICATION[kind]
+    except KeyError as exc:
+        raise ProjectionError(
+            event_id="(classification)",
+            kind=kind,
+            reason=f"event kind {kind!r} is not classified for projection",
+        ) from exc
+
 
 _EMPTY_INIT_DEFAULTS: dict[str, Any] = {
     "clips": [],
     "tracks": [],
     "theme": "",
     "theme_overrides": {},
-    "pool": {"entries": []},
-    "arrangement": {"clips": []},
 }
+
+_THEME_OVERRIDE_KEYS = frozenset({"visual", "generation", "voice", "audio", "pacing"})
 
 
 def _copy_empty_default(value: Any) -> Any:
@@ -197,15 +297,18 @@ def _insert_at_position(
 
 def _make_clip_entry(payload: ClipAddedPayload) -> dict[str, Any]:
     """Build a minimal clip dict from a ``clip.added`` payload."""
-    return {
+    clip_type = "text" if payload.kind == "text" else "media"
+    entry: dict[str, Any] = {
         "id": payload.clip_id,
-        "kind": payload.kind,
-        "asset_id": payload.asset_id,
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": "",
+        "at": 0.0,
+        "track": payload.track_id,
+        "clipType": clip_type,
     }
+    if payload.asset_id:
+        entry["asset"] = payload.asset_id
+    if clip_type == "text":
+        entry["text"] = {"content": ""}
+    return entry
 
 
 # ============================================================================
@@ -231,11 +334,18 @@ def _apply_clip_moved(clips: list[dict[str, Any]], payload: ClipMovedPayload) ->
     _insert_at_position(clips, clip, payload.position)
 
 
+def _apply_clip_retracked(clips: list[dict[str, Any]], payload: ClipRetrackedPayload) -> None:
+    for clip in clips:
+        if clip.get("id") == payload.clip_id:
+            clip["track"] = payload.track_id
+            return
+
+
 def _apply_clip_retimed(clips: list[dict[str, Any]], payload: ClipRetimedPayload) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            clip["start"] = payload.start
-            clip["duration"] = payload.duration
+            clip["at"] = payload.start
+            clip["hold"] = payload.duration
             return
 
 
@@ -249,21 +359,14 @@ def _apply_clip_swapped(clips: list[dict[str, Any]], payload: ClipSwappedPayload
 def _apply_clip_replaced(clips: list[dict[str, Any]], payload: ClipReplacedPayload) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            clip["asset_id"] = payload.with_asset_id
+            clip["asset"] = payload.with_asset_id
             return
 
 
 def _apply_clip_text_set(clips: list[dict[str, Any]], payload: ClipTextSetPayload) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            clip["text"] = payload.text
-            return
-
-
-def _apply_clip_annotated(clips: list[dict[str, Any]], payload: ClipAnnotatedPayload) -> None:
-    for clip in clips:
-        if clip.get("id") == payload.clip_id:
-            clip["note"] = payload.note
+            clip["text"] = {"content": payload.text}
             return
 
 
@@ -276,9 +379,9 @@ def _apply_transition_set(clips: list[dict[str, Any]], payload: TransitionSetPay
     for clip in clips:
         if clip.get("id") == payload.left_clip_id:
             clip["transition"] = {
-                "kind": payload.kind,
-                "right_clip_id": payload.right_clip_id,
-                "duration_seconds": payload.duration_seconds,
+                "type": payload.kind,
+                "duration": payload.duration_seconds,
+                "params": {"right_clip_id": payload.right_clip_id},
             }
             return
 
@@ -298,35 +401,29 @@ def _apply_transition_removed(clips: list[dict[str, Any]], payload: TransitionRe
 def _apply_effect_added(clips: list[dict[str, Any]], payload: EffectAddedPayload, assembly: dict[str, Any]) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            effects: list[dict[str, Any]] = clip.setdefault("effects", [])
-            effects.append({
-                "effect_id": payload.effect_id,
-                "params": dict(payload.params) if payload.params else None,
-            })
+            params = clip.setdefault("params", {})
+            effects = params.setdefault("effects", {})
+            effects[payload.effect_id] = dict(payload.params) if payload.params else {}
             return
 
 
 def _apply_effect_removed(clips: list[dict[str, Any]], payload: EffectRemovedPayload, assembly: dict[str, Any]) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            effects = clip.get("effects")
-            if isinstance(effects, list):
-                clip["effects"] = [
-                    e for e in effects if e.get("effect_id") != payload.effect_id
-                ]
+            params = clip.get("params")
+            effects = params.get("effects") if isinstance(params, dict) else None
+            if isinstance(effects, dict):
+                effects.pop(payload.effect_id, None)
             return
 
 
 def _apply_effect_tuned(clips: list[dict[str, Any]], payload: EffectTunedPayload, assembly: dict[str, Any]) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            effects = clip.get("effects")
-            if isinstance(effects, list):
-                for e in effects:
-                    if e.get("effect_id") == payload.effect_id:
-                        params = e.setdefault("params", {})
-                        params[payload.param] = payload.value
-                        return
+            params = clip.setdefault("params", {})
+            effects = params.setdefault("effects", {})
+            effect_params = effects.setdefault(payload.effect_id, {})
+            effect_params[payload.param] = payload.value
             return
 
 
@@ -341,7 +438,8 @@ def _apply_theme_set(assembly: dict[str, Any], payload: ThemeSetPayload) -> None
 
 def _apply_theme_overridden(assembly: dict[str, Any], payload: ThemeOverriddenPayload) -> None:
     overrides: dict[str, Any] = assembly["theme_overrides"]
-    overrides[payload.override_id] = payload.value
+    if payload.override_id in _THEME_OVERRIDE_KEYS and isinstance(payload.value, dict):
+        overrides[payload.override_id] = payload.value
 
 
 # ============================================================================
@@ -351,9 +449,11 @@ def _apply_theme_overridden(assembly: dict[str, Any], payload: ThemeOverriddenPa
 
 def _apply_track_added(assembly: dict[str, Any], payload: TrackAddedPayload) -> None:
     tracks: list[dict[str, Any]] = assembly["tracks"]
-    track_entry: dict[str, Any] = {"id": payload.track_id, "kind": payload.kind}
-    if payload.label is not None:
-        track_entry["label"] = payload.label
+    track_entry: dict[str, Any] = {
+        "id": payload.track_id,
+        "kind": payload.kind,
+        "label": payload.label,
+    }
     tracks.append(track_entry)
 
 
@@ -370,50 +470,15 @@ def _apply_track_removed(assembly: dict[str, Any], payload: TrackRemovedPayload)
 def _apply_audio_bound(clips: list[dict[str, Any]], payload: AudioBoundPayload) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            clip["asset_id"] = payload.asset_id
+            clip["asset"] = payload.asset_id
             return
 
 
 def _apply_audio_unbound(clips: list[dict[str, Any]], payload: AudioUnboundPayload) -> None:
     for clip in clips:
         if clip.get("id") == payload.clip_id:
-            clip["asset_id"] = ""
+            clip.pop("asset", None)
             return
-
-
-# ============================================================================
-# pool.* applicators (m3)
-# ============================================================================
-
-
-def _apply_pool_asset_added(assembly: dict[str, Any], payload: PoolAssetAddedPayload) -> None:
-    pool: dict[str, Any] = assembly["pool"]
-    entries: list[dict[str, Any]] = pool.setdefault("entries", [])
-    entries.append({"asset_id": payload.asset_id, "score": 0.0})
-
-
-def _apply_pool_asset_removed(assembly: dict[str, Any], payload: PoolAssetRemovedPayload) -> None:
-    pool: dict[str, Any] = assembly["pool"]
-    entries: list[dict[str, Any]] = pool.get("entries", [])
-    pool["entries"] = [e for e in entries if e.get("asset_id") != payload.asset_id]
-
-
-def _apply_pool_asset_scored(assembly: dict[str, Any], payload: PoolAssetScoredPayload) -> None:
-    pool: dict[str, Any] = assembly["pool"]
-    entries: list[dict[str, Any]] = pool.get("entries", [])
-    for e in entries:
-        if e.get("asset_id") == payload.asset_id:
-            e["score"] = payload.score
-            return
-
-
-# ============================================================================
-# arrangement.* applicators (m3)
-# ============================================================================
-
-
-def _apply_arrangement_replaced(assembly: dict[str, Any], payload: ArrangementReplacedPayload) -> None:
-    assembly["arrangement"] = dict(payload.arrangement)
 
 
 # ============================================================================
@@ -435,11 +500,11 @@ _LIFECYCLE_NOOP_KINDS: frozenset[str] = frozenset({
 })
 
 # Event kinds whose erased payloads can be safely skipped in projection.
-# These are domain events that modify specific assembly keys (clips, tracks,
-# pool, arrangement, etc.) — skipping them preserves structural consistency
-# of the remaining assembly.
+# These are runtime domain events that mutate specific raw TimelineConfig keys
+# or explicit non-container read models. Migration-only legacy events are not
+# included in this canonical projection skip list.
 _ERASED_SAFE_KINDS: frozenset[str] = frozenset({
-    "clip.added", "clip.removed", "clip.moved", "clip.retimed",
+    "clip.added", "clip.removed", "clip.moved", "clip.retracked", "clip.retimed",
     "clip.swapped", "clip.replaced", "clip.text_set", "clip.annotated",
     "transition.set", "transition.removed",
     "effect.added", "effect.removed", "effect.tuned",
@@ -447,7 +512,6 @@ _ERASED_SAFE_KINDS: frozenset[str] = frozenset({
     "track.added", "track.removed",
     "audio.bound", "audio.unbound",
     "pool.asset_added", "pool.asset_removed", "pool.asset_scored",
-    "arrangement.replaced",
 })
 
 
@@ -486,11 +550,11 @@ _DISPATCH: list[tuple[str, list[str], Any, Any]] = [
     ("clip.added", ["clips"], _dispatch_clip_applicator, _apply_clip_added),
     ("clip.removed", ["clips"], _dispatch_clip_applicator, _apply_clip_removed),
     ("clip.moved", ["clips"], _dispatch_clip_applicator, _apply_clip_moved),
+    ("clip.retracked", ["clips"], _dispatch_clip_applicator, _apply_clip_retracked),
     ("clip.retimed", ["clips"], _dispatch_clip_applicator, _apply_clip_retimed),
     ("clip.swapped", ["clips"], _dispatch_clip_applicator, _apply_clip_swapped),
     ("clip.replaced", ["clips"], _dispatch_clip_applicator, _apply_clip_replaced),
     ("clip.text_set", ["clips"], _dispatch_clip_applicator, _apply_clip_text_set),
-    ("clip.annotated", ["clips"], _dispatch_clip_applicator, _apply_clip_annotated),
     # -- transition.* (m3) --
     ("transition.set", ["clips"], _dispatch_clip_applicator, _apply_transition_set),
     ("transition.removed", ["clips"], _dispatch_clip_applicator, _apply_transition_removed),
@@ -507,12 +571,6 @@ _DISPATCH: list[tuple[str, list[str], Any, Any]] = [
     # -- audio.* (m3) --
     ("audio.bound", ["clips"], _dispatch_clip_applicator, _apply_audio_bound),
     ("audio.unbound", ["clips"], _dispatch_clip_applicator, _apply_audio_unbound),
-    # -- pool.* (m3) --
-    ("pool.asset_added", ["pool"], _dispatch_assembly_applicator, _apply_pool_asset_added),
-    ("pool.asset_removed", ["pool"], _dispatch_assembly_applicator, _apply_pool_asset_removed),
-    ("pool.asset_scored", ["pool"], _dispatch_assembly_applicator, _apply_pool_asset_scored),
-    # -- arrangement.* (m3) --
-    ("arrangement.replaced", ["arrangement"], _dispatch_assembly_applicator, _apply_arrangement_replaced),
 ]
 
 # Build fast lookup
@@ -526,30 +584,12 @@ for kind, keys, dispatcher, applicator in _DISPATCH:
 # ============================================================================
 
 
-def _unwrap_imported_assembly(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """Extract the inner assembly dict from a ``timeline.imported`` snapshot.
-
-    ``LocalFsBackend._build_imported_event()`` stores the full on-disk
-    ``assembly.json`` blob under ``snapshot['assembly.json']``.  The blob
-    has the wrapper shape ``{"schema_version": 1, "assembly": {...}}``.
-    When the value is a dict containing an ``"assembly"`` key whose value
-    is itself a dict, the inner dict is returned.  Otherwise the raw value
-    is used as-is.
-    """
-    raw = snapshot.get("assembly.json")
-    if not isinstance(raw, dict):
-        return {}
-    # Heuristic: if the dict has an "assembly" key whose value is a dict,
-    # it's the wrapper shape — extract the inner dict (deep copy to avoid
-    # sharing mutable structures with the event payload).
-    inner = raw.get("assembly")
-    if isinstance(inner, dict):
-        return deepcopy(inner)
-    # Otherwise treat the raw value as the assembly body.
-    return deepcopy(raw)
-
-
-def apply_event_to_assembly(state: dict[str, Any], event: TimelineEvent) -> dict[str, Any]:
+def apply_event_to_assembly(
+    state: dict[str, Any],
+    event: TimelineEvent,
+    *,
+    _copy_state: bool = True,
+) -> dict[str, Any]:
     """Fold a single *event* onto an assembly *state*, returning a **new** dict.
 
     The input *state* is never mutated.  This is the unit operation behind
@@ -580,29 +620,52 @@ def apply_event_to_assembly(state: dict[str, Any], event: TimelineEvent) -> dict
             ),
         )
 
-    # timeline.imported — seed the assembly from the snapshot
+    # timeline.imported — migration-only legacy
     if event.kind == "timeline.imported":
-        imported_assembly = _unwrap_imported_assembly(event.payload.snapshot)
-        if not imported_assembly:
-            return state
-        # Merge: start from imported, then merge current state on top
-        # so events applied before this one are preserved (useful for replay
-        # where imported is not the first event).
-        result = dict(imported_assembly)
-        result.update(state)
-        return result
+        raise ProjectionError(
+            event_id=event.event_id,
+            kind=event.kind,
+            reason=(
+                "timeline.imported is migration-only legacy; run the Sprint 2 "
+                "migration before runtime projection"
+            ),
+        )
+
+    classification = classify_projector_event_kind(event.kind)
+    if classification in {"metadata_noop", "non_container_read_model"}:
+        return state
+
+    # timeline.config_replaced — replace projected assembly with a validated
+    # raw TimelineConfig container. This event is the lossless runtime full
+    # replacement surface; legacy wrappers are rejected by payload validation.
+    if event.kind == "timeline.config_replaced":
+        payload = event.payload
+        if isinstance(payload, TimelineConfigReplacedPayload):
+            return timeline_contract.validate_timeline_config_for_container(payload.config)
+        return state
 
     # timeline.recovered — replace projected assembly with anchor projection
     if event.kind == "timeline.recovered":
         payload = event.payload
         if isinstance(payload, TimelineRecoveredPayload):
             if payload.projected_state_summary is not None:
-                # Use the embedded projected state as the new assembly
-                return deepcopy(payload.projected_state_summary)
+                return timeline_contract.validate_timeline_config_for_container(
+                    payload.projected_state_summary
+                )
             # Fall through: if no projected state in payload, treat as no-op
             # (requires upstream caller to have materialised the anchor)
             return state
         return state
+
+    if classification == "migration_only_legacy":
+        raise ProjectionError(
+            event_id=event.event_id,
+            kind=event.kind,
+            reason=(
+                f"{event.kind} is not a TimelineConfig container mutation; "
+                "run the Sprint 2 migration for legacy read-model events"
+            ),
+        )
 
     # Domain mutation events — look up in dispatch table
     dispatch_entry = _DISPATCH_MAP.get(event.kind)
@@ -619,7 +682,16 @@ def apply_event_to_assembly(state: dict[str, Any], event: TimelineEvent) -> dict
     # A shallow dict() copy would still share nested lists/dicts (clips,
     # tracks, pool entries, etc.) with the input, causing silent corruption
     # when applicators mutate those structures in-place.
-    assembly = deepcopy(state)
+    assembly = deepcopy(state) if _copy_state else state
+
+    # Runtime assembly state is always a raw TimelineConfig container.
+    # Granular legacy events may arrive before any track/clip event, so keep
+    # the required container keys present even when a test or checkpoint seed
+    # omits them.
+    if "clips" not in assembly:
+        assembly["clips"] = []
+    if "tracks" not in assembly:
+        assembly["tracks"] = []
 
     # Ensure every required domain key exists, initialising from defaults
     # when the key is missing from the assembly (not just when empty).
@@ -665,8 +737,7 @@ def project_to_assembly(
     -------
     dict
         The projected assembly dict.  This is the **inner** assembly value
-        (the ``.assembly`` attribute of the on-disk ``Assembly`` model),
-        **not** the wrapper ``{"schema_version": 1, "assembly": {...}}``.
+        (the on-disk ``assembly.json`` content), **not** a legacy wrapper.
         Callers that need the wrapper must construct it themselves.
 
     Raises
@@ -675,11 +746,13 @@ def project_to_assembly(
         When any event cannot be projected.
     """
     state: dict[str, Any] = (
-        deepcopy(initial_assembly) if initial_assembly is not None else {}
+        timeline_contract.canonical_timeline_config(initial_assembly)
+        if initial_assembly is not None
+        else timeline_contract.canonical_empty_timeline()
     )
     for event in events:
-        state = apply_event_to_assembly(state, event)
-    return state
+        state = apply_event_to_assembly(state, event, _copy_state=False)
+    return _validate_projected_timeline_boundary(state)
 
 
 # ============================================================================
@@ -850,14 +923,13 @@ def regenerate_projection(
        assembly and replay only suffix events (``after=last_event_id``).
     4. **Checkpoint miss / corruption / version mismatch**: fall back to
        full replay via ``replay_projection()`` (the pure read-only path).
-    5. Atomically write the projected assembly to ``assembly.json``
-       (wrapper shape ``{schema_version, assembly}``).
+    5. Atomically write the projected raw TimelineConfig to ``assembly.json``.
     6. Atomically write / refresh ``assembly.checkpoint.json``.
 
     Returns
     -------
     dict
-        The **inner** projected assembly dict (not the wrapper).
+        The projected raw TimelineConfig dict.
 
     Raises
     ------
@@ -945,10 +1017,9 @@ def regenerate_projection(
         events_applied = head.event_count
 
     # --- Write assembly.json atomically ---
-    from astrid.core.timeline.model import Assembly, TIMELINE_SCHEMA_VERSION as _SCHEMA_VER
+    from astrid.core.timeline.model import write_timeline_config_json
 
-    wrapper = Assembly(schema_version=_SCHEMA_VER, assembly=assembly)
-    wrapper.write(assembly_file)
+    assembly = write_timeline_config_json(assembly_file, assembly)
 
     # --- Write / refresh checkpoint ---
     checkpoint_payload = {

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from contextlib import redirect_stdout
+import io
 
 import pytest
 
@@ -69,7 +71,6 @@ def cost_fixture(tmp_projects_root: Path) -> dict:
         "steps": [
             {
                 "id": "s1",
-                "kind": "code",
                 "adapter": "local",
                 "command": "echo ok",
                 "cost": {"amount": 0, "currency": "USD", "source": "local"},
@@ -209,6 +210,39 @@ def test_timeline_cost_json_output(
     assert rc == 0
 
 
+def test_timeline_cost_dedupes_duplicate_manifest_runs(
+    cost_fixture: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.timeline import cli as tm_cli
+    from unittest.mock import MagicMock
+    import argparse
+
+    manifest_path = cost_fixture["proj_root"] / "timelines" / cost_fixture["timeline_ulid"] / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["contributing_runs"] = [
+        cost_fixture["run1_id"],
+        cost_fixture["run2_id"],
+        cost_fixture["run2_id"],
+        cost_fixture["run3_id"],
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    mock_session = MagicMock()
+    mock_session.project = cost_fixture["slug"]
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
+
+    args = argparse.Namespace(slug="cost-line", json_out=True, include_aborted=False)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = tm_cli.cmd_cost(args)
+    assert rc == 0
+    payload = json.loads(buf.getvalue())
+    assert payload["contributing_runs"] == 2
+    assert payload["grand_total"] == 3.5
+    assert payload["by_source"]["claude"]["amount"] == 1.5
+    assert payload["by_source"]["runpod"]["amount"] == 2.0
+
+
 # ── Project cost ────────────────────────────────────────────────────────
 
 
@@ -244,6 +278,19 @@ def test_project_cost_json_output(
 
     rc = _cmd_project_cost(args)
     assert rc == 0
+
+
+def test_run_cost_json_output(tmp_projects_root: Path, cost_fixture: dict) -> None:
+    from astrid.core.task.run_audit import cmd_run_cost
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cmd_run_cost([cost_fixture["run2_id"], "--project", cost_fixture["slug"], "--json"], projects_root=tmp_projects_root)
+    assert rc == 0
+    payload = json.loads(buf.getvalue())
+    assert payload["run_id"] == cost_fixture["run2_id"]
+    assert payload["by_source"]["claude"]["amount"] == 1.5
+    assert payload["by_source"]["runpod"]["amount"] == 2.0
 
 
 def test_project_cost_include_aborted(

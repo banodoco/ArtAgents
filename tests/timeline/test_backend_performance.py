@@ -65,6 +65,7 @@ def _generate_clip_events(count: int, timeline_id: str) -> list[TimelineEvent]:
             payload={
                 "clip_id": f"clip-{i:05d}",
                 "kind": "visual",
+                "track_id": "visual",
                 "asset_id": f"asset-{i:05d}",
                 "position": None,
             },
@@ -165,7 +166,7 @@ def test_repeated_cas_contention(tmp_path: Path):
         be.append_event(
             timeline_id,
             "clip.added",
-            {"clip_id": f"cas-clip-{i:05d}", "kind": "visual", "asset_id": f"a-{i:05d}", "position": None},
+            {"clip_id": f"cas-clip-{i:05d}", "kind": "visual", "track_id": "visual", "asset_id": f"a-{i:05d}", "position": None},
             actor=_ACTOR,
             expected_version=current_version,
         )
@@ -206,7 +207,7 @@ def test_cas_contention_with_stale_versions(tmp_path: Path):
     be.append_event(
         timeline_id,
         "clip.added",
-        {"clip_id": "c1", "kind": "visual", "asset_id": "a1", "position": None},
+        {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
         actor=_ACTOR,
     )
 
@@ -218,7 +219,7 @@ def test_cas_contention_with_stale_versions(tmp_path: Path):
             be.append_event(
                 timeline_id,
                 "clip.added",
-                {"clip_id": "cX", "kind": "visual", "asset_id": "aX", "position": None},
+                {"clip_id": "cX", "kind": "visual", "track_id": "visual", "asset_id": "aX", "position": None},
                 actor=_ACTOR,
                 expected_version=0,  # stale: current is 1
             )

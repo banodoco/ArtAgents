@@ -44,8 +44,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
             OrchestratorRunRequest(
                 orchestrator_id="builtin.iteration_video",
                 out=out_dir,
-                thread=THREAD_ID,
-                inputs={"target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
+                inputs={"thread": THREAD_ID, "target_run_id": TARGET_RUN_ID, "repo_root": str(repo)},
                 orchestrator_args=("--max-iterations", "7", "--direction", "label only", "--clip-mode", "hold"),
             )
         )
@@ -58,9 +57,10 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
     assert not (out_dir / "hype.mp4").exists()
     assert not (out_dir / "_prepare").exists()
 
-    run_record = _read_json(out_dir / "run.json")
-    variant_artifacts = [artifact for artifact in run_record["output_artifacts"] if artifact.get("role") == "variant"]
-    assert [Path(item["path"]).name for item in variant_artifacts] == [
+    assert not (out_dir / "run.json").exists()
+    sidecar = _read_json(out_dir / ".astrid.variants.json")
+    variant_artifacts = [artifact for artifact in sidecar["artifacts"] if artifact.get("role") == "variant"]
+    assert sorted(Path(item["path"]).name for item in variant_artifacts) == [
         "iteration.manifest.json",
         "iteration.mp4",
         "iteration.quality.json",
@@ -73,7 +73,7 @@ def test_iteration_video_renders_hype_adapter_and_records_five_output_variant_gr
     groups = _read_json(repo / ".astrid" / "threads" / THREAD_ID / "groups.json")
     group = groups["groups"][f"iteration-video:{TARGET_RUN_ID}"]
     assert len(group["artifacts"]) == 5
-    assert {item["run_id"] for item in group["artifacts"]} == {run_record["run_id"]}
+    assert {item["run_id"] for item in group["artifacts"]} == {TARGET_RUN_ID}
 
 
 def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_content(tmp_path: Path, monkeypatch) -> None:
@@ -204,4 +204,3 @@ def _write_json(path: Path, payload: dict) -> None:
 
 def _read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
-

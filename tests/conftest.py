@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,6 @@ from astrid.core.task.env import (
     TASK_RUN_ID_ENV,
     TASK_STEP_ID_ENV,
 )
-
 
 if "ASTRID_TIMELINE_COMPOSITION_SRC" not in os.environ:
     _package_src = Path(tempfile.mkdtemp(prefix="astrid-timeline-composition-src-"))
@@ -37,64 +37,120 @@ if "ASTRID_TIMELINE_COMPOSITION_SRC" not in os.environ:
 os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
 
 
-# Sprint 3 test-only shim: auto-migrate v1 plan dicts to v2 inside _validate_plan
-# so legacy fixtures keep working without per-test schema rewrites. The original
-# (un-shimmed) validator is captured below in ``_UNSHIMMED_VALIDATE_PLAN`` so
-# the ``unshimmed_validate_plan`` fixture can hand it back to tests that need
-# to assert the production v2-strict contract.
-_UNSHIMMED_VALIDATE_PLAN: Any = None
+@pytest.fixture
+def mint_session() -> Callable[..., Any]:
+    """Return a callable that writes an explicit session fixture to disk."""
 
+    def _mint_session(
+        astrid_home: Path,
+        sid: str = "S-TEST",
+        *,
+        project: str = "demo",
+        run_id: str | None = None,
+        role: str = "writer",
+        timeline: str | None = None,
+        agent_id: str = "claude-1",
+    ) -> Any:
+        from astrid.core.session.model import Session
 
-def _install_v1_plan_migration_shim() -> None:
-    global _UNSHIMMED_VALIDATE_PLAN
-    import importlib.util
-    import sys as _sys
-    from astrid.core.task import plan as _plan_mod
+        sessions = astrid_home / "sessions"
+        sessions.mkdir(parents=True, exist_ok=True)
+        sess = Session(
+            id=sid,
+            project=project,
+            timeline=timeline,
+            run_id=run_id,
+            agent_id=agent_id,
+            attached_at="2026-05-11T00:00:00Z",
+            last_used_at="2026-05-11T00:00:00Z",
+            role=role,  # type: ignore[arg-type]
+        )
+        sess.to_json(sessions / f"{sid}.json")
+        return sess
 
-    _orig_validate = _plan_mod._validate_plan
-    _UNSHIMMED_VALIDATE_PLAN = _orig_validate
-    _migrate_module_path = (
-        Path(__file__).resolve().parent.parent
-        / "scripts" / "migrations" / "sprint-3" / "migrate_plans.py"
-    )
-    _spec = importlib.util.spec_from_file_location(
-        "_astrid_sprint3_migrate_plans_testshim", _migrate_module_path
-    )
-    _mig = importlib.util.module_from_spec(_spec)
-    _sys.modules[_spec.name] = _mig
-    _spec.loader.exec_module(_mig)
-
-    def _shim(payload: Any, *, _is_root: bool = True):
-        if (
-            isinstance(payload, dict)
-            and payload.get("version") == 1
-            and isinstance(payload.get("steps"), list)
-        ):
-            payload = {
-                "plan_id": payload.get("plan_id", "unknown"),
-                "version": 2,
-                "steps": [
-                    _mig._migrate_step(s) if isinstance(s, dict) else s
-                    for s in payload["steps"]
-                ],
-            }
-        return _orig_validate(payload, _is_root=_is_root)
-
-    _plan_mod._validate_plan = _shim
-
-
-_install_v1_plan_migration_shim()
+    return _mint_session
 
 
 @pytest.fixture
-def unshimmed_validate_plan():
-    """Return the original ``_validate_plan`` captured before the v1->v2 shim.
+def seed_project() -> Callable[[Path, str], Path]:
+    """Return a callable that seeds the shared session project fixture shape."""
 
-    Tests asserting the production v2-strict contract use this together with
-    ``monkeypatch.setattr`` to bypass the conftest auto-migration shim.
-    """
+    def _seed_project(projects_root: Path, slug: str) -> Path:
+        from astrid import timeline as timeline_contract
+        from astrid.core.session.ulid import generate_ulid
 
-    return _UNSHIMMED_VALIDATE_PLAN
+        pdir = projects_root / slug
+        pdir.mkdir(parents=True, exist_ok=True)
+
+        timeline_ulid = generate_ulid()
+        tdir = pdir / "timelines" / timeline_ulid
+        tdir.mkdir(parents=True, exist_ok=True)
+        (tdir / "assembly.json").write_text(
+            json.dumps(timeline_contract.canonical_empty_timeline()), encoding="utf-8"
+        )
+        (tdir / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "contributing_runs": [],
+                    "final_outputs": [],
+                    "tombstoned_at": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (tdir / "display.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "slug": "primary",
+                    "name": "Primary",
+                    "is_default": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (pdir / "project.json").write_text(
+            json.dumps(
+                {
+                    "created_at": "2026-05-11T00:00:00Z",
+                    "name": slug,
+                    "schema_version": 1,
+                    "slug": slug,
+                    "updated_at": "2026-05-11T00:00:00Z",
+                    "default_timeline_id": timeline_ulid,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return pdir
+
+    return _seed_project
+
+
+@pytest.fixture
+def seed_project_run(seed_project: Callable[[Path, str], Path]) -> Callable[..., Path]:
+    """Return a callable that seeds a project run with writer lease state."""
+
+    def _seed_project_run(
+        projects_root: Path,
+        slug: str = "demo",
+        run_id: str = "01RUN",
+        *,
+        writer_session_id: str,
+    ) -> Path:
+        from astrid.core.project.current_run import write_current_run
+        from astrid.core.session.lease import write_lease_init
+
+        project = seed_project(projects_root, slug)
+        run_dir = project / "runs" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "events.jsonl").touch()
+        write_lease_init(run_dir, session_id=writer_session_id, plan_hash="")
+        write_current_run(slug, run_id)
+        return run_dir
+
+    return _seed_project_run
 
 
 # ---------------------------------------------------------------------------

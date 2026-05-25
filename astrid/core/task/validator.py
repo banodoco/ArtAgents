@@ -10,6 +10,7 @@ from astrid.core.task.plan import (
     TaskPlan,
     TaskPlanError,
     _assert_unique_paths,
+    _assert_repeat_until_refs,
     _validate_plan,
     iter_steps_with_path,
     parse_from_ref,
@@ -153,6 +154,15 @@ def _check_adapter_shape(proposed: TaskPlan) -> None:
 # ---- I5: repeat.for_each.from_ref resolves to a real prior produces ----
 
 def _check_repeat_source(proposed: TaskPlan) -> None:
+    try:
+        _assert_repeat_until_refs(proposed)
+    except TaskPlanError as exc:
+        raise MutationInvariantError(
+            "I5_repeat_source",
+            "repeat.until",
+            str(exc),
+        ) from exc
+
     # Walk siblings frame-by-frame so "prior" semantics match _validate_repeat_for_each.
     def _walk_frame(steps: tuple[Step, ...], prefix: tuple[str, ...]) -> None:
         for index, step in enumerate(steps):

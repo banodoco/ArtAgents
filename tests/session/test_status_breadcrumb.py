@@ -3,23 +3,23 @@
 from __future__ import annotations
 
 import argparse
-import json
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from astrid.core.project import paths as project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.project.project import create_project
-from astrid.core.session import cli, paths as session_paths
+from astrid.core.session import cli
+from astrid.core.session import paths as session_paths
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.identity import Identity, write_identity
 from astrid.core.session.lease import (
     release_writer_lease,
     write_lease_init,
 )
-from astrid.core.session.model import Session
 from astrid.core.task.events import ZERO_HASH, append_event_locked
 
 
@@ -30,25 +30,6 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     (tmp_path / "home").mkdir()
     write_identity(Identity(agent_id="claude-1", created_at="2026-05-11T00:00:00Z"))
     return {"home": tmp_path / "home", "projects": tmp_path / "projects"}
-
-
-def _mint_session(
-    home: Path, sid: str, *, project: str, run_id: str | None, role: str = "writer"
-) -> Session:
-    sessions = home / "sessions"
-    sessions.mkdir(parents=True, exist_ok=True)
-    sess = Session(
-        id=sid,
-        project=project,
-        timeline="primary",
-        run_id=run_id,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role=role,  # type: ignore[arg-type]
-    )
-    sess.to_json(sessions / f"{sid}.json")
-    return sess
 
 
 def test_unbound_no_identity_triggers_bootstrap_then_lists_projects(
@@ -116,14 +97,16 @@ def test_unbound_status_warns_when_default_project_is_not_discoverable(
 
 
 def test_bound_writer_breadcrumb_template(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, mint_session: Any
 ) -> None:
     pdir = create_project("demo")["slug"]  # → "demo"
     project_dir = env["projects"] / pdir
     run_dir = project_dir / "runs" / "01RUN"
     run_dir.mkdir(parents=True)
     (run_dir / "events.jsonl").touch()
-    sess = _mint_session(env["home"], "S-1", project="demo", run_id="01RUN")
+    sess = mint_session(
+        env["home"], "S-1", project="demo", run_id="01RUN", timeline="primary"
+    )
     write_lease_init(run_dir, session_id=sess.id, plan_hash="")
     write_current_run("demo", "01RUN")
     # Add one event so the breadcrumb has data to show.
@@ -165,10 +148,12 @@ def test_bound_writer_breadcrumb_template(
 
 
 def test_bound_status_without_run_includes_start_hint(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, mint_session: Any
 ) -> None:
     create_project("demo")
-    sess = _mint_session(env["home"], "S-NO-RUN", project="demo", run_id=None)
+    sess = mint_session(
+        env["home"], "S-NO-RUN", project="demo", run_id=None, timeline="primary"
+    )
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, sess.id)
     buf = StringIO()
     rc = cli.cmd_status(argparse.Namespace(), out=buf)
@@ -180,7 +165,7 @@ def test_bound_status_without_run_includes_start_hint(
 
 
 def test_bound_reader_breadcrumb_includes_takeover_hint(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, mint_session: Any
 ) -> None:
     create_project("demo")
     run_dir = env["projects"] / "demo" / "runs" / "01RUN"
@@ -188,7 +173,14 @@ def test_bound_reader_breadcrumb_includes_takeover_hint(
     (run_dir / "events.jsonl").touch()
     write_lease_init(run_dir, session_id="S-WRITER", plan_hash="")
     write_current_run("demo", "01RUN")
-    reader = _mint_session(env["home"], "S-READER", project="demo", run_id="01RUN", role="reader")
+    reader = mint_session(
+        env["home"],
+        "S-READER",
+        project="demo",
+        run_id="01RUN",
+        role="reader",
+        timeline="primary",
+    )
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, reader.id)
     buf = StringIO()
     cli.cmd_status(argparse.Namespace(), out=buf)
@@ -199,7 +191,7 @@ def test_bound_reader_breadcrumb_includes_takeover_hint(
 
 
 def test_bound_orphan_pending_breadcrumb_includes_claim_hint(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, mint_session: Any
 ) -> None:
     create_project("demo")
     run_dir = env["projects"] / "demo" / "runs" / "01RUN"
@@ -208,7 +200,9 @@ def test_bound_orphan_pending_breadcrumb_includes_claim_hint(
     write_lease_init(run_dir, session_id="S-OLD", plan_hash="")
     release_writer_lease(run_dir)
     write_current_run("demo", "01RUN")
-    caller = _mint_session(env["home"], "S-CALL", project="demo", run_id="01RUN")
+    caller = mint_session(
+        env["home"], "S-CALL", project="demo", run_id="01RUN", timeline="primary"
+    )
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
     buf = StringIO()
     cli.cmd_status(argparse.Namespace(), out=buf)

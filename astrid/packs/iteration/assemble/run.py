@@ -77,10 +77,10 @@ def _get_managed_actor_via() -> Any | None:
 
 
 def _emit_assemble_managed_events(
-    project_slug: str, timeline_slug: str, timeline: dict[str, Any],
+    project_slug: str, timeline_slug: str, timeline_config: dict[str, Any],
     *, actor_via: Any | None = None,
 ) -> int:
-    """Emit arrangement.replaced event through the pack write gateway.
+    """Emit timeline.config_replaced event through the pack write gateway.
 
     Called when assemble runs in managed mode (--project + --timeline-slug).
     Emits events before compatibility outputs are written, preserving the
@@ -101,10 +101,11 @@ def _emit_assemble_managed_events(
         display="iteration.assemble",
         via=[actor_via] if actor_via is not None else None,
     )
+    config = timeline.canonical_timeline_config(timeline_config)
     events = [
         {
-            "kind": "arrangement.replaced",
-            "payload": {"arrangement": dict(timeline)},
+            "kind": "timeline.config_replaced",
+            "payload": {"config": config},
         }
     ]
     result = pack_write_gateway(
@@ -197,6 +198,8 @@ def assemble_iteration(
     quality_path = out_path / "iteration.quality.json"
     report_path = out_path / "iteration.report.html"
     assets_path = out_path / "hype.assets.json"
+    timeline_config = timeline.canonical_timeline_config(assembly["timeline"])
+    assembly["timeline"] = timeline_config
 
     # m3.5 managed mode: emit events through the gateway before writing
     # compatibility outputs.
@@ -204,10 +207,10 @@ def assemble_iteration(
     timeline_slug = _get_managed_timeline_slug()
     actor_via = _get_managed_actor_via()
     if project_slug is not None and timeline_slug is not None:
-        _emit_assemble_managed_events(project_slug, timeline_slug, assembly["timeline"], actor_via=actor_via)
+        _emit_assemble_managed_events(project_slug, timeline_slug, timeline_config, actor_via=actor_via)
 
-    timeline.save_timeline(assembly["timeline"], timeline_path)
-    timeline.save_timeline(assembly["timeline"], hype_timeline_path)
+    timeline.save_timeline(timeline_config, timeline_path)
+    timeline.save_timeline(timeline_config, hype_timeline_path)
     timeline.save_registry(assembly["assets"], assets_path)
     _write_json(manifest_path, assembly["manifest"])
     _write_json(quality_path, assembly["quality"])
@@ -293,13 +296,6 @@ def build_assembly(
             {"id": "a1", "kind": "audio", "label": "Audio bed"},
         ],
         "clips": clips,
-        "iteration": {
-            "schema_version": SCHEMA_VERSION,
-            "mode": mode,
-            "direction_label": direction,
-            "style_source": _style_source(theme=theme, direction=direction, style_preset=style_preset),
-            "audio_bed": selected_audio_bed,
-        },
     }
     assembled_quality = dict(quality)
     assembled_quality["forced"] = bool(force)
@@ -336,9 +332,9 @@ def _enforce_quality_floor(quality: Mapping[str, Any], *, force: bool) -> None:
             continue
         run_id = item.get("run_id")
         if run_id:
-            commands.append(f"python3 -m astrid thread backfill  # unresolved producer {run_id}")
-    detail = "\n".join(commands) if commands else "python3 -m astrid thread backfill"
-    raise AssembleError(f"data_quality {data_quality:.3f} is below {QUALITY_FLOOR:.1f}; run:\n{detail}\nUse --force to assemble anyway.")
+            commands.append(f"restore or regenerate lineage for unresolved producer {run_id}")
+    detail = "\n".join(commands) if commands else "restore or regenerate missing lineage inputs"
+    raise AssembleError(f"data_quality {data_quality:.3f} is below {QUALITY_FLOOR:.1f}; {detail}. Use --force to assemble anyway.")
 
 
 def _clip_for_artifact(

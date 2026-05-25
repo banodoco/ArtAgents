@@ -13,6 +13,23 @@ production hot path uses :func:`append_event_locked` which relies on the
 tail-hash CAS for integrity (DEC-007 / FLAG-019 — events do not store a
 ``prev_hash`` field, so a v3-style "re-verify the last link" is not
 expressible without reading the full chain).
+
+Writer-boundary note: this module is intentionally session-free transport.
+Normal production task-run writes must enter through
+``astrid.core.session.writer.WriterContext.append()``. The only production
+same-lock exception is lease takeover/orphan-claim emission in
+``astrid.core.session.lease``: it writes the takeover event while holding the
+same flock that mutates ``writer_epoch`` so the ownership change and its
+observability event stay atomic. Tests, migrations, and non-task event
+backends may use the raw helpers when explicitly allowlisted.
+
+Approved transport use:
+  * Normal task-run mutations: ``WriterContext.append()`` only.
+  * Raw locked helper: this module's transport, ``WriterContext.append()``,
+    and the RunPod sweeper's documented hard-mode exception.
+  * In-handle helper: same-flock lease takeover/orphan recovery only.
+  * ``append_event()``: legacy test/migration compatibility only. It is
+    guarded at runtime and must not be called by production task-run code.
 """
 
 from __future__ import annotations
@@ -22,14 +39,16 @@ import fcntl
 import hashlib
 import json
 import os
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
+
+from astrid.core.util.time import utc_now_iso
 
 ZERO_HASH = "sha256:" + "0" * 64
 
 LEASE_FILENAME = "lease.json"
 EVENTS_FILENAME = "events.jsonl"
+LEGACY_APPEND_EVENT_ALLOW_ENV = "ASTRID_ALLOW_LEGACY_APPEND_EVENT"
 
 _TAIL_SEEK_INITIAL_WINDOW = 4096
 
@@ -169,13 +188,54 @@ def append_event_locked(
     return stored
 
 
+def append_event_to_locked_handle(
+    handle: BinaryIO,
+    event: dict[str, Any],
+) -> dict[str, Any]:
+    """Append ``event`` using an already-locked ``events.jsonl`` handle.
+
+    This is the intentionally session-free same-lock escape hatch for lease
+    takeover/orphan emissions. Callers must already hold ``LOCK_EX`` on the
+    supplied events file and must have performed any lease mutation/fencing
+    checks required for their operation.
+    """
+
+    tail_hash = _read_tail_hash(handle)
+    stored = dict(event)
+    stored.pop("hash", None)
+    stored["hash"] = _event_hash(tail_hash, stored)
+
+    line = (
+        json.dumps(
+            stored,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+    handle.seek(0, os.SEEK_END)
+    handle.write(line)
+    handle.flush()
+    os.fsync(handle.fileno())
+    return stored
+
+
 def append_event(path: str | Path, event: dict[str, Any]) -> dict[str, Any]:
-    """Test/migration only. Production code MUST use WriterContext.
+    """Legacy test/migration wrapper. Production code MUST use WriterContext.
 
     Reads the current ``(writer_epoch, tail_hash)`` from disk and calls
     :func:`append_event_locked` once. Raises :class:`StaleTailError` /
     :class:`StaleEpochError` / :class:`NotWriterError` with no retry.
     """
+
+    if not _legacy_append_event_allowed():
+        raise EventLogError(
+            "append_event() is a legacy test/migration helper. "
+            "Production task-run writes must use WriterContext.append(); "
+            "test/migration callers must run under pytest or set "
+            f"{LEGACY_APPEND_EVENT_ALLOW_ENV}=1."
+        )
 
     events_path = Path(path)
     run_dir = events_path.parent
@@ -184,13 +244,38 @@ def append_event(path: str | Path, event: dict[str, Any]) -> dict[str, Any]:
     # the lock and CAS-checks. This pre-read just supplies an "expected"
     # value so the contract shape matches the locked helper.
     pre_tail = _peek_tail_hash(events_path)
-    pre_epoch = _read_lease_epoch(lease_path)
+    try:
+        pre_epoch = _read_lease_epoch(lease_path)
+    except EventLogError as exc:
+        if _legacy_append_event_pytest_seed_without_lease(exc):
+            pre_epoch = None
+        else:
+            raise
     return append_event_locked(
         run_dir,
         event,
         expected_writer_epoch=pre_epoch,
         expected_prev_hash=pre_tail,
     )
+
+
+def _legacy_append_event_allowed() -> bool:
+    if os.environ.get(LEGACY_APPEND_EVENT_ALLOW_ENV) == "1":
+        return True
+    return "PYTEST_CURRENT_TEST" in os.environ
+
+
+def _legacy_append_event_pytest_seed_without_lease(exc: EventLogError) -> bool:
+    """Keep old unit-test event seeding working without weakening production.
+
+    The environment override is reserved for deliberate migration/debug use and
+    remains strict. Only pytest's implicit allow path can bypass a missing
+    lease, and only for missing lease state; malformed leases still fail.
+    """
+
+    if os.environ.get(LEGACY_APPEND_EVENT_ALLOW_ENV) == "1":
+        return False
+    return "PYTEST_CURRENT_TEST" in os.environ and "missing lease" in str(exc)
 
 
 def verify_chain(path: str | Path) -> tuple[bool, int, str | None]:
@@ -253,11 +338,36 @@ def read_events(path: str | Path) -> list[dict[str, Any]]:
         raise EventLogError(f"failed to read {events_path}: {exc}") from exc
 
 
+def _canonical_identity(kind: str, identity: str) -> str:
+    if kind == "system":
+        return "system"
+    if kind == "actor":
+        kind = "human"
+    if kind not in {"agent", "human"}:
+        raise ValueError(f"identity kind must be 'system', 'agent', or 'human', got {kind!r}")
+    if not identity:
+        raise ValueError(f"{kind} identity must be non-empty")
+    return f"{kind}:{identity}"
+
+
+def _canonical_kind(kind: str, *, allow_system: bool = False) -> str:
+    if kind == "actor":
+        return "human"
+    allowed = {"agent", "human"}
+    if allow_system:
+        allowed.add("system")
+    if kind not in allowed:
+        expected = "', '".join(sorted(allowed))
+        raise ValueError(f"identity kind must be one of '{expected}', got {kind!r}")
+    return kind
+
+
 def make_run_started_event(
     run_id: str,
     plan_hash: str,
     *,
     actor: str | None = None,
+    started_by: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "kind": "run_started",
@@ -265,9 +375,25 @@ def make_run_started_event(
         "run_id": run_id,
         "ts": _utc_now_iso(),
     }
-    if actor is not None:
-        payload["actor"] = actor
+    if started_by is None and actor is not None:
+        started_by = _canonical_identity("human", actor)
+    if started_by is not None:
+        payload["started_by"] = started_by
     return payload
+
+
+def make_plan_initialized_event(
+    run_id: str,
+    plan: dict[str, Any],
+    plan_hash: str,
+) -> dict[str, Any]:
+    return {
+        "kind": "plan_initialized",
+        "run_id": run_id,
+        "plan_hash": plan_hash,
+        "plan": plan,
+        "ts": _utc_now_iso(),
+    }
 
 
 def make_run_aborted_event(run_id: str, *, reason: str | None = None) -> dict[str, Any]:
@@ -311,6 +437,8 @@ def make_step_completed_event(
     *,
     cost: dict[str, Any] | None = None,
     adapter: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_completed`` event.  *None-valued kwargs are OMITTED* (never ``null``)."""
     payload: dict[str, Any] = {
@@ -323,6 +451,10 @@ def make_step_completed_event(
         payload["cost"] = cost
     if adapter is not None:
         payload["adapter"] = adapter
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
     return payload
 
 
@@ -333,6 +465,8 @@ def make_step_failed_event(
     reason: str | None = None,
     cost: dict[str, Any] | None = None,
     adapter: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_failed`` event.  *None-valued kwargs are OMITTED* (never ``null``)."""
     payload: dict[str, Any] = {
@@ -348,6 +482,10 @@ def make_step_failed_event(
         payload["cost"] = cost
     if adapter is not None:
         payload["adapter"] = adapter
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
     return payload
 
 
@@ -358,6 +496,8 @@ def make_step_awaiting_fetch_event(
     mismatched: list[str],
     reason: str | None = None,
     adapter: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_awaiting_fetch`` event after partial artifact fetch.
 
@@ -375,6 +515,10 @@ def make_step_awaiting_fetch_event(
         payload["reason"] = reason
     if adapter is not None:
         payload["adapter"] = adapter
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
     return payload
 
 
@@ -392,8 +536,12 @@ def make_step_attested_event(
     attestor_kind: str,
     attestor_id: str,
     evidence: tuple[str, ...] = (),
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    attestor_kind = _canonical_kind(attestor_kind, allow_system=True)
+    payload: dict[str, Any] = {
+        "attestor": _canonical_identity(attestor_kind, attestor_id),
         "attestor_id": attestor_id,
         "attestor_kind": attestor_kind,
         "evidence": list(evidence),
@@ -401,6 +549,9 @@ def make_step_attested_event(
         "plan_step_id": plan_step_path,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_step_skipped_event(
@@ -409,23 +560,26 @@ def make_step_skipped_event(
     actor_kind: str,
     actor_id: str,
     reason: str | None = None,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
     """Emit a ``step_skipped`` event for an ``optional=True`` step.
 
     *None-valued kwargs (reason) are OMITTED* (never ``null``), matching the
     convention used by ``make_step_completed_event`` and friends.
     """
-    if actor_kind not in ("agent", "actor"):
-        raise ValueError(f"actor_kind must be 'agent' or 'actor', got {actor_kind!r}")
+    actor_kind = _canonical_kind(actor_kind)
     payload: dict[str, Any] = {
-        "actor_id": actor_id,
-        "actor_kind": actor_kind,
         "kind": "step_skipped",
         "plan_step_path": path.split("/") if "/" in path else [path],
+        "skipped_by": _canonical_identity(actor_kind, actor_id),
+        "skipped_by_id": actor_id,
+        "skipped_by_kind": actor_kind,
         "ts": _utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
+    if step_version is not None:
+        payload["step_version"] = step_version
     return payload
 
 
@@ -436,22 +590,25 @@ def make_item_skipped_event(
     actor_kind: str,
     actor_id: str,
     reason: str | None = None,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
     """Emit an ``item_skipped`` event for one iteration of a for_each host
     whose body is ``optional=True``. Mirrors :func:`make_item_attested_event`.
     """
-    if actor_kind not in ("agent", "actor"):
-        raise ValueError(f"actor_kind must be 'agent' or 'actor', got {actor_kind!r}")
+    actor_kind = _canonical_kind(actor_kind)
     payload: dict[str, Any] = {
-        "actor_id": actor_id,
-        "actor_kind": actor_kind,
         "item_id": item_id,
         "kind": "item_skipped",
         "plan_step_path": list(plan_step_path),
+        "skipped_by": _canonical_identity(actor_kind, actor_id),
+        "skipped_by_id": actor_id,
+        "skipped_by_kind": actor_kind,
         "ts": _utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
+    if step_version is not None:
+        payload["step_version"] = step_version
     return payload
 
 
@@ -479,6 +636,8 @@ def make_produces_check_passed_event(
     *,
     check_id: str,
     cas_sha256: str | None = None,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
     event: dict[str, Any] = {
         "check_id": check_id,
@@ -489,6 +648,10 @@ def make_produces_check_passed_event(
     }
     if cas_sha256 is not None:
         event["cas_sha256"] = cas_sha256
+    if step_version is not None:
+        event["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        event["dispatch_event_hash"] = dispatch_event_hash
     return event
 
 
@@ -498,8 +661,10 @@ def make_produces_check_failed_event(
     *,
     check_id: str,
     reason: str,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "check_id": check_id,
         "kind": "produces_check_failed",
         "plan_step_path": list(plan_step_path),
@@ -507,6 +672,11 @@ def make_produces_check_failed_event(
         "reason": reason,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
+    return payload
 
 
 def make_iteration_started_event(
@@ -526,14 +696,18 @@ def make_iteration_failed_event(
     iteration: int,
     *,
     reason: str,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "iteration": int(iteration),
         "kind": "iteration_failed",
         "plan_step_path": list(plan_step_path),
         "reason": reason,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_iteration_exhausted_event(
@@ -554,39 +728,54 @@ def make_iteration_exhausted_event(
 def make_for_each_expanded_event(
     plan_step_path: tuple[str, ...],
     item_ids: tuple[str, ...],
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "item_ids": list(item_ids),
         "kind": "for_each_expanded",
         "plan_step_path": list(plan_step_path),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_item_started_event(
     plan_step_path: tuple[str, ...],
     item_id: str,
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "item_id": item_id,
         "kind": "item_started",
         "plan_step_path": list(plan_step_path),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_item_completed_event(
     plan_step_path: tuple[str, ...],
     item_id: str,
     returncode: int,
+    *,
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "item_id": item_id,
         "kind": "item_completed",
         "plan_step_path": list(plan_step_path),
         "returncode": int(returncode),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_item_attested_event(
@@ -596,8 +785,11 @@ def make_item_attested_event(
     attestor_kind: str,
     attestor_id: str,
     evidence: tuple[str, ...] = (),
+    step_version: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    attestor_kind = _canonical_kind(attestor_kind, allow_system=True)
+    payload: dict[str, Any] = {
+        "attestor": _canonical_identity(attestor_kind, attestor_id),
         "attestor_id": attestor_id,
         "attestor_kind": attestor_kind,
         "evidence": list(evidence),
@@ -606,19 +798,29 @@ def make_item_attested_event(
         "plan_step_path": list(plan_step_path),
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    return payload
 
 
 def make_cursor_rewind_event(
     plan_step_path: tuple[str, ...],
     *,
     reason: str,
+    step_version: int | None = None,
+    dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "kind": "cursor_rewind",
         "plan_step_path": list(plan_step_path),
         "reason": reason,
         "ts": _utc_now_iso(),
     }
+    if step_version is not None:
+        payload["step_version"] = step_version
+    if dispatch_event_hash is not None:
+        payload["dispatch_event_hash"] = dispatch_event_hash
+    return payload
 
 
 def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
@@ -629,22 +831,15 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
     without terminal follow-up.
     """
     # Lazy import to avoid circular dependency with plan.py.
-    from astrid.core.task.plan import Step  # noqa: PLC0415
+    from astrid.core.task.plan import STEP_PATH_SEP, iter_steps_with_path  # noqa: PLC0415
 
-    # Collect all leaf step ids from the plan.
-    leaf_ids: set[str] = set()
-
-    def _collect_leaves(steps: tuple[Step, ...]) -> None:
-        for step in steps:
-            if step.children is None:
-                leaf_ids.add(step.id)
-            else:
-                _collect_leaves(step.children)
-
+    leaves: list[tuple[str, int]] = []
     if hasattr(plan, "steps") and plan.steps is not None:
-        _collect_leaves(plan.steps)
+        for path_tuple, step in iter_steps_with_path(plan):
+            if step.children is None:
+                leaves.append((STEP_PATH_SEP.join(path_tuple), step.version))
 
-    if not leaf_ids:
+    if not leaves:
         return False
 
     # Map step path -> latest event kind for terminal checks.
@@ -667,31 +862,44 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
         "step_attested",
         "step_awaiting_fetch",
     }
-    latest_by_path: dict[str, str] = {}
+    latest_by_path: dict[tuple[str, int], str] = {}
+    latest_dispatch_version_by_path: dict[str, int] = {}
     for event in events:
         kind = event.get("kind")
         if not isinstance(kind, str):
             continue
         if kind not in _LIFECYCLE_KINDS:
             continue
+        raw_version = event.get("step_version")
         path_list = event.get("plan_step_path")
         if isinstance(path_list, list) and path_list:
             path_str = "/".join(str(p) for p in path_list)
-            latest_by_path[path_str] = kind
+            if isinstance(raw_version, int) and not isinstance(raw_version, bool) and raw_version >= 1:
+                step_version = raw_version
+            else:
+                step_version = latest_dispatch_version_by_path.get(path_str, 1)
+            if kind == "step_dispatched":
+                latest_dispatch_version_by_path[path_str] = step_version
+            latest_by_path[(path_str, step_version)] = kind
             continue
         legacy_id = event.get("plan_step_id")
         if isinstance(legacy_id, str) and legacy_id:
-            latest_by_path[legacy_id] = kind
+            if isinstance(raw_version, int) and not isinstance(raw_version, bool) and raw_version >= 1:
+                step_version = raw_version
+            else:
+                step_version = latest_dispatch_version_by_path.get(legacy_id, 1)
+            if kind == "step_dispatched":
+                latest_dispatch_version_by_path[legacy_id] = step_version
+            latest_by_path[(legacy_id, step_version)] = kind
 
-    for leaf_id in leaf_ids:
-        # Find latest event whose path matches this leaf id.
-        # Events use plan_step_path which is a list; the last element
-        # is typically the step's own id for leaf steps.
-        latest_kind: str | None = None
-        for path_str, kind in latest_by_path.items():
-            parts = path_str.split("/")
-            if parts and parts[-1] == leaf_id:
-                latest_kind = kind
+    for path_str, step_version in leaves:
+        latest_kind = latest_by_path.get((path_str, step_version))
+        if latest_kind is None and STEP_PATH_SEP in path_str:
+            # Legacy synthetic tests and pre-path event logs may record only
+            # the leaf id. Prefer the exact path above; this fallback keeps
+            # old unambiguous logs readable without allowing a stale version
+            # to satisfy a superseded step.
+            latest_kind = latest_by_path.get((path_str.rsplit(STEP_PATH_SEP, 1)[-1], step_version))
 
         if latest_kind is None:
             # No event at all for this leaf — not terminal.
@@ -715,7 +923,7 @@ def _event_hash(prev_hash: str, event: dict[str, Any]) -> str:
 
 
 def _utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    return utc_now_iso()
 
 
 def _read_tail_hash(handle) -> str:
@@ -794,18 +1002,17 @@ def _peek_tail_hash(events_path: Path) -> str:
 
 
 def _read_lease_epoch(lease_path: Path) -> int:
-    """Return ``lease.json``'s ``writer_epoch`` (default 0 when absent / malformed key).
+    """Return ``lease.json``'s ``writer_epoch`` for the append epoch CAS.
 
-    A missing lease file means the run pre-dates the Sprint 1 contract; the
-    apex contract treats that as ``writer_epoch=0`` so the wrapper / legacy
-    callers can still operate. Malformed JSON raises :class:`EventLogError`
-    so corruption is loud.
+    Missing, unreadable, malformed, or incomplete leases fail closed. Legacy
+    active-run migration must create canonical lease state before any append
+    path reaches this helper.
     """
 
     try:
         raw = lease_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return 0
+        raise EventLogError(f"missing lease {lease_path}") from None
     except OSError as exc:
         raise EventLogError(f"failed to read lease {lease_path}: {exc}") from exc
     try:
@@ -814,7 +1021,9 @@ def _read_lease_epoch(lease_path: Path) -> int:
         raise EventLogError(f"invalid JSON in lease {lease_path}: {exc.msg}") from exc
     if not isinstance(data, dict):
         raise EventLogError(f"lease {lease_path} must be a JSON object")
-    epoch = data.get("writer_epoch", 0)
+    if "writer_epoch" not in data:
+        raise EventLogError(f"lease {lease_path} missing required key 'writer_epoch'")
+    epoch = data["writer_epoch"]
     if not isinstance(epoch, int) or isinstance(epoch, bool):
         raise EventLogError(
             f"lease {lease_path} writer_epoch must be an integer, got {epoch!r}"
@@ -858,6 +1067,7 @@ __all__ = [
     "make_nested_exited_event",
     "make_produces_check_failed_event",
     "make_produces_check_passed_event",
+    "make_plan_initialized_event",
     "make_run_aborted_event",
     "make_run_completed_event",
     "make_run_started_event",

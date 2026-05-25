@@ -9,15 +9,16 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from astrid._paths import REPO_ROOT
 from astrid.core._search import (
     SearchRecord,
-    search as run_search,
     short_description_or_truncated,
+)
+from astrid.core._search import (
+    search as run_search,
 )
 from astrid.core.dirty import detect_local_edits
 from astrid.core.override import OverrideStore, OverrideStoreError
-from astrid.core.update import update_check, update_apply
+from astrid.core.update import update_apply, update_check
 
 from .install import install_element
 from .registry import ElementRegistryError, load_default_registry
@@ -29,8 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         # Create OverrideStore so --show-overrides and override set/remove/list work.
-        override_store = OverrideStore(project_root=REPO_ROOT)
-        registry = load_default_registry(active_theme=args.theme, project_root=REPO_ROOT)
+        project_root = _project_root_from_args(args)
+        override_store = OverrideStore(project_root=project_root)
+        registry = load_default_registry(active_theme=args.theme, project_root=project_root)
         registry.override_store = override_store
         return int(args.handler(args, registry))
     except (KeyError, ElementRegistryError, ElementValidationError, ValueError, OverrideStoreError) as exc:
@@ -44,6 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="List, inspect, validate, fork, and install Astrid render elements.",
     )
     parser.add_argument("--theme", help="Active theme id, theme directory, or path to theme.json.")
+    parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="List available elements.")
@@ -133,6 +136,10 @@ def build_parser() -> argparse.ArgumentParser:
     update_apply_parser.set_defaults(handler=_cmd_update)
 
     return parser
+
+
+def _project_root_from_args(args: argparse.Namespace) -> Path:
+    return getattr(args, "project_root", None) or Path.cwd()
 
 
 def _cmd_list(args: argparse.Namespace, registry: Any) -> int:
@@ -264,19 +271,14 @@ def _cmd_validate(args: argparse.Namespace, registry: Any) -> int:
 
 
 def _cmd_fork(args: argparse.Namespace, registry: Any) -> int:
-    # SD2: Element CLI forks to REPO_ROOT by default so forked elements
-    # land alongside installed source-tree packs. Executor/orchestrator
-    # CLIs fork to Path.cwd() by default — this asymmetry is intentional
-    # because elements are source-tree capabilities while
-    # executors/orchestrators are project-scoped.
-    target = registry.fork(args.kind, args.element_id, project_root=REPO_ROOT, overwrite=bool(args.overwrite))
+    target = registry.fork(args.kind, args.element_id, project_root=_project_root_from_args(args), overwrite=bool(args.overwrite))
     print(f"forked: {target}")
     return 0
 
 
 def _cmd_install(args: argparse.Namespace, registry: Any) -> int:
     element = registry.get(args.kind, args.element_id)
-    result = install_element(element, project_root=REPO_ROOT, dry_run=not bool(args.apply))
+    result = install_element(element, project_root=_project_root_from_args(args), dry_run=not bool(args.apply))
     plan = result.plan
     if plan.noop_reason:
         print(f"{element.kind}/{element.id}: no install needed: {plan.noop_reason}")
@@ -350,7 +352,6 @@ def _cmd_dirty(args: argparse.Namespace, registry: Any) -> int:
 
 def _cmd_update(args: argparse.Namespace, registry: Any) -> int:
     action = getattr(args, "update_action", None)
-    element_id = f"{args.kind}/{args.element_id}"
     if action == "check":
         report = update_check(
             args.element_id, registry,

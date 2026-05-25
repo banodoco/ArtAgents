@@ -24,7 +24,7 @@ _APP = '''from astrid.orchestrate import orchestrator, code, attested, repeat_un
 @orchestrator("demo.app")
 def app(): return [
     code("transcribe", argv=["echo","t"]),
-    attested("review", command="review.sh", instructions="please review", ack="actor",
+    attested("review", command="review.sh", instructions="please review", ack="human",
              repeat=repeat_until(condition="user_approves", max_iterations=3, on_exhaust="fail")),
     nested("delegate", plan="demo.inner"),
 ]

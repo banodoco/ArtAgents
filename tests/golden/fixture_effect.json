@@ -15,8 +15,7 @@
       "kind": "clip.added",
       "payload": {
         "clip_id": "clip-x",
-        "kind": "visual",
-        "asset_id": "asset-x",
+        "kind": "visual", "track_id": "visual", "asset_id": "asset-x",
         "position": null
       },
       "expected_version": null,
@@ -114,21 +113,19 @@
     "clips": [
       {
         "id": "clip-x",
-        "kind": "visual",
-        "asset_id": "asset-x",
-        "start": 0.0,
-        "duration": 0.0,
-        "text": "",
-        "note": "",
-        "effects": [
-          {
-            "effect_id": "blur",
-            "params": {
+        "at": 0.0,
+        "track": "visual",
+        "clipType": "media",
+        "asset": "asset-x",
+        "params": {
+          "effects": {
+            "blur": {
               "radius": 10
             }
           }
-        ]
+        }
       }
-    ]
+    ],
+    "tracks": []
   }
 }

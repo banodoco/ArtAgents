@@ -7,21 +7,29 @@ import shutil
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid._paths import REPO_ROOT
 from astrid.core.alias_resolver import (
     AliasResolver,
-    create_shared_alias_resolver,
     _register_pack_aliases,
+    create_shared_alias_resolver,
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
-from astrid.core.pack import discover_packs, ensure_local_pack, iter_executor_roots, validate_content_id_in_pack
+from astrid.core.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
+from astrid.core.pack import (
+    discover_packs,
+    ensure_local_pack,
+    iter_executor_roots,
+    validate_content_id_in_pack,
+)
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors
 from .schema import ExecutorDefinition, ExecutorValidationError, validate_executor_definition
 
+if TYPE_CHECKING:
+    from astrid.core.override import OverrideStore
 
 BUILTIN_STEP_ORDER: tuple[str, ...] = (
     "transcribe",
@@ -91,7 +99,6 @@ class ExecutorRegistry:
 
     def register(self, executor: ExecutorDefinition | dict[str, Any]) -> ExecutorDefinition:
         definition = validate_executor_definition(executor)
-        priority = int(definition.metadata.get("priority", 30))
         if definition.id not in self._executors:
             self._executors[definition.id] = []
         self._executors[definition.id].append(definition)
@@ -325,8 +332,8 @@ def _rewrite_executor_manifest_fork(
         return  # No manifest to rewrite — executor was loaded via executor.py
 
     try:
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
+        data = load_manifest_mapping(manifest_path, manifest_kind="executor")
+    except ManifestParseError:
         return  # Cannot parse, leave as-is
 
     new_id = f"local.{local_id}"
@@ -340,7 +347,7 @@ def _rewrite_executor_manifest_fork(
     metadata["forked_from"] = forked_from
     metadata["upstream_version"] = upstream_version
 
-    manifest_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    dump_manifest_payload(manifest_path, data)
 
 
 __all__ = [

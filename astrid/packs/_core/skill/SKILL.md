@@ -18,15 +18,15 @@ to do *first*:
 
 | Where you are | What `astrid next` tells you |
 |---|---|
-| No session bound | `astrid attach <slug>` (lists projects on disk) or `astrid projects create <slug>` |
+| No session bound | One legal bootstrap action, usually `astrid attach <slug>` or `astrid projects create <slug>` |
 | Session bound, no active run | `astrid start <orchestrator-id> --project <slug>` (suggests top orchestrators) |
 | In a run, mid-step | The exact `run: …` command or `astrid ack …` template to type |
 | Run rejected by verifier | The rejection reason + the retry command |
 | Run complete | "Run complete. Nothing to do." |
 
 Run it without flags. It derives the project from the bound session; if
-nothing is bound, it dispatches to discovery. **You don't need to remember
-which other verb to run** — `astrid next` is always the answer.
+nothing is bound, it still prints one legal bootstrap action. **You don't need
+to remember which other verb to run** — `astrid next` is always the answer.
 
 For deeper context (recent events, run state, inbox count) `astrid status`
 remains the read-side breadcrumb; `next` is the action verb.
@@ -35,8 +35,7 @@ remains the read-side breadcrumb; `next` is the action verb.
 
 Astrid is session-gated. From the repository root, the canonical entry is
 `astrid next` (see above). When you need detail beyond the next action,
-`astrid status` prints the session breadcrumb and the key discovery commands
-for skills, orchestrators, executors, and elements.
+`astrid status` prints the session breadcrumb and the exact recovery action.
 
 ```bash
 git status --short
@@ -45,9 +44,12 @@ python3 -m astrid next     # always-correct next action
 python3 -m astrid status   # detail breadcrumb when you need it
 ```
 
-If status says `no session bound`, attach before running doctor, list, inspect,
-executor, orchestrator, element, or task-mode commands. After that, use
-`status` when you need to re-orient, not before every command.
+If status says `no session bound`, attach before running doctor, registry
+list/search/inspect, executor, orchestrator, element, or task-mode commands.
+The only legal unbound commands are help/version, `status`, `next`, `attach`,
+`projects ls`, `projects create`, `projects default`, `sessions ls`, and
+`sessions takeover`. After binding, use `status` when you need to re-orient,
+not before every command.
 
 ```bash
 python3 -m astrid attach [<project>] [--default] [--timeline <slug>] [--session <id>] [--as agent:<id>]
@@ -165,13 +167,44 @@ Common task commands:
 ```bash
 python3 -m astrid start <orchestrator-id> --project <slug>
 python3 -m astrid next --project <slug>
-python3 -m astrid ack <step> --project <slug> --decision approve [--agent <id> | --actor <name>]
+python3 -m astrid ack <step> --project <slug> --decision approve [--agent <id> | --human <name>]
 python3 -m astrid status --project <slug>
 python3 -m astrid abort --project <slug>
 python3 -m astrid sessions {ls, detach, takeover} ...
 ```
 
 `astrid sessions takeover` atomically increments the run's `writer_epoch` and swaps the lease writer; any other tab that was writing to the run gets a `StaleEpochError` on its next mutating verb.
+Takeover from an unbound shell is allowed, but it first bootstraps a concrete
+caller session through the same identity and file-binding path as `attach`;
+anonymous takeover is not a valid state. Lease helpers preserve unknown
+metadata fields while updating only the owned writer fields, so future
+per-run metadata survives takeover, orphan claim, and release.
+
+Normal task-run mutations must go through the writer-owned task APIs; do not
+edit `plan.json`, `events.jsonl`, `current_run.json`, or `lease.json` by hand.
+The low-level event append helpers are transport internals, not agent-facing
+escape hatches.
+
+Sprint 3 task plans use one collapsed step shape: leaves have `command`, groups
+have `children`, and both share `adapter`, `requires_ack`, `assignee`,
+`produces`, `repeat`, and `version`. Do not author legacy `kind: code`,
+`kind: attested`, `kind: nested`, or inline `plan` step payloads. If you find a
+v1 plan, run `scripts/migrations/sprint-3/migrate_plans.py` rather than relying
+on runtime auto-migration.
+
+The first event in each run is `plan_initialized`. Treat `plan.json` as a
+cached projection replayed from `plan_initialized` plus `plan_mutated`, not as
+the source of truth. Use plan mutation verbs for edits.
+
+`repeat.until` now accepts expression strings such as
+`review.produces.verdict.status == "approved"`. Repeated group steps may expose
+descendant produces through `re_export`; missing artifacts or malformed JSON
+fail closed. Legacy conditions such as `user_approves` exist only for migrated
+read compatibility.
+
+`remote-artifact` is available for task leaves that dispatch remote work through
+the generic subprocess-plus-manifest contract. Use `local` or `manual` when the
+step does not need asynchronous artifact fetch/retry behavior.
 
 ## Create Something New
 
@@ -276,7 +309,7 @@ rewriting the element's `pack_id` to `local`.
 python3 -m astrid elements fork effects text-card
 ```
 
-Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a variant lineage WITHIN a pack and is UNRELATED to the (removed) `astrid thread` CLI verb — threads as a user-facing concept were retired in Sprint 1 (DEC-001); the internal `astrid.threads` library is retained for pack runners.
+Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a non-binding variant lineage WITHIN a pack and is UNRELATED to the removed `astrid thread` CLI verb or to session binding. Threads as a generic user-facing runtime concept were retired in Sprint 1 (DEC-001); the internal `astrid.threads` library is retained for pack lineage utilities.
 
 ## Pack Model
 

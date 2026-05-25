@@ -7,20 +7,18 @@ from __future__ import annotations
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('builtin.event_talks')
 import argparse
+import datetime as dt
 import hashlib
 import json
-import os
 import re
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from astrid.packs.builtin.event_talks.plan_template import build_plan_v2, emit_plan_json
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.core.task.events import append_event
 from astrid.core.project.run import (
-    ProjectRunError,
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
@@ -144,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Search a Whisper JSON transcript for speaker/title phrases.",
     )
     search.add_argument("--transcript", type=Path, required=True)
+    search.add_argument("--out", type=Path, required=True)
     search.add_argument("--phrases", nargs="*", default=[])
 
     # find-holding-screens
@@ -224,6 +223,8 @@ def _exec_ados_sunday_template(args: argparse.Namespace) -> int:
 def _exec_search_transcript(args: argparse.Namespace) -> int:
     """Search a Whisper JSON transcript for speaker/title phrases."""
     transcript: Path = args.transcript
+    out: Path = args.out
+    out.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(transcript.read_text(encoding="utf-8"))
     segments = data.get("segments") or []
 
@@ -239,6 +240,7 @@ def _exec_search_transcript(args: argparse.Namespace) -> int:
     ]
 
     found = 0
+    lines: list[str] = []
     for segment in segments:
         text = str(segment.get("text") or "")
         folded = _fold(text)
@@ -247,11 +249,13 @@ def _exec_search_transcript(args: argparse.Namespace) -> int:
             found += 1
             start = float(segment.get("start") or 0.0)
             end = float(segment.get("end") or start)
-            print(
+            lines.append(
                 f"{_fmt_time(start)}-{_fmt_time(end)} | "
                 f"{', '.join(matches)} | {text.strip()}"
             )
-    print(f"matches={found}")
+    lines.append(f"matches={found}")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"event_talks: wrote={out} matches={found}")
     return 0
 
 
@@ -340,8 +344,6 @@ def _exec_render_manifest(args: argparse.Namespace) -> int:
     can proceed.  Full ffmpeg/Remotion rendering may be restored in a
     follow-up.
     """
-    import shutil
-
     manifest: Path = args.manifest
     out_dir: Path = getattr(args, "out_dir", args.out) if hasattr(args, "out_dir") else args.out
 
@@ -367,17 +369,9 @@ def _exec_render_manifest(args: argparse.Namespace) -> int:
 
 def _probe_duration(video: Path) -> float:
     """Return video duration in seconds via ffprobe."""
-    import subprocess as sp
-    result = sp.run(
-        [
-            "ffprobe", "-v", "error", "-show_entries",
-            "format=duration", "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(video),
-        ],
-        capture_output=True, text=True, check=True,
-    )
-    return float(result.stdout.strip())
+    from astrid.core.util.media import ffprobe_duration_seconds
+
+    return ffprobe_duration_seconds(video)
 
 
 def _coalesce_hit_intervals(
@@ -462,16 +456,20 @@ def _write_run_json(args: argparse.Namespace) -> None:
         )
 
 
-def _append_run_started(run_root: Path) -> None:
-    """Append a ``run_started`` event to ``events.jsonl``."""
-    events_path = run_root / "events.jsonl"
-    import datetime as dt
+def _append_pack_run_started(run_root: Path) -> None:
+    """Append a pack-local audit event.
 
-    ev = {
-        "kind": "run_started",
+    This log is intentionally not the task-run ``events.jsonl`` ledger. Canonical
+    task-run events are written through the task gate's WriterContext.
+    """
+    events_path = run_root / "pack_events.jsonl"
+    ev: dict[str, Any] = {
+        "kind": "pack_run_started",
         "ts": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
-    append_event(events_path, ev)
+    events_path.parent.mkdir(parents=True, exist_ok=True)
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(ev, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 def run_orchestrator(args: argparse.Namespace) -> int:
@@ -501,8 +499,8 @@ def run_orchestrator(args: argparse.Namespace) -> int:
     # 3. Write run.json with consumes
     _write_run_json(args)
 
-    # 4. Append run_started event
-    _append_run_started(args.out)
+    # 4. Append pack-local audit event
+    _append_pack_run_started(args.out)
 
     if args.dry_run:
         print(f"event_talks: plan emitted to {plan_path} (plan_hash={plan_hash})")
@@ -564,6 +562,35 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _run_step_subcommand(
+    *,
+    effective_argv: list[str],
+    args: argparse.Namespace,
+    runner: Callable[[argparse.Namespace], int],
+) -> int:
+    """Run one local-adapter step, recording task-gate completion in task mode."""
+    slug = task_env.task_project_env()
+    decision = None
+    if slug is not None and task_env.is_in_task_run(slug):
+        try:
+            decision = task_gate.gate_command(
+                slug,
+                task_gate.command_for_argv(
+                    ["python3", "-m", "astrid.packs.builtin.event_talks.run", *effective_argv]
+                ),
+                effective_argv,
+                reentry=True,
+            )
+        except task_gate.TaskRunGateError as exc:
+            print(exc.recovery, file=sys.stderr)
+            return 1
+
+    returncode = runner(args)
+    if decision is not None:
+        task_gate.record_dispatch_complete(decision, returncode)
+    return returncode
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point for the event_talks orchestrator.
 
@@ -591,13 +618,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = build_parser().parse_args(effective_argv)
         cmd = args.command
         if cmd == "ados-sunday-template":
-            return _exec_ados_sunday_template(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_ados_sunday_template,
+            )
         if cmd == "search-transcript":
-            return _exec_search_transcript(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_search_transcript,
+            )
         if cmd == "find-holding-screens":
-            return _exec_find_holding_screens(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_find_holding_screens,
+            )
         if cmd == "render":
-            return _exec_render_manifest(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_render_manifest,
+            )
         # Should not reach here — subparser dispatch guarantees `command`
         print(f"event_talks: unknown subcommand: {cmd}", file=sys.stderr)
         return 1

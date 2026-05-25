@@ -186,6 +186,24 @@ def test_training_config_enforces_supported_backend_trainer_and_required_budget_
         load_training_run_config(missing_budget)
 
 
+def test_training_config_requires_storage_name_when_runpod_storage_required(tmp_path: Path) -> None:
+    config_path = _training_config(
+        tmp_path / "storage-required.json",
+        compute={"storage_required": True},
+    )
+
+    with pytest.raises(TrainingRunConfigError, match="ensure-storage"):
+        load_training_run_config(config_path)
+
+    configured_path = _training_config(
+        tmp_path / "storage-configured.json",
+        compute={"storage_required": True, "storage_name": "astrid-storage"},
+    )
+    parsed = load_training_run_config(configured_path)
+    assert parsed.data["compute"]["storage_required"] is True
+    assert parsed.data["compute"]["storage_name"] == "astrid-storage"
+
+
 def test_budget_preflight_requires_positive_caps_and_live_spend_confirmation() -> None:
     config = {
         "trainer_id": "ai-toolkit-ltx",

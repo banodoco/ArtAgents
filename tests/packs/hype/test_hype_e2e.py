@@ -6,7 +6,7 @@ Verifies:
 - Dynamic plan mutation via ``add-step`` (shot count discovered after cut)
 - All steps terminal with ``step_dispatched`` → ``step_completed`` events
 - ``run_completed`` lands after final step completes
-- Artifacts under canonical ``steps/<id>/v<N>/produces/...`` paths
+- Artifacts under canonical ``steps/hype/<id>/v<N>/produces/...`` paths
 - ``consumes`` populated on ``run.json``
 - Costs surfaced on completion events
 """
@@ -15,25 +15,44 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sys
+import os
+import shlex
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
+from astrid.core.executor.cli import _parse_input_values
+from astrid.core.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.executor.runner import ExecutorRunRequest, build_executor_command
+from astrid.core.project.current_run import write_current_run
+from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core.project.project import create_project
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.model import Session
+from astrid.core.session.paths import session_path
+from astrid.core.task.command_render import render_task_command
 from astrid.core.task.events import (
     _run_is_complete,
     make_run_completed_event,
     make_step_completed_event,
     make_step_dispatched_event,
+    read_events,
 )
+from astrid.core.task.gate import (
+    TaskRunGateError,
+    _resolve_for_each_items,
+    gate_command,
+    record_dispatch_complete,
+)
+from astrid.core.task.lifecycle import cmd_next, cmd_start
 from astrid.core.task.plan import (
+    RepeatForEach,
     Step,
-    TaskPlan,
     compute_plan_hash,
     load_plan,
 )
-
 
 # ---------------------------------------------------------------------------
 # Synthetic run fixture
@@ -56,7 +75,8 @@ def _build_synthetic_hype_run(
 
     Returns ``(project_root, run_dir, source_path, plan_path)``.
     """
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2, emit_plan_json
+    from astrid.core.orchestrator.plan_template import emit_plan_json
+    from astrid.packs.builtin.hype.plan_template import build_plan_v2
 
     proj_root = tmp_path / "projects" / slug
     run_dir = proj_root / "runs" / run_id
@@ -110,6 +130,95 @@ def _write_step_event(events_path: Path, event: dict) -> None:
         f.write(line + "\n")
 
 
+def _bind_hype_session(projects_root: Path, slug: str, run_id: str, sid: str) -> None:
+    os.environ[ASTRID_SESSION_ID_ENV] = sid
+    sess = Session(
+        id=sid,
+        project=slug,
+        agent_id="hype-test",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        run_id=run_id,
+    )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
+    write_current_run(slug, run_id, root=projects_root)
+
+
+def _seed_default_timeline(projects_root: Path, slug: str) -> str:
+    from astrid import timeline as timeline_contract
+    from astrid.core.session.ulid import generate_ulid
+
+    timeline_ulid = generate_ulid()
+    pdir = projects_root / slug
+    tdir = pdir / "timelines" / timeline_ulid
+    tdir.mkdir(parents=True)
+    (tdir / "assembly.json").write_text(
+        json.dumps(timeline_contract.canonical_empty_timeline()), encoding="utf-8"
+    )
+    (tdir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "contributing_runs": [],
+                "final_outputs": [],
+                "tombstoned_at": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tdir / "display.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "slug": "main",
+                "name": "Main",
+                "is_default": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    project_json = pdir / "project.json"
+    payload = read_json(project_json)
+    payload["default_timeline_id"] = timeline_ulid
+    write_json_atomic(project_json, payload)
+    return timeline_ulid
+
+
+def _write_bound_session(
+    *,
+    sid: str,
+    slug: str,
+    run_id: str | None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, sid)
+    sess = Session(
+        id=sid,
+        project=slug,
+        agent_id="hype-start-test",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        run_id=run_id,
+    )
+    path = session_path(sid)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sess.to_json(path)
+
+
+def _capture_stdout_stderr(fn, *args, **kwargs) -> tuple[int, str, str]:
+    stdout = StringIO()
+    stderr = StringIO()
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        rc = fn(*args, **kwargs)
+    return rc, stdout.getvalue(), stderr.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Initial plan v2 emission + stable plan hash
 # ---------------------------------------------------------------------------
@@ -117,7 +226,6 @@ def _write_step_event(events_path: Path, event: dict) -> None:
 
 def test_initial_plan_v2_emission(tmp_path: Path) -> None:
     """Build plan v2, emit it as JSON, and verify plan hash is stable."""
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2
 
     proj_root, run_dir, _, plan_path = _build_synthetic_hype_run(tmp_path)
 
@@ -150,10 +258,334 @@ def test_initial_plan_v2_emission(tmp_path: Path) -> None:
     assert "editor_review" in child_ids
     assert "validate" in child_ids
 
+    executor_leaf_ids = {
+        "transcribe": "builtin.transcribe",
+        "scenes": "builtin.scenes",
+        "cut": "builtin.cut",
+        "render": "builtin.render",
+        "validate": "builtin.validate",
+    }
+    for child in top["children"]:
+        if child["id"] not in executor_leaf_ids:
+            continue
+        argv = shlex.split(child["command"])
+        assert argv[:6] == [
+            "python3",
+            "-m",
+            "astrid",
+            "executors",
+            "run",
+            executor_leaf_ids[child["id"]],
+        ]
+        assert "--out" in argv
+        assert "--" not in argv
+
+    render_step = next(c for c in top["children"] if c["id"] == "render")
+    render_argv = shlex.split(render_step["command"])
+    assert "--out" in render_argv
+    assert "--input" in render_argv
+    render_inputs = [
+        render_argv[index + 1]
+        for index, token in enumerate(render_argv)
+        if token == "--input"
+    ]
+    assert any(value.startswith("timeline=") for value in render_inputs)
+    assert any(value.startswith("assets_registry=") for value in render_inputs)
+    assert not any(value.startswith("assets=") for value in render_inputs)
+    assert "external.runpod" not in render_step["command"]
+
+    cut_step = next(c for c in top["children"] if c["id"] == "cut")
+    assert cut_step["repeat"]["for_each"]["from"] == "scenes.produces.scene_items"
+    produced_names = set(cut_step["produces"])
+    assert {"timeline_output", "assets_registry"} <= produced_names
+
+    scenes_step = next(c for c in top["children"] if c["id"] == "scenes")
+    assert {"scenes_list", "scene_items"} <= set(scenes_step["produces"])
+
+    review_step = next(c for c in top["children"] if c["id"] == "editor_review")
+    assert review_step["requires_ack"] is True
+    assert "steps/hype/render/v1/produces/hype.mp4" in review_step["instructions"]
+    assert review_step["repeat"]["until"] == 'hype.editor_review.produces.review_output.verdict == "ship"'
+    assert review_step["repeat"]["max_iterations"] == 2
+    assert review_step["repeat"]["on_exhaust"] == "fail"
+
+
+def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from astrid.core.adapter import DispatchResult
+    from astrid.core.adapter.local import LocalAdapter
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv("ASTRID_PROJECTS_ROOT", str(projects_root))
+    monkeypatch.setenv("ASTRID_HOME", str(tmp_path / "home"))
+    slug = "demo"
+    create_project(slug, root=projects_root)
+    _seed_default_timeline(projects_root, slug)
+    source = projects_root / slug / "source.mp4"
+    source.write_bytes(b"tiny source media")
+    brief = projects_root / slug / "brief.txt"
+    brief.write_text("make a short hype edit", encoding="utf-8")
+    _write_bound_session(
+        sid="S-HYPE-START",
+        slug=slug,
+        run_id=None,
+        monkeypatch=monkeypatch,
+    )
+
+    rc, stdout, stderr = _capture_stdout_stderr(
+        cmd_start,
+        ["builtin.hype", "--project", slug, "--name", "run-hype-start"],
+        packs_root=tmp_path / "empty-packs",
+        projects_root=projects_root,
+    )
+    assert rc == 0, stderr
+    assert "started builtin.hype" in stdout
+    run_dir = projects_root / slug / "runs" / "run-hype-start"
+    plan_path = projects_root / slug / "plan.json"
+    run_plan_path = run_dir / "plan.json"
+    assert plan_path.exists()
+    assert run_plan_path.exists()
+
+    plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+    assert json.loads(run_plan_path.read_text(encoding="utf-8")) == plan_data
+    assert plan_data["version"] == 2
+    assert plan_data["steps"][0]["id"] == "hype"
+    assert "children" in plan_data["steps"][0]
+
+    run_json = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+    assert run_json["tool_id"] == "builtin.hype"
+    assert run_json["metadata"]["plan_hash"].startswith("sha256:")
+    assert {
+        (entry["source"], entry["sha256"]) for entry in run_json["consumes"]
+    } == {
+        (str(source.resolve()), hashlib.sha256(source.read_bytes()).hexdigest()),
+        (str(brief.resolve()), hashlib.sha256(brief.read_bytes()).hexdigest()),
+    }
+
+    events = read_events(run_dir / "events.jsonl")
+    assert [event["kind"] for event in events[:2]] == [
+        "plan_initialized",
+        "run_started",
+    ]
+    assert events[0]["plan"]["version"] == 2
+    assert events[0]["plan"]["steps"][0]["id"] == "hype"
+
+    plan = load_plan(plan_path)
+    transcribe = plan.steps[0].children[0]  # type: ignore[index,union-attr]
+    rendered_transcribe = render_task_command(
+        transcribe,
+        slug=slug,
+        run_id="run-hype-start",
+        project_root=projects_root / slug,
+        plan_step_path=("hype", "transcribe"),
+    )
+    assert rendered_transcribe.canonical_argv[:6] == (
+        "python3",
+        "-m",
+        "astrid",
+        "executors",
+        "run",
+        "builtin.transcribe",
+    )
+    assert rendered_transcribe.task_env["ASTRID_TASK_PROJECT"] == slug
+    assert rendered_transcribe.task_env["ASTRID_TASK_RUN_ID"] == "run-hype-start"
+
+    rc, next_stdout, next_stderr = _capture_stdout_stderr(
+        cmd_next,
+        ["--project", slug],
+        projects_root=projects_root,
+    )
+    assert rc == 0, next_stderr
+    assert "ASTRID_TASK_PROJECT=demo" in next_stdout
+    assert "python3 -m astrid executors run builtin.transcribe" in next_stdout
+    assert "add --project" not in next_stdout
+    assert "uses task env instead of a local --project" in next_stdout
+
+    dispatches: list[dict[str, object]] = []
+
+    def fake_dispatch(self, step, run_ctx):
+        dispatches.append(
+            {
+                "path": run_ctx.plan_step_path,
+                "item_id": run_ctx.item_id,
+                "command": run_ctx.canonical_command,
+                "argv": tuple(run_ctx.canonical_argv),
+                "env": dict(run_ctx.task_env or {}),
+                "produces_root": run_ctx.produces_root,
+            }
+        )
+        return DispatchResult(status="dispatched", pid=1234, started_at="2026-05-25T00:00:00.000Z")
+
+    monkeypatch.setattr(LocalAdapter, "dispatch", fake_dispatch)
+
+    decision = gate_command(slug, rendered_transcribe.canonical_command, [], root=projects_root)
+    assert dispatches[-1]["path"] == ("hype", "transcribe")
+    assert dispatches[-1]["env"]["ASTRID_TASK_STEP_ID"] == "hype/transcribe"
+    assert str(dispatches[-1]["produces_root"]).endswith(
+        "runs/run-hype-start/steps/hype/transcribe/v1/produces"
+    )
+    transcribe_produces = run_dir / "steps" / "hype" / "transcribe" / "v1" / "produces"
+    transcribe_produces.mkdir(parents=True, exist_ok=True)
+    (transcribe_produces / "transcript.json").write_text("{}", encoding="utf-8")
+    record_dispatch_complete(decision, returncode=0)
+
+    scenes = plan.steps[0].children[1]  # type: ignore[index,union-attr]
+    rendered_scenes = render_task_command(
+        scenes,
+        slug=slug,
+        run_id="run-hype-start",
+        project_root=projects_root / slug,
+        plan_step_path=("hype", "scenes"),
+    )
+    decision = gate_command(slug, rendered_scenes.canonical_command, [], root=projects_root)
+    scenes_produces = run_dir / "steps" / "hype" / "scenes" / "v1" / "produces"
+    scenes_produces.mkdir(parents=True, exist_ok=True)
+    (scenes_produces / "scene_items.json").write_text(
+        json.dumps(["scene-0001"]), encoding="utf-8"
+    )
+    (scenes_produces / "scenes.json").write_text(
+        json.dumps([{"id": "scene-0001"}]), encoding="utf-8"
+    )
+    record_dispatch_complete(decision, returncode=0)
+
+    cut = plan.steps[0].children[2]  # type: ignore[index,union-attr]
+    rendered_cut = render_task_command(
+        cut,
+        slug=slug,
+        run_id="run-hype-start",
+        project_root=projects_root / slug,
+        plan_step_path=("hype", "cut"),
+        item_id="scene-0001",
+    )
+    decision = gate_command(slug, rendered_cut.canonical_command, [], root=projects_root)
+    assert dispatches[-1]["path"] == ("hype", "cut")
+    assert dispatches[-1]["item_id"] == "scene-0001"
+    assert dispatches[-1]["env"]["ASTRID_TASK_ITEM_ID"] == "scene-0001"
+    assert "scene_id=scene-0001" in dispatches[-1]["argv"]
+    assert str(dispatches[-1]["produces_root"]).endswith(
+        "runs/run-hype-start/steps/hype/cut/v1/items/scene-0001/produces"
+    )
+    cut_item_produces = (
+        run_dir
+        / "steps"
+        / "hype"
+        / "cut"
+        / "v1"
+        / "items"
+        / "scene-0001"
+        / "produces"
+    )
+    cut_item_produces.mkdir(parents=True, exist_ok=True)
+    (cut_item_produces / "hype.timeline.json").write_text("{}", encoding="utf-8")
+    (cut_item_produces / "hype.assets.json").write_text("{}", encoding="utf-8")
+    record_dispatch_complete(decision, returncode=0)
+
+    events_after_cut = read_events(run_dir / "events.jsonl")
+    assert any(
+        event.get("kind") == "item_completed"
+        and event.get("plan_step_path") == ["hype", "cut"]
+        and event.get("item_id") == "scene-0001"
+        for event in events_after_cut
+    )
+    assert any(
+        event.get("kind") == "step_completed"
+        and event.get("plan_step_path") == ["hype", "cut"]
+        for event in events_after_cut
+    )
+    rc, next_stdout, next_stderr = _capture_stdout_stderr(
+        cmd_next,
+        ["--project", slug],
+        projects_root=projects_root,
+    )
+    assert rc == 0, next_stderr
+    assert "builtin.render" in next_stdout
+
+    kinds = [event["kind"] for event in read_events(run_dir / "events.jsonl")]
+    assert kinds.count("step_dispatched") == 3
+    assert "for_each_expanded" in kinds
+    assert "item_started" in kinds
+    assert "item_completed" in kinds
+
+
+def test_generated_hype_render_command_parses_to_required_downstream_render_argv(
+    tmp_path: Path,
+) -> None:
+    from astrid.packs.builtin.hype.plan_template import build_plan_v2
+
+    run_dir = tmp_path / "runs" / "r-hype"
+    run_dir.mkdir(parents=True)
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"media")
+    theme = tmp_path / "theme.json"
+    theme.write_text("{}", encoding="utf-8")
+    plan = build_plan_v2(
+        python_exec="/opt/python",
+        run_root=run_dir,
+        source=source,
+        theme=theme,
+        run_id="r-hype",
+    )
+    render_step = next(
+        child
+        for child in plan["steps"][0]["children"]
+        if child["id"] == "render"
+    )
+    rendered = render_task_command(
+        Step(id="render", command=render_step["command"]),
+        slug="demo",
+        run_id="r-hype",
+        project_root=tmp_path,
+        plan_step_path=("hype", "render"),
+    )
+
+    rendered_argv = rendered.canonical_argv
+    assert rendered_argv[:6] == (
+        "/opt/python",
+        "-m",
+        "astrid",
+        "executors",
+        "run",
+        "builtin.render",
+    )
+    out = rendered_argv[rendered_argv.index("--out") + 1]
+    input_values = [
+        rendered_argv[index + 1]
+        for index, token in enumerate(rendered_argv)
+        if token == "--input"
+    ]
+    downstream_argv = build_executor_command(
+        ExecutorRunRequest(
+            "builtin.render",
+            out=out,
+            inputs=_parse_input_values(input_values),
+            python_exec="/opt/python",
+        ),
+        load_executor_registry(),
+    )
+
+    assert downstream_argv[:3] == (
+        "/opt/python",
+        "-m",
+        "astrid.packs.builtin.render.run",
+    )
+    assert downstream_argv[3:] == (
+        "--timeline",
+        str(run_dir / "steps" / "hype" / "cut" / "v1" / "produces" / "hype.timeline.json"),
+        "--assets",
+        str(run_dir / "steps" / "hype" / "cut" / "v1" / "produces" / "hype.assets.json"),
+        "--out",
+        str((tmp_path / "runs" / "r-hype" / "steps" / "hype" / "render" / "v1" / "produces").resolve() / "hype.mp4"),
+        "--theme",
+        str(theme.resolve()),
+    )
+
 
 def test_plan_hash_different_for_different_plans(tmp_path: Path) -> None:
     """Two plans with different run_ids produce different hashes."""
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2, emit_plan_json
+    from astrid.core.orchestrator.plan_template import emit_plan_json
+    from astrid.packs.builtin.hype.plan_template import build_plan_v2
 
     slug = "demo"
     proj_root = tmp_path / "projects" / slug
@@ -181,6 +613,56 @@ def test_plan_hash_different_for_different_plans(tmp_path: Path) -> None:
     h1 = compute_plan_hash(str(plan_path1))
     h2 = compute_plan_hash(str(plan_path2))
     assert h1 != h2
+
+
+def test_hype_repeat_source_uses_grouped_string_scene_items(tmp_path: Path) -> None:
+    """Grouped hype repeat discovery reads scene_items.json, not dict scenes.json."""
+    _proj_root, run_dir, _, _ = _build_synthetic_hype_run(tmp_path)
+    plan = load_plan(run_dir / "plan.json")
+    hype = plan.steps[0]
+    assert hype.children is not None
+    cut = next(child for child in hype.children if child.id == "cut")
+    assert isinstance(cut.repeat, RepeatForEach)
+    assert cut.repeat.from_ref == "scenes.produces.scene_items"
+
+    scenes_dir = run_dir / "steps" / "hype" / "scenes" / "v1" / "produces"
+    scenes_dir.mkdir(parents=True, exist_ok=True)
+    (scenes_dir / "scene_items.json").write_text(
+        json.dumps(["scene-0001", "scene-0002"]), encoding="utf-8"
+    )
+    (scenes_dir / "scenes.json").write_text(
+        json.dumps([{"index": 1}, {"index": 2}]), encoding="utf-8"
+    )
+
+    items = _resolve_for_each_items(
+        slug="demo",
+        repeat=cut.repeat,
+        parent_prefix=("hype",),
+        project_root=tmp_path / "projects" / "demo",
+        run_id="run-hype-1",
+        events=[],
+    )
+    assert items == ("scene-0001", "scene-0002")
+
+
+def test_dictionary_scene_output_is_not_a_valid_for_each_source(tmp_path: Path) -> None:
+    """Dictionary scene output still fails the task gate's item-id contract."""
+    _proj_root, run_dir, _, _ = _build_synthetic_hype_run(tmp_path)
+    scenes_dir = run_dir / "steps" / "hype" / "scenes" / "v1" / "produces"
+    scenes_dir.mkdir(parents=True, exist_ok=True)
+    (scenes_dir / "scenes.json").write_text(
+        json.dumps([{"index": 1, "start": 0.0, "end": 1.0}]), encoding="utf-8"
+    )
+
+    with pytest.raises(TaskRunGateError, match="for_each items must be unique strings"):
+        _resolve_for_each_items(
+            slug="demo",
+            repeat=RepeatForEach(items_source="from", from_ref="scenes.produces.scenes_list"),
+            parent_prefix=("hype",),
+            project_root=tmp_path / "projects" / "demo",
+            run_id="run-hype-1",
+            events=[],
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +717,7 @@ def test_dynamic_add_step_shot_count_discovery(tmp_path: Path) -> None:
 
     # Seed the run with a lease so add-step can validate
     from astrid.core.session.lease import write_lease_init
+    _bind_hype_session(tmp_path / "projects", "demo", "run-hype-1", "test-session-1")
     write_lease_init(run_dir, session_id="test-session-1", plan_hash="")
 
     # Seed the first event using ``append_event`` so the hash chain is valid.
@@ -287,6 +770,7 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
     proj_root, run_dir, _, _ = _build_synthetic_hype_run(tmp_path)
 
     from astrid.core.session.lease import write_lease_init
+    _bind_hype_session(tmp_path / "projects", "demo", "run-hype-1", "test-session-2")
     write_lease_init(run_dir, session_id="test-session-2", plan_hash="")
 
     # Seed the first event with the hash chain intact.
@@ -324,7 +808,6 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
                 events.append(json.loads(line))
 
     effective = apply_mutations(plan, events)
-    all_ids = [s.id for s in effective.steps]
     # The extra step should appear somewhere (flat or under hype group)
     found = any(
         child.id == "extra_render"
@@ -349,7 +832,7 @@ def test_full_step_lifecycle_events(tmp_path: Path) -> None:
 
     # Load the plan to know the leaf step ids
     plan = load_plan(str(run_dir / "plan.json"))
-    leaf_ids = _collect_leaf_ids(plan.steps)
+    leaf_paths = _collect_leaf_paths(plan.steps)
 
     events_path = run_dir / "events.jsonl"
 
@@ -360,9 +843,10 @@ def test_full_step_lifecycle_events(tmp_path: Path) -> None:
     )
 
     # Simulate dispatching and completing each leaf step
-    for leaf_id in sorted(leaf_ids):
+    for path_tuple in sorted(leaf_paths):
+        leaf_id = path_tuple[-1]
         # Create step directory and produces
-        step_dir = run_dir / "steps" / leaf_id / "v1"
+        step_dir = run_dir / "steps" / Path(*path_tuple) / "v1"
         step_dir.mkdir(parents=True, exist_ok=True)
         produces_dir = step_dir / "produces"
         produces_dir.mkdir(exist_ok=True)
@@ -371,7 +855,7 @@ def test_full_step_lifecycle_events(tmp_path: Path) -> None:
         _write_step_event(
             events_path,
             make_step_dispatched_event(
-                leaf_id,
+                "/".join(path_tuple),
                 f"python3 -m {leaf_id}",
                 adapter="local",
                 step_version=1,
@@ -389,7 +873,7 @@ def test_full_step_lifecycle_events(tmp_path: Path) -> None:
         _write_step_event(
             events_path,
             make_step_completed_event(
-                leaf_id, returncode=0, cost=cost, adapter=adapter
+                "/".join(path_tuple), returncode=0, cost=cost, adapter=adapter
             ),
         )
 
@@ -415,26 +899,27 @@ def test_full_step_lifecycle_events(tmp_path: Path) -> None:
 
 
 def test_artifacts_under_canonical_paths(tmp_path: Path) -> None:
-    """Verify artifacts land under steps/<id>/v<N>/produces/... paths."""
+    """Verify artifacts land under steps/hype/<id>/v<N>/produces/... paths."""
     proj_root, run_dir, _, _ = _build_synthetic_hype_run(tmp_path)
 
     plan = load_plan(str(run_dir / "plan.json"))
-    leaf_ids = _collect_leaf_ids(plan.steps)
+    leaf_paths = _collect_leaf_paths(plan.steps)
 
-    for leaf_id in sorted(leaf_ids):
-        step_dir = run_dir / "steps" / leaf_id / "v1" / "produces"
+    for path_tuple in sorted(leaf_paths):
+        leaf_id = path_tuple[-1]
+        step_dir = run_dir / "steps" / Path(*path_tuple) / "v1" / "produces"
         step_dir.mkdir(parents=True, exist_ok=True)
         artifact = step_dir / f"{leaf_id}_result.json"
         artifact.write_text(f'{{"step": "{leaf_id}"}}', encoding="utf-8")
         assert artifact.exists()
 
     # Verify canonical path structure
-    assert (run_dir / "steps" / "transcribe" / "v1" / "produces").exists()
-    assert (run_dir / "steps" / "scenes" / "v1" / "produces").exists()
-    assert (run_dir / "steps" / "cut" / "v1" / "produces").exists()
-    assert (run_dir / "steps" / "render" / "v1" / "produces").exists()
-    assert (run_dir / "steps" / "editor_review" / "v1" / "produces").exists()
-    assert (run_dir / "steps" / "validate" / "v1" / "produces").exists()
+    assert (run_dir / "steps" / "hype" / "transcribe" / "v1" / "produces").exists()
+    assert (run_dir / "steps" / "hype" / "scenes" / "v1" / "produces").exists()
+    assert (run_dir / "steps" / "hype" / "cut" / "v1" / "produces").exists()
+    assert (run_dir / "steps" / "hype" / "render" / "v1" / "produces").exists()
+    assert (run_dir / "steps" / "hype" / "editor_review" / "v1" / "produces").exists()
+    assert (run_dir / "steps" / "hype" / "validate" / "v1" / "produces").exists()
 
 
 def test_costs_surfaced_on_completion_events(tmp_path: Path) -> None:
@@ -456,13 +941,14 @@ def test_costs_surfaced_on_completion_events(tmp_path: Path) -> None:
         ("editor_review", {"amount": 0.0, "currency": "USD", "source": "manual"}),
         ("validate", {"amount": 0.001, "currency": "USD", "source": "gemini"}),
     ]:
+        path_tuple = ("hype", step_id)
         # Create step dir
-        (run_dir / "steps" / step_id / "v1" / "produces").mkdir(parents=True, exist_ok=True)
+        (run_dir / "steps" / Path(*path_tuple) / "v1" / "produces").mkdir(parents=True, exist_ok=True)
 
         _write_step_event(
             events_path,
             make_step_dispatched_event(
-                step_id,
+                "/".join(path_tuple),
                 f"python3 -m {step_id}",
                 adapter="manual" if step_id == "editor_review" else "local",
             ),
@@ -470,7 +956,7 @@ def test_costs_surfaced_on_completion_events(tmp_path: Path) -> None:
         _write_step_event(
             events_path,
             make_step_completed_event(
-                step_id,
+                "/".join(path_tuple),
                 returncode=0,
                 cost=cost,
                 adapter="manual" if step_id == "editor_review" else "local",
@@ -519,13 +1005,14 @@ def test_run_completed_not_emitted_with_awaiting_fetch(tmp_path: Path) -> None:
     )
 
     # Complete all but render (which goes to awaiting_fetch)
-    leaf_ids = _collect_leaf_ids(plan.steps)
-    for leaf_id in sorted(leaf_ids):
-        (run_dir / "steps" / leaf_id / "v1" / "produces").mkdir(parents=True, exist_ok=True)
+    leaf_paths = _collect_leaf_paths(plan.steps)
+    for path_tuple in sorted(leaf_paths):
+        leaf_id = path_tuple[-1]
+        (run_dir / "steps" / Path(*path_tuple) / "v1" / "produces").mkdir(parents=True, exist_ok=True)
         _write_step_event(
             events_path,
             make_step_dispatched_event(
-                leaf_id,
+                "/".join(path_tuple),
                 f"python3 -m {leaf_id}",
                 adapter="manual" if leaf_id == "editor_review" else "local",
             ),
@@ -536,7 +1023,7 @@ def test_run_completed_not_emitted_with_awaiting_fetch(tmp_path: Path) -> None:
                 events_path,
                 {
                     "kind": "step_awaiting_fetch",
-                    "plan_step_path": ["render"],
+                    "plan_step_path": list(path_tuple),
                     "missing": ["hype.mp4"],
                     "mismatched": [],
                     "ts": "2025-01-01T00:01:00Z",
@@ -546,7 +1033,7 @@ def test_run_completed_not_emitted_with_awaiting_fetch(tmp_path: Path) -> None:
             _write_step_event(
                 events_path,
                 make_step_completed_event(
-                    leaf_id,
+                    "/".join(path_tuple),
                     returncode=0,
                     adapter="manual" if leaf_id == "editor_review" else "local",
                 ),
@@ -568,16 +1055,17 @@ def test_run_completed_not_emitted_with_awaiting_fetch(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _collect_leaf_ids(steps: tuple[Step, ...]) -> set[str]:
-    """Collect all leaf step ids from a step tree."""
-    leaf_ids: set[str] = set()
+def _collect_leaf_paths(steps: tuple[Step, ...]) -> set[tuple[str, ...]]:
+    """Collect all leaf step paths from a step tree."""
+    leaf_paths: set[tuple[str, ...]] = set()
 
-    def _walk(s: tuple[Step, ...]) -> None:
+    def _walk(s: tuple[Step, ...], prefix: tuple[str, ...]) -> None:
         for step in s:
+            path_tuple = prefix + (step.id,)
             if step.children is None:
-                leaf_ids.add(step.id)
+                leaf_paths.add(path_tuple)
             else:
-                _walk(step.children)
+                _walk(step.children, path_tuple)
 
-    _walk(steps)
-    return leaf_ids
+    _walk(steps, ())
+    return leaf_paths

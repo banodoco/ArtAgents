@@ -81,6 +81,10 @@ class TestCreateTimeline:
         assert (tdir / "assembly.json").is_file()
         assert (tdir / "manifest.json").is_file()
         assert (tdir / "display.json").is_file()
+        assert json.loads((tdir / "assembly.json").read_text(encoding="utf-8")) == {
+            "clips": [],
+            "tracks": [],
+        }
 
         from astrid.core.timeline.model import Display
 
@@ -160,6 +164,19 @@ class TestListTimelines:
             else:
                 assert r.is_default is False
 
+    def test_excludes_tombstoned_timelines_by_default(self, project_tree: Path) -> None:
+        create_timeline("demo", "active")
+        create_timeline("demo", "old")
+        tombstone_timeline("demo", "old")
+
+        rows = list_timelines("demo")
+        assert [row.slug for row in rows] == ["active"]
+
+        audit_rows = list_timelines("demo", include_tombstoned=True)
+        assert {row.slug for row in audit_rows} == {"active", "old"}
+        old = next(row for row in audit_rows if row.slug == "old")
+        assert old.tombstoned_at is not None
+
 
 # ---------------------------------------------------------------------------
 # Show
@@ -179,6 +196,35 @@ class TestShowTimeline:
         assert "assembly" in data
         assert "manifest" in data
         assert data["display"].slug == "primary"
+        assert data["assembly"] == {"clips": [], "tracks": []}
+
+    def test_verify_is_read_only_and_does_not_repair_stale_assembly(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "primary")
+        ulid = result["ulid"]
+        tdir = project_tree / "demo" / "timelines" / ulid
+        identity = json.loads((tdir / "assembly.identity.json").read_text(encoding="utf-8"))
+        backend = LocalFsBackend(timeline_id=identity["timeline_id"], timeline_home=tdir)
+        backend.append_event(
+            identity["timeline_id"],
+            "track.added",
+            {"track_id": "v1", "kind": "visual", "label": "Video"},
+            actor=TimelineActor(type="system", id="test"),
+        )
+        stale = {"clips": [], "tracks": []}
+        assembly_path = tdir / "assembly.json"
+        before = json.dumps(stale, indent=2, sort_keys=True) + "\n"
+        assembly_path.write_text(before, encoding="utf-8")
+
+        data = show_timeline("demo", "primary", verify=True)
+
+        assert data is not None
+        assert data["assembly"] == stale
+        assert data["verification"]["ok"] is True
+        assert assembly_path.read_text(encoding="utf-8") == before
+
+        repaired = show_timeline("demo", "primary")
+        assert repaired is not None
+        assert repaired["assembly"]["tracks"] == [{"id": "v1", "kind": "visual", "label": "Video"}]
 
 
 # ---------------------------------------------------------------------------
@@ -490,6 +536,20 @@ class TestTombstoneTimeline:
         with pytest.raises(TimelineCrudError, match="not found"):
             tombstone_timeline("demo", "nonexistent")
 
+    def test_tombstoned_timeline_is_rejected_by_normal_mutations(self, project_tree: Path) -> None:
+        output = project_tree / "out.mp4"
+        output.write_bytes(b"video")
+        create_timeline("demo", "primary")
+        tombstone_timeline("demo", "primary")
+
+        assert show_timeline("demo", "primary", include_tombstoned=False) is None
+        with pytest.raises(TimelineCrudError, match="not found"):
+            rename_timeline("demo", "primary", "renamed")
+        with pytest.raises(TimelineCrudError, match="not found"):
+            finalize_output("demo", "primary", output)
+        with pytest.raises(TimelineCrudError, match="not found"):
+            set_default("demo", "primary")
+
 
 # ---------------------------------------------------------------------------
 # Purge
@@ -502,6 +562,14 @@ class TestPurgeTimeline:
         ulid = result["ulid"]
         tdir = project_tree / "demo" / "timelines" / ulid
         assert tdir.exists()
+        purge_timeline("demo", "primary")
+        assert not tdir.exists()
+
+    def test_purge_can_remove_tombstoned_timeline(self, project_tree: Path) -> None:
+        result = create_timeline("demo", "primary")
+        ulid = result["ulid"]
+        tdir = project_tree / "demo" / "timelines" / ulid
+        tombstone_timeline("demo", "primary")
         purge_timeline("demo", "primary")
         assert not tdir.exists()
 

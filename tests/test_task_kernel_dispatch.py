@@ -138,7 +138,11 @@ def _setup_active_plan(tmp_projects_root: Path, *, command: str) -> None:
     create_project("demo", root=tmp_projects_root)
     plan_path = tmp_projects_root / "demo" / "plan.json"
     plan_path.write_text(
-        json.dumps({"plan_id": "dispatch-plan", "version": 1, "steps": [{"id": "step-1", "command": command}]}),
+        json.dumps({
+            "plan_id": "dispatch-plan",
+            "version": 2,
+            "steps": [{"id": "step-1", "adapter": "local", "command": command}],
+        }),
         encoding="utf-8",
     )
     write_active_run("demo", run_id="task-run-1", plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)

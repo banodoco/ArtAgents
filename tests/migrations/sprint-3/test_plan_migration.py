@@ -19,6 +19,8 @@ _spec.loader.exec_module(_migrate_plans_mod)
 
 _broadened_assignee = _migrate_plans_mod._broadened_assignee
 _migrate_step = _migrate_plans_mod._migrate_step
+PLAN_BACKUP_SUFFIX = _migrate_plans_mod.PLAN_BACKUP_SUFFIX
+EVENTS_BACKUP_SUFFIX = _migrate_plans_mod.EVENTS_BACKUP_SUFFIX
 migrate_plan = _migrate_plans_mod.migrate_plan
 migrate_plans_main = _migrate_plans_mod.main
 
@@ -45,6 +47,17 @@ def _read_plan_json(plan_path: Path) -> dict:
     return json.loads(plan_path.read_text(encoding="utf-8"))
 
 
+def _write_event_chain(path: Path, raw_events: list[dict]) -> None:
+    prev = "sha256:" + "0" * 64
+    lines = []
+    for event in raw_events:
+        stored = dict(event)
+        stored["hash"] = _migrate_plans_mod._event_hash(prev, stored)
+        prev = stored["hash"]
+        lines.append(json.dumps(stored, sort_keys=True, separators=(",", ":")))
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # _migrate_step: individual step conversions
 # ---------------------------------------------------------------------------
@@ -58,6 +71,7 @@ def test_code_step_becomes_local_adapter() -> None:
     assert result["command"] == "echo hi"
     assert result["version"] == 1
     assert result["id"] == "s1"
+    assert "kind" not in result
 
 
 def test_code_step_without_kind_defaults_to_local() -> None:
@@ -81,6 +95,8 @@ def test_attested_step_becomes_manual_adapter() -> None:
     assert result["instructions"] == "Carefully check the output."
     assert result["requires_ack"] is True
     assert result["version"] == 1
+    assert result["ack"] == {"kind": "human"}
+    assert "kind" not in result
 
 
 def test_attested_step_instructions_preserved_verbatim() -> None:
@@ -94,16 +110,37 @@ def test_attested_step_instructions_preserved_verbatim() -> None:
     assert result["instructions"] == "Multi-line\ninstruction\nblock"
 
 
+def test_legacy_actor_flag_migrates_to_human_flag_in_text_fields() -> None:
+    step = {
+        "id": "a2",
+        "kind": "attested",
+        "command": "astrid ack a2 --actor=Pat --decision approve",
+        "instructions": "Approve with: astrid ack a2 --actor Pat --decision approve",
+    }
+    result = _migrate_step(step)
+    assert "--actor" not in result["command"]
+    assert "--actor" not in result["instructions"]
+    assert "--human=Pat" in result["command"]
+    assert "--human Pat" in result["instructions"]
+
+
 def test_attested_step_without_instructions_no_key() -> None:
     step = {"id": "a3", "kind": "attested", "command": "verify"}
     result = _migrate_step(step)
     assert "instructions" not in result
 
 
-def test_attested_step_broadens_assignee_agent_to_any_agent() -> None:
-    step = {"id": "a4", "kind": "attested", "command": "run", "ack": {"kind": "agent"}}
+def test_attested_step_agent_ack_defaults_to_system_assignee() -> None:
+    step = {
+        "id": "a4",
+        "kind": "attested",
+        "command": "run",
+        "assignee": "any-agent",
+        "ack": {"kind": "agent"},
+    }
     result = _migrate_step(step)
-    assert result["assignee"] == "any-agent"
+    assert result["assignee"] == "system"
+    assert "any-agent" not in json.dumps(result)
 
 
 def test_attested_step_broadens_assignee_actor_to_any_human() -> None:
@@ -137,16 +174,11 @@ def test_nested_step_becomes_group_with_children() -> None:
     assert result["children"][0]["id"] == "child1"
     assert result["children"][1]["id"] == "child2"
     assert "command" not in result
+    assert "kind" not in result
+    assert all("kind" not in child for child in result["children"])
 
 
 def test_nested_step_aggregates_child_produces() -> None:
-    """Produces aggregation only works when child steps carry produces post-migration.
-
-    Note: ``_migrate_step`` for code steps does NOT preserve ``produces``,
-    so nested-step aggregation will not pick up code-step produces. This is
-    a known limitation of the migration script — attested-step children may
-    carry produces through if they retain the field.
-    """
     step = {
         "id": "n2",
         "kind": "nested",
@@ -163,8 +195,22 @@ def test_nested_step_aggregates_child_produces() -> None:
     # Code-step migration drops produces, so the group step won't have produces.
     # This is expected behavior for the migration script.
     assert "children" in result
-    # produces may or may not be present depending on whether child migration preserves it.
-    # Currently code-step migration does NOT preserve produces, so produces is absent.
+    assert result["produces"] == {"out1": "file1.txt", "out2": "file2.txt"}
+
+
+def test_repeat_payload_survives_migration_with_legacy_condition() -> None:
+    step = {
+        "id": "review",
+        "kind": "attested",
+        "command": "review",
+        "repeat": {"until": "user_approves", "max_iterations": 2, "on_exhaust": "fail"},
+    }
+    result = _migrate_step(step)
+    assert result["repeat"] == {
+        "until": "user_approves",
+        "max_iterations": 2,
+        "on_exhaust": "fail",
+    }
 
 
 def test_nested_step_without_plan_still_constructs() -> None:
@@ -180,7 +226,7 @@ def test_nested_step_without_plan_still_constructs() -> None:
 
 
 def test_broaden_agent_kind() -> None:
-    assert _broadened_assignee({"ack": {"kind": "agent"}}) == "any-agent"
+    assert _broadened_assignee({"ack": {"kind": "agent"}}) == "system"
 
 
 def test_broaden_actor_kind() -> None:
@@ -253,7 +299,30 @@ def test_all_three_kinds_migrated_together(tmp_path: Path) -> None:
     assert steps[0]["adapter"] == "local"
     assert steps[1]["adapter"] == "manual"
     assert "children" in steps[2]
-    assert len(broadening_notes) == 1
+    assert len(broadening_notes) == 0
+    assert not any("kind" in step for step in steps)
+    assert not any("kind" in child for child in steps[2]["children"])
+
+
+def test_migration_output_has_command_xor_children_shape(tmp_path: Path) -> None:
+    run_dir = _make_run_dir(tmp_path)
+    _write_legacy_plan(run_dir, [
+        {"id": "leaf", "kind": "code", "command": "echo leaf"},
+        {
+            "id": "group",
+            "kind": "nested",
+            "plan": {
+                "plan_id": "sub",
+                "version": 1,
+                "steps": [{"id": "child", "kind": "code", "command": "echo child"}],
+            },
+        },
+    ])
+    changed, new_payload, broadening_notes = migrate_plan(run_dir / "plan.json")
+    assert changed is True
+    leaf, group = new_payload["steps"]
+    assert "command" in leaf and "children" not in leaf
+    assert "children" in group and "command" not in group
 
 
 def test_broadening_notes_for_attested_steps(tmp_path: Path) -> None:
@@ -263,10 +332,8 @@ def test_broadening_notes_for_attested_steps(tmp_path: Path) -> None:
         {"id": "a2", "kind": "attested", "command": "review2", "ack": {"kind": "actor"}},
     ])
     changed, new_payload, broadening_notes = migrate_plan(run_dir / "plan.json")
-    assert len(broadening_notes) == 2
-    assert any("a1" in note for note in broadening_notes)
+    assert len(broadening_notes) == 1
     assert any("a2" in note for note in broadening_notes)
-    assert any("any-agent" in note for note in broadening_notes)
     assert any("any-human" in note for note in broadening_notes)
 
 
@@ -305,6 +372,7 @@ def test_main_dry_run_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert exit_code == 0
     # File should be unchanged.
     assert plan_path.read_bytes() == original_content
+    assert not (run_dir / f"plan.json{PLAN_BACKUP_SUFFIX}").exists()
 
 
 def test_main_apply_writes_new_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -322,6 +390,93 @@ def test_main_apply_writes_new_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     new_payload = _read_plan_json(plan_path)
     assert new_payload["version"] == 2
     assert new_payload["steps"][0]["adapter"] == "local"
+    assert (run_dir / f"plan.json{PLAN_BACKUP_SUFFIX}").exists()
+
+
+def test_main_apply_writes_backup_before_rewrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _make_run_dir(tmp_path)
+    _write_legacy_plan(run_dir, [{"id": "s1", "kind": "code", "command": "echo apply"}])
+    plan_path = run_dir / "plan.json"
+    original_content = plan_path.read_bytes()
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["migrate_plans.py", "--projects-root", str(tmp_path), "--apply"],
+    )
+    assert migrate_plans_main() == 0
+
+    backup_path = run_dir / f"plan.json{PLAN_BACKUP_SUFFIX}"
+    assert backup_path.read_bytes() == original_content
+
+
+def test_main_apply_seeds_plan_initialized_event_for_existing_v2_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _make_run_dir(tmp_path)
+    plan_path = run_dir / "plan.json"
+    plan_payload = {
+        "plan_id": "p-seed",
+        "version": 2,
+        "steps": [{"id": "s1", "adapter": "local", "command": "echo"}],
+    }
+    plan_path.write_text(json.dumps(plan_payload), encoding="utf-8")
+    events_path = run_dir / "events.jsonl"
+    _write_event_chain(events_path, [
+        {
+            "kind": "run_started",
+            "run_id": "run-1",
+            "plan_hash": "sha256:legacy",
+            "ts": "2026-01-01T00:00:00Z",
+        },
+    ])
+    original_plan = plan_path.read_bytes()
+    original_events = events_path.read_bytes()
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["migrate_plans.py", "--projects-root", str(tmp_path), "--apply"],
+    )
+    assert migrate_plans_main() == 0
+
+    assert plan_path.read_bytes() == original_plan
+    assert (run_dir / f"events.jsonl{EVENTS_BACKUP_SUFFIX}").read_bytes() == original_events
+    events = [
+        json.loads(line)
+        for line in events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["kind"] == "plan_initialized"
+    assert events[0]["plan"] == plan_payload
+    assert events[1]["kind"] == "run_started"
+
+
+def test_main_dry_run_does_not_seed_plan_initialized_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_dir = _make_run_dir(tmp_path)
+    (run_dir / "plan.json").write_text(
+        json.dumps({
+            "plan_id": "p-seed",
+            "version": 2,
+            "steps": [{"id": "s1", "adapter": "local", "command": "echo"}],
+        }),
+        encoding="utf-8",
+    )
+    events_path = run_dir / "events.jsonl"
+    _write_event_chain(events_path, [
+        {"kind": "run_started", "run_id": "run-1", "plan_hash": "sha256:legacy"},
+    ])
+    original_events = events_path.read_bytes()
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["migrate_plans.py", "--projects-root", str(tmp_path), "--dry-run"],
+    )
+    assert migrate_plans_main() == 0
+
+    assert events_path.read_bytes() == original_events
+    assert not (run_dir / f"events.jsonl{EVENTS_BACKUP_SUFFIX}").exists()
 
 
 def test_main_assignee_broadening_banner_in_log(
@@ -329,7 +484,7 @@ def test_main_assignee_broadening_banner_in_log(
 ) -> None:
     run_dir = _make_run_dir(tmp_path)
     _write_legacy_plan(run_dir, [
-        {"id": "a1", "kind": "attested", "command": "review", "ack": {"kind": "agent"}},
+        {"id": "a1", "kind": "attested", "command": "review", "ack": {"kind": "actor"}},
     ])
     log_path = tmp_path / "test-migration.log"
 
@@ -348,7 +503,7 @@ def test_main_assignee_broadening_banner_in_log(
     log_text = log_path.read_text(encoding="utf-8")
     assert "WARNING:" in log_text
     assert "step(s) had their assignee broadened" in log_text
-    assert "any-agent" in log_text or "any-human" in log_text
+    assert "any-human" in log_text
     assert "astrid claim" in log_text
     assert "a1" in log_text
 
@@ -368,6 +523,8 @@ def test_main_idempotent_rerun_with_apply(
     assert migrate_plans_main() == 0
 
     after_first = plan_path.read_bytes()
+    backup_path = run_dir / f"plan.json{PLAN_BACKUP_SUFFIX}"
+    backup_after_first = backup_path.read_bytes()
 
     # Second apply — should be idempotent.
     monkeypatch.setattr(
@@ -377,6 +534,7 @@ def test_main_idempotent_rerun_with_apply(
     assert migrate_plans_main() == 0
 
     assert plan_path.read_bytes() == after_first
+    assert backup_path.read_bytes() == backup_after_first
 
 
 def test_main_empty_workspace_exits_cleanly(

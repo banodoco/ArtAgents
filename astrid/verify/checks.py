@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
+from astrid.core.util.media import ffprobe_duration_seconds
+
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -140,10 +142,9 @@ def _run_audio_duration_min(path: Path, params: dict[str, Any]) -> CheckResult:
             return CheckResult(ok=False, reason=f"wave parse failed: {exc}")
     else:
         try:
-            result = subprocess.run(
-                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-                 "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
-                capture_output=True, text=True, timeout=10, check=True,
+            duration = ffprobe_duration_seconds(
+                path,
+                runner=lambda cmd, **kwargs: subprocess.run(cmd, timeout=10, **kwargs),
             )
         except FileNotFoundError:
             return CheckResult(ok=False, reason="ffprobe not on PATH")
@@ -151,10 +152,8 @@ def _run_audio_duration_min(path: Path, params: dict[str, Any]) -> CheckResult:
             return CheckResult(ok=False, reason="ffprobe timed out")
         except subprocess.CalledProcessError as exc:
             return CheckResult(ok=False, reason=f"ffprobe failed: {exc.stderr.strip() if exc.stderr else exc}")
-        try:
-            duration = float(result.stdout.strip())
-        except ValueError:
-            return CheckResult(ok=False, reason=f"ffprobe returned non-numeric duration: {result.stdout!r}")
+        except ValueError as exc:
+            return CheckResult(ok=False, reason=f"ffprobe returned non-numeric duration: {exc}")
     if duration is None or duration < minimum:
         return CheckResult(
             ok=False,

@@ -5,9 +5,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid._paths import REPO_ROOT
 from astrid.core.element.install import build_element_install_plan, install_element
 from astrid.core.element.registry import load_default_registry
-from astrid.core.executor.install import build_executor_install_plan, executor_environment_path, executor_python_path
+from astrid.core.executor.install import (
+    build_executor_install_plan,
+    executor_environment_path,
+    executor_python_path,
+)
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
 
 
@@ -87,6 +92,8 @@ class ElementInstallTest(unittest.TestCase):
 
         self.assertEqual(executor_environment_path(vibe_run), executor_environment_path(vibe_validate))
         self.assertEqual(executor_python_path(vibe_run), executor_python_path(vibe_validate))
+        self.assertEqual(executor_environment_path(vibe_run), REPO_ROOT / ".astrid" / "venvs" / "vibecomfy" / "venv")
+        self.assertEqual(executor_environment_path(moirae), REPO_ROOT / ".astrid" / "venvs" / "external.moirae" / "venv")
         self.assertTrue(str(executor_environment_path(vibe_run)).endswith(".astrid/venvs/vibecomfy/venv"))
         self.assertTrue(str(executor_environment_path(moirae)).endswith(".astrid/venvs/external.moirae/venv"))
 

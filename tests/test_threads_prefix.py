@@ -19,7 +19,7 @@ def test_prefix_order_thread_variants_notice_blank_line() -> None:
     stream = io.StringIO()
     emit_prefix(lines, stream=stream)
 
-    assert lines[0].startswith("[thread] Logo")
-    assert lines[1].startswith("[variants] requested 4")
+    assert lines[0].startswith("[lineage] Logo")
+    assert lines[1] == "[variants] requested 4; record keepers only as non-binding lineage after reviewing outputs."
     assert lines[2].startswith("Notice:")
     assert stream.getvalue().splitlines() == lines + [""]

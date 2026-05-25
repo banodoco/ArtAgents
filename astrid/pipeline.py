@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """Astrid top-level command gateway.
 
-Sprint 1 wires the session CLI gate: every verb outside the unbound
-allowlist requires ``ASTRID_SESSION_ID`` to resolve to a valid session
-record. Unbound callers are pointed at ``astrid attach <project>``.
+Sprint 1 wires the session CLI gate: every verb outside the accepted unbound
+allowlist requires ``ASTRID_SESSION_ID`` or a project ``.astrid-session`` file
+to resolve to a valid session record. Unbound callers are pointed first at
+``astrid status`` so they can attach deliberately.
 
-The unbound allowlist mirrors the brief: ``attach``, ``status``,
-``projects ls``, ``projects create``, ``sessions ls``,
-``sessions takeover``, ``sessions detach``, ``init`` (first-run
-bootstrap), and the help flags. ``author test --project <slug>`` is also
-a documented exception so workflow tests can run without an operator
-session.
+The settled Sprint 1 allowlist is recorded in
+``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: help/version, ``status``,
+``next``, ``attach``, ``projects ls``, ``projects create``,
+``projects default``, ``sessions ls``, and ``sessions takeover``. Unbound
+``sessions takeover`` is legal only because it must bootstrap or select a
+concrete caller session before it mutates the target lease; anonymous takeover
+is outside the contract.
 
 Subcommands dispatch to focused module CLIs. Brief / video flags fall
 through to the ``builtin.hype`` orchestrator resolved through the
@@ -48,36 +50,44 @@ LIFECYCLE_VERBS = {
     # abort` just to inspect a stuck run — destroying the very state they
     # were trying to read.
     "run",
+    "events",
+}
+
+TASK_GATE_READONLY_VERBS = {
+    ("projects", "cost"),
+    ("projects", "export"),
+    ("timelines", "cost"),
+    ("timelines", "export"),
 }
 
 
-# Sprint 1 session-gate allowlist. A first-token (or two-token) match against
-# this set lets the verb run without a bound session. Everything else needs
-# ``ASTRID_SESSION_ID`` to resolve to a session record.
-_UNBOUND_TOP_LEVEL = {
-    "attach",
-    "status",
-    "sessions",  # sub-verbs handled below
-    "init",
-    "packs",  # packs validate / packs new are builder-facing and sessionless
-    "models",  # `astrid models list` is discoverability-only, no session needed
-    # Universal port-of-call (#13): `astrid next` always prints exactly one
-    # legal action regardless of bound/unbound state. From cold it dispatches
-    # to the attach/create discovery hint inside cmd_next itself.
-    "next",
-    "-h",
-    "--help",
-    "help",
-}
-_UNBOUND_PROJECTS_SUBVERBS = {"ls", "create", "default"}
-_UNBOUND_SESSIONS_SUBVERBS = {"ls", "takeover", "detach"}
-_UNBOUND_DISCOVERY_SUBVERBS = {"inspect", "search"}
+# Canonical accepted unbound contract for Sprint 1. The gate implementation
+# below is deliberately table-driven: do not add ad hoc unbound exceptions
+# outside this tuple.
+SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
+    ("-h",),
+    ("--help",),
+    ("help",),
+    ("--version",),
+    ("status",),
+    ("next",),
+    ("attach",),
+    ("projects", "ls"),
+    ("projects", "create"),
+    ("projects", "default"),
+    ("sessions", "ls"),
+    ("sessions", "takeover"),
+)
+_SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
 
 def main(argv: list[str] | None = None) -> int:
     raw = sys.argv[1:] if argv is None else list(argv)
     if raw and raw[0] in {"-h", "--help", "help"}:
         _print_entrypoint_help()
+        return 0
+    if raw and raw[0] == "--version":
+        print("astrid")
         return 0
     # Nudge runs once per CLI invocation, before the command itself, but never
     # for the `skills` subcommand (would be silly) or help. Cheap state-file
@@ -119,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
                 on_auto_resolve=_nudge,
             )
         except SessionBindingError as exc:
-            print(f"session: {exc}", file=sys.stderr)
+            _print_unbound_gate_recovery(f"session: {exc}")
             return 2
         if session is None:
             project_hint = _extract_project_slug(raw)
@@ -128,14 +138,13 @@ def main(argv: list[str] | None = None) -> int:
                 if project_hint
                 else "`astrid attach <project>`"
             )
-            print(
+            _print_unbound_gate_recovery(
                 f"no session bound — run `astrid status` to list projects, then {attach_hint} "
-                "(or `astrid attach` if a default project is configured)",
-                file=sys.stderr,
+                "(or `astrid attach` if a default project is configured)"
             )
             return 2
 
-    if raw and raw[0] in LIFECYCLE_VERBS:
+    if _verb_bypasses_task_gate(raw):
         return _dispatch(raw)
     project_slug = _extract_project_slug(raw)
     if project_slug is None:
@@ -162,91 +171,38 @@ def main(argv: list[str] | None = None) -> int:
             returncode = _dispatch(raw)
         return returncode
     finally:
-        # T9 extends GateDecision with a `.session` field so the post-dispatch
-        # record helpers can flow through a fresh WriterContext. Until that
-        # lands, guard the wrapper with hasattr() so existing callers that
-        # don't carry a session keep working unchanged.
-        if hasattr(decision, "session") and getattr(decision, "session", None) is not None:
-            from .core.session.writer import writer_context_from_decision
+        task_gate.record_dispatch_complete(decision, returncode)
 
-            try:
-                with writer_context_from_decision(decision):
-                    task_gate.record_dispatch_complete(decision, returncode)
-            except Exception:
-                # Fall back to the unwrapped path on any writer-auth failure;
-                # T9's lifecycle migration is the layer that makes this hard.
-                task_gate.record_dispatch_complete(decision, returncode)
-        else:
-            task_gate.record_dispatch_complete(decision, returncode)
+
+def _verb_bypasses_task_gate(raw: list[str]) -> bool:
+    if raw and raw[0] in LIFECYCLE_VERBS:
+        return True
+    if len(raw) >= 2 and tuple(raw[:2]) in TASK_GATE_READONLY_VERBS:
+        return True
+    return False
 
 
 def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
     """Decide whether the invocation may run without a bound session.
 
-    The allowlist is the canonical Sprint 1 set (brief §CLI gate):
-
-    * ``attach``, ``init``, ``-h`` / ``--help`` (full-verb).
-    * ``status`` — both the new session breadcrumb (no ``--project``) and
-      the legacy ``astrid status --project <slug>``.
-    * ``projects ls``, ``projects create``, and ``projects default``.
-    * ``sessions ls`` / ``sessions takeover`` / ``sessions detach``.
-    * ``author test --project <slug>`` — documented exception for the
-      workflow test runner.
+    The final Sprint 1 contract is ``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT``.
+    Exact top-level entries match one token; exact subcommand entries match
+    their listed prefix. No other discovery, setup, task, RunPod, or builder
+    verb is sessionless.
     """
 
     if not raw:
         return True  # empty argv → entrypoint help
 
-    top = raw[0]
-    if "-h" in raw or "--help" in raw:
-        return True
-    # 'packs' is builder-facing and sessionless (T5).
-    # 'models' is discoverability-only, no session needed.
-    if top in {"attach", "init", "status", "packs", "models"}:
-        return True
-    # Universal port-of-call (#13): `astrid next` is the agent's one-stop
-    # discovery verb. When unbound, cmd_next itself dispatches to the
-    # attach/create hint — no early gate rejection.
-    if top == "next":
-        return True
-    # FLAG-S1-002: executors new / orchestrators new are builder-facing
-    # scaffold commands that short-circuit before registry loading (T6).
-    if top in ("executors", "orchestrators") and len(raw) >= 2 and raw[1] == "new":
-        return True
-    # Capability metadata inspection is read-only discovery. Keep run/install
-    # paths session-gated, but allow agents and CI to inspect definitions before
-    # a project session has been attached.
-    if (
-        top in ("executors", "orchestrators", "elements")
-        and len(raw) >= 2
-        and raw[1] in _UNBOUND_DISCOVERY_SUBVERBS
-    ):
-        return True
-    if top == "projects" and len(raw) >= 2 and raw[1] in _UNBOUND_PROJECTS_SUBVERBS:
-        return True
-    if top == "timelines" and len(raw) >= 2 and raw[1] == "ls":
-        return True
-    if top == "sessions" and len(raw) >= 2 and raw[1] in _UNBOUND_SESSIONS_SUBVERBS:
-        return True
-    if top == "runpod":
-        # --help anywhere in the runpod subcommand tree is always allowed.
-        if "--help" in raw or "-h" in raw or len(raw) == 1:
+    for allowed in _SPRINT1_UNBOUND_ALLOWLIST:
+        if tuple(raw[: len(allowed)]) == allowed:
             return True
-        # `runpod volumes ls/create` and `runpod ensure-storage` operate on RunPod
-        # cloud state only — no Astrid run/lease/event mutation, so unbound is fine.
-        if len(raw) >= 2 and raw[1] == "volumes":
-            return True
-        if len(raw) >= 2 and raw[1] == "ensure-storage":
-            return True
-        # `runpod sweep` writes pod_terminated_by_sweep events to owning runs'
-        # events.jsonl — requires a bound session per the S4 brief.
-        return False
-    # `author test --project <slug>` exception. The orchestrate.cli wires the
-    # `test` sub-verb regardless of whether a session is bound, so we open the
-    # gate explicitly to match.
-    if top == "author" and "test" in raw[1:] and "--project" in raw:
-        return True
     return False
+
+
+def _print_unbound_gate_recovery(message: str) -> None:
+    print("first recovery action: astrid status", file=sys.stderr)
+    print(message, file=sys.stderr)
 
 
 def _dispatch(raw: list[str]) -> int:
@@ -588,9 +544,19 @@ def _dispatch_runpod(args: list[str]) -> int:
 
 def _dispatch_runpod_volumes(args: list[str]) -> int:
     """Dispatch ``astrid runpod volumes ls``."""
-    if not args or args[0] != "ls":
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="astrid runpod volumes")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("ls", help="List RunPod network volumes as JSON.")
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit:
+        return 2
+    if parsed.command != "ls":
         print("usage: astrid runpod volumes ls", file=sys.stderr)
         return 2
+
     from .core.runpod.storage import list_volumes
 
     try:
@@ -604,7 +570,7 @@ def _dispatch_runpod_volumes(args: list[str]) -> int:
         asyncio.run(_volumes_ls())
         return 0
     except Exception as exc:
-        print(f"runpod volumes: {exc}", file=sys.stderr)
+        print(f"runpod volumes ls: {exc}", file=sys.stderr)
         return 1
 
 
@@ -615,7 +581,7 @@ def _dispatch_runpod_ensure_storage(args: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="astrid runpod ensure-storage")
     parser.add_argument("name", help="Volume name to find or create.")
     parser.add_argument("--size", type=int, default=50, help="Size in GB for new volumes (default: 50).")
-    parser.add_argument("--datacenter", dest="datacenter_id", default=None, help="RunPod datacenter ID.")
+    parser.add_argument("--datacenter", "--datacenter-id", dest="datacenter_id", default=None, help="RunPod datacenter ID.")
     try:
         parsed = parser.parse_args(args)
     except SystemExit:
@@ -647,8 +613,7 @@ def _wait_adapter(decision: Any) -> int:
 
     For local adapter: poll the subprocess until it exits, capture returncode.
     For manual adapter: the agent does work out-of-band; return 0 immediately.
-    For remote-artifact adapter: poll the remote job in a loop until done/failed.
-    The actual completion is detected by record_dispatch_complete via the adapter.
+    For remote-artifact adapter: wait for the generic subprocess wrapper.
     """
     adapter_kind = getattr(decision, "adapter", None)
     if adapter_kind == "local":
@@ -697,56 +662,8 @@ def _wait_local_subprocess(decision: Any) -> int:
 
 
 def _wait_remote_artifact(decision: Any) -> int:
-    """Poll the remote-artifact adapter until the subprocess exits.
-
-    Loads ``remote_state.json`` from the step directory and polls the
-    adapter's poll() method in a loop, sleeping ``poll_interval_seconds``
-    between checks.  Returns 0 on ``done``, 1 on ``failed``.
-    """
-    import json
-    import time
-    from pathlib import Path
-
-    from astrid.core.adapter.remote_artifact import RemoteArtifactAdapter
-
-    project_root = getattr(decision, "project_root", None)
-    run_id = getattr(decision, "run_id", None)
-    path_tuple = getattr(decision, "plan_step_path", ())
-    step_version = getattr(decision, "step_version", 1)
-    if not project_root or not run_id or not path_tuple:
-        return 1
-
-    step_dir = project_root / "runs" / run_id / "steps"
-    for seg in path_tuple:
-        step_dir = step_dir / seg
-    step_dir = step_dir / f"v{step_version}"
-
-    remote_state_path = step_dir / "remote_state.json"
-    if not remote_state_path.exists():
-        return 1
-
-    try:
-        state = json.loads(remote_state_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return 1
-
-    poll_interval = state.get("poll_interval_seconds", 30) or 30
-    adapter = RemoteArtifactAdapter()
-
-    while True:
-        try:
-            wpid, status = os.waitpid(decision.pid, os.WNOHANG) if getattr(decision, "pid", None) else (0, 0)
-        except (ChildProcessError, OSError):
-            wpid = 0
-
-        poll_result = adapter.poll(None, _make_run_ctx_for_poll(
-            project_root, run_id, path_tuple, step_version
-        ))
-        if poll_result.status == "done":
-            return 0
-        if poll_result.status == "failed":
-            return 1
-        time.sleep(poll_interval)
+    """Block until the generic remote-artifact subprocess exits."""
+    return _wait_local_subprocess(decision)
 
 
 def _make_run_ctx_for_poll(
@@ -839,7 +756,7 @@ Usage:
     python3 -m astrid unclaim <step> --project <slug> --run-id <id> [--for agent:<id>|human:<name>]
   Task-mode agent-facing verbs (mid-run):
     python3 -m astrid next --project <slug>
-    python3 -m astrid ack <step> --project <slug> --decision {approve,retry,iterate,abort} [--agent <id> | --actor <name>] [--evidence path] [--feedback "..."] [--item id]
+    python3 -m astrid ack <step> --project <slug> --decision {approve,retry,iterate,abort} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
     python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/HOOKS.md
     # sessions \u2014 tab binding and takeover
   Session verbs (Sprint 1):
