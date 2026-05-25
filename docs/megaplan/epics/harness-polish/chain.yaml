@@ -1,0 +1,63 @@
+# Epic: Harness Polish — get the non-pack core to :chefskiss:
+# Spec for `megaplan chain start --spec docs/megaplan/epics/harness-polish/chain.yaml`
+# See EPIC.md in this directory for the vision, dependency graph, and profile rationale.
+# Packs are OUT of scope for the whole epic (see EPIC.md scope note).
+
+base_branch: main      # integration line carrying the recent taxonomy/alias merges
+
+milestones:
+  - label: m1
+    idea: docs/megaplan/epics/harness-polish/m1-hygiene-and-safety.md
+    branch: epic/polish/m1-hygiene-and-safety
+    profile: solo                   # tier 1 — mechanical untrack/gitignore/config edits
+    robustness: light
+    depth: low
+    notes: "No behavior change. Untrack secrets+artifacts, fix gitignore root-misses, remove dead seinfeld submodule, fix npm machine paths, turn ruff+mypy ON over astrid/ and baseline. History scrub + key rotation are flagged HUMAN follow-ups — no history rewrite."
+
+  - label: m2
+    idea: docs/megaplan/epics/harness-polish/m2-test-integrity.md
+    branch: epic/polish/m2-test-integrity
+    profile: partnered              # tier 3 — LOAD-BEARING exception to default-lower: this is the safety net every later milestone refactors on top of, so critique+review must be premium
+    robustness: full
+    depth: low
+    notes: "Make green mean green: fix double-executing test_runner, delete KNOWN_FAILURES denylist, remove zombie skips, kill time.sleep races, decide opt-in-test CI policy. Real product bugs found here are handed to m3, not fixed here."
+
+  - label: m3
+    idea: docs/megaplan/epics/harness-polish/m3-runtime-correctness.md
+    branch: epic/polish/m3-runtime-correctness
+    profile: premium                # tier 4 — production-incident stakes: silent run stalls / corrupted event log
+    robustness: thorough
+    depth: high
+    with_prep: true                 # map the start→next→gate→dispatch→record event path before planning fixes
+    prep_direction: "Trace every path through gate.py and pipeline.py where a step can fail to emit a terminal event (step_completed/step_attested/step_failed) or where the cursor can stall on replay. Enumerate each broad `except` in the listed files and classify the right fix. Determine whether threads/ ThreadIndexStore has concurrent in-process callers. Ignore pack internals."
+    notes: "Fix vanishing events, discarded inline-check result, repeat.until swallowing gate errors, for_each control-flow mismatch, flock hazard. Silent-exception sweep + one error model + assert→raise. Default audit-ledger verification. Every fix gets a regression test."
+
+  - label: m4
+    idea: docs/megaplan/epics/harness-polish/m4-dependency-inversion.md
+    branch: epic/polish/m4-dependency-inversion
+    profile: partnered              # tier 3 — architectural keystone but mechanical once mapped (registry pattern); depth high for the design
+    robustness: full
+    depth: high
+    with_prep: true                 # enumerate EVERY core→packs/orchestrate import, not just the known sites
+    prep_direction: "Grep the whole tree for every `astrid.core.* -> astrid.packs.*` and `-> astrid.orchestrate.*` import so the inversion is complete. Find the cleanest neutral home for DEFAULT_PACKS_ROOT and the media util to break the core<->verify cycle. Map the existing discovery surface (agent_index / InstalledPackStore / canonical entrypoint) that core should resolve tools through. Do NOT design a new plugin framework."
+    notes: "core/ stops importing packs/ and orchestrate/. Replace concrete pack imports with id-based lookup via the existing discovery surface. Break core<->verify cycle. De-dup _sha256_file and the three _now_iso variants. Add an import-linter contract enforcing core ⊥ packs/orchestrate (the m4→m5 handoff artifact)."
+
+  - label: m5
+    idea: docs/megaplan/epics/harness-polish/m5-taxonomy-cli-docs.md
+    branch: epic/polish/m5-taxonomy-cli-docs
+    profile: partnered              # tier 3 — cross-cutting renames + god-module splits; mechanical-ish with naming judgment
+    robustness: full
+    depth: medium
+    notes: "Kill zombie modules (threads/wrapper no-ops, builtin/_legacy, dup build_parser/cmd_list). Reconcile taxonomy (modalities/renderers, elements facade, domains, orchestrate vs orchestrator, Performer aliases). Split timeline.py + lifecycle.py god modules. Unify CLI dispatch + fix silent fallthrough-to-hype + help drift. Docs truth pass; one canonical plan doc. Behavior- and import-surface-preserving."
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+merge_policy: review                # review each milestone's PR before it merges into base
+
+driver:
+  robustness: full
+  auto_approve: true
+  max_iterations: 90
+  poll_sleep: 8.0
