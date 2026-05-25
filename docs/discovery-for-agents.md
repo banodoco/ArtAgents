@@ -24,6 +24,10 @@ pack and is exposed through a consistent list/search/inspect surface with a
 See the formal vocabulary in
 [docs/megaplan/epics/pack-system/pack-contract.md](megaplan/epics/pack-system/pack-contract.md).
 
+For the taxonomy fields that classify packs for discovery and filtering
+(`origin`, `install_tier`, `pack_type`, `domain`, `stability`, `support`),
+see [docs/pack-taxonomy.md](pack-taxonomy.md).
+
 ## Three Capability Kinds
 
 | Kind | CLI path | Purpose | Example |

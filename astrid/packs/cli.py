@@ -18,7 +18,14 @@ from typing import Any, Optional
 
 import yaml
 
-from astrid.core.pack import PackDefinition, discover_packs, load_pack_manifest, pack_manifest_path, packs_root
+from astrid.core.pack import (
+    PackDefinition,
+    discover_packs,
+    load_pack_manifest,
+    pack_manifest_path,
+    pack_taxonomy_from_manifest,
+    packs_root,
+)
 from astrid.packs.validate import validate_pack
 
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
@@ -148,6 +155,112 @@ def _effective_status(pack: PackDefinition) -> str:
     return pack.status
 
 
+_TAXONOMY_FIELDS = (
+    "origin",
+    "install_tier",
+    "pack_type",
+    "domain",
+    "stability",
+    "support",
+)
+
+
+def _pack_taxonomy(pack: PackDefinition) -> dict[str, str]:
+    return {field: getattr(pack, field) for field in _TAXONOMY_FIELDS}
+
+
+def _taxonomy_filters(args: argparse.Namespace) -> dict[str, str]:
+    return {
+        field: value
+        for field in _TAXONOMY_FIELDS
+        if isinstance((value := getattr(args, field, None)), str) and value
+    }
+
+
+def _matches_taxonomy_filters(pack: PackDefinition, args: argparse.Namespace) -> bool:
+    for field, value in _taxonomy_filters(args).items():
+        if getattr(pack, field) != value:
+            return False
+    return True
+
+
+def _group_packs_by_domain(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        taxonomy = row.get("taxonomy")
+        if isinstance(taxonomy, dict):
+            domain = taxonomy.get("domain")
+        else:
+            domain = row.get("domain")
+        label = str(domain or "general")
+        groups.setdefault(label, []).append(row)
+    return [
+        {
+            "group_by": "domain",
+            "value": domain,
+            "taxonomy": {"domain": domain},
+            "packs": sorted(group_rows, key=lambda pack_row: str(pack_row["id"])),
+        }
+        for domain, group_rows in sorted(groups.items())
+    ]
+
+
+def _with_grouped_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"packs": rows, "groups": _group_packs_by_domain(rows)}
+
+
+def _print_taxonomy_block(taxonomy: dict[str, Any], *, indent: str = "") -> None:
+    print(f"{indent}taxonomy:")
+    for field in _TAXONOMY_FIELDS:
+        print(f"{indent}  {field}: {taxonomy.get(field, '')}")
+
+
+def _print_grouped_rows(rows: list[dict[str, Any]], *, row_formatter: Any) -> None:
+    for index, group in enumerate(_group_packs_by_domain(rows)):
+        if index:
+            print()
+        print(f"taxonomy: domain={group['value']}")
+        for row in group["packs"]:
+            row_formatter(row)
+
+
+def _format_list_row(row: dict[str, Any]) -> None:
+    taxonomy = row.get("taxonomy", {})
+    print(
+        f"{row['id']}\t{row['name']}\t{row['version']}\t"
+        f"origin={taxonomy.get('origin', '')}\t"
+        f"tier={taxonomy.get('install_tier', '')}\t"
+        f"type={taxonomy.get('pack_type', '')}\t"
+        f"stability={taxonomy.get('stability', '')}\t"
+        f"support={taxonomy.get('support', '')}\t"
+        f"{row['description']}"
+    )
+
+
+def _format_status_row(row: dict[str, Any]) -> None:
+    validation = row["validation"]
+    taxonomy = row.get("taxonomy", {})
+    print(
+        f"{row['id']}\t{row['effective_status']}\t{row['visibility']}\t"
+        f"errors={validation['errors']}\twarnings={validation['warnings']}\t"
+        f"origin={taxonomy.get('origin', '')}\t"
+        f"tier={taxonomy.get('install_tier', '')}\t"
+        f"type={taxonomy.get('pack_type', '')}\t"
+        f"stability={taxonomy.get('stability', '')}\t"
+        f"support={taxonomy.get('support', '')}\t"
+        f"{row['description']}"
+    )
+
+
+def _add_taxonomy_filter_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--domain", help="Filter by taxonomy.domain.")
+    parser.add_argument("--origin", help="Filter by taxonomy.origin.")
+    parser.add_argument("--install-tier", dest="install_tier", help="Filter by taxonomy.install_tier.")
+    parser.add_argument("--pack-type", dest="pack_type", help="Filter by taxonomy.pack_type.")
+    parser.add_argument("--stability", help="Filter by taxonomy.stability.")
+    parser.add_argument("--support", help="Filter by taxonomy.support.")
+
+
 def _filtered_packs(args: argparse.Namespace, *, include_hidden: bool | None = None) -> list[PackDefinition]:
     show_hidden = bool(getattr(args, "show_hidden", False))
     packs = list(discover_packs(packs_root(), include_hidden=show_hidden if include_hidden is None else include_hidden))
@@ -156,6 +269,7 @@ def _filtered_packs(args: argparse.Namespace, *, include_hidden: bool | None = N
     visibility = getattr(args, "visibility", None)
     if category:
         packs = [pack for pack in packs if _pack_category(pack) == category]
+    packs = [pack for pack in packs if _matches_taxonomy_filters(pack, args)]
     if status:
         packs = [pack for pack in packs if _effective_status(pack) == status]
     if visibility:
@@ -197,7 +311,7 @@ def _handle_inspect(args: argparse.Namespace) -> int:
 
 
 def _handle_status(args: argparse.Namespace) -> int:
-    packs = list(discover_packs(packs_root(), include_hidden=bool(args.show_hidden)))
+    packs = _filtered_packs(args)
     rows: list[dict] = []
     for pack in packs:
         errors, warnings = validate_pack(pack.root)
@@ -211,14 +325,9 @@ def _handle_status(args: argparse.Namespace) -> int:
         }
         rows.append(payload)
     if args.json:
-        print(json.dumps({"packs": rows}, indent=2, sort_keys=True))
+        print(json.dumps(_with_grouped_payload(rows), indent=2, sort_keys=True))
         return 0
-    for row in rows:
-        validation = row["validation"]
-        print(
-            f"{row['id']}\t{row['effective_status']}\t{row['visibility']}\t"
-            f"errors={validation['errors']}\twarnings={validation['warnings']}\t{row['description']}"
-        )
+    _print_grouped_rows(rows, row_formatter=_format_status_row)
     return 0
 
 
@@ -280,6 +389,12 @@ id: {pack_id}
 name: {pack_name}
 version: 0.1.0
 description: {description}
+origin: project
+install_tier: default
+pack_type: capability
+domain: general
+stability: stable
+support: project
 content:
   executors: executors
   orchestrators: orchestrators
@@ -369,6 +484,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser = subparsers.add_parser("list", help="List discovered packs.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--category", help="Filter by metadata.category.")
+    _add_taxonomy_filter_args(list_parser)
     list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
     list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
     list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
@@ -381,6 +497,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Validate and summarize discovered packs.")
     status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    status_parser.add_argument("--category", help="Filter by metadata.category.")
+    _add_taxonomy_filter_args(status_parser)
+    status_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    status_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
     status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     status_parser.set_defaults(handler=_handle_status)
 
@@ -922,6 +1042,7 @@ def _build_full_inspect(
 
     # ── Components scan ─────────────────────────────────────────────
     components = _scan_inspect_components(rev_dir, manifest) if rev_dir is not None else []
+    taxonomy = pack_taxonomy_from_manifest(manifest, status=str(manifest.get("status", "active")))
 
     result = {
         "pack_id": record.pack_id,
@@ -956,6 +1077,8 @@ def _build_full_inspect(
         "required_context": trust_summary.get("required_context", []),
         "keywords": trust_summary.get("keywords", []),
         "capabilities": trust_summary.get("capabilities", []),
+        **taxonomy,
+        "taxonomy": taxonomy,
         # Component details (scanned from disk)
         "components": components,
     }
@@ -975,6 +1098,8 @@ def _print_full_inspect(data: dict) -> None:
     desc = data.get("description")
     if desc:
         print(f"  Description:   {desc}")
+
+    _print_taxonomy_block(data.get("taxonomy", {}), indent="  ")
 
     # Git-enriched fields
     git_url = data.get("git_url", "")
@@ -1147,6 +1272,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--category", help="Filter by metadata.category.")
+    _add_taxonomy_filter_args(list_parser)
     list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
     list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
     list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
@@ -1168,6 +1294,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     status_parser = subparsers.add_parser("status", help="Validate and summarize discovered packs.")
     status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    status_parser.add_argument("--category", help="Filter by metadata.category.")
+    _add_taxonomy_filter_args(status_parser)
+    status_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    status_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
     status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     status_parser.set_defaults(handler=_handle_status)
 
@@ -1279,11 +1409,11 @@ def _handle_new(args: argparse.Namespace) -> int:
 def _handle_list(args: argparse.Namespace) -> int:
     """Handler for ``packs list``."""
     packs = _filtered_packs(args)
+    rows = [_pack_payload(pack) for pack in packs]
     if args.json:
-        print(json.dumps({"packs": [_pack_payload(pack) for pack in packs]}, indent=2, sort_keys=True))
+        print(json.dumps(_with_grouped_payload(rows), indent=2, sort_keys=True))
         return 0
-    for pack in packs:
-        print(f"{pack.id}\t{pack.name}\t{pack.version}\t{pack.description}")
+    _print_grouped_rows(rows, row_formatter=_format_list_row)
     return 0
 
 
@@ -1311,6 +1441,15 @@ def _handle_inspect(args: argparse.Namespace) -> int:
             return 0
         for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
             print(f"{key}: {payload.get(key, '')}")
+        _print_taxonomy_block(payload.get("taxonomy", _pack_taxonomy(pack)))
+        if pack.content:
+            print("content:")
+            for key, value in sorted(pack.content.items()):
+                print(f"  {key}: {value}")
+        if pack.agent:
+            print("agent:")
+            for key, value in sorted(pack.agent.items()):
+                print(f"  {key}: {value}")
         return 0
 
     argv = [args.pack_id]

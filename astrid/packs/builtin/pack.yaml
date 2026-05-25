@@ -2,6 +2,12 @@ id: builtin
 schema_version: 1
 name: Astrid Built-in
 version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: system
+stability: stable
+support: core
 content:
   executors: executors
   orchestrators: orchestrators

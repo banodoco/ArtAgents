@@ -2,3 +2,9 @@ schema_version: 1
 id: external
 name: Astrid External Tools
 version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: integration
+stability: stable
+support: core
