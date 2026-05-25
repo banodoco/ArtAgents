@@ -18,11 +18,6 @@ from astrid.core.task.events import append_event, read_events
 from astrid.core.task.lifecycle import cmd_step_retry_fetch
 from astrid.core.task.plan import compute_plan_hash
 
-pytestmark = pytest.mark.skip(
-    reason="Sprint 5a retry-fetch behavior tests are quarantined while Sprint 3 defers remote-artifact"
-)
-
-
 # ---------------------------------------------------------------------------
 # Synthetic run state helper
 # ---------------------------------------------------------------------------
@@ -34,10 +29,12 @@ def _build_synthetic_run(
     run_id: str = "run-1",
     *,
     step_id: str = "render",
+    step_path: tuple[str, ...] | None = None,
     step_state: str = "awaiting_fetch",
     with_plan: bool = True,
 ) -> tuple[Path, Path]:
     """Create minimal project/run structure for testing retry-fetch."""
+    step_path = step_path or (step_id,)
     proj_root = tmp_path / "projects" / slug
     run_dir = proj_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -48,21 +45,7 @@ def _build_synthetic_run(
             "plan_id": f"test-{run_id}",
             "version": 2,
             "steps": [
-                {
-                    "id": step_id,
-                    "adapter": "remote-artifact",
-                    "command": "echo test-job",
-                    "produces": {
-                        "output": {
-                            "path": "result.json",
-                            "check": {
-                                "check_id": "file_nonempty",
-                                "params": {},
-                                "sentinel": False,
-                            },
-                        }
-                    },
-                }
+                _plan_step_for_path(step_path),
             ],
         }
         (proj_root / "plan.json").write_text(
@@ -70,7 +53,7 @@ def _build_synthetic_run(
         )
 
     # Create step directory and remote_state.json
-    step_dir = run_dir / "steps" / step_id / "v1"
+    step_dir = run_dir / "steps" / Path(*step_path) / "v1"
     step_dir.mkdir(parents=True, exist_ok=True)
     produces_dir = step_dir / "produces"
     produces_dir.mkdir(parents=True, exist_ok=True)
@@ -122,7 +105,7 @@ def _build_synthetic_run(
         {"kind": "run_started", "run_id": run_id, "ts": "2025-01-01T00:00:00Z"},
         {
             "kind": "step_dispatched",
-            "plan_step_path": [step_id],
+            "plan_step_path": list(step_path),
             "adapter": "remote-artifact",
             "ts": "2025-01-01T00:00:01Z",
         },
@@ -131,7 +114,7 @@ def _build_synthetic_run(
     if step_state == "awaiting_fetch":
         events.append({
             "kind": "step_awaiting_fetch",
-            "plan_step_path": [step_id],
+            "plan_step_path": list(step_path),
             "missing": ["result.json"],
             "mismatched": [],
             "reason": "1 artifact missing",
@@ -141,7 +124,7 @@ def _build_synthetic_run(
     elif step_state == "completed":
         events.append({
             "kind": "step_completed",
-            "plan_step_path": [step_id],
+            "plan_step_path": list(step_path),
             "adapter": "remote-artifact",
             "returncode": 0,
             "cost": None,
@@ -152,7 +135,7 @@ def _build_synthetic_run(
     elif step_state == "failed":
         events.append({
             "kind": "step_failed",
-            "plan_step_path": [step_id],
+            "plan_step_path": list(step_path),
             "adapter": "remote-artifact",
             "returncode": 1,
             "ts": "2025-01-01T00:00:03Z",
@@ -170,6 +153,33 @@ def _build_synthetic_run(
     )
 
     return proj_root, run_dir
+
+
+def _remote_step_payload(step_id: str) -> dict:
+    return {
+        "id": step_id,
+        "adapter": "remote-artifact",
+        "command": "echo test-job",
+        "produces": {
+            "output": {
+                "path": "result.json",
+                "check": {
+                    "check_id": "file_nonempty",
+                    "params": {},
+                    "sentinel": False,
+                },
+            }
+        },
+    }
+
+
+def _plan_step_for_path(step_path: tuple[str, ...]) -> dict:
+    if len(step_path) == 1:
+        return _remote_step_payload(step_path[0])
+    return {
+        "id": step_path[0],
+        "children": [_plan_step_for_path(step_path[1:])],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +242,98 @@ def test_retry_fetch_ignores_superseded_v1_awaiting_fetch(
 
 
 @patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")
+def test_retry_fetch_uses_only_current_version_events(
+    mock_fetch: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    slug, run_id = "demo", "run-1"
+    proj_root, run_dir = _build_synthetic_run(
+        tmp_path, slug, run_id, step_state="awaiting_fetch"
+    )
+    (proj_root / "plan.json").write_text(
+        json.dumps(
+            {
+                "plan_id": "test-run-1",
+                "version": 2,
+                "steps": [
+                    {
+                        "id": "render",
+                        "adapter": "remote-artifact",
+                        "command": "echo v2",
+                        "version": 2,
+                        "produces": {
+                            "output": {
+                                "path": "result.json",
+                                "check": {
+                                    "check_id": "file_nonempty",
+                                    "params": {},
+                                    "sentinel": False,
+                                },
+                            }
+                        },
+                    }
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    append_event(
+        run_dir / "events.jsonl",
+        {
+            "kind": "step_dispatched",
+            "plan_step_path": ["render"],
+            "step_version": 2,
+            "adapter": "remote-artifact",
+            "ts": "2025-01-01T00:00:03Z",
+        },
+    )
+
+    with patch(
+        "astrid.core.task.lifecycle.project_dir",
+        return_value=proj_root,
+    ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
+        "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
+    ):
+        rc = cmd_step_retry_fetch(
+            ["render", "--project", slug, "--run", run_id],
+            projects_root=tmp_path / "projects",
+        )
+
+    assert rc == 1
+    assert "not awaiting_fetch" in capsys.readouterr().err
+    mock_fetch.assert_not_called()
+
+
+@patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")
+def test_retry_fetch_rejects_non_remote_artifact_step(
+    mock_fetch: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    slug, run_id = "demo", "run-1"
+    proj_root, _run_dir = _build_synthetic_run(
+        tmp_path, slug, run_id, step_state="awaiting_fetch"
+    )
+    plan = json.loads((proj_root / "plan.json").read_text(encoding="utf-8"))
+    plan["steps"][0]["adapter"] = "local"
+    (proj_root / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
+
+    with patch(
+        "astrid.core.task.lifecycle.project_dir",
+        return_value=proj_root,
+    ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
+        "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
+    ):
+        rc = cmd_step_retry_fetch(
+            ["render", "--project", slug, "--run", run_id],
+            projects_root=tmp_path / "projects",
+        )
+
+    assert rc == 1
+    assert "not a remote-artifact step" in capsys.readouterr().err
+    mock_fetch.assert_not_called()
+
+
+@patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")
 def test_retry_fetch_round_trip_missing_to_completed(
     mock_fetch: object, tmp_path: Path
 ) -> None:
@@ -267,6 +369,86 @@ def test_retry_fetch_round_trip_missing_to_completed(
 
     assert rc == 0
     assert any(event.get("kind") == "step_completed" for event in read_events(run_dir / "events.jsonl"))
+
+
+@patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")
+def test_retry_fetch_handles_nested_group_step_path(
+    mock_fetch: object, tmp_path: Path
+) -> None:
+    slug, run_id = "demo", "run-1"
+    proj_root, run_dir = _build_synthetic_run(
+        tmp_path,
+        slug,
+        run_id,
+        step_id="render",
+        step_path=("hype", "render"),
+        step_state="awaiting_fetch",
+    )
+    mock_fetch.return_value = FetchResult(
+        status="completed",
+        fetched=["result.json"],
+        missing=[],
+        mismatched=[],
+        checksums={"result.json": "abc123"},
+    )
+
+    with patch(
+        "astrid.core.task.lifecycle.project_dir",
+        return_value=proj_root,
+    ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
+        "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
+    ):
+        rc = cmd_step_retry_fetch(
+            ["hype/render", "--project", slug, "--run", run_id],
+            projects_root=tmp_path / "projects",
+        )
+
+    assert rc == 0
+    ctx = mock_fetch.call_args.args[1]
+    assert ctx.plan_step_path == ("hype", "render")
+    assert any(
+        event.get("kind") == "step_completed"
+        and event.get("plan_step_path") == ["hype", "render"]
+        for event in read_events(run_dir / "events.jsonl")
+    )
+
+
+@patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")
+def test_retry_fetch_passes_repeat_item_context(
+    mock_fetch: object, tmp_path: Path
+) -> None:
+    slug, run_id = "demo", "run-1"
+    proj_root, _run_dir = _build_synthetic_run(
+        tmp_path,
+        slug,
+        run_id,
+        step_id="cut",
+        step_path=("hype", "cut"),
+        step_state="awaiting_fetch",
+    )
+    mock_fetch.return_value = FetchResult(
+        status="completed",
+        fetched=["result.json"],
+        missing=[],
+        mismatched=[],
+        checksums={"result.json": "abc123"},
+    )
+
+    with patch(
+        "astrid.core.task.lifecycle.project_dir",
+        return_value=proj_root,
+    ), patch("astrid.core.task.lifecycle.validate_project_slug", return_value=slug), patch(
+        "astrid.core.task.lifecycle.validate_run_id", return_value=run_id
+    ):
+        rc = cmd_step_retry_fetch(
+            ["hype/cut", "--project", slug, "--run", run_id, "--item", "scene-0001"],
+            projects_root=tmp_path / "projects",
+        )
+
+    assert rc == 0
+    ctx = mock_fetch.call_args.args[1]
+    assert ctx.plan_step_path == ("hype", "cut")
+    assert ctx.item_id == "scene-0001"
 
 
 @patch("astrid.core.adapter.remote_artifact_fetch.fetch_artifacts")

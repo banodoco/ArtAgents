@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.util.time import utc_now_milliseconds
@@ -17,15 +18,14 @@ from astrid.core.util.time import utc_now_milliseconds
 
 def _step_dir(run_ctx: RunContext) -> Path:
     """Resolve runs/<run>/steps/<id>/v<N>/[iterations|items]/... for this dispatch."""
-    base = run_ctx.project_root / "runs" / run_ctx.run_id / "steps"
-    for segment in run_ctx.plan_step_path:
-        base = base / segment
-    base = base / f"v{run_ctx.step_version}"
-    if run_ctx.iteration is not None:
-        base = base / "iterations" / f"{run_ctx.iteration:03d}"
-    elif run_ctx.item_id is not None:
-        base = base / "items" / run_ctx.item_id
-    return base
+    return step_dir_for_context(
+        run_ctx.project_root,
+        run_ctx.run_id,
+        run_ctx.plan_step_path,
+        run_ctx.step_version,
+        iteration=run_ctx.iteration,
+        item_id=run_ctx.item_id,
+    )
 
 
 def _utc_now_iso() -> str:
@@ -49,7 +49,7 @@ class LocalAdapter:
         # POSIX: start_new_session detaches from the controlling terminal so the
         # child survives the parent tab being closed.
         try:
-            argv = shlex.split(step.command)
+            argv = list(run_ctx.canonical_argv) if run_ctx.canonical_argv else shlex.split(step.command)
         except ValueError as exc:
             return DispatchResult(status="rejected", reason=f"command not shell-parseable: {exc}")
 
@@ -62,7 +62,7 @@ class LocalAdapter:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
-                env={**os.environ},
+                env={**os.environ, **(run_ctx.task_env or {})},
             )
         except (FileNotFoundError, OSError) as exc:
             log_handle.close()
@@ -73,7 +73,13 @@ class LocalAdapter:
         started_at = _utc_now_iso()
         write_json_sidecar(
             meta_path,
-            {"pid": proc.pid, "started_at": started_at, "command": step.command},
+            {
+                "pid": proc.pid,
+                "started_at": started_at,
+                "command": run_ctx.canonical_command or step.command,
+                "display_command": run_ctx.display_command,
+                "task_env": run_ctx.task_env or {},
+            },
         )
         return DispatchResult(status="dispatched", pid=proc.pid, started_at=started_at)
 

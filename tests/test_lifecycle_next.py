@@ -20,10 +20,12 @@ from astrid.core.task import write_iteration_feedback
 from astrid.core.task.events import (
     append_event,
     make_iteration_failed_event,
+    read_events,
 )
 from astrid.core.task.events import make_iteration_started_event
 from astrid.core.task.claim import _make_claim_event
 from astrid.core.task.gate import GateDecision
+from astrid.core.task.gate import TaskRunGateError, gate_command
 from astrid.core.task.lifecycle import cmd_next
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 
@@ -88,8 +90,35 @@ def test_preamble_byte_identical_across_two_calls(tmp_path: Path) -> None:
 def test_code_step_prints_command(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r2")
     out = _capture_next(packs, projects)
-    assert "run: echo alpha" in out
-    assert "warning: this code-step command has no --project argument" in out
+    assert "run: ASTRID_TASK_PROJECT=p" in out
+    assert "ASTRID_TASK_RUN_ID=r2" in out
+    assert "ASTRID_TASK_STEP_ID=step_a" in out
+    assert "echo alpha" in out
+    assert "warning: this code-step command uses task env instead of a local --project argument" in out
+    assert "add --project" not in out
+
+
+def test_env_prefixed_cmd_next_command_is_the_only_gate_wrapper_normalization(tmp_path: Path) -> None:
+    _packs, projects = setup_run(tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r2b")
+    out = _capture_next(_packs, projects)
+    displayed = next(line.removeprefix("run: ") for line in out.splitlines() if line.startswith("run: "))
+
+    decision = gate_command("p", displayed, [])
+    assert decision.active is True
+
+    events = read_events(projects / "p" / "runs" / "r2b" / "events.jsonl")
+    dispatched = [event for event in events if event.get("kind") == "step_dispatched"]
+    assert dispatched[-1]["command"] == "echo alpha"
+
+    with pytest.raises(TaskRunGateError):
+        gate_command("p", f"OTHER_ENV=1 {displayed}", [])
+
+
+def test_cmd_next_renders_no_task_placeholders_in_code_step(tmp_path: Path) -> None:
+    _packs, projects = setup_run(tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r2c")
+    out = _capture_next(_packs, projects)
+    assert "$ASTRID_" not in out
+    assert "{{" not in next(line for line in out.splitlines() if line.startswith("run: "))
 
 
 def test_attested_agent_template(tmp_path: Path) -> None:

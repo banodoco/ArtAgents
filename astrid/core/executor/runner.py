@@ -62,6 +62,7 @@ class ExecutorRunRequest:
     check_binaries: bool = False
     python_exec: str | None = None
     verbose: bool = False
+    argv: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -84,16 +85,32 @@ class ExecutorRunResult:
 
 
 def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None = None) -> ExecutorRunResult:
-    if request.project and task_env.is_in_task_run(request.project):
+    task_project = task_env.task_project_env()
+    task_run_id = task_env.task_run_id_env()
+    task_step_id = task_env.task_step_id_env()
+    env_task_context = bool(task_project and task_run_id and task_step_id)
+    project_task_context = bool(request.project and task_env.is_in_task_run(request.project))
+    should_gate = env_task_context or project_task_context
+    if should_gate:
+        gate_project = task_project or request.project
+        if gate_project is None:
+            raise ExecutorRunnerError("task project is missing")
+        if task_project and request.project and request.project != task_project:
+            raise ExecutorRunnerError(
+                f"task run is bound to project {task_project!r}, refusing executor project {request.project!r}"
+            )
         try:
             task_gate.gate_command(
-                request.project,
+                gate_project,
                 task_gate.command_for_argv(_request_argv_for_gate(request)),
                 [],
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            raise ExecutorRunnerError(exc.recovery) from exc
+            if env_task_context and not project_task_context and exc.reason == "active_run.json is missing":
+                should_gate = False
+            else:
+                raise ExecutorRunnerError(f"{exc.reason}; recovery: {exc.recovery}") from exc
     active_registry = registry or load_default_registry()
     executor = active_registry.get(request.executor_id)
     project_context, effective_request = _prepare_project_request(request, executor)
@@ -114,10 +131,48 @@ def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None 
 
 
 def _request_argv_for_gate(request: ExecutorRunRequest) -> tuple[str, ...]:
+    if request.argv:
+        if request.argv[0] == "executors":
+            return request.argv
+        if request.argv[0] == "run":
+            argv = _canonicalize_runner_argv_paths(request.argv)
+            if request.project or os.environ.get("ASTRID_INTERNAL_INVOCATION") != "1":
+                return ("executors", *argv)
+            return ("python3", "-m", "astrid", "executors", *argv)
+        return ("executors", *request.argv)
     argv = ["executors", "run", request.executor_id]
     if request.project:
         argv.extend(["--project", request.project])
+    if request.out not in (None, ""):
+        argv.extend(["--out", str(request.out)])
+    if request.brief:
+        argv.extend(["--brief", str(request.brief)])
+    for key, value in request.inputs.items():
+        for item in _iter_input_values(value):
+            argv.extend(["--input", f"{key}={_stringify_value(item)}"])
+    if request.dry_run:
+        argv.append("--dry-run")
+    if request.check_binaries:
+        argv.append("--check-binaries")
+    if request.python_exec:
+        argv.extend(["--python-exec", request.python_exec])
+    if request.verbose:
+        argv.append("--verbose")
     return tuple(argv)
+
+
+def _canonicalize_runner_argv_paths(argv: Sequence[str]) -> tuple[str, ...]:
+    tokens = [str(token) for token in argv]
+    canonical: list[str] = []
+    idx = 0
+    while idx < len(tokens):
+        token = tokens[idx]
+        canonical.append(token)
+        if token == "--out" and idx + 1 < len(tokens):
+            idx += 1
+            canonical.append(str(Path(tokens[idx]).resolve()))
+        idx += 1
+    return tuple(canonical)
 
 
 def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
@@ -254,6 +309,8 @@ def build_executor_command(request: ExecutorRunRequest, registry: ExecutorRegist
     condition_result = evaluate_conditions(executor, values)
     if condition_result.skipped:
         return ()
+    if executor.command is not None:
+        return _expand_external_command(executor, request, values)[0]
     if executor.kind == "built_in" and "pipeline_step" in executor.metadata:
         step = _step_for_executor(executor)
         args = build_pipeline_context(request, executor)
@@ -262,6 +319,8 @@ def build_executor_command(request: ExecutorRunRequest, registry: ExecutorRegist
 
 
 def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequest) -> ExecutorRunResult:
+    if executor.command is not None:
+        return _run_explicit_command_executor(executor, request, _request_values(request))
     pipeline = _pipeline_module()
     step = _step_for_executor(executor)
     args = build_pipeline_context(request, executor)
@@ -286,7 +345,11 @@ def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequ
     )
 
 
-def _run_external_executor(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> ExecutorRunResult:
+def _run_explicit_command_executor(
+    executor: ExecutorDefinition,
+    request: ExecutorRunRequest,
+    values: Mapping[str, Any],
+) -> ExecutorRunResult:
     command, cwd, env = _expand_external_command(executor, request, values)
     if request.dry_run:
         return ExecutorRunResult(
@@ -326,6 +389,10 @@ def _run_external_executor(executor: ExecutorDefinition, request: ExecutorRunReq
     )
 
 
+def _run_external_executor(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> ExecutorRunResult:
+    return _run_explicit_command_executor(executor, request, values)
+
+
 def _expand_external_command(
     executor: ExecutorDefinition,
     request: ExecutorRunRequest,
@@ -335,6 +402,7 @@ def _expand_external_command(
         raise ExecutorRunnerError(f"executor {executor.id!r} has no command")
     placeholders = _placeholder_values(executor, request, values)
     argv = tuple(_expand_placeholders(part, placeholders) for part in executor.command.argv)
+    argv = (*argv, *_expand_input_arg_mappings(executor, values))
     cwd = _expand_placeholders(executor.command.cwd, placeholders) if executor.command.cwd else None
     env = {key: _expand_placeholders(value, placeholders) for key, value in executor.command.env.items()}
     return argv, cwd, env
@@ -364,7 +432,8 @@ def _project_argv(request: ExecutorRunRequest) -> list[str]:
     if request.brief:
         argv.extend(["--brief", str(request.brief)])
     for key, value in request.inputs.items():
-        argv.extend(["--input", f"{key}={_stringify_value(value)}"])
+        for item in _iter_input_values(value):
+            argv.extend(["--input", f"{key}={_stringify_value(item)}"])
     if request.dry_run:
         argv.append("--dry-run")
     if request.check_binaries:
@@ -441,6 +510,26 @@ def _placeholder_values(executor: ExecutorDefinition, request: ExecutorRunReques
         if output.placeholder:
             placeholders[output.placeholder] = output_path
     return placeholders
+
+
+def _expand_input_arg_mappings(executor: ExecutorDefinition, values: Mapping[str, Any]) -> tuple[str, ...]:
+    if executor.command is None or not executor.command.input_args:
+        return ()
+    argv: list[str] = []
+    for mapping in executor.command.input_args:
+        value = values.get(mapping.input)
+        if not _has_value(value):
+            if mapping.optional:
+                continue
+            raise ExecutorRunnerError(f"executor {executor.id!r} missing mapped input {mapping.input!r}")
+        items = list(_iter_input_values(value))
+        if len(items) > 1 and not mapping.repeatable:
+            raise ExecutorRunnerError(f"executor {executor.id!r} input {mapping.input!r} is not repeatable")
+        for item in items:
+            if mapping.flag:
+                argv.append(mapping.flag)
+            argv.append(_stringify_value(item))
+    return tuple(argv)
 
 
 def _output_value(output: ExecutorOutput, request: ExecutorRunRequest, placeholders: Mapping[str, str]) -> str:
@@ -616,6 +705,14 @@ def _stringify_value(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return ",".join(str(item) for item in value)
     return str(value)
+
+
+def _iter_input_values(value: Any) -> tuple[Any, ...]:
+    if isinstance(value, list):
+        return tuple(value)
+    if isinstance(value, tuple):
+        return value
+    return (value,)
 
 
 def _required_input(inputs: Mapping[str, Any], key: str) -> str:

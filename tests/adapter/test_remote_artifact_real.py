@@ -9,11 +9,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.adapter.remote_artifact import RemoteArtifactAdapter
 from astrid.core.adapter.remote_artifact_fetch import FetchResult, fetch_artifacts
+from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import (
     Check,
     ProducesEntry,
@@ -21,9 +20,7 @@ from astrid.core.task.plan import (
     Step,
 )
 
-pytestmark = pytest.mark.skip(
-    reason="Sprint 5a real remote-artifact adapter tests are quarantined during Sprint 3"
-)
+import pytest
 
 
 @pytest.fixture
@@ -50,6 +47,30 @@ def _make_ctx(
         step_version=step_version,
         iteration=iteration,
         item_id=item_id,
+    )
+
+
+def _make_rendered_ctx(
+    tmp_path: Path,
+    *,
+    command: str,
+    argv: tuple[str, ...],
+    display_command: str,
+) -> RunContext:
+    ctx = _make_ctx(tmp_path)
+    return RunContext(
+        slug=ctx.slug,
+        run_id=ctx.run_id,
+        project_root=ctx.project_root,
+        plan_step_path=ctx.plan_step_path,
+        step_version=ctx.step_version,
+        canonical_command=command,
+        canonical_argv=argv,
+        display_command=display_command,
+        task_env={"ASTRID_TASK_PROJECT": ctx.slug, "ASTRID_TASK_RUN_ID": ctx.run_id},
+        produces_root=step_dir_for_context(
+            ctx.project_root, ctx.run_id, ctx.plan_step_path, ctx.step_version
+        ) / "produces",
     )
 
 
@@ -155,6 +176,31 @@ def test_dispatch_spawns_subprocess_and_persists_remote_state(
     assert state["pid"] == result.pid
 
 
+def test_dispatch_persists_rendered_canonical_and_display_command_metadata(
+    adapter: RemoteArtifactAdapter, tmp_path: Path
+) -> None:
+    """dispatch() executes/persists rendered commands, not raw templates."""
+    ctx = _make_rendered_ctx(
+        tmp_path,
+        command="python3 -c 'print(42)'",
+        argv=("python3", "-c", "print(42)"),
+        display_command="ASTRID_TASK_PROJECT=demo ASTRID_TASK_RUN_ID=run-1 python3 -c 'print(42)'",
+    )
+    step = _make_step(command="raw {template} must not execute")
+
+    result = adapter.dispatch(step, ctx)
+    assert result.status == "dispatched"
+
+    step_dir = _step_dir_from_ctx(ctx)
+    state = json.loads((step_dir / "remote_state.json").read_text(encoding="utf-8"))
+    dispatch = json.loads((step_dir / "dispatch.json").read_text(encoding="utf-8"))
+    assert state["command"] == "python3 -c 'print(42)'"
+    assert dispatch["command"] == "python3 -c 'print(42)'"
+    assert dispatch["display_command"].startswith("ASTRID_TASK_PROJECT=demo")
+    assert dispatch["task_env"]["ASTRID_TASK_RUN_ID"] == "run-1"
+    assert state["status"] in {"running", "done"}
+
+
 def test_dispatch_writes_returncode_placeholder(
     adapter: RemoteArtifactAdapter, tmp_path: Path
 ) -> None:
@@ -181,6 +227,24 @@ def test_poll_pending_when_no_remote_state(
     step = _make_step()
     result = adapter.poll(step, ctx)
     assert result.status == "pending"
+
+
+def test_poll_classifies_persisted_terminal_remote_states(
+    adapter: RemoteArtifactAdapter, tmp_path: Path
+) -> None:
+    ctx = _make_ctx(tmp_path)
+    step = _make_step()
+    step_dir = _step_dir_from_ctx(ctx)
+    step_dir.mkdir(parents=True, exist_ok=True)
+    for persisted, expected in (
+        ("awaiting_fetch", "done"),
+        ("failed", "failed"),
+        ("done", "done"),
+    ):
+        (step_dir / "remote_state.json").write_text(
+            json.dumps({"status": persisted, "pid": 99999999}), encoding="utf-8"
+        )
+        assert adapter.poll(step, ctx).status == expected
 
 
 def test_poll_running_for_live_process(
@@ -463,6 +527,55 @@ def test_fetch_artifacts_standalone(
     assert len(result.missing) == 0
     assert len(result.mismatched) == 0
     assert len(result.checksums) == 3
+
+
+def test_fetch_artifacts_copies_manifest_sources_and_persists_state(
+    adapter: RemoteArtifactAdapter, tmp_path: Path
+) -> None:
+    ctx = _make_ctx(tmp_path)
+    source = tmp_path / "remote" / "nested" / "result.json"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b'{"remote": true}')
+
+    import hashlib
+
+    checksum = hashlib.sha256(b'{"remote": true}').hexdigest()
+    step = _make_step(produces=_make_produces(["nested/result.json"]))
+    result = fetch_artifacts(
+        step,
+        ctx,
+        manifest={
+            "nested/result.json": {
+                "path": "nested/result.json",
+                "source": str(source),
+                "sha256": checksum,
+            }
+        },
+    )
+
+    step_dir = _step_dir_from_ctx(ctx)
+    assert result.status == "completed"
+    assert (step_dir / "produces" / "nested" / "result.json").read_bytes() == b'{"remote": true}'
+    state = json.loads((step_dir / "fetch_state.json").read_text(encoding="utf-8"))
+    assert state["fetched"] == ["nested/result.json"]
+    assert state["checksums"]["nested/result.json"] == checksum
+
+
+def test_fetch_artifacts_uses_repeat_item_produces_directory(
+    adapter: RemoteArtifactAdapter, tmp_path: Path
+) -> None:
+    ctx = _make_ctx(tmp_path, iteration=None, item_id="clip-001")
+    step_dir = _step_dir_from_ctx(ctx)
+    _write_produces(step_dir, {"result.json": b"item-result"})
+
+    step = _make_step(produces=_make_produces(["result.json"]))
+    result = fetch_artifacts(step, ctx)
+
+    assert result.status == "completed"
+    assert (step_dir / "fetch_state.json").exists()
+    assert not (
+        ctx.project_root / "runs" / ctx.run_id / "steps" / "s1" / "v1" / "produces" / "result.json"
+    ).exists()
 
 
 # ---------------------------------------------------------------------------

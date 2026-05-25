@@ -129,7 +129,17 @@ class CanonicalCliTest(unittest.TestCase):
 
         result, stdout, stderr = self.capture(
             executors_cli.main,
-            ["run", "builtin.render", "--out", "runs/example", "--brief", "brief.txt", "--dry-run"],
+            [
+                "run",
+                "builtin.render",
+                "--out",
+                "runs/example",
+                "--input",
+                "timeline=hype.timeline.json",
+                "--input",
+                "assets_registry=hype.assets.json",
+                "--dry-run",
+            ],
         )
         self.assertEqual(result, 0, stderr)
         self.assertIn("astrid.packs.builtin.render.run", stdout)
@@ -262,12 +272,12 @@ class CapabilityDiscoveryTest(unittest.TestCase):
         ids = [hit["id"] for hit in payload["hits"]]
         self.assertIn("builtin.transcribe", ids)
 
-    def test_executor_run_inputs_normalize_dashes_and_combine_repeats(self) -> None:
+    def test_executor_run_inputs_normalize_dashes_and_preserve_repeats(self) -> None:
         parsed = executors_cli._parse_input_values(
             ["match-mode=any", "match=photo", "match=realism"]
         )
         self.assertEqual(parsed["match_mode"], "any")
-        self.assertEqual(parsed["match"], "photo,realism")
+        self.assertEqual(parsed["match"], ["photo", "realism"])
 
     def test_orchestrators_search_finds_foley_pipeline(self) -> None:
         result, stdout, stderr = self.capture(

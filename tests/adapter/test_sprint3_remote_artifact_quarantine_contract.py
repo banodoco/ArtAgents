@@ -19,9 +19,6 @@ from astrid.core.task.plan import Check, ProducesEntry, Step, compute_plan_hash
 from astrid.core.project.current_run import write_current_run
 
 
-DEFERRAL_FRAGMENT = "remote-artifact is reserved for Sprint 5a"
-
-
 def _ctx(tmp_path: Path) -> RunContext:
     project_root = tmp_path / "projects" / "demo"
     project_root.mkdir(parents=True, exist_ok=True)
@@ -49,22 +46,32 @@ def _remote_step() -> Step:
     )
 
 
-def test_remote_artifact_adapter_methods_fail_with_same_deferral(
+def test_remote_artifact_adapter_writes_provider_neutral_state_and_dispatch(
     tmp_path: Path,
 ) -> None:
     adapter = RemoteArtifactAdapter()
     step = _remote_step()
     ctx = _ctx(tmp_path)
 
-    for method_name in ("dispatch", "poll", "complete"):
-        method = getattr(adapter, method_name)
-        with pytest.raises(RuntimeError, match=DEFERRAL_FRAGMENT):
-            method(step, ctx)
+    result = adapter.dispatch(step, ctx)
+    assert result.status == "dispatched"
+    step_dir = ctx.project_root / "runs" / ctx.run_id / "steps" / "render" / "v1"
+    remote_state = json.loads((step_dir / "remote_state.json").read_text(encoding="utf-8"))
+    dispatch = json.loads((step_dir / "dispatch.json").read_text(encoding="utf-8"))
+    assert remote_state["provider"] == "provider-neutral"
+    assert dispatch["adapter"] == "remote-artifact"
+    assert dispatch["runpod_smoke_manifest"]["provider"] == "runpod"
 
 
-def test_direct_fetch_artifacts_fails_with_deferral(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match=DEFERRAL_FRAGMENT):
-        fetch_artifacts(_remote_step(), _ctx(tmp_path))
+def test_direct_fetch_artifacts_computes_checksums_and_missing(tmp_path: Path) -> None:
+    ctx = _ctx(tmp_path)
+    step_dir = ctx.project_root / "runs" / ctx.run_id / "steps" / "render" / "v1" / "produces"
+    step_dir.mkdir(parents=True)
+    (step_dir / "result.json").write_text("{}", encoding="utf-8")
+    result = fetch_artifacts(_remote_step(), ctx)
+    assert result.status == "completed"
+    assert result.fetched == ["result.json"]
+    assert len(result.checksums["result.json"]) == 64
 
 
 def _build_retry_fetch_run(tmp_path: Path) -> tuple[Path, Path]:
@@ -142,12 +149,12 @@ def _build_retry_fetch_run(tmp_path: Path) -> tuple[Path, Path]:
     return projects_root, run_dir
 
 
-def test_retry_fetch_cli_defers_and_does_not_append_remote_artifact_events(
+def test_retry_fetch_cli_appends_completion_when_fetch_succeeds(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     projects_root, run_dir = _build_retry_fetch_run(tmp_path)
-    before = read_events(run_dir / "events.jsonl")
+    (run_dir / "steps" / "render" / "v1" / "produces" / "result.json").write_text("{}", encoding="utf-8")
 
     with patch.dict("os.environ", {ASTRID_SESSION_ID_ENV: "S-REMOTE-ARTIFACT-DEFERRAL"}), patch(
         "astrid.core.adapter.remote_artifact_fetch.fetch_artifacts",
@@ -160,16 +167,16 @@ def test_retry_fetch_cli_defers_and_does_not_append_remote_artifact_events(
 
     captured = capsys.readouterr()
     after = read_events(run_dir / "events.jsonl")
-    assert rc == 1
-    assert DEFERRAL_FRAGMENT in captured.err
-    assert after == before
+    assert rc == 0
+    assert captured.err == ""
+    assert any(event.get("kind") == "step_completed" for event in after)
 
 
-def test_retry_fetch_help_defers(
+def test_retry_fetch_help_prints_usage(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     rc = cmd_step_retry_fetch(["--help"])
 
     captured = capsys.readouterr()
-    assert rc == 1
-    assert DEFERRAL_FRAGMENT in captured.err
+    assert rc == 0
+    assert "usage:" in captured.out

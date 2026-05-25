@@ -29,11 +29,13 @@ from astrid.core.task.env import (
     is_in_task_run,
     task_actor_env,
 )
+from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.events import (
     canonical_event_json,
     make_cursor_rewind_event,
     make_for_each_expanded_event,
     make_item_attested_event,
+    make_item_completed_event,
     make_item_started_event,
     make_iteration_exhausted_event,
     make_iteration_failed_event,
@@ -329,6 +331,19 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                 frames[-1].child_index += 1
                 pending[-1] = None
             top = frames[-1]
+            event_path = _path_str_from_event(event)
+            if (
+                top.repeat_step_id is not None
+                and top.item_id is None
+                and top.child_index >= len(top.plan.steps)
+                and kind == "step_completed"
+                and event_path == STEP_PATH_SEP.join(top.path_prefix + (top.repeat_step_id,))
+            ):
+                frames.pop()
+                pending.pop()
+                frames[-1].child_index += 1
+                pending[-1] = None
+                continue
             if top.child_index >= len(top.plan.steps):
                 continue
             step = top.plan.steps[top.child_index]
@@ -337,7 +352,6 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
             # the host. Verify the event's step path matches the current
             # child before consuming it as an advance signal — otherwise the
             # autoclose silently skips past the host's sibling.
-            event_path = _path_str_from_event(event)
             expected_path = STEP_PATH_SEP.join(list(top.path_prefix) + [step.id])
             if event_path and event_path != expected_path:
                 continue
@@ -958,6 +972,14 @@ def _evaluate_exhausted_repeat_until_frame(
     )
     cursor.frames.pop()
     if passed:
+        append_fn(
+            make_step_completed_event(
+                STEP_PATH_SEP.join(host_path),
+                0,
+                adapter=host.adapter,
+                step_version=host.version,
+            )
+        )
         parent.child_index += 1
         return
     append_fn(
@@ -1023,6 +1045,7 @@ def _resolve_for_each_items(
     *,
     slug: str,
     repeat: RepeatForEach,
+    parent_prefix: tuple[str, ...] = (),
     project_root: Path,
     run_id: str,
     events: Sequence[dict[str, Any]],
@@ -1036,7 +1059,7 @@ def _resolve_for_each_items(
         plan = load_plan(project_root / "plan.json")
         from astrid.core.task.plan_verbs import apply_mutations
         effective = apply_mutations(plan, events)
-        target_path = (target_id,)
+        target_path = parent_prefix + (target_id,)
         target_step = next((s for path, s in iter_steps_with_path(effective) if path == target_path), None)
         if target_step is None:
             raise TaskRunGateError(
@@ -1102,6 +1125,7 @@ def _enter_repeat_for_each(
         items = _resolve_for_each_items(
             slug=slug,
             repeat=repeat,
+            parent_prefix=parent_prefix,
             project_root=project_root,
             run_id=run_id,
             events=events,
@@ -1139,17 +1163,14 @@ def _resolve_adapter(step: Step):
     """Return the concrete adapter instance for ``step.adapter``."""
     from astrid.core.adapter.local import LocalAdapter
     from astrid.core.adapter.manual import ManualAdapter
-    from astrid.core.adapter.remote_artifact import REMOTE_ARTIFACT_DEFERRAL
+    from astrid.core.adapter.remote_artifact import RemoteArtifactAdapter
 
     if step.adapter == "local":
         return LocalAdapter()
     if step.adapter == "manual":
         return ManualAdapter()
     if step.adapter == "remote-artifact":
-        raise TaskRunGateError(
-            reason=f"{REMOTE_ARTIFACT_DEFERRAL} step={step.id!r}",
-            recovery="use adapter 'local' or 'manual'",
-        )
+        return RemoteArtifactAdapter()
     raise TaskRunGateError(
         reason=f"unknown adapter {step.adapter!r}",
         recovery="use --adapter local or manual",
@@ -1164,6 +1185,7 @@ def _make_run_ctx(
     project_root: Path,
     iteration: int | None = None,
     item_id: str | None = None,
+    rendered: Any = None,
 ):
     """Return a RunContext for adapter dispatch. Return type is adapter.RunContext (lazy import)."""
     from astrid.core.adapter import RunContext
@@ -1176,6 +1198,11 @@ def _make_run_ctx(
         step_version=step_version,
         iteration=iteration,
         item_id=item_id,
+        canonical_command=getattr(rendered, "canonical_command", None),
+        canonical_argv=getattr(rendered, "canonical_argv", ()),
+        display_command=getattr(rendered, "display_command", None),
+        task_env=getattr(rendered, "task_env", None),
+        produces_root=getattr(rendered, "produces_root", None),
     )
 
 
@@ -1197,14 +1224,27 @@ def _dispatch_code(
     run_dir: Path | None = None,
     writer_epoch_at_dispatch: int | None = None,
 ) -> GateDecision:
-    if command != step.command:
+    try:
+        rendered = render_task_command(
+            step,
+            slug=slug,
+            run_id=run_id,
+            project_root=project_root,
+            plan_step_path=path_tuple,
+            iteration=iteration,
+            item_id=item_id,
+        )
+    except ValueError as exc:
+        _reject(slug, str(exc), abort=False)
+    incoming_canonical = _normalize_command_string(strip_task_env_prefix(command))
+    if incoming_canonical != rendered.canonical_command:
         _reject(slug, "incoming command does not match plan[cursor]", abort=False)
 
     adapter = _resolve_adapter(step)
     step_version = step.version
     run_ctx = _make_run_ctx(
         slug, run_id, path_tuple, step_version, project_root,
-        iteration=iteration, item_id=item_id,
+        iteration=iteration, item_id=item_id, rendered=rendered,
     )
 
     if reentry:
@@ -1215,7 +1255,7 @@ def _dispatch_code(
         if (
             isinstance(latest, dict)
             and latest.get("kind") == "step_dispatched"
-            and latest.get("command") == command
+            and latest.get("command") == rendered.canonical_command
         ):
             apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
             return _code_decision(
@@ -1236,10 +1276,43 @@ def _dispatch_code(
                 run_dir=run_dir,
                 writer_epoch_at_dispatch=writer_epoch_at_dispatch,
             )
+        if latest is None:
+            apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
+            dispatched = make_step_dispatched_event(
+                path_str,
+                rendered.canonical_command,
+                adapter=step.adapter,
+                step_version=step_version,
+                pid=None,
+            )
+            appended = append_fn(dispatched)
+            dispatch_event_hash = (
+                appended.get("hash")
+                if isinstance(appended, dict) and isinstance(appended.get("hash"), str)
+                else None
+            )
+            return _code_decision(
+                run_id=run_id,
+                slug=slug,
+                path_str=path_str,
+                path_tuple=path_tuple,
+                events_path=events_path,
+                produces=step.produces,
+                project_root=project_root,
+                reentry=True,
+                iteration=iteration,
+                item_id=item_id,
+                adapter=step.adapter,
+                step_version=step_version,
+                dispatch_event_hash=dispatch_event_hash,
+                session=session,
+                run_dir=run_dir,
+                writer_epoch_at_dispatch=writer_epoch_at_dispatch,
+            )
         if isinstance(latest, dict) and latest.get("kind") == "produces_check_failed":
             apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
             dispatch_result, dispatch_event_hash = _adapter_dispatch(
-                adapter, step, run_ctx, path_str, command, append_fn
+                adapter, step, run_ctx, path_str, rendered.canonical_command, append_fn
             )
             return _code_decision(
                 run_id=run_id,
@@ -1264,7 +1337,7 @@ def _dispatch_code(
 
     apply_task_run_env(run_id, slug, path_str, item_id=item_id, iteration=iteration)
     dispatch_result, dispatch_event_hash = _adapter_dispatch(
-        adapter, step, run_ctx, path_str, command, append_fn
+        adapter, step, run_ctx, path_str, rendered.canonical_command, append_fn
     )
     return _code_decision(
         run_id=run_id,
@@ -1581,6 +1654,77 @@ def _maybe_autoclose_for_each_host(
     append_fn(auto_event)
 
 
+def _maybe_autocomplete_for_each_host(
+    *,
+    decision: GateDecision,
+    returncode: int,
+    cost: dict[str, Any] | None,
+) -> None:
+    """Append a host ``step_completed`` when all code-repeat items completed."""
+    if (
+        not decision.active
+        or decision.events_path is None
+        or decision.project_root is None
+        or decision.run_id is None
+        or decision.item_id is None
+    ):
+        return
+    plan_path = decision.project_root / "plan.json"
+    try:
+        plan = load_plan(plan_path)
+        from astrid.core.task.plan_verbs import apply_mutations
+
+        events = read_events(decision.events_path) if decision.events_path.exists() else []
+        plan = apply_mutations(plan, events)
+    except Exception:
+        return
+    host_step = None
+    for tup, step in iter_steps_with_path(plan):
+        if tup == decision.plan_step_path:
+            host_step = step
+            break
+    if host_step is None or not isinstance(getattr(host_step, "repeat", None), RepeatForEach):
+        return
+
+    path_list = list(decision.plan_step_path)
+    completed_items: set[str] = set()
+    expected_items: set[str] | None = None
+    has_host_completed = False
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("kind") == "step_completed" and ev.get("plan_step_path") == path_list:
+            if _event_matches_step_version(ev, host_step):
+                has_host_completed = True
+        if ev.get("kind") == "item_completed" and ev.get("plan_step_path") == path_list:
+            if _event_matches_step_version(ev, host_step):
+                item_id = ev.get("item_id")
+                if isinstance(item_id, str):
+                    completed_items.add(item_id)
+        if ev.get("kind") == "for_each_expanded" and ev.get("plan_step_path") == path_list:
+            raw = ev.get("item_ids") or []
+            if isinstance(raw, list):
+                expected_items = {item for item in raw if isinstance(item, str)}
+    if has_host_completed:
+        return
+    if expected_items is None:
+        repeat = host_step.repeat
+        if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
+            expected_items = set(repeat.items)
+    if expected_items is None or completed_items != expected_items:
+        return
+    _append_via_decision(
+        decision,
+        make_step_completed_event(
+            STEP_PATH_SEP.join(decision.plan_step_path),
+            returncode,
+            cost=cost,
+            adapter=decision.adapter,
+            step_version=host_step.version,
+        ),
+    )
+
+
 def _extract_iterate_feedback(evidence: tuple[str, ...]) -> str | None:
     for item in evidence:
         if item.startswith(ITERATE_FEEDBACK_PREFIX):
@@ -1750,13 +1894,6 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
     adapter = _resolve_adapter(step) if step else None
 
     if adapter is not None:
-        if decision.adapter == "remote-artifact":
-            from astrid.core.adapter.remote_artifact import REMOTE_ARTIFACT_DEFERRAL
-
-            raise TaskRunGateError(
-                reason=f"{REMOTE_ARTIFACT_DEFERRAL} step={decision.plan_step_id!r}",
-                recovery="use adapter 'local' or 'manual'",
-            )
         if returncode != -1:
             write_text_sidecar(_step_dir_from_run_ctx(run_ctx) / "returncode", f"{returncode}\n")
         complete_result = adapter.complete(step, run_ctx)
@@ -1799,17 +1936,34 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
                 ),
             )
         else:
-            _append_via_decision(
-                decision,
-                make_step_completed_event(
-                    decision.plan_step_id,
-                    returncode if returncode != -1 else (complete_result.returncode or 0),
+            completed_returncode = returncode if returncode != -1 else (complete_result.returncode or 0)
+            if decision.item_id is not None:
+                _append_via_decision(
+                    decision,
+                    make_item_completed_event(
+                        decision.plan_step_path,
+                        decision.item_id,
+                        completed_returncode,
+                        step_version=decision.step_version,
+                    ),
+                )
+                _maybe_autocomplete_for_each_host(
+                    decision=decision,
+                    returncode=completed_returncode,
                     cost=cost_dict,
-                    adapter=decision.adapter,
-                    step_version=decision.step_version,
-                    dispatch_event_hash=decision.dispatch_event_hash,
-                ),
-            )
+                )
+            else:
+                _append_via_decision(
+                    decision,
+                    make_step_completed_event(
+                        decision.plan_step_id,
+                        completed_returncode,
+                        cost=cost_dict,
+                        adapter=decision.adapter,
+                        step_version=decision.step_version,
+                        dispatch_event_hash=decision.dispatch_event_hash,
+                    ),
+                )
     else:
         # Legacy path: no adapter info on decision — use raw returncode.
         _append_via_decision(
@@ -2006,11 +2160,14 @@ def record_nested_exited(decision: GateDecision, returncode: int) -> None:
 
 def command_for_argv(argv: Sequence[str]) -> str:
     tokens = [str(token) for token in argv]
-    if len(tokens) >= 3 and Path(tokens[0]).name.startswith("python") and tokens[1:3] == ["-m", "astrid"]:
-        tokens = tokens[3:]
-    elif tokens and Path(tokens[0]).name.endswith("astrid"):
-        tokens = tokens[1:]
     return " ".join(shlex.quote(token) for token in tokens)
+
+
+def _normalize_command_string(command: str) -> str:
+    try:
+        return shlex.join(shlex.split(command))
+    except ValueError:
+        return command
 
 
 def _compute_inline_plan_hash(plan: TaskPlan) -> str:

@@ -82,9 +82,9 @@ they expose descendant artifacts through `re_export`; the expression references
 the group produce name, and the runtime resolves the descendant path. Legacy
 conditions such as `user_approves` are migration/read compatibility only.
 
-`remote-artifact` remains schema-reserved in Sprint 3, but every runtime path
-rejects it with the Sprint 5a deferral message. Use `local` or `manual` for
-current authoring.
+`remote-artifact` is available for task leaves that dispatch remote work through
+the generic subprocess-plus-manifest contract. Use `local` or `manual` when the
+step should complete synchronously or through human attestation.
 
 Anti-pattern: a single orchestrator `run.py` that opens HTTP sockets, parses
 model output, downloads files, and assembles grids — all inline. That is three

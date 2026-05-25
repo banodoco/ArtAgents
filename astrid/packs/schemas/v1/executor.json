@@ -26,7 +26,21 @@
       "properties": {
         "argv": {"type": "array", "items": {"type": "string"}},
         "cwd": {"type": "string"},
-        "env": {"type": "object"}
+        "env": {"type": "object"},
+        "input_args": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "input": {"type": "string"},
+              "flag": {"type": ["string", "null"]},
+              "repeatable": {"type": "boolean"},
+              "optional": {"type": "boolean"}
+            },
+            "required": ["input"],
+            "additionalProperties": false
+          }
+        }
       },
       "required": ["argv"],
       "additionalProperties": false
