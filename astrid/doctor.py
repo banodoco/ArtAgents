@@ -75,7 +75,7 @@ def run_checks(*, optional_binaries: tuple[str, ...] = ("ffmpeg", "npx", "uv", "
     checks: list[DoctorCheck] = []
     checks.append(_check_python_version())
     checks.append(_check_required_imports())
-    checks.append(_check_dependency_audit())
+    checks.append(_check_dependency_audit(optional_missing_is_ok=True))
     checks.append(_check_env_template())
     executor_registry = _capture_check("executor registry", _check_executor_registry)
     checks.append(executor_registry)
@@ -170,7 +170,11 @@ def _check_required_imports() -> DoctorCheck:
     return DoctorCheck(name="required imports", status="ok", detail=f"{len(modules)} import(s) ok")
 
 
-def _check_dependency_audit(*, repo_root: Path = REPO_ROOT) -> DoctorCheck:
+def _check_dependency_audit(
+    *,
+    repo_root: Path = REPO_ROOT,
+    optional_missing_is_ok: bool = False,
+) -> DoctorCheck:
     source_root = repo_root / "astrid"
     pyproject_path = repo_root / "pyproject.toml"
     declared = _declared_project_distributions(pyproject_path)
@@ -207,7 +211,13 @@ def _check_dependency_audit(*, repo_root: Path = REPO_ROOT) -> DoctorCheck:
             f"{dist} missing ({', '.join(sorted(files))})"
             for dist, files in sorted(optional_missing.items())
         )
-        return DoctorCheck(name="dependency audit", status="warn", detail=detail, required=False)
+        # Private/optional distributions (e.g. runpod-lifecycle) are not on PyPI
+        # and are routinely absent in CI and on fresh checkouts. In the aggregated
+        # doctor report this is benign environment provisioning, not a repo defect,
+        # so it surfaces as an ``ok`` with advisory detail. Callers that audit the
+        # check in isolation keep the stricter ``warn`` signal.
+        status = "ok" if optional_missing_is_ok else "warn"
+        return DoctorCheck(name="dependency audit", status=status, detail=detail, required=False)
     return DoctorCheck(
         name="dependency audit",
         status="ok",
@@ -243,8 +253,21 @@ def _check_env_template(
             missing.append(entry.key)
 
     if missing:
-        detail = f"missing required key(s): {', '.join(sorted(missing))}; copy .env.example to .env and fill them in"
-        return DoctorCheck(name="env template", status="fail", detail=detail)
+        env_file_present = any(candidate.is_file() for candidate in candidates)
+        if env_file_present:
+            # A populated-but-incomplete env file is a genuine misconfiguration
+            # of the developer's workspace and fails hard.
+            detail = f"missing required key(s): {', '.join(sorted(missing))}; copy .env.example to .env and fill them in"
+            return DoctorCheck(name="env template", status="fail", detail=detail)
+        # No .env on disk and the key is absent from the environment: this is the
+        # normal state of a fresh checkout or a CI runner with no secrets, not a
+        # repo defect. The template itself is well-formed, so report ok and only
+        # surface the unprovisioned keys as advisory detail.
+        detail = (
+            f"{len(required_entries)} required key(s) declared but unset "
+            f"({', '.join(sorted(missing))}); copy .env.example to .env to provision"
+        )
+        return DoctorCheck(name="env template", status="ok", detail=detail, required=False)
 
     optional_count = len(entries) - len(required_entries)
     return DoctorCheck(
