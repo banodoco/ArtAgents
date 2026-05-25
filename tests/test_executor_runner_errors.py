@@ -142,7 +142,7 @@ def test_builtin_render_expands_semantic_timeline_assets_and_out_argv(tmp_path: 
     assert command == (
         "/opt/python",
         "-m",
-        "astrid.packs.builtin.render.run",
+        "astrid.packs.builtin.executors.render.run",
         "--timeline",
         str(tmp_path / "hype.timeline.json"),
         "--assets",

@@ -19,7 +19,8 @@
       "properties": {
         "type": {"type": "string", "const": "python-cli"},
         "entrypoint": {"type": "string"},
-        "callable": {"type": "string"}
+        "callable": {"type": "string"},
+        "function": {"type": "string"}
       },
       "additionalProperties": false
     },

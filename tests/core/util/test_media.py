@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.util.media import ffprobe_duration_seconds
-from astrid.packs.builtin.audio_understand.run import _probe_duration as audio_probe_duration
-from astrid.packs.builtin.editor_review.run import _probe_duration as editor_probe_duration
-from astrid.packs.builtin.video_understand.run import _probe_duration as video_probe_duration
+from astrid.packs.builtin.executors.audio_understand.run import _probe_duration as audio_probe_duration
+from astrid.packs.builtin.executors.editor_review.run import _probe_duration as editor_probe_duration
+from astrid.packs.builtin.executors.video_understand.run import _probe_duration as video_probe_duration
 
 
 def test_ffprobe_duration_seconds_uses_duration_only_probe() -> None:
@@ -40,8 +40,8 @@ def test_updated_duration_helpers_preserve_float_parsing(monkeypatch, tmp_path: 
     def fake_runner(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(cmd, 0, stdout="7.25\n", stderr="")
 
-    monkeypatch.setattr("astrid.packs.builtin.audio_understand.run._run", fake_runner)
-    monkeypatch.setattr("astrid.packs.builtin.video_understand.run._run", fake_runner)
+    monkeypatch.setattr("astrid.packs.builtin.executors.audio_understand.run._run", fake_runner)
+    monkeypatch.setattr("astrid.packs.builtin.executors.video_understand.run._run", fake_runner)
 
     assert audio_probe_duration(media) == 7.25
     assert video_probe_duration(media) == 7.25

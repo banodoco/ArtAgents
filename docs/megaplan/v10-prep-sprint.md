@@ -148,7 +148,7 @@ All design decisions resolved above. If the executor hits something undecided, i
 
 ## Done criteria
 
-1. All 65 pack `run.py` modules call `guard_canonical_entrypoint()` at module-top, not just under `__main__`. Verify: `python -c "from astrid.packs.builtin.hype.run import main"` exits 2 with the remediation message.
+1. All 65 pack `run.py` modules call `guard_canonical_entrypoint()` at module-top, not just under `__main__`. Verify: `python -c "from astrid.packs.builtin.orchestrators.hype.run import main"` exits 2 with the remediation message.
 2. `astrid help` (no dashes) prints the same content as `astrid --help`.
 3. Top-level `astrid --help` shows one-line descriptions per subcommand group.
 4. `astrid next` after run-completion lists ALL available orchestrators (no "N more" truncation).

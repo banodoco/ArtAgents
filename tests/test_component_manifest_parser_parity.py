@@ -20,8 +20,8 @@ from astrid.packs.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
 BUILTIN_PACK_ROOT = REPO_ROOT / "astrid" / "packs" / "builtin"
 
 BUILTIN_MANIFESTS: dict[str, tuple[Path, ...]] = {
-    "executor": tuple(sorted(BUILTIN_PACK_ROOT.glob("*/executor.yaml"))),
-    "orchestrator": tuple(sorted(BUILTIN_PACK_ROOT.glob("*/orchestrator.yaml"))),
+    "executor": tuple(sorted((BUILTIN_PACK_ROOT / "executors").glob("*/executor.yaml"))),
+    "orchestrator": tuple(sorted((BUILTIN_PACK_ROOT / "orchestrators").glob("*/orchestrator.yaml"))),
     "element": tuple(sorted((BUILTIN_PACK_ROOT / "elements").glob("*/*/element.yaml"))),
 }
 

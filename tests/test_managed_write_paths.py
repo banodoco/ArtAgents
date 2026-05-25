@@ -636,9 +636,9 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
 
     def test_cut_refine_and_assemble_emit_config_replaced_payloads(self):
         from astrid.core.timeline import _edit_helpers
-        from astrid.packs.builtin.cut import run as cut_run
-        from astrid.packs.builtin.refine import run as refine_run
-        from astrid.packs.iteration.assemble import run as assemble_run
+        from astrid.packs.builtin.executors.cut import run as cut_run
+        from astrid.packs.builtin.executors.refine import run as refine_run
+        from astrid.packs.iteration.executors.assemble import run as assemble_run
 
         config = {
             "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
@@ -667,10 +667,10 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
 
     def test_named_managed_sources_do_not_emit_arrangement_replaced(self):
         managed_sources = [
-            ROOT / "astrid/packs/builtin/cut/run.py",
-            ROOT / "astrid/packs/builtin/hype/run.py",
-            ROOT / "astrid/packs/builtin/refine/run.py",
-            ROOT / "astrid/packs/iteration/assemble/run.py",
+            ROOT / "astrid/packs/builtin/executors/cut/run.py",
+            ROOT / "astrid/packs/builtin/orchestrators/hype/run.py",
+            ROOT / "astrid/packs/builtin/executors/refine/run.py",
+            ROOT / "astrid/packs/iteration/executors/assemble/run.py",
             ROOT / "astrid/core/worker/banodoco_worker.py",
         ]
         for path in managed_sources:

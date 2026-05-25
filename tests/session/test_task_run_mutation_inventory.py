@@ -103,12 +103,12 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "pipeline_dispatch_complete_caller",
     ),
     CallSite(
-        "astrid/packs/builtin/event_talks/run.py",
+        "astrid/packs/builtin/orchestrators/event_talks/run.py",
         "_run_step_subcommand",
         "record_dispatch_complete",
     ): (1, "canonical_pack_step_reentry_dispatch_complete_caller"),
     CallSite(
-        "astrid/packs/builtin/thumbnail_maker/run.py",
+        "astrid/packs/builtin/orchestrators/thumbnail_maker/run.py",
         "_run_step_subcommand",
         "record_dispatch_complete",
     ): (1, "canonical_pack_step_reentry_dispatch_complete_caller"),
@@ -212,12 +212,12 @@ APPROVED_PRODUCTION_DIRECT_EVENT_WRITES: dict[CallSite, str] = {
 
 EXPECTED_PACK_LOCAL_LOG_WRITES = {
     CallSite(
-        "astrid/packs/builtin/event_talks/run.py",
+        "astrid/packs/builtin/orchestrators/event_talks/run.py",
         "_append_pack_run_started",
         "handle.write",
     ): (1, "pack_local_event_talks_audit_log_non_task"),
     CallSite(
-        "astrid/packs/builtin/thumbnail_maker/run.py",
+        "astrid/packs/builtin/orchestrators/thumbnail_maker/run.py",
         "_append_pack_run_started",
         "handle.write",
     ): (1, "pack_local_thumbnail_maker_audit_log_non_task"),
@@ -473,8 +473,8 @@ def test_builtin_pack_local_logs_are_classified_non_task() -> None:
         for site, count in _collect_calls(watched={"append_event"}).items()
         if site.path
         in {
-            "astrid/packs/builtin/event_talks/run.py",
-            "astrid/packs/builtin/thumbnail_maker/run.py",
+            "astrid/packs/builtin/orchestrators/event_talks/run.py",
+            "astrid/packs/builtin/orchestrators/thumbnail_maker/run.py",
         }
     }
     assert pack_append_calls == {}

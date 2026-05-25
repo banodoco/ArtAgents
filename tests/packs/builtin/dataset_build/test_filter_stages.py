@@ -8,8 +8,8 @@ from typing import Any
 import jsonschema
 import pytest
 
-from astrid.packs.builtin.dataset_build.caption_providers import BudgetTracker
-from astrid.packs.builtin.dataset_build.filter_stages import (
+from astrid.packs.builtin.orchestrators.dataset_build.caption_providers import BudgetTracker
+from astrid.packs.builtin.orchestrators.dataset_build.filter_stages import (
     BlackFrameFilter,
     BucketJudgeGate,
     ContentHashFilter,
@@ -48,7 +48,7 @@ def _item(tmp_path: Path, item_id: str, *, duration_s: float = 5.0) -> dict[str,
 
 
 def _assert_filter_stats_schema(stats: dict[str, Any]) -> None:
-    schema = json.loads(Path("astrid/packs/builtin/dataset_build/schemas/filter-stats.schema.json").read_text(encoding="utf-8"))
+    schema = json.loads(Path("astrid/packs/builtin/orchestrators/dataset_build/schemas/filter-stats.schema.json").read_text(encoding="utf-8"))
     jsonschema.Draft7Validator(schema).validate(stats)
 
 
@@ -406,7 +406,7 @@ def test_bucket_judge_visual_understand_uses_schema_constrained_output_and_budge
 
     command = calls[0]
     assert [item["bucket"] for item in result.passed] == ["closeup"]
-    assert "astrid.packs.builtin.visual_understand.run" in command
+    assert "astrid.packs.builtin.executors.visual_understand.run" in command
     assert command[command.index("--query") + 1] == "Classify clip-a into closeup."
     assert "--response-schema" in command
     assert tracker.provider_calls == {"bucket_judge.visual_understand": 1}
@@ -475,7 +475,7 @@ def test_bucket_judge_video_understand_classifies_generically(tmp_path: Path) ->
 
     command = calls[0]
     assert result.passed[0]["bucket"] == "action"
-    assert "astrid.packs.builtin.video_understand.run" in command
+    assert "astrid.packs.builtin.executors.video_understand.run" in command
     assert command[command.index("--start") + 1] == "1.000"
     assert command[command.index("--end") + 1] == "6.000"
 
@@ -541,7 +541,7 @@ def test_transcript_keyword_filter_uses_injected_runner_and_hashed_cache(tmp_pat
     assert [item["item_id"] for item in second.passed] == ["clip-a"]
     assert [item["item_id"] for item in changed.passed] == ["clip-a"]
     assert len(calls) == 2
-    assert "astrid.packs.builtin.transcribe.run" in calls[0]
+    assert "astrid.packs.builtin.executors.transcribe.run" in calls[0]
     assert calls[0][calls[0].index("--audio") + 1].endswith("clip-a.mp4")
     assert tracker.provider_calls == {"filter.transcript.builtin.transcribe": 2}
     payload = json.loads(transcript_sidecar_path(_item(tmp_path, "clip-a"), {"out_dir": str(tmp_path / "out")}).read_text(encoding="utf-8"))
@@ -596,7 +596,7 @@ def test_semantic_visual_filter_uses_injected_runner_budget_and_hashed_cache(tmp
     assert second.rejected[0]["filter_results"]["semantic_visual_filter"]["reason"] == "semantic_visual_filter_off_topic"
     assert changed.rejected[0]["filter_results"]["semantic_visual_filter"]["reason"] == "semantic_visual_filter_off_topic"
     assert len(calls) == 2
-    assert "astrid.packs.builtin.visual_understand.run" in calls[0]
+    assert "astrid.packs.builtin.executors.visual_understand.run" in calls[0]
     assert calls[0][calls[0].index("--query") + 1] == "Keep useful clip-a."
     assert calls[0][calls[0].index("--at") + 1] == "3.500"
     assert tracker.provider_calls == {"filter.semantic_visual": 2}
@@ -631,7 +631,7 @@ def test_semantic_video_filter_dispatches_video_understand_and_fixture_sidecars(
     command = calls[0]
     assert result.rejected == []
     assert result.passed[0]["filter_results"]["semantic_video_filter"]["semantic_decision"]["details"] == {"motion": "clear"}
-    assert "astrid.packs.builtin.video_understand.run" in command
+    assert "astrid.packs.builtin.executors.video_understand.run" in command
     assert command[command.index("--start") + 1] == "1.000"
     assert command[command.index("--end") + 1] == "6.000"
 
@@ -652,6 +652,6 @@ def test_semantic_video_filter_dispatches_video_understand_and_fixture_sidecars(
 
 
 def test_filter_stage_code_has_no_domain_specific_literals() -> None:
-    root = Path("astrid/packs/builtin/dataset_build/filter_stages")
+    root = Path("astrid/packs/builtin/orchestrators/dataset_build/filter_stages")
     text = "\n".join(path.read_text(encoding="utf-8").lower() for path in root.glob("*.py"))
     assert "seinfeld" not in text

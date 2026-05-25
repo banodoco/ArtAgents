@@ -43,7 +43,8 @@ def main(argv: list[str] | None = None) -> int:
         # Create OverrideStore so --show-overrides and override set/remove/list work.
         override_store = OverrideStore(project_root=project_root)
         registry = load_default_registry(
-            _banodoco_config_from_args(args), project_root=project_root
+            _banodoco_config_from_args(args), project_root=project_root,
+            extra_pack_roots=tuple(args.pack_root),
         )
         registry.override_store = override_store
         return int(args.handler(args, registry))
@@ -58,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="List, inspect, validate, install, and run Astrid executors.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
+    parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover executors from; may be repeated.")
     parser.add_argument("--banodoco-agent-executors", action="store_true", help="Opt in to loading executors from the Banodoco website catalog.")
     parser.add_argument("--banodoco-catalog-url", help="Banodoco website agent-executor catalog Edge Function URL.")
     parser.add_argument("--banodoco-cache-dir", help="Cache directory for git-backed Banodoco executors.")
@@ -222,11 +224,19 @@ def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
 
     Short-circuits before ``load_default_registry()`` — never imports pack code.
     """
+    qualified_id: str = args.qualified_id
     return _scaffold_component(
-        qualified_id=args.qualified_id,
+        qualified_id=qualified_id,
         component_type="executor",
         yaml_template=_EXECUTOR_YAML_TEMPLATE,
         run_py_template=_RUN_PY_TEMPLATE,
+        extra_files={
+            "tests/__init__.py": "",
+            "tests/test_run.py": _TEST_RUN_PY_TEMPLATE.format(
+                qualified_id=qualified_id,
+                component_type="executor",
+            ),
+        },
     )
 
 
@@ -235,6 +245,8 @@ def _scaffold_component(
     component_type: str,
     yaml_template: str,
     run_py_template: str,
+    *,
+    extra_files: dict[str, str] | None = None,
 ) -> int:
     """Shared scaffolding logic for executors new / orchestrators new.
 
@@ -243,6 +255,8 @@ def _scaffold_component(
         component_type: ``'executor'`` or ``'orchestrator'``.
         yaml_template: str.format template for the component manifest.
         run_py_template: str.format template for run.py stub.
+        extra_files: Optional mapping of filename → already-formatted content
+            to write into the component directory (e.g., ``plan_template.py``).
 
     Returns:
         Exit code (0 on success, non-zero on failure).
@@ -328,6 +342,13 @@ def _scaffold_component(
     )
     stage_md_path.write_text(stage_md_text, encoding="utf-8")
     created.append(str(stage_md_path.relative_to(pack_root)))
+
+    # Extra files (e.g., plan_template.py for orchestrators, tests/)
+    for filename, content in (extra_files or {}).items():
+        extra_path = component_dir / filename
+        extra_path.parent.mkdir(parents=True, exist_ok=True)
+        extra_path.write_text(content, encoding="utf-8")
+        created.append(str(extra_path.relative_to(pack_root)))
 
     # --- 6. Validate the pack after scaffolding --------------------------------
     # We only fail when errors involve the JUST-scaffolded file. Pre-existing
@@ -481,6 +502,24 @@ TODO: list the outputs this {component_type} produces.
 
 TODO: any Python, npm, or system dependencies.
 """
+
+_TEST_RUN_PY_TEMPLATE = '''\
+"""Basic smoke test for {qualified_id}."""
+import subprocess
+import sys
+
+
+def test_dry_run() -> None:
+    """Verify the {component_type} runs in dry-run mode without errors."""
+    result = subprocess.run(
+        [sys.executable, "-m", "astrid", "{component_type}s", "run",
+         "{qualified_id}", "--dry-run"],
+        capture_output=True,
+        text=True,
+    )
+    # TODO: assert on expected behavior
+    assert result.returncode == 0, f"dry-run failed: {{result.stderr}}"
+'''
 
 
 def _banodoco_config_from_args(args: argparse.Namespace) -> BanodocoCatalogConfig:

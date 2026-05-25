@@ -56,7 +56,7 @@ That's the whole change. ~30 lines added across the codebase.
 
 Three checks, in this order:
 
-1. **Direct invocation rejects:** `python3 -m astrid.packs.builtin.hype.run --help` should exit 2 with the remediation message on stderr.
+1. **Direct invocation rejects:** `python3 -m astrid.packs.builtin.orchestrators.hype.run --help` should exit 2 with the remediation message on stderr.
 2. **Canonical invocation works:** `python3 -m astrid orchestrators run builtin.hype --help` should print the orchestrator help normally (the env var is set internally).
 3. **Existing tests pass:** `pytest tests/ --ignore=tests/agentic/` — no regressions. Pre-existing `generate_image/executor.yaml` float-type breakage is allowed (separately ticketed).
 

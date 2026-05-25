@@ -14,8 +14,10 @@
     "keywords": {"type": "array", "items": {"type": "string"}},
     "runtime": {
       "oneOf": [
+        {"$ref": "_defs.json#/definitions/runtime_python_cli"},
         {"$ref": "_defs.json#/definitions/runtime_python"},
-        {"$ref": "_defs.json#/definitions/runtime_command"}
+        {"$ref": "_defs.json#/definitions/runtime_command"},
+        {"$ref": "_defs.json#/definitions/runtime_command_legacy"}
       ]
     },
     "inputs": {"type": "array", "items": {"type": "object", "additionalProperties": true}},

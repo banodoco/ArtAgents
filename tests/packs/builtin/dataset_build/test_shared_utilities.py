@@ -8,15 +8,15 @@ from typing import Any
 import jsonschema
 from referencing import Registry, Resource
 
-from astrid.packs.builtin.dataset_build.config import MISSING_SCHEMA_VERSION_SOURCE
-from astrid.packs.builtin.dataset_build.artifacts import (
+from astrid.packs.builtin.orchestrators.dataset_build.config import MISSING_SCHEMA_VERSION_SOURCE
+from astrid.packs.builtin.orchestrators.dataset_build.artifacts import (
     load_valid_cached_sidecar,
     prompt_hash,
     schema_hash,
     sidecar_hashes,
     write_hashed_sidecar,
 )
-from astrid.packs.builtin.dataset_build.items import (
+from astrid.packs.builtin.orchestrators.dataset_build.items import (
     config_hash,
     deterministic_id,
     explicit_rights,
@@ -25,8 +25,8 @@ from astrid.packs.builtin.dataset_build.items import (
     repo_relative_path,
     sha256_file,
 )
-from astrid.packs.builtin.dataset_build.media import extract_clip_ffmpeg, ffprobe_metadata
-from astrid.packs.builtin.dataset_build.state import (
+from astrid.packs.builtin.orchestrators.dataset_build.media import extract_clip_ffmpeg, ffprobe_metadata
+from astrid.packs.builtin.orchestrators.dataset_build.state import (
     make_initial_state,
     read_review_state,
     set_status,
@@ -35,7 +35,7 @@ from astrid.packs.builtin.dataset_build.state import (
 
 
 ROOT = Path(__file__).resolve().parents[4]
-SCHEMAS = ROOT / "astrid" / "packs" / "builtin" / "dataset_build" / "schemas"
+SCHEMAS = ROOT / "astrid" / "packs" / "builtin" / "orchestrators" / "dataset_build" / "schemas"
 
 
 def _schema_registry() -> Registry:

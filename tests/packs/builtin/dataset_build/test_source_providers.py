@@ -5,9 +5,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from astrid.packs.builtin.dataset_build.source_providers import get_source_provider, iter_source_candidates
-from astrid.packs.builtin.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
-from astrid.packs.builtin.dataset_build.source_providers.youtube import YouTubeSourceProvider, youtube_source_key
+from astrid.packs.builtin.orchestrators.dataset_build.source_providers import get_source_provider, iter_source_candidates
+from astrid.packs.builtin.orchestrators.dataset_build.source_providers.local_folder import LocalFolderSourceProvider
+from astrid.packs.builtin.orchestrators.dataset_build.source_providers.youtube import YouTubeSourceProvider, youtube_source_key
 
 
 def _probe(path: Path) -> dict[str, Any]:
@@ -99,10 +99,10 @@ def test_youtube_provider_delegates_download_scene_split_and_internal_clip_extra
 
     def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
-        if "astrid.packs.builtin.youtube_audio.run" in cmd:
+        if "astrid.packs.builtin.executors.youtube_audio.run" in cmd:
             out_base = Path(cmd[cmd.index("--out") + 1])
             out_base.with_suffix(".mp4").write_bytes(b"video")
-        elif "astrid.packs.builtin.scenes.run" in cmd:
+        elif "astrid.packs.builtin.executors.scenes.run" in cmd:
             out_path = Path(cmd[cmd.index("--out") + 1])
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(
@@ -135,8 +135,8 @@ def test_youtube_provider_delegates_download_scene_split_and_internal_clip_extra
     assert candidates[0]["duration_s"] == 3.0
     assert candidates[0]["clip_start_s"] == 1.0
     assert candidates[0]["clip_end_s"] == 4.0
-    assert any("astrid.packs.builtin.youtube_audio.run" in cmd for cmd in calls)
-    assert any("astrid.packs.builtin.scenes.run" in cmd for cmd in calls)
+    assert any("astrid.packs.builtin.executors.youtube_audio.run" in cmd for cmd in calls)
+    assert any("astrid.packs.builtin.executors.scenes.run" in cmd for cmd in calls)
     assert any(cmd and cmd[0] == "ffmpeg" for cmd in calls)
     assert not any(cmd and cmd[0] == "yt-dlp" for cmd in calls)
 
@@ -146,9 +146,9 @@ def test_youtube_provider_uses_bucket_search_queries_from_config(tmp_path: Path)
 
     def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append(cmd)
-        if "astrid.packs.builtin.youtube_audio.run" in cmd:
+        if "astrid.packs.builtin.executors.youtube_audio.run" in cmd:
             Path(cmd[cmd.index("--out") + 1]).with_suffix(".mp4").write_bytes(b"video")
-        elif "astrid.packs.builtin.scenes.run" in cmd:
+        elif "astrid.packs.builtin.executors.scenes.run" in cmd:
             Path(cmd[cmd.index("--out") + 1]).write_text(json.dumps([{"start": 0.0, "end": 3.0}]), encoding="utf-8")
         elif cmd and cmd[0] == "ffmpeg":
             Path(cmd[-1]).write_bytes(b"clip")
@@ -170,7 +170,7 @@ def test_youtube_provider_uses_bucket_search_queries_from_config(tmp_path: Path)
     )
 
     assert len(candidates) == 1
-    query_commands = [cmd for cmd in calls if "astrid.packs.builtin.youtube_audio.run" in cmd]
+    query_commands = [cmd for cmd in calls if "astrid.packs.builtin.executors.youtube_audio.run" in cmd]
     assert query_commands[0][query_commands[0].index("--query") + 1] == "query from bucket"
 
 

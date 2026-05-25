@@ -52,10 +52,10 @@ def test_builder_emits_loadable_collapsed_plan(tmp_path: Path) -> None:
 
 
 def test_builtin_task_templates_round_trip_through_kernel(tmp_path: Path) -> None:
-    from astrid.packs.builtin.event_talks.plan_template import build_plan_v2 as build_event_talks
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2 as build_hype
-    from astrid.packs.builtin.iteration_video.plan_template import build_plan_v2 as build_iteration
-    from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2 as build_thumbnail
+    from astrid.packs.builtin.orchestrators.event_talks.plan_template import build_plan_v2 as build_event_talks
+    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2 as build_hype
+    from astrid.packs.builtin.orchestrators.iteration_video.plan_template import build_plan_v2 as build_iteration
+    from astrid.packs.builtin.orchestrators.thumbnail_maker.plan_template import build_plan_v2 as build_thumbnail
 
     source = tmp_path / "source.mp4"
     source.write_bytes(b"media")

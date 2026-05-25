@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from astrid.packs.builtin.dataset_build.caption_providers import (
+from astrid.packs.builtin.orchestrators.dataset_build.caption_providers import (
     BudgetTracker,
     VideoUnderstandCaptionProvider,
     VisualUnderstandCaptionProvider,
@@ -140,7 +140,7 @@ def test_visual_understand_wrapper_writes_sidecar_and_tracks_budget(tmp_path: Pa
     assert tracker.as_dict()["provider_calls"] == {"caption.visual_understand": 1}
     assert json.loads(sidecar.read_text(encoding="utf-8"))["model"] == "gpt-test"
     command = calls[0]
-    assert "astrid.packs.builtin.visual_understand.run" in command
+    assert "astrid.packs.builtin.executors.visual_understand.run" in command
     assert command[command.index("--query") + 1] == "Describe clip-001 from bucket-a."
     assert command[command.index("--at") + 1] == "3.000"
     assert command[command.index("--response-schema") + 1] == str(schema_path)
@@ -240,7 +240,7 @@ def test_video_understand_wrapper_uses_video_runner_and_stays_bucket_judge_indep
 
     command = calls[0]
     assert result.text == "A synchronized audio-video caption."
-    assert "astrid.packs.builtin.video_understand.run" in command
+    assert "astrid.packs.builtin.executors.video_understand.run" in command
     assert command[command.index("--start") + 1] == "1.000"
     assert command[command.index("--end") + 1] == "7.000"
     assert "bucket_judge" not in " ".join(command)

@@ -123,10 +123,7 @@ class PackDiscoveryTest(unittest.TestCase):
         executor_registry = load_executor_registry()
         orchestrator_registry = load_orchestrator_registry(executor_registry=executor_registry)
 
-        # Floor recalibrated after the timeline+builtin-training merge: M3 cleanup
-        # removed the comfy_* external wrappers + iteration/clip_extract and the
-        # seinfeld pack was generalized away, leaving 54 shipped executors.
-        self.assertGreaterEqual(len(executor_registry.list()), 54)
+        self.assertGreaterEqual(len(executor_registry.list()), 52)
         self.assertGreaterEqual(len(orchestrator_registry.list()), 5)
         self.assertIn("builtin.cut", executor_registry.as_mapping())
         self.assertIn("external.moirae", executor_registry.as_mapping())

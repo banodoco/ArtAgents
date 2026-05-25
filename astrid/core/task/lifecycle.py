@@ -227,7 +227,7 @@ def _build_canonical_start_plan(
     run_id: str,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     if orchestrator_id == "builtin.hype":
-        from astrid.packs.builtin.hype.plan_template import build_plan_v2
+        from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
 
         video, brief, theme, consumes = _hype_project_inputs(proj_root)
         return (
@@ -242,7 +242,7 @@ def _build_canonical_start_plan(
             consumes,
         )
     if orchestrator_id == "builtin.event_talks":
-        from astrid.packs.builtin.event_talks.plan_template import build_plan_v2
+        from astrid.packs.builtin.orchestrators.event_talks.plan_template import build_plan_v2
 
         source, transcript, consumes = _event_talks_project_inputs(proj_root)
         return (
@@ -256,7 +256,7 @@ def _build_canonical_start_plan(
             consumes,
         )
     if orchestrator_id == "builtin.thumbnail_maker":
-        from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2
+        from astrid.packs.builtin.orchestrators.thumbnail_maker.plan_template import build_plan_v2
 
         source, query_text, consumes = _thumbnail_maker_project_inputs(proj_root)
         return (

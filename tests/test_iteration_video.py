@@ -3,7 +3,7 @@ import io
 import json
 from pathlib import Path
 
-from astrid.packs.builtin.iteration_video import run as iteration_video
+from astrid.packs.builtin.orchestrators.iteration_video import run as iteration_video
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.schema import make_thread_record
@@ -121,7 +121,7 @@ def test_iteration_video_inspect_does_not_render_or_summarize_and_suppresses_con
 
 
 def test_iteration_video_orchestrator_declares_no_cut_child() -> None:
-    manifest = _read_json(Path("astrid/packs/builtin/iteration_video/orchestrator.yaml"))
+    manifest = _read_json(Path("astrid/packs/builtin/orchestrators/iteration_video/orchestrator.yaml"))
     assert manifest["child_executors"] == ["iteration.prepare", "iteration.assemble", "builtin.render"]
     assert "builtin.cut" not in manifest["child_executors"]
 

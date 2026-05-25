@@ -24,6 +24,10 @@ name: Builtin Test Pack
 version: 0.1.0
 agent:
   purpose: Testing
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
 """,
     )
     _write(pack_root / "AGENTS.md", "# Builtin Test Pack\n")
@@ -32,7 +36,7 @@ agent:
 
 
 def _write_valid_executor(pack_root: Path, name: str = "sample_exec") -> None:
-    component_dir = pack_root / name
+    component_dir = pack_root / "executors" / name
     _write(
         component_dir / "executor.yaml",
         f"""schema_version: 1
@@ -50,7 +54,7 @@ runtime:
 
 
 def _write_valid_orchestrator(pack_root: Path, name: str = "sample_orch") -> None:
-    component_dir = pack_root / name
+    component_dir = pack_root / "orchestrators" / name
     _write(
         component_dir / "orchestrator.yaml",
         f"""schema_version: 1
@@ -86,8 +90,14 @@ dependencies: {{}}
 
 
 def test_builtin_pack_validation_discovers_actual_mixed_layout_manifests(monkeypatch: Any) -> None:
-    expected_executors = {path.relative_to(BUILTIN_PACK_ROOT) for path in BUILTIN_PACK_ROOT.glob("*/executor.yaml")}
-    expected_orchestrators = {path.relative_to(BUILTIN_PACK_ROOT) for path in BUILTIN_PACK_ROOT.glob("*/orchestrator.yaml")}
+    expected_executors = {
+        path.relative_to(BUILTIN_PACK_ROOT)
+        for path in (BUILTIN_PACK_ROOT / "executors").glob("*/executor.yaml")
+    }
+    expected_orchestrators = {
+        path.relative_to(BUILTIN_PACK_ROOT)
+        for path in (BUILTIN_PACK_ROOT / "orchestrators").glob("*/orchestrator.yaml")
+    }
     expected_elements = {
         path.relative_to(BUILTIN_PACK_ROOT)
         for path in (BUILTIN_PACK_ROOT / "elements").glob("*/*/element.yaml")
@@ -118,7 +128,7 @@ def test_malformed_builtin_executor_manifest_is_schema_checked(tmp_path: Path) -
     pack_root = _write_builtin_pack(tmp_path)
     _write_valid_orchestrator(pack_root)
     _write_valid_element(pack_root)
-    component_dir = pack_root / "bad_exec"
+    component_dir = pack_root / "executors" / "bad_exec"
     _write(
         component_dir / "executor.yaml",
         """schema_version: 1
@@ -135,7 +145,7 @@ runtime:
 
     errors, _ = validate_pack(pack_root)
 
-    assert any("bad_exec/executor.yaml" in error and "missing required field name" in error for error in errors)
+    assert any("executors/bad_exec/executor.yaml" in error and "missing required field name" in error for error in errors)
 
 
 def test_malformed_builtin_nested_element_manifest_is_schema_checked(tmp_path: Path) -> None:
@@ -163,7 +173,7 @@ def test_builtin_executor_runtime_entrypoint_file_is_checked(tmp_path: Path) -> 
     pack_root = _write_builtin_pack(tmp_path)
     _write_valid_orchestrator(pack_root)
     _write_valid_element(pack_root)
-    component_dir = pack_root / "missing_entrypoint"
+    component_dir = pack_root / "executors" / "missing_entrypoint"
     _write(
         component_dir / "executor.yaml",
         """schema_version: 1
@@ -180,14 +190,14 @@ runtime:
 
     errors, _ = validate_pack(pack_root)
 
-    assert any("missing_entrypoint/missing.py" in error and "runtime entrypoint file not found" in error for error in errors)
+    assert any("executors/missing_entrypoint/missing.py" in error and "runtime entrypoint file not found" in error for error in errors)
 
 
 def test_builtin_orchestrator_python_runtime_module_file_is_checked(tmp_path: Path) -> None:
     pack_root = _write_builtin_pack(tmp_path)
     _write_valid_executor(pack_root)
     _write_valid_element(pack_root)
-    component_dir = pack_root / "missing_python_module"
+    component_dir = pack_root / "orchestrators" / "missing_python_module"
     _write(
         component_dir / "orchestrator.yaml",
         """schema_version: 1
@@ -205,14 +215,14 @@ runtime:
 
     errors, _ = validate_pack(pack_root)
 
-    assert any("missing_python_module/orchestrator.yaml" in error and "runtime.module file not found" in error for error in errors)
+    assert any("orchestrators/missing_python_module/orchestrator.yaml" in error and "runtime.module file not found" in error for error in errors)
 
 
 def test_builtin_orchestrator_command_runtime_module_file_is_checked(tmp_path: Path) -> None:
     pack_root = _write_builtin_pack(tmp_path)
     _write_valid_executor(pack_root)
     _write_valid_element(pack_root)
-    component_dir = pack_root / "missing_command_module"
+    component_dir = pack_root / "orchestrators" / "missing_command_module"
     _write(
         component_dir / "orchestrator.yaml",
         """schema_version: 1
@@ -233,4 +243,4 @@ runtime:
 
     errors, _ = validate_pack(pack_root)
 
-    assert any("missing_command_module" in error and "command.argv module file not found" in error for error in errors)
+    assert any("orchestrators/missing_command_module" in error and "command.argv module file not found" in error for error in errors)

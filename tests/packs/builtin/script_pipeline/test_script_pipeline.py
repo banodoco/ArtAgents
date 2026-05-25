@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from astrid.packs.builtin.script_pipeline import run as script_run
+from astrid.packs.builtin.executors.script_pipeline import run as script_run
 
 
 def test_fake_mode_writes_candidates_selected_and_manifest(tmp_path: Path) -> None:

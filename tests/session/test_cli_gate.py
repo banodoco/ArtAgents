@@ -19,8 +19,8 @@ from astrid.core.session.model import Session
 
 # Settled Sprint 1 unbound contract. The implementation may temporarily carry
 # compatibility exceptions during migration, but the final gate must match this
-# list exactly: help/version, status, next, attach, projects ls/create/default,
-# sessions ls, and sessions takeover.
+# list exactly: help/version, status, next, attach, pack management,
+# projects ls/create/default, sessions ls, and sessions takeover.
 EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("-h",),
     ("--help",),
@@ -34,6 +34,7 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("projects", "default"),
     ("sessions", "ls"),
     ("sessions", "takeover"),
+    ("packs",),
 )
 
 
@@ -138,8 +139,6 @@ def test_unbound_gate_uses_the_frozen_allowlist_table() -> None:
 def test_stop_line_unbound_gate_has_no_transitional_extras() -> None:
     transitional_extras = [
         ["init"],
-        ["packs", "validate"],
-        ["packs", "install"],
         ["models", "validate"],
         ["models", "doctor"],
         ["runpod", "volumes", "ls"],

@@ -39,7 +39,7 @@ the pinned timeline with:
 ```bash
 PYENV_VERSION=3.11.11 \
 ASTRID_TIMELINE_COMPOSITION_SRC=$(pwd)/remotion/node_modules/@banodoco/timeline-composition/typescript/src \
-python3 -m astrid.packs.builtin.render.run \
+python3 -m astrid.packs.builtin.executors.render.run \
   --timeline tests/fixtures/reshape/hype_regression/hype.timeline.json \
   --assets tests/fixtures/reshape/hype_regression/hype.assets.json \
   --out /tmp/astrid-hype-regression/hype.mp4

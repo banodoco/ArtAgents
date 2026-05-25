@@ -29,6 +29,7 @@ from astrid.core.pack import (
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
+    pack_manifest_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -167,9 +168,15 @@ class PackValidator:
         self._capability_locations: dict[str, str] = {}
         self._alias_targets: list[tuple[str, str, str]] = []
 
-        pack_yaml = self.pack_root / "pack.yaml"
-        if not pack_yaml.is_file():
-            self.errors.append(f"{self._rel(pack_yaml)}: pack.yaml not found")
+        if (self.pack_root / ".no-pack").exists():
+            return self.errors
+
+        pack_yaml = pack_manifest_path(self.pack_root)
+        if pack_yaml is None:
+            self.errors.append(
+                f"{self._rel(self.pack_root)}: pack manifest not found "
+                f"(pack.yaml, pack.yml, or pack.json)"
+            )
             return self.errors
 
         # Parse pack.yaml
@@ -641,6 +648,21 @@ class PackValidator:
             and parts[4] == component_dir.name
         ):
             return component_dir / Path(*parts[5:]).with_suffix(".py")
+        if (
+            len(parts) >= 5
+            and parts[0:2] == ["astrid", "packs"]
+            and parts[2] == pack_id
+            and parts[3] == component_dir.name
+        ):
+            return component_dir / Path(*parts[4:]).with_suffix(".py")
+        if len(parts) >= 5 and parts[0:2] == ["astrid", "packs"]:
+            pack_root = _REPO_ROOT / "astrid" / "packs" / parts[2]
+            component_name = parts[3]
+            tail = Path(*parts[4:]).with_suffix(".py")
+            for kind_root in ("executors", "orchestrators"):
+                candidate = pack_root / kind_root / component_name / tail
+                if candidate.is_file():
+                    return candidate
         if module.startswith("astrid."):
             return _REPO_ROOT / Path(*module.split(".")).with_suffix(".py")
         if "." not in module:
@@ -710,8 +732,160 @@ def json_loads(text: str) -> Any:
     return _json.loads(text)
 
 
+def _check_semantic_secrets(data: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    secrets_raw = data.get("secrets")
+    if not isinstance(secrets_raw, list):
+        return warnings
+    for idx, item in enumerate(secrets_raw):
+        if not isinstance(item, dict):
+            warnings.append(f"secrets[{idx}]: not a mapping, skipping")
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            warnings.append(f"secrets[{idx}]: empty or missing secret name")
+            continue
+        if not item.get("required", False):
+            description = item.get("description")
+            if not isinstance(description, str) or not description.strip():
+                warnings.append(f"secret '{name.strip()}': optional secret has no description")
+    return warnings
+
+
+def _check_semantic_deps(data: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    deps = data.get("dependencies")
+    if not isinstance(deps, dict):
+        return warnings
+    python_deps = deps.get("python")
+    if isinstance(python_deps, list):
+        for idx, dep in enumerate(python_deps):
+            if not isinstance(dep, str) or not dep.strip():
+                warnings.append(f"dependencies.python[{idx}]: empty entry")
+            elif not _re.match(r"^[A-Za-z0-9_.-]+(\s*[><=!~]+\s*[A-Za-z0-9_.*-]+)*(\s*;\s*.*)?$", dep.strip()):
+                warnings.append(f"dependencies.python[{idx}]: '{dep}' does not look like a pip requirement")
+    npm_deps = deps.get("npm")
+    if isinstance(npm_deps, list):
+        for idx, dep in enumerate(npm_deps):
+            if not isinstance(dep, str) or not dep.strip():
+                warnings.append(f"dependencies.npm[{idx}]: empty entry")
+            elif not _re.match(r"^@?[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?(@[A-Za-z0-9_.-]+)?$", dep.strip()):
+                warnings.append(f"dependencies.npm[{idx}]: '{dep}' does not look like an npm package specifier")
+    system_deps = deps.get("system")
+    if isinstance(system_deps, list):
+        for idx, dep in enumerate(system_deps):
+            if not isinstance(dep, str) or not dep.strip():
+                warnings.append(f"dependencies.system[{idx}]: empty entry")
+            elif not _re.match(r"^[A-Za-z0-9_.-]+$", dep.strip()):
+                warnings.append(f"dependencies.system[{idx}]: '{dep}' does not look like a system command name")
+    return warnings
+
+
+def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
+    """Extract a lightweight trust summary for pack install dry-runs."""
+    root = Path(pack_root).resolve()
+    manifest_path = pack_manifest_path(root)
+    if manifest_path is None:
+        raise ValidationError(f"No pack manifest found in {root}")
+
+    try:
+        data = load_manifest_mapping(manifest_path, manifest_kind="pack")
+    except ManifestParseError as exc:
+        raise ValidationError(f"Failed to parse {manifest_path}: {exc}") from exc
+
+    pack_id = data.get("id", root.name)
+    name = data.get("name", pack_id)
+    version = data.get("version", "0.0.0")
+    schema_version = data.get("schema_version", "unknown")
+
+    content = data.get("content", {}) if isinstance(data.get("content"), dict) else {}
+    component_counts: dict[str, int] = {}
+    for key in ("executors", "orchestrators", "elements"):
+        comp_root_rel = content.get(key)
+        if isinstance(comp_root_rel, str) and comp_root_rel.strip():
+            comp_dir = root / comp_root_rel
+            component_counts[key] = sum(
+                1 for child in comp_dir.iterdir() if child.is_dir() and not child.name.startswith(".")
+            ) if comp_dir.is_dir() else 0
+        else:
+            component_counts[key] = 0
+
+    agent = data.get("agent", {}) if isinstance(data.get("agent"), dict) else {}
+    normal_entrypoints = [str(ep) for ep in agent.get("normal_entrypoints", []) if ep] if isinstance(agent.get("normal_entrypoints"), list) else []
+    legacy_entrypoints = [str(ep) for ep in agent.get("entrypoints", []) if ep] if isinstance(agent.get("entrypoints"), list) else []
+    display_entrypoints = normal_entrypoints or legacy_entrypoints
+
+    secrets_raw = data.get("secrets")
+    secrets_list: list[str] = []
+    if isinstance(secrets_raw, list):
+        for item in secrets_raw:
+            if isinstance(item, dict) and item.get("name"):
+                label = str(item["name"])
+                if item.get("required"):
+                    label += " (required)"
+                description = item.get("description")
+                if description:
+                    label += f": {description}"
+                secrets_list.append(label)
+    elif isinstance(secrets_raw, dict) and isinstance(secrets_raw.get("required"), list):
+        secrets_list = [str(secret) for secret in secrets_raw["required"] if secret]
+
+    deps_raw = data.get("dependencies", {}) if isinstance(data.get("dependencies"), dict) else {}
+    dependencies: list[str] = []
+    dependencies_struct: dict[str, list[str]] = {}
+    for ecosystem in ("python", "npm", "system"):
+        values = deps_raw.get(ecosystem) if isinstance(deps_raw, dict) else None
+        if isinstance(values, list):
+            clean = [str(value) for value in values if value]
+            dependencies_struct[ecosystem] = clean
+            dependencies.extend(f"{ecosystem}:{value}" for value in clean)
+    if isinstance(deps_raw.get("packs"), list):
+        for value in deps_raw["packs"]:
+            if value and str(value) not in dependencies:
+                dependencies.append(str(value))
+
+    docs = data.get("docs", {}) if isinstance(data.get("docs"), dict) else {}
+    doc_info = {key: str(docs.get(key)) if docs.get(key) else None for key in ("readme", "agents", "stage")}
+
+    warnings: list[str] = []
+    for doc_name in ("AGENTS.md", "README.md"):
+        if not (root / doc_name).is_file():
+            warnings.append(f"Recommended file not found: {doc_name}")
+    for key, comp_root_rel in content.items():
+        if isinstance(comp_root_rel, str) and not (root / comp_root_rel).exists():
+            warnings.append(f"Declared content root does not exist: {comp_root_rel}")
+    warnings.extend(_check_semantic_secrets(data))
+    warnings.extend(_check_semantic_deps(data))
+
+    keywords = [str(value) for value in data.get("keywords", []) if value] if isinstance(data.get("keywords"), list) else []
+    capabilities = [str(value) for value in data.get("capabilities", []) if value] if isinstance(data.get("capabilities"), list) else []
+    required_context = [str(value) for value in agent.get("required_context", []) if value] if isinstance(agent.get("required_context"), list) else []
+
+    return {
+        "pack_id": pack_id,
+        "name": name,
+        "version": version,
+        "schema_version": schema_version,
+        "source_path": str(root),
+        "component_counts": component_counts,
+        "entrypoints": display_entrypoints,
+        "normal_entrypoints": normal_entrypoints,
+        "declared_secrets": secrets_list,
+        "dependencies": dependencies,
+        "dependencies_struct": dependencies_struct,
+        "docs": doc_info,
+        "warnings": warnings,
+        "do_not_use_for": str(agent.get("do_not_use_for")) if agent.get("do_not_use_for") else None,
+        "required_context": required_context,
+        "keywords": keywords,
+        "capabilities": capabilities,
+        "astrid_version": data.get("astrid_version"),
+    }
+
+
 __all__ = [
     "PackValidator",
     "ValidationError",
     "validate_pack",
+    "extract_trust_summary",
 ]

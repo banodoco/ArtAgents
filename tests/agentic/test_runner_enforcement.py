@@ -28,22 +28,22 @@ def test_check_canonical_bypass_no_false_positive_on_read(tmp_path: Path) -> Non
     stderr.write_text(
         "📖 read ./astrid/packs/builtin/hype/run.py\n"
         "Checked astrid/packs/builtin/hype/executor.yaml\n"
-        "Looking at astrid.packs.builtin.hype.run module docs\n"
+        "Looking at astrid.packs.builtin.orchestrators.hype.run module docs\n"
     )
     assert _check_canonical_bypass(stderr, scenario_cfg=None) is None
 
 
 def test_check_canonical_bypass_detects_execution_python3_m(tmp_path: Path) -> None:
-    """Direct 'python3 -m astrid.packs.builtin.hype.run' must trigger."""
+    """Direct 'python3 -m astrid.packs.builtin.orchestrators.hype.run' must trigger."""
     stderr = tmp_path / "stderr.log"
     stderr.write_text(
         "Starting...\n"
-        "python3 -m astrid.packs.builtin.hype.run --some-flag\n"
+        "python3 -m astrid.packs.builtin.orchestrators.hype.run --some-flag\n"
         "Done.\n"
     )
     result = _check_canonical_bypass(stderr, scenario_cfg=None)
     assert result is not None
-    assert "python3 -m astrid.packs.builtin.hype.run" in result
+    assert "python3 -m astrid.packs.builtin.orchestrators.hype.run" in result
 
 
 def test_check_canonical_bypass_detects_execution_python_path(tmp_path: Path) -> None:
@@ -90,7 +90,7 @@ def test_check_canonical_bypass_from_offset_skips_old_content(tmp_path: Path) ->
     """Re-check with from_offset past an old bypass + marker line
     must return None (only new content is scanned)."""
     stderr = tmp_path / "stderr.log"
-    old_content = "python3 -m astrid.packs.builtin.hype.run\n"
+    old_content = "python3 -m astrid.packs.builtin.orchestrators.hype.run\n"
     marker = "--- REPROMPT: canonical CLI bypass detected ---\n"
     new_content = "astrid author run hype --check\n"  # canonical, no bypass
     stderr.write_text(old_content + marker + new_content)
@@ -104,7 +104,7 @@ def test_check_canonical_bypass_from_offset_skips_old_content(tmp_path: Path) ->
 def test_check_canonical_bypass_from_offset_zero_finds_bypass(tmp_path: Path) -> None:
     """With from_offset=0, old bypass is scanned and detected."""
     stderr = tmp_path / "stderr.log"
-    old_content = "python3 -m astrid.packs.builtin.hype.run\n"
+    old_content = "python3 -m astrid.packs.builtin.orchestrators.hype.run\n"
     marker = "--- REPROMPT: canonical CLI bypass detected ---\n"
     new_content = "astrid author run hype --check\n"
     stderr.write_text(old_content + marker + new_content)
@@ -117,7 +117,7 @@ def test_check_canonical_bypass_from_offset_zero_finds_bypass(tmp_path: Path) ->
 def test_check_canonical_bypass_bypass_exempt(tmp_path: Path) -> None:
     """Scenario with bypass_exempt: true returns None regardless."""
     stderr = tmp_path / "stderr.log"
-    stderr.write_text("python3 -m astrid.packs.builtin.hype.run\n")
+    stderr.write_text("python3 -m astrid.packs.builtin.orchestrators.hype.run\n")
 
     scenario_cfg = {"assessment": {"bypass_exempt": True}}
     assert _check_canonical_bypass(stderr, scenario_cfg=scenario_cfg) is None

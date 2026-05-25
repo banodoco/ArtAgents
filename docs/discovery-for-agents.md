@@ -13,9 +13,9 @@ Capability discovery is session-gated. From a cold shell, run
 `python3 -m astrid next` for exactly one legal action, or `python3 -m astrid
 status` for the read-side breadcrumb. Attach before running `skills list`,
 capability `list`, `search`, or `inspect` commands. The unbound CLI surface is
-intentionally narrow: help/version, `status`, `next`, `attach`, `projects
-ls`, `projects create`, `projects default`, `sessions ls`, and `sessions
-takeover`.
+intentionally narrow: help/version, `status`, `next`, `attach`, `packs ...`,
+`projects ls`, `projects create`, `projects default`, `sessions ls`, and
+`sessions takeover`.
 
 Every discoverable capability (executor, orchestrator, element) belongs to a
 pack and is exposed through a consistent list/search/inspect surface with a

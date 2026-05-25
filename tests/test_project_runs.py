@@ -16,7 +16,7 @@ from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.project import paths
 from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
-from astrid.packs.builtin.hype import run as hype
+from astrid.packs.builtin.orchestrators.hype import run as hype
 
 
 def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_collision(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,7 +242,7 @@ def _hype_command_orchestrator() -> OrchestratorDefinition:
         version="1.0",
         runtime=RuntimeSpec(
             kind="command",
-            command=CommandSpec(argv=(sys.executable, "-m", "astrid.packs.builtin.hype.run", "{orchestrator_args}")),
+            command=CommandSpec(argv=(sys.executable, "-m", "astrid.packs.builtin.orchestrators.hype.run", "{orchestrator_args}")),
         ),
         metadata={"requires_output_path": True},
     )
@@ -280,7 +280,7 @@ def test_hype_prepare_project_main_writes_ulid_to_timeline_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main writes a valid ULID to run.timeline_id."""
-    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.packs.builtin.orchestrators.hype.run import _prepare_project_main
     from astrid.threads.ids import is_ulid
 
     projects_root = tmp_path / "projects"
@@ -306,7 +306,7 @@ def test_hype_prepare_project_main_writes_slug_and_uuid_to_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main writes timeline_slug and timeline_event_stream_id to run.metadata."""
-    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.packs.builtin.orchestrators.hype.run import _prepare_project_main
     from astrid.core.project.run import (
         METADATA_KEY_TIMELINE_SLUG,
         METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
@@ -356,7 +356,7 @@ def test_hype_prepare_project_main_returns_none_for_file_only_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main returns (None, argv) when --project is absent."""
-    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.packs.builtin.orchestrators.hype.run import _prepare_project_main
 
     argv = ["--brief", str(tmp_path / "brief.txt"), "--target-duration", "1"]
     context, effective_argv = _prepare_project_main(argv)
@@ -369,7 +369,7 @@ def test_hype_prepare_project_main_derives_slug_from_brief_stem(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main derives slug from brief stem when not generic."""
-    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.packs.builtin.orchestrators.hype.run import _prepare_project_main
     from astrid.core.project.run import METADATA_KEY_TIMELINE_SLUG
 
     projects_root = tmp_path / "projects"
@@ -395,7 +395,7 @@ def test_hype_prepare_project_main_falls_back_to_project_slug(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main falls back to project slug when brief has generic name."""
-    from astrid.packs.builtin.hype.run import _prepare_project_main
+    from astrid.packs.builtin.orchestrators.hype.run import _prepare_project_main
     from astrid.core.project.run import METADATA_KEY_TIMELINE_SLUG
 
     projects_root = tmp_path / "projects"

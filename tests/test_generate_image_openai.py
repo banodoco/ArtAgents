@@ -5,9 +5,9 @@ import json
 import pytest
 
 from astrid.core.util.secrets import load_api_key
-from astrid.packs.builtin.generate_image_openai.run import main
-from astrid.packs.builtin.sprite_sheet.run import load_fal_key
-from astrid.packs.builtin.transcribe.run import load_api_key as load_transcribe_api_key
+from astrid.packs.builtin.executors.generate_image_openai.run import main
+from astrid.packs.builtin.executors.sprite_sheet.run import load_fal_key
+from astrid.packs.builtin.executors.transcribe.run import load_api_key as load_transcribe_api_key
 from astrid.utilities.llm_clients import _load_api_key
 
 

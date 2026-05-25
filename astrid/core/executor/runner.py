@@ -36,7 +36,7 @@ class ExecutorRunnerError(ExecutorValidationError):
 
 
 def _pipeline_module():
-    from astrid.packs.builtin.hype import run as pipeline
+    from astrid.packs.builtin.orchestrators.hype import run as pipeline
 
     return pipeline
 
@@ -216,7 +216,7 @@ def _run_upload_youtube(request: ExecutorRunRequest) -> ExecutorRunResult:
             payload={"would_run": "upload.youtube", "inputs": inputs},
         )
 
-    from astrid.packs.upload.youtube.src.social_publish import publish_youtube_video
+    from astrid.packs.upload.executors.youtube.src.social_publish import publish_youtube_video
 
     result = publish_youtube_video(
         video_url=_required_input(inputs, "video_url"),

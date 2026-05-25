@@ -76,7 +76,7 @@ def _build_synthetic_hype_run(
     Returns ``(project_root, run_dir, source_path, plan_path)``.
     """
     from astrid.core.orchestrator.plan_template import emit_plan_json
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2
+    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
 
     proj_root = tmp_path / "projects" / slug
     run_dir = proj_root / "runs" / run_id
@@ -512,7 +512,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
 def test_generated_hype_render_command_parses_to_required_downstream_render_argv(
     tmp_path: Path,
 ) -> None:
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2
+    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
 
     run_dir = tmp_path / "runs" / "r-hype"
     run_dir.mkdir(parents=True)
@@ -568,7 +568,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
     assert downstream_argv[:3] == (
         "/opt/python",
         "-m",
-        "astrid.packs.builtin.render.run",
+        "astrid.packs.builtin.executors.render.run",
     )
     assert downstream_argv[3:] == (
         "--timeline",
@@ -585,7 +585,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
 def test_plan_hash_different_for_different_plans(tmp_path: Path) -> None:
     """Two plans with different run_ids produce different hashes."""
     from astrid.core.orchestrator.plan_template import emit_plan_json
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2
+    from astrid.packs.builtin.orchestrators.hype.plan_template import build_plan_v2
 
     slug = "demo"
     proj_root = tmp_path / "projects" / slug

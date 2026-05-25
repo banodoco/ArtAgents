@@ -45,13 +45,13 @@ assessment:
         question: |
           Did the agent invoke the tool via `astrid executors run
           builtin.transcribe ...`, as opposed to `python -m
-          astrid.packs.builtin.transcribe.run ...` or a direct import?
+          astrid.packs.builtin.executors.transcribe.run ...` or a direct import?
         evidence: [stderr]
         grading: pass_fail
         weight: 2
         failure_mode: |
           Stderr or report shows `python3? -m astrid.packs.builtin.transcribe`
-          or `from astrid.packs.builtin.transcribe import` instead of
+          or `from astrid.packs.builtin.executors.transcribe import` instead of
           `astrid executors run builtin.transcribe`.
       - id: did_not_install_own_whisper
         question: |

@@ -2,3 +2,7 @@ id: builtin
 schema_version: 1
 name: Astrid Built-in
 version: 1.0.0
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements

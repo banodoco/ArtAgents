@@ -229,7 +229,7 @@ plan = build_plan_template(
     steps=[
         build_leaf_template(
             "render",
-            command="python3 -m astrid.packs.builtin.render.run ...",
+            command="python3 -m astrid.packs.builtin.executors.render.run ...",
             produces=[file_output("video", "hype.mp4")],
             cost=cost_entry(0, source="local"),
         )

@@ -13,7 +13,7 @@ from astrid.packs.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
 
 BUILTIN_PACK_ROOT = REPO_ROOT / "astrid" / "packs" / "builtin"
 BUILTIN_ORCHESTRATOR_MANIFESTS = tuple(
-    sorted(BUILTIN_PACK_ROOT.glob("*/orchestrator.yaml"))
+    sorted((BUILTIN_PACK_ROOT / "orchestrators").glob("*/orchestrator.yaml"))
 )
 
 
@@ -84,9 +84,9 @@ def test_all_builtin_orchestrator_manifests_parse_through_runtime_and_registry()
     assert failures == {}
 
 
-def test_orchestrator_schema_rejects_legacy_python_cli_runtime_shape() -> None:
+def test_orchestrator_schema_accepts_legacy_python_cli_runtime_shape() -> None:
     payload = load_manifest_mapping(
-        BUILTIN_PACK_ROOT / "hype" / "orchestrator.yaml",
+        BUILTIN_PACK_ROOT / "orchestrators" / "hype" / "orchestrator.yaml",
         manifest_kind="orchestrator",
     )
     legacy_payload = deepcopy(payload)
@@ -98,12 +98,12 @@ def test_orchestrator_schema_rejects_legacy_python_cli_runtime_shape() -> None:
 
     errors = _schema_errors(legacy_payload)
 
-    assert any("not valid under any of the given schemas" in error for error in errors)
+    assert errors == []
 
 
 def test_orchestrator_schema_rejects_missing_schema_version() -> None:
     payload = load_manifest_mapping(
-        BUILTIN_PACK_ROOT / "hype" / "orchestrator.yaml",
+        BUILTIN_PACK_ROOT / "orchestrators" / "hype" / "orchestrator.yaml",
         manifest_kind="orchestrator",
     )
     payload.pop("schema_version")

@@ -32,7 +32,11 @@ def main(argv: list[str] | None = None) -> int:
         # Create OverrideStore so --show-overrides and override set/remove/list work.
         project_root = _project_root_from_args(args)
         override_store = OverrideStore(project_root=project_root)
-        registry = load_default_registry(active_theme=args.theme, project_root=project_root)
+        registry = load_default_registry(
+            active_theme=args.theme,
+            project_root=project_root,
+            extra_pack_roots=tuple(args.pack_root),
+        )
         registry.override_store = override_store
         return int(args.handler(args, registry))
     except (KeyError, ElementRegistryError, ElementValidationError, ValueError, OverrideStoreError) as exc:
@@ -47,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--theme", help="Active theme id, theme directory, or path to theme.json.")
     parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
+    parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover elements from; may be repeated.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="List available elements.")

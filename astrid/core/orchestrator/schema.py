@@ -216,6 +216,18 @@ def _canonical_child_list(data: dict[str, Any], *, legacy_key: str, canonical_ke
 
 def _parse_runtime(raw: Any, path: str) -> RuntimeSpec:
     data = _require_mapping(raw, path)
+    if "type" in data and "kind" not in data:
+        v1_type = _require_string(data, "type", f"{path}.type")
+        if v1_type == "python-cli":
+            callable_name = _optional_string(data, "callable", f"{path}.callable", default="")
+            if not callable_name:
+                callable_name = _optional_string(data, "function", f"{path}.function", default="main")
+            return RuntimeSpec(kind="python", module=None, function=callable_name)
+        if v1_type == "command":
+            return RuntimeSpec(kind="command", command=_parse_command(data.get("command"), f"{path}.command"))
+        raise OrchestratorValidationError(
+            f"{path}.type must be 'python-cli' or 'command', got {v1_type!r}"
+        )
     kind = _require_literal(
         _require_string(data, "kind", f"{path}.kind"),
         RUNTIME_KINDS, f"{path}.kind", RuntimeKind,
@@ -350,7 +362,8 @@ def _validate_runtime(runtime: RuntimeSpec) -> None:
     if runtime.kind not in RUNTIME_KINDS:
         raise OrchestratorValidationError(f"runtime.kind must be one of {sorted(RUNTIME_KINDS)}")
     if runtime.kind == "python":
-        _validate_non_empty_string(runtime.module, "runtime.module")
+        if runtime.module is not None:
+            _validate_non_empty_string(runtime.module, "runtime.module")
         _validate_non_empty_string(runtime.function, "runtime.function")
         if runtime.command is not None:
             raise OrchestratorValidationError("python runtime cannot include runtime.command")

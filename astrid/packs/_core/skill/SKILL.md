@@ -47,9 +47,9 @@ python3 -m astrid status   # detail breadcrumb when you need it
 If status says `no session bound`, attach before running doctor, registry
 list/search/inspect, executor, orchestrator, element, or task-mode commands.
 The only legal unbound commands are help/version, `status`, `next`, `attach`,
-`projects ls`, `projects create`, `projects default`, `sessions ls`, and
-`sessions takeover`. After binding, use `status` when you need to re-orient,
-not before every command.
+`packs ...`, `projects ls`, `projects create`, `projects default`,
+`sessions ls`, and `sessions takeover`. After binding, use `status` when you
+need to re-orient, not before every command.
 
 ```bash
 python3 -m astrid attach [<project>] [--default] [--timeline <slug>] [--session <id>] [--as agent:<id>]
@@ -309,7 +309,7 @@ rewriting the element's `pack_id` to `local`.
 python3 -m astrid elements fork effects text-card
 ```
 
-Before rendering an iteration video, run `python3 -m astrid.packs.builtin.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a non-binding variant lineage WITHIN a pack and is UNRELATED to the removed `astrid thread` CLI verb or to session binding. Threads as a generic user-facing runtime concept were retired in Sprint 1 (DEC-001); the internal `astrid.threads` library is retained for pack lineage utilities.
+Before rendering an iteration video, run `python3 -m astrid.packs.builtin.orchestrators.iteration_video.run inspect <thread>` to see modalities, renderers, quality, cache counts, and estimated cost without rendering. Note: the pack-level `--thread <id>` argument identifies a non-binding variant lineage WITHIN a pack and is UNRELATED to the removed `astrid thread` CLI verb or to session binding. Threads as a generic user-facing runtime concept were retired in Sprint 1 (DEC-001); the internal `astrid.threads` library is retained for pack lineage utilities.
 
 ## Pack Model
 
@@ -393,7 +393,6 @@ orchestrator, or element manifests.
 | `builtin.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `builtin.audio_understand` | Inspect audio clips or sampled windows with an audio-understanding LLM. |
 | `builtin.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
-| `builtin.clip_extract` | Extract a clip segment from a video using ffmpeg. |
 | `builtin.cut` | Build the Reigh-compatible hype timeline + assets + metadata JSON triple from arrangement. |
 | `builtin.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
 | `builtin.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
@@ -428,7 +427,6 @@ orchestrator, or element manifests.
 | `builtin.video_understand` | Inspect synchronized audio+video windows with a video-understanding model. |
 | `builtin.visual_understand` | Inspect images or sampled video frames with a vision LLM — free-text or JSON-schema-constrained. |
 | `builtin.youtube_audio` | Download a YouTube video's audio (MP3) or video (MP4) — by search query or direct URL. |
-| `external.comfy_t2i_ds1` | Render an image from --prompt through a fixed ComfyUI workflow via the VibeComfy CLI. |
 | `external.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
 | `external.moirae` | Run a Moirae screenplay through the terminal-as-cinema renderer to produce a video. |
 | `external.runpod.exec` | Execute a script on an existing RunPod pod and download artifacts. |
@@ -601,7 +599,7 @@ You should not need ffmpeg's `atrim` / `afade` / `amix` for any normal "music un
 ```bash
 PYENV_VERSION=3.11.11 \
 ASTRID_TIMELINE_COMPOSITION_SRC=$(pwd)/remotion/node_modules/@banodoco/timeline-composition/typescript/src \
-python3 -m astrid.packs.builtin.render.run \
+python3 -m astrid.packs.builtin.executors.render.run \
   --timeline runs/<my-run>/timeline.json \
   --assets runs/<my-run>/assets.json \
   --out runs/<my-run>/composed.mp4

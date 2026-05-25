@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from astrid.packs.builtin.iteration_video import run as iteration_video
+from astrid.packs.builtin.orchestrators.iteration_video import run as iteration_video
 from astrid.threads.attribute import AttributionDecision, infer_lineage_thread_id
 from astrid.threads.cli import main as thread_cli
 from astrid.threads.index import ThreadIndexStore
@@ -125,7 +125,7 @@ def test_dogfood_fixture_render_handoff_outputs_sidecar_report_and_no_cut(tmp_pa
     assert {item["variant_meta"]["target_run_id"] for item in artifacts} == {TARGET_RUN_ID}
     assert all(item["variant_meta"]["fallback_diagnostics"] for item in artifacts)
 
-    orchestrator = _read_json(Path("astrid/packs/builtin/iteration_video/orchestrator.yaml"))
+    orchestrator = _read_json(Path("astrid/packs/builtin/orchestrators/iteration_video/orchestrator.yaml"))
     assert orchestrator["child_executors"] == ["iteration.prepare", "iteration.assemble", "builtin.render"]
     assert "builtin.cut" not in json.dumps(orchestrator)
 

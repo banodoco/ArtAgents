@@ -8,7 +8,7 @@ Pre-step verified the inspect output shape for builtin.generate_image:
   _capability: { canonical_id, kind, name, safety: { network, ... } }
   inputs: [{ name, type, required, description, ... }]
   outputs: [{ name, description, type, mode, path_template }]
-  command.argv: ["{python_exec}", "-m", "astrid.packs.builtin.generate_image.run", ...]
+  command.argv: ["{python_exec}", "-m", "astrid.packs.builtin.executors.generate_image.run", ...]
 """
 
 from __future__ import annotations

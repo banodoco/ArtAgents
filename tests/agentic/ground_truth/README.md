@@ -34,7 +34,7 @@ Three representative scenarios, picked to cover the three failure-mode
 families the rubric is most likely to confuse:
 
 1. **specific_transcribe** — canonical-path-heavy. The agent's report
-   sounds successful but quotes `python3 -m astrid.packs.builtin.transcribe.run`
+   sounds successful but quotes `python3 -m astrid.packs.builtin.executors.transcribe.run`
    in the dry-run step, raising the question of whether the final
    invocation went via the canonical CLI. Tests whether the assessor
    distinguishes "discovered canonically" from "invoked canonically".

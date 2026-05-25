@@ -13,6 +13,7 @@ from .plan_template import (
     repeat_for_each_items,
     repeat_until,
 )
+from .plan_v2 import PlanStep, PlanV2, build_step_command, make_produces
 from .registry import (
     OrchestratorRegistry,
     OrchestratorRegistryError,
@@ -28,6 +29,11 @@ from .runner import (
     OrchestratorRunnerError,
     build_orchestrator_command,
     run_orchestrator,
+)
+from .runtime import (
+    OrchestratorRuntimeResolutionError,
+    resolve_orchestrator_runtime,
+    resolve_python_module_from_file,
 )
 from .schema import (
     CachePolicy,
@@ -56,15 +62,19 @@ __all__ = [
     "OrchestratorRunRequest",
     "OrchestratorRunResult",
     "OrchestratorRunnerError",
+    "OrchestratorRuntimeResolutionError",
     "OrchestratorSpec",
     "OrchestratorValidationError",
     "Output",
+    "PlanStep",
+    "PlanV2",
     "Port",
     "RuntimeSpec",
     "build_orchestrator_command",
     "build_group_template",
     "build_leaf_template",
     "build_plan_template",
+    "build_step_command",
     "cost_entry",
     "emit_plan_json",
     "file_output",
@@ -77,6 +87,8 @@ __all__ = [
     "repeat_for_each_from",
     "repeat_for_each_items",
     "repeat_until",
+    "resolve_orchestrator_runtime",
+    "resolve_python_module_from_file",
     "run_orchestrator",
     "to_capability_handle",
     "validate_orchestrator_definition",

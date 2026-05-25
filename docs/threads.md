@@ -58,7 +58,7 @@ and health-smell lines are not active user-facing runtime behavior.
 Before rendering an iteration video, inspect the lineage:
 
 ```bash
-python3 -m astrid.packs.builtin.iteration_video.run inspect <lineage-id-or-active>
+python3 -m astrid.packs.builtin.orchestrators.iteration_video.run inspect <lineage-id-or-active>
 ```
 
 Inspect does not render and does not dispatch summarization. It reports detected

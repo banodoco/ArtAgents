@@ -77,6 +77,7 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("projects", "default"),
     ("sessions", "ls"),
     ("sessions", "takeover"),
+    ("packs",),
 )
 _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
@@ -264,15 +265,15 @@ def _dispatch(raw: list[str]) -> int:
         from .core.task.claim import cmd_unclaim
         return cmd_unclaim(raw[1:])
     if raw and raw[0] == "publish":
-        from .packs.builtin.publish import run as publish
+        from .packs.builtin.executors.publish import run as publish
 
         return publish.main(raw[1:])
     if raw and raw[0] == "publish-youtube":
-        from .packs.upload.youtube import run as publish_youtube
+        from .packs.upload.executors.youtube import run as publish_youtube
 
         return publish_youtube.main(raw[1:])
     if raw and raw[0] == "upload-youtube":
-        from .packs.upload.youtube import run as publish_youtube
+        from .packs.upload.executors.youtube import run as publish_youtube
 
         return publish_youtube.main(raw[1:])
     if raw and raw[0] == "skills":
@@ -336,7 +337,7 @@ def _dispatch(raw: list[str]) -> int:
     if raw and raw[0] == "events":
         return _dispatch_events(raw[1:])
     if raw and raw[0] == "reigh-data":
-        from .packs.builtin.reigh_data import run as reigh_data
+        from .packs.builtin.executors.reigh_data import run as reigh_data
 
         return reigh_data.main(raw[1:])
     if raw and raw[0] == "worker":
