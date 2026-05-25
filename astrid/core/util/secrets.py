@@ -50,27 +50,16 @@ def candidate_env_files(
     else:
         candidates.extend(
             [
-                Path.cwd() / "this.env",
                 Path.cwd() / ".env",
-                Path(__file__).resolve().parent / "this.env",
                 Path(__file__).resolve().parent / ".env",
-                repo_root / "this.env",
                 repo_root / ".env",
-                workspace / "this.env",
                 workspace / ".env",
-                workspace / "reigh-app" / "this.env",
                 workspace / "reigh-app" / ".env",
-                workspace / "reigh-worker" / "this.env",
                 workspace / "reigh-worker" / ".env",
-                workspace / "reigh-worker-orchestrator" / "this.env",
                 workspace / "reigh-worker-orchestrator" / ".env",
-                Path.home() / "this.env",
                 Path.home() / ".env",
-                Path.home() / ".codex" / "this.env",
                 Path.home() / ".codex" / ".env",
-                Path.home() / ".claude" / "this.env",
                 Path.home() / ".claude" / ".env",
-                Path.home() / ".hermes" / "this.env",
                 Path.home() / ".hermes" / ".env",
             ]
         )

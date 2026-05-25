@@ -13,7 +13,28 @@
 // `setTimelineTheme` ARE exported by the local package and are the canonical
 // authoring API.
 
-import {addClip, moveClip, setTimelineTheme} from '@banodoco/timeline-ops';
+let addClip, moveClip, setTimelineTheme;
+
+try {
+  ({addClip, moveClip, setTimelineTheme} = await import('@banodoco/timeline-ops'));
+} catch (cause) {
+  const msg = [
+    '@banodoco/timeline-ops is not installed. This is an optional private package.',
+    '',
+    'It is required only for the `npm run ops` bridge used by AA edit verbs.',
+    'To install it:',
+    '  1. Clone or locate the sibling banodoco-workspace repository.',
+    '  2. cd <banodoco-workspace>/packages/timeline-ops',
+    '  3. npm install && npm run build',
+    '  4. npm link (from this directory) or copy into node_modules/@banodoco/timeline-ops',
+    '',
+    'See the _private_packages section in package.json for full details.',
+    'If you do not need timeline-authoring ops, this script is safe to ignore.',
+    `Underlying error: ${cause?.message ?? cause}`,
+  ].join('\n');
+  process.stderr.write(`${msg}\n`);
+  process.exit(2);
+}
 
 const SUPPORTED_OPS = new Set(['add-clip', 'move-clip', 'set-theme']);
 

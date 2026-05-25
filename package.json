@@ -7,8 +7,14 @@
     "ops": "node scripts/node/ops_helper.mjs",
     "fixtures": "node scripts/node/export_fixtures.mjs"
   },
-  "dependencies": {
-    "@banodoco/timeline-ops": "file:/Users/peteromalley/Documents/banodoco-workspace/packages/timeline-ops",
-    "@banodoco/timeline-schema": "file:/Users/peteromalley/Documents/banodoco-workspace/packages/timeline-schema"
+  "_private_packages": {
+    "@banodoco/timeline-ops": {
+      "description": "Optional private package for timeline authoring primitives (addClip, moveClip, setTimelineTheme). Required only for the `npm run ops` bridge used by AA edit verbs.",
+      "install_note": "Install from the sibling banodoco-workspace repository: cd <path-to-banodoco-workspace>/packages/timeline-ops && npm install && npm run build, then `npm link` or copy into node_modules/@banodoco/timeline-ops."
+    },
+    "@banodoco/timeline-schema": {
+      "description": "Optional private package providing the Zod-schema-validated timeline config shape. Required by @banodoco/timeline-ops as a peer dependency.",
+      "install_note": "Install from the sibling banodoco-workspace repository: cd <path-to-banodoco-workspace>/packages/timeline-schema && npm install && npm run build, then `npm link` or copy into node_modules/@banodoco/timeline-schema."
+    }
   }
 }

@@ -1,0 +1,31 @@
+{
+  "tool": "ruff",
+  "scope": [
+    "astrid",
+    "scripts/reshape",
+    "tests/reshape",
+    "tests/concurrency/two_tab_harness.py",
+    "tests/concurrency/test_two_tab_harness_smoke.py"
+  ],
+  "command": [
+    "python3",
+    "-m",
+    "ruff",
+    "check",
+    ".",
+    "--output-format",
+    "json"
+  ],
+  "finding_count": 1003,
+  "code_counts": {
+    "E402": 609,
+    "I001": 236,
+    "F401": 105,
+    "F821": 19,
+    "F541": 18,
+    "F841": 11,
+    "F811": 2,
+    "E702": 2,
+    "F402": 1
+  }
+}

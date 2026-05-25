@@ -101,6 +101,36 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             self.assertEqual(pipeline.main(["upload-youtube", "--help"]), 53)
             youtube_main.assert_called_once_with(["--help"])
 
+    def test_unknown_command_exits_2_with_message(self) -> None:
+        """T7: unknown non-flag command prints to stderr and exits 2."""
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                pipeline.main(["boguscmd"])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertIn("astrid: unknown command 'boguscmd'", stderr.getvalue())
+
+    def test_flag_style_invocation_still_passes_through(self) -> None:
+        """T7: --prefixed args pass through to default brief orchestrator."""
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch(
+                "astrid.pipeline._run_default_brief_orchestrator",
+                return_value=42,
+            ) as mock_fallback,
+        ):
+            exit_code = pipeline.main(["--brief", "some brief text"])
+            self.assertEqual(exit_code, 42)
+            mock_fallback.assert_called_once_with(["--brief", "some brief text"])
+
     def test_package_is_executable(self) -> None:
         import runpy
 

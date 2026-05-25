@@ -1,7 +1,50 @@
+[project]
+name = "astrid"
+version = "0.1.0"
+description = "A harness toolkit for agents and humans to make art"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.55,<3",
+    "scenedetect[opencv-headless]==0.6.4",
+    "anthropic>=0.40.0",
+    "google-genai>=1.15.0",
+    "filelock>=3.13",
+    "PyYAML>=6.0",
+    "jsonschema>=4.0",
+    "pillow>=10.0",
+    "fal-client>=0.7.0",
+    "xxhash>=3.4",
+    "PyJWT[crypto]>=2.8",
+    # pyannote.audio is intentionally excluded from core metadata.
+    # It is an optional/heavy dependency; install separately if needed.
+    # "pyannote.audio==3.3.2",
+    #
+    # runpod-lifecycle is a private/local dependency not published to PyPI.
+    # It lives in a sibling repo: /Users/peteromalley/Documents/reigh-workspace/runpod-lifecycle
+    # Install it locally before running RunPod executors:
+    #   pip install -e /Users/peteromalley/Documents/reigh-workspace/runpod-lifecycle
+    # The pack-level requirements.txt at astrid/packs/runpod/executors/session/requirements.txt
+    # pins runpod-lifecycle>=0.3 for pack consumers.
+    # "runpod-lifecycle>=0.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy==1.17.0",
+    "pytest==9.0.2",
+    "ruff==0.12.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["astrid*"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Evidence: advisory lint scope was introduced in 7d343bc with only reshape/concurrency paths.
+# Inference: astrid/ was left out to keep the initial S0 gate narrow while known backlog remained.
 include = [
+    "astrid/**/*.py",
     "scripts/reshape/**/*.py",
     "tests/reshape/**/*.py",
     "tests/concurrency/two_tab_harness.py",
@@ -13,7 +56,9 @@ select = ["E4", "E7", "E9", "F", "I"]
 
 [tool.mypy]
 python_version = "3.11"
-files = ["scripts/reshape"]
+# Evidence: 7d343bc created this config with files = ["scripts/reshape"] alongside the first advisory CI gate.
+# Inference: core astrid typing was intentionally excluded at that point rather than accidentally omitted.
+files = ["astrid", "scripts/reshape"]
 follow_imports = "skip"
 ignore_missing_imports = true
 namespace_packages = true

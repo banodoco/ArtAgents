@@ -344,6 +344,9 @@ def _dispatch(raw: list[str]) -> int:
         from .core.worker import banodoco_worker
 
         return banodoco_worker.main(raw[1:])
+    if raw and not raw[0].startswith("--"):
+        print(f"astrid: unknown command '{raw[0]}'", file=sys.stderr)
+        raise SystemExit(2)
     return _run_default_brief_orchestrator(raw)
 
 
@@ -789,8 +792,8 @@ Usage:
   python3 -m astrid runpod sweep [--hard] [--dry-run] [--projects-root PATH]
   python3 -m astrid runpod volumes ls
   python3 -m astrid runpod ensure-storage <name> [--size <GB>] [--datacenter <id>]
-  python3 -m astrid --video SRC --brief BRIEF --out runs/name [--render]
-  python3 -m astrid --brief BRIEF --out runs/name --target-duration SECONDS [--render]
+  python3 -m astrid --video SRC --brief BRIEF --out out/runs/name [--render]
+  python3 -m astrid --brief BRIEF --out out/runs/name --target-duration SECONDS [--render]
 Start here:
   python3 -m astrid status
   python3 -m astrid attach [<project>]

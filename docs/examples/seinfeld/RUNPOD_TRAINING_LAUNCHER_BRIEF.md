@@ -44,7 +44,6 @@ These items were identified as gaps after the initial brief was written. The pla
 ### Operational quality (will frustrate without these)
 
 5. **`.env` auto-loading**: Pre-flight validation should auto-source the first available of:
-   - `$PWD/.env.local`
    - `$PWD/.env`
    - `/Users/peteromalley/Documents/reigh-workspace/runpod-lifecycle/.env`
    - `~/.config/astrid/.env`
