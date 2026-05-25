@@ -253,13 +253,47 @@ python3 -m astrid packs list --show-hidden
 python3 -m astrid packs status --show-hidden
 
 # Inspect always works for any pack (hidden or visible)
-python3 -m astrid packs inspect text_review
+python3 -m astrid packs inspect upload
 ```
 
-The `text_review` pack is hidden by default. Its capabilities
-(`text_review.clip_extract` and `text_review.file_audit`) are excluded from
-default capability discovery but remain discoverable through hidden-pack
-paths (e.g., `packs inspect text_review`, `packs list --show-hidden`).
+### Example Packs vs. Runtime Packs
+
+Not every pack directory in the repository is a runtime-discovered pack:
+
+- **`astrid/packs/`** — Runtime packs. Discovered by `packs list`, `packs status`,
+  and capability searches. Currently: `builtin`, `external`, `iteration`,
+  `media`, `upload`, plus the dynamically-created `local` scratch pack.
+
+- **`examples/packs/`** — Teaching packs. These are committed reference examples
+  that demonstrate pack authoring patterns (multi-step pipelines, agent-attested
+  workflows, element components). They are **not** runtime-discovered — you will
+  not see them in `packs list` output even with `--show-hidden`. Validate them
+  with `packs validate`:
+
+  ```bash
+  python3 -m astrid packs validate examples/packs/minimal
+  python3 -m astrid packs validate examples/packs/file_summarizer
+  ```
+
+  The example packs are: `minimal` (canonical external-pack contract),
+  `media` (pack with elements and schemas), `file_summarizer` (multi-step text
+  pipeline), `text_digest` (agent-in-the-loop text pipelines), and `text_review`
+  (machine summary + agent verdict workflow).
+
+### Canonical Clip Extraction
+
+The canonical product clip extraction executor is `media.clip_extract`. It
+lives in `astrid/packs/media/executors/clip_extract/` and appears in runtime
+discovery as `media.clip_extract`:
+
+```bash
+python3 -m astrid executors search clip_extract
+```
+
+The former scaffold-only packs `clip_tools` and `video_tools` (which contained
+duplicate `clip_extract` scaffolding) have been removed. The example packs in
+`examples/packs/` no longer carry `clip_extract` executor artifacts — they
+demonstrate text-processing workflows, not media extraction.
 
 ## Defaults for Unspecified Fields
 

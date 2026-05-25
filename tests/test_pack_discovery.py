@@ -123,10 +123,15 @@ class PackDiscoveryTest(unittest.TestCase):
         executor_registry = load_executor_registry()
         orchestrator_registry = load_orchestrator_registry(executor_registry=executor_registry)
 
-        self.assertGreaterEqual(len(executor_registry.list()), 52)
+        self.assertGreaterEqual(len(executor_registry.list()), 51)
         self.assertGreaterEqual(len(orchestrator_registry.list()), 5)
         self.assertIn("builtin.cut", executor_registry.as_mapping())
         self.assertIn("external.moirae", executor_registry.as_mapping())
+        self.assertIn("media.clip_extract", executor_registry.as_mapping())
+        self.assertEqual(
+            sorted(executor.id for executor in executor_registry.list() if "clip_extract" in executor.id),
+            ["media.clip_extract"],
+        )
         self.assertIn("builtin.hype", orchestrator_registry.as_mapping())
 
     def test_canonical_content_roots_are_used_for_discovery(self) -> None:
