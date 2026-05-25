@@ -232,5 +232,530 @@ support: core
             self.assertEqual(pack.domain, "finance")
 
 
+class PackAliasSchemaTest(unittest.TestCase):
+    def _write_pack(self, root: Path, body: str, *, folder: str = "builtin") -> Path:
+        pack_root = root / folder
+        pack_root.mkdir(parents=True)
+        (pack_root / "pack.yaml").write_text(
+            body + ("\n" if not body.endswith("\n") else ""), encoding="utf-8"
+        )
+        return pack_root
+
+    # ------------------------------------------------------------------
+    # Valid alias arrays
+    # ------------------------------------------------------------------
+
+    def test_valid_executor_alias_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.legacy_cut
+    canonical_id: builtin.cut
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(len(pack.aliases), 1)
+            self.assertEqual(pack.aliases[0]["kind"], "executor")
+            self.assertEqual(pack.aliases[0]["alias"], "builtin.legacy_cut")
+            self.assertEqual(pack.aliases[0]["canonical_id"], "builtin.cut")
+            self.assertNotIn("deprecated", pack.aliases[0])
+
+    def test_valid_orchestrator_alias_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: orchestrator
+    alias: builtin.legacy_hype
+    canonical_id: builtin.hype
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(len(pack.aliases), 1)
+            self.assertEqual(pack.aliases[0]["kind"], "orchestrator")
+
+    def test_multiple_aliases_load(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.a1
+    canonical_id: builtin.real1
+  - kind: executor
+    alias: builtin.a2
+    canonical_id: builtin.real2
+  - kind: orchestrator
+    alias: builtin.a3
+    canonical_id: builtin.real3
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(len(pack.aliases), 3)
+            kinds = [a["kind"] for a in pack.aliases]
+            self.assertEqual(kinds, ["executor", "executor", "orchestrator"])
+
+    def test_aliases_not_present_defaults_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(Path(tmp), "id: builtin\n")
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.aliases, ())
+
+    def test_aliases_null_defaults_to_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                "schema_version: 1\nid: builtin\naliases:\n",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.aliases, ())
+
+    def test_aliases_empty_array_loads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                "schema_version: 1\nid: builtin\naliases: []\n",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.aliases, ())
+
+    def test_alias_with_full_deprecation_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.old
+    canonical_id: builtin.new
+    deprecated: true
+    deprecation_message: "Use builtin.new instead."
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(len(pack.aliases), 1)
+            self.assertEqual(pack.aliases[0]["deprecated"], True)
+            self.assertEqual(
+                pack.aliases[0]["deprecation_message"], "Use builtin.new instead."
+            )
+
+    # ------------------------------------------------------------------
+    # Missing/invalid fields
+    # ------------------------------------------------------------------
+
+    def test_aliases_not_array_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                "schema_version: 1\nid: builtin\naliases: not_an_array\n",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be an array"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_aliases_string_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                'schema_version: 1\nid: builtin\naliases: "string"\n',
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be an array"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_entry_not_object_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                "schema_version: 1\nid: builtin\naliases:\n  - just_a_string\n",
+            )
+            with self.assertRaisesRegex(PackValidationError, r"pack\.aliases\[0\] must be an object"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_missing_kind_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - alias: builtin.x
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\\[0\\].kind"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_missing_alias_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\\[0\\].alias"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_missing_canonical_id_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\\[0\\].canonical_id"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_empty_string_alias_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: ""
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be a non-empty"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_empty_string_canonical_id_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: ""
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be a non-empty"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Unknown alias keys
+    # ------------------------------------------------------------------
+
+    def test_alias_unknown_key_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: builtin.y
+    extra_field: true
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "has unknown field"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_multiple_unknown_keys_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: builtin.y
+    foo: 1
+    bar: 2
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "bar, foo"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Invalid kind
+    # ------------------------------------------------------------------
+
+    def test_alias_invalid_kind_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: invalid_kind
+    alias: builtin.x
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "kind must be one of"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_kind_element_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: element
+    alias: builtin.x
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "kind must be one of"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_kind_numeric_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: 42
+    alias: builtin.x
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaises(PackValidationError):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Unqualified ids
+    # ------------------------------------------------------------------
+
+    def test_alias_unqualified_alias_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: bare_name
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be qualified as"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_unqualified_canonical_id_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: bare_name
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be qualified as"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_trailing_dot_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be qualified as"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_leading_dot_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: .builtin
+    canonical_id: builtin.y
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "must be qualified as"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Bad deprecation metadata types
+    # ------------------------------------------------------------------
+
+    def test_alias_deprecated_not_bool_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: builtin.y
+    deprecated: "yes"
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "deprecated must be a boolean"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_deprecated_integer_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: builtin.y
+    deprecated: 1
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "deprecated must be a boolean"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_deprecation_message_not_string_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: builtin.y
+    deprecation_message: 123
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "deprecation_message must be a string"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_alias_deprecation_message_boolean_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.x
+    canonical_id: builtin.y
+    deprecation_message: true
+""",
+            )
+            with self.assertRaisesRegex(PackValidationError, "deprecation_message must be a string"):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Serialization through PackDefinition.to_dict()
+    # ------------------------------------------------------------------
+
+    def test_aliases_serialize_in_to_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.old
+    canonical_id: builtin.new
+    deprecated: true
+    deprecation_message: Migrated
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            payload = pack.to_dict()
+            self.assertIn("aliases", payload)
+            self.assertEqual(len(payload["aliases"]), 1)
+            self.assertEqual(payload["aliases"][0]["kind"], "executor")
+            self.assertEqual(payload["aliases"][0]["alias"], "builtin.old")
+            self.assertEqual(payload["aliases"][0]["canonical_id"], "builtin.new")
+            self.assertEqual(payload["aliases"][0]["deprecated"], True)
+            self.assertEqual(payload["aliases"][0]["deprecation_message"], "Migrated")
+
+    def test_aliases_not_in_to_dict_when_empty(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(Path(tmp), "id: builtin\n")
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            payload = pack.to_dict()
+            self.assertNotIn("aliases", payload)
+
+    def test_aliases_round_trip_through_to_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.alpha
+    canonical_id: builtin.beta
+  - kind: orchestrator
+    alias: builtin.gamma
+    canonical_id: builtin.delta
+    deprecated: false
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            payload = pack.to_dict()
+            self.assertEqual(len(payload["aliases"]), 2)
+            # First alias (no deprecation)
+            self.assertNotIn("deprecated", payload["aliases"][0])
+            # Second alias (deprecated: false is present)
+            self.assertIn("deprecated", payload["aliases"][1])
+            self.assertEqual(payload["aliases"][1]["deprecated"], False)
+
+    def test_aliases_preserved_through_discovery_path(self) -> None:
+        """Verify _pack_definition_for_discovery preserves identical aliases."""
+        with tempfile.TemporaryDirectory() as tmp:
+            from astrid.packs.validate import PackValidator
+
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+aliases:
+  - kind: executor
+    alias: builtin.old
+    canonical_id: builtin.new
+    deprecated: true
+    deprecation_message: Migrated
+""",
+            )
+            pack_direct = load_pack_manifest(pack_manifest_path(pack_root))
+            validator = PackValidator(pack_root)
+            validator._pack_data = validator._load_yaml(pack_root / "pack.yaml")
+            pack_discovery = validator._pack_definition_for_discovery({})
+            self.assertEqual(pack_direct.aliases, pack_discovery.aliases)
+            self.assertEqual(
+                pack_direct.to_dict()["aliases"],
+                pack_discovery.to_dict()["aliases"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

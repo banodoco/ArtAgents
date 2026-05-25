@@ -45,6 +45,30 @@
     "metadata": {
       "type": "object"
     },
+    "aliases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "alias", "canonical_id"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["executor", "orchestrator"]
+          },
+          "alias": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+          },
+          "canonical_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+          },
+          "deprecated": {"type": "boolean"},
+          "deprecation_message": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
     "secrets": {
       "type": "array",
       "items": {

@@ -756,5 +756,754 @@ runtime:
         )
 
 
+class TestPackLevelAliases(MinimalPackTestCase):
+    """Top-level pack alias validation through validate_pack() and PackValidator."""
+
+    def test_valid_pack_with_aliases_passes_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_executor(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_pack_alias_unknown_key_fails_validation(self) -> None:
+        """An alias with extra keys fails JSON schema validation
+        because pack.json has additionalProperties: false on alias items."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+    extra_field: true
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("extra_field", "additionalproperties", "unknown field")
+            ),
+            f"Expected schema error about extra field, got: {errors}",
+        )
+
+    def test_pack_alias_unqualified_alias_fails_schema(self) -> None:
+        """An unqualified alias value fails the JSON schema pattern check."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: bare_name
+    canonical_id: test_pack.test_exec
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(term in error_text.lower() for term in ("pattern", "bare_name")),
+            f"Expected schema pattern error for unqualified alias, got: {errors}",
+        )
+
+    def test_pack_alias_invalid_kind_fails_schema(self) -> None:
+        """An invalid kind value fails JSON schema enum check."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: invalid
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            "kind" in error_text.lower()
+            and any(t in error_text.lower() for t in ("enum", "invalid", "not valid")),
+            f"Expected schema enum error for kind, got: {errors}",
+        )
+
+    def test_pack_alias_missing_required_fields_fails_schema(self) -> None:
+        """Missing required alias fields fail JSON schema validation."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(t in error_text.lower() for t in ("required", "alias", "canonical_id")),
+            f"Expected required field error, got: {errors}",
+        )
+
+    def test_pack_alias_not_array_fails_schema(self) -> None:
+        """aliases as string fails JSON schema type check."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases: not_an_array
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(t in error_text.lower() for t in ("array", "type", "aliases")),
+            f"Expected type error for aliases, got: {errors}",
+        )
+
+    def test_discovery_preserves_pack_aliases(self) -> None:
+        """_pack_definition_for_discovery preserves aliases from pack data."""
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.old_name
+    canonical_id: test_pack.new_name
+    deprecated: true
+    deprecation_message: Moved
+""",
+        )
+        _write(root / "AGENTS.md", "# Test")
+        _write(root / "README.md", "# Test")
+        validator = PackValidator(root)
+        validator._pack_data = validator._load_yaml(root / "pack.yaml")
+        pack = validator._pack_definition_for_discovery({"executors": "executors"})
+        self.assertEqual(len(pack.aliases), 1)
+        self.assertEqual(pack.aliases[0]["kind"], "executor")
+        self.assertEqual(pack.aliases[0]["alias"], "test_pack.old_name")
+        self.assertEqual(pack.aliases[0]["canonical_id"], "test_pack.new_name")
+        self.assertEqual(pack.aliases[0]["deprecated"], True)
+        self.assertEqual(pack.aliases[0]["deprecation_message"], "Moved")
+
+    def test_pack_alias_duplicate_alias_same_kind_fails_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.other_exec
+""",
+        )
+        self.write_valid_executor(root, "executors/other_exec", "test_pack.other_exec")
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(any("duplicates existing executor alias" in error for error in errors), errors)
+
+    def test_pack_alias_duplicate_alias_across_kinds_is_allowed(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_executor(root)
+        orch_dir = root / "orchestrators" / "test_orch"
+        _write(
+            orch_dir / "orchestrator.yaml",
+            """schema_version: 1
+id: test_pack.test_orch
+name: Test Orchestrator
+version: 0.1.0
+runtime:
+  kind: command
+  command:
+    argv: ["python3", "run.py"]
+""",
+        )
+        _write(orch_dir / "run.py", "print('ok')\n")
+        _write(orch_dir / "STAGE.md", "# Test Orchestrator\n")
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+  - kind: orchestrator
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_orch
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_pack_alias_cycle_fails_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.alias_one
+    canonical_id: test_pack.alias_two
+  - kind: executor
+    alias: test_pack.alias_two
+    canonical_id: test_pack.alias_one
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(any("alias cycle detected" in error for error in errors), errors)
+
+    def test_pack_alias_missing_local_target_fails_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.missing_exec
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(any("unknown executor id 'test_pack.missing_exec'" in error for error in errors), errors)
+
+    def test_pack_alias_qualified_cross_pack_target_is_allowed(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: external.remote_exec
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    # -- non-object shapes inside the aliases array -----------------------
+
+    def test_pack_alias_string_entry_in_array_fails(self) -> None:
+        """A bare string inside the aliases array is not an object."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - just_a_string
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("object", "type", "string", "must be")
+            ),
+            f"Expected error about non-object alias entry, got: {errors}",
+        )
+
+    def test_pack_alias_number_entry_in_array_fails(self) -> None:
+        """A bare number inside the aliases array is not an object."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - 42
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("object", "type", "number", "must be")
+            ),
+            f"Expected error about non-object alias entry, got: {errors}",
+        )
+
+    def test_pack_alias_null_entry_in_array_fails(self) -> None:
+        """A null inside the aliases array is not an object."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - null
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("object", "type", "null", "must be")
+            ),
+            f"Expected error about non-object alias entry, got: {errors}",
+        )
+
+    # -- invalid deprecation metadata ------------------------------------
+
+    def test_pack_alias_deprecated_non_bool_string_fails(self) -> None:
+        """deprecated must be a boolean, not a string."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+    deprecated: "yes"
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("deprecated", "boolean", "string", "type")
+            ),
+            f"Expected error about non-boolean deprecated, got: {errors}",
+        )
+
+    def test_pack_alias_deprecated_non_bool_int_fails(self) -> None:
+        """deprecated must be a boolean, not an integer."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+    deprecated: 1
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("deprecated", "boolean", "integer", "type")
+            ),
+            f"Expected error about non-boolean deprecated, got: {errors}",
+        )
+
+    def test_pack_alias_deprecation_message_non_string_int_fails(self) -> None:
+        """deprecation_message must be a string, not an integer."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+    deprecated: true
+    deprecation_message: 123
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("deprecation_message", "string", "integer", "type")
+            ),
+            f"Expected error about non-string deprecation_message, got: {errors}",
+        )
+
+    def test_pack_alias_deprecation_message_non_string_bool_fails(self) -> None:
+        """deprecation_message must be a string, not a boolean."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases:
+  - kind: executor
+    alias: test_pack.legacy
+    canonical_id: test_pack.test_exec
+    deprecated: true
+    deprecation_message: true
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        error_text = " ".join(errors)
+        self.assertTrue(
+            any(
+                term in error_text.lower()
+                for term in ("deprecation_message", "string", "boolean", "type")
+            ),
+            f"Expected error about non-string deprecation_message, got: {errors}",
+        )
+
+    # -- empty aliases array ---------------------------------------------
+
+    def test_pack_alias_empty_array_passes(self) -> None:
+        """An empty aliases array is valid (no aliases declared)."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+aliases: []
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+
+class TestLegacyComponentMetadataAliases(MinimalPackTestCase):
+    """Legacy component-level metadata.aliases validation (separate from top-level pack aliases)."""
+
+    def test_legacy_alias_targets_must_exist(self) -> None:
+        """Legacy metadata.aliases pointing to unknown capability ids fail."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors" / "test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+metadata:
+  aliases:
+    - canonical_id: test_pack.missing
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any("unknown capability id" in error for error in errors), errors
+        )
+
+    def test_legacy_alias_string_target_must_exist(self) -> None:
+        """Legacy string-form metadata.aliases must resolve to known capability ids."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors" / "test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+metadata:
+  aliases:
+    - test_pack.missing
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any("unknown capability id" in error for error in errors), errors
+        )
+
+    def test_legacy_alias_must_be_string_or_object(self) -> None:
+        """Legacy metadata.aliases entries must be strings or objects, not numbers."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors" / "test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+metadata:
+  aliases:
+    - 42
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any(
+                t in " ".join(errors).lower()
+                for t in ("string or object", "must be")
+            ),
+            f"Expected error about non-string/non-object alias, got: {errors}",
+        )
+
+    def test_legacy_alias_must_declare_canonical_id(self) -> None:
+        """Legacy object-form metadata.aliases must declare canonical_id."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors" / "test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+metadata:
+  aliases:
+    - description: "no canonical_id here"
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any("must declare canonical_id" in error for error in errors), errors
+        )
+
+    def test_legacy_alias_metadata_not_array_fails(self) -> None:
+        """Legacy metadata.aliases must be an array."""
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors" / "test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+runtime:
+  type: python-cli
+  entrypoint: run.py
+metadata:
+  aliases: not_an_array
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any("must be an array" in error for error in errors), errors
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

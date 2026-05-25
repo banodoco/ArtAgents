@@ -6,7 +6,10 @@ validates alias graphs for cycles, and tracks deprecated aliases.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
+
 from astrid.contracts.schema import AliasRecord
+from astrid.core.pack import PackAliasKind, PackDefinition
 
 
 class AliasResolutionError(ValueError):
@@ -40,6 +43,7 @@ class AliasResolver:
         *,
         deprecated: bool = False,
         deprecation_message: str = "",
+        source_pack_id: str = "",
     ) -> None:
         """Register *alias* as a public name for *canonical_id*.
 
@@ -56,6 +60,7 @@ class AliasResolver:
             canonical_id=canonical_id,
             deprecated=deprecated,
             deprecation_message=deprecation_message,
+            source_pack_id=source_pack_id,
         )
 
         # Snapshot current state so we can roll back on cycle detection.
@@ -74,7 +79,7 @@ class AliasResolver:
     def register_pack_aliases(
         self,
         pack_id: str,
-        aliases: list[dict[str, str | bool]],
+        aliases: Iterable[Mapping[str, object]],
     ) -> None:
         """Register every alias declared by *pack_id* from a list of raw dicts.
 
@@ -94,6 +99,7 @@ class AliasResolver:
                 canonical_id=str(canonical_id),
                 deprecated=bool(entry.get("deprecated", False)),
                 deprecation_message=str(entry.get("deprecation_message", "")),
+                source_pack_id=pack_id,
             )
 
     # ------------------------------------------------------------------
@@ -169,6 +175,10 @@ class AliasResolver:
         """Return ``True`` if *value* is a registered alias."""
         return value in self._aliases
 
+    def get_record(self, alias: str) -> AliasRecord | None:
+        """Return the ``AliasRecord`` for *alias*, or ``None`` if not registered."""
+        return self._aliases.get(alias)
+
 
 def create_shared_alias_resolver() -> AliasResolver:
     """Factory that returns a fresh ``AliasResolver`` instance.
@@ -180,9 +190,33 @@ def create_shared_alias_resolver() -> AliasResolver:
     return AliasResolver()
 
 
+def extract_pack_aliases(
+    packs: Iterable[PackDefinition],
+    *,
+    kind: PackAliasKind,
+) -> dict[str, list[dict[str, object]]]:
+    """Collect pack-level aliases for a specific capability *kind*.
+
+    Returned values preserve deprecation metadata and annotate each alias entry
+    with its source pack id so the resolver record retains provenance.
+    """
+    aliases_by_pack: dict[str, list[dict[str, object]]] = {}
+    for pack in packs:
+        matching_aliases: list[dict[str, object]] = []
+        for alias in pack.aliases:
+            if alias.get("kind") != kind:
+                continue
+            normalized = dict(alias)
+            normalized["source_pack_id"] = pack.id
+            matching_aliases.append(normalized)
+        if matching_aliases:
+            aliases_by_pack[pack.id] = matching_aliases
+    return aliases_by_pack
+
+
 def _register_pack_aliases(
     resolver: AliasResolver,
-    pack_aliases: dict[str, list[dict[str, str | bool]]],
+    pack_aliases: Mapping[str, Iterable[Mapping[str, object]]],
 ) -> None:
     """Register every pack's declared aliases into *resolver*.
 

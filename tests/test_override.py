@@ -217,7 +217,7 @@ class TestOverrideStoreRegistryIntegration:
             # The override routes builtin.shots → local.shots
             assert result.id == "local.shots"
             assert result.name == "Local Shots"
-            assert result.metadata["override_target"] == "local.shots"
+            assert "override_target" not in result.metadata
 
     def test_executor_registry_get_no_override_returns_winner(self):
         """Without override, get() returns the priority winner."""

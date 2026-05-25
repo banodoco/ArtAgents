@@ -20,6 +20,7 @@ from typing import Any, Optional
 import jsonschema
 from referencing import Registry, Resource
 
+from astrid.core.alias_resolver import AliasResolutionError, AliasResolver
 from astrid.core.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
     ELEMENT_KINDS,
@@ -29,6 +30,7 @@ from astrid.core.pack import (
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
+    _optional_pack_aliases,
     pack_taxonomy_from_manifest,
     pack_manifest_path,
 )
@@ -167,7 +169,16 @@ class PackValidator:
         self.errors = []
         self.warnings = []
         self._capability_locations: dict[str, str] = {}
+        self._pack_capability_locations: dict[str, dict[str, str]] = {
+            "executor": {},
+            "orchestrator": {},
+        }
         self._alias_targets: list[tuple[str, str, str]] = []
+        self._pack_alias_resolvers: dict[str, AliasResolver] = {
+            "executor": AliasResolver(),
+            "orchestrator": AliasResolver(),
+        }
+        self._pack_alias_targets: list[tuple[str, str, str, str]] = []
 
         if (self.pack_root / ".no-pack").exists():
             return self.errors
@@ -213,6 +224,7 @@ class PackValidator:
 
         # Validate component manifests
         self._validate_components(content)
+        self._validate_pack_aliases()
         self._validate_alias_targets()
 
         return self.errors
@@ -470,6 +482,7 @@ class PackValidator:
             content=dict(content),
             metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
             agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
+            aliases=_optional_pack_aliases(data.get("aliases"), path="pack.aliases"),
             **taxonomy,
         )
 
@@ -517,6 +530,8 @@ class PackValidator:
         component_id = data.get("id")
         if isinstance(component_id, str):
             self._register_capability_id(component_id, rel)
+            if manifest_kind in self._pack_capability_locations:
+                self._pack_capability_locations[manifest_kind][component_id] = rel
             self._register_aliases(data, rel)
 
         self._validate_runtime_entrypoints(component_dir, data, manifest_kind, rel)
@@ -702,12 +717,65 @@ class PackValidator:
             else:
                 self.errors.append(f"{relpath}: metadata.aliases[{index}] must be a string or object")
 
+    def _validate_pack_aliases(self) -> None:
+        if self._pack_data is None:
+            return
+        aliases = self._pack_data.get("aliases")
+        if aliases is None:
+            return
+        try:
+            normalized_aliases = _optional_pack_aliases(aliases, path="pack.aliases")
+        except ValueError as exc:
+            self.errors.append(f"pack.yaml: {exc}")
+            return
+
+        for index, alias in enumerate(normalized_aliases):
+            kind = str(alias["kind"])
+            alias_id = str(alias["alias"])
+            canonical_id = str(alias["canonical_id"])
+            resolver = self._pack_alias_resolvers[kind]
+            if resolver.is_alias(alias_id):
+                self.errors.append(
+                    f"pack.yaml: pack.aliases[{index}] duplicates existing {kind} alias {alias_id!r}"
+                )
+                continue
+            try:
+                resolver.register_alias(
+                    alias_id,
+                    canonical_id,
+                    deprecated=bool(alias.get("deprecated", False)),
+                    deprecation_message=str(alias.get("deprecation_message", "")),
+                )
+            except AliasResolutionError as exc:
+                self.errors.append(f"pack.yaml: pack.aliases[{index}] {exc}")
+                continue
+            self._pack_alias_targets.append(
+                ("pack.yaml", f"pack.aliases[{index}]", kind, canonical_id)
+            )
+
+        for relpath, alias_path, kind, target in self._pack_alias_targets:
+            pack_id = target.split(".", 1)[0]
+            if pack_id != self._pack_id():
+                continue
+            if target not in self._pack_capability_locations[kind]:
+                self.errors.append(
+                    f"{relpath}: {alias_path} points to unknown {kind} id {target!r}"
+                )
+
     def _validate_alias_targets(self) -> None:
         for relpath, alias_path, target in self._alias_targets:
             if target not in self._capability_locations:
                 self.errors.append(
                     f"{relpath}: {alias_path} points to unknown capability id {target!r}"
                 )
+
+    def _pack_id(self) -> str:
+        if self._pack_data is None:
+            return self.pack_root.name
+        value = self._pack_data.get("id")
+        if isinstance(value, str) and value.strip():
+            return value
+        return self.pack_root.name
 
     def _rel(self, path: Path) -> str:
         """Return a path relative to the pack root for error messages."""
