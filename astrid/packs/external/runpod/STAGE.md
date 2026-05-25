@@ -60,6 +60,54 @@ Successful `provision`, `exec`, `teardown`, and `session` paths write
 `cost.json` with `amount`, `currency`, and `source`; Astrid also includes a
 local diagnostic `basis` string for auditability.
 
+## Remote-artifact smoke
+
+The task adapter stays provider-neutral. A RunPod smoke step should use the
+generic `remote-artifact` subprocess-plus-manifest contract and put the RunPod
+executor behind the command:
+
+```bash
+python3 -m astrid executors run external.runpod.session \
+  --out "$ASTRID_TASK_PRODUCES_ROOT" \
+  --input gpu_type=NVIDIA_L40S \
+  --input local_root=. \
+  --input remote_root=/workspace \
+  --input remote_script=smoke.sh
+```
+
+Expected manifest/fetch shape:
+
+```json
+{
+  "result.txt": {
+    "path": "result.txt",
+    "source": "/local/pulled/result.txt",
+    "sha256": "<sha256>",
+    "provider": "runpod"
+  }
+}
+```
+
+`path` is relative to the canonical task produces directory, `source` is a
+local fetched file, and `sha256` is verified before the task can complete.
+The fetch state records `fetched`, `missing`, `mismatched`, and computed
+`checksums`; retries are idempotent. If a smoke keeps a pod alive and uses
+`external.runpod.pull`, repeated `remote_path` values must be supplied as
+separate `--input remote_path=...` values so the downstream command emits
+ordered repeated `--remote-path` flags.
+
+Live RunPod validation is opt-in only. Run it only when `RUNPOD_API_KEY` and
+the required RunPod environment are present and spend is approved, for example:
+
+```bash
+ASTRID_LIVE_RUNPOD_SMOKE=1 RUNPOD_API_KEY=... \
+python3 -m pytest tests/packs/runpod/test_manifest_contract.py
+```
+
+Without those variables, CI runs the mocked smoke only: command rendering,
+manifest checksum/fetch behavior, repeated pull paths, and cleanup contract
+documentation are verified without contacting RunPod.
+
 ## Safety net
 
 Run `astrid runpod sweep` to clean up orphaned pods. Default mode is safe

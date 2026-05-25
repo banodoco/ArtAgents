@@ -10,38 +10,40 @@ manifest is missing — prints the compile recovery and returns non-zero.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
-import shlex
 import secrets
+import shlex
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
-from astrid.core.project.jsonio import write_json_atomic
-from astrid.core.project.project import ProjectError, require_project
-from astrid.core.project.run import resolve_required_project_timeline
-from astrid.core.project.schema import build_run_record
-from astrid.core.project.paths import (
-    project_dir,
-    resolve_projects_root,
-    validate_project_slug,
-    validate_run_id,
-)
 from astrid.core.project.current_run import (
     clear_current_run,
     read_current_run,
     read_current_run_state,
     write_current_run,
 )
+from astrid.core.project.jsonio import write_json_atomic
+from astrid.core.project.paths import (
+    project_dir,
+    resolve_projects_root,
+    validate_project_slug,
+    validate_run_id,
+)
+from astrid.core.project.project import ProjectError, require_project
+from astrid.core.project.run import resolve_required_project_timeline
+from astrid.core.project.schema import build_run_record
 from astrid.core.session.lease import (
     release_writer_lease,
     write_lease_init,
 )
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.claim import active_claims_by_step
-from astrid.core.task.env import task_actor_env
+from astrid.core.task.command_render import render_task_command
+from astrid.core.task.env import is_author_test_mode, task_actor_env
 from astrid.core.task.events import (
     EventLogError,
     _run_is_complete,
@@ -49,6 +51,9 @@ from astrid.core.task.events import (
     make_run_aborted_event,
     make_run_completed_event,
     make_run_started_event,
+    make_step_awaiting_fetch_event,
+    make_step_completed_event,
+    make_step_failed_event,
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
@@ -56,13 +61,12 @@ from astrid.core.task.inbox import consume_inbox_entry, pending_count, scan_inbo
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
-    Step,
+    compute_plan_hash,
     is_attested_kind,
     is_code_kind,
     is_group_step,
     is_leaf_step,
     iter_steps_with_path,
-    compute_plan_hash,
     load_plan,
     step_dir_for_path,
 )
@@ -71,7 +75,6 @@ from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.timeline.crud import record_contributing_run
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
-
 
 _AGENT_MD_TEMPLATE = """{preamble}
 
@@ -151,6 +154,45 @@ def _generate_run_id() -> str:
     return f"run-{stamp}-{secrets.token_hex(4)}"
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _hype_project_inputs(proj_root: Path) -> tuple[Path | None, Path | None, Path | None, list[dict[str, str]]]:
+    """Resolve conventional project-local inputs for ``astrid start builtin.hype``.
+
+    ``start`` has no orchestrator-specific argument surface, so the task-mode
+    port uses stable project-root names when present. Missing files are allowed;
+    generated executor commands then omit those inputs just as direct template
+    construction does.
+    """
+    video = proj_root / "source.mp4"
+    if not video.is_file():
+        video = next(iter(sorted(proj_root.glob("*.mp4"))), None)
+    brief = proj_root / "brief.txt"
+    if not brief.is_file():
+        brief = None
+    theme = proj_root / "theme.json"
+    if not theme.is_file():
+        theme = None
+
+    consumes: list[dict[str, str]] = []
+    seen: set[Path] = set()
+    for path in (video, brief, theme):
+        if path is None:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        consumes.append({"source": str(resolved), "sha256": _sha256_file(resolved)})
+    return video, brief, theme, consumes
+
+
 # ---------------------------------------------------------------------------
 # cmd_start
 # ---------------------------------------------------------------------------
@@ -199,20 +241,24 @@ def cmd_start(
         )
         return 1
 
-    packs = _resolve_packs_root(packs_root)
-    build_path = packs / pack / "build" / f"{name}.json"
-    if not build_path.is_file():
-        _print_err(
-            f"start: compiled plan not found at {build_path}; "
-            f"recovery: astrid author compile {args.orchestrator_id}"
-        )
-        return 1
+    uses_dynamic_hype_plan = args.orchestrator_id == "builtin.hype" and not is_author_test_mode()
+    if uses_dynamic_hype_plan:
+        compiled_payload: dict[str, Any] = {}
+    else:
+        packs = _resolve_packs_root(packs_root)
+        build_path = packs / pack / "build" / f"{name}.json"
+        if not build_path.is_file():
+            _print_err(
+                f"start: compiled plan not found at {build_path}; "
+                f"recovery: astrid author compile {args.orchestrator_id}"
+            )
+            return 1
 
-    try:
-        compiled_payload = json.loads(build_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        _print_err(f"start: failed to read {build_path}: {exc}")
-        return 1
+        try:
+            compiled_payload = json.loads(build_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _print_err(f"start: failed to read {build_path}: {exc}")
+            return 1
 
     # Resolve timeline ULID (timeline_id) and slug for display.
     timeline_id: str | None = None
@@ -247,8 +293,38 @@ def cmd_start(
             _print_err(f"start: {exc}")
             return 1
 
+    if args.name is not None:
+        try:
+            run_id = validate_run_id(args.name)
+        except Exception as exc:
+            _print_err(f"start: --name {exc}")
+            return 1
+    else:
+        run_id = _generate_run_id()
+
     proj_root = project_dir(slug, root=projects_root)
     proj_root.mkdir(parents=True, exist_ok=True)
+    run_dir = proj_root / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    consumes: list[dict[str, str]] = []
+    if uses_dynamic_hype_plan:
+        try:
+            from astrid.packs.builtin.hype.plan_template import build_plan_v2
+
+            video, brief, theme, consumes = _hype_project_inputs(proj_root)
+            compiled_payload = build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=video,
+                brief=brief,
+                theme=theme,
+                run_id=run_id,
+            )
+        except Exception as exc:
+            _print_err(f"start: failed to build builtin.hype task plan: {exc}")
+            return 1
+
     plan_path = proj_root / "plan.json"
     write_json_atomic(plan_path, compiled_payload)
 
@@ -260,30 +336,22 @@ def cmd_start(
 
     plan_hash = compute_plan_hash(plan_path)
 
-    if args.name is not None:
-        try:
-            run_id = validate_run_id(args.name)
-        except Exception as exc:
-            _print_err(f"start: --name {exc}")
-            return 1
-    else:
-        run_id = _generate_run_id()
-
-    run_dir = proj_root / "runs" / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    run_record = build_run_record(
+        slug,
+        run_id,
+        tool_id=args.orchestrator_id,
+        kind="orchestrator",
+        status="prepared",
+        out=run_dir,
+        argv=["start", *list(argv)],
+        metadata={"plan_hash": plan_hash},
+        timeline_id=timeline_id,
+    )
+    if consumes:
+        run_record["consumes"] = consumes
     write_json_atomic(
         run_dir / "run.json",
-        build_run_record(
-            slug,
-            run_id,
-            tool_id=args.orchestrator_id,
-            kind="orchestrator",
-            status="prepared",
-            out=run_dir,
-            argv=["start", *list(argv)],
-            metadata={"plan_hash": plan_hash},
-            timeline_id=timeline_id,
-        ),
+        run_record,
     )
     record_contributing_run(slug, timeline_id, run_id, root=projects_root)
 
@@ -313,7 +381,6 @@ def cmd_start(
     )
     write_current_run(slug, run_id, root=projects_root)
 
-    events_path = run_dir / "events.jsonl"
     actor = task_actor_env()
     started_by = f"human:{actor}" if actor else None
     with writer_context_for_project(slug, root=projects_root) as writer:
@@ -582,6 +649,7 @@ def render_step_instructions(
     unknown token is left literal (best-effort, never crashes the CLI).
     """
     import os as _os
+
     from astrid.core.task.env import is_author_test_mode as _is_author_test_mode
 
     if text is None:
@@ -1298,6 +1366,8 @@ def cmd_next(
     try:
         from astrid.core.session.binding import (
             SessionBindingError as _SBErr,
+        )
+        from astrid.core.session.binding import (
             is_writer_for,
             resolve_current_session,
         )
@@ -1489,13 +1559,22 @@ def cmd_next(
         print()
 
     if is_code_kind(peek.step):
-        print(f"run: {render_step_instructions(peek.step.command, **_render_kwargs)}")
-        if not _command_has_project_arg(peek.step.command):
+        rendered = render_task_command(
+            peek.step,
+            slug=slug,
+            run_id=run_id,
+            project_root=proj_root,
+            plan_step_path=peek.path_tuple,
+            iteration=peek.iteration,
+            item_id=peek.item_id,
+        )
+        print(f"run: {render_step_instructions(rendered.display_command, **_render_kwargs)}")
+        if not _command_has_project_arg(rendered.canonical_command):
             print(
-                "warning: this code-step command has no --project argument, so running it "
-                "directly will not re-enter the Astrid task gate or advance the run. "
-                "Fix the authored plan so the step runs through `python3 -m astrid ... --project "
-                f"{slug}`."
+                "warning: this code-step command uses task env instead of a local --project "
+                "argument. The printed env-prefixed command is the copy/paste re-entry "
+                "form for a normal shell; adapters execute the canonical command under "
+                "the same task env."
             )
         print(
             "(rerun the same command if it failed; the gate detects re-entry "
@@ -1719,10 +1798,105 @@ def cmd_step_retry_fetch(
     *,
     projects_root: Optional[Path] = None,
 ) -> int:
-    """Reject the deferred remote-artifact retry-fetch surface."""
-    from astrid.core.adapter.remote_artifact import REMOTE_ARTIFACT_DEFERRAL
+    """Retry fetching artifacts for a remote-artifact step awaiting fetch."""
+    parser = argparse.ArgumentParser(prog="astrid step retry-fetch", add_help=True)
+    parser.add_argument("step")
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--run", required=True)
+    parser.add_argument("--item", default=None, help="for_each item id")
+    try:
+        args = parser.parse_args(list(argv))
+    except SystemExit as exc:
+        return int(exc.code)
 
-    _print_err(f"step retry-fetch: {REMOTE_ARTIFACT_DEFERRAL}")
+    from astrid.core.adapter import RunContext
+    from astrid.core.adapter.remote_artifact_fetch import fetch_artifacts
+
+    slug = validate_project_slug(args.project)
+    run_id = validate_run_id(args.run)
+    proj_root = project_dir(slug, root=projects_root)
+    run_dir = proj_root / "runs" / run_id
+    events_path = run_dir / "events.jsonl"
+    plan = load_plan(proj_root / "plan.json")
+    events = read_events(events_path)
+    step_path = tuple(args.step.split(STEP_PATH_SEP))
+    step = _find_step_by_path(plan, step_path)
+    if step is None:
+        _print_err(f"step retry-fetch: unknown step {args.step!r}")
+        return 1
+    if step.adapter != "remote-artifact":
+        _print_err(f"step retry-fetch: {args.step} is not a remote-artifact step")
+        return 1
+    if step.version != 1 and not any(
+        event.get("step_version") == step.version and event.get("plan_step_path") == list(step_path)
+        for event in events
+    ):
+        _print_err(f"step retry-fetch: no v{step.version} events found for {args.step}")
+        return 1
+    latest = None
+    for event in reversed(events):
+        if not (
+            event.get("plan_step_path") == list(step_path)
+            or event.get("plan_step_id") == args.step
+        ):
+            continue
+        event_version = event.get("step_version", 1)
+        if event_version == step.version:
+            latest = event
+            break
+    if latest and latest.get("kind") == "step_completed":
+        print(f"step retry-fetch: {args.step} already completed")
+        return 0
+    if not latest or latest.get("kind") != "step_awaiting_fetch":
+        _print_err(f"step retry-fetch: {args.step} is not awaiting_fetch")
+        return 1
+
+    ctx = RunContext(
+        slug=slug,
+        run_id=run_id,
+        project_root=proj_root,
+        plan_step_path=step_path,
+        step_version=step.version,
+        item_id=args.item,
+    )
+    result = fetch_artifacts(step, ctx)
+    if result.status == "completed":
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_step_completed_event(
+                    args.step,
+                    0,
+                    adapter=step.adapter,
+                    step_version=step.version,
+                )
+            )
+        events = read_events(events_path)
+        if _run_is_complete(plan, events):
+            _emit_run_completed_if_needed(plan, events, events_path, run_id, slug=slug, projects_root=projects_root)
+        return 0
+    if result.status == "awaiting_fetch":
+        with writer_context_for_project(slug, root=projects_root) as writer:
+            writer.append(
+                make_step_awaiting_fetch_event(
+                    args.step,
+                    missing=result.missing,
+                    mismatched=result.mismatched,
+                    reason=result.reason,
+                    adapter=step.adapter,
+                    step_version=step.version,
+                )
+            )
+        return 1
+    with writer_context_for_project(slug, root=projects_root) as writer:
+        writer.append(
+            make_step_failed_event(
+                args.step,
+                1,
+                reason=result.reason,
+                adapter=step.adapter,
+                step_version=step.version,
+            )
+        )
     return 1
 
 

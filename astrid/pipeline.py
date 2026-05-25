@@ -597,7 +597,7 @@ def _wait_adapter(decision: Any) -> int:
 
     For local adapter: poll the subprocess until it exits, capture returncode.
     For manual adapter: the agent does work out-of-band; return 0 immediately.
-    For remote-artifact adapter: fail closed with the Sprint 5a deferral error.
+    For remote-artifact adapter: wait for the generic subprocess wrapper.
     """
     adapter_kind = getattr(decision, "adapter", None)
     if adapter_kind == "local":
@@ -646,11 +646,8 @@ def _wait_local_subprocess(decision: Any) -> int:
 
 
 def _wait_remote_artifact(decision: Any) -> int:
-    """Reject the schema-reserved remote-artifact runtime surface."""
-    from astrid.core.adapter.remote_artifact import REMOTE_ARTIFACT_DEFERRAL
-
-    print(f"remote-artifact: {REMOTE_ARTIFACT_DEFERRAL}", file=sys.stderr)
-    return 1
+    """Block until the generic remote-artifact subprocess exits."""
+    return _wait_local_subprocess(decision)
 
 
 def _make_run_ctx_for_poll(

@@ -196,24 +196,18 @@ def cmd_run_artifacts(
     header = f"{'step_id':30s} {'ver':>4s} {'iter':>6s} {'item':>10s} {'name':>20s} {'path':>40s} {'check':>12s} {'sha256':>18s} {'cost':>10s}"
     print(header)
 
-    for step_dir in sorted(steps_root.iterdir()):
-        if not step_dir.is_dir():
+    for step_path, vdir in _iter_step_version_dirs(steps_root):
+        if args.step_filter and not _step_filter_matches(step_path, args.step_filter):
             continue
-        step_id = step_dir.name
-        if args.step_filter and step_id != args.step_filter:
-            continue
-        for vdir in sorted(step_dir.iterdir()):
-            if not vdir.is_dir() or not vdir.name.startswith("v"):
-                continue
-            version = vdir.name[1:]  # strip 'v'
-            # Check for iterations / items
-            _emit_artifact_rows(vdir, step_id, version, "")
-            for sub in [vdir / "iterations", vdir / "items"]:
-                if sub.is_dir():
-                    for child in sorted(sub.iterdir()):
-                        if child.is_dir():
-                            label = child.name
-                            _emit_artifact_rows(child, step_id, version, label)
+        version = vdir.name[1:]  # strip 'v'
+        step_label = "/".join(step_path)
+        _emit_artifact_rows(vdir, step_label, version, "")
+        for sub in [vdir / "iterations", vdir / "items"]:
+            if sub.is_dir():
+                for child in sorted(sub.iterdir()):
+                    if child.is_dir():
+                        label = child.name
+                        _emit_artifact_rows(child, step_label, version, label)
     return 0
 
 
@@ -277,6 +271,26 @@ def _emit_artifact_rows(adir: Path, step_id: str, version: str, sub_label: str) 
             f"{step_id:30s} {version:>4s} {iter_label:>6s} {item_label:>10s} "
             f"{name:20s} {short_path:40s} {check_status:>12s} {sha256_val:>18s} {cost_str:>10s}"
         )
+
+
+def _iter_step_version_dirs(steps_root: Path) -> list[tuple[tuple[str, ...], Path]]:
+    """Return canonical nested step version dirs below ``runs/<id>/steps``."""
+
+    found: list[tuple[tuple[str, ...], Path]] = []
+    for vdir in sorted(steps_root.rglob("v[0-9]*")):
+        if not vdir.is_dir():
+            continue
+        rel_parent = vdir.parent.relative_to(steps_root)
+        parts = rel_parent.parts
+        if not parts or "iterations" in parts or "items" in parts:
+            continue
+        found.append((tuple(parts), vdir))
+    return found
+
+
+def _step_filter_matches(step_path: tuple[str, ...], step_filter: str) -> bool:
+    normalized = step_filter.strip("/")
+    return normalized == "/".join(step_path) or normalized == step_path[-1]
 
 
 def cmd_run_trace(
@@ -700,42 +714,36 @@ def _build_step_rows(
 
     rows: list[dict[str, Any]] = []
     if steps_root.is_dir():
-        for step_dir in sorted(steps_root.iterdir()):
-            if not step_dir.is_dir():
-                continue
-            step_id = step_dir.name
-            for vdir in sorted(step_dir.iterdir()):
-                if not vdir.is_dir() or not vdir.name.startswith("v"):
-                    continue
-                version = int(vdir.name[1:])
-                # Find the event path that ends with this step_id
-                path_str = step_id
-                state = "pending"
-                for ps, info in latest_by_path.items():
-                    parts = ps.split("/")
-                    if parts and parts[-1] == step_id:
-                        state = info.get("kind", "pending")
+        for step_path, vdir in _iter_step_version_dirs(steps_root):
+            version = int(vdir.name[1:])
+            path_str = "/".join(step_path)
+            info = latest_by_path.get(path_str)
+            if info is None:
+                for ps, candidate in latest_by_path.items():
+                    if _step_filter_matches(tuple(ps.split("/")), path_str):
+                        info = candidate
                         break
-                cost_val = cost_by_path.get(path_str)
-                extras = ""
-                if state == "step_awaiting_fetch":
-                    remote_path = vdir / "remote_state.json"
-                    if remote_path.exists():
-                        try:
-                            st = json.loads(remote_path.read_text(encoding="utf-8"))
-                            missing = st.get("missing", [])
-                            mismatched = st.get("mismatched", [])
-                            if missing or mismatched:
-                                extras = f"({len(missing)} missing, {len(mismatched)} mismatched)"
-                        except (json.JSONDecodeError, OSError):
-                            pass
-                rows.append({
-                    "step_id": step_id,
-                    "version": version,
-                    "state": state,
-                    "cost": cost_val,
-                    "extras": extras,
-                })
+            state = info.get("kind", "pending") if info is not None else "pending"
+            cost_val = cost_by_path.get(path_str)
+            extras = ""
+            if state == "step_awaiting_fetch":
+                remote_path = vdir / "remote_state.json"
+                if remote_path.exists():
+                    try:
+                        st = json.loads(remote_path.read_text(encoding="utf-8"))
+                        missing = st.get("missing", [])
+                        mismatched = st.get("mismatched", [])
+                        if missing or mismatched:
+                            extras = f"({len(missing)} missing, {len(mismatched)} mismatched)"
+                    except (json.JSONDecodeError, OSError):
+                        pass
+            rows.append({
+                "step_id": path_str,
+                "version": version,
+                "state": state,
+                "cost": cost_val,
+                "extras": extras,
+            })
     return rows
 
 

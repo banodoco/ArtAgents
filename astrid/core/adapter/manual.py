@@ -6,21 +6,21 @@ import json
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.util.time import utc_now_milliseconds
 
 
 def _step_dir(run_ctx: RunContext) -> Path:
-    base = run_ctx.project_root / "runs" / run_ctx.run_id / "steps"
-    for segment in run_ctx.plan_step_path:
-        base = base / segment
-    base = base / f"v{run_ctx.step_version}"
-    if run_ctx.iteration is not None:
-        base = base / "iterations" / f"{run_ctx.iteration:03d}"
-    elif run_ctx.item_id is not None:
-        base = base / "items" / run_ctx.item_id
-    return base
+    return step_dir_for_context(
+        run_ctx.project_root,
+        run_ctx.run_id,
+        run_ctx.plan_step_path,
+        run_ctx.step_version,
+        iteration=run_ctx.iteration,
+        item_id=run_ctx.item_id,
+    )
 
 
 def _utc_now_iso() -> str:
@@ -47,7 +47,9 @@ class ManualAdapter:
         payload: dict[str, object] = {
             "step_id": step.id,
             "step_version": run_ctx.step_version,
-            "command": step.command,
+            "command": run_ctx.canonical_command or step.command,
+            "display_command": run_ctx.display_command,
+            "task_env": run_ctx.task_env or {},
             "adapter": "manual",
             "assignee": step.assignee,
             "requires_ack": step.requires_ack,

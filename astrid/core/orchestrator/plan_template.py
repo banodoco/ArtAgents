@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable, Literal, Mapping, cast
 
 from astrid.core.task.plan import (
+    AckRule,
     AdapterKind,
     CostEntry,
     ProducesEntry,
@@ -84,6 +85,7 @@ def build_leaf_template(
     repeat: Repeat | None = None,
     instructions: str | None = None,
     requires_ack: bool = False,
+    ack_kind: Literal["agent", "human"] = "agent",
     assignee: str = "system",
     optional: bool = False,
 ) -> Step:
@@ -95,6 +97,7 @@ def build_leaf_template(
         command=command,
         instructions=instructions,
         requires_ack=requires_ack,
+        ack=AckRule(kind=ack_kind) if requires_ack else None,
         assignee=assignee,
         produces=tuple(produces),
         cost=cost,

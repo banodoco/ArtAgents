@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -27,6 +29,46 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _ensure_deterministic_media(path: Path, *, duration: float, resolution: str, fps: float) -> None:
+    if path.is_file():
+        return
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.skip(f"ffmpeg is required to create deterministic fixture media: {path.name}")
+    cmd = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        f"color=c=black:s={resolution}:r={fps}:d={duration}",
+        "-f",
+        "lavfi",
+        "-i",
+        f"anullsrc=channel_layout=stereo:sample_rate=48000:d={duration}",
+        "-shortest",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "35",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-movflags",
+        "+faststart",
+        str(path),
+    ]
+    result = subprocess.run(cmd, cwd=FIXTURE_ROOT, text=True, capture_output=True, check=False)
+    assert result.returncode == 0, (
+        f"failed to create deterministic fixture media {path.name}: {result.stderr.strip()}"
+    )
 
 
 def test_hype_regression_required_small_fixtures_exist_and_validate() -> None:
@@ -66,14 +108,23 @@ def test_hype_regression_media_manifest_covers_optional_mp4_assets() -> None:
         assert media_entry["expected_resolution"] == asset["resolution"]
         assert media_entry["expected_fps"] == asset["fps"]
         if not media_path.is_file():
+            _ensure_deterministic_media(
+                media_path,
+                duration=float(media_entry["expected_duration_seconds"]),
+                resolution=str(media_entry["expected_resolution"]),
+                fps=float(media_entry["expected_fps"]),
+            )
+        if not media_path.is_file():
             missing_media.append(media_entry["path"])
 
-    if missing_media:
-        pytest.skip(
-            "media-dependent hype regression checks skipped; missing optional mp4 artifact(s): "
-            + ", ".join(sorted(missing_media))
-        )
+    assert missing_media == [], (
+        "media-dependent hype regression checks require deterministic mp4 artifacts; "
+        f"missing after creation attempt: {sorted(missing_media)}"
+    )
 
     for media_entry in media_by_asset.values():
+        digest = _sha256(FIXTURE_ROOT / media_entry["path"])
         if media_entry["sha256"] is not None:
-            assert media_entry["sha256"] == _sha256(FIXTURE_ROOT / media_entry["path"])
+            assert media_entry["sha256"] == digest
+        else:
+            assert len(digest) == 64

@@ -1,7 +1,4 @@
-"""Tests for remote-artifact adapter rejection (Sprint 3 T22).
-
-Asserts the exact deferral string + non-zero exit / exception raise.
-"""
+"""Remote-artifact adapter active rejection paths."""
 
 from __future__ import annotations
 
@@ -10,14 +7,8 @@ from pathlib import Path
 import pytest
 
 from astrid.core.adapter import RunContext
+from astrid.core.adapter.remote_artifact import RemoteArtifactAdapter
 from astrid.core.task.plan import Step
-
-from astrid.core.adapter.remote_artifact import (
-    REMOTE_ARTIFACT_DEFERRAL,
-    RemoteArtifactAdapter,
-    RemoteArtifactDeferralError,
-    _deferral_message,
-)
 
 
 @pytest.fixture
@@ -35,59 +26,26 @@ def _make_ctx(tmp_path: Path) -> RunContext:
     )
 
 
-def _make_step() -> Step:
-    return Step(id="s1", adapter="remote-artifact", command="fetch-artifact")
+def test_dispatch_rejects_empty_command(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:
+    result = adapter.dispatch(Step(id="s1", adapter="remote-artifact", command=""), _make_ctx(tmp_path))
+    assert result.status == "rejected"
+    assert "non-empty command" in (result.reason or "")
 
 
-def test_deferral_message_exact_string() -> None:
-    """Verify the deferral message is exactly the string from the brief."""
-    msg = _deferral_message("test-step")
-    expected = (
-        "remote-artifact is reserved for Sprint 5a and is runtime-disabled in "
-        "Sprint 3; use adapter 'local' or 'manual' for this run. step='test-step'"
+def test_dispatch_rejects_unparseable_command(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:
+    result = adapter.dispatch(
+        Step(id="s1", adapter="remote-artifact", command="python -c 'unterminated"),
+        _make_ctx(tmp_path),
     )
-    assert msg == expected
+    assert result.status == "rejected"
+    assert "shell-parseable" in (result.reason or "")
 
 
-def test_remote_artifact_deferral_constant() -> None:
-    """REMOTE_ARTIFACT_DEFERRAL is the shared Sprint 5a quarantine text."""
-    assert "remote-artifact is reserved for Sprint 5a" in REMOTE_ARTIFACT_DEFERRAL
-    assert "Sprint 5a" in REMOTE_ARTIFACT_DEFERRAL
-
-
-def test_dispatch_raises_deferral_error(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:
+def test_poll_failed_on_corrupt_remote_state(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path)
-    step = _make_step()
-    with pytest.raises(RemoteArtifactDeferralError) as exc:
-        adapter.dispatch(step, ctx)
-    assert "remote-artifact" in str(exc.value)
-    assert "Sprint 5a" in str(exc.value)
-    assert "local" in str(exc.value)
+    step_dir = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1"
+    step_dir.mkdir(parents=True)
+    (step_dir / "remote_state.json").write_text("{bad", encoding="utf-8")
+    result = adapter.poll(Step(id="s1", adapter="remote-artifact", command="echo ok"), ctx)
+    assert result.status == "failed"
 
-
-def test_poll_raises_deferral_error(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:
-    ctx = _make_ctx(tmp_path)
-    step = _make_step()
-    with pytest.raises(RemoteArtifactDeferralError):
-        adapter.poll(step, ctx)
-
-
-def test_complete_raises_deferral_error(adapter: RemoteArtifactAdapter, tmp_path: Path) -> None:
-    ctx = _make_ctx(tmp_path)
-    step = _make_step()
-    with pytest.raises(RemoteArtifactDeferralError):
-        adapter.complete(step, ctx)
-
-
-def test_deferral_error_is_runtime_error() -> None:
-    """RemoteArtifactDeferralError inherits from RuntimeError so cmd_next can catch it."""
-    assert issubclass(RemoteArtifactDeferralError, RuntimeError)
-
-
-def test_step_id_interpolated_in_message() -> None:
-    """The step id is dynamically interpolated."""
-    msg_for_a = _deferral_message("step-a")
-    msg_for_b = _deferral_message("step-b")
-    assert "step-a" in msg_for_a
-    assert "step-b" in msg_for_b
-    assert msg_for_a != msg_for_b

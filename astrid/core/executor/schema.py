@@ -19,6 +19,7 @@ from astrid.contracts.schema import (
     CacheMode,
     CachePolicy,
     CapabilityHandle,
+    CommandInputArg,
     CommandSpec,
     IsolationMetadata,
     IsolationMode,
@@ -53,6 +54,7 @@ CLIP_KIND_VALUES = tuple(kind.value for kind in ClipClassifiedKind)
 PIPELINE_REQUIREMENT_FACTS = {
     "arrangement",
     "assets",
+    "assets_registry",
     "audio",
     "brief",
     "generative_visuals_enabled",
@@ -448,7 +450,22 @@ def _parse_command(raw: Any, path: str) -> CommandSpec | None:
         if not isinstance(key, str) or not isinstance(value, str):
             raise ExecutorValidationError(f"{path}.env keys and values must be strings")
         env[key] = value
-    return CommandSpec(argv=argv, cwd=cwd, env=env)
+    input_args = tuple(
+        _parse_command_input_arg(item, f"{path}.input_args[{index}]")
+        for index, item in enumerate(_optional_list(data, "input_args", f"{path}.input_args"))
+    )
+    return CommandSpec(argv=argv, cwd=cwd, env=env, input_args=input_args)
+
+
+def _parse_command_input_arg(raw: Any, path: str) -> CommandInputArg:
+    data = _require_mapping(raw, path)
+    input_name = _require_string(data, "input", f"{path}.input")
+    return CommandInputArg(
+        input=input_name,
+        flag=_optional_nullable_string(data, "flag", f"{path}.flag"),
+        repeatable=_optional_bool(data, "repeatable", f"{path}.repeatable", default=False),
+        optional=_optional_bool(data, "optional", f"{path}.optional", default=False),
+    )
 
 
 def _parse_cache(raw: Any, path: str) -> CachePolicy:
@@ -705,6 +722,13 @@ def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:
     for key, value in command.env.items():
         _validate_non_empty_string(key, "command.env key")
         _validate_placeholders(value, placeholders, f"command.env[{key!r}]")
+    for index, mapping in enumerate(command.input_args):
+        path = f"command.input_args[{index}]"
+        _validate_non_empty_string(mapping.input, f"{path}.input")
+        if mapping.input not in placeholders:
+            raise ExecutorValidationError(f"{path}.input references unknown input {mapping.input!r}")
+        if mapping.flag is not None:
+            _validate_non_empty_string(mapping.flag, f"{path}.flag")
 
 
 SHORT_DESCRIPTION_MAX_LEN = 120

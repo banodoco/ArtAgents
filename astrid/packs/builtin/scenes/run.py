@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def resolve_output_paths(out_path: Path) -> tuple[Path, Path]:
+def resolve_output_paths(out_path: Path) -> tuple[Path, Path, Path]:
     resolved = out_path.resolve()
     if resolved.exists() and resolved.is_dir():
         json_path = resolved / "scenes.json"
@@ -46,7 +46,8 @@ def resolve_output_paths(out_path: Path) -> tuple[Path, Path]:
     else:
         json_path = resolved / "scenes.json"
     csv_path = json_path.with_name("scenes.csv")
-    return json_path, csv_path
+    items_path = json_path.with_name("scene_items.json")
+    return json_path, csv_path, items_path
 
 
 def timecode_seconds(value: Any) -> float:
@@ -93,10 +94,16 @@ def detect_scenes(video_path: Path, threshold: float) -> list[dict[str, float | 
 
 
 def write_outputs(
-    scenes: list[dict[str, float | int]], json_path: Path, csv_path: Path
+    scenes: list[dict[str, float | int]],
+    json_path: Path,
+    csv_path: Path,
+    items_path: Path | None = None,
 ) -> None:
     json_path.parent.mkdir(parents=True, exist_ok=True)
+    items_path = items_path or json_path.with_name("scene_items.json")
     json_path.write_text(json.dumps(scenes, indent=2), encoding="utf-8")
+    scene_items = [f"scene-{int(scene['index']):04d}" for scene in scenes]
+    items_path.write_text(json.dumps(scene_items, indent=2), encoding="utf-8")
 
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
@@ -107,7 +114,11 @@ def write_outputs(
             )
     register_outputs(
         stage="scenes",
-        outputs=[("scenes", json_path, "Scene list"), ("scenes_csv", csv_path, "Scene CSV")],
+        outputs=[
+            ("scenes", json_path, "Scene list"),
+            ("scenes_csv", csv_path, "Scene CSV"),
+            ("scene_items", items_path, "Scene item ids"),
+        ],
         metadata={"scenes": len(scenes)},
     )
 
@@ -123,9 +134,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not video_path.is_file():
         raise SystemExit(f"Video file not found: {video_path}")
 
-    json_path, csv_path = resolve_output_paths(args.out)
+    json_path, csv_path, items_path = resolve_output_paths(args.out)
     scenes = detect_scenes(video_path, args.threshold)
-    write_outputs(scenes, json_path, csv_path)
+    write_outputs(scenes, json_path, csv_path, items_path)
     return 0
 
 

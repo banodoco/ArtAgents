@@ -202,8 +202,9 @@ descendant produces through `re_export`; missing artifacts or malformed JSON
 fail closed. Legacy conditions such as `user_approves` exist only for migrated
 read compatibility.
 
-`remote-artifact` is reserved but runtime-disabled until Sprint 5a. Current
-plans should use `local` or `manual` adapters.
+`remote-artifact` is available for task leaves that dispatch remote work through
+the generic subprocess-plus-manifest contract. Use `local` or `manual` when the
+step does not need asynchronous artifact fetch/retry behavior.
 
 ## Create Something New
 
