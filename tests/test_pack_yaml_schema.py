@@ -33,6 +33,12 @@ class PackYamlSchemaTest(unittest.TestCase):
             self.assertEqual(pack.agent, {})
             self.assertEqual(pack.status, "active")
             self.assertEqual(pack.visibility, "visible")
+            self.assertEqual(pack.origin, "unknown")
+            self.assertEqual(pack.install_tier, "default")
+            self.assertEqual(pack.pack_type, "capability")
+            self.assertEqual(pack.domain, "general")
+            self.assertEqual(pack.stability, "stable")
+            self.assertEqual(pack.support, "project")
             self.assertEqual(pack.root, pack_root.resolve())
 
     def test_full_manifest_round_trips_name_version_and_metadata(self) -> None:
@@ -47,6 +53,42 @@ class PackYamlSchemaTest(unittest.TestCase):
             self.assertEqual(pack.name, "External Tools")
             self.assertEqual(pack.version, "1.2.3")
             self.assertEqual(pack.metadata, {})
+
+    def test_taxonomy_fields_round_trip_and_emit_taxonomy_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+origin: builtin
+install_tier: bundled
+pack_type: product_surface
+domain: video
+stability: beta
+support: core
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            payload = pack.to_dict()
+            self.assertEqual(pack.origin, "builtin")
+            self.assertEqual(pack.install_tier, "bundled")
+            self.assertEqual(pack.pack_type, "product_surface")
+            self.assertEqual(pack.domain, "video")
+            self.assertEqual(pack.stability, "beta")
+            self.assertEqual(pack.support, "core")
+            self.assertEqual(
+                payload["taxonomy"],
+                {
+                    "origin": "builtin",
+                    "install_tier": "bundled",
+                    "pack_type": "product_surface",
+                    "domain": "video",
+                    "stability": "beta",
+                    "support": "core",
+                },
+            )
+            self.assertEqual(payload["origin"], "builtin")
+            self.assertEqual(payload["stability"], "beta")
 
     def test_missing_id_field_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,6 +134,13 @@ visibility: hidden
             self.assertEqual(pack.agent["purpose"], "Test purpose")
             self.assertEqual(pack.status, "experimental")
             self.assertEqual(pack.visibility, "hidden")
+            self.assertEqual(pack.stability, "experimental")
+
+    def test_deprecated_status_defaults_stability_to_deprecated(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(Path(tmp), "id: builtin\nstatus: deprecated\n")
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.stability, "deprecated")
 
     def test_pack_id_must_match_folder_name(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -116,6 +165,71 @@ visibility: hidden
             qualified_id_pack_id("")
         with self.assertRaisesRegex(PackValidationError, "qualified"):
             qualified_id_pack_id("builtin.")
+
+    def test_partial_taxonomy_fields_get_defaults_for_unspecified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                "id: builtin\norigin: community\ndomain: media\n",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.origin, "community")
+            self.assertEqual(pack.domain, "media")
+            self.assertEqual(pack.install_tier, "default")
+            self.assertEqual(pack.pack_type, "capability")
+            self.assertEqual(pack.stability, "stable")
+            self.assertEqual(pack.support, "project")
+
+    def test_status_stub_defaults_to_stable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(Path(tmp), "id: builtin\nstatus: stub\n")
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.status, "stub")
+            self.assertEqual(pack.stability, "stable")
+
+    def test_explicit_stability_overrides_status_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp), "id: builtin\nstatus: experimental\nstability: beta\n"
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.status, "experimental")
+            self.assertEqual(pack.stability, "beta")
+
+    def test_to_dict_includes_all_taxonomy_top_level_and_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: system
+stability: stable
+support: core
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            payload = pack.to_dict()
+            for field in ("origin", "install_tier", "pack_type", "domain", "stability", "support"):
+                self.assertEqual(
+                    payload[field],
+                    getattr(pack, field),
+                    f"top-level {field} must match pack.{field}",
+                )
+            self.assertEqual(payload["taxonomy"]["origin"], pack.origin)
+            self.assertEqual(payload["taxonomy"]["domain"], pack.domain)
+
+    def test_taxonomy_accepts_non_standard_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                "id: builtin\norigin: vendor-x\ndomain: finance\n",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.origin, "vendor-x")
+            self.assertEqual(pack.domain, "finance")
 
 
 if __name__ == "__main__":

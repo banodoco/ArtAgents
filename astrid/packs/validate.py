@@ -29,6 +29,7 @@ from astrid.core.pack import (
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
+    pack_taxonomy_from_manifest,
     pack_manifest_path,
 )
 
@@ -454,6 +455,8 @@ class PackValidator:
 
     def _pack_definition_for_discovery(self, content: dict[str, Any]) -> PackDefinition:
         data = self._pack_data or {}
+        status = str(data.get("status") or "active")
+        taxonomy = pack_taxonomy_from_manifest(data, status=status)
         return PackDefinition(
             id=str(data.get("id") or self.pack_root.name),
             name=str(data.get("name") or data.get("id") or self.pack_root.name),
@@ -462,11 +465,12 @@ class PackValidator:
             manifest_path=self.pack_root / "pack.yaml",
             schema_version=data.get("schema_version"),
             description=str(data.get("description") or ""),
-            status=str(data.get("status") or "active"),
+            status=status,
             visibility=str(data.get("visibility") or "visible"),
             content=dict(content),
             metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
             agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
+            **taxonomy,
         )
 
     def _validate_discovered_builtin_components(self, content: dict[str, Any]) -> None:

@@ -41,8 +41,22 @@ class PackDefinition:
     status: str = field(default="active")
     visibility: str = field(default="visible")
     schema_version: str = field(default="")
+    origin: str = field(default="unknown")
+    install_tier: str = field(default="default")
+    pack_type: str = field(default="capability")
+    domain: str = field(default="general")
+    stability: str = field(default="stable")
+    support: str = field(default="project")
 
     def to_dict(self) -> dict[str, Any]:
+        taxonomy = {
+            "origin": self.origin,
+            "install_tier": self.install_tier,
+            "pack_type": self.pack_type,
+            "domain": self.domain,
+            "stability": self.stability,
+            "support": self.support,
+        }
         return {
             "id": self.id,
             "name": self.name,
@@ -56,6 +70,8 @@ class PackDefinition:
             "status": self.status,
             "visibility": self.visibility,
             "schema_version": self.schema_version,
+            **taxonomy,
+            "taxonomy": taxonomy,
         }
 
 
@@ -128,6 +144,7 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
     status = _optional_string(data, "status", "pack.status", default="active")
     visibility = _optional_string(data, "visibility", "pack.visibility", default="visible")
     schema_version = str(data.get("schema_version", "")) if "schema_version" in data else ""
+    taxonomy = pack_taxonomy_from_manifest(data, status=status)
     return PackDefinition(
         id=pack_id,
         name=_optional_string(data, "name", "pack.name", default=pack_id),
@@ -141,7 +158,37 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
         status=status,
         visibility=visibility,
         schema_version=schema_version,
+        **taxonomy,
     )
+
+
+def pack_taxonomy_from_manifest(data: dict[str, Any], *, status: str) -> dict[str, str]:
+    """Return the deterministic taxonomy projection for a pack manifest.
+
+    These defaults are the M1 taxonomy baseline for manifests that do not yet
+    declare an explicit taxonomy block.
+    """
+    return {
+        "origin": _optional_string(data, "origin", "pack.origin", default="unknown"),
+        "install_tier": _optional_string(data, "install_tier", "pack.install_tier", default="default"),
+        "pack_type": _optional_string(data, "pack_type", "pack.pack_type", default="capability"),
+        "domain": _optional_string(data, "domain", "pack.domain", default="general"),
+        "stability": _optional_string(
+            data,
+            "stability",
+            "pack.stability",
+            default=_default_stability_for_status(status),
+        ),
+        "support": _optional_string(data, "support", "pack.support", default="project"),
+    }
+
+
+def _default_stability_for_status(status: str) -> str:
+    if status == "experimental":
+        return "experimental"
+    if status == "deprecated":
+        return "deprecated"
+    return "stable"
 
 
 def pack_manifest_path(root: str | Path) -> Path | None:
@@ -356,6 +403,7 @@ __all__ = [
     "iter_executor_roots",
     "iter_orchestrator_roots",
     "load_pack_manifest",
+    "pack_taxonomy_from_manifest",
     "pack_manifest_path",
     "packs_root",
     "qualified_id_pack_id",

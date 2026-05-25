@@ -64,11 +64,17 @@ supported, but new packs should use the canonical `executors/`,
 Pack discovery commands:
 
 ```bash
-# List all discovered packs
+# List all discovered packs (grouped by taxonomy domain in plain text)
 python3 -m astrid packs list
 python3 -m astrid packs list --json
 
-# Filter by category, effective status, or visibility
+# Filter by taxonomy fields
+python3 -m astrid packs list --domain system
+python3 -m astrid packs list --origin builtin
+python3 -m astrid packs list --stability stable
+python3 -m astrid packs list --install-tier core
+
+# Filter by category (metadata.category only — not a taxonomy filter)
 python3 -m astrid packs list --category media
 python3 -m astrid packs list --status stub
 python3 -m astrid packs list --visibility hidden
@@ -80,7 +86,7 @@ python3 -m astrid packs list --show-hidden
 python3 -m astrid packs inspect my_video_tools
 python3 -m astrid packs inspect my_video_tools --json
 
-# Validate every discovered pack and show effective status
+# Validate every discovered pack and show effective status (grouped by domain)
 python3 -m astrid packs status
 python3 -m astrid packs status --json
 python3 -m astrid packs status --show-hidden
@@ -118,6 +124,9 @@ contract allows the schemas to evolve without breaking existing packs.
 The pack manifest declares:
 
 - **Identity**: `id`, `name`, `version`, `description`.
+- **Taxonomy**: `origin`, `install_tier`, `pack_type`, `domain`, `stability`,
+  `support` — six fields that classify the pack for discovery, filtering, and
+  grouping. See [pack-taxonomy.md](pack-taxonomy.md) for the full vocabulary.
 - **Content roots**: where to find executor, orchestrator, and element
   manifests (e.g., `executors: executors`).
 - **Agent instructions**: `purpose`, `normal_entrypoints`,
@@ -239,6 +248,9 @@ separate path. The canonical external example is `examples/packs/minimal/`.
 The pack system is documented across several complementary guides. Refer to
 these for the topics they cover:
 
+- [pack-taxonomy.md](pack-taxonomy.md) — The six taxonomy fields (`origin`,
+  `install_tier`, `pack_type`, `domain`, `stability`, `support`), their
+  defaults, and how to filter and group by them in the CLI.
 - [pack-contract.md](megaplan/epics/pack-system/pack-contract.md) — Formal
   definitions for pack identity, capability identity, aliases, forks,
   overrides, and the unified layout contract.

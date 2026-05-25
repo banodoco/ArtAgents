@@ -131,6 +131,34 @@ agent:
         # 1.0 should be accepted as it equals int 1
         self.assertEqual(errors, [])
 
+    def test_discovery_pack_definition_preserves_taxonomy_fields(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+origin: external
+install_tier: optional
+pack_type: adapter
+domain: image
+support: community
+status: experimental
+agent:
+  purpose: Testing
+""",
+        )
+        validator = PackValidator(root)
+        validator._pack_data = validator._load_yaml(root / "pack.yaml")
+        pack = validator._pack_definition_for_discovery({"executors": "executors"})
+        self.assertEqual(pack.origin, "external")
+        self.assertEqual(pack.install_tier, "optional")
+        self.assertEqual(pack.pack_type, "adapter")
+        self.assertEqual(pack.domain, "image")
+        self.assertEqual(pack.support, "community")
+        self.assertEqual(pack.stability, "experimental")
+
 
 class TestLayoutValidation(MinimalPackTestCase):
     def test_duplicate_capability_ids_are_errors(self) -> None:

@@ -87,6 +87,12 @@
       "type": "string",
       "enum": ["active", "deprecated", "stub", "experimental"]
     },
+    "origin": {"type": "string"},
+    "install_tier": {"type": "string"},
+    "pack_type": {"type": "string"},
+    "domain": {"type": "string"},
+    "stability": {"type": "string"},
+    "support": {"type": "string"},
     "visibility": {
       "type": "string",
       "enum": ["visible", "hidden"]

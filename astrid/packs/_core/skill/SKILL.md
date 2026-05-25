@@ -439,7 +439,6 @@ orchestrator, or element manifests.
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
-| `text_review.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
 | `upload.youtube` | Upload a finished video to YouTube via the shared banodoco-social Zapier integration. |
 
 ### Orchestrators

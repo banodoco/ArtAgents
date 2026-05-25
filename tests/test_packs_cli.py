@@ -139,22 +139,57 @@ class TestPacksValidateCLI(unittest.TestCase):
         list_result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
         self.assertEqual(list_result.returncode, 0, list_result.stderr)
         listed = json.loads(list_result.stdout)
+        self.assertIn("groups", listed)
         self.assertIn("builtin", {pack["id"] for pack in listed["packs"]})
         builtin = next(pack for pack in listed["packs"] if pack["id"] == "builtin")
         self.assertIn("content", builtin)
         self.assertIn("agent", builtin)
         self.assertEqual(builtin["status"], "active")
         self.assertEqual(builtin["visibility"], "visible")
+        self.assertEqual(builtin["taxonomy"]["domain"], "system")
+        self.assertEqual(builtin["origin"], "builtin")
+        self.assertTrue(any(group["value"] == "system" for group in listed["groups"]))
 
         inspect_result = _run_packs("inspect", "builtin", "--json", cwd=str(_REPO_ROOT))
         self.assertEqual(inspect_result.returncode, 0, inspect_result.stderr)
         inspected = json.loads(inspect_result.stdout)
         self.assertEqual(inspected["id"], "builtin")
+        self.assertEqual(inspected["taxonomy"]["domain"], "system")
+        self.assertEqual(inspected["origin"], "builtin")
 
         status_result = _run_packs("status", "--json", cwd=str(_REPO_ROOT))
         self.assertEqual(status_result.returncode, 0, status_result.stderr)
         status = json.loads(status_result.stdout)
+        self.assertIn("groups", status)
         self.assertIn("validation", status["packs"][0])
+        self.assertTrue(all("taxonomy" in pack for pack in status["packs"]))
+
+    def test_packs_taxonomy_plain_text_and_filters(self) -> None:
+        list_result = _run_packs("list", "--domain", "system", cwd=str(_REPO_ROOT))
+        self.assertEqual(list_result.returncode, 0, list_result.stderr)
+        self.assertIn("taxonomy: domain=system", list_result.stdout)
+        self.assertIn("builtin\t", list_result.stdout)
+        self.assertNotIn("external\t", list_result.stdout)
+
+        status_result = _run_packs("status", "--domain", "system", cwd=str(_REPO_ROOT))
+        self.assertEqual(status_result.returncode, 0, status_result.stderr)
+        self.assertIn("taxonomy: domain=system", status_result.stdout)
+        self.assertIn("builtin\tactive\tvisible", status_result.stdout)
+
+        inspect_result = _run_packs("inspect", "builtin", cwd=str(_REPO_ROOT))
+        self.assertEqual(inspect_result.returncode, 0, inspect_result.stderr)
+        self.assertIn("taxonomy:", inspect_result.stdout)
+        self.assertIn("  origin: builtin", inspect_result.stdout)
+        self.assertIn("  domain: system", inspect_result.stdout)
+
+    def test_category_filter_remains_metadata_only(self) -> None:
+        domain_result = _run_packs("list", "--domain", "system", cwd=str(_REPO_ROOT))
+        self.assertEqual(domain_result.returncode, 0, domain_result.stderr)
+        self.assertIn("builtin\t", domain_result.stdout)
+
+        category_result = _run_packs("list", "--category", "system", cwd=str(_REPO_ROOT))
+        self.assertEqual(category_result.returncode, 0, category_result.stderr)
+        self.assertEqual(category_result.stdout.strip(), "")
 
     def test_validate_defaults_to_current_directory(self) -> None:
         """When no path is given, validate defaults to '.'."""
@@ -337,6 +372,18 @@ class TestScaffoldAndValidateRoundTrip(unittest.TestCase):
                 f"CLI validate should exit 0; stderr: {result.stderr!r}",
             )
             self.assertIn("valid:", result.stdout)
+
+    def test_packs_new_scaffold_includes_taxonomy_fields(self) -> None:
+        with ScratchPackFixture(self) as tmp:
+            result = _run_packs("new", "taxonomy_pack", cwd=str(tmp))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            manifest = (tmp / "taxonomy_pack" / "pack.yaml").read_text(encoding="utf-8")
+            self.assertIn("origin: project", manifest)
+            self.assertIn("install_tier: default", manifest)
+            self.assertIn("pack_type: capability", manifest)
+            self.assertIn("domain: general", manifest)
+            self.assertIn("stability: stable", manifest)
+            self.assertIn("support: project", manifest)
 
     def test_scaffold_pack_then_add_executor_and_orchestrator_programmatic(self) -> None:
         """Use the CLI modules directly (not subprocess) to test the internal API."""
@@ -588,6 +635,172 @@ class TestCLIBackwardCompat(unittest.TestCase):
     def test_packs_cli_main_new_rejects_bad_id(self) -> None:
         exit_code = packs_cli.main(["new", "BAD"])
         self.assertNotEqual(exit_code, 0)
+
+
+class TestTaxonomyHiddenPackBehavior(unittest.TestCase):
+    """Prove: hidden packs are excluded from default discovery but visible
+    with --show-hidden; both text_review capabilities are absent from default."""
+
+    def test_default_discovery_excludes_text_review(self) -> None:
+        result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertNotIn("text_review", pack_ids)
+
+    def test_show_hidden_includes_text_review(self) -> None:
+        result = _run_packs("list", "--json", "--show-hidden", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("text_review", pack_ids)
+
+    def test_status_default_excludes_text_review(self) -> None:
+        result = _run_packs("status", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        status = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in status["packs"]}
+        self.assertNotIn("text_review", pack_ids)
+
+    def test_status_show_hidden_includes_text_review(self) -> None:
+        result = _run_packs("status", "--json", "--show-hidden", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        status = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in status["packs"]}
+        self.assertIn("text_review", pack_ids)
+
+    def test_inspect_text_review_works_despite_hidden(self) -> None:
+        result = _run_packs("inspect", "text_review", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inspected = json.loads(result.stdout)
+        self.assertEqual(inspected["id"], "text_review")
+        self.assertEqual(inspected.get("visibility"), "hidden")
+
+    def test_visible_packs_present_in_default_discovery(self) -> None:
+        result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        for visible_id in ("builtin", "external", "iteration", "media", "upload"):
+            self.assertIn(visible_id, pack_ids, f"{visible_id} must be in default discovery")
+
+
+class TestTaxonomyAllFilters(unittest.TestCase):
+    """Prove: all six taxonomy filter flags work independently."""
+
+    def test_domain_filter_includes_only_matching(self) -> None:
+        result = _run_packs("list", "--json", "--domain", "system", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("builtin", pack_ids)
+        self.assertNotIn("external", pack_ids)
+        self.assertNotIn("media", pack_ids)
+
+    def test_origin_filter_includes_only_matching(self) -> None:
+        result = _run_packs("list", "--json", "--origin", "builtin", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("builtin", pack_ids)
+        self.assertIn("external", pack_ids)
+        self.assertIn("media", pack_ids)
+
+    def test_install_tier_filter_includes_only_matching(self) -> None:
+        result = _run_packs("list", "--json", "--install-tier", "core", "--show-hidden", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("builtin", pack_ids)
+        self.assertIn("external", pack_ids)
+        # text_review has no explicit install_tier, defaults to "default"
+        self.assertNotIn("text_review", pack_ids)
+
+    def test_pack_type_filter_includes_only_matching(self) -> None:
+        result = _run_packs("list", "--json", "--pack-type", "capability", "--show-hidden", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("builtin", pack_ids)
+        self.assertIn("external", pack_ids)
+
+    def test_stability_filter_includes_only_matching(self) -> None:
+        result = _run_packs("list", "--json", "--stability", "stable", "--show-hidden", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("builtin", pack_ids)
+        self.assertIn("external", pack_ids)
+
+    def test_support_filter_includes_only_matching(self) -> None:
+        result = _run_packs("list", "--json", "--support", "core", "--show-hidden", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertIn("builtin", pack_ids)
+        self.assertIn("external", pack_ids)
+        # text_review has default support="project"
+        self.assertNotIn("text_review", pack_ids)
+
+    def test_combined_filters(self) -> None:
+        result = _run_packs("list", "--json", "--domain", "system", "--origin", "builtin", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        pack_ids = {pack["id"] for pack in listed["packs"]}
+        self.assertEqual(pack_ids, {"builtin"})
+
+
+class TestTaxonomyGroupingAndOutput(unittest.TestCase):
+    """Prove: JSON output has groups, plain-text output has taxonomy headings."""
+
+    def test_list_json_has_groups_and_packs(self) -> None:
+        result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        listed = json.loads(result.stdout)
+        self.assertIn("packs", listed)
+        self.assertIn("groups", listed)
+        self.assertIsInstance(listed["packs"], list)
+        self.assertIsInstance(listed["groups"], list)
+        for group in listed["groups"]:
+            self.assertIn("group_by", group)
+            self.assertEqual(group["group_by"], "domain")
+            self.assertIn("value", group)
+            self.assertIn("packs", group)
+            self.assertIsInstance(group["packs"], list)
+
+    def test_status_json_has_groups_and_validation(self) -> None:
+        result = _run_packs("status", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        status = json.loads(result.stdout)
+        self.assertIn("packs", status)
+        self.assertIn("groups", status)
+        for pack in status["packs"]:
+            self.assertIn("taxonomy", pack)
+            self.assertIn("validation", pack)
+
+    def test_list_plain_text_grouped_by_domain(self) -> None:
+        result = _run_packs("list", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("taxonomy: domain=", result.stdout)
+
+    def test_status_plain_text_grouped_by_domain(self) -> None:
+        result = _run_packs("status", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("taxonomy: domain=", result.stdout)
+
+    def test_inspect_json_has_taxonomy(self) -> None:
+        result = _run_packs("inspect", "builtin", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        inspected = json.loads(result.stdout)
+        self.assertIn("taxonomy", inspected)
+        self.assertEqual(inspected["taxonomy"]["domain"], "system")
+        self.assertEqual(inspected["taxonomy"]["origin"], "builtin")
+
+    def test_inspect_plain_text_has_taxonomy_block(self) -> None:
+        result = _run_packs("inspect", "builtin", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("taxonomy:", result.stdout)
+        self.assertIn("domain:", result.stdout)
 
 
 if __name__ == "__main__":
