@@ -12,30 +12,30 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shlex
 import secrets
+import shlex
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
-from astrid.core.project.jsonio import write_json_atomic
-from astrid.core.project.project import ProjectError, require_project
-from astrid.core.project.run import resolve_required_project_timeline
-from astrid.core.project.schema import build_run_record
-from astrid.core.project.paths import (
-    project_dir,
-    resolve_projects_root,
-    validate_project_slug,
-    validate_run_id,
-)
 from astrid.core.project.current_run import (
     clear_current_run,
     read_current_run,
     read_current_run_state,
     write_current_run,
 )
+from astrid.core.project.jsonio import write_json_atomic
+from astrid.core.project.paths import (
+    project_dir,
+    resolve_projects_root,
+    validate_project_slug,
+    validate_run_id,
+)
+from astrid.core.project.project import ProjectError, require_project
+from astrid.core.project.run import resolve_required_project_timeline
+from astrid.core.project.schema import build_run_record
 from astrid.core.session.lease import (
     release_writer_lease,
     write_lease_init,
@@ -47,13 +47,13 @@ from astrid.core.task.env import is_author_test_mode, task_actor_env
 from astrid.core.task.events import (
     EventLogError,
     _run_is_complete,
-    make_step_awaiting_fetch_event,
-    make_step_completed_event,
-    make_step_failed_event,
     make_plan_initialized_event,
     make_run_aborted_event,
     make_run_completed_event,
     make_run_started_event,
+    make_step_awaiting_fetch_event,
+    make_step_completed_event,
+    make_step_failed_event,
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
@@ -61,13 +61,12 @@ from astrid.core.task.inbox import consume_inbox_entry, pending_count, scan_inbo
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
-    Step,
+    compute_plan_hash,
     is_attested_kind,
     is_code_kind,
     is_group_step,
     is_leaf_step,
     iter_steps_with_path,
-    compute_plan_hash,
     load_plan,
     step_dir_for_path,
 )
@@ -76,7 +75,6 @@ from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.timeline.crud import record_contributing_run
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
-
 
 _AGENT_MD_TEMPLATE = """{preamble}
 
@@ -243,20 +241,24 @@ def cmd_start(
         )
         return 1
 
-    packs = _resolve_packs_root(packs_root)
-    build_path = packs / pack / "build" / f"{name}.json"
-    if not build_path.is_file():
-        _print_err(
-            f"start: compiled plan not found at {build_path}; "
-            f"recovery: astrid author compile {args.orchestrator_id}"
-        )
-        return 1
+    uses_dynamic_hype_plan = args.orchestrator_id == "builtin.hype" and not is_author_test_mode()
+    if uses_dynamic_hype_plan:
+        compiled_payload: dict[str, Any] = {}
+    else:
+        packs = _resolve_packs_root(packs_root)
+        build_path = packs / pack / "build" / f"{name}.json"
+        if not build_path.is_file():
+            _print_err(
+                f"start: compiled plan not found at {build_path}; "
+                f"recovery: astrid author compile {args.orchestrator_id}"
+            )
+            return 1
 
-    try:
-        compiled_payload = json.loads(build_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        _print_err(f"start: failed to read {build_path}: {exc}")
-        return 1
+        try:
+            compiled_payload = json.loads(build_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            _print_err(f"start: failed to read {build_path}: {exc}")
+            return 1
 
     # Resolve timeline ULID (timeline_id) and slug for display.
     timeline_id: str | None = None
@@ -306,7 +308,7 @@ def cmd_start(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     consumes: list[dict[str, str]] = []
-    if args.orchestrator_id == "builtin.hype" and not is_author_test_mode():
+    if uses_dynamic_hype_plan:
         try:
             from astrid.packs.builtin.hype.plan_template import build_plan_v2
 
@@ -379,7 +381,6 @@ def cmd_start(
     )
     write_current_run(slug, run_id, root=projects_root)
 
-    events_path = run_dir / "events.jsonl"
     actor = task_actor_env()
     started_by = f"human:{actor}" if actor else None
     with writer_context_for_project(slug, root=projects_root) as writer:
@@ -648,6 +649,7 @@ def render_step_instructions(
     unknown token is left literal (best-effort, never crashes the CLI).
     """
     import os as _os
+
     from astrid.core.task.env import is_author_test_mode as _is_author_test_mode
 
     if text is None:
@@ -1364,6 +1366,8 @@ def cmd_next(
     try:
         from astrid.core.session.binding import (
             SessionBindingError as _SBErr,
+        )
+        from astrid.core.session.binding import (
             is_writer_for,
             resolve_current_session,
         )

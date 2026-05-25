@@ -17,29 +17,12 @@ import hashlib
 import json
 import os
 import shlex
-import sys
 from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
 import pytest
 
-from astrid.core.task.command_render import render_task_command
-from astrid.core.task.gate import gate_command, record_dispatch_complete
-from astrid.core.task.events import (
-    _run_is_complete,
-    make_run_completed_event,
-    make_step_completed_event,
-    make_step_dispatched_event,
-    read_events,
-)
-from astrid.core.task.plan import (
-    RepeatForEach,
-    Step,
-    compute_plan_hash,
-    load_plan,
-)
-from astrid.core.task.gate import TaskRunGateError, _resolve_for_each_items
 from astrid.core.executor.cli import _parse_input_values
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.executor.runner import ExecutorRunRequest, build_executor_command
@@ -49,8 +32,27 @@ from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session
 from astrid.core.session.paths import session_path
+from astrid.core.task.command_render import render_task_command
+from astrid.core.task.events import (
+    _run_is_complete,
+    make_run_completed_event,
+    make_step_completed_event,
+    make_step_dispatched_event,
+    read_events,
+)
+from astrid.core.task.gate import (
+    TaskRunGateError,
+    _resolve_for_each_items,
+    gate_command,
+    record_dispatch_complete,
+)
 from astrid.core.task.lifecycle import cmd_next, cmd_start
-
+from astrid.core.task.plan import (
+    RepeatForEach,
+    Step,
+    compute_plan_hash,
+    load_plan,
+)
 
 # ---------------------------------------------------------------------------
 # Synthetic run fixture
@@ -224,7 +226,6 @@ def _capture_stdout_stderr(fn, *args, **kwargs) -> tuple[int, str, str]:
 
 def test_initial_plan_v2_emission(tmp_path: Path) -> None:
     """Build plan v2, emit it as JSON, and verify plan hash is stable."""
-    from astrid.packs.builtin.hype.plan_template import build_plan_v2
 
     proj_root, run_dir, _, plan_path = _build_synthetic_hype_run(tmp_path)
 
@@ -336,6 +337,7 @@ def test_start_builtin_hype_emits_executable_task_run_and_dispatches_leaves(
     rc, stdout, stderr = _capture_stdout_stderr(
         cmd_start,
         ["builtin.hype", "--project", slug, "--name", "run-hype-start"],
+        packs_root=tmp_path / "empty-packs",
         projects_root=projects_root,
     )
     assert rc == 0, stderr
@@ -805,7 +807,6 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
                 events.append(json.loads(line))
 
     effective = apply_mutations(plan, events)
-    all_ids = [s.id for s in effective.steps]
     # The extra step should appear somewhere (flat or under hype group)
     found = any(
         child.id == "extra_render"
