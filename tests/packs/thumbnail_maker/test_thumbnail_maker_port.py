@@ -78,6 +78,26 @@ def test_plan_has_expected_step_ids() -> None:
     assert step_ids == expected, f"Unexpected step ids: {step_ids}"
 
 
+def test_plan_template_uses_step_subcommands_and_produces_root() -> None:
+    from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2
+
+    plan = build_plan_v2(
+        python_exec="python3",
+        run_root=Path("/tmp/test with spaces"),
+        source=Path("/tmp/source with spaces.mp4"),
+        query="quote this",
+        run_id="test-run",
+    )
+
+    commands = {step["id"]: step["command"] for step in plan["steps"]}
+    assert "resolve-video" in commands["resolve-video"]
+    assert "plan-evidence" in commands["plan-evidence"]
+    assert "discover-video-evidence" in commands["discover-video-evidence"]
+    assert "build-reference-pack" in commands["build-reference-pack"]
+    assert "generate-thumbnails" in commands["generate-thumbnails"]
+    assert all("{produces_root}" in command for command in commands.values())
+
+
 def test_emit_plan_json_writes_valid_json(tmp_path: Path) -> None:
     """``emit_plan_json`` writes a parsable plan.json."""
     from astrid.packs.builtin.thumbnail_maker.plan_template import (
@@ -138,6 +158,31 @@ def test_plan_is_round_trip_stable(tmp_path: Path) -> None:
     assert loaded.plan_id == plan["plan_id"]
     assert loaded.version == 2
     assert len(loaded.steps) == len(plan["steps"])
+
+
+def test_consumes_populated() -> None:
+    """The plan template includes source media in its command args."""
+    from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2
+
+    source = Path("/tmp/source.mp4")
+    plan = build_plan_v2(
+        python_exec="python3",
+        run_root=Path("/tmp/test"),
+        source=source,
+        run_id="test-run",
+    )
+
+    source_str = str(source)
+    found = False
+    for step in plan["steps"]:
+        cmd = step.get("command", "")
+        if source_str in cmd:
+            found = True
+            break
+    assert found, (
+        f"source {source_str!r} must be referenced in at least one step command;"
+        f" found in none of {[s['id'] for s in plan['steps']]}"
+    )
 
 
 def test_old_build_plan_not_accessible() -> None:

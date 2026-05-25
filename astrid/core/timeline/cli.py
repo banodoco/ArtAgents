@@ -1165,18 +1165,10 @@ def cmd_export(args: argparse.Namespace) -> int:
                 _add_file(src, name)
 
         # Copy contributing runs
-        for run_id in manifest.contributing_runs:
+        for run_id in _timeline_contributing_runs(proj_root, manifest.contributing_runs, include_aborted=include_aborted):
             run_root = runs_dir / run_id
             if not run_root.is_dir():
                 continue
-
-            # Filter aborted runs
-            events_path = run_root / "events.jsonl"
-            if events_path.exists():
-                events = read_events(events_path)
-                status = _run_status(events)
-                if status == "aborted" and not include_aborted:
-                    continue
 
             # Copy plan.json (from project root)
             plan_path = proj_root / "plan.json"
@@ -1184,6 +1176,7 @@ def cmd_export(args: argparse.Namespace) -> int:
                 _add_file(plan_path, f"runs/{run_id}/plan.json")
 
             # Copy events.jsonl
+            events_path = run_root / "events.jsonl"
             if events_path.is_file():
                 _add_file(events_path, f"runs/{run_id}/events.jsonl")
 
@@ -1234,59 +1227,91 @@ def cmd_cost(args: argparse.Namespace) -> int:
     include_aborted = bool(getattr(args, "include_aborted", False))
 
     # Aggregate costs across all contributing runs
-    by_source: dict[str, float] = {}
+    by_source: dict[str, dict[str, Any]] = {}
     grand_total = 0.0
-    run_count = 0
+    run_ids = _timeline_contributing_runs(
+        proj_root,
+        manifest.contributing_runs,
+        include_aborted=include_aborted,
+    )
 
-    for run_id in manifest.contributing_runs:
-        run_root = runs_dir / run_id
-        if not run_root.is_dir():
-            continue
-        events_path = run_root / "events.jsonl"
-        if not events_path.exists():
-            continue
+    for run_id in run_ids:
+        events_path = runs_dir / run_id / "events.jsonl"
         events = read_events(events_path)
-
-        # Filter aborted runs
-        status = _run_status(events)
-        if status == "aborted" and not include_aborted:
-            continue
-
-        run_count += 1
         cost_summary = _cost_by_source(events)
-        for source, info in cost_summary.items():
-            if isinstance(info, dict):
-                amt = info.get("amount", 0)
-                by_source[source] = by_source.get(source, 0.0) + float(amt)
-                grand_total += float(amt)
+        grand_total += _merge_cost_summaries(by_source, cost_summary)
 
     json_out = bool(getattr(args, "json_out", False))
     if json_out:
         payload: dict[str, Any] = {
             "slug": args.slug,
             "project": session.project,
-            "contributing_runs": run_count,
+            "contributing_runs": len(run_ids),
             "total_runs_in_manifest": len(manifest.contributing_runs),
             "include_aborted": include_aborted,
             "grand_total": round(grand_total, 6),
-            "by_source": {
-                source: round(amt, 6) for source, amt in sorted(by_source.items())
-            },
+            "by_source": by_source,
         }
         print(json.dumps(payload, indent=2))
         return 0
 
-    print(f"Cost rollup for timeline '{args.slug}' ({run_count} contributing runs):")
+    print(f"Cost rollup for timeline '{args.slug}' ({len(run_ids)} contributing runs):")
     print()
     if not by_source:
         print("  (no cost data)")
     else:
         for source in sorted(by_source):
-            amt = by_source[source]
+            amt = float(by_source[source].get("amount", 0.0))
             print(f"  {source:<20} ${amt:>10.4f}")
     print(f"  {'─' * 32}")
     print(f"  {'TOTAL':<20} ${grand_total:>10.4f}")
     return 0
+
+
+def _timeline_contributing_runs(
+    proj_root: Path,
+    run_ids: list[str] | tuple[str, ...],
+    *,
+    include_aborted: bool,
+) -> list[str]:
+    runs_dir = proj_root / "runs"
+    selected: list[str] = []
+    seen: set[str] = set()
+    for run_id in run_ids:
+        if run_id in seen:
+            continue
+        seen.add(run_id)
+        run_root = runs_dir / run_id
+        if not run_root.is_dir():
+            continue
+        events_path = run_root / "events.jsonl"
+        if events_path.exists():
+            events = read_events(events_path)
+            if _run_status(events) == "aborted" and not include_aborted:
+                continue
+        selected.append(run_id)
+    return selected
+
+
+def _merge_cost_summaries(
+    target: dict[str, dict[str, Any]],
+    incoming: dict[str, dict[str, Any]],
+) -> float:
+    added_total = 0.0
+    for source, info in incoming.items():
+        if not isinstance(info, dict):
+            continue
+        amount = float(info.get("amount", 0.0))
+        currency = str(info.get("currency", "USD"))
+        bucket = target.setdefault(
+            source,
+            {"amount": 0.0, "currency": currency, "source": source},
+        )
+        bucket["amount"] = round(float(bucket.get("amount", 0.0)) + amount, 6)
+        bucket["currency"] = currency
+        bucket["source"] = source
+        added_total += amount
+    return added_total
 
 
 # ---------------------------------------------------------------------------

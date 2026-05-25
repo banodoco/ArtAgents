@@ -584,6 +584,11 @@ def _validate_step(step: Any, index: int, prior_siblings: list[Step]) -> Step:
             f"plan steps[{index}].kind is legacy v1 schema; "
             "run scripts/migrations/sprint-3/migrate_plans.py to migrate it"
         )
+    if "plan" in step:
+        raise TaskPlanError(
+            f"plan steps[{index}].plan is legacy v1 inline child-plan schema; "
+            "run scripts/migrations/sprint-3/migrate_plans.py to migrate it"
+        )
     requires_ack = step.get("requires_ack", False)
     if not isinstance(requires_ack, bool):
         raise TaskPlanError(f"plan steps[{index}].requires_ack must be a bool")

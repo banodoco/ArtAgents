@@ -567,52 +567,38 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
             continue
 
     # Aggregate costs across runs
-    by_source: dict[str, float] = {}
+    by_source: dict[str, dict[str, Any]] = {}
     grand_total = 0.0
-    run_count = 0
+    selected_run_ids = _project_selected_runs(
+        runs_dir,
+        run_ids,
+        include_aborted=include_aborted,
+    )
 
-    for run_id in run_ids:
-        run_root = runs_dir / run_id
-        if not run_root.is_dir():
-            continue
-        events_path = run_root / "events.jsonl"
-        if not events_path.exists():
-            continue
-        events = read_events(events_path)
-
-        status = _run_status(events)
-        if status == "aborted" and not include_aborted:
-            continue
-
-        run_count += 1
+    for run_id in selected_run_ids:
+        events = read_events(runs_dir / run_id / "events.jsonl")
         cost_summary = _cost_by_source(events)
-        for source, info in cost_summary.items():
-            if isinstance(info, dict):
-                amt = info.get("amount", 0)
-                by_source[source] = by_source.get(source, 0.0) + float(amt)
-                grand_total += float(amt)
+        grand_total += _merge_project_cost_summaries(by_source, cost_summary)
 
     if json_out:
         payload: dict[str, Any] = {
             "project": args.project,
             "timeline_count": len(timelines),
-            "contributing_runs": run_count,
+            "contributing_runs": len(selected_run_ids),
             "include_aborted": include_aborted,
             "grand_total": round(grand_total, 6),
-            "by_source": {
-                source: round(amt, 6) for source, amt in sorted(by_source.items())
-            },
+            "by_source": by_source,
         }
         _print_json(payload)
         return 0
 
-    print(f"Cost rollup for project '{args.project}' ({len(timelines)} timelines, {run_count} contributing runs):")
+    print(f"Cost rollup for project '{args.project}' ({len(timelines)} timelines, {len(selected_run_ids)} contributing runs):")
     print()
     if not by_source:
         print("  (no cost data)")
     else:
         for source in sorted(by_source):
-            amt = by_source[source]
+            amt = float(by_source[source].get("amount", 0.0))
             print(f"  {source:<20} ${amt:>10.4f}")
     print(f"  {'─' * 32}")
     print(f"  {'TOTAL':<20} ${grand_total:>10.4f}")
@@ -689,17 +675,14 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
             _add_file(project_json, "project.json")
 
         # Copy contributing runs
-        for run_id in all_run_ids:
+        for run_id in _project_selected_runs(
+            runs_dir,
+            all_run_ids,
+            include_aborted=include_aborted,
+        ):
             run_root = runs_dir / run_id
             if not run_root.is_dir():
                 continue
-
-            events_path = run_root / "events.jsonl"
-            if events_path.exists():
-                events = read_events(events_path)
-                status = _run_status(events)
-                if status == "aborted" and not include_aborted:
-                    continue
 
             # Copy plan.json
             plan_path = proj_root / "plan.json"
@@ -707,6 +690,7 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
                 _add_file(plan_path, f"runs/{run_id}/plan.json")
 
             # Copy events.jsonl
+            events_path = run_root / "events.jsonl"
             if events_path.is_file():
                 _add_file(events_path, f"runs/{run_id}/events.jsonl")
 
@@ -753,6 +737,50 @@ def _require_project_session(project_slug: str) -> None:
     session = resolve_current_session(slug=project_slug)
     if session is None:
         raise SessionBindingError(_SESSION_GATE_HINT)
+
+
+def _project_selected_runs(
+    runs_dir: Path,
+    run_ids: list[str],
+    *,
+    include_aborted: bool,
+) -> list[str]:
+    from astrid.core.task.events import read_events
+    from astrid.core.task.run_audit import _run_status
+
+    selected: list[str] = []
+    for run_id in run_ids:
+        run_root = runs_dir / run_id
+        if not run_root.is_dir():
+            continue
+        events_path = run_root / "events.jsonl"
+        if events_path.exists():
+            events = read_events(events_path)
+            if _run_status(events) == "aborted" and not include_aborted:
+                continue
+        selected.append(run_id)
+    return selected
+
+
+def _merge_project_cost_summaries(
+    target: dict[str, dict[str, Any]],
+    incoming: dict[str, dict[str, Any]],
+) -> float:
+    added_total = 0.0
+    for source, info in incoming.items():
+        if not isinstance(info, dict):
+            continue
+        amount = float(info.get("amount", 0.0))
+        currency = str(info.get("currency", "USD"))
+        bucket = target.setdefault(
+            source,
+            {"amount": 0.0, "currency": currency, "source": source},
+        )
+        bucket["amount"] = round(float(bucket.get("amount", 0.0)) + amount, 6)
+        bucket["currency"] = currency
+        bucket["source"] = source
+        added_total += amount
+    return added_total
 
 
 def _print_project_header(slug: str) -> None:

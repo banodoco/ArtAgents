@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import uuid
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ def build_plan_v2(
     python_exec: str,
     run_root: str | Path,
     source: str | Path | None = None,
+    query: str | None = None,
     run_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a plan v2 dict for the thumbnail_maker pipeline.
@@ -32,11 +34,12 @@ def build_plan_v2(
     run_root = Path(run_root)
     plan_id = f"thumbnail-maker-{run_id or uuid.uuid4().hex[:12]}"
 
-    cmd_resolve = _build_resolve_cmd(python_exec, run_root, source)
-    cmd_plan = _build_plan_cmd(python_exec, run_root)
-    cmd_discover = _build_discover_cmd(python_exec, run_root)
-    cmd_build_ref = _build_build_ref_cmd(python_exec, run_root)
-    cmd_generate = _build_generate_cmd(python_exec, run_root)
+    query = query or "auto"
+    cmd_resolve = _build_resolve_cmd(python_exec, run_root, source, query)
+    cmd_plan = _build_plan_cmd(python_exec, run_root, query)
+    cmd_discover = _build_discover_cmd(python_exec, run_root, query, source)
+    cmd_build_ref = _build_build_ref_cmd(python_exec, run_root, query)
+    cmd_generate = _build_generate_cmd(python_exec, run_root, query)
 
     local_zero = cost_entry(0, source="local")
     return build_plan_template(
@@ -77,34 +80,35 @@ def build_plan_v2(
 
 
 def _build_resolve_cmd(
-    python_exec: str, run_root: Path, source: str | Path | None
+    python_exec: str,
+    run_root: Path,
+    source: str | Path | None,
+    query: str,
 ) -> str:
-    out = run_root / "steps" / "resolve-video" / "v1" / "produces"
-    src = str(Path(source).resolve()) if source else ""
+    _ = (run_root, query)
+    src = shlex.quote(str(Path(source).resolve())) if source else "''"
     return (
-        f"{python_exec} -m astrid.packs.builtin.thumbnail_maker.run "
-        f"--video {src} --out {out} --query auto --dry-run"
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.builtin.thumbnail_maker.run "
+        f"resolve-video --video {src} "
+        f"--out {shlex.quote('{produces_root}/video-resolution.json')}"
     )
 
 
-def _build_plan_cmd(python_exec: str, run_root: Path) -> str:
-    out = run_root / "steps" / "plan-evidence" / "v1" / "produces"
-    evidence = (
-        run_root
-        / "steps"
-        / "resolve-video"
-        / "v1"
-        / "produces"
-        / "video-resolution.json"
-    )
+def _build_plan_cmd(python_exec: str, run_root: Path, query: str) -> str:
+    _ = run_root
     return (
-        f"{python_exec} -m astrid.packs.builtin.thumbnail_maker.run "
-        f"--video {evidence} --out {out} --query auto --dry-run"
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.builtin.thumbnail_maker.run "
+        f"plan-evidence --query {shlex.quote(query)} "
+        f"--out {shlex.quote('{produces_root}/evidence/evidence-plan.json')}"
     )
 
 
-def _build_discover_cmd(python_exec: str, run_root: Path) -> str:
-    out = run_root / "steps" / "discover-video-evidence" / "v1" / "produces"
+def _build_discover_cmd(
+    python_exec: str,
+    run_root: Path,
+    query: str,
+    source: str | Path | None,
+) -> str:
     evidence_plan = (
         run_root
         / "steps"
@@ -114,15 +118,19 @@ def _build_discover_cmd(python_exec: str, run_root: Path) -> str:
         / "evidence"
         / "evidence-plan.json"
     )
+    video_flag = ""
+    if source is not None:
+        video_flag = f"--video {shlex.quote(str(Path(source).resolve()))} "
     return (
-        f"{python_exec} -m astrid.packs.builtin.thumbnail_maker.run "
-        f"--out {out} --query auto --dry-run "
-        f"--previous-manifest {evidence_plan}"
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.builtin.thumbnail_maker.run "
+        f"discover-video-evidence {video_flag}"
+        f"--out {shlex.quote('{produces_root}/evidence/candidates.json')} "
+        f"--query {shlex.quote(query)} "
+        f"--previous-manifest {shlex.quote(str(evidence_plan))}"
     )
 
 
-def _build_build_ref_cmd(python_exec: str, run_root: Path) -> str:
-    out = run_root / "steps" / "build-reference-pack" / "v1" / "produces"
+def _build_build_ref_cmd(python_exec: str, run_root: Path, query: str) -> str:
     candidates = (
         run_root
         / "steps"
@@ -133,14 +141,15 @@ def _build_build_ref_cmd(python_exec: str, run_root: Path) -> str:
         / "candidates.json"
     )
     return (
-        f"{python_exec} -m astrid.packs.builtin.thumbnail_maker.run "
-        f"--out {out} --query auto --dry-run "
-        f"--previous-manifest {candidates}"
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.builtin.thumbnail_maker.run "
+        f"build-reference-pack "
+        f"--out {shlex.quote('{produces_root}/evidence/reference-pack.json')} "
+        f"--query {shlex.quote(query)} "
+        f"--previous-manifest {shlex.quote(str(candidates))}"
     )
 
 
-def _build_generate_cmd(python_exec: str, run_root: Path) -> str:
-    out = run_root / "steps" / "generate-thumbnails" / "v1" / "produces"
+def _build_generate_cmd(python_exec: str, run_root: Path, query: str) -> str:
     ref_pack = (
         run_root
         / "steps"
@@ -151,7 +160,12 @@ def _build_generate_cmd(python_exec: str, run_root: Path) -> str:
         / "reference-pack.json"
     )
     return (
-        f"{python_exec} -m astrid.packs.builtin.thumbnail_maker.run "
-        f"--out {out} --query auto --dry-run "
-        f"--previous-manifest {ref_pack}"
+        f"{shlex.quote(str(python_exec))} -m astrid.packs.builtin.thumbnail_maker.run "
+        f"generate-thumbnails "
+        f"--out {shlex.quote('{produces_root}/thumbnail-manifest.json')} "
+        f"--query {shlex.quote(query)} "
+        f"--previous-manifest {shlex.quote(str(ref_pack))}"
     )
+
+
+__all__ = ["build_plan_v2", "emit_plan_json"]

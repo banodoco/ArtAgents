@@ -164,6 +164,22 @@ def test_v2_plan_rejects_legacy_step_kind(tmp_path: Path) -> None:
         load_plan(plan_path)
 
 
+def test_v2_plan_rejects_legacy_inline_plan_payload(tmp_path: Path) -> None:
+    plan_path = _write_plan(tmp_path, {
+        "plan_id": "p1", "version": 2,
+        "steps": [{
+            "id": "parent",
+            "plan": {
+                "plan_id": "inline",
+                "version": 1,
+                "steps": [{"id": "child", "kind": "code", "command": "echo"}],
+            },
+        }],
+    })
+    with pytest.raises(TaskPlanError, match=r"\.plan is legacy v1 inline child-plan schema"):
+        load_plan(plan_path)
+
+
 def test_load_plan_with_group_step(tmp_path: Path) -> None:
     plan_path = _write_plan(tmp_path, {
         "plan_id": "p1", "version": 2,

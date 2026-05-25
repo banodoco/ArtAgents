@@ -5,7 +5,10 @@ start rejected; missing build/<name>.json prints compile recovery + rc=1.
 from __future__ import annotations
 
 import io
+import hashlib
 import json
+import os
+import subprocess
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -151,3 +154,250 @@ def test_start_rejects_missing_project_before_creating_run_dir(tmp_path: Path) -
     assert rc == 1
     assert "project 'missing' not found" in err.getvalue()
     assert not (projects / "missing" / "runs").exists()
+
+
+def test_start_builtin_canonical_orchestrators_ignore_stale_build_json_and_use_runtime_inputs(
+    tmp_path: Path,
+) -> None:
+    packs_root = tmp_path / "packs"
+    projects_root = tmp_path / "projects"
+    packs_root.mkdir()
+    projects_root.mkdir()
+
+    for qualified_id in (
+        "builtin.hype",
+        "builtin.event_talks",
+        "builtin.thumbnail_maker",
+    ):
+        _, name = qualified_id.split(".", 1)
+        build_dir = packs_root / "builtin" / "build"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        stale_content = json.dumps(
+            {
+                "plan_id": f"STALE-{name}-MARKER",
+                "version": 2,
+                "steps": [
+                    {
+                        "id": "stale-step",
+                        "adapter": "local",
+                        "command": "echo STALE_COMPILED_CONTENT",
+                        "produces": [],
+                        "cost": {"amount": 0, "source": "local"},
+                    }
+                ],
+            }
+        )
+        (build_dir / f"{name}.json").write_text(stale_content, encoding="utf-8")
+
+        slug = name.replace("_", "-")
+        create_project(slug, root=projects_root)
+        create_timeline(slug, "main", root=projects_root, is_default=True)
+        bind_writer_session(projects_root, slug, sid=f"S-{slug}")
+
+        proj_root = projects_root / slug
+        source = proj_root / "source.mp4"
+        source.write_bytes(f"source-{qualified_id}".encode("utf-8"))
+        expected_consumes = {
+            str(source.resolve()): hashlib.sha256(source.read_bytes()).hexdigest()
+        }
+
+        if qualified_id == "builtin.hype":
+            brief = proj_root / "brief.txt"
+            brief.write_text("make it punchy\n", encoding="utf-8")
+            expected_consumes[str(brief.resolve())] = hashlib.sha256(
+                brief.read_bytes()
+            ).hexdigest()
+        elif qualified_id == "builtin.event_talks":
+            transcript = proj_root / "transcript.json"
+            transcript.write_text('{"segments":[]}\n', encoding="utf-8")
+            expected_consumes[str(transcript.resolve())] = hashlib.sha256(
+                transcript.read_bytes()
+            ).hexdigest()
+        else:
+            query = proj_root / "query.txt"
+            query.write_text("dramatic speaker on stage\n", encoding="utf-8")
+            expected_consumes[str(query.resolve())] = hashlib.sha256(
+                query.read_bytes()
+            ).hexdigest()
+
+        run_id = f"run-{slug}"
+        rc = cmd_start(
+            [qualified_id, "--project", slug, "--name", run_id],
+            packs_root=packs_root,
+            projects_root=projects_root,
+        )
+
+        assert rc == 0
+        run_dir = proj_root / "runs" / run_id
+        run_json = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
+        consumes = {
+            entry["source"]: entry["sha256"]
+            for entry in run_json.get("consumes", [])
+        }
+        assert consumes == expected_consumes
+
+        plan_text = (proj_root / "plan.json").read_text(encoding="utf-8")
+        assert str(run_dir) in plan_text
+        # Verify stale build content did NOT leak into the plan
+        assert "STALE-" not in plan_text, (
+            f"Plan for {qualified_id} contains stale build content: {plan_text[:200]}"
+        )
+        assert "STALE_COMPILED_CONTENT" not in plan_text
+        assert "stale-step" not in plan_text
+        if qualified_id == "builtin.event_talks":
+            assert str((proj_root / "transcript.json").resolve()) in plan_text
+        if qualified_id == "builtin.thumbnail_maker":
+            assert "dramatic speaker on stage" in plan_text
+
+
+def test_canonical_start_creates_task_events_not_pack_audit_log(
+    tmp_path: Path,
+) -> None:
+    """``cmd_start`` for canonical orchestrators must write only task-run
+    ``events.jsonl``, NOT the pack-level ``pack_events.jsonl`` audit log."""
+    packs_root = tmp_path / "packs"
+    projects_root = tmp_path / "projects"
+    packs_root.mkdir()
+    projects_root.mkdir()
+
+    for qualified_id in (
+        "builtin.event_talks",
+        "builtin.thumbnail_maker",
+    ):
+        _, name = qualified_id.split(".", 1)
+        # Seed stale build JSON so we can also verify it is ignored
+        build_dir = packs_root / "builtin" / "build"
+        build_dir.mkdir(parents=True, exist_ok=True)
+        stale = json.dumps(
+            {
+                "plan_id": f"STALE-{name}-MARKER",
+                "version": 2,
+                "steps": [
+                    {
+                        "id": "stale-step",
+                        "adapter": "local",
+                        "command": "echo STALE_AUDIT_MARKER",
+                        "produces": [],
+                        "cost": {"amount": 0, "source": "local"},
+                    }
+                ],
+            }
+        )
+        (build_dir / f"{name}.json").write_text(stale, encoding="utf-8")
+
+        slug = name.replace("_", "-")
+        create_project(slug, root=projects_root)
+        create_timeline(slug, "main", root=projects_root, is_default=True)
+        bind_writer_session(projects_root, slug, sid=f"S-{slug}-audit")
+
+        proj_root = projects_root / slug
+        source = proj_root / "source.mp4"
+        source.write_bytes(f"audit-source-{qualified_id}".encode("utf-8"))
+
+        if qualified_id == "builtin.event_talks":
+            (proj_root / "transcript.json").write_text('{"segments":[]}\n', encoding="utf-8")
+        else:
+            (proj_root / "query.txt").write_text("test query\n", encoding="utf-8")
+
+        run_id = f"run-audit-{slug}"
+        rc = cmd_start(
+            [qualified_id, "--project", slug, "--name", run_id],
+            packs_root=packs_root,
+            projects_root=projects_root,
+        )
+
+        assert rc == 0
+        run_dir = proj_root / "runs" / run_id
+
+        # Task-run events MUST exist
+        events_path = run_dir / "events.jsonl"
+        assert events_path.is_file(), (
+            f"{qualified_id}: missing events.jsonl in {run_dir}"
+        )
+        lines = events_path.read_text(encoding="utf-8").splitlines()
+        assert len(lines) >= 2, f"{qualified_id}: expected >=2 events, got {len(lines)}"
+        first = json.loads(lines[0])
+        assert first["kind"] == "plan_initialized"
+        second = json.loads(lines[1])
+        assert second["kind"] == "run_started"
+
+        # Pack audit log MUST NOT exist (only created by direct pack-run invocation)
+        pack_log = run_dir / "pack_events.jsonl"
+        assert not pack_log.exists(), (
+            f"{qualified_id}: pack_events.jsonl should not exist in task-run directory;"
+            f" pack-run audit log must be separate from task-run events.jsonl"
+        )
+
+        # Also verify stale build markers are absent from plan
+        plan_text = (proj_root / "plan.json").read_text(encoding="utf-8")
+        assert "STALE-" not in plan_text
+
+
+def test_canonical_step_reentry_records_completion_and_events_verify_bypasses_gate(
+    tmp_path: Path,
+) -> None:
+    """The ``astrid next`` command for a canonical pack step is copy/paste runnable."""
+    os.environ["ASTRID_HOME"] = str(tmp_path / "home")
+    packs_root = tmp_path / "packs"
+    projects_root = tmp_path / "projects"
+    packs_root.mkdir()
+    projects_root.mkdir()
+
+    slug = "smoke-event"
+    run_id = "run-event"
+    create_project(slug, root=projects_root)
+    create_timeline(slug, "main", root=projects_root, is_default=True)
+    bind_writer_session(projects_root, slug, sid="S-smoke-event")
+    proj_root = projects_root / slug
+    (proj_root / "source.mp4").write_bytes(b"fake mp4 bytes")
+    (proj_root / "transcript.json").write_text('{"segments":[]}\n', encoding="utf-8")
+
+    assert cmd_start(
+        ["builtin.event_talks", "--project", slug, "--name", run_id],
+        packs_root=packs_root,
+        projects_root=projects_root,
+    ) == 0
+
+    from astrid.core.task.lifecycle import cmd_next
+
+    out = io.StringIO()
+    with redirect_stdout(out):
+        assert cmd_next(["--project", slug], projects_root=projects_root) == 0
+    command = next(
+        line.removeprefix("run: ")
+        for line in out.getvalue().splitlines()
+        if line.startswith("run: ")
+    )
+
+    env = os.environ.copy()
+    env["ASTRID_PROJECTS_ROOT"] = str(projects_root)
+    completed = subprocess.run(
+        command,
+        shell=True,
+        cwd=Path(__file__).resolve().parent.parent,
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    events = [
+        json.loads(line)
+        for line in (proj_root / "runs" / run_id / "events.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert any(event["kind"] == "step_completed" for event in events)
+
+    from astrid.pipeline import main as astrid_main
+
+    os.environ["ASTRID_TASK_PROJECT"] = slug
+    os.environ["ASTRID_TASK_RUN_ID"] = run_id
+    os.environ["ASTRID_TASK_STEP_ID"] = "ados-sunday-template"
+    try:
+        assert astrid_main(["events", "verify", "--project", slug, "--run", run_id]) == 0
+    finally:
+        os.environ.pop("ASTRID_TASK_PROJECT", None)
+        os.environ.pop("ASTRID_TASK_RUN_ID", None)
+        os.environ.pop("ASTRID_TASK_STEP_ID", None)

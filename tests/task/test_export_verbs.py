@@ -216,6 +216,36 @@ def test_timeline_export_includes_aborted_with_flag(
         assert f"runs/{timeline_fixture['run2_id']}/events.jsonl" in names
 
 
+def test_timeline_export_dedupes_duplicate_manifest_runs(
+    tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.timeline import cli as tm_cli
+    from unittest.mock import MagicMock
+    import argparse
+
+    manifest_path = timeline_fixture["timeline_dir"] / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["contributing_runs"] = [
+        timeline_fixture["run1_id"],
+        timeline_fixture["run1_id"],
+        timeline_fixture["run2_id"],
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    mock_session = MagicMock()
+    mock_session.project = timeline_fixture["slug"]
+    monkeypatch.setattr(tm_cli, "resolve_current_session", lambda *a, **k: mock_session)
+
+    out_path = tmp_projects_root / "bundle-deduped.tar.gz"
+    args = argparse.Namespace(slug="main-line", out=str(out_path), include_aborted=False)
+    rc = tm_cli.cmd_export(args)
+    assert rc == 0
+
+    with tarfile.open(out_path, "r:gz") as tf:
+        names = sorted(tf.getnames())
+        assert names.count(f"runs/{timeline_fixture['run1_id']}/events.jsonl") == 1
+
+
 # ── Project export ──────────────────────────────────────────────────────
 
 
