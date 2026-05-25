@@ -6,6 +6,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from astrid import timeline
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "reshape" / "hype_regression"
@@ -33,7 +35,8 @@ def _ensure_deterministic_media(path: Path, *, duration: float, resolution: str,
     if path.is_file():
         return
     ffmpeg = shutil.which("ffmpeg")
-    assert ffmpeg is not None, f"ffmpeg is required to create deterministic fixture media: {path.name}"
+    if ffmpeg is None:
+        pytest.skip(f"ffmpeg is required to create deterministic fixture media: {path.name}")
     cmd = [
         ffmpeg,
         "-hide_banner",
