@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import io
 import sys
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -17,18 +17,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.task import write_iteration_feedback
+from astrid.core.task.claim import _make_claim_event
 from astrid.core.task.events import (
     append_event,
     make_iteration_failed_event,
+    make_iteration_started_event,
     read_events,
 )
-from astrid.core.task.events import make_iteration_started_event
-from astrid.core.task.claim import _make_claim_event
-from astrid.core.task.gate import GateDecision
-from astrid.core.task.gate import TaskRunGateError, gate_command
+from astrid.core.task.gate import GateDecision, TaskRunGateError, gate_command
 from astrid.core.task.lifecycle import cmd_next
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
-
 
 _BODY_CODE = '''from astrid.orchestrate import orchestrator, code
 @orchestrator("demo.code")
@@ -90,7 +88,8 @@ def test_preamble_byte_identical_across_two_calls(tmp_path: Path) -> None:
 def test_code_step_prints_command(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r2")
     out = _capture_next(packs, projects)
-    assert "run: ASTRID_TASK_PROJECT=p" in out
+    assert "run: ASTRID_INTERNAL_INVOCATION=1" in out
+    assert "ASTRID_TASK_PROJECT=p" in out
     assert "ASTRID_TASK_RUN_ID=r2" in out
     assert "ASTRID_TASK_STEP_ID=step_a" in out
     assert "echo alpha" in out

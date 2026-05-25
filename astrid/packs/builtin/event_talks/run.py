@@ -13,7 +13,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from astrid.packs.builtin.event_talks.plan_template import build_plan_v2, emit_plan_json
 from astrid.core.task import env as task_env
@@ -142,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Search a Whisper JSON transcript for speaker/title phrases.",
     )
     search.add_argument("--transcript", type=Path, required=True)
+    search.add_argument("--out", type=Path, required=True)
     search.add_argument("--phrases", nargs="*", default=[])
 
     # find-holding-screens
@@ -222,6 +223,8 @@ def _exec_ados_sunday_template(args: argparse.Namespace) -> int:
 def _exec_search_transcript(args: argparse.Namespace) -> int:
     """Search a Whisper JSON transcript for speaker/title phrases."""
     transcript: Path = args.transcript
+    out: Path = args.out
+    out.parent.mkdir(parents=True, exist_ok=True)
     data = json.loads(transcript.read_text(encoding="utf-8"))
     segments = data.get("segments") or []
 
@@ -237,6 +240,7 @@ def _exec_search_transcript(args: argparse.Namespace) -> int:
     ]
 
     found = 0
+    lines: list[str] = []
     for segment in segments:
         text = str(segment.get("text") or "")
         folded = _fold(text)
@@ -245,11 +249,13 @@ def _exec_search_transcript(args: argparse.Namespace) -> int:
             found += 1
             start = float(segment.get("start") or 0.0)
             end = float(segment.get("end") or start)
-            print(
+            lines.append(
                 f"{_fmt_time(start)}-{_fmt_time(end)} | "
                 f"{', '.join(matches)} | {text.strip()}"
             )
-    print(f"matches={found}")
+    lines.append(f"matches={found}")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"event_talks: wrote={out} matches={found}")
     return 0
 
 
@@ -556,6 +562,35 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _run_step_subcommand(
+    *,
+    effective_argv: list[str],
+    args: argparse.Namespace,
+    runner: Callable[[argparse.Namespace], int],
+) -> int:
+    """Run one local-adapter step, recording task-gate completion in task mode."""
+    slug = task_env.task_project_env()
+    decision = None
+    if slug is not None and task_env.is_in_task_run(slug):
+        try:
+            decision = task_gate.gate_command(
+                slug,
+                task_gate.command_for_argv(
+                    ["python3", "-m", "astrid.packs.builtin.event_talks.run", *effective_argv]
+                ),
+                effective_argv,
+                reentry=True,
+            )
+        except task_gate.TaskRunGateError as exc:
+            print(exc.recovery, file=sys.stderr)
+            return 1
+
+    returncode = runner(args)
+    if decision is not None:
+        task_gate.record_dispatch_complete(decision, returncode)
+    return returncode
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Main entry point for the event_talks orchestrator.
 
@@ -583,13 +618,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         args = build_parser().parse_args(effective_argv)
         cmd = args.command
         if cmd == "ados-sunday-template":
-            return _exec_ados_sunday_template(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_ados_sunday_template,
+            )
         if cmd == "search-transcript":
-            return _exec_search_transcript(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_search_transcript,
+            )
         if cmd == "find-holding-screens":
-            return _exec_find_holding_screens(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_find_holding_screens,
+            )
         if cmd == "render":
-            return _exec_render_manifest(args)
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_render_manifest,
+            )
         # Should not reach here — subparser dispatch guarantees `command`
         print(f"event_talks: unknown subcommand: {cmd}", file=sys.stderr)
         return 1

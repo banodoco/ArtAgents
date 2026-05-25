@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from astrid.core.project.paths import project_dir, validate_project_slug
-from astrid.core.task.events import read_events, verify_chain
+from astrid.core.task.events import canonical_event_json, read_events, verify_chain
 from astrid.core.task.plan import load_plan
 from astrid.core.task.plan_verbs import (
     PLAN_MUTATED_KIND,
@@ -368,6 +369,7 @@ def cmd_run_cost(
     parser = argparse.ArgumentParser(prog="astrid run cost", add_help=True)
     parser.add_argument("run_id", help="run identifier")
     parser.add_argument("--project", required=True, help="project slug")
+    parser.add_argument("--json", dest="json_out", action="store_true", help="emit JSON instead of pretty-print")
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -390,6 +392,21 @@ def cmd_run_cost(
 
     by_source = _cost_by_source(events)
     total = sum(c.get("amount", 0) for c in by_source.values() if isinstance(c, dict))
+
+    if args.json_out:
+        print(
+            json.dumps(
+                {
+                    "run_id": args.run_id,
+                    "project": slug,
+                    "status": _run_status(events),
+                    "grand_total": total,
+                    "by_source": by_source,
+                },
+                indent=2,
+            )
+        )
+        return 0
 
     print(f"Run: {args.run_id}")
     print(f"Total cost: ${total:.2f}")
@@ -479,89 +496,7 @@ def cmd_events_verify(
     # ── --strict: replay plan mutations through the validator ──────────
     strict_failures = 0
     if args.strict:
-        plan_path = proj_root / "plan.json"
-        if not plan_path.exists():
-            print("strict: plan.json not found; cannot validate mutations")
-        else:
-            try:
-                from astrid.core.task.plan_verbs import _apply_diff as plan_apply_diff
-                from astrid.core.task.validator import (
-                    MutationInvariantError,
-                    validate_mutation,
-                )
-
-                cached_plan = load_plan(plan_path)
-                plan = initial_plan_from_events(events) or cached_plan
-                current = plan
-                mutation_events = [
-                    e for e in events if e.get("kind") == PLAN_MUTATED_KIND
-                ]
-                for i, ev in enumerate(mutation_events):
-                    diff = ev.get("diff")
-                    if not isinstance(diff, dict):
-                        strict_failures += 1
-                        print(
-                            f"strict: mutation event {i + 1} missing diff field"
-                        )
-                        continue
-                    try:
-                        proposed = plan_apply_diff(current, diff)
-                        # lease_epoch is not recoverable from event log;
-                        # pass epoch=0,0 as a best-effort audit check
-                        # (I6 is skipped in audit mode)
-                        validate_mutation(
-                            prior=current,
-                            proposed=proposed,
-                            lease_epoch_actual=0,
-                            lease_epoch_expected=0,
-                        )
-                        current = proposed
-                    except (MutationInvariantError, Exception) as exc:
-                        strict_failures += 1
-                        print(
-                            f"strict: mutation event {i + 1} failed: {exc}"
-                        )
-
-                # Sprint 5b: reject skip events whose target step is not
-                # optional=True in the effective (post-mutation) plan tree.
-                # This is defence-in-depth on already-written event logs.
-                from astrid.core.task.plan import (
-                    iter_steps_with_path as _iter_steps,
-                )
-                effective_index = {
-                    path: step for path, step in _iter_steps(current)
-                }
-                for i, ev in enumerate(events):
-                    if ev.get("kind") not in {"step_skipped", "item_skipped"}:
-                        continue
-                    path_list = ev.get("plan_step_path")
-                    if not isinstance(path_list, list) or not path_list:
-                        strict_failures += 1
-                        print(
-                            f"strict: skip event {i + 1} missing plan_step_path"
-                        )
-                        continue
-                    target_path = tuple(str(p) for p in path_list)
-                    target = effective_index.get(target_path)
-                    if target is None:
-                        strict_failures += 1
-                        print(
-                            f"strict: skip event {i + 1} references unknown "
-                            f"step path {'/'.join(target_path)!r}"
-                        )
-                        continue
-                    # item_skipped is allowed even if the host is not optional
-                    # (per-item skip is independent of host optionality).
-                    if ev.get("kind") == "item_skipped":
-                        continue
-                    if not getattr(target, "optional", False):
-                        strict_failures += 1
-                        print(
-                            f"strict: skip event {i + 1} targets non-optional "
-                            f"step {'/'.join(target_path)!r}"
-                        )
-            except Exception as exc:
-                print(f"strict: error loading plan: {exc}", file=sys.stderr)
+        strict_failures += _strict_verify_run_events(proj_root, events)
 
     print(f"verified: {n_events} events, plan_hash={plan_hash}")
     if args.strict:
@@ -651,7 +586,13 @@ def cmd_events_tail(
 def _print_tail(events_path: Path, *, n: int) -> None:
     """Print the last *n* events as one-line summaries."""
     events = read_events(events_path)
-    tail = events[-n:] if len(events) > n else events
+    if not events:
+        print("(no events)")
+        return
+    bounded = max(int(n), 0)
+    if bounded == 0:
+        return
+    tail = events[-bounded:] if len(events) > bounded else events
     for ev in tail:
         ts = str(ev.get("ts", ""))[:19]  # truncate fractional seconds
         kind = ev.get("kind", "?")
@@ -767,6 +708,141 @@ def _cost_by_source(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         by_source[source]["amount"] += float(amount)
         by_source[source]["currency"] = currency
     return by_source
+
+
+def _strict_verify_run_events(proj_root: Path, events: list[dict[str, Any]]) -> int:
+    from astrid.core.task.plan import TaskPlan, compute_plan_hash, iter_steps_with_path
+    from astrid.core.task.plan_verbs import _apply_diff as plan_apply_diff
+    from astrid.core.task.validator import MutationInvariantError, validate_mutation
+
+    strict_failures = 0
+    plan_path = proj_root / "plan.json"
+    cached_plan = load_plan(plan_path) if plan_path.exists() else None
+    initialized_payload = next(
+        (
+            ev.get("plan")
+            for ev in events
+            if isinstance(ev, dict)
+            and ev.get("kind") == "plan_initialized"
+            and isinstance(ev.get("plan"), dict)
+        ),
+        None,
+    )
+
+    initial_plan = initial_plan_from_events(events) or cached_plan
+    initial_hash = initial_plan_hash_from_events(events)
+    if initial_plan is None:
+        print("strict: could not resolve initial plan from events or project plan")
+        return 1
+
+    if isinstance(initialized_payload, dict):
+        computed_initial_hash = (
+            "sha256:"
+            + hashlib.sha256(
+                canonical_event_json(initialized_payload).encode("utf-8")
+            ).hexdigest()
+        )
+    elif plan_path.exists():
+        computed_initial_hash = compute_plan_hash(plan_path)
+    else:
+        computed_initial_hash = (
+            "sha256:"
+            + hashlib.sha256(
+                canonical_event_json(initial_plan.to_dict()).encode("utf-8")
+            ).hexdigest()
+        )
+    if initial_hash and initial_hash != computed_initial_hash:
+        strict_failures += 1
+        print(
+            "strict: initial plan hash mismatch: "
+            f"events={initial_hash} computed={computed_initial_hash}"
+        )
+
+    current: TaskPlan = initial_plan
+    for index, ev in enumerate(events, start=1):
+        kind = ev.get("kind")
+        if kind == "plan_initialized":
+            payload = ev.get("plan")
+            if not isinstance(payload, dict):
+                strict_failures += 1
+                print(f"strict: event {index} plan_initialized missing plan payload")
+                continue
+            event_hash = ev.get("plan_hash")
+            payload_hash = (
+                "sha256:"
+                + hashlib.sha256(
+                    canonical_event_json(payload).encode("utf-8")
+                ).hexdigest()
+            )
+            if isinstance(event_hash, str) and event_hash != payload_hash:
+                strict_failures += 1
+                print(
+                    f"strict: event {index} plan_initialized hash mismatch: "
+                    f"event={event_hash} computed={payload_hash}"
+                )
+            continue
+        if kind == PLAN_MUTATED_KIND:
+            diff = ev.get("diff")
+            if not isinstance(diff, dict):
+                strict_failures += 1
+                print(f"strict: mutation event {index} missing diff field")
+                continue
+            try:
+                proposed = plan_apply_diff(current, diff)
+                validate_mutation(
+                    prior=current,
+                    proposed=proposed,
+                    lease_epoch_actual=0,
+                    lease_epoch_expected=0,
+                )
+                current = proposed
+            except (MutationInvariantError, Exception) as exc:
+                strict_failures += 1
+                print(f"strict: mutation event {index} failed: {exc}")
+            continue
+
+        if kind in {
+            "step_dispatched",
+            "step_completed",
+            "step_failed",
+            "step_skipped",
+            "step_attested",
+            "item_attested",
+            "item_completed",
+            "item_skipped",
+            "for_each_expanded",
+        }:
+            path_tuple = _event_step_path(ev)
+            if path_tuple is None:
+                strict_failures += 1
+                print(f"strict: event {index} missing step path for {kind}")
+                continue
+            effective_index = {path: step for path, step in iter_steps_with_path(current)}
+            target = effective_index.get(path_tuple)
+            if target is None:
+                strict_failures += 1
+                print(
+                    f"strict: event {index} references unknown step path "
+                    f"{'/'.join(path_tuple)!r}"
+                )
+                continue
+            if kind == "step_skipped" and not getattr(target, "optional", False):
+                strict_failures += 1
+                print(
+                    f"strict: skip event {index} targets non-optional step "
+                    f"{'/'.join(path_tuple)!r}"
+                )
+    return strict_failures
+
+
+def _event_step_path(event: dict[str, Any]) -> tuple[str, ...] | None:
+    path_list = event.get("plan_step_path")
+    if isinstance(path_list, list) and path_list:
+        return tuple(str(part) for part in path_list)
+    plan_step_id = event.get("plan_step_id")
+    if isinstance(plan_step_id, str) and plan_step_id:
+        return tuple(segment for segment in plan_step_id.split("/") if segment)
+    return None
 
 
 __all__ = [

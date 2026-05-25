@@ -43,7 +43,7 @@ from astrid.core.session.lease import (
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.claim import active_claims_by_step
 from astrid.core.task.command_render import render_task_command
-from astrid.core.task.env import is_author_test_mode, task_actor_env
+from astrid.core.task.env import task_actor_env
 from astrid.core.task.events import (
     EventLogError,
     _run_is_complete,
@@ -162,35 +162,114 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _hype_project_inputs(proj_root: Path) -> tuple[Path | None, Path | None, Path | None, list[dict[str, str]]]:
-    """Resolve conventional project-local inputs for ``astrid start builtin.hype``.
+def _append_consume(consumes: list[dict[str, str]], path: Path | None) -> None:
+    if path is None or not path.is_file():
+        return
+    resolved = path.resolve()
+    consumes.append({"source": str(resolved), "sha256": _sha256_file(resolved)})
 
-    ``start`` has no orchestrator-specific argument surface, so the task-mode
-    port uses stable project-root names when present. Missing files are allowed;
-    generated executor commands then omit those inputs just as direct template
-    construction does.
-    """
+
+def _default_project_video(proj_root: Path) -> Path | None:
     video = proj_root / "source.mp4"
-    if not video.is_file():
-        video = next(iter(sorted(proj_root.glob("*.mp4"))), None)
-    brief = proj_root / "brief.txt"
-    if not brief.is_file():
-        brief = None
-    theme = proj_root / "theme.json"
-    if not theme.is_file():
-        theme = None
+    if video.is_file():
+        return video
+    return next(iter(sorted(proj_root.glob("*.mp4"))), None)
 
+
+def _project_file(proj_root: Path, name: str) -> Path | None:
+    path = proj_root / name
+    return path if path.is_file() else None
+
+
+def _hype_project_inputs(
+    proj_root: Path,
+) -> tuple[Path | None, Path | None, Path | None, list[dict[str, str]]]:
+    """Resolve conventional project-local inputs for ``astrid start builtin.hype``."""
+    video = _default_project_video(proj_root)
+    brief = _project_file(proj_root, "brief.txt")
+    theme = _project_file(proj_root, "theme.json")
     consumes: list[dict[str, str]] = []
-    seen: set[Path] = set()
     for path in (video, brief, theme):
-        if path is None:
-            continue
-        resolved = path.resolve()
-        if resolved in seen:
-            continue
-        seen.add(resolved)
-        consumes.append({"source": str(resolved), "sha256": _sha256_file(resolved)})
+        _append_consume(consumes, path)
     return video, brief, theme, consumes
+
+
+def _event_talks_project_inputs(
+    proj_root: Path,
+) -> tuple[Path | None, Path | None, list[dict[str, str]]]:
+    source = _default_project_video(proj_root)
+    transcript = _project_file(proj_root, "transcript.json")
+    consumes: list[dict[str, str]] = []
+    for path in (source, transcript):
+        _append_consume(consumes, path)
+    return source, transcript, consumes
+
+
+def _thumbnail_maker_project_inputs(
+    proj_root: Path,
+) -> tuple[Path | None, str | None, list[dict[str, str]]]:
+    source = _default_project_video(proj_root)
+    query_path = _project_file(proj_root, "query.txt")
+    query_text = None
+    if query_path is not None:
+        query_text = query_path.read_text(encoding="utf-8").strip() or None
+    consumes: list[dict[str, str]] = []
+    for path in (source, query_path):
+        _append_consume(consumes, path)
+    return source, query_text, consumes
+
+
+def _build_canonical_start_plan(
+    orchestrator_id: str,
+    *,
+    proj_root: Path,
+    run_dir: Path,
+    run_id: str,
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    if orchestrator_id == "builtin.hype":
+        from astrid.packs.builtin.hype.plan_template import build_plan_v2
+
+        video, brief, theme, consumes = _hype_project_inputs(proj_root)
+        return (
+            build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=video,
+                brief=brief,
+                theme=theme,
+                run_id=run_id,
+            ),
+            consumes,
+        )
+    if orchestrator_id == "builtin.event_talks":
+        from astrid.packs.builtin.event_talks.plan_template import build_plan_v2
+
+        source, transcript, consumes = _event_talks_project_inputs(proj_root)
+        return (
+            build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=source,
+                transcript=transcript,
+                run_id=run_id,
+            ),
+            consumes,
+        )
+    if orchestrator_id == "builtin.thumbnail_maker":
+        from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2
+
+        source, query_text, consumes = _thumbnail_maker_project_inputs(proj_root)
+        return (
+            build_plan_v2(
+                python_exec="python3",
+                run_root=run_dir,
+                source=source,
+                query=query_text,
+                run_id=run_id,
+            ),
+            consumes,
+        )
+    raise ValueError(f"unsupported canonical start orchestrator: {orchestrator_id}")
 
 
 # ---------------------------------------------------------------------------
@@ -241,10 +320,12 @@ def cmd_start(
         )
         return 1
 
-    uses_dynamic_hype_plan = args.orchestrator_id == "builtin.hype" and not is_author_test_mode()
-    if uses_dynamic_hype_plan:
-        compiled_payload: dict[str, Any] = {}
-    else:
+    uses_dynamic_start_plan = args.orchestrator_id in {
+        "builtin.hype",
+        "builtin.event_talks",
+        "builtin.thumbnail_maker",
+    }
+    if not uses_dynamic_start_plan:
         packs = _resolve_packs_root(packs_root)
         build_path = packs / pack / "build" / f"{name}.json"
         if not build_path.is_file():
@@ -259,6 +340,8 @@ def cmd_start(
         except (OSError, json.JSONDecodeError) as exc:
             _print_err(f"start: failed to read {build_path}: {exc}")
             return 1
+    else:
+        compiled_payload = {}
 
     # Resolve timeline ULID (timeline_id) and slug for display.
     timeline_id: str | None = None
@@ -308,25 +391,21 @@ def cmd_start(
     run_dir.mkdir(parents=True, exist_ok=True)
 
     consumes: list[dict[str, str]] = []
-    if uses_dynamic_hype_plan:
+    if uses_dynamic_start_plan:
         try:
-            from astrid.packs.builtin.hype.plan_template import build_plan_v2
-
-            video, brief, theme, consumes = _hype_project_inputs(proj_root)
-            compiled_payload = build_plan_v2(
-                python_exec="python3",
-                run_root=run_dir,
-                source=video,
-                brief=brief,
-                theme=theme,
+            compiled_payload, consumes = _build_canonical_start_plan(
+                args.orchestrator_id,
+                proj_root=proj_root,
+                run_dir=run_dir,
                 run_id=run_id,
             )
         except Exception as exc:
-            _print_err(f"start: failed to build builtin.hype task plan: {exc}")
+            _print_err(f"start: failed to build {args.orchestrator_id} task plan: {exc}")
             return 1
 
     plan_path = proj_root / "plan.json"
     write_json_atomic(plan_path, compiled_payload)
+    write_json_atomic(run_dir / "plan.json", compiled_payload)
 
     try:
         plan = load_plan(plan_path)
@@ -1062,6 +1141,18 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
     # Add DSL-compiled orchestrators discovered from build/*.json files.
     # Each `<pack>/build/<name>.json` corresponds to qualified id
     # `<pack>.<name>`. Defensive — never raises if a pack dir is missing.
+    #
+    # Canonical orchestrators (builtin.hype, builtin.event_talks,
+    # builtin.thumbnail_maker) build their plans dynamically at start
+    # time via plan_template.build_plan_v2(). Their compiled build JSON
+    # artifacts (if present) are NOT product surface — they must never
+    # be treated as the canonical plan source or discovered from the
+    # build/ directory for listing/suggestion purposes.
+    _CANONICAL_DYNAMIC_IDS = {
+        "builtin.hype",
+        "builtin.event_talks",
+        "builtin.thumbnail_maker",
+    }
     try:
         from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT
         if DEFAULT_PACKS_ROOT.is_dir():
@@ -1072,7 +1163,9 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
                 if not build_dir.is_dir():
                     continue
                 for build_file in build_dir.glob("*.json"):
-                    ids.add(f"{pack_dir.name}.{build_file.stem}")
+                    qid = f"{pack_dir.name}.{build_file.stem}"
+                    if qid not in _CANONICAL_DYNAMIC_IDS:
+                        ids.add(qid)
     except Exception:
         pass
 

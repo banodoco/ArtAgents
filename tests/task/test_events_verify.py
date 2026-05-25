@@ -6,8 +6,10 @@ hand-corrupted hash, broken prev_hash chain, and --strict mode.
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
+from contextlib import redirect_stdout
 
 import pytest
 
@@ -309,3 +311,113 @@ def test_strict_mode_with_invalid_mutation(
     )
     # Should return non-zero because strict validation catches the duplicate
     assert rc != 0
+
+
+def test_strict_mode_rejects_initial_plan_hash_mismatch(
+    tmp_projects_root: Path,
+) -> None:
+    from astrid.core.project.project import create_project
+    from astrid.core.task.active_run import write_active_run
+    from astrid.core.task.plan import compute_plan_hash
+
+    slug = "strict-plan-hash"
+    run_id = "run-plan-hash"
+    create_project(slug, root=tmp_projects_root)
+    proj_root = tmp_projects_root / slug
+    run_root = proj_root / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+
+    plan_payload = {
+        "plan_id": "p-strict-hash",
+        "version": 2,
+        "steps": [{"id": "s1", "adapter": "local", "command": "echo one"}],
+    }
+    plan_path = proj_root / "plan.json"
+    plan_path.write_text(json.dumps(plan_payload), encoding="utf-8")
+    plan_hash = compute_plan_hash(plan_path)
+    bad_hash = "sha256:" + "f" * 64
+
+    raw_events = [
+        {"kind": "plan_initialized", "run_id": run_id, "plan": plan_payload, "plan_hash": bad_hash, "ts": "2026-01-01T00:00:00Z"},
+        {"kind": "run_started", "run_id": run_id, "plan_hash": plan_hash, "ts": "2026-01-01T00:00:01Z"},
+    ]
+    _write_events(run_root / "events.jsonl", _build_chain(raw_events))
+    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+
+    from astrid.core.task.run_audit import cmd_events_verify
+
+    rc = cmd_events_verify(["--run", run_id, "--project", slug, "--strict"], projects_root=tmp_projects_root)
+    assert rc == 1
+
+
+def test_strict_mode_rejects_unknown_step_event_path(
+    tmp_projects_root: Path,
+) -> None:
+    from astrid.core.project.project import create_project
+    from astrid.core.task.active_run import write_active_run
+    from astrid.core.task.plan import compute_plan_hash
+
+    slug = "strict-step-path"
+    run_id = "run-step-path"
+    create_project(slug, root=tmp_projects_root)
+    proj_root = tmp_projects_root / slug
+    run_root = proj_root / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+
+    plan_payload = {
+        "plan_id": "p-step-path",
+        "version": 2,
+        "steps": [{"id": "s1", "adapter": "local", "command": "echo one"}],
+    }
+    plan_path = proj_root / "plan.json"
+    plan_path.write_text(json.dumps(plan_payload), encoding="utf-8")
+    plan_hash = compute_plan_hash(plan_path)
+
+    raw_events = [
+        {"kind": "plan_initialized", "run_id": run_id, "plan": plan_payload, "plan_hash": plan_hash, "ts": "2026-01-01T00:00:00Z"},
+        {"kind": "run_started", "run_id": run_id, "plan_hash": plan_hash, "ts": "2026-01-01T00:00:01Z"},
+        {"kind": "step_attested", "plan_step_id": "missing-step", "attested_by": "agent:test", "decision": "approve", "ts": "2026-01-01T00:00:02Z"},
+    ]
+    _write_events(run_root / "events.jsonl", _build_chain(raw_events))
+    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+
+    from astrid.core.task.run_audit import cmd_events_verify
+
+    rc = cmd_events_verify(["--run", run_id, "--project", slug, "--strict"], projects_root=tmp_projects_root)
+    assert rc == 1
+
+
+def test_events_tail_bounds_and_empty_output(tmp_projects_root: Path) -> None:
+    from astrid.core.project.project import create_project
+    from astrid.core.task.run_audit import cmd_events_tail
+
+    slug = "tail-proj"
+    run_id = "run-tail"
+    create_project(slug, root=tmp_projects_root)
+    run_root = tmp_projects_root / slug / "runs" / run_id
+    run_root.mkdir(parents=True, exist_ok=True)
+
+    raw_events = [
+        {"kind": "run_started", "run_id": run_id, "plan_hash": "sha256:abc", "ts": "2026-01-01T00:00:00Z"},
+        {"kind": "step_dispatched", "plan_step_path": ["s1"], "ts": "2026-01-01T00:00:01Z"},
+        {"kind": "step_completed", "plan_step_path": ["s1"], "returncode": 0, "ts": "2026-01-01T00:00:02Z"},
+    ]
+    _write_events(run_root / "events.jsonl", _build_chain(raw_events))
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cmd_events_tail(["--run", run_id, "--project", slug, "-n", "2"], projects_root=tmp_projects_root)
+    assert rc == 0
+    lines = [line for line in buf.getvalue().splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert "step_dispatched" in lines[0]
+    assert "step_completed" in lines[1]
+
+    empty_run = tmp_projects_root / slug / "runs" / "run-empty"
+    empty_run.mkdir(parents=True, exist_ok=True)
+    (empty_run / "events.jsonl").write_text("", encoding="utf-8")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cmd_events_tail(["--run", "run-empty", "--project", slug], projects_root=tmp_projects_root)
+    assert rc == 0
+    assert buf.getvalue().strip() == "(no events)"

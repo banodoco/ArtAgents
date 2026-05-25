@@ -103,6 +103,16 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "pipeline_dispatch_complete_caller",
     ),
     CallSite(
+        "astrid/packs/builtin/event_talks/run.py",
+        "_run_step_subcommand",
+        "record_dispatch_complete",
+    ): (1, "canonical_pack_step_reentry_dispatch_complete_caller"),
+    CallSite(
+        "astrid/packs/builtin/thumbnail_maker/run.py",
+        "_run_step_subcommand",
+        "record_dispatch_complete",
+    ): (1, "canonical_pack_step_reentry_dispatch_complete_caller"),
+    CallSite(
         "astrid/core/runpod/sweeper.py",
         "append_runpod_sweeper_event",
         "append_event_locked",

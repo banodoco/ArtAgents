@@ -50,6 +50,14 @@ LIFECYCLE_VERBS = {
     # abort` just to inspect a stuck run — destroying the very state they
     # were trying to read.
     "run",
+    "events",
+}
+
+TASK_GATE_READONLY_VERBS = {
+    ("projects", "cost"),
+    ("projects", "export"),
+    ("timelines", "cost"),
+    ("timelines", "export"),
 }
 
 
@@ -136,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
-    if raw and raw[0] in LIFECYCLE_VERBS:
+    if _verb_bypasses_task_gate(raw):
         return _dispatch(raw)
     project_slug = _extract_project_slug(raw)
     if project_slug is None:
@@ -164,6 +172,14 @@ def main(argv: list[str] | None = None) -> int:
         return returncode
     finally:
         task_gate.record_dispatch_complete(decision, returncode)
+
+
+def _verb_bypasses_task_gate(raw: list[str]) -> bool:
+    if raw and raw[0] in LIFECYCLE_VERBS:
+        return True
+    if len(raw) >= 2 and tuple(raw[:2]) in TASK_GATE_READONLY_VERBS:
+        return True
+    return False
 
 
 def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:

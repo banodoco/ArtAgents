@@ -16,7 +16,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from astrid.packs.builtin.thumbnail_maker.plan_template import build_plan_v2, emit_plan_json
 from astrid.packs.builtin.asset_cache import run as asset_cache
@@ -205,6 +205,43 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Create source-relevant thumbnail candidates for a video."
     )
+    subparsers = parser.add_subparsers(dest="command")
+
+    resolve_cmd = subparsers.add_parser("resolve-video", help="Resolve source video metadata.")
+    resolve_cmd.add_argument("--video", required=True)
+    resolve_cmd.add_argument("--out", type=Path, required=True)
+
+    plan_cmd = subparsers.add_parser("plan-evidence", help="Write evidence planning metadata.")
+    plan_cmd.add_argument("--query", required=True)
+    plan_cmd.add_argument("--out", type=Path, required=True)
+
+    discover_cmd = subparsers.add_parser(
+        "discover-video-evidence",
+        help="Write deterministic candidate evidence metadata.",
+    )
+    discover_cmd.add_argument("--query", required=True)
+    discover_cmd.add_argument("--out", type=Path, required=True)
+    discover_cmd.add_argument("--video")
+    discover_cmd.add_argument("--previous-manifest", type=Path, required=True)
+
+    reference_cmd = subparsers.add_parser(
+        "build-reference-pack",
+        help="Build a deterministic reference-pack manifest.",
+    )
+    reference_cmd.add_argument("--query", required=True)
+    reference_cmd.add_argument("--out", type=Path, required=True)
+    reference_cmd.add_argument("--previous-manifest", type=Path, required=True)
+
+    generate_cmd = subparsers.add_parser(
+        "generate-thumbnails",
+        help="Write a placeholder generated-thumbnail manifest.",
+    )
+    generate_cmd.add_argument("--query", required=True)
+    generate_cmd.add_argument("--out", type=Path, required=True)
+    generate_cmd.add_argument("--previous-manifest", type=Path, required=True)
+    generate_cmd.add_argument("--count", type=int, default=DEFAULT_COUNT)
+    generate_cmd.add_argument("--size", default=DEFAULT_SIZE, type=normalized_size)
+
     parser.add_argument("--video", help="Source video path or URL.", default=argparse.SUPPRESS)
     parser.add_argument("--query", default="auto", help="Thumbnail direction or search query.")
     parser.add_argument("--out", type=Path, help="Output directory.", default=argparse.SUPPRESS)
@@ -285,6 +322,80 @@ def _append_pack_run_started(run_root: Path) -> None:
         handle.write(json.dumps(ev, sort_keys=True, separators=(",", ":")) + "\n")
 
 
+def _exec_resolve_video(args: argparse.Namespace) -> int:
+    out: Path = args.out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = resolve_video_for_analysis(str(args.video), dry_run=True)
+    payload["query"] = None
+    write_json(out, payload)
+    print(f"thumbnail_maker: wrote={out}")
+    return 0
+
+
+def _exec_plan_evidence(args: argparse.Namespace) -> int:
+    out: Path = args.out
+    payload = plan_evidence_needs(args.query)
+    write_json(out, payload)
+    print(f"thumbnail_maker: wrote={out}")
+    return 0
+
+
+def _exec_discover_video_evidence(args: argparse.Namespace) -> int:
+    out: Path = args.out
+    previous = json.loads(args.previous_manifest.read_text(encoding="utf-8"))
+    candidates = {
+        "query": args.query,
+        "video": args.video,
+        "evidence_plan": previous,
+        "candidates": [
+            {
+                "id": "candidate-001",
+                "kind": "scene_frame",
+                "score": 1.0,
+                "reason": "Deterministic placeholder candidate for task-mode port.",
+            }
+        ],
+    }
+    write_json(out, candidates)
+    print(f"thumbnail_maker: wrote={out}")
+    return 0
+
+
+def _exec_build_reference_pack(args: argparse.Namespace) -> int:
+    out: Path = args.out
+    previous = json.loads(args.previous_manifest.read_text(encoding="utf-8"))
+    payload = {
+        "query": args.query,
+        "references": previous.get("candidates", []),
+        "source_manifest": str(args.previous_manifest),
+    }
+    write_json(out, payload)
+    print(f"thumbnail_maker: wrote={out}")
+    return 0
+
+
+def _exec_generate_thumbnails(args: argparse.Namespace) -> int:
+    out: Path = args.out
+    previous = json.loads(args.previous_manifest.read_text(encoding="utf-8"))
+    payload = {
+        "query": args.query,
+        "count": int(args.count),
+        "size": args.size,
+        "outputs": [
+            {
+                "id": f"thumb-{index + 1:03d}",
+                "path": f"generated/thumb-{index + 1:03d}.png",
+                "reference_count": len(previous.get("references", [])),
+            }
+            for index in range(int(args.count))
+        ],
+        "source_manifest": str(args.previous_manifest),
+    }
+    write_json(out, payload)
+    print(f"thumbnail_maker: wrote={out}")
+    return 0
+
+
 def run_orchestrator(args: argparse.Namespace) -> int:
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -357,8 +468,80 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _run_step_subcommand(
+    *,
+    effective_argv: list[str],
+    args: argparse.Namespace,
+    runner: Callable[[argparse.Namespace], int],
+) -> int:
+    """Run one local-adapter step, recording task-gate completion in task mode."""
+    slug = task_env.task_project_env()
+    decision = None
+    if slug is not None and task_env.is_in_task_run(slug):
+        try:
+            decision = task_gate.gate_command(
+                slug,
+                task_gate.command_for_argv(
+                    ["python3", "-m", "astrid.packs.builtin.thumbnail_maker.run", *effective_argv]
+                ),
+                effective_argv,
+                reentry=True,
+            )
+        except task_gate.TaskRunGateError as exc:
+            print(exc.recovery, file=sys.stderr)
+            return 1
+
+    returncode = runner(args)
+    if decision is not None:
+        task_gate.record_dispatch_complete(decision, returncode)
+    return returncode
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     effective_argv = list(sys.argv[1:] if argv is None else argv)
+    step_commands = {
+        "resolve-video",
+        "plan-evidence",
+        "discover-video-evidence",
+        "build-reference-pack",
+        "generate-thumbnails",
+    }
+
+    if effective_argv and effective_argv[0] in step_commands:
+        args = build_parser().parse_args(effective_argv)
+        if args.command == "resolve-video":
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_resolve_video,
+            )
+        if args.command == "plan-evidence":
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_plan_evidence,
+            )
+        if args.command == "discover-video-evidence":
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_discover_video_evidence,
+            )
+        if args.command == "build-reference-pack":
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_build_reference_pack,
+            )
+        if args.command == "generate-thumbnails":
+            return _run_step_subcommand(
+                effective_argv=effective_argv,
+                args=args,
+                runner=_exec_generate_thumbnails,
+            )
+        print(f"thumbnail_maker: unknown subcommand: {args.command}", file=sys.stderr)
+        return 1
+
     project_context = None
 
     try:
