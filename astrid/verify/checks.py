@@ -13,6 +13,7 @@ sentinel iff every constituent is sentinel.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import wave
 from dataclasses import dataclass, field
@@ -110,15 +111,156 @@ def _run_json_schema(path: Path, params: dict[str, Any]) -> CheckResult:
         return CheckResult(ok=False, reason=f"invalid JSON: {exc.msg}")
     except OSError as exc:
         return CheckResult(ok=False, reason=f"read failed: {exc}")
-    schema = params.get("schema") or {}
-    required = schema.get("required") or []
-    if not isinstance(payload, dict):
-        if required:
-            return CheckResult(ok=False, reason="payload is not an object")
-        return CheckResult(ok=True)
-    for key in required:
-        if key not in payload:
-            return CheckResult(ok=False, reason=f"missing required key: {key}")
+    schema = params.get("schema")
+    result = _validate_json_schema_value(payload, schema, path="$")
+    if not result.ok:
+        return result
+    return CheckResult(ok=True)
+
+
+_JSON_SCHEMA_SUPPORTED_KEYS = frozenset(
+    {
+        "type",
+        "required",
+        "properties",
+        "items",
+        "minItems",
+        "maxItems",
+        "minimum",
+        "pattern",
+        "enum",
+    }
+)
+_JSON_SCHEMA_SUPPORTED_TYPES = frozenset({"object", "array", "string", "number", "integer", "boolean", "null"})
+
+
+def _validate_json_schema_value(value: Any, schema: Any, *, path: str) -> CheckResult:
+    if not isinstance(schema, dict):
+        return CheckResult(ok=False, reason=f"{path}: malformed schema: expected object")
+
+    for key in schema:
+        if key not in _JSON_SCHEMA_SUPPORTED_KEYS:
+            return CheckResult(ok=False, reason=f"{path}: unsupported schema keyword: {key}")
+
+    type_spec = schema.get("type")
+    if type_spec is not None:
+        type_result = _validate_json_schema_type(value, type_spec, path=path)
+        if not type_result.ok:
+            return type_result
+
+    if "enum" in schema:
+        enum_values = schema["enum"]
+        if not isinstance(enum_values, list):
+            return CheckResult(ok=False, reason=f"{path}: malformed enum: expected array")
+        if value not in enum_values:
+            return CheckResult(ok=False, reason=f"{path}: value {value!r} not in enum")
+
+    if "minimum" in schema:
+        minimum = schema["minimum"]
+        if isinstance(minimum, bool) or not isinstance(minimum, (int, float)):
+            return CheckResult(ok=False, reason=f"{path}: malformed minimum: expected number")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return CheckResult(ok=False, reason=f"{path}: minimum requires numeric value")
+        if value < minimum:
+            return CheckResult(ok=False, reason=f"{path}: value {value!r} below minimum {minimum!r}")
+
+    if "pattern" in schema:
+        pattern = schema["pattern"]
+        if not isinstance(pattern, str):
+            return CheckResult(ok=False, reason=f"{path}: malformed pattern: expected string")
+        if not isinstance(value, str):
+            return CheckResult(ok=False, reason=f"{path}: pattern requires string value")
+        try:
+            matched = re.search(pattern, value) is not None
+        except re.error as exc:
+            return CheckResult(ok=False, reason=f"{path}: invalid regex pattern: {exc}")
+        if not matched:
+            return CheckResult(ok=False, reason=f"{path}: string does not match pattern")
+
+    if "required" in schema:
+        required = schema["required"]
+        if not isinstance(required, list) or any(not isinstance(item, str) for item in required):
+            return CheckResult(ok=False, reason=f"{path}: malformed required: expected array of strings")
+        if not isinstance(value, dict):
+            return CheckResult(ok=False, reason=f"{path}: required requires object value")
+        for key in required:
+            if key not in value:
+                return CheckResult(ok=False, reason=f"missing required key: {key}")
+
+    if "properties" in schema:
+        properties = schema["properties"]
+        if not isinstance(properties, dict):
+            return CheckResult(ok=False, reason=f"{path}: malformed properties: expected object")
+        if not isinstance(value, dict):
+            return CheckResult(ok=False, reason=f"{path}: properties requires object value")
+        for key, child_schema in properties.items():
+            if not isinstance(key, str):
+                return CheckResult(ok=False, reason=f"{path}: malformed properties: property name must be string")
+            if not isinstance(child_schema, dict):
+                return CheckResult(ok=False, reason=f"{path}.{key}: malformed property schema: expected object")
+            if key in value:
+                child_result = _validate_json_schema_value(value[key], child_schema, path=f"{path}.{key}")
+                if not child_result.ok:
+                    return child_result
+
+    if "items" in schema:
+        items_schema = schema["items"]
+        if isinstance(items_schema, list):
+            return CheckResult(ok=False, reason=f"{path}: unsupported tuple items schema")
+        if not isinstance(items_schema, dict):
+            return CheckResult(ok=False, reason=f"{path}: malformed items schema: expected object")
+        if not isinstance(value, list):
+            return CheckResult(ok=False, reason=f"{path}: items requires array value")
+        for index, item in enumerate(value):
+            item_result = _validate_json_schema_value(item, items_schema, path=f"{path}[{index}]")
+            if not item_result.ok:
+                return item_result
+
+    if "minItems" in schema:
+        min_items = schema["minItems"]
+        if isinstance(min_items, bool) or not isinstance(min_items, int) or min_items < 0:
+            return CheckResult(ok=False, reason=f"{path}: malformed minItems: expected nonnegative integer")
+        if not isinstance(value, list):
+            return CheckResult(ok=False, reason=f"{path}: minItems requires array value")
+        if len(value) < min_items:
+            return CheckResult(ok=False, reason=f"{path}: array length {len(value)} below minItems {min_items}")
+
+    if "maxItems" in schema:
+        max_items = schema["maxItems"]
+        if isinstance(max_items, bool) or not isinstance(max_items, int) or max_items < 0:
+            return CheckResult(ok=False, reason=f"{path}: malformed maxItems: expected nonnegative integer")
+        if not isinstance(value, list):
+            return CheckResult(ok=False, reason=f"{path}: maxItems requires array value")
+        if len(value) > max_items:
+            return CheckResult(ok=False, reason=f"{path}: array length {len(value)} above maxItems {max_items}")
+
+    return CheckResult(ok=True)
+
+
+def _validate_json_schema_type(value: Any, type_spec: Any, *, path: str) -> CheckResult:
+    if not isinstance(type_spec, str):
+        return CheckResult(ok=False, reason=f"{path}: malformed type: expected string")
+    if type_spec not in _JSON_SCHEMA_SUPPORTED_TYPES:
+        return CheckResult(ok=False, reason=f"{path}: unsupported JSON type: {type_spec}")
+
+    ok = False
+    if type_spec == "object":
+        ok = isinstance(value, dict)
+    elif type_spec == "array":
+        ok = isinstance(value, list)
+    elif type_spec == "string":
+        ok = isinstance(value, str)
+    elif type_spec == "number":
+        ok = not isinstance(value, bool) and isinstance(value, (int, float))
+    elif type_spec == "integer":
+        ok = not isinstance(value, bool) and isinstance(value, int)
+    elif type_spec == "boolean":
+        ok = isinstance(value, bool)
+    elif type_spec == "null":
+        ok = value is None
+
+    if not ok:
+        return CheckResult(ok=False, reason=f"{path}: expected {type_spec}")
     return CheckResult(ok=True)
 
 

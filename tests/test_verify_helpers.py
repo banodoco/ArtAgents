@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import struct
 import wave
 from pathlib import Path
@@ -46,6 +47,96 @@ def test_json_schema_required_keys_enforced(tmp_path: Path) -> None:
     assert check.run(missing).ok is False
     assert "missing required key: a" in check.run(missing).reason
     assert check.run(present).ok is True
+
+
+def test_json_schema_validates_recursive_supported_subset(tmp_path: Path) -> None:
+    check = json_schema(
+        {
+            "type": "object",
+            "required": ["name", "status", "items", "count", "metadata"],
+            "properties": {
+                "name": {"type": "string", "pattern": "astrid"},
+                "status": {"enum": ["ready", "done"]},
+                "count": {"type": "integer", "minimum": 2},
+                "metadata": {
+                    "type": "object",
+                    "required": ["kind"],
+                    "properties": {"kind": {"type": "string"}},
+                },
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 2,
+                    "items": {
+                        "type": "object",
+                        "required": ["score"],
+                        "properties": {"score": {"type": "number", "minimum": 0.5}},
+                    },
+                },
+            },
+        }
+    )
+    good = _write(
+        tmp_path / "good.json",
+        json.dumps(
+            {
+                "name": "made-by-astrid",
+                "status": "ready",
+                "count": 2,
+                "metadata": {"kind": "clip"},
+                "items": [{"score": 0.5}, {"score": 1.25}],
+            }
+        ).encode("utf-8"),
+    )
+
+    assert check.run(good).ok is True
+
+    failures = {
+        "type": {"name": 3, "status": "ready", "count": 2, "metadata": {"kind": "clip"}, "items": [{"score": 1}]},
+        "required": {"name": "astrid", "status": "ready", "count": 2, "items": [{"score": 1}]},
+        "nested": {"name": "astrid", "status": "ready", "count": 2, "metadata": {}, "items": [{"score": 1}]},
+        "enum": {"name": "astrid", "status": "draft", "count": 2, "metadata": {"kind": "clip"}, "items": [{"score": 1}]},
+        "pattern": {"name": "other", "status": "ready", "count": 2, "metadata": {"kind": "clip"}, "items": [{"score": 1}]},
+        "minItems": {"name": "astrid", "status": "ready", "count": 2, "metadata": {"kind": "clip"}, "items": []},
+        "maxItems": {
+            "name": "astrid",
+            "status": "ready",
+            "count": 2,
+            "metadata": {"kind": "clip"},
+            "items": [{"score": 1}, {"score": 1}, {"score": 1}],
+        },
+        "minimum": {"name": "astrid", "status": "ready", "count": 1, "metadata": {"kind": "clip"}, "items": [{"score": 1}]},
+        "item_minimum": {
+            "name": "astrid",
+            "status": "ready",
+            "count": 2,
+            "metadata": {"kind": "clip"},
+            "items": [{"score": 0.25}],
+        },
+    }
+    for label, payload in failures.items():
+        result = check.run(_write(tmp_path / f"{label}.json", json.dumps(payload).encode("utf-8")))
+        assert result.ok is False, label
+
+
+def test_json_schema_rejects_unsupported_keywords_and_tuple_items(tmp_path: Path) -> None:
+    payload = _write(tmp_path / "payload.json", b'{"items": ["a"], "name": "astrid"}')
+
+    tuple_result = json_schema({"type": "object", "properties": {"items": {"type": "array", "items": [{"type": "string"}]}}}).run(payload)
+    assert tuple_result.ok is False
+    assert "unsupported" in tuple_result.reason.lower()
+
+    keyword_result = json_schema({"type": "object", "additionalProperties": False}).run(payload)
+    assert keyword_result.ok is False
+    assert "unsupported" in keyword_result.reason.lower()
+
+
+def test_json_schema_rejects_bool_for_number_and_integer(tmp_path: Path) -> None:
+    number = _write(tmp_path / "number.json", b'{"value": true}')
+    integer = _write(tmp_path / "integer.json", b'{"value": false}')
+
+    assert json_schema({"type": "object", "properties": {"value": {"type": "number"}}}).run(number).ok is False
+    assert json_schema({"type": "object", "properties": {"value": {"type": "integer"}}}).run(integer).ok is False
 
 
 def test_audio_duration_min_wav_accepts_long_rejects_short(tmp_path: Path) -> None:

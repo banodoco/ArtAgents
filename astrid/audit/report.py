@@ -4,7 +4,7 @@ import html
 from pathlib import Path
 from typing import Any
 
-from .graph import build_graph, load_ledger
+from .graph import build_graph, load_ledger, verify_audit_ledger
 
 
 def _render_preview(node: dict[str, Any]) -> str:
@@ -98,8 +98,17 @@ def render_html(run_dir: Path | str, graph: dict[str, Any]) -> str:
 """
 
 
-def write_report(run_dir: Path | str, out: Path | None = None) -> Path:
+def _verification_failure_message(line_number: int | None, reason: str) -> str:
+    location = f" line {line_number}" if line_number is not None else ""
+    return f"audit ledger verification failed{location}: {reason}"
+
+
+def write_report(run_dir: Path | str, out: Path | None = None, *, verify: bool = True) -> Path:
     run_path = Path(run_dir).resolve()
+    if verify:
+        ok, line_number, reason = verify_audit_ledger(run_path)
+        if not ok:
+            raise RuntimeError(_verification_failure_message(line_number, reason))
     graph = build_graph(load_ledger(run_path))
     output = out or run_path / "audit" / "report.html"
     output.parent.mkdir(parents=True, exist_ok=True)

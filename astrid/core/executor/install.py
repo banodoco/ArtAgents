@@ -236,13 +236,15 @@ def _clone_git_manifest_source(source: _GitManifestSource, checkout: Path) -> No
         _checkout_git_manifest_ref(source, checkout)
         return
     ref = source.tag or source.branch or source.source_ref
-    assert ref is not None
+    if ref is None:
+        raise ExecutorInstallError("git manifest source requires a ref to clone")
     _run_git(("git", "clone", "--depth", "1", "--branch", ref, source.repo_url, str(checkout)))
 
 
 def _checkout_git_manifest_ref(source: _GitManifestSource, checkout: Path) -> None:
     ref = source.commit_sha or source.tag or source.branch or source.source_ref
-    assert ref is not None
+    if ref is None:
+        raise ExecutorInstallError("git manifest source requires a ref to checkout")
     _run_git(("git", "-C", str(checkout), "checkout", "--detach", ref))
 
 

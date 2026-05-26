@@ -124,6 +124,45 @@ def test_audit_cli_renders_legacy_and_v2_ledgers(tmp_path: Path, capsys: pytest.
         assert payload["nodes"]
 
 
+def test_audit_cli_verifies_by_default_and_no_verify_is_explicit_escape_hatch(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from astrid.audit import cli as audit_cli
+
+    run_dir = tmp_path / "run"
+    ctx = AuditContext.for_run(run_dir)
+    ctx.register_node(stage="prepare", label="Prepare")
+    ledger_path = run_dir / "audit" / "ledger.jsonl"
+    payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    payload["stage"] = "tampered"
+    ledger_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+
+    assert audit_cli.main(["--run", str(run_dir), "--json"]) == 1
+    assert "verification failed" in capsys.readouterr().out
+
+    assert audit_cli.main(["--run", str(run_dir), "--json", "--no-verify"]) == 0
+    assert json.loads(capsys.readouterr().out)["nodes"]
+
+
+def test_audit_report_write_report_verifies_by_default(tmp_path: Path) -> None:
+    from astrid.audit.report import write_report
+
+    run_dir = tmp_path / "run"
+    ctx = AuditContext.for_run(run_dir)
+    ctx.register_node(stage="prepare", label="Prepare")
+    ledger_path = run_dir / "audit" / "ledger.jsonl"
+    payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    payload["stage"] = "tampered"
+    ledger_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="audit ledger verification failed"):
+        write_report(run_dir)
+
+    report = write_report(run_dir, verify=False)
+    assert report.is_file()
+
+
 def test_verify_audit_ledger_detects_truncation(tmp_path: Path) -> None:
     from astrid.audit.graph import verify_audit_ledger
 

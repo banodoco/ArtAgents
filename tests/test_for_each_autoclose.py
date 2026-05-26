@@ -52,20 +52,20 @@ def _replay_agent_probe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     # to advance past produces-bearing attested steps. This keeps the test
     # focused on the autoclose surface without coupling it to artifact
     # authoring details.
-    def _stub_inline_checks(decision, produces):
+    def _stub_inline_checks(decision, produces, append_fn):
+        emitted = []
         for entry in produces:
             if decision.events_path is None or not decision.plan_step_path:
                 continue
-            append_event(
-                decision.events_path,
-                make_produces_check_passed_event(
-                    decision.plan_step_path,
-                    entry.name,
-                    check_id=entry.check.check_id,
-                    cas_sha256=None,
-                ),
+            event = make_produces_check_passed_event(
+                decision.plan_step_path,
+                entry.name,
+                check_id=entry.check.check_id,
+                cas_sha256=None,
             )
-        return True
+            emitted.append(event)
+            append_fn(event)
+        return gate.InlineCheckResult(ok=True, events=tuple(emitted))
     monkeypatch.setattr(gate, "_run_inline_checks", _stub_inline_checks)
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
