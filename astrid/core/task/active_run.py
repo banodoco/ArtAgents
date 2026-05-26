@@ -16,8 +16,12 @@ Callers should migrate to:
 
 The brief asks for full deletion of this module; the shim keeps existing
 non-lifecycle callers functional while T10's test fixtures land, and the
-remaining shim retirement is deferred to m5b. The public symbols are NO
-LONGER re-exported from ``astrid.core.task``.
+remaining shim retirement is deferred to m5b.
+
+TODO(m5b): delete this shim once the last fixture/helper callers migrate to
+``astrid.core.project.current_run`` and ``astrid.core.session.lease``.
+
+The public symbols are NO LONGER re-exported from ``astrid.core.task``.
 """
 
 from __future__ import annotations

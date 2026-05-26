@@ -1,3 +1,11 @@
+> **⚠️ OBSOLETE / ARCHIVED — May 2026**
+>
+> This document (`project.md`) is an archived project brief scoped to the **Seinfeld Scene Generator** demo. It was drafted as an early concept document describing four orchestrators (`dataset_build`, `lora_train`, `script_to_shots`, `scene_render`) composed into a top-level `seinfeld_demo` pipeline. Many of the architectural assumptions (e.g., the `code` / `attested` / `nested` step taxonomy, RunPod-in-vibecomfy) predate the reshape sprints and no longer reflect the current framework design.
+>
+> **Canonical planning authority** has moved to [`idea.md`](./idea.md). This file is retained for historical reference only.
+
+---
+
 # Seinfeld Scene Generator — Project Plan
 
 A demo of LTX 2.3 that generates Seinfeld-style scenes from a concept. Built on top of a fine-tuned LoRA, agent-written scripts, and Astrid's timeline composition.

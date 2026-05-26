@@ -24,8 +24,9 @@ Give this to your agents to get started:
 ◇                                                                            ◇
 ┃                           ◇  Getting Started  ◇                            ┃
 ┃            git clone https://github.com/peteromallet/Astrid.git            ┃
-┃            python3 -m astrid [executors|orchestrators] list                 ┃
-┃           python3 -m astrid elements list <kind>                           ┃
+┃        python3 -m astrid [executors|orchestrators|packs] list              ┃
+┃       python3 -m astrid modalities list                                    ┃
+┃           python3 -m astrid elements list --kind <kind>                    ┃
 ┃        python3 -m astrid [executors|orchestrators] inspect <id>            ┃
 ┃       python3 -m astrid elements inspect <kind> <element_id>               ┃
 ┃       python3 -m astrid [executors|orchestrators] run <id> -- <args>       ┃

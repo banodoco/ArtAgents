@@ -109,6 +109,7 @@ class OnboardingDocsTest(unittest.TestCase):
             "docs/templates/orchestrator/run.py",
             "docs/templates/orchestrator/STAGE.md",
             "docs/templates/element/component.tsx",
+            "docs/templates/element/STAGE.md",
             "docs/templates/element/element.yaml",
         )
         for path in required:

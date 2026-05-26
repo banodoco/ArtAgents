@@ -12,6 +12,11 @@ def _write(root: Path, rel: str, body: str) -> Path:
     return path
 
 
+def _bootstrap_structure_root(root: Path) -> None:
+    _write(root, "astrid/core/__init__.py", "")
+    _write(root, "astrid/packs/__init__.py", "")
+
+
 def test_validate_import_layering_flags_absolute_and_relative_core_pack_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -126,6 +131,73 @@ def test_validate_repo_structure_promotes_migration_completion_violations_to_err
     assert report.warnings == ()
 
 
+def test_validate_repo_structure_flags_deprecated_without_todo_as_error(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/deprecated_module.py",
+        '"""DEPRECATED compatibility layer."""\n'
+        "value = 1\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == (
+        "astrid/core/deprecated_module.py: DEPRECATED marker lacks TODO(milestone) removal target",
+    )
+
+
+def test_validate_repo_structure_flags_non_exempt_sys_modules_injection_as_error(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/sys_modules_alias.py",
+        "import sys\n"
+        "sys.modules['astrid.core.legacy'] = sys.modules[__name__]\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == (
+        "astrid/core/sys_modules_alias.py: sys.modules injection remains outside tests",
+    )
+
+
+def test_validate_repo_structure_flags_dangling_all_alias_as_error(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/deprecated_module.py",
+        "__all__ = ['new_name', 'old_name']\n"
+        "old_name = 'value'\n"
+        "new_name = old_name\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == (
+        "astrid/core/deprecated_module.py:3: __all__ exports alias new_name = old_name",
+    )
+
+
+def test_validate_repo_structure_flags_non_exempt_compatibility_shim_as_error(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/shim_module.py",
+        '"""Compatibility shim for older imports."""\n'
+        "from astrid.core.real_target import value\n",
+    )
+    _write(tmp_path, "astrid/core/real_target.py", "value = 1\n")
+    _write(tmp_path, "astrid/core/shim_consumer.py", "from astrid.core.shim_module import value\n")
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == (
+        "astrid/core/shim_module.py: compatibility shim still has 1 live import caller(s)",
+    )
+
+
 def test_validate_migration_completion_exempts_only_compile_sys_modules_pattern(
     tmp_path: Path,
 ) -> None:
@@ -148,6 +220,20 @@ def test_validate_migration_completion_exempts_only_compile_sys_modules_pattern(
     assert "astrid/core/not_compile.py: sys.modules injection remains outside tests" in advisories
 
 
+def test_validate_repo_structure_keeps_compile_sys_modules_exemption_green(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/orchestrate/compile.py",
+        "import sys\n"
+        "sys.modules['temp'] = object()\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == ()
+
+
 def test_validate_migration_completion_requires_todo_marker_for_media_shim_exemption(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -164,6 +250,25 @@ def test_validate_migration_completion_requires_todo_marker_for_media_shim_exemp
     advisories = validate_migration_completion(tmp_path)
 
     assert "astrid/core/util/media.py: compatibility shim still has 1 live import caller(s)" not in advisories
+
+
+def test_validate_repo_structure_keeps_media_shim_exemption_green(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/util/media.py",
+        '"""TODO(m5b): Re-export shim for ffprobe_duration_seconds."""\n'
+        "from astrid._media import ffprobe_duration_seconds\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/example/use_media.py",
+        "from astrid.core.util.media import ffprobe_duration_seconds\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == ()
 
 
 def test_validate_migration_completion_flags_media_shim_without_m5b_todo(tmp_path: Path) -> None:

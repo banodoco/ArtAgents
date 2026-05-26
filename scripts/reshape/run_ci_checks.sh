@@ -27,6 +27,7 @@ BROAD_PYTEST_ARGS=(
 "$PYTHON_BIN" scripts/reshape/compare_ruff_baseline.py
 "$PYTHON_BIN" scripts/reshape/compare_mypy_baseline.py
 "$PYTHON_BIN" scripts/reshape/check_repo_hygiene.py
+bash tests/verify_docs_commands.sh
 
 "$PYTHON_BIN" -m pytest tests/reshape -q
 "$PYTHON_BIN" -m pytest tests/reshape/test_hype_regression_fixture.py -q

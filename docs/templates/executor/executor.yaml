@@ -1,5 +1,6 @@
 {
-  "id": "builtin.example",
+  "schema_version": 1,
+  "id": "builtin.example_executor",
   "name": "Example",
   "kind": "built_in",
   "version": "1.0",

@@ -67,6 +67,7 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
     errors.extend(_validate_pack_orchestrator_folders(repo_root / "astrid" / "packs"))
     errors.extend(_validate_pack_element_folders(repo_root / "astrid" / "packs"))
     errors.extend(validate_import_layering(repo_root))
+    # Migration-completion drift is a blocking structure violation, not a warning.
     errors.extend(validate_migration_completion(repo_root))
     return StructureReport(errors=tuple(errors), warnings=tuple(warnings))
 

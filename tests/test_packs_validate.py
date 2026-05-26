@@ -206,6 +206,45 @@ agent:
         self.assertEqual(pack.support, "community")
         self.assertEqual(pack.stability, "experimental")
 
+    def test_docs_scaffold_templates_validate_in_minimal_pack(self) -> None:
+        """Scaffold templates should validate together in a minimal pack shell."""
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: builtin
+name: Builtin
+version: 0.1.0
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+""",
+        )
+        _write(root / "AGENTS.md", "# Builtin\n")
+        _write(root / "README.md", "# Builtin\n")
+
+        template_pairs = (
+            ("docs/templates/executor/executor.yaml", "executors/example/executor.yaml"),
+            ("docs/templates/executor/STAGE.md", "executors/example/STAGE.md"),
+            ("docs/templates/executor/run.py", "executors/example/run.py"),
+            ("docs/templates/orchestrator/orchestrator.yaml", "orchestrators/example/orchestrator.yaml"),
+            ("docs/templates/orchestrator/STAGE.md", "orchestrators/example/STAGE.md"),
+            ("docs/templates/orchestrator/run.py", "orchestrators/example/run.py"),
+            ("docs/templates/element/element.yaml", "elements/effects/example/element.yaml"),
+            ("docs/templates/element/STAGE.md", "elements/effects/example/STAGE.md"),
+            ("docs/templates/element/component.tsx", "elements/effects/example/component.tsx"),
+        )
+        repo_root = Path(__file__).resolve().parents[1]
+        for src_rel, dst_rel in template_pairs:
+            src = repo_root / src_rel
+            dst = root / dst_rel
+            _write(dst, src.read_text(encoding="utf-8"))
+
+        errors, warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertEqual(warnings, [], f"Unexpected warnings: {warnings}")
+
 
 class TestLayoutValidation(MinimalPackTestCase):
     def test_non_builtin_pack_uses_discovery_iterators_for_declared_content_roots(self) -> None:

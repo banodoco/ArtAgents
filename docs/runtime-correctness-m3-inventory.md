@@ -532,8 +532,8 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 80 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 133 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 84 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 137 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/task/claim.py`
 
@@ -1116,15 +1116,15 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 92 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 95 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 143 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 154 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 220 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
-| 250 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
-| 323 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 374 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 449 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 93 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 96 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 144 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 155 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 221 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 251 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 324 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 375 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 450 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/theme_schema.py`
 
