@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import time
 from pathlib import Path
 
 import pytest
@@ -41,8 +42,31 @@ def _make_step(**kwargs) -> Step:
     return Step(**defaults)
 
 
-def _wait_for_exit(pid: int) -> int:
-    waited_pid, status = os.waitpid(pid, 0)
+def _wait_for_exit(pid: int) -> int | None:
+    """Block until ``pid`` has exited; return its exit code if reapable.
+
+    ``LocalAdapter.dispatch`` intentionally discards the ``Popen`` handle so the
+    child can outlive the spawning tab. As a side effect, the still-running
+    child stays on CPython's internal ``subprocess._active`` list, and the next
+    ``subprocess.Popen(...)`` anywhere in the process reaps it via the module's
+    ``_cleanup()``. In a single-process serial run (CI), a later test spawning a
+    subprocess thus reaps our child first, so ``os.waitpid`` here raises
+    ``ChildProcessError`` (ECHILD). Run in isolation no other Popen intervenes
+    and the reap succeeds — which is why this only failed under the broad CI
+    run. Tolerate the already-reaped case by polling for disappearance; callers
+    treat a ``None`` return as "exited, code unrecoverable" (the authoritative
+    returncode for ``complete()`` is the sidecar the test writes explicitly).
+    """
+    try:
+        waited_pid, status = os.waitpid(pid, 0)
+    except ChildProcessError:
+        # Already reaped by subprocess's internal cleanup; wait for it to vanish.
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return None
+            time.sleep(0.01)
     assert waited_pid == pid
     return os.waitstatus_to_exitcode(status)
 
@@ -118,7 +142,7 @@ def test_complete_success(adapter: LocalAdapter, tmp_path: Path) -> None:
     step = _make_step(command="echo hello")
     dispatched = adapter.dispatch(step, ctx)
     assert dispatched.pid is not None
-    assert _wait_for_exit(dispatched.pid) == 0
+    assert _wait_for_exit(dispatched.pid) in (0, None)
     # Write returncode sidecar (normally done by cmd_next)
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
     rc_path.write_text("0", encoding="utf-8")
@@ -133,7 +157,7 @@ def test_complete_failure_nonzero_exit(adapter: LocalAdapter, tmp_path: Path) ->
     step = _make_step(command="sh -c 'exit 1'")
     dispatched = adapter.dispatch(step, ctx)
     assert dispatched.pid is not None
-    assert _wait_for_exit(dispatched.pid) == 1
+    assert _wait_for_exit(dispatched.pid) in (1, None)
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
     rc_path.write_text("1", encoding="utf-8")
 
@@ -150,7 +174,7 @@ def test_complete_with_produces_check(adapter: LocalAdapter, tmp_path: Path) -> 
     )
     dispatched = adapter.dispatch(step, ctx)
     assert dispatched.pid is not None
-    assert _wait_for_exit(dispatched.pid) == 0
+    assert _wait_for_exit(dispatched.pid) in (0, None)
 
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
     rc_path.write_text("0", encoding="utf-8")
@@ -170,7 +194,7 @@ def test_complete_missing_produces_fails(adapter: LocalAdapter, tmp_path: Path) 
     )
     dispatched = adapter.dispatch(step, ctx)
     assert dispatched.pid is not None
-    assert _wait_for_exit(dispatched.pid) == 0
+    assert _wait_for_exit(dispatched.pid) in (0, None)
 
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
     rc_path.write_text("0", encoding="utf-8")
@@ -184,7 +208,7 @@ def test_complete_cost_omitted_when_absent(adapter: LocalAdapter, tmp_path: Path
     step = _make_step()
     dispatched = adapter.dispatch(step, ctx)
     assert dispatched.pid is not None
-    assert _wait_for_exit(dispatched.pid) == 0
+    assert _wait_for_exit(dispatched.pid) in (0, None)
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
     rc_path.write_text("0", encoding="utf-8")
 
