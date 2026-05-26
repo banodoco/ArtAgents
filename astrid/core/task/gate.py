@@ -1,11 +1,10 @@
 """Task-run dispatch gate.
 
-Phase 2 attested/nested handling is kernel-only; Phase 5 will add the
-``astrid ack`` / ``astrid next`` lifecycle verbs that drive the
-``record_step_attested`` / ``record_nested_entered`` / ``record_nested_exited``
-helpers exposed for symmetry below. The gate itself emits ``step_attested``,
-``nested_entered``, and ``nested_exited`` events inline; the public helpers
-have zero callers in Phase 2 (FLAG-007).
+Phase 2 nested handling is kernel-only; Phase 5 will add the ``astrid ack`` /
+``astrid next`` lifecycle verbs that drive the ``record_nested_entered`` /
+``record_nested_exited`` helpers exposed for symmetry below. The gate itself
+emits ``step_attested``, ``nested_entered``, and ``nested_exited`` events
+inline; only the nested helpers remain exported for later lifecycle wiring.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ import dataclasses
 import hashlib
 import json
 import shlex
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
@@ -32,6 +32,7 @@ from astrid.core.task.env import (
 from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.events import (
     canonical_event_json,
+    EventLogError,
     make_cursor_rewind_event,
     make_for_each_expanded_event,
     make_item_attested_event,
@@ -144,6 +145,47 @@ class _PendingProduces:
     dispatch_event_hash: str | None = None
 
 
+@dataclass(frozen=True)
+class _ForEachSelection:
+    item_id: str | None
+    no_pending: bool = False
+
+
+@dataclass(frozen=True)
+class InlineCheckResult:
+    ok: bool
+    name: str | None = None
+    reason: str | None = None
+    events: tuple[dict[str, Any], ...] = field(default_factory=tuple, compare=False)
+
+
+@dataclass(frozen=True)
+class _ActiveWriterAppend:
+    append_fn: Callable[[dict[str, Any]], Any]
+
+
+_FinalizeAppendMode = Literal["decision"] | _ActiveWriterAppend
+
+
+@dataclass(frozen=True)
+class _TerminalEventRequest:
+    kind: Literal[
+        "step_completed",
+        "step_failed",
+        "step_awaiting_fetch",
+        "item_completed",
+        "step_attested",
+        "item_attested",
+    ]
+    payload: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class _ParentFinalizationContext:
+    decision: GateDecision
+    terminal_event: _TerminalEventRequest
+
+
 @dataclass
 class CursorPath:
     frames: list[_Frame] = field(default_factory=list)
@@ -181,6 +223,7 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
     pending: list[_PendingProduces | None] = [None]
     latest_dispatch: dict[str, tuple[int, str | None]] = {}
     for_each_progress: dict[str, dict[str, Any]] = {}
+    last_item_terminal: dict[str, str] = {}
     pinned_failure: tuple[str, str] | None = None
     for event in events:
         kind = event.get("kind")
@@ -289,6 +332,7 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                 continue
             entry = for_each_progress.setdefault(host_path, {"items": (), "completed": set()})
             entry["completed"].add(item_id)
+            last_item_terminal[host_path] = item_id
             if frames[-1].item_id == item_id:
                 frames.pop()
                 pending.pop()
@@ -301,8 +345,16 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                     if frames[-1].child_index < len(frames[-1].plan.steps):
                         candidate = frames[-1].plan.steps[frames[-1].child_index]
                         if host_segments and candidate.id == host_segments[-1]:
-                            frames[-1].child_index += 1
-                            pending[-1] = None
+                            produces = getattr(candidate, "produces", ())
+                            if produces:
+                                pending[-1] = _PendingProduces(
+                                    names={entry.name for entry in produces},
+                                    step_version=candidate.version,
+                                    dispatch_event_hash=None,
+                                )
+                            else:
+                                frames[-1].child_index += 1
+                                pending[-1] = None
         elif kind in ("step_completed", "step_attested", "step_skipped"):
             # #20 fix — repeat.until cursor stall: when the topmost frame is
             # an iteration frame whose body is already exhausted (typically
@@ -388,6 +440,25 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                     frames[-1].child_index += 1
                     pending[-1] = None
         elif kind in ("produces_check_failed", "cursor_rewind"):
+            host_path = _path_str_from_event(event)
+            failed_item_id = last_item_terminal.get(host_path)
+            if failed_item_id is not None and host_path in for_each_progress:
+                for_each_progress[host_path]["completed"].discard(failed_item_id)
+                if frames[-1].item_id != failed_item_id:
+                    host_segments = host_path.split(STEP_PATH_SEP) if host_path else []
+                    expected_parent_prefix = tuple(host_segments[:-1])
+                    if tuple(frames[-1].path_prefix) == expected_parent_prefix:
+                        if frames[-1].child_index < len(frames[-1].plan.steps):
+                            host_step = frames[-1].plan.steps[frames[-1].child_index]
+                            if host_segments and host_step.id == host_segments[-1]:
+                                frames.append(
+                                    _make_item_frame(
+                                        host_step,
+                                        frames[-1].path_prefix,
+                                        failed_item_id,
+                                    )
+                                )
+                                pending.append(None)
             current = pending[-1]
             if current is None or _event_matches_pending(event, current):
                 pending[-1] = None
@@ -641,7 +712,7 @@ def _auto_traverse_to_leaf(
                 )
                 continue
             if isinstance(repeat, RepeatForEach):
-                _enter_repeat_for_each(
+                selection = _enter_repeat_for_each(
                     slug=slug,
                     cursor=cursor,
                     host=current_step,
@@ -654,6 +725,10 @@ def _auto_traverse_to_leaf(
                     run_id=run_id,
                     incoming_command=incoming_command,
                 )
+                if selection.no_pending:
+                    if raise_on_exhausted:
+                        _reject(slug, "for_each has no pending items", abort=True)
+                    return None
                 continue
         if is_group_step(current_step):
             child_hash = _compute_inline_plan_hash(current_step.plan)
@@ -781,67 +856,66 @@ def gate_command(
     # for_each_expanded/item_started for repeat hosts. We loop until we land on a
     # dispatchable leaf inside the appropriate frame.
     with writer_context_for_project(slug, root=root) as writer:
-        pass
-    events_view = list(events)
+        events_view = list(events)
 
-    def _gate_append(ev: dict[str, Any]) -> None:
-        writer.append(ev)
-        events_view.append(ev)
+        def _gate_append(ev: dict[str, Any]) -> None:
+            writer.append(ev)
+            events_view.append(ev)
 
-    leaf = _auto_traverse_to_leaf(
-        slug=slug,
-        cursor=cursor,
-        events_view=events_view,
-        incoming_command=command,
-        project_root=project_root,
-        run_id=run_id,
-        append_fn=_gate_append,
-        raise_on_exhausted=True,
-    )
-    if leaf is None:
-        # Defensive: raise_on_exhausted=True should always raise inside the helper.
-        _reject(slug, "plan is exhausted", abort=True)
-    current_step, current_path = leaf
-    path_str = STEP_PATH_SEP.join(current_path)
-
-    iteration, item_id = _current_repeat_context(cursor.frames)
-
-    if is_code_kind(current_step):
-        return _dispatch_code(
+        leaf = _auto_traverse_to_leaf(
             slug=slug,
-            command=command,
-            step=current_step,
-            path_str=path_str,
-            path_tuple=current_path,
-            events_path=events_path,
-            run_id=run_id,
-            reentry=reentry,
+            cursor=cursor,
+            events_view=events_view,
+            incoming_command=command,
             project_root=project_root,
-            iteration=iteration,
-            item_id=item_id,
-            append_fn=writer.append,
-            session=writer.session,
-            run_dir=writer.run_dir,
-            writer_epoch_at_dispatch=writer.expected_writer_epoch,
-        )
-    if is_attested_kind(current_step):
-        return _dispatch_attested(
-            slug=slug,
-            command=command,
-            step=current_step,
-            path_str=path_str,
-            path_tuple=current_path,
-            events_path=events_path,
             run_id=run_id,
-            run_started_actor=run_started_actor,
-            project_root=project_root,
-            iteration=iteration,
-            item_id=item_id,
-            append_fn=writer.append,
-            session=writer.session,
-            run_dir=writer.run_dir,
-            writer_epoch_at_dispatch=writer.expected_writer_epoch,
+            append_fn=_gate_append,
+            raise_on_exhausted=True,
         )
+        if leaf is None:
+            # Defensive: raise_on_exhausted=True should always raise inside the helper.
+            _reject(slug, "plan is exhausted", abort=True)
+        current_step, current_path = leaf
+        path_str = STEP_PATH_SEP.join(current_path)
+
+        iteration, item_id = _current_repeat_context(cursor.frames)
+
+        if is_code_kind(current_step):
+            return _dispatch_code(
+                slug=slug,
+                command=command,
+                step=current_step,
+                path_str=path_str,
+                path_tuple=current_path,
+                events_path=events_path,
+                run_id=run_id,
+                reentry=reentry,
+                project_root=project_root,
+                iteration=iteration,
+                item_id=item_id,
+                append_fn=_gate_append,
+                session=writer.session,
+                run_dir=writer.run_dir,
+                writer_epoch_at_dispatch=writer.expected_writer_epoch,
+            )
+        if is_attested_kind(current_step):
+            return _dispatch_attested(
+                slug=slug,
+                command=command,
+                step=current_step,
+                path_str=path_str,
+                path_tuple=current_path,
+                events_path=events_path,
+                run_id=run_id,
+                run_started_actor=run_started_actor,
+                project_root=project_root,
+                iteration=iteration,
+                item_id=item_id,
+                append_fn=_gate_append,
+                session=writer.session,
+                run_dir=writer.run_dir,
+                writer_epoch_at_dispatch=writer.expected_writer_epoch,
+            )
     raise TaskRunGateError(
         reason=f"unexpected step kind: {type(current_step).__name__}",
         recovery=f"astrid next --project {slug}",
@@ -926,7 +1000,7 @@ def _evaluate_repeat_until_expression(
         artifact_path = step_dir / "produces" / resolved.produces.path
         payload = json.loads(artifact_path.read_text(encoding="utf-8"))
         value = _json_field(payload, resolved.json_path, artifact_path)
-    except (TaskPlanError, TaskRunGateError, FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+    except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
         return False, f"repeat.until unresolved: {exc}"
 
     if expr.op == "==":
@@ -972,13 +1046,27 @@ def _evaluate_exhausted_repeat_until_frame(
     )
     cursor.frames.pop()
     if passed:
-        append_fn(
-            make_step_completed_event(
-                STEP_PATH_SEP.join(host_path),
-                0,
+        _finalize_step(
+            GateDecision(
+                active=True,
+                run_id=run_id,
+                plan_step_id=STEP_PATH_SEP.join(host_path),
+                slug=slug,
+                plan_step_path=host_path,
+                project_root=project_root,
                 adapter=host.adapter,
                 step_version=host.version,
-            )
+            ),
+            _TerminalEventRequest(
+                "step_completed",
+                {
+                    "plan_step_path": STEP_PATH_SEP.join(host_path),
+                    "returncode": 0,
+                    "adapter": host.adapter,
+                    "step_version": host.version,
+                },
+            ),
+            append_mode=_ActiveWriterAppend(append_fn),
         )
         parent.child_index += 1
         return
@@ -1109,7 +1197,7 @@ def _enter_repeat_for_each(
     project_root: Path,
     run_id: str,
     incoming_command: str,
-) -> str | None:
+) -> _ForEachSelection:
     # FLAG-P3-004: scan events for an existing for_each_expanded; if absent, append once.
     existing = next(
         (
@@ -1143,20 +1231,21 @@ def _enter_repeat_for_each(
         _, args = match_attested_command(incoming_command, host.command)
         if args.item is not None:
             target_item = args.item
+    pending_item = next((it for it in items if it not in completed), None)
     if target_item is None:
-        # Pick first not-yet-completed item.
-        target_item = next((it for it in items if it not in completed), None)
+        target_item = pending_item
+    elif target_item not in items or target_item in completed:
+        # Explicit --item mistakes are local selection misses, not replayable
+        # item outcomes. Fall back to a pending item when possible; otherwise
+        # let traversal report exhaustion without appending item_skipped or
+        # mutating progress.
+        target_item = pending_item
     if target_item is None:
-        # All items done — finalize will pop. Just return.
-        return None
-    if target_item not in items:
-        _reject(slug, f"for_each --item {target_item!r} not in expanded item set", abort=False)
-    if target_item in completed:
-        _reject(slug, f"for_each --item {target_item!r} already completed", abort=False)
+        return _ForEachSelection(item_id=None, no_pending=True)
     path_tuple = parent_prefix + (host.id,)
     append_fn(make_item_started_event(path_tuple, target_item, step_version=host.version))
     cursor.frames.append(_make_item_frame(host, parent_prefix, target_item))
-    return target_item
+    return _ForEachSelection(item_id=target_item)
 
 
 def _resolve_adapter(step: Step):
@@ -1478,39 +1567,6 @@ def _dispatch_attested(
         run_started_actor=run_started_actor,
     )
 
-    if item_id is not None:
-        event = make_item_attested_event(
-            path_tuple,
-            item_id,
-            attestor_kind=attestor_kind,
-            attestor_id=attestor_id,
-            evidence=args.evidence,
-            step_version=step.version,
-        )
-    else:
-        event = make_step_attested_event(
-            path_str,
-            attestor_kind,
-            attestor_id,
-            args.evidence,
-            step_version=step.version,
-        )
-    if is_author_test_mode():
-        event["source"] = "author_test"
-    append_fn(event)
-    # FLAG-S1-001 / all_locations-3: after appending item_attested, route
-    # through the centralized autoclose helper. Any future site that emits
-    # item_attested MUST also call this helper, or for_each host closure
-    # silently regresses (see T1 / SD-001 / SD-004).
-    if item_id is not None:
-        _maybe_autoclose_for_each_host(
-            events_path=events_path,
-            path_tuple=path_tuple,
-            project_root=project_root,
-            slug=slug,
-            run_id=run_id,
-            append_fn=append_fn,
-        )
     decision = GateDecision(
         active=True,
         run_id=run_id,
@@ -1531,24 +1587,48 @@ def _dispatch_attested(
         session_id=getattr(session, "id", None),
         session=session,
     )
+    if item_id is not None:
+        terminal = _TerminalEventRequest(
+            "item_attested",
+            {
+                "plan_step_path": path_tuple,
+                "item_id": item_id,
+                "attestor_kind": attestor_kind,
+                "attestor_id": attestor_id,
+                "evidence": args.evidence,
+                "step_version": step.version,
+            },
+        )
+    else:
+        terminal = _TerminalEventRequest(
+            "step_attested",
+            {
+                "plan_step_path": path_str,
+                "attestor_kind": attestor_kind,
+                "attestor_id": attestor_id,
+                "evidence": args.evidence,
+                "step_version": step.version,
+            },
+        )
+    inline_check_result: InlineCheckResult | None = None
     if step.produces:
-        # FLAG-S1-005: detect a fresh produces_check_failed pair attributable
-        # to this dispatch by scanning the events tail appended during
-        # _run_inline_checks. We deliberately do NOT push this responsibility
-        # into _run_inline_checks itself, because that helper is also called
-        # from record_dispatch_complete (code-step path) where we MUST NOT
-        # surface the result through GateDecision.inline_check_result.
-        pre_inline = read_events(events_path) if events_path.exists() else []
-        pre_inline_count = len(pre_inline)
-        _run_inline_checks(decision, step.produces)
-        new_tail = read_events(events_path)[pre_inline_count:]
-        for ev in new_tail:
-            if isinstance(ev, dict) and ev.get("kind") == "produces_check_failed":
-                name = str(ev.get("produces_name") or "")
-                reason = str(ev.get("reason") or "")
-                import dataclasses as _dc
-                decision = _dc.replace(decision, inline_check_result=(name, reason))
-                break
+        inline_events: list[dict[str, Any]] = []
+        inline_check_result = _run_inline_checks(
+            decision,
+            step.produces,
+            append_fn=inline_events.append,
+        )
+        if not inline_check_result.ok:
+            decision = dataclasses.replace(
+                decision,
+                inline_check_result=(inline_check_result.name or "", inline_check_result.reason or ""),
+            )
+    _finalize_step(
+        decision,
+        terminal,
+        append_mode=_ActiveWriterAppend(append_fn),
+        inline_check_result=inline_check_result,
+    )
     if iteration is not None:
         feedback = _extract_iterate_feedback(args.evidence)
         if feedback is not None:
@@ -1572,8 +1652,35 @@ def _maybe_autoclose_for_each_host(
     slug: str,
     run_id: str,
     append_fn: Callable[[dict[str, Any]], Any],
+    current_item_id: str | None = None,
 ) -> None:
-    """Append a synthetic ``step_attested`` for a for_each host once all items
+    context = _build_autoclose_for_each_host_context(
+        events_path=events_path,
+        path_tuple=path_tuple,
+        project_root=project_root,
+        slug=slug,
+        run_id=run_id,
+        current_item_id=current_item_id,
+    )
+    if context is None:
+        return
+    _finalize_step(
+        context.decision,
+        context.terminal_event,
+        append_mode=_ActiveWriterAppend(append_fn),
+    )
+
+
+def _build_autoclose_for_each_host_context(
+    *,
+    events_path: Path,
+    path_tuple: tuple[str, ...],
+    project_root: Path,
+    slug: str,
+    run_id: str,
+    current_item_id: str | None = None,
+) -> _ParentFinalizationContext | None:
+    """Build a synthetic ``step_attested`` for a for_each host once all items
     are attested. SD-001: attestor is always ``system`` / ``gate.autoclose``
     (never inherits from the closing item). SD-004: optional bodies / any
     prior ``item_skipped`` event are loud failures, not silent.
@@ -1589,7 +1696,12 @@ def _maybe_autoclose_for_each_host(
         from astrid.core.task.plan_verbs import apply_mutations
         events = read_events(events_path) if events_path.exists() else []
         plan = apply_mutations(plan, events)
-    except Exception:
+    except (TaskPlanError, EventLogError) as exc:
+        warnings.warn(
+            f"for_each autoclose skipped for {'/'.join(path_tuple)}: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return
     host_step = None
     for tup, s in iter_steps_with_path(plan):
@@ -1623,6 +1735,8 @@ def _maybe_autoclose_for_each_host(
                 has_host_step_attested = True
     if has_host_step_attested:
         return
+    if current_item_id is not None:
+        item_attested_ids.add(current_item_id)
     # Resolve expected total: prefer for_each_expanded (covers items_source='from'),
     # fall back to static items declared on the host.
     expected_items: set[str] | None = None
@@ -1642,16 +1756,30 @@ def _maybe_autoclose_for_each_host(
             expected_items = set(repeat.items)
     if expected_items is None or item_attested_ids != expected_items:
         return
-    auto_event = make_step_attested_event(
-        STEP_PATH_SEP.join(path_tuple),
-        "system",
-        "gate.autoclose",
-        ("auto-close: all items attested",),
+    decision = GateDecision(
+        active=True,
+        run_id=run_id,
+        plan_step_id=STEP_PATH_SEP.join(path_tuple),
+        events_path=events_path,
+        step_kind="attested",
+        slug=slug,
+        plan_step_path=path_tuple,
+        project_root=project_root,
         step_version=host_step.version,
     )
-    if is_author_test_mode():
-        auto_event["source"] = "author_test"
-    append_fn(auto_event)
+    return _ParentFinalizationContext(
+        decision=decision,
+        terminal_event=_TerminalEventRequest(
+            "step_attested",
+            {
+                "plan_step_path": STEP_PATH_SEP.join(path_tuple),
+                "attestor_kind": "system",
+                "attestor_id": "gate.autoclose",
+                "evidence": ("auto-close: all items attested",),
+                "step_version": host_step.version,
+            },
+        ),
+    )
 
 
 def _maybe_autocomplete_for_each_host(
@@ -1660,7 +1788,27 @@ def _maybe_autocomplete_for_each_host(
     returncode: int,
     cost: dict[str, Any] | None,
 ) -> None:
-    """Append a host ``step_completed`` when all code-repeat items completed."""
+    context = _build_autocomplete_for_each_host_context(
+        decision=decision,
+        returncode=returncode,
+        cost=cost,
+    )
+    if context is None:
+        return
+    _finalize_step(
+        context.decision,
+        context.terminal_event,
+        append_mode="decision",
+    )
+
+
+def _build_autocomplete_for_each_host_context(
+    *,
+    decision: GateDecision,
+    returncode: int,
+    cost: dict[str, Any] | None,
+) -> _ParentFinalizationContext | None:
+    """Build a host ``step_completed`` when all code-repeat items completed."""
     if (
         not decision.active
         or decision.events_path is None
@@ -1676,7 +1824,13 @@ def _maybe_autocomplete_for_each_host(
 
         events = read_events(decision.events_path) if decision.events_path.exists() else []
         plan = apply_mutations(plan, events)
-    except Exception:
+    except (TaskPlanError, EventLogError) as exc:
+        warnings.warn(
+            "for_each autocomplete skipped for "
+            f"{'/'.join(decision.plan_step_path)}: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
         return
     host_step = None
     for tup, step in iter_steps_with_path(plan):
@@ -1707,20 +1861,24 @@ def _maybe_autocomplete_for_each_host(
                 expected_items = {item for item in raw if isinstance(item, str)}
     if has_host_completed:
         return
+    completed_items.add(decision.item_id)
     if expected_items is None:
         repeat = host_step.repeat
         if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
             expected_items = set(repeat.items)
     if expected_items is None or completed_items != expected_items:
         return
-    _append_via_decision(
-        decision,
-        make_step_completed_event(
-            STEP_PATH_SEP.join(decision.plan_step_path),
-            returncode,
-            cost=cost,
-            adapter=decision.adapter,
-            step_version=host_step.version,
+    return _ParentFinalizationContext(
+        decision=dataclasses.replace(decision, item_id=None, step_version=host_step.version),
+        terminal_event=_TerminalEventRequest(
+            "step_completed",
+            {
+                "plan_step_path": STEP_PATH_SEP.join(decision.plan_step_path),
+                "returncode": returncode,
+                "cost": cost,
+                "adapter": decision.adapter,
+                "step_version": host_step.version,
+            },
         ),
     )
 
@@ -1871,6 +2029,96 @@ def _append_via_decision(decision: GateDecision, event: dict[str, Any]) -> dict[
         return writer.append(event)
 
 
+def _append_finalized(
+    decision: GateDecision,
+    event: dict[str, Any],
+    append_mode: _FinalizeAppendMode,
+) -> dict[str, Any] | None:
+    if append_mode == "decision":
+        return _append_via_decision(decision, event)
+    return append_mode.append_fn(event)
+
+
+def _finalize_step(
+    decision: GateDecision,
+    terminal_event: _TerminalEventRequest | dict[str, Any],
+    append_mode: _FinalizeAppendMode,
+    inline_check_result: InlineCheckResult | None = None,
+    cost: dict[str, Any] | None = None,
+) -> None:
+    if isinstance(terminal_event, dict):
+        event = terminal_event
+    else:
+        payload = terminal_event.payload
+        if terminal_event.kind == "step_completed":
+            event = make_step_completed_event(**payload)
+        elif terminal_event.kind == "step_failed":
+            event = make_step_failed_event(**payload)
+        elif terminal_event.kind == "step_awaiting_fetch":
+            event = make_step_awaiting_fetch_event(**payload)
+        elif terminal_event.kind == "item_completed":
+            event = make_item_completed_event(**payload)
+        elif terminal_event.kind == "step_attested":
+            event = make_step_attested_event(**payload)
+        elif terminal_event.kind == "item_attested":
+            event = make_item_attested_event(**payload)
+        else:
+            raise AssertionError(f"unknown terminal event kind: {terminal_event.kind}")
+    if is_author_test_mode() and event.get("kind") in {"step_attested", "item_attested"}:
+        event["source"] = "author_test"
+    _append_finalized(decision, event, append_mode)
+    result = inline_check_result or InlineCheckResult(ok=True)
+    inline_events = result.events
+    if not result.ok and not inline_events and result.name is not None:
+        failed = make_produces_check_failed_event(
+            decision.plan_step_path,
+            result.name,
+            check_id="inline",
+            reason=result.reason or "produces check failed",
+            step_version=decision.step_version,
+            dispatch_event_hash=decision.dispatch_event_hash,
+        )
+        if decision.iteration is not None:
+            rewind = make_iteration_failed_event(
+                decision.plan_step_path,
+                decision.iteration,
+                reason=f"produces check failed: {result.name}",
+                step_version=decision.step_version,
+            )
+        else:
+            rewind = make_cursor_rewind_event(
+                decision.plan_step_path,
+                reason=f"produces check failed: {result.name}",
+                step_version=decision.step_version,
+                dispatch_event_hash=decision.dispatch_event_hash,
+            )
+        inline_events = (failed, rewind)
+    for inline_event in inline_events:
+        _append_finalized(decision, inline_event, append_mode)
+    if not result.ok:
+        return
+    if event.get("kind") == "item_attested":
+        _maybe_autoclose_for_each_host(
+            events_path=decision.events_path or Path(),
+            path_tuple=decision.plan_step_path,
+            project_root=decision.project_root or Path("."),
+            slug=decision.slug or "",
+            run_id=decision.run_id or "",
+            append_fn=(
+                append_mode.append_fn
+                if isinstance(append_mode, _ActiveWriterAppend)
+                else lambda ev: _append_via_decision(decision, ev)
+            ),
+            current_item_id=str(event.get("item_id") or "") or None,
+        )
+    elif event.get("kind") == "item_completed":
+        _maybe_autocomplete_for_each_host(
+            decision=decision,
+            returncode=int(event.get("returncode") or 0),
+            cost=cost,
+        )
+
+
 def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
     if not decision.active or decision.events_path is None or decision.plan_step_id is None:
         return
@@ -1908,76 +2156,86 @@ def record_dispatch_complete(decision: GateDecision, returncode: int) -> None:
         # Do NOT emit step_completed for requires_ack steps — the ack event will advance.
         if step is not None and step.requires_ack:
             return
+        terminal: _TerminalEventRequest
+        completed_returncode = returncode if returncode != -1 else (complete_result.returncode or 0)
         if complete_result.status == "failed":
-            _append_via_decision(
-                decision,
-                make_step_failed_event(
-                    decision.plan_step_id,
-                    complete_result.returncode,
-                    reason=complete_result.reason,
-                    cost=cost_dict,
-                    adapter=decision.adapter,
-                    step_version=decision.step_version,
-                    dispatch_event_hash=decision.dispatch_event_hash,
-                ),
+            terminal = _TerminalEventRequest(
+                "step_failed",
+                {
+                    "plan_step_path": decision.plan_step_id,
+                    "returncode": complete_result.returncode,
+                    "reason": complete_result.reason,
+                    "cost": cost_dict,
+                    "adapter": decision.adapter,
+                    "step_version": decision.step_version,
+                    "dispatch_event_hash": decision.dispatch_event_hash,
+                },
             )
         elif complete_result.status == "awaiting_fetch":
             missing, mismatched = _read_awaiting_fetch_items(run_ctx)
-            _append_via_decision(
-                decision,
-                make_step_awaiting_fetch_event(
-                    decision.plan_step_id,
-                    missing=missing,
-                    mismatched=mismatched,
-                    reason=complete_result.reason,
-                    adapter=decision.adapter,
-                    step_version=decision.step_version,
-                    dispatch_event_hash=decision.dispatch_event_hash,
-                ),
+            terminal = _TerminalEventRequest(
+                "step_awaiting_fetch",
+                {
+                    "path_str": decision.plan_step_id,
+                    "missing": missing,
+                    "mismatched": mismatched,
+                    "reason": complete_result.reason,
+                    "adapter": decision.adapter,
+                    "step_version": decision.step_version,
+                    "dispatch_event_hash": decision.dispatch_event_hash,
+                },
+            )
+        elif decision.item_id is not None:
+            terminal = _TerminalEventRequest(
+                "item_completed",
+                {
+                    "plan_step_path": decision.plan_step_path,
+                    "item_id": decision.item_id,
+                    "returncode": completed_returncode,
+                    "step_version": decision.step_version,
+                },
             )
         else:
-            completed_returncode = returncode if returncode != -1 else (complete_result.returncode or 0)
-            if decision.item_id is not None:
-                _append_via_decision(
-                    decision,
-                    make_item_completed_event(
-                        decision.plan_step_path,
-                        decision.item_id,
-                        completed_returncode,
-                        step_version=decision.step_version,
-                    ),
-                )
-                _maybe_autocomplete_for_each_host(
-                    decision=decision,
-                    returncode=completed_returncode,
-                    cost=cost_dict,
-                )
-            else:
-                _append_via_decision(
-                    decision,
-                    make_step_completed_event(
-                        decision.plan_step_id,
-                        completed_returncode,
-                        cost=cost_dict,
-                        adapter=decision.adapter,
-                        step_version=decision.step_version,
-                        dispatch_event_hash=decision.dispatch_event_hash,
-                    ),
-                )
+            terminal = _TerminalEventRequest(
+                "step_completed",
+                {
+                    "plan_step_path": decision.plan_step_id,
+                    "returncode": completed_returncode,
+                    "cost": cost_dict,
+                    "adapter": decision.adapter,
+                    "step_version": decision.step_version,
+                    "dispatch_event_hash": decision.dispatch_event_hash,
+                },
+            )
     else:
         # Legacy path: no adapter info on decision — use raw returncode.
-        _append_via_decision(
-            decision,
-            make_step_completed_event(
-                decision.plan_step_id,
-                returncode,
-                step_version=decision.step_version,
-                dispatch_event_hash=decision.dispatch_event_hash,
-            ),
+        completed_returncode = returncode
+        cost_dict = None
+        terminal = _TerminalEventRequest(
+            "step_completed",
+            {
+                "plan_step_path": decision.plan_step_id,
+                "returncode": returncode,
+                "step_version": decision.step_version,
+                "dispatch_event_hash": decision.dispatch_event_hash,
+            },
         )
 
+    inline_check_result: InlineCheckResult | None = None
     if decision.produces:
-        _run_inline_checks(decision, decision.produces)
+        inline_events: list[dict[str, Any]] = []
+        inline_check_result = _run_inline_checks(
+            decision,
+            decision.produces,
+            append_fn=inline_events.append,
+        )
+    _finalize_step(
+        decision,
+        terminal,
+        append_mode="decision",
+        inline_check_result=inline_check_result,
+        cost=cost_dict,
+    )
 
 
 def _read_awaiting_fetch_items(run_ctx: Any) -> tuple[list[str], list[str]]:
@@ -2036,7 +2294,11 @@ def _load_step_for_decision(decision: GateDecision) -> Step | None:
 
 
 # step_dir_for_path is the ONLY directory API used in this gate path (FLAG-P3-001).
-def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ...]) -> bool:
+def _run_inline_checks(
+    decision: GateDecision,
+    produces: tuple[ProducesEntry, ...],
+    append_fn: Callable[[dict[str, Any]], Any],
+) -> InlineCheckResult:
     if (
         decision.events_path is None
         or decision.run_id is None
@@ -2044,7 +2306,7 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
         or decision.project_root is None
         or not decision.plan_step_path
     ):
-        return True
+        return InlineCheckResult(ok=True)
     projects_root = decision.project_root.parent
     step_dir = step_dir_for_path(
         decision.slug,
@@ -2052,16 +2314,21 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
         decision.plan_step_path,
         step_version=decision.step_version,
         iteration=decision.iteration,
-        item_id=decision.item_id,
+        item_id=None if decision.iteration is not None else decision.item_id,
         root=projects_root,
     )
     produces_root = step_dir / "produces"
+    emitted: list[dict[str, Any]] = []
+
+    def _append_inline(event: dict[str, Any]) -> None:
+        emitted.append(event)
+        append_fn(event)
+
     for entry in produces:
         artifact_path = produces_root / entry.path
         result = entry.check.run(artifact_path)
         if not result.ok:
-            _append_via_decision(
-                decision,
+            _append_inline(
                 make_produces_check_failed_event(
                     decision.plan_step_path,
                     entry.name,
@@ -2071,19 +2338,17 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
                     dispatch_event_hash=decision.dispatch_event_hash,
                 ),
             )
-            if decision.iteration is not None:
-                _append_via_decision(
-                    decision,
+            if decision.iteration is not None or decision.item_id is not None:
+                _append_inline(
                     make_iteration_failed_event(
                         decision.plan_step_path,
-                        decision.iteration,
+                        decision.iteration if decision.iteration is not None else 0,
                         reason=f"produces check failed: {entry.name}",
                         step_version=decision.step_version,
                     ),
                 )
             else:
-                _append_via_decision(
-                    decision,
+                _append_inline(
                     make_cursor_rewind_event(
                         decision.plan_step_path,
                         reason=f"produces check failed: {entry.name}",
@@ -2091,10 +2356,14 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
                         dispatch_event_hash=decision.dispatch_event_hash,
                     ),
                 )
-            return False
+            return InlineCheckResult(
+                ok=False,
+                name=entry.name,
+                reason=result.reason,
+                events=tuple(emitted),
+            )
         cas_sha256 = _intern_produces_artifact(decision, artifact_path)
-        _append_via_decision(
-            decision,
+        _append_inline(
             make_produces_check_passed_event(
                 decision.plan_step_path,
                 entry.name,
@@ -2104,7 +2373,7 @@ def _run_inline_checks(decision: GateDecision, produces: tuple[ProducesEntry, ..
                 dispatch_event_hash=decision.dispatch_event_hash,
             ),
         )
-    return True
+    return InlineCheckResult(ok=True, events=tuple(emitted))
 
 
 def _intern_produces_artifact(decision: GateDecision, artifact_path: Path) -> str | None:
@@ -2115,27 +2384,6 @@ def _intern_produces_artifact(decision: GateDecision, artifact_path: Path) -> st
     cas_target = intern(decision.project_root, artifact_path)
     link_into_produces(cas_target, artifact_path)
     return cas_target.name
-
-
-def record_step_attested(
-    decision: GateDecision,
-    attestor_kind: str,
-    attestor_id: str,
-    evidence: tuple[str, ...] = (),
-) -> None:
-    """Reserved for Phase 5 lifecycle verbs; gate emits inline in Phase 2."""
-    if not decision.active or decision.events_path is None or decision.plan_step_id is None:
-        return
-    _append_via_decision(
-        decision,
-        make_step_attested_event(
-            decision.plan_step_id,
-            attestor_kind,
-            attestor_id,
-            evidence,
-            step_version=decision.step_version,
-        ),
-    )
 
 
 def record_nested_entered(decision: GateDecision, child_plan_hash: str) -> None:

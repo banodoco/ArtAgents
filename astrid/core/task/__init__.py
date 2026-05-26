@@ -64,7 +64,6 @@ from .gate import (
     record_dispatch_complete,
     record_nested_entered,
     record_nested_exited,
-    record_step_attested,
     validate_attested_identity,
     write_iteration_feedback,
 )
@@ -113,7 +112,6 @@ __all__ = [
     "record_dispatch_complete",
     "record_nested_entered",
     "record_nested_exited",
-    "record_step_attested",
     "scan_inbox",
     "step_dir_for",
     "step_dir_for_path",

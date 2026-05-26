@@ -146,7 +146,8 @@ def append_runpod_sweeper_event(
         except StaleTailError as exc:
             last_error = exc
             continue
-    assert last_error is not None
+    if last_error is None:
+        raise RuntimeError("RunPod sweeper append exhausted retries without recording a stale-tail error")
     raise last_error
 
 

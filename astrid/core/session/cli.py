@@ -708,7 +708,12 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
             target_run_dir = candidate
             prev_session_id = None
 
-        assert target_run_dir is not None
+        if target_run_dir is None:
+            print(
+                "takeover: internal error resolving takeover target run directory",
+                file=sys.stderr,
+            )
+            return 2
         try:
             lease = read_lease(target_run_dir)
         except LeaseError as exc:

@@ -716,6 +716,22 @@ def cmd_status(
     if pending > 0:
         print(f"inbox:     {pending} pending")
 
+    inline_failure = _inline_failure_tail(events)
+    if inline_failure is not None:
+        path_str = STEP_PATH_SEP.join(inline_failure.path)
+        print(
+            "blocked:   produces check failed"
+            f"{f' for {path_str}' if path_str else ''}: "
+            f"{_format_inline_failure_tail(inline_failure)}"
+        )
+    elif events and isinstance(events[-1], dict) and events[-1].get("kind") in {"cursor_rewind", "iteration_failed"}:
+        reason = events[-1].get("reason")
+        if reason:
+            path_str = STEP_PATH_SEP.join(_path_tuple_from_event(events[-1]))
+            print(
+                f"blocked:   {f'{path_str}: ' if path_str else ''}{reason}"
+            )
+
     print("recent events:")
     for ev in events[-5:]:
         kind = ev.get("kind", "?")
@@ -913,6 +929,13 @@ class _RewindRetry:
 
 
 @dataclass(frozen=True)
+class _InlineFailureTail:
+    name: str | None
+    reason: str
+    path: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class _HostCloseHint:
     host_path: tuple[str, ...]
 
@@ -954,6 +977,45 @@ def _expected_for_each_total(plan, events, host_path_tuple) -> int | None:
     return None
 
 
+def _path_tuple_from_event(ev: dict[str, Any]) -> tuple[str, ...]:
+    path_raw = ev.get("plan_step_path")
+    if isinstance(path_raw, list):
+        return tuple(str(p) for p in path_raw)
+    plan_step_id = ev.get("plan_step_id")
+    if isinstance(plan_step_id, str) and plan_step_id:
+        return tuple(plan_step_id.split(STEP_PATH_SEP))
+    return ()
+
+
+def _inline_failure_tail(events: Sequence[dict[str, Any]]) -> _InlineFailureTail | None:
+    """Return inline-check detail for tails that rewind a just-finalized step."""
+    if len(events) < 2:
+        return None
+    last = events[-1] if isinstance(events[-1], dict) else None
+    prior = events[-2] if isinstance(events[-2], dict) else None
+    if last is None or prior is None:
+        return None
+    if last.get("kind") not in {"cursor_rewind", "iteration_failed"}:
+        return None
+    if prior.get("kind") != "produces_check_failed":
+        return None
+    raw_reason = prior.get("reason") or last.get("reason") or "produces check failed"
+    raw_name = prior.get("produces")
+    if not isinstance(raw_name, str):
+        raw_name = prior.get("name") if isinstance(prior.get("name"), str) else None
+    return _InlineFailureTail(
+        name=raw_name,
+        reason=str(raw_reason),
+        path=_path_tuple_from_event(last) or _path_tuple_from_event(prior),
+    )
+
+
+def _format_inline_failure_tail(detail: _InlineFailureTail) -> str:
+    if detail.name:
+        return f"{detail.name}: {detail.reason}"
+    return detail.reason
+
+
 def _dispatch_from_tail(
     plan,
     events,
@@ -983,20 +1045,19 @@ def _dispatch_from_tail(
         return None
     last_kind = last.get("kind")
 
-    # (1) Rewind retry — single collapsed branch keyed on cursor_rewind.
-    if last_kind == "cursor_rewind":
-        reason = "previous attempt rewound"
-        if len(events) >= 2 and isinstance(events[-2], dict):
-            prior = events[-2]
-            if prior.get("kind") == "produces_check_failed":
-                reason = str(prior.get("reason") or reason)
-            else:
-                reason = str(last.get("reason") or reason)
-        path_raw = last.get("plan_step_path")
-        if isinstance(path_raw, list):
-            path_tuple = tuple(str(p) for p in path_raw)
-        else:
-            path_tuple = peek.path_tuple if peek.path_tuple else ()
+    # (1) Rewind retry — normal inline failures end with cursor_rewind;
+    # per-item iteration inline failures end with iteration_failed.
+    if last_kind in {"cursor_rewind", "iteration_failed"}:
+        detail = _inline_failure_tail(events)
+        if detail is not None:
+            return _RewindRetry(
+                reason=_format_inline_failure_tail(detail),
+                path=detail.path or (peek.path_tuple if peek.path_tuple else ()),
+            )
+        if last_kind == "iteration_failed" and last.get("reason") == "iterate_feedback":
+            return None
+        reason = str(last.get("reason") or "previous attempt rewound")
+        path_tuple = _path_tuple_from_event(last) or (peek.path_tuple if peek.path_tuple else ())
         return _RewindRetry(reason=reason, path=path_tuple)
 
     # (2) Host-close hint — defensive belt for replays missing Phase-1

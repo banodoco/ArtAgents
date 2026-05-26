@@ -272,11 +272,11 @@ def _revert_inline_ack_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     original = _gate_mod._run_inline_checks
 
-    def _stub(decision, produces):
+    def _stub(decision, produces, append_fn):
         # Skip emitting produces_check_failed/cursor_rewind. Return True so
         # the gate proceeds — this neutralizes BOTH the inline-check side
         # effect AND the inline_check_result population.
-        return True
+        return _gate_mod.InlineCheckResult(ok=True)
 
     monkeypatch.setattr(_gate_mod, "_run_inline_checks", _stub)
 
@@ -332,20 +332,20 @@ def _stub_inline_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
     advances. Mirrors tests/test_for_each_autoclose.py's stub.
     """
 
-    def _stub(decision, produces):
+    def _stub(decision, produces, append_fn):
+        emitted = []
         for entry in produces:
             if decision.events_path is None or not decision.plan_step_path:
                 continue
-            append_event(
-                decision.events_path,
-                make_produces_check_passed_event(
-                    decision.plan_step_path,
-                    entry.name,
-                    check_id=entry.check.check_id,
-                    cas_sha256=None,
-                ),
+            event = make_produces_check_passed_event(
+                decision.plan_step_path,
+                entry.name,
+                check_id=entry.check.check_id,
+                cas_sha256=None,
             )
-        return True
+            emitted.append(event)
+            append_fn(event)
+        return _gate_mod.InlineCheckResult(ok=True, events=tuple(emitted))
 
     monkeypatch.setattr(_gate_mod, "_run_inline_checks", _stub)
 
