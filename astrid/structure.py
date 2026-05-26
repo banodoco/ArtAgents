@@ -12,7 +12,6 @@ from astrid.core.executor.folder import load_folder_executors
 from astrid.core.orchestrator.folder import load_folder_orchestrators
 from astrid.core.pack import ELEMENT_KINDS as _ELEMENT_KINDS
 
-
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
 INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
@@ -67,9 +66,8 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
     errors.extend(_validate_pack_orchestrator_folders(repo_root / "astrid" / "packs"))
     errors.extend(_validate_pack_element_folders(repo_root / "astrid" / "packs"))
     errors.extend(validate_import_layering(repo_root))
-    # TODO(m5a): promote these migration-completion advisories to errors after
-    # the dead-code/docs cleanup milestone removes the known compatibility debt.
-    warnings.extend(validate_migration_completion(repo_root))
+    # Migration-completion drift is a blocking structure violation, not a warning.
+    errors.extend(validate_migration_completion(repo_root))
     return StructureReport(errors=tuple(errors), warnings=tuple(warnings))
 
 
@@ -113,6 +111,21 @@ def validate_import_layering(root: str | Path = REPO_ROOT) -> list[str]:
 
 
 _TODO_MILESTONE_RE = re.compile(r"TODO\(m\d+[ab]?\)", re.IGNORECASE)
+_SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
+    {
+        # SD2: compile.py temporarily registers a UUID-namespaced module for
+        # importlib relative imports and pops it in finally; keep the guard
+        # narrow so only this approved register-then-pop pattern is exempt.
+        "astrid/orchestrate/compile.py",
+    }
+)
+_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
+    {
+        # TODO(m5b): astrid.core.util.media remains as a narrow re-export shim
+        # until the last live pack caller migrates to astrid._media.
+        "astrid/core/util/media.py",
+    }
+)
 
 
 def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
@@ -133,7 +146,7 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
 
         if "DEPRECATED" in text and not _TODO_MILESTONE_RE.search(text):
             advisories.append(f"{rel}: DEPRECATED marker lacks TODO(milestone) removal target")
-        if _contains_sys_modules_injection(path):
+        if _contains_sys_modules_injection(path) and rel not in _SYS_MODULES_INJECTION_EXEMPTIONS:
             advisories.append(f"{rel}: sys.modules injection remains outside tests")
 
         try:
@@ -147,9 +160,13 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
         if _looks_like_compatibility_shim(text):
             module_name = _module_name_for_path(path, repo_root)
             caller_count = len(import_map.get(module_name, set()))
-            if caller_count > 0:
+            if caller_count > 0 and not _is_compatibility_shim_exempt(rel, text):
                 advisories.append(f"{rel}: compatibility shim still has {caller_count} live import caller(s)")
     return advisories
+
+
+def _is_compatibility_shim_exempt(rel: str, text: str) -> bool:
+    return rel in _COMPATIBILITY_SHIM_EXEMPTIONS and "TODO(m5b)" in text
 
 
 def _validate_legacy_dirs(repo_root: Path) -> list[str]:

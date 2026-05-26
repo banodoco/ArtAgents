@@ -1,4 +1,4 @@
-"""Library entry-point for timeline migration (milestone 8).
+"""Library support for timeline migration classification and discovery.
 
 Provides:
 - Dataclasses for structured migration results
@@ -9,40 +9,17 @@ Provides:
 
 The sprint-2 migration script at
 ``scripts/migrations/sprint-2/migrate_timelines.py`` remains the supported
-runnable surface for legacy migration.  This module re-exports its ``main``
-and ``audit`` entry points so that existing callers continue to work.
+runnable surface for legacy migration. This module intentionally keeps only
+the live classification, discovery, and import helpers used by runtime code
+and tests.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
-
-# ---------------------------------------------------------------------------
-# Sprint-2 compatibility re-exports
-# ---------------------------------------------------------------------------
-
-_SCRIPT_PATH = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "scripts" / "migrations" / "sprint-2" / "migrate_timelines.py"
-)
-
-_spec = importlib.util.spec_from_file_location(
-    "_astrid_sprint2_migrate_timelines", _SCRIPT_PATH
-)
-if _spec is None or _spec.loader is None:  # pragma: no cover - import-time guard
-    raise ImportError(f"could not load migration script from {_SCRIPT_PATH}")
-
-_module = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _module
-_spec.loader.exec_module(_module)
-
-main = _module.main
-audit = _module.audit
 
 # ---------------------------------------------------------------------------
 # Structured result types
@@ -595,9 +572,6 @@ def read_resumable_checkpoint(checkpoint_file: Path) -> ResumableStatus | None:
 # ---------------------------------------------------------------------------
 
 __all__ = [
-    # Sprint-2 compatibility
-    "main",
-    "audit",
     # Structured result types
     "MigrationResult",
     "SkippedTimeline",

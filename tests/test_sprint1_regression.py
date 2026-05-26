@@ -164,9 +164,9 @@ class TestCanonicalAliasesRegression(unittest.TestCase):
         )
 
     def test_element_registry_uses_canonical_module(self) -> None:
-        import astrid.elements as legacy_elements
+        from astrid.core.element import ElementRegistry
         self.assertEqual(
-            legacy_elements.ElementRegistry.__module__,
+            ElementRegistry.__module__,
             "astrid.core.element.registry",
         )
 

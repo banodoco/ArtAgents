@@ -52,11 +52,7 @@ def _candidate_module_paths(root: Path, pack: str, name: str) -> tuple[Path, ...
     candidates = [
         pack_root / f"{name}.py",
         pack_root / "orchestrators" / name / "run.py",
-        pack_root / "_legacy" / f"{name}.py",
     ]
-    builtin_legacy = root / "builtin" / "_legacy" / f"{name}.py"
-    if builtin_legacy not in candidates:
-        candidates.append(builtin_legacy)
     return tuple(candidates)
 
 

@@ -12,8 +12,6 @@ from .schema import (
     IsolationMetadata,
     Output,
     Port,
-    PerformerOutput,
-    PerformerPort,
     Provenance,
     SafetyDeclaration,
 )
@@ -30,8 +28,6 @@ __all__ = [
     "IsolationMetadata",
     "Output",
     "Port",
-    "PerformerOutput",
-    "PerformerPort",
     "Provenance",
     "SafetyDeclaration",
 ]

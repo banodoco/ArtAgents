@@ -1,5 +1,6 @@
 {
-  "id": "builtin.example",
+  "schema_version": 1,
+  "id": "builtin.example_orchestrator",
   "name": "Example",
   "kind": "built_in",
   "version": "1.0",
@@ -18,7 +19,7 @@
     }
   },
   "child_executors": [
-    "builtin.example_step"
+    "builtin.example_executor"
   ],
   "child_orchestrators": [],
   "cache": {

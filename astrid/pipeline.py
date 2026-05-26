@@ -4,12 +4,15 @@
 Sprint 1 wires the session CLI gate: every verb outside the accepted unbound
 allowlist requires ``ASTRID_SESSION_ID`` or a project ``.astrid-session`` file
 to resolve to a valid session record. Unbound callers are pointed first at
-``astrid status`` so they can attach deliberately.
+``astrid status`` so they can attach deliberately. ``--help``/``-h`` is exempt
+wherever it appears in argv: usage text is documentation and never requires a
+bound session (this also lets a fresh checkout verify documented commands).
 
 The settled Sprint 1 allowlist is recorded in
 ``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: help/version, ``status``,
 ``next``, ``attach``, ``projects ls``, ``projects create``,
-``projects default``, ``sessions ls``, and ``sessions takeover``. Unbound
+``projects default``, ``sessions ls``, ``sessions takeover``, and ``doctor``
+(a diagnostic that must run before any session exists). Unbound
 ``sessions takeover`` is legal only because it must bootstrap or select a
 concrete caller session before it mutates the target lease; anonymous takeover
 is outside the contract.
@@ -78,6 +81,7 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
+    ("doctor",),
 )
 _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
@@ -90,6 +94,12 @@ def main(argv: list[str] | None = None) -> int:
     if raw and raw[0] == "--version":
         print("astrid")
         return 0
+    # Help for a subcommand (e.g. `astrid elements list --help`) must never
+    # require a bound session — argparse should print usage and exit 0
+    # regardless of session state. The raw[0] check above only catches
+    # top-level help; this catches `-h`/`--help` anywhere in the argv.
+    if raw and any(tok in {"-h", "--help"} for tok in raw):
+        return _dispatch(raw)
     # Nudge runs once per CLI invocation, before the command itself, but never
     # for the `skills` subcommand (would be silly) or help. Cheap state-file
     # read; bails early if no harness is detected or ASTRID_NO_NUDGE is set.

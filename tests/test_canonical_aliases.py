@@ -3,7 +3,7 @@ import unittest
 
 from astrid.core.executor import ExecutorDefinition, ExecutorRegistry, load_default_registry as load_executor_registry
 from astrid.core.orchestrator import OrchestratorDefinition, OrchestratorRegistry, load_default_registry as load_orchestrator_registry
-import astrid.elements as legacy_elements
+from astrid.core.element import ElementDefinition, ElementRegistry
 
 
 class CanonicalAliasTest(unittest.TestCase):
@@ -33,8 +33,8 @@ class CanonicalAliasTest(unittest.TestCase):
         self.assertIsNone(importlib.util.find_spec("astrid.orchestrators"))
 
     def test_element_framework_api_exports(self) -> None:
-        self.assertEqual(legacy_elements.ElementRegistry.__module__, "astrid.core.element.registry")
-        self.assertEqual(legacy_elements.ElementDefinition.__module__, "astrid.core.element.schema")
+        self.assertEqual(ElementRegistry.__module__, "astrid.core.element.registry")
+        self.assertEqual(ElementDefinition.__module__, "astrid.core.element.schema")
 
     def test_top_level_orchestrator_modules_are_absent(self) -> None:
         self.assertIsNone(importlib.util.find_spec("astrid.event_talks"))

@@ -180,3 +180,19 @@ of history is permitted per the non-negotiable constraint above.
 ## Cross-references
 
 - [Root EPIC.md](../../../EPIC.md) — m3 handoff entries surfaced during m2 test-integrity work (denylist removals, strict xfails, deferred product bugs).
+
+## m5a taxonomy handoff
+
+The following taxonomy areas are intentionally **out of scope** for m5a and belong to the
+active pack-taxonomy ticket `01KRF17FVN1C24HQ8TFJJNPW0G`:
+
+- **modalities/renderers** — renaming, re-categorizing, or restructuring the modalities surface.
+- **elements facade taxonomy** — renaming element kinds or reorganizing the element facade.
+- **domains** — any domain-level taxonomy reorganization.
+- **orchestrate vs orchestrator renames** — renaming the `orchestrate/` directory or its
+  public surface; m5a does not claim any rename was done.
+
+m5a only removed stale compatibility aliases that were required by the migration-completion
+guard: `PerformerPort`/`PerformerOutput` (contracts aliases) and the `elements`
+`sys.modules` injection. No taxonomy renames were performed — all four areas above are
+deferred to the pack-taxonomy epic, which owns taxonomy and is actively working on them.

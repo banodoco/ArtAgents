@@ -20,7 +20,9 @@ from astrid.core.session.model import Session
 # Settled Sprint 1 unbound contract. The implementation may temporarily carry
 # compatibility exceptions during migration, but the final gate must match this
 # list exactly: help/version, status, next, attach, pack management,
-# projects ls/create/default, sessions ls, and sessions takeover.
+# projects ls/create/default, sessions ls, sessions takeover, and doctor.
+# `doctor` is a diagnostic that must run before any session exists (you run it
+# precisely to debug an unconfigured workspace), so it is unbound-allowlisted.
 EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("-h",),
     ("--help",),
@@ -35,6 +37,7 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
+    ("doctor",),
 )
 
 
@@ -77,7 +80,6 @@ def _action_lines(output: str) -> list[str]:
 
 
 GATED_INVOCATIONS = [
-    pytest.param(["doctor"], id="doctor"),
     pytest.param(["setup"], id="setup"),
     pytest.param(["start", "pack.thing", "--project", "demo"], id="start"),
     # `next` is intentionally NOT in this list as of #13 — it's the universal
@@ -279,15 +281,20 @@ def test_allowlist_version_runs_without_session(
     assert stderr == ""
 
 
-def test_non_allowlisted_subcommand_help_is_blocked_without_session(
+def test_subcommand_help_runs_without_session(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """`--help` (or `-h`) anywhere in argv prints usage and exits 0 regardless
+    of session state. Help text is just usage documentation; requiring a bound
+    session to read it serves no purpose and breaks docs-command verification
+    in a fresh checkout (e.g. CI). The session gate still applies to the real
+    invocation of any non-allowlisted verb."""
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, stdout, stderr = _run_pipeline(["projects", "--help"])
-    assert rc == 2
-    assert stdout == ""
-    assert stderr.splitlines()[0] == "first recovery action: astrid status"
-    assert "no session bound" in stderr
+    assert rc == 0
+    assert "no session bound" not in stdout
+    assert "no session bound" not in stderr
+    assert "usage:" in stdout
 
 
 def test_status_help_runs_without_rendering_live_status(

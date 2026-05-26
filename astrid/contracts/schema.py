@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, get_args
 
-
 PortType = Literal[
     "string", "path", "file", "directory", "json", "boolean", "number", "integer", "html"
 ]
@@ -41,10 +40,6 @@ class Output:
     placeholder: str | None = None
     path_template: str | None = None
     extension: str | None = None
-
-
-PerformerPort = Port
-PerformerOutput = Output
 
 
 @dataclass(frozen=True)
@@ -173,8 +168,6 @@ __all__ = [
     "IsolationMetadata",
     "Output",
     "Port",
-    "PerformerOutput",
-    "PerformerPort",
     "Provenance",
     "SafetyDeclaration",
 ]

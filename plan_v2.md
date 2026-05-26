@@ -1,3 +1,17 @@
+> **⚠️ OBSOLETE / ARCHIVED — May 2026**
+>
+> This document (`plan_v2.md`) is an archived implementation plan scoped to the **m4 Dependency Inversion** milestone. It is no longer the active planning document. Its scope was limited to import-layering hygiene (inverting static pack imports from `astrid/core/`, relocating duplicate helpers, and establishing the `PackResolver` infrastructure).
+>
+> **Canonical planning authority** has moved to [`idea.md`](./idea.md), which captures the full multi-sprint reshape vision including the **m3 code-backed step-model conclusion** that governs all subsequent design:
+>
+> - **Collapsed step shape**: one step type at runtime (`requires_ack`, `assignee`, `produces`, `repeat`, optional `command` for leaf or `children` for group), collapsing the former `code` / `attested` / `nested` kinds.
+> - **`plan_initialized` as genesis event**: the initial plan is the first hash-chained event in `events.jsonl`, so `astrid events verify` covers the plan from byte zero.
+> - **`plan.json` as cached projection**: `plan.json` is a cheap-read projection of the genesis event, never an independent authority — if it disagrees with the event log, the log wins.
+>
+> This file is retained for historical reference only. For current planning, see [`idea.md`](./idea.md).
+
+---
+
 # Implementation Plan: m4 Dependency Inversion (revised v2)
 
 ## Overview
