@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import time
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
@@ -101,8 +102,26 @@ def _make_produces(names: list[str]) -> tuple[ProducesEntry, ...]:
     )
 
 
-def _wait_for_exit(pid: int) -> int:
-    waited_pid, status = os.waitpid(pid, 0)
+def _wait_for_exit(pid: int) -> int | None:
+    """Block until ``pid`` exits; return its exit code if still reapable.
+
+    See the twin helper in ``tests/adapter/test_local.py`` for the full
+    rationale: the adapter discards the ``Popen`` handle (so the child outlives
+    the tab), leaving the child on CPython's ``subprocess._active`` list. A
+    later ``subprocess.Popen`` in the same process reaps it via the module's
+    internal ``_cleanup()``, so ``os.waitpid`` here can raise
+    ``ChildProcessError`` (ECHILD) under the serial CI run while passing in
+    isolation. Tolerate the already-reaped case by polling for disappearance.
+    """
+    try:
+        waited_pid, status = os.waitpid(pid, 0)
+    except ChildProcessError:
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return None
+            time.sleep(0.01)
     assert waited_pid == pid
     return os.waitstatus_to_exitcode(status)
 
@@ -287,7 +306,7 @@ def test_poll_done_when_process_exits(
     result = adapter.dispatch(step, ctx)
     assert result.status == "dispatched"
     assert result.pid is not None
-    assert _wait_for_exit(result.pid) == 0
+    assert _wait_for_exit(result.pid) in (0, None)
 
     poll_result = adapter.poll(step, ctx)
     assert poll_result.status in ("done", "running")

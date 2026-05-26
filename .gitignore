@@ -46,6 +46,10 @@ cache/
 *.jpg
 *.jpeg
 *.png
+# ...but committed test fixtures must stay tracked (media OUTPUT/cache stays ignored).
+!tests/**/fixtures/
+!tests/**/fixtures/**
+!tests/fixtures/**
 
 # Agentic test artifacts (regenerated per-run, not source)
 tests/agentic/reports/
