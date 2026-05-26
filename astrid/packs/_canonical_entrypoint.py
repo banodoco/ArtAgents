@@ -20,9 +20,9 @@ def guard_canonical_entrypoint(pack_id: str) -> None:
     print(
         f"error: this pack ({pack_id}) is not meant to be invoked directly.\n"
         f"use the canonical CLI:\n"
-        f"    astrid executors run {pack_id} --input ... --out ...\n"
+        f"    python3 -m astrid executors run {pack_id} --input ... --out ...\n"
         f"  or:\n"
-        f"    astrid orchestrators run {pack_id} --input ... --out ...\n"
+        f"    python3 -m astrid orchestrators run {pack_id} --input ... --out ...\n"
         f"(direct `python -m astrid.packs.<...>.run` invocation is reserved\n"
         f"for internal use by the astrid runner.)",
         file=sys.stderr,

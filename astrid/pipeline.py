@@ -88,15 +88,16 @@ _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
 def main(argv: list[str] | None = None) -> int:
     raw = sys.argv[1:] if argv is None else list(argv)
-    if raw and raw[0] in {"-h", "--help", "help"}:
+    first_arg = next(iter(raw), None)
+    if first_arg in {"-h", "--help", "help"}:
         _print_entrypoint_help()
         return 0
-    if raw and raw[0] == "--version":
+    if first_arg == "--version":
         print("astrid")
         return 0
     # Help for a subcommand (e.g. `astrid elements list --help`) must never
     # require a bound session — argparse should print usage and exit 0
-    # regardless of session state. The raw[0] check above only catches
+    # regardless of session state. The first-arg check above only catches
     # top-level help; this catches `-h`/`--help` anywhere in the argv.
     if raw and any(tok in {"-h", "--help"} for tok in raw):
         return _dispatch(raw)
@@ -186,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _verb_bypasses_task_gate(raw: list[str]) -> bool:
-    if raw and raw[0] in LIFECYCLE_VERBS:
+    first = next(iter(raw), None)
+    if first in LIFECYCLE_VERBS:
         return True
     if len(raw) >= 2 and tuple(raw[:2]) in TASK_GATE_READONLY_VERBS:
         return True
@@ -217,156 +219,250 @@ def _print_unbound_gate_recovery(message: str) -> None:
 
 
 def _dispatch(raw: list[str]) -> int:
-    if raw and raw[0] == "attach":
-        from .core.session.cli import build_parser as _sb
-        from .core.session.cli import cmd_attach
+    if not raw:
+        _print_entrypoint_help()
+        return 0
 
-        args = _sb().parse_args(["attach", *raw[1:]])
-        return int(cmd_attach(args))
-    if raw and raw[0] == "sessions":
-        return _dispatch_sessions(raw[1:])
-    if raw and raw[0] == "start":
-        from .core.task.lifecycle import cmd_start
-
-        return cmd_start(raw[1:])
-    if raw and raw[0] == "next":
-        from .core.task.lifecycle import cmd_next
-
-        return cmd_next(raw[1:])
-    if raw and raw[0] == "ack":
-        from .core.task.lifecycle import cmd_ack
-
-        return cmd_ack(raw[1:])
-    if raw and raw[0] == "skip":
-        from .core.task.lifecycle import cmd_skip
-
-        return cmd_skip(raw[1:])
-    if raw and raw[0] == "abort":
-        from .core.task.lifecycle import cmd_abort
-
-        return cmd_abort(raw[1:])
-    if raw and raw[0] == "status":
-        # The new session-status verb fires when no --project is given; the
-        # legacy lifecycle status verb keeps working with --project.
-        if "--project" in raw[1:]:
-            from .core.task.lifecycle import cmd_status
-
-            return cmd_status(raw[1:])
-        from .core.session.cli import build_parser as _sb
-        from .core.session.cli import cmd_status as session_status
-
-        status_args = ["status", *[arg for arg in raw[1:] if arg in {"-h", "--help"}]]
-        args = _sb().parse_args(status_args)
-        return int(session_status(args))
-    if raw and raw[0] == "runs":
-        return _dispatch_runs(raw[1:])
-    if raw and raw[0] == "run":
-        return _dispatch_run(raw[1:])
-    if raw and raw[0] == "step":
-        return _dispatch_step(raw[1:])
-    if raw and raw[0] == "hook":
-        return _dispatch_hook(raw[1:])
-    if raw and raw[0] == "plan":
-        return _dispatch_plan_verbs(raw[1:])
-    if raw and raw[0] == "claim":
-        from .core.task.claim import cmd_claim
-        return cmd_claim(raw[1:])
-    if raw and raw[0] == "unclaim":
-        from .core.task.claim import cmd_unclaim
-        return cmd_unclaim(raw[1:])
-    if raw and raw[0] == "publish":
-        from .packs.reigh.executors.publish import run as publish
-
-        return publish.main(raw[1:])
-    if raw and raw[0] == "publish-youtube":
-        from .packs.youtube.executors.upload import run as publish_youtube
-
-        return publish_youtube.main(raw[1:])
-    if raw and raw[0] == "upload-youtube":
-        from .packs.youtube.executors.upload import run as publish_youtube
-
-        return publish_youtube.main(raw[1:])
-    if raw and raw[0] == "skills":
-        from .skills import cli as skills_cli
-
-        return skills_cli.main(raw[1:])
-    if raw and raw[0] == "packs":
-        from .packs import cli as packs_cli
-
-        return packs_cli.main(raw[1:])
-    if raw and raw[0] == "executors":
-        from .core.executor import cli as executors_cli
-
-        return executors_cli.main(raw[1:])
-    if raw and raw[0] == "orchestrators":
-        from .core.orchestrator import cli as orchestrators_cli
-
-        return orchestrators_cli.main(raw[1:])
-    if raw and raw[0] == "author":
-        from .orchestrate import cli as author_cli
-
-        return author_cli.main(raw[1:])
-    if raw and raw[0] == "models":
-        from .core.model_catalog import cli as models_cli
-
-        return models_cli.main(raw[1:])
-    if raw and raw[0] == "elements":
-        from .core.element import cli as elements_cli
-
-        return elements_cli.main(raw[1:])
-    # TODO(Sprint 5b): astrid projects timeline is a legacy reigh-app subcommand
-    # that collides with the new Sprint 2 timeline concept.  Rename to
-    # `astrid projects reigh-timeline` or document the collision once the
-    # reigh-app integration path is clearer.  Deferred — out of scope for 5b.
-    if raw and raw[0] == "projects":
-        from .core.project import cli as projects_cli
-
-        return projects_cli.main(raw[1:])
-    if raw and raw[0] == "timelines":
-        from .core.timeline import cli as timelines_cli
-
-        return timelines_cli.main(raw[1:])
-    if raw and raw[0] == "modalities":
-        from . import modalities
-
-        return modalities.main(raw[1:])
-    if raw and raw[0] == "runpod":
-        return _dispatch_runpod(raw[1:])
-    if raw and raw[0] == "doctor":
-        from . import doctor
-
-        return doctor.main(raw[1:])
-    if raw and raw[0] == "setup":
-        from . import setup_cli
-
-        return setup_cli.main(raw[1:])
-    if raw and raw[0] == "audit":
-        from . import audit
-
-        return audit.main(raw[1:])
-    if raw and raw[0] == "events":
-        return _dispatch_events(raw[1:])
-    if raw and raw[0] == "reigh-data":
-        from .packs.reigh.executors.reigh_data import run as reigh_data
-
-        return reigh_data.main(raw[1:])
-    if raw and raw[0] == "worker":
-        from .core.worker import banodoco_worker
-
-        return banodoco_worker.main(raw[1:])
-    if raw and not raw[0].startswith("--"):
-        print(f"astrid: unknown command '{raw[0]}'", file=sys.stderr)
+    first, *_ = raw
+    if first.startswith("-"):
+        return _dispatch_default_brief(raw)
+    if first not in _top_level_commands():
+        print(f"astrid: unknown command '{first}'", file=sys.stderr)
         raise SystemExit(2)
-    return _run_default_brief_orchestrator(raw)
+
+    parser = _build_dispatch_parser()
+    parsed, tail = parser.parse_known_args(raw)
+    return int(parsed.handler(tail))
+
+
+def _top_level_commands() -> frozenset[str]:
+    return frozenset(_TOP_LEVEL_HANDLERS)
+
+
+def _build_dispatch_parser() -> Any:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="astrid", add_help=False)
+    sub = parser.add_subparsers(dest="command", required=True)
+    for command, handler in _TOP_LEVEL_HANDLERS.items():
+        command_parser = sub.add_parser(command, add_help=False)
+        command_parser.set_defaults(handler=handler)
+    return parser
+
+
+def _dispatch_default_brief(args: list[str]) -> int:
+    """Route the legacy explicit brief/video entrypoint through hype."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="astrid", add_help=False)
+    parser.add_argument("--video")
+    parser.add_argument("--brief")
+    parser.add_argument("--out")
+    parser.add_argument("--render", action="store_true")
+    parser.add_argument("--target-duration")
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return int(exc.code or 2)
+    if parsed.brief is None:
+        parser.error("default brief routing requires --brief")
+    return _run_default_brief_from_args(args)
+
+
+def _run_default_brief_from_args(args: list[str]) -> int:
+    return _run_default_brief_orchestrator(args)
+
+
+def _dispatch_attach(args: list[str]) -> int:
+    from .core.session.cli import build_parser, cmd_attach
+
+    parsed = build_parser().parse_args(["attach", *args])
+    return int(cmd_attach(parsed))
+
+
+def _dispatch_status(args: list[str]) -> int:
+    # The session-status verb fires when no --project is given; lifecycle
+    # status keeps working with --project.
+    if "--project" in args or any(arg.startswith("--project=") for arg in args):
+        from .core.task.lifecycle import cmd_status
+
+        return cmd_status(args)
+    from .core.session.cli import build_parser
+    from .core.session.cli import cmd_status as session_status
+
+    status_args = ["status", *[arg for arg in args if arg in {"-h", "--help"}]]
+    parsed = build_parser().parse_args(status_args)
+    return int(session_status(parsed))
+
+
+def _dispatch_lifecycle(command: str) -> Any:
+    def _handler(args: list[str]) -> int:
+        from .core.task import lifecycle
+
+        return int(getattr(lifecycle, command)(args))
+
+    return _handler
+
+
+def _dispatch_claim(args: list[str]) -> int:
+    from .core.task.claim import cmd_claim
+
+    return cmd_claim(args)
+
+
+def _dispatch_unclaim(args: list[str]) -> int:
+    from .core.task.claim import cmd_unclaim
+
+    return cmd_unclaim(args)
+
+
+def _dispatch_publish(args: list[str]) -> int:
+    return _dispatch_executor_main("reigh.publish", args)
+
+
+def _dispatch_publish_youtube(args: list[str]) -> int:
+    return _dispatch_executor_main("youtube.upload", args)
+
+
+def _dispatch_skills(args: list[str]) -> int:
+    from .skills import cli as skills_cli
+
+    return skills_cli.main(args)
+
+
+def _dispatch_packs(args: list[str]) -> int:
+    from .packs import cli as packs_cli
+
+    return packs_cli.main(args)
+
+
+def _dispatch_executors(args: list[str]) -> int:
+    from .core.executor import cli as executors_cli
+
+    return executors_cli.main(args)
+
+
+def _dispatch_orchestrators(args: list[str]) -> int:
+    from .core.orchestrator import cli as orchestrators_cli
+
+    return orchestrators_cli.main(args)
+
+
+def _dispatch_author(args: list[str]) -> int:
+    from .orchestrate import cli as author_cli
+
+    return author_cli.main(args)
+
+
+def _dispatch_models(args: list[str]) -> int:
+    from .core.model_catalog import cli as models_cli
+
+    return models_cli.main(args)
+
+
+def _dispatch_elements(args: list[str]) -> int:
+    from .core.element import cli as elements_cli
+
+    return elements_cli.main(args)
+
+
+def _dispatch_projects(args: list[str]) -> int:
+    # TODO(Sprint 5b): astrid projects timeline is a legacy reigh-app
+    # subcommand that collides with the Sprint 2 timeline concept.
+    from .core.project import cli as projects_cli
+
+    return projects_cli.main(args)
+
+
+def _dispatch_timelines(args: list[str]) -> int:
+    from .core.timeline import cli as timelines_cli
+
+    return timelines_cli.main(args)
+
+
+def _dispatch_modalities(args: list[str]) -> int:
+    from . import modalities
+
+    return modalities.main(args)
+
+
+def _dispatch_doctor(args: list[str]) -> int:
+    from . import doctor
+
+    return doctor.main(args)
+
+
+def _dispatch_setup(args: list[str]) -> int:
+    from . import setup_cli
+
+    return setup_cli.main(args)
+
+
+def _dispatch_audit(args: list[str]) -> int:
+    from . import audit
+
+    return audit.main(args)
+
+
+def _dispatch_reigh_data(args: list[str]) -> int:
+    return _dispatch_executor_main("reigh.reigh_data", args)
+
+
+def _dispatch_executor_main(executor_id: str, args: list[str]) -> int:
+    from .core.executor.registry import load_default_registry
+    from .core.pack_resolver import resolve_callable_from_metadata
+
+    executor = load_default_registry().get(executor_id)
+    entrypoint = resolve_callable_from_metadata(executor.metadata, owner_id=executor.id)
+    return int(entrypoint(args))
+
+
+def _dispatch_worker(args: list[str]) -> int:
+    from .core.worker import banodoco_worker
+
+    return banodoco_worker.main(args)
+
+
+_TOP_LEVEL_HANDLERS = {
+    "attach": _dispatch_attach,
+    "sessions": lambda args: _dispatch_sessions(args),
+    "start": _dispatch_lifecycle("cmd_start"),
+    "next": _dispatch_lifecycle("cmd_next"),
+    "ack": _dispatch_lifecycle("cmd_ack"),
+    "skip": _dispatch_lifecycle("cmd_skip"),
+    "abort": _dispatch_lifecycle("cmd_abort"),
+    "status": _dispatch_status,
+    "runs": lambda args: _dispatch_runs(args),
+    "run": lambda args: _dispatch_run(args),
+    "step": lambda args: _dispatch_step(args),
+    "hook": lambda args: _dispatch_hook(args),
+    "plan": lambda args: _dispatch_plan_verbs(args),
+    "claim": _dispatch_claim,
+    "unclaim": _dispatch_unclaim,
+    "publish": _dispatch_publish,
+    "publish-youtube": _dispatch_publish_youtube,
+    "upload-youtube": _dispatch_publish_youtube,
+    "skills": _dispatch_skills,
+    "packs": _dispatch_packs,
+    "executors": _dispatch_executors,
+    "orchestrators": _dispatch_orchestrators,
+    "author": _dispatch_author,
+    "models": _dispatch_models,
+    "elements": _dispatch_elements,
+    "projects": _dispatch_projects,
+    "timelines": _dispatch_timelines,
+    "modalities": _dispatch_modalities,
+    "runpod": lambda args: _dispatch_runpod(args),
+    "doctor": _dispatch_doctor,
+    "setup": _dispatch_setup,
+    "audit": _dispatch_audit,
+    "events": lambda args: _dispatch_events(args),
+    "reigh-data": _dispatch_reigh_data,
+    "worker": _dispatch_worker,
+}
 
 
 def _dispatch_sessions(args: list[str]) -> int:
-    if not args:
-        print(
-            "usage: astrid sessions {ls,detach,takeover} ...",
-            file=sys.stderr,
-        )
-        return 2
     from .core.session.cli import (
         build_parser,
         cmd_sessions_detach,
@@ -374,48 +470,38 @@ def _dispatch_sessions(args: list[str]) -> int:
         cmd_sessions_takeover,
     )
 
-    sub = args[0]
     parser = build_parser()
-    if sub == "ls":
-        parsed = parser.parse_args(["ls"])
+    try:
+        parsed = parser.parse_args(args)
+    except SystemExit as exc:
+        return int(exc.code or 2)
+    if parsed.command == "ls":
         return int(cmd_sessions_ls(parsed))
-    if sub == "detach":
-        parsed = parser.parse_args(["detach", *args[1:]])
+    if parsed.command == "detach":
         return int(cmd_sessions_detach(parsed))
-    if sub == "takeover":
-        parsed = parser.parse_args(["takeover", *args[1:]])
+    if parsed.command == "takeover":
         return int(cmd_sessions_takeover(parsed))
-    print(
-        f"sessions: unknown sub-verb {sub!r}; expected one of ls / detach / takeover",
-        file=sys.stderr,
-    )
+    parser.error("expected one of ls / detach / takeover")
     return 2
 
 
 def _dispatch_runs(args: list[str]) -> int:
-    if not args:
-        print("usage: astrid runs ls [--project <slug>]", file=sys.stderr)
-        return 2
-    sub = args[0]
-    if sub == "ls":
-        from .core.task.lifecycle import cmd_runs_ls
+    import argparse
 
-        return cmd_runs_ls(args[1:])
-    print(
-        f"runs: unknown sub-verb {sub!r}; only 'runs ls' is implemented in Phase 5",
-        file=sys.stderr,
-    )
-    return 2
+    from .core.task.lifecycle import cmd_runs_ls
+
+    parser = argparse.ArgumentParser(prog="astrid runs")
+    sub = parser.add_subparsers(dest="command", required=True)
+    ls = sub.add_parser("ls")
+    ls.set_defaults(handler=lambda tail: cmd_runs_ls(tail))
+    parsed, tail = parser.parse_known_args(args)
+    return int(parsed.handler(tail))
 
 
 def _dispatch_run(args: list[str]) -> int:
     """Dispatch ``astrid run {show,artifacts,trace,cost}`` sub-verbs."""
-    if not args:
-        print(
-            "usage: astrid run {show,artifacts,trace,cost} ...",
-            file=sys.stderr,
-        )
-        return 2
+    import argparse
+
     from astrid.core.task.run_audit import (
         cmd_run_artifacts,
         cmd_run_cost,
@@ -423,49 +509,39 @@ def _dispatch_run(args: list[str]) -> int:
         cmd_run_trace,
     )
 
-    sub = args[0]
-    if sub == "show":
-        return cmd_run_show(args[1:])
-    if sub == "artifacts":
-        return cmd_run_artifacts(args[1:])
-    if sub == "trace":
-        return cmd_run_trace(args[1:])
-    if sub == "cost":
-        return cmd_run_cost(args[1:])
-    print(
-        f"run: unknown sub-verb {sub!r}; expected one of show / artifacts / trace / cost",
-        file=sys.stderr,
-    )
-    return 2
+    parser = argparse.ArgumentParser(prog="astrid run")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("show").set_defaults(handler=cmd_run_show)
+    sub.add_parser("artifacts").set_defaults(handler=cmd_run_artifacts)
+    sub.add_parser("trace").set_defaults(handler=cmd_run_trace)
+    sub.add_parser("cost").set_defaults(handler=cmd_run_cost)
+    parsed, tail = parser.parse_known_args(args)
+    return int(parsed.handler(tail))
 
 
 def _dispatch_step(args: list[str]) -> int:
     """Dispatch ``astrid step {retry-fetch}`` sub-verbs."""
-    if not args:
-        print(
-            "usage: astrid step {retry-fetch} ...",
-            file=sys.stderr,
-        )
-        return 2
+    import argparse
+
     from astrid.core.task.lifecycle import cmd_step_retry_fetch
 
-    sub = args[0]
-    if sub == "retry-fetch":
-        return cmd_step_retry_fetch(args[1:])
-    print(
-        f"step: unknown sub-verb {sub!r}; expected retry-fetch",
-        file=sys.stderr,
-    )
-    return 2
+    parser = argparse.ArgumentParser(prog="astrid step")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("retry-fetch").set_defaults(handler=cmd_step_retry_fetch)
+    parsed, tail = parser.parse_known_args(args)
+    return int(parsed.handler(tail))
 
 
 def _dispatch_hook(args: list[str]) -> int:
-    if not args or args[0] != "stop":
-        print("usage: astrid hook stop", file=sys.stderr)
-        return 2
+    import argparse
+
     from .core.task.hook import cmd_hook_stop
 
-    return cmd_hook_stop(args[1:])
+    parser = argparse.ArgumentParser(prog="astrid hook")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("stop").set_defaults(handler=cmd_hook_stop)
+    parsed, tail = parser.parse_known_args(args)
+    return int(parsed.handler(tail))
 
 
 def _dispatch_plan_verbs(args: list[str]) -> int:
@@ -481,82 +557,53 @@ def _dispatch_events(args: list[str]) -> int:
     Both verbs read run state (events.jsonl) and require ASTRID_SESSION_ID.
     They are NOT listed in ``_verb_is_unbound_allowlisted``.
     """
-    if not args:
-        print(
-            "usage: astrid events {verify,tail} ...",
-            file=sys.stderr,
-        )
-        return 2
+    import argparse
+
     from astrid.core.task.run_audit import cmd_events_verify, cmd_events_tail
 
-    sub = args[0]
-    if sub == "verify":
-        return cmd_events_verify(args[1:])
-    if sub == "tail":
-        return cmd_events_tail(args[1:])
-    print(
-        f"events: unknown sub-verb {sub!r}; expected one of verify / tail",
-        file=sys.stderr,
-    )
-    return 2
+    parser = argparse.ArgumentParser(prog="astrid events")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("verify").set_defaults(handler=cmd_events_verify)
+    sub.add_parser("tail").set_defaults(handler=cmd_events_tail)
+    parsed, tail = parser.parse_known_args(args)
+    return int(parsed.handler(tail))
 
 
 def _dispatch_runpod(args: list[str]) -> int:
     """Dispatch ``astrid runpod {sweep,volumes,ensure-storage} ...`` sub-verbs."""
-    if not args:
-        print(
-            "usage: astrid runpod {sweep,volumes,ensure-storage} ...",
-            file=sys.stderr,
-        )
-        return 2
+    import argparse
 
-    sub = args[0]
-    if sub == "sweep":
-        from typing import Literal
+    parser = argparse.ArgumentParser(prog="astrid runpod")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sweep = sub.add_parser("sweep")
+    sweep.add_argument("--hard", action="store_true")
+    sweep.add_argument("--dry-run", action="store_true")
+    sweep.add_argument("--projects-root")
+    sweep.set_defaults(handler=_dispatch_runpod_sweep)
+    sub.add_parser("volumes").set_defaults(handler=_dispatch_runpod_volumes)
+    ensure = sub.add_parser("ensure-storage")
+    ensure.set_defaults(handler=_dispatch_runpod_ensure_storage)
+    parsed, tail = parser.parse_known_args(args)
+    return int(parsed.handler(parsed, tail))
 
-        from .core.runpod.sweeper import sweep as run_sweep
 
-        # Parse --hard and --dry-run from remaining args
-        mode: Literal["default", "hard"] = "default"
-        dry_run = False
-        projects_root_arg: str | None = None
-        i = 1
-        while i < len(args):
-            if args[i] == "--hard":
-                mode = "hard"
-                i += 1
-            elif args[i] == "--dry-run":
-                dry_run = True
-                i += 1
-            elif args[i] == "--projects-root" and i + 1 < len(args):
-                projects_root_arg = args[i + 1]
-                i += 2
-            else:
-                i += 1
+def _dispatch_runpod_sweep(parsed: Any, _tail: list[str]) -> int:
+    from pathlib import Path
+    from typing import Literal
 
-        from pathlib import Path
+    from .core.project.paths import resolve_projects_root
+    from .core.runpod.sweeper import sweep as run_sweep
 
-        from .core.project.paths import resolve_projects_root
-
-        projects_root = Path(projects_root_arg) if projects_root_arg else resolve_projects_root()
-        summary = run_sweep(projects_root, mode=mode, dry_run=dry_run)
-        print(json.dumps(summary, indent=2, default=str))
-        return 0
-
-    if sub == "volumes":
-        return _dispatch_runpod_volumes(args[1:])
-
-    if sub == "ensure-storage":
-        return _dispatch_runpod_ensure_storage(args[1:])
-
-    print(
-        f"runpod: unknown sub-verb {sub!r}; expected one of sweep / volumes / ensure-storage",
-        file=sys.stderr,
+    mode: Literal["default", "hard"] = "hard" if parsed.hard else "default"
+    projects_root = (
+        Path(parsed.projects_root) if parsed.projects_root else resolve_projects_root()
     )
-    return 2
+    summary = run_sweep(projects_root, mode=mode, dry_run=parsed.dry_run)
+    print(json.dumps(summary, indent=2, default=str))
+    return 0
 
 
-def _dispatch_runpod_volumes(args: list[str]) -> int:
+def _dispatch_runpod_volumes(_parsed: Any, args: list[str]) -> int:
     """Dispatch ``astrid runpod volumes ls``."""
     import argparse
 
@@ -588,7 +635,7 @@ def _dispatch_runpod_volumes(args: list[str]) -> int:
         return 1
 
 
-def _dispatch_runpod_ensure_storage(args: list[str]) -> int:
+def _dispatch_runpod_ensure_storage(_parsed: Any, args: list[str]) -> int:
     """Dispatch ``astrid runpod ensure-storage <name> [--size <GB>] [--datacenter <id>]``."""
     import argparse
 
@@ -744,18 +791,37 @@ def _run_default_brief_orchestrator(argv: list[str]) -> int:
     return int(entrypoint(argv))
 
 
+def _packs_subcommand_list() -> str:
+    """Return a comma-separated list of ``astrid packs`` subcommands."""
+    try:
+        import argparse
+
+        from .packs.cli import build_parser as packs_build_parser
+
+        packs_parser = packs_build_parser()
+        # Extract subcommand names from the parser's subparsers action.
+        for action in packs_parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                return ",".join(sorted(action.choices.keys()))
+    except Exception:
+        pass
+    # Fallback: canonical list matching the packs CLI as of m5b.
+    return "agent-index,install,inspect,list,new,rollback,status,uninstall,update,validate"
+
+
 def _print_entrypoint_help() -> None:
+    packs_verbs = _packs_subcommand_list()
     print(
-        """Astrid command gateway
+        f"""Astrid command gateway
 
 Usage:
   python3 -m astrid doctor
   python3 -m astrid setup [--apply]
     # orchestrators — multi-step pipelines
-  python3 -m astrid orchestrators {list,inspect,validate,fork,run} ...
-    # authoring \u2014 create and compile new tools
-  python3 -m astrid author {new,check,describe,compile,test,explain} <pack>.<name>
-    # task-mode \u2014 lifecycle verbs for running orchestrated plans
+  python3 -m astrid orchestrators {{list,inspect,validate,fork,run}} ...
+    # authoring \\u2014 create and compile new tools
+  python3 -m astrid author {{new,check,describe,compile,test,explain}} <pack>.<name>
+    # task-mode \\u2014 lifecycle verbs for running orchestrated plans
   Task-mode operator verbs:
     python3 -m astrid start <pack>.<name> --project <slug> [--name <run-id>]
     python3 -m astrid abort --project <slug>
@@ -765,43 +831,48 @@ Usage:
     python3 -m astrid plan add-step --project <slug> --run-id <id> --step-id <id> --command '...' [--adapter local|manual] [--after|--before|--into <path>]
     python3 -m astrid plan edit-step <path> --project <slug> --run-id <id> [--command '...'] [--assignee ...]
     python3 -m astrid plan remove-step <path> --project <slug> --run-id <id>
-    python3 -m astrid plan supersede-step <path> --project <slug> --run-id <id> --scope {all,future-iterations,future-items}
+    python3 -m astrid plan supersede-step <path> --project <slug> --run-id <id> --scope {{all,future-iterations,future-items}}
     python3 -m astrid claim <step> --project <slug> --run-id <id> [--for agent:<id>|human:<name>]
     python3 -m astrid unclaim <step> --project <slug> --run-id <id> [--for agent:<id>|human:<name>]
   Task-mode agent-facing verbs (mid-run):
     python3 -m astrid next --project <slug>
-    python3 -m astrid ack <step> --project <slug> --decision {approve,retry,iterate,abort} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
+    python3 -m astrid ack <step> --project <slug> --decision {{approve,retry,iterate,abort}} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
     python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/HOOKS.md
-    # sessions \u2014 tab binding and takeover
+    python3 -m astrid skip   # skip a step (use --help for details)
+    # sessions \\u2014 tab binding and takeover
   Session verbs (Sprint 1):
     python3 -m astrid attach [<project>] [--default] [--timeline <slug>] [--session <id>] [--as agent:<id>]
     python3 -m astrid status
-    python3 -m astrid sessions {ls,detach,takeover} ...
-    # skills \u2014 installable agent capabilities
-  python3 -m astrid skills {list,install,uninstall,sync,doctor} ...
-    # packs \u2014 build and validate packs
-  python3 -m astrid packs {validate,new} ...
+    python3 -m astrid sessions {{ls,detach,takeover}} ...
+    # skills \\u2014 installable agent capabilities
+  python3 -m astrid skills {{list,install,uninstall,sync,doctor}} ...
+    # packs \\u2014 build and validate packs
+  python3 -m astrid packs {{{packs_verbs}}} ...
     # executors — single-step CLI tools
-  python3 -m astrid executors {new,list,inspect,validate,fork,install,run} ...
+  python3 -m astrid executors {{new,list,inspect,validate,fork,install,run}} ...
     # elements — reusable building blocks
-  python3 -m astrid elements {list,inspect,fork,install} ...
+  python3 -m astrid elements {{list,inspect,fork,install}} ...
     # projects — project CRUD
-  python3 -m astrid projects {ls,default,create,show,source} ...
-    # timelines \u2014 timeline management
-  python3 -m astrid timelines {ls,create,show,rename,finalize,tombstone,purge,set-default} ...
-    # models \u2014 model catalog discovery
-  python3 -m astrid models {list,show} ...
-    # modalities \u2014 output modality discovery
-  python3 -m astrid modalities {list,inspect} ...
+  python3 -m astrid projects {{ls,default,create,show,source}} ...
+    # timelines \\u2014 timeline management
+  python3 -m astrid timelines {{ls,create,show,rename,finalize,tombstone,purge,set-default}} ...
+    # models \\u2014 model catalog discovery
+  python3 -m astrid models {{list,show}} ...
+    # modalities \\u2014 output modality discovery
+  python3 -m astrid modalities {{list,inspect}} ...
   python3 -m astrid reigh-data --project-id PROJECT_ID [--out PATH]
   python3 -m astrid worker --pool banodoco [--worker-id ID] [--max-iterations N]
-    # run-audit \u2014 inspect completed runs
-  python3 -m astrid events {verify,tail} --run <id> --project <slug>
+    # run-audit \\u2014 inspect completed runs
+  python3 -m astrid events {{verify,tail}} --run <id> --project <slug>
   python3 -m astrid audit --run RUN_DIR
-    # infrastructure \u2014 setup, events, worker, runpod
+    # infrastructure \\u2014 setup, events, worker, runpod
   python3 -m astrid runpod sweep [--hard] [--dry-run] [--projects-root PATH]
   python3 -m astrid runpod volumes ls
   python3 -m astrid runpod ensure-storage <name> [--size <GB>] [--datacenter <id>]
+    # publish / reigh-data (executor-backed)
+  python3 -m astrid publish ...
+  python3 -m astrid publish-youtube ...
+  python3 -m astrid upload-youtube ...
   python3 -m astrid --video SRC --brief BRIEF --out out/runs/name [--render]
   python3 -m astrid --brief BRIEF --out out/runs/name --target-duration SECONDS [--render]
 Start here:

@@ -8,6 +8,7 @@ env-inheritance spike confirms this); do not silently scrub it.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from astrid.core.project.paths import project_dir
@@ -75,7 +76,7 @@ def resolve_current_session_with_fs_fallback(
     """
     raw = os.environ.get(ASTRID_SESSION_ID_ENV)
     if not raw and slug is None:
-        from astrid.core.task.lifecycle import _most_recent_session_slug
+        from astrid.core.task.session_discovery import _most_recent_session_slug
 
         root = Path(projects_root) if projects_root is not None else None
         discovered = _most_recent_session_slug(root)

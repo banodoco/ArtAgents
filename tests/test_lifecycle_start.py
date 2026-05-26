@@ -20,6 +20,7 @@ from astrid.core.task.active_run import read_active_run
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.plan import compute_plan_hash
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
+from astrid.core.orchestrator.registry import load_default_registry
 from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
 
@@ -253,6 +254,21 @@ def test_start_builtin_canonical_orchestrators_ignore_stale_build_json_and_use_r
             assert str((proj_root / "transcript.json").resolve()) in plan_text
         if qualified_id == "video_editing.thumbnail_maker":
             assert "dramatic speaker on stage" in plan_text
+
+
+def test_canonical_start_orchestrators_declare_plan_builder_metadata() -> None:
+    registry = load_default_registry(include_installed=False)
+
+    expected_modules = {
+        "video_editing.hype": "astrid.packs.video_editing.orchestrators.hype.plan_template",
+        "video_editing.event_talks": "astrid.packs.video_editing.orchestrators.event_talks.plan_template",
+        "video_editing.thumbnail_maker": "astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template",
+    }
+
+    for orchestrator_id, module_name in expected_modules.items():
+        orchestrator = registry.get(orchestrator_id)
+        assert orchestrator.metadata["plan_builder_module"] == module_name
+        assert orchestrator.metadata["plan_builder_entrypoint"] == "build_plan_v2"
 
 
 def test_canonical_start_creates_task_events_not_pack_audit_log(

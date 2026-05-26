@@ -67,39 +67,51 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             self.assertEqual(pipeline.main(["setup", "--help"]), 42)
             setup_main.assert_called_once_with(["--help"])
 
-    def test_publish_dispatch_uses_package_relative_imports(self) -> None:
-        from astrid.packs.reigh.executors.publish import run as publish
-        from astrid.packs.youtube.executors.upload import run as publish_youtube
+    def test_publish_style_dispatch_resolves_executor_runtime_from_registry_metadata(self) -> None:
+        registry = mock.Mock()
+        publish_entrypoint = mock.Mock(return_value=51)
+        youtube_entrypoint = mock.Mock(return_value=52)
+        reigh_data_entrypoint = mock.Mock(return_value=53)
+
+        registry.get.side_effect = [
+            mock.Mock(id="reigh.publish", metadata={"runtime_module": "reigh.publish.module", "runtime_entrypoint": "main"}),
+            mock.Mock(id="youtube.upload", metadata={"runtime_module": "youtube.upload.module", "runtime_entrypoint": "main"}),
+            mock.Mock(id="youtube.upload", metadata={"runtime_module": "youtube.upload.module", "runtime_entrypoint": "main"}),
+            mock.Mock(id="reigh.reigh_data", metadata={"runtime_module": "reigh.reigh_data.module", "runtime_entrypoint": "main"}),
+        ]
 
         with (
             mock.patch(
                 "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
                 return_value=object(),
             ),
-            mock.patch.object(publish, "main", return_value=51) as publish_main,
+            mock.patch("astrid.core.executor.registry.load_default_registry", return_value=registry),
+            mock.patch(
+                "astrid.core.pack_resolver.resolve_callable_from_metadata",
+                side_effect=[
+                    publish_entrypoint,
+                    youtube_entrypoint,
+                    youtube_entrypoint,
+                    reigh_data_entrypoint,
+                ],
+            ) as resolve_runtime,
         ):
             self.assertEqual(pipeline.main(["publish", "--help"]), 51)
-            publish_main.assert_called_once_with(["--help"])
-
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch.object(publish_youtube, "main", return_value=52) as youtube_main,
-        ):
             self.assertEqual(pipeline.main(["publish-youtube", "--help"]), 52)
-            youtube_main.assert_called_once_with(["--help"])
+            self.assertEqual(pipeline.main(["upload-youtube", "--help"]), 52)
+            self.assertEqual(pipeline.main(["reigh-data", "--help"]), 53)
 
-        with (
-            mock.patch(
-                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
-                return_value=object(),
-            ),
-            mock.patch.object(publish_youtube, "main", return_value=53) as youtube_main,
-        ):
-            self.assertEqual(pipeline.main(["upload-youtube", "--help"]), 53)
-            youtube_main.assert_called_once_with(["--help"])
+        self.assertEqual(
+            [call.args[0] for call in registry.get.call_args_list],
+            ["reigh.publish", "youtube.upload", "youtube.upload", "reigh.reigh_data"],
+        )
+        publish_entrypoint.assert_called_once_with(["--help"])
+        self.assertEqual(youtube_entrypoint.call_count, 2)
+        reigh_data_entrypoint.assert_called_once_with(["--help"])
+        self.assertEqual(
+            [call.kwargs["owner_id"] for call in resolve_runtime.call_args_list],
+            ["reigh.publish", "youtube.upload", "youtube.upload", "reigh.reigh_data"],
+        )
 
     def test_unknown_command_exits_2_with_message(self) -> None:
         """T7: unknown non-flag command prints to stderr and exits 2."""

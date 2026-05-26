@@ -25,7 +25,6 @@ TOP_LEVEL_ASTRID_FILES = {
     "setup_cli.py",
     "structure.py",
     "theme_schema.py",
-    "timeline.py",
 }
 TOP_LEVEL_ASTRID_DIRS = {
     "__pycache__",
@@ -40,6 +39,7 @@ TOP_LEVEL_ASTRID_DIRS = {
     "packs",
     "skills",
     "threads",
+    "timeline",
     "utilities",
     "verify",
 }
@@ -72,13 +72,8 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
 
 
 def validate_import_layering(root: str | Path = REPO_ROOT) -> list[str]:
-    # TODO(m5b) exemptions:
-    # - astrid/core/task/lifecycle.py: static imports from astrid.orchestrate.compile
-    #   for DEFAULT_PACKS_ROOT and from astrid.packs.video_editing.*.plan_template
-    #   remain while lifecycle.py is split and de-inverted in m5b. The audited
-    #   locations were lifecycle.py:143,252,267,281,1252,1275 at m4 planning time.
-    # - astrid/pipeline.py is intentionally outside this validator's scope; it is
-    #   a top-level dispatcher and its pack imports are deferred to m5b.
+    # astrid/pipeline.py is intentionally outside this validator's scope; it is
+    # a top-level dispatcher and its pack imports are deferred to m5b.
     repo_root = Path(root)
     core_root = repo_root / "astrid" / "core"
     if not core_root.is_dir():
@@ -365,7 +360,7 @@ def _is_forbidden_core_import(module: str) -> bool:
 
 
 def _is_import_layering_exempt(path: Path, repo_root: Path) -> bool:
-    return _repo_rel(path, repo_root) == "astrid/core/task/lifecycle.py"
+    return False
 
 
 def _contains_sys_modules_injection(path: Path) -> bool:

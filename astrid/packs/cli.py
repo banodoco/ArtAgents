@@ -277,78 +277,8 @@ def _filtered_packs(args: argparse.Namespace, *, include_hidden: bool | None = N
     return packs
 
 
-def _handle_list(args: argparse.Namespace) -> int:
-    packs = _filtered_packs(args)
-    if args.json:
-        print(json.dumps({"packs": [_pack_payload(pack) for pack in packs]}, indent=2, sort_keys=True))
-        return 0
-    for pack in packs:
-        print(f"{pack.id}\t{pack.name}\t{pack.version}\t{pack.description}")
-    return 0
-
-
-def _handle_inspect(args: argparse.Namespace) -> int:
-    packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
-    pack = packs.get(args.pack_id)
-    if pack is None:
-        print(f"packs inspect: unknown pack {args.pack_id!r}", file=sys.stderr)
-        return 1
-    payload = _pack_payload(pack)
-    if args.json:
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 0
-    for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
-        print(f"{key}: {payload.get(key, '')}")
-    if pack.content:
-        print("content:")
-        for key, value in sorted(pack.content.items()):
-            print(f"  {key}: {value}")
-    if pack.agent:
-        print("agent:")
-        for key, value in sorted(pack.agent.items()):
-            print(f"  {key}: {value}")
-    return 0
-
-
-def _handle_status(args: argparse.Namespace) -> int:
-    packs = _filtered_packs(args)
-    rows: list[dict] = []
-    for pack in packs:
-        errors, warnings = validate_pack(pack.root)
-        payload = _pack_payload(pack)
-        payload["effective_status"] = _effective_status(pack)
-        payload["validation"] = {
-            "errors": len(errors),
-            "warnings": len(warnings),
-            "error_messages": errors,
-            "warning_messages": warnings,
-        }
-        rows.append(payload)
-    if args.json:
-        print(json.dumps(_with_grouped_payload(rows), indent=2, sort_keys=True))
-        return 0
-    _print_grouped_rows(rows, row_formatter=_format_status_row)
-    return 0
-
-
-def cmd_new(argv: list[str]) -> int:
-    """Scaffold a minimal pack directory in the CWD.
-
-    Usage: python3 -m astrid packs new <id>
-    """
-    parser = argparse.ArgumentParser(
-        prog="python3 -m astrid packs new",
-        description="Create a new pack skeleton in the current directory.",
-    )
-    parser.add_argument(
-        "pack_id",
-        help="Pack identifier (lowercase, digits, underscore; e.g., my_project).",
-    )
-    args = parser.parse_args(argv)
-
-    pack_id: str = args.pack_id
-
-    # Validate the pack id
+def _create_pack_skeleton(pack_id: str) -> int:
+    """Create and validate a new pack skeleton in the current directory."""
     if not _pack_id_is_valid(pack_id):
         print(
             f"packs new: invalid pack id {pack_id!r}. "
@@ -357,7 +287,6 @@ def cmd_new(argv: list[str]) -> int:
         )
         return 2
 
-    # Target directory in CWD
     target = Path.cwd() / pack_id
     if target.exists():
         print(
@@ -367,7 +296,6 @@ def cmd_new(argv: list[str]) -> int:
         )
         return 1
 
-    # Ensure parent (CWD) exists
     if not target.parent.is_dir():
         print(
             f"packs new: parent directory {target.parent} does not exist",
@@ -375,13 +303,11 @@ def cmd_new(argv: list[str]) -> int:
         )
         return 1
 
-    # Create the pack skeleton
     pack_name = pack_id.replace("_", " ").title()
     description = f"A pack for {pack_name}."
 
     target.mkdir(parents=False)
 
-    # pack.yaml
     pack_yaml = target / "pack.yaml"
     pack_yaml.write_text(
         f"""schema_version: 1
@@ -405,32 +331,27 @@ agent:
         encoding="utf-8",
     )
 
-    # AGENTS.md
     agents_md = target / "AGENTS.md"
     agents_md.write_text(
         _AGENTS_MD_STUB.format(pack_name=pack_name),
         encoding="utf-8",
     )
 
-    # README.md
     readme_md = target / "README.md"
     readme_md.write_text(
         _README_MD_STUB.format(pack_name=pack_name, description=description),
         encoding="utf-8",
     )
 
-    # STAGE.md at pack root
     stage_md = target / "STAGE.md"
     stage_md.write_text(
         _STAGE_MD_STUB.format(pack_name=pack_name),
         encoding="utf-8",
     )
 
-    # Create content root directories
     for subdir in ("executors", "orchestrators", "elements"):
         (target / subdir).mkdir(parents=False)
 
-    # Report what was created
     created = [
         "pack.yaml",
         "AGENTS.md",
@@ -443,7 +364,6 @@ agent:
     for rel in created:
         print(f"created {target.name}/{rel}")
 
-    # Validate the new pack before declaring success
     errors, warnings = validate_pack(target)
     if errors:
         print(
@@ -462,70 +382,62 @@ agent:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the ``packs`` subcommand parser."""
+def cmd_new(argv: list[str]) -> int:
+    """Scaffold a minimal pack directory in the CWD.
+
+    Usage: python3 -m astrid packs new <id>
+    """
     parser = argparse.ArgumentParser(
-        prog="python3 -m astrid packs",
-        description="Manage and validate Astrid packs.",
+        prog="python3 -m astrid packs new",
+        description="Create a new pack skeleton in the current directory.",
     )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    validate_parser = subparsers.add_parser(
-        "validate", help="Statically validate a pack directory."
+    parser.add_argument(
+        "pack_id",
+        help="Pack identifier (lowercase, digits, underscore; e.g., my_project).",
     )
-    validate_parser.add_argument(
-        "path", nargs="?", default=".", help="Path to pack root (default: .)"
-    )
-    validate_parser.add_argument(
-        "--warnings", action="store_true", help="Also print non-fatal warnings."
-    )
-    validate_parser.set_defaults(handler=_handle_validate)
-
-    list_parser = subparsers.add_parser("list", help="List discovered packs.")
-    list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    list_parser.add_argument("--category", help="Filter by metadata.category.")
-    _add_taxonomy_filter_args(list_parser)
-    list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
-    list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
-    list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
-    list_parser.set_defaults(handler=_handle_list)
-
-    inspect_parser = subparsers.add_parser("inspect", help="Inspect one pack.")
-    inspect_parser.add_argument("pack_id")
-    inspect_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    inspect_parser.set_defaults(handler=_handle_inspect)
-
-    status_parser = subparsers.add_parser("status", help="Validate and summarize discovered packs.")
-    status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    status_parser.add_argument("--category", help="Filter by metadata.category.")
-    _add_taxonomy_filter_args(status_parser)
-    status_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
-    status_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
-    status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
-    status_parser.set_defaults(handler=_handle_status)
-
-    new_parser = subparsers.add_parser(
-        "new", help="Create a new pack skeleton in the current directory."
-    )
-    new_parser.add_argument("pack_id", help="Pack identifier (e.g., my_project).")
-    new_parser.set_defaults(handler=_handle_new)
-
-    return parser
-
-
-def _handle_validate(args: argparse.Namespace) -> int:
-    """Handler for ``packs validate``."""
-    return cmd_validate([args.path] + (["--warnings"] if args.warnings else []))
-
-
-def _handle_new(args: argparse.Namespace) -> int:
-    """Handler for ``packs new``."""
-    return cmd_new([args.pack_id])
+    args = parser.parse_args(argv)
+    return _create_pack_skeleton(args.pack_id)
 
 
 
 # pack list
 # ---------------------------------------------------------------------------
+
+
+def _list_installed_packs() -> int:
+    """Render the installed-pack list used by the public wrapper."""
+    from astrid.core.pack_store import InstalledPackStore
+
+    store = InstalledPackStore()
+    records = store.list_installed()
+
+    if not records:
+        print("No packs installed.")
+        return 0
+
+    col_id = max(max(len(r.pack_id) for r in records), 2)
+    col_name = max(max(len(r.name) for r in records), 4)
+    col_version = max(max(len(r.version) for r in records), 7)
+    col_status = 6
+    col_installed = 19
+
+    header = (
+        f"{'ID':<{col_id}}  {'NAME':<{col_name}}  "
+        f"{'VERSION':<{col_version}}  {'STATUS':<{col_status}}  "
+        f"{'INSTALLED':<{col_installed}}"
+    )
+    print(header)
+    print("-" * len(header))
+
+    for record in records:
+        status = "active" if record.active else "inactive"
+        print(
+            f"{record.pack_id:<{col_id}}  {record.name:<{col_name}}  "
+            f"{record.version:<{col_version}}  {status:<{col_status}}  "
+            f"{record.installed_at:<{col_installed}}"
+        )
+
+    return 0
 
 
 def cmd_list(argv: list[str]) -> int:
@@ -538,46 +450,77 @@ def cmd_list(argv: list[str]) -> int:
         description="List installed external packs.",
     )
     parser.parse_args(argv)  # no arguments, just parses --help
-
-    # Lazy import — InstalledPackStore touches filesystem only when called
-    from astrid.core.pack_store import InstalledPackStore
-
-    store = InstalledPackStore()
-    records = store.list_installed()
-
-    if not records:
-        print("No packs installed.")
-        return 0
-
-    # Column widths (minimums, will expand for longer values)
-    col_id = max(max(len(r.pack_id) for r in records), 2)
-    col_name = max(max(len(r.name) for r in records), 4)
-    col_version = max(max(len(r.version) for r in records), 7)
-    col_status = 6  # "active" = 6 chars
-    col_installed = 19  # ISO-8601 "YYYY-MM-DDTHH:MM:SS"
-
-    header = (
-        f"{'ID':<{col_id}}  {'NAME':<{col_name}}  "
-        f"{'VERSION':<{col_version}}  {'STATUS':<{col_status}}  "
-        f"{'INSTALLED':<{col_installed}}"
-    )
-    print(header)
-    print("-" * len(header))
-
-    for r in records:
-        status = "active" if r.active else "inactive"
-        print(
-            f"{r.pack_id:<{col_id}}  {r.name:<{col_name}}  "
-            f"{r.version:<{col_version}}  {status:<{col_status}}  "
-            f"{r.installed_at:<{col_installed}}"
-        )
-
-    return 0
+    return _list_installed_packs()
 
 
 # ---------------------------------------------------------------------------
 # pack inspect
 # ---------------------------------------------------------------------------
+
+
+def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
+    """Render installed-pack inspect output for the public wrapper and CLI."""
+    from astrid.core.pack_store import InstalledPackStore
+
+    store = InstalledPackStore()
+    record = store.get_active(pack_id)
+
+    if record is None:
+        print(
+            f"inspect: pack {pack_id!r} is not installed.",
+            file=sys.stderr,
+        )
+        return 1
+
+    rev_dir = store.active_revision_path(pack_id)
+    if rev_dir is None:
+        print(
+            f"inspect: cannot resolve active revision for {pack_id!r}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    manifest_path = pack_manifest_path(rev_dir)
+    if manifest_path is None:
+        print(
+            f"inspect: no pack manifest found in installed revision {rev_dir}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        if manifest_path.suffix == ".json":
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        else:
+            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"inspect: failed to parse pack manifest: {e}", file=sys.stderr)
+        return 1
+
+    if not isinstance(manifest, dict):
+        print("inspect: pack manifest is not a mapping", file=sys.stderr)
+        return 1
+
+    try:
+        trust_summary = extract_trust_summary(rev_dir)
+    except Exception:
+        trust_summary = {}
+
+    if agent:
+        agent_data = _build_agent_view(manifest, trust_summary)
+        if json_output:
+            print(json.dumps(agent_data, indent=2, default=str))
+        else:
+            _print_agent_view(agent_data)
+        return 0
+
+    full_data = _build_full_inspect(record, manifest, trust_summary, rev_dir=rev_dir)
+    if json_output:
+        print(json.dumps(full_data, indent=2, default=str))
+    else:
+        _print_full_inspect(full_data)
+
+    return 0
 
 
 def cmd_inspect(argv: list[str]) -> int:
@@ -602,77 +545,15 @@ def cmd_inspect(argv: list[str]) -> int:
     parser.add_argument(
         "--json",
         action="store_true",
-        dest="json_output",
+        dest="json",
         help="Output as JSON.",
     )
     args = parser.parse_args(argv)
-
-    from astrid.core.pack_store import InstalledPackStore
-
-    store = InstalledPackStore()
-    record = store.get_active(args.pack_id)
-
-    if record is None:
-        print(
-            f"inspect: pack {args.pack_id!r} is not installed.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Resolve the active revision directory
-    rev_dir = store.active_revision_path(args.pack_id)
-    if rev_dir is None:
-        print(
-            f"inspect: cannot resolve active revision for {args.pack_id!r}.",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Read pack manifest from active revision for fresh data
-    manifest_path = pack_manifest_path(rev_dir)
-    if manifest_path is None:
-        print(
-            f"inspect: no pack manifest found in installed revision {rev_dir}.",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        if manifest_path.suffix == ".json":
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        else:
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"inspect: failed to parse pack manifest: {e}", file=sys.stderr)
-        return 1
-
-    if not isinstance(manifest, dict):
-        print("inspect: pack manifest is not a mapping", file=sys.stderr)
-        return 1
-
-    # Also get the trust summary for component counts
-    try:
-        trust_summary = extract_trust_summary(rev_dir)
-    except Exception:
-        trust_summary = {}
-
-    # ── Agent-focused output ──
-    if args.agent:
-        agent_data = _build_agent_view(manifest, trust_summary)
-        if args.json_output:
-            print(json.dumps(agent_data, indent=2, default=str))
-        else:
-            _print_agent_view(agent_data)
-        return 0
-
-    # ── Full inspect output ──
-    full_data = _build_full_inspect(record, manifest, trust_summary, rev_dir=rev_dir)
-    if args.json_output:
-        print(json.dumps(full_data, indent=2, default=str))
-    else:
-        _print_full_inspect(full_data)
-
-    return 0
+    return _inspect_installed_pack(
+        pack_id=args.pack_id,
+        agent=bool(args.agent),
+        json_output=bool(args.json),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1242,6 +1123,38 @@ def _print_full_inspect(data: dict) -> None:
             print(f"    • {w}")
 
 
+def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
+    """Render discovery-backed inspect output for non-installed packs."""
+    packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
+    pack = packs.get(pack_id)
+    if pack is None:
+        print(f"packs inspect: unknown pack {pack_id!r}", file=sys.stderr)
+        return 1
+
+    payload = pack.agent if agent else _pack_payload(pack)
+    if json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if agent:
+        for key, value in sorted(payload.items()):
+            print(f"{key}: {value}")
+        return 0
+
+    for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
+        print(f"{key}: {payload.get(key, '')}")
+    _print_taxonomy_block(payload.get("taxonomy", _pack_taxonomy(pack)))
+    if pack.content:
+        print("content:")
+        for key, value in sorted(pack.content.items()):
+            print(f"  {key}: {value}")
+    if pack.agent:
+        print("agent:")
+        for key, value in sorted(pack.agent.items()):
+            print(f"  {key}: {value}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``packs`` subcommand parser."""
     parser = argparse.ArgumentParser(
@@ -1287,7 +1200,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit agent-focused subset (purpose, entrypoints, constraints, context, secrets)."
     )
     inspect_parser.add_argument(
-        "--json", action="store_true", dest="json_output",
+        "--json", action="store_true", dest="json",
         help="Output as JSON."
     )
     inspect_parser.set_defaults(handler=_handle_inspect)
@@ -1384,7 +1297,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Limit output to a single pack (returns the pack dict or null).",
     )
     agent_index_parser.add_argument(
-        "--json", dest="json_output", action="store_true",
+        "--json", dest="json", action="store_true",
         help="Output as JSON (default).",
     )
     agent_index_parser.add_argument(
@@ -1398,12 +1311,25 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _handle_validate(args: argparse.Namespace) -> int:
     """Handler for ``packs validate``."""
-    return cmd_validate([args.path] + (["--warnings"] if args.warnings else []))
+    pack_root = _validate_pack_path(Path(args.path))
+    errors, warnings = validate_pack(pack_root)
+
+    if errors:
+        for err in errors:
+            print(err, file=sys.stderr)
+        return 1
+
+    if args.warnings and warnings:
+        for warning in warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+
+    print(f"valid: {pack_root.resolve()}")
+    return 0
 
 
 def _handle_new(args: argparse.Namespace) -> int:
     """Handler for ``packs new``."""
-    return cmd_new([args.pack_id])
+    return _create_pack_skeleton(args.pack_id)
 
 
 def _handle_list(args: argparse.Namespace) -> int:
@@ -1417,97 +1343,73 @@ def _handle_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def _handle_status(args: argparse.Namespace) -> int:
+    """Handler for ``packs status``."""
+    packs = _filtered_packs(args)
+    rows: list[dict[str, Any]] = []
+    for pack in packs:
+        errors, warnings = validate_pack(pack.root)
+        payload = _pack_payload(pack)
+        payload["effective_status"] = _effective_status(pack)
+        payload["validation"] = {
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "error_messages": errors,
+            "warning_messages": warnings,
+        }
+        rows.append(payload)
+    if args.json:
+        print(json.dumps(_with_grouped_payload(rows), indent=2, sort_keys=True))
+        return 0
+    _print_grouped_rows(rows, row_formatter=_format_status_row)
+    return 0
+
+
 def _handle_inspect(args: argparse.Namespace) -> int:
     """Handler for ``packs inspect``."""
     from astrid.core.pack_store import InstalledPackStore
 
     store = InstalledPackStore()
     if store.get_active(args.pack_id) is None:
-        packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
-        pack = packs.get(args.pack_id)
-        if pack is None:
-            print(f"packs inspect: unknown pack {args.pack_id!r}", file=sys.stderr)
-            return 1
-        if args.agent:
-            payload = pack.agent
-        else:
-            payload = _pack_payload(pack)
-        if args.json_output:
-            print(json.dumps(payload, indent=2, sort_keys=True))
-            return 0
-        if args.agent:
-            for key, value in sorted(payload.items()):
-                print(f"{key}: {value}")
-            return 0
-        for key in ("id", "name", "version", "description", "status", "visibility", "root", "manifest_path"):
-            print(f"{key}: {payload.get(key, '')}")
-        _print_taxonomy_block(payload.get("taxonomy", _pack_taxonomy(pack)))
-        if pack.content:
-            print("content:")
-            for key, value in sorted(pack.content.items()):
-                print(f"  {key}: {value}")
-        if pack.agent:
-            print("agent:")
-            for key, value in sorted(pack.agent.items()):
-                print(f"  {key}: {value}")
-        return 0
+        return _inspect_discovered_pack(
+            pack_id=args.pack_id,
+            agent=bool(args.agent),
+            json_output=bool(args.json),
+        )
 
-    argv = [args.pack_id]
-    if args.agent:
-        argv.append("--agent")
-    if args.json_output:
-        argv.append("--json")
-    return cmd_inspect(argv)
+    return _inspect_installed_pack(
+        pack_id=args.pack_id,
+        agent=bool(args.agent),
+        json_output=bool(args.json),
+    )
 
 
 def _handle_install(args: argparse.Namespace) -> int:
     """Handler for ``packs install``."""
-    from astrid.packs.install import cmd_install
+    from astrid.packs.install import _run_install_command
 
-    argv = [args.source]
-    if args.dry_run:
-        argv.append("--dry-run")
-    if args.yes:
-        argv.append("--yes")
-    if args.force:
-        argv.append("--force")
-    return cmd_install(argv)
+    return _run_install_command(args)
 
 
 def _handle_update(args: argparse.Namespace) -> int:
     """Handler for ``packs update``."""
-    from astrid.packs.install import cmd_update
+    from astrid.packs.install import _run_update_command
 
-    argv = [args.pack_id]
-    if args.dry_run:
-        argv.append("--dry-run")
-    if args.yes:
-        argv.append("--yes")
-    return cmd_update(argv)
+    return _run_update_command(args)
 
 
 def _handle_uninstall(args: argparse.Namespace) -> int:
     """Handler for ``packs uninstall``."""
-    from astrid.packs.install import cmd_uninstall
+    from astrid.packs.install import _run_uninstall_command
 
-    argv = [args.pack_id]
-    if args.keep_revisions:
-        argv.append("--keep-revisions")
-    if args.yes:
-        argv.append("--yes")
-    return cmd_uninstall(argv)
+    return _run_uninstall_command(args)
 
 
 def _handle_rollback(args: argparse.Namespace) -> int:
     """Handler for ``packs rollback``."""
-    from astrid.packs.install import cmd_rollback
+    from astrid.packs.install import _run_rollback_command
 
-    argv = [args.pack_id]
-    if args.revision:
-        argv.extend(["--revision", args.revision])
-    if args.yes:
-        argv.append("--yes")
-    return cmd_rollback(argv)
+    return _run_rollback_command(args)
 
 
 def _handle_agent_index(args: argparse.Namespace) -> int:

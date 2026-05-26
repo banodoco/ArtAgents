@@ -226,7 +226,7 @@ def test_list_volumes_passthrough() -> None:
 def test_runpod_volumes_ls_requires_api_key(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
 
-    rc = pipeline._dispatch_runpod_volumes(["ls"])
+    rc = pipeline._dispatch_runpod_volumes(None, ["ls"])
 
     assert rc == 1
     assert "RUNPOD_API_KEY is not set" in capsys.readouterr().err
@@ -241,7 +241,7 @@ def test_runpod_volumes_ls_emits_json_and_is_read_only(
 
     with patch("runpod_lifecycle.api.get_network_volumes", return_value=volumes), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        rc = pipeline._dispatch_runpod_volumes(["ls"])
+        rc = pipeline._dispatch_runpod_volumes(None, ["ls"])
 
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == volumes
@@ -256,7 +256,7 @@ def test_runpod_ensure_storage_cli_requires_datacenter_when_creation_needed(
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        rc = pipeline._dispatch_runpod_ensure_storage(["missing-vol"])
+        rc = pipeline._dispatch_runpod_ensure_storage(None, ["missing-vol"])
 
     assert rc == 1
     assert "datacenter_id is required" in capsys.readouterr().err
@@ -272,7 +272,7 @@ def test_runpod_ensure_storage_cli_supports_datacenter_id_alias(
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created)):
-        rc = pipeline._dispatch_runpod_ensure_storage(["new-volume", "--datacenter-id", "US-GA-1"])
+        rc = pipeline._dispatch_runpod_ensure_storage(None, ["new-volume", "--datacenter-id", "US-GA-1"])
 
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == created

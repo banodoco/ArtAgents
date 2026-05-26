@@ -26,7 +26,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from astrid import timeline as timeline_contract
+from astrid.timeline.timeline_model import canonical_empty_timeline, canonical_timeline_config
 from astrid.core.project.jsonio import read_json, write_json_atomic
 
 from .events.schema import TimelineEvent
@@ -144,7 +144,7 @@ def materialize_event(timeline_home: Path, event: TimelineEvent) -> None:
     try:
         raw = read_json(assembly_path)
     except FileNotFoundError:
-        current_state = timeline_contract.canonical_empty_timeline()
+        current_state = canonical_empty_timeline()
     except Exception as exc:
         raise AssemblyMutationError(
             f"failed to read assembly.json for materialization: {exc}"
@@ -160,7 +160,7 @@ def materialize_event(timeline_home: Path, event: TimelineEvent) -> None:
                 "materialization; run the Sprint 2 migration first"
             )
         try:
-            current_state = timeline_contract.canonical_timeline_config(raw)
+            current_state = canonical_timeline_config(raw)
         except Exception as exc:
             raise AssemblyMutationError(
                 f"assembly.json is not a valid raw TimelineConfig container: {exc}"
