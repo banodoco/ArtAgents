@@ -57,6 +57,7 @@ from astrid.core.session.paths import (
 )
 from astrid.core.session.ulid import generate_ulid
 from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.util.time import utc_now_iso
 
 # ----- Templates --------------------------------------------------------
 #
@@ -76,14 +77,6 @@ NONE_PLACEHOLDER = "(none)"
 
 
 # ----- Helpers ----------------------------------------------------------
-
-
-def _now_iso() -> str:
-    from astrid.core.util.time import utc_now_iso
-
-    return utc_now_iso()
-
-
 def _parse_agent_override(raw: str) -> str:
     """Parse ``agent:<slug>`` from ``--as`` argument; raise on malformed."""
 
@@ -283,7 +276,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        session = session.with_changes(last_used_at=_now_iso())
+        session = session.with_changes(last_used_at=utc_now_iso())
         session.to_json(session_path(session.id))
         sid = session.id
         slug = session.project
@@ -344,7 +337,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
             else _find_reusable_session(slug, agent_id)
         )
         if _reusable is not None:
-            refreshed = _reusable.with_changes(last_used_at=_now_iso())
+            refreshed = _reusable.with_changes(last_used_at=utc_now_iso())
             refreshed.to_json(session_path(refreshed.id))
             # File-bound session pointer (T9 / FLAG-S1-003).
             try:
@@ -456,7 +449,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
             run_id=on_disk_run_id,
             timeline_slug=resolved_timeline_slug,
             timeline_id=resolved_timeline_id,
-            now=_now_iso(),
+            now=utc_now_iso(),
         )
         # T9 / FLAG-S1-003: write a file-bound session pointer so subsequent
         # CLI calls in the same project survive ASTRID_SESSION_ID being lost
@@ -596,7 +589,7 @@ def _bootstrap_takeover_session(
         print(f"takeover: {exc}", file=sys.stderr)
         return None
 
-    now = _now_iso()
+    now = utc_now_iso()
     reusable = _find_reusable_session(slug, identity.agent_id)
     if reusable is not None:
         session = reusable.with_changes(
@@ -629,7 +622,7 @@ def _mark_takeover_session_writer(session: Session, run_id: str) -> None:
     promoted = session.with_changes(
         run_id=run_id,
         role="writer",
-        last_used_at=_now_iso(),
+        last_used_at=utc_now_iso(),
     )
     promoted.to_json(session_path(promoted.id))
     try:

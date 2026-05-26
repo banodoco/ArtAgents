@@ -8,27 +8,27 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 ## Summary
 
-- AST sites inventoried: 557 (555 `except`, 2 `assert`).
-- Status counts: deferred=24, fixed=0, justified=427, justified-with-caveat=106
+- AST sites inventoried: 567 (565 `except`, 2 `assert`).
+- Status counts: deferred=24, fixed=0, justified=437, justified-with-caveat=106
 - Allowed statuses: `fixed`, `justified`, `justified-with-caveat`, `deferred`.
 - `fixed` now means the approved M3 runtime assert conversions have been applied in code; no current AST row remains marked fixed.
 
 ## Secondary Grep Cross-Check
 
-- Grep lexical hits after the same source exclusions: 567.
+- Grep lexical hits after the same source exclusions: 577.
 - AST sites not present as direct grep hits: 0. These are parser-normalized multi-line handlers/asserts or sites whose keyword line differs from the AST node line; AST remains authoritative.
 - Grep-only hits: 10. These are comments, docstrings, or non-runtime text references and are not executable sites.
 
 | grep-only location | text | triage |
 | --- | --- | --- |
-| `astrid/core/executor/cli.py:519` | `# TODO: assert on expected behavior` | justified: non-executable text/comment/docstring reference |
-| `astrid/core/executor/cli.py:520` | `assert result.returncode == 0, f"dry-run failed: {{result.stderr}}"` | justified: non-executable text/comment/docstring reference |
+| `astrid/core/executor/cli.py:520` | `# TODO: assert on expected behavior` | justified: non-executable text/comment/docstring reference |
+| `astrid/core/executor/cli.py:521` | `assert result.returncode == 0, f"dry-run failed: {result.stderr}"` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/executor/folder.py:222` | `except TypeError:` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/executor/folder.py:259` | `except Exception:` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/orchestrator/folder.py:200` | `except TypeError:` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/orchestrator/folder.py:237` | `except Exception:` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/session/binding.py:31` | `# directly; spike tests assert env-inheritance specifically):` | justified: non-executable text/comment/docstring reference |
-| `astrid/core/session/cli.py:63` | `# Tests assert on these literal strings; keep them stable.` | justified: non-executable text/comment/docstring reference |
+| `astrid/core/session/cli.py:64` | `# Tests assert on these literal strings; keep them stable.` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/timeline/_edit_helpers.py:63` | `via a single ``except TimelineEditError`` clause.` | justified: non-executable text/comment/docstring reference |
 | `astrid/core/timeline/erasure.py:183` | `Never mutates — always read-only.  Callers should assert preview is` | justified: non-executable text/comment/docstring reference |
 
@@ -111,19 +111,19 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 53 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 67 | `except` | `(FileNotFoundError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 92 | `except` | `(json.JSONDecodeError, ValueError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 99 | `except` | `ProcessLookupError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 103 | `except` | `PermissionError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 121 | `except` | `(OSError, ValueError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 164 | `except` | `(json.JSONDecodeError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 47 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 61 | `except` | `(FileNotFoundError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 86 | `except` | `(json.JSONDecodeError, ValueError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 93 | `except` | `ProcessLookupError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 97 | `except` | `PermissionError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 115 | `except` | `(OSError, ValueError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 158 | `except` | `(json.JSONDecodeError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/adapter/manual.py`
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 120 | `except` | `(json.JSONDecodeError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 114 | `except` | `(json.JSONDecodeError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/adapter/remote_artifact.py`
 
@@ -182,7 +182,7 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
 | 50 | `except` | `(KeyError, ExecutorValidationError, ProjectRunError, ValueError, OverrideStoreError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 295 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 296 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
 
 ### `astrid/core/executor/folder.py`
 
@@ -202,14 +202,14 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 397 | `except` | `ManifestParseError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 398 | `except` | `ManifestParseError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
 
 ### `astrid/core/executor/runner.py`
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 119 | `except` | `task_gate.TaskRunGateError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 129 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 120 | `except` | `task_gate.TaskRunGateError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 130 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
 
 ### `astrid/core/executor/schema.py`
 
@@ -330,10 +330,18 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 362 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 367 | `except` | `json.JSONDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 378 | `except` | `PackValidationError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 380 | `except` | `yaml.YAMLError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 365 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 370 | `except` | `json.JSONDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 381 | `except` | `PackValidationError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 383 | `except` | `yaml.YAMLError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+
+### `astrid/core/pack_resolver.py`
+
+| line | kind | caught/test | status | reason |
+| ---: | --- | --- | --- | --- |
+| 23 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves import-context wrapping for resolver failures; caveat: it intentionally normalizes arbitrary import-time exceptions into PackResolverError. |
+| 66 | `except` | `CallableNotFoundError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 70 | `except` | `PackResolverError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
 
 ### `astrid/core/pack_store.py`
 
@@ -384,15 +392,15 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 209 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 347 | `except` | `TimelineCrudError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 211 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 349 | `except` | `TimelineCrudError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
 
 ### `astrid/core/project/schema.py`
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 268 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 307 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 262 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 301 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/project/sidecar.py`
 
@@ -446,15 +454,15 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 57 | `except` | `(json.JSONDecodeError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 74 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 98 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 146 | `except` | `StaleTailError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 241 | `except` | `(ValueError, TypeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 271 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 294 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 330 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 354 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 52 | `except` | `(json.JSONDecodeError, OSError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 69 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 93 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 141 | `except` | `StaleTailError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 236 | `except` | `(ValueError, TypeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 266 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 289 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 325 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 349 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
 
 ### `astrid/core/session/binding.py`
 
@@ -469,25 +477,25 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 121 | `except` | `Exception` | `deferred` | M3-INV-007: narrow corrupt session display handling in status. |
-| 190 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 225 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 264 | `except` | `IdentityError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
-| 271 | `except` | `(ValueError, IdentityError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 280 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 315 | `except` | `ProjectError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 352 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 413 | `except` | `(EOFError, KeyboardInterrupt)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 595 | `except` | `(IdentityError, ProjectError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 637 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 649 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
-| 660 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 719 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 734 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 754 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 778 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
-| 871 | `except` | `Exception` | `deferred` | M3-INV-008: log skipped corrupt timeline status rows. |
-| 913 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 114 | `except` | `Exception` | `deferred` | M3-INV-007: narrow corrupt session display handling in status. |
+| 183 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 218 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 257 | `except` | `IdentityError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 264 | `except` | `(ValueError, IdentityError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 273 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 308 | `except` | `ProjectError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 345 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 406 | `except` | `(EOFError, KeyboardInterrupt)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 588 | `except` | `(IdentityError, ProjectError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 630 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 642 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 653 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 712 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 727 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 747 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 771 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 864 | `except` | `Exception` | `deferred` | M3-INV-008: log skipped corrupt timeline status rows. |
+| 906 | `except` | `LeaseError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/session/config.py`
 
@@ -499,9 +507,9 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 55 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 89 | `except` | `EOFError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 96 | `except` | `IdentityError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 49 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 83 | `except` | `EOFError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 90 | `except` | `IdentityError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
 
 ### `astrid/core/session/lease.py`
 
@@ -555,11 +563,11 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 | 333 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 | 335 | `except` | `json.JSONDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 | 337 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 983 | `except` | `(json.JSONDecodeError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1014 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1016 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1020 | `except` | `json.JSONDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1040 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 979 | `except` | `(json.JSONDecodeError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1010 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1012 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1016 | `except` | `json.JSONDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1036 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/task/gate.py`
 
@@ -600,41 +608,41 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 315 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 320 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 325 | `except` | `ProjectError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 339 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 372 | `except` | `(OSError, json.JSONDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 407 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 414 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 434 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 446 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 487 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
-| 535 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 540 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 558 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 660 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 665 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 811 | `assert` | `"$ASTRID_" not in result` | `justified` | Non-runtime assert: debug/type-narrowing or test/dev helper path, not user input validation. |
-| 920 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1128 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1192 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1233 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1264 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1278 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1314 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1399 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1414 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1470 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1514 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
-| 1531 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1563 | `except` | `_SBErr` | `justified` | Narrow/domain catch with local recovery or wrapping. |
-| 1592 | `except` | `(TaskRunGateError, OSError, EventLogError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1825 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1832 | `except` | `(OSError, json.JSONDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1947 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 1953 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 1997 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 317 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 322 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 327 | `except` | `ProjectError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 341 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 374 | `except` | `(OSError, json.JSONDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 409 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 416 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 436 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 448 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 489 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 537 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 542 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 560 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 662 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 667 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 813 | `assert` | `"$ASTRID_" not in result` | `justified` | Non-runtime assert: debug/type-narrowing or test/dev helper path, not user input validation. |
+| 922 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1130 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1194 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1235 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1266 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1280 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1316 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1401 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1416 | `except` | `OSError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1472 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1516 | `except` | `SessionBindingError` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 1533 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1565 | `except` | `_SBErr` | `justified` | Narrow/domain catch with local recovery or wrapping. |
+| 1594 | `except` | `(TaskRunGateError, OSError, EventLogError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1827 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1834 | `except` | `(OSError, json.JSONDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1949 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 1955 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 1999 | `except` | `SystemExit` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/task/lifecycle_ack.py`
 
@@ -948,7 +956,7 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 56 | `except` | `(KeyError, ValueError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 58 | `except` | `(KeyError, ValueError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/util/http.py`
 
@@ -977,7 +985,7 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
 | 126 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 403 | `except` | `(ValueError, TypeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 405 | `except` | `(ValueError, TypeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/domains/hype/enriched_arrangement.py`
 
@@ -1013,7 +1021,7 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 76 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 74 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
 
 ### `astrid/orchestrate/dsl.py`
 
@@ -1108,8 +1116,15 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 114 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
-| 144 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 94 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 97 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 130 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 141 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 203 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 233 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 306 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 357 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 432 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/theme_schema.py`
 

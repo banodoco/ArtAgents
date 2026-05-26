@@ -4,7 +4,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from astrid._media import ffprobe_duration_seconds as canonical_ffprobe_duration_seconds
 from astrid.core.util.media import ffprobe_duration_seconds
+from astrid.verify.checks import ffprobe_duration_seconds as checks_ffprobe_duration_seconds
 from astrid.packs.understanding.executors.audio_understand.run import _probe_duration as audio_probe_duration
 from astrid.packs.editorial.executors.editor_review.run import _probe_duration as editor_probe_duration
 from astrid.packs.understanding.executors.video_understand.run import _probe_duration as video_probe_duration
@@ -46,3 +48,9 @@ def test_updated_duration_helpers_preserve_float_parsing(monkeypatch, tmp_path: 
     assert audio_probe_duration(media) == 7.25
     assert video_probe_duration(media) == 7.25
     assert editor_probe_duration(media, ffprobe_runner=fake_runner) == 7.25
+
+
+def test_canonical_media_module_same_as_shim() -> None:
+    """The canonical astrid._media module exports the same callable as the re-export shim."""
+    assert canonical_ffprobe_duration_seconds is ffprobe_duration_seconds
+    assert checks_ffprobe_duration_seconds is canonical_ffprobe_duration_seconds

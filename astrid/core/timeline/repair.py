@@ -16,7 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.project.schema import utc_now_iso
+from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .events.schema import (
     ErasedPayload,

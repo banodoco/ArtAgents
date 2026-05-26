@@ -24,11 +24,9 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from astrid._paths import REPO_ROOT
+from astrid.core.pack import DEFAULT_PACKS_ROOT
 
 from .dsl import OrchestrateDefinitionError, _PlanBuilder
-
-DEFAULT_PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
 
 
 def _qualified_split(qualified_id: str) -> tuple[str, str]:

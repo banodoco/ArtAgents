@@ -66,6 +66,8 @@
   "kind": "built_in",
   "metadata": {
     "backend": "banodoco-social",
+    "callable_module": "astrid.packs.youtube.executors.upload.src.social_publish",
+    "callable_name": "publish_youtube_video",
     "command": "python3 -m astrid upload-youtube",
     "requires_reachable_video_url": true,
     "runtime_entrypoint": "main",

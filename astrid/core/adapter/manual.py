@@ -21,12 +21,6 @@ def _step_dir(run_ctx: RunContext) -> Path:
         iteration=run_ctx.iteration,
         item_id=run_ctx.item_id,
     )
-
-
-def _utc_now_iso() -> str:
-    return utc_now_milliseconds()
-
-
 # Inbox completion-entry contract — parity with the ack identity contract:
 # every inbox-driven completion MUST carry submitted_by + submitted_by_kind.
 REQUIRED_INBOX_KEYS = ("submitted_by", "submitted_by_kind")
@@ -43,7 +37,7 @@ class ManualAdapter:
         step_dir = _step_dir(run_ctx)
         step_dir.mkdir(parents=True, exist_ok=True)
         dispatch_path = step_dir / "dispatch.json"
-        started_at = _utc_now_iso()
+        started_at = utc_now_milliseconds()
         payload: dict[str, object] = {
             "step_id": step.id,
             "step_version": run_ctx.step_version,

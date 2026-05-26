@@ -1,353 +1,435 @@
-# Implementation Plan v2: Port PR #8 operational substrate into pack-system
+# Implementation Plan: m4 Dependency Inversion (revised v2)
 
 ## Overview
 
-**Goal.** Bring PR #8's *operational substrate* (installed-pack store, `packs install/uninstall/update/rollback` CLI, gitignore copytree filter, agent index, the executor/orchestrator directory restructure, stricter JSON schemas, and parity/install tests) onto the current `main`-based pack-system branch — **without** disturbing pack-system's identity/governance layer (`CapabilityHandle`/`Provenance`/`SafetyDeclaration`/`AliasRecord`/`AliasResolver`/`OverrideStore`/`fork`/`override`/`dirty`/`update`). Then close PR #8.
+The gate audit surfaced 37 significant flags across correctness, completeness, caller analysis,
+criteria quality, and prerequisite ordering. This revision resolves all open design questions,
+re-baselines the stale state model, completes the duplicate-helper and media-caller inventories,
+and hardens the validator specification.
 
-**Settled decisions (replaces unanswered questions from v1):**
+**Settled decisions carried forward from gate feedback:**
 
-1. **Restructure approach.** Re-execute flat→nested moves on main's tree with `git mv` — NOT copy PR #8's tree wholesale. Main has more packs (generate_image_openai, generate_video, script_pipeline, search_loras, dataset_build, training_run, and others) that PR #8 lacks. Copying PR #8's tree would drop them. This is settled; no confirmation needed.
+- **SD1:** `PackResolver` lives in a new `astrid/core/pack_resolver.py` module (don't convert
+  `core/pack.py` into a package).
+- **SD2:** The import-layering validator scopes to `astrid/core/` only — `pipeline.py` and
+  `orchestrate/` are top-level dispatchers allowed to import from packs.
+- **SD3:** The `core → verify` direction (`plan.py:15`, `plan_template.py:20` importing `Check`,
+  `canonical_check_params`, `file_nonempty`) is **deferred to m5a/m5b**, not in scope for m4.
+  The plan addresses only the `verify → core` direction (media relocation).
 
-2. **Deletion scope.** Delete ONLY `astrid/packs/builtin/clip_extract/` (the builtin executor). The other 5 clip_extract copies (media/executors/, clip_tools/executors/, file_summarizer/executors/, text_review/executors/, video_tools/clip_extract/) serve different packs and are left untouched. Deduplication of clip_extract across packs is a separate concern, out of scope for this port.
+**New decisions resolving open questions:**
 
-3. **PR #8 close + branch deletion.** Leave as a manual final step (info-only in the success criteria). This plan executes all the port work and full validation. Closing PR #8 and deleting remote branches is an irreversible outward action the user must perform.
+- **Media relocation:** Move `ffprobe_duration_seconds` to `astrid/_media.py`. Add a thin
+  `TODO(m5a)` compatibility shim at `astrid/core/util/media.py` that re-exports from
+  `astrid._media` — all pack callers continue to work. Only `verify/checks.py` imports directly
+  from `astrid._media`, breaking the verify→core edge. Full pack-caller migration happens in m5a.
+- **Callable coordinate field names:** Use **`metadata.callable_module`** and
+  **`metadata.callable_name`** for internal callables, separate from the existing CLI-facing
+  `metadata.runtime_module` / `metadata.runtime_entrypoint`. These are metadata-only pack edits.
+- **Migration-completion guard:** Build `validate_migration_completion()` in m4 alongside
+  `validate_import_layering()`, but **unit-test only**. Repo-wide blocking enforcement is
+  deferred to m5a per the brief.
 
-**Current repo shape (verified on 2026-05-23):**
-- Working dir: throwaway worktree `pack-system-pr8-port` off `main`.
-- PR #8 branch: `origin/megaplan/git-backed-packs/sprint-02-resolver-runtime`.
-- **Packs needing restructure** (flat layout): `builtin/` (33+ subdirs + 5 standalone .py files), `upload/` (youtube/ subdir), `iteration/` (assemble/, prepare/ subdirs), `video_tools/` (clip_extract/ subdir).
-- **Packs already nested** (no restructure needed): `media/`, `clip_tools/`, `file_summarizer/`, `text_review/`, `text_digest/`, `external/`.
-- **5 standalone .py files at builtin root**: `hype.py`, `mini_research.py`, `iterate_review.py`, `agent_probe.py`, `classify_grid.py`. `hype.py` collides with `hype/` directory. These are NOT discoverable as executors/orchestrators (not named `executor.py`/`orchestrator.py`). They need explicit disposition.
-- **6 clip_extract locations**: builtin/clip_extract (flat, to be deleted), media/executors/clip_extract, clip_tools/executors/clip_extract, file_summarizer/executors/clip_extract, text_review/executors/clip_extract, video_tools/clip_extract (flat). Only builtin/clip_extract is deleted; the rest stay.
-- **New files to port** (absent on main, source = PR #8): `astrid/core/pack_store.py`, `astrid/packs/install.py`, `astrid/packs/gitignore.py`, `astrid/packs/agent_index.py`, `astrid/core/orchestrator/plan_v2.py`, `astrid/core/orchestrator/runtime.py`.
-- **12 merge targets** exist on main and diverge from PR #8: `astrid/core/{element,executor,orchestrator}/{registry,schema,cli}.py` (9 files) + `astrid/core/pack.py` + `astrid/packs/cli.py` + `astrid/packs/validate.py`.
-- **pack.yaml content roots**: builtin, iteration, upload, video_tools, external have NO `content:` section (discovery is rglob-based, path-agnostic). media, clip_tools, file_summarizer, text_review, text_digest HAVE `content: { executors: executors, ... }` but are already nested — no change needed.
-- **Schemas**: main already has `astrid/packs/schemas/v1/{_defs,element,executor,orchestrator,pack}.json` (runtime-aligned, `_defs.json` refs, `html` PortType).
-- **Test suite**: `pytest.ini` sets `testpaths = tests, scripts/migrations`. Identity-layer tests exist (test_capability_handle, test_capability_alias_resolver, test_canonical_aliases, test_fork_executor_orchestrator, test_override, test_dirty_detection, test_update_report, test_provenance_fields, test_pack_discovery*, test_pack_local_priority, test_packs_shipped_ids, test_pack_yaml_schema, test_pack_parser_binding).
-- **Index generator**: `scripts/gen_capability_index.py` imports from element/executor/orchestrator registries.
+## Current state (re-baselined)
 
----
+### Static pack/orchestrate imports in `astrid/core/`
 
-## Phase 0: Pre-flight verification + reference worktree
+**Invert now (m4 scope):**
+- `astrid/core/executor/runner.py:229` — lazy function-body import of
+  `publish_youtube_video` from `astrid.packs.youtube.executors.upload.src.social_publish`
+- `astrid/core/executor/cli.py:263` — `from astrid.packs.validate import validate_pack`
 
-### Step 0: Create reference worktree + verify PR #8 file inventory
-**Scope:** Small — Complexity: 1
+**Deferred to m5b (exempted):**
+- `astrid/core/task/lifecycle.py:252,267,281` — plan-template imports for hype, event_talks,
+  thumbnail_maker
+- `astrid/core/task/lifecycle.py:143,1252,1275` — `DEFAULT_PACKS_ROOT` from
+  `astrid.orchestrate.compile`
 
-1. **Create** the PR #8 reference worktree: `git worktree add ../pr8-ref origin/megaplan/git-backed-packs/sprint-02-resolver-runtime` (skip if it already exists).
-2. **Verify** each new file exists on PR #8 branch:
-   - `ls ../pr8-ref/astrid/core/pack_store.py`
-   - `ls ../pr8-ref/astrid/packs/install.py`
-   - `ls ../pr8-ref/astrid/packs/gitignore.py`
-   - `ls ../pr8-ref/astrid/packs/agent_index.py`
-   - `ls ../pr8-ref/astrid/core/orchestrator/plan_v2.py`
-   - `ls ../pr8-ref/astrid/core/orchestrator/runtime.py`
-3. **Verify** the 4 ported test files exist: `tests/packs/test_portfolio_parity.py`, `tests/packs/test_public_id_resolution.py`, `tests/test_git_pack_install.py`, `tests/test_pack_install.py`.
-4. **Verify** example packs exist: `examples/packs/media/`, `examples/packs/minimal/`.
-5. **Capture** line counts of each 12 merge-target file on PR #8 (`wc -l ../pr8-ref/<file>`) to scope the merge work.
-6. **If any file is missing or at a different path**, record it and adjust the plan before proceeding to Phase 1.
+### pipeline.py static pack imports (all deferred to m5b, not in core scope)
+- Line 268: `from .packs.reigh.executors.publish import run as publish`
+- Line 272: `from .packs.youtube.executors.upload import run as publish_youtube`
+- Line 276: `from .packs.youtube.executors.upload import run as publish_youtube`
+- Line 284: `from .packs import cli as packs_cli`
+- Line 340: `from .packs.reigh.executors.reigh_data import run as reigh_data`
 
----
+### Existing dynamic resolution (already done — NOT new work)
+- `pipeline.py:727` already uses `registry.get("video_editing.hype")` with
+  `import_module(metadata.runtime_module)` / `getattr(module, runtime_entrypoint)`.
+  All three orchestrator manifests (hype, event_talks, thumbnail_maker) already have
+  `metadata.runtime_entrypoint: "main"`. This pattern exists but is only used by the
+  pipeline CLI entrypoint; core doesn't use it yet.
 
-## Phase 1: Restructure + orphan file disposition + low-risk wholesale ports
+### Existing infrastructure
+- `core/pack.py:84` already exports `packs_root() → Path`
+- `orchestrate/compile.py:31` defines `DEFAULT_PACKS_ROOT = REPO_ROOT / "astrid" / "packs"`
+  using `astrid._paths.REPO_ROOT` (no core dependency)
+- `astrid/_paths.py:12` already has `resolve_executor_runtime_module()`
+- `structure.py` has `validate_repo_structure()` with `StructureReport` / `__all__`;
+  called from `doctor.py:_check_repo_structure()`
+- `core/util/__init__.py` exists but is empty (no `__all__`, no re-exports)
 
-### Step 1: Audit restructure move set + classify every builtin directory
-**Scope:** Small — Complexity: 1
+### Complete duplicate-helper inventory (12 definitions)
 
-1. **Enumerate** `astrid/packs/builtin/*/` subdirectories (excluding files).
-2. **Classify** each: has `executor.yaml` → goes to `executors/<slug>/`; has `orchestrator.yaml` → goes to `orchestrators/<slug>/`.
-3. **Identify main-only packs** that PR #8 lacks — these must survive the restructure. From the verified listing, this includes at minimum: `generate_image_openai`, `generate_video`, `script_pipeline`, `search_loras`, `dataset_build`, `training_run`, plus any others PR #8 doesn't have listed in its tree.
-4. **List** the flat packs needing restructure: `builtin/` (all subdirs), `upload/youtube/`, `iteration/{assemble,prepare}/`, `video_tools/clip_extract/`.
-5. **Confirm** that packs already nested (media, clip_tools, file_summarizer, text_review, text_digest, external) need NO structural changes.
+**sha256 family (3):**
+| File | Name | Chunk size | Notes |
+|---|---|---|---|
+| `dirty.py:123` | `_sha256_file` | 64 KB | Uses `open(path, "rb")` (string path) |
+| `lifecycle.py:179` | `_sha256_file` | 1 MB | Uses `path.open("rb")` — deferred, read-only touch |
+| `adapter/remote_artifact_fetch.py:28` | `_sha256` | 1 MB | **Named `_sha256`**, not `_sha256_file` — call sites use `_sha256(...)` |
 
-### Step 2: Execute directory restructure + deletions + orphan disposition
-**Scope:** Large — Complexity: 3
+**timestamp family (9):**
+| File | Name | Implementation | Behavioral note |
+|---|---|---|---|
+| `session/identity.py:25` | `_now_iso` | Delegates to `utc_now_iso()` | Already a wrapper — trivial replace |
+| `session/cli.py:81` | `_now_iso` | Delegates to `utc_now_iso()` | Already a wrapper — trivial replace |
+| `update.py:404` | `_now_iso` | `datetime.now(timezone.utc).isoformat()` | **Produces `+00:00` not `Z`** |
+| `session/lease.py:311` | `_utc_now_iso` | Delegates to `utc_now_iso()` | Already a wrapper — trivial replace |
+| `pack_store.py:464` | `_utc_now_iso` | `.isoformat(timespec="seconds")` | **Seconds precision, `+00:00`** |
+| `task/events.py:925` | `_utc_now_iso` | Delegates to `utc_now_iso()` | Already a wrapper — trivial replace |
+| `runpod/sweeper.py:24` | `_utc_now_iso` | Delegates to `utc_now_iso()` | Already a wrapper — trivial replace |
+| `adapter/manual.py:26` | `_utc_now_iso` | Calls `utc_now_milliseconds()` | **Millisecond precision** |
+| `adapter/local.py:31` | `_utc_now_iso` | Calls `utc_now_milliseconds()` | **Millisecond precision** |
+| `project/schema.py:33` | `utc_now_iso` | Calls `utc_now_seconds()` | **Seconds precision** |
 
-**2a. Create target directories.**
-```
-mkdir -p astrid/packs/builtin/executors
-mkdir -p astrid/packs/builtin/orchestrators
-mkdir -p astrid/packs/upload/executors
-mkdir -p astrid/packs/iteration/executors
-mkdir -p astrid/packs/video_tools/executors
-```
+### Media callers (10 files importing `ffprobe_duration_seconds` from `astrid.core.util.media`)
+1. `verify/checks.py:23` — will import from `astrid._media`
+2. `tests/core/util/test_media.py:7`
+3. `packs/video_editing/executors/cut/run.py:277`
+4. `packs/video_editing/orchestrators/hype/run.py:507`
+5. `packs/video_editing/orchestrators/event_talks/run.py:372`
+6. `packs/understanding/executors/audio_understand/run.py:22`
+7. `packs/understanding/executors/video_understand/run.py:18`
+8. `packs/editorial/executors/scenes/run.py:17`
+9. `packs/editorial/executors/transcribe/run.py:19`
+10. `packs/editorial/executors/editor_review/run.py:20`
 
-**2b. Move builtin executor subdirs** (has `executor.yaml`). For each, `git mv astrid/packs/builtin/<slug> astrid/packs/builtin/executors/<slug>`. This includes: youtube_audio, generate_video, spatial_audio_page, shots, asset_cache, transcribe, boundary_candidates, sprite_sheet, human_notes, audio_understand, refine, inspect_cut, arrange, publish, pool_build, scene_describe, visual_understand, tile_video, video_understand, scenes, quality_zones, human_review, understand, generate_image, pool_merge, open_in_reigh, editor_review, cut, html_canvas_effect, reigh_data, triage, foley_review, validate, quote_scout, search_loras, generate_image_openai, render, script_pipeline.
-
-**2c. Move builtin orchestrator subdirs** (has `orchestrator.yaml`). For each, `git mv astrid/packs/builtin/<slug> astrid/packs/builtin/orchestrators/<slug>`. This includes: animate_image, foley_map, iteration_video, logo_ideas, hype, dataset_build, training_run, thumbnail_maker, vary_grid, event_talks.
-
-**2d. Delete** `astrid/packs/builtin/clip_extract` (this builtin executor is removed per the brief — it's superseded by the clip_extract copies in media/clip_tools/file_summarizer/text_review/video_tools packs).
-
-**2e. Add `__init__.py`** files to new directories matching the pattern used in already-nested packs:
-```
-touch astrid/packs/builtin/executors/__init__.py
-touch astrid/packs/builtin/orchestrators/__init__.py
-```
-
-**2f. Handle the 5 standalone .py files at builtin root.** These are NOT discoverable as executors or orchestrators (they don't live in subdirectories with manifests). They are legacy/orphan scripts. **Move them into `astrid/packs/builtin/_legacy/`** as a holding area:
-```
-mkdir -p astrid/packs/builtin/_legacy
-git mv astrid/packs/builtin/hype.py astrid/packs/builtin/_legacy/hype.py
-git mv astrid/packs/builtin/mini_research.py astrid/packs/builtin/_legacy/mini_research.py
-git mv astrid/packs/builtin/iterate_review.py astrid/packs/builtin/_legacy/iterate_review.py
-git mv astrid/packs/builtin/agent_probe.py astrid/packs/builtin/_legacy/agent_probe.py
-git mv astrid/packs/builtin/classify_grid.py astrid/packs/builtin/_legacy/classify_grid.py
-touch astrid/packs/builtin/_legacy/__init__.py
-```
-This resolves the `hype.py` vs `hype/` collision and keeps the files from polluting the restructured root.
-
-**2g. Restructure other flat packs.**
-```
-# upload
-git mv astrid/packs/upload/youtube astrid/packs/upload/executors/youtube
-touch astrid/packs/upload/executors/__init__.py
-
-# iteration
-git mv astrid/packs/iteration/assemble astrid/packs/iteration/executors/assemble
-git mv astrid/packs/iteration/prepare astrid/packs/iteration/executors/prepare
-touch astrid/packs/iteration/executors/__init__.py
-
-# video_tools
-git mv astrid/packs/video_tools/clip_extract astrid/packs/video_tools/executors/clip_extract
-touch astrid/packs/video_tools/executors/__init__.py
-```
-
-**2h. Validate cheaply.** Run `python scripts/gen_capability_index.py` — must succeed with the new layout. Then run the discovery tests:
-```
-python -m pytest tests/test_pack_discovery.py tests/test_pack_discovery_canonical.py tests/test_pack_discovery_excludes_ai_toolkit.py tests/test_packs_shipped_ids.py tests/test_pack_local_priority.py -q
-```
-
-### Step 3: Port `astrid/core/pack_store.py` wholesale (new file)
-**Scope:** Medium — Complexity: 2
-
-1. **Copy** `../pr8-ref/astrid/core/pack_store.py` → `astrid/core/pack_store.py`.
-2. **Adjust imports** to match pack-system's module layout. Read the file, identify every `from astrid.*` import, and verify the target exists on main. If PR #8 references discarded identity modules, replace with pack-system equivalents or stub.
-3. **Smoke:** `python -c "import astrid.core.pack_store"`.
-
-### Step 4: Port `astrid/packs/gitignore.py` wholesale (new file)
-**Scope:** Small — Complexity: 1
-
-1. **Copy** `../pr8-ref/astrid/packs/gitignore.py` → `astrid/packs/gitignore.py`.
-2. **Smoke-import:** `python -c "import astrid.packs.gitignore"`.
-
-### Step 5: Port `astrid/packs/install.py` (new file, deferred CLI wiring)
-**Scope:** Medium — Complexity: 3
-
-1. **Copy** `../pr8-ref/astrid/packs/install.py` → `astrid/packs/install.py`.
-2. **Audit imports.** Read the file and check every import against main's module tree. Key expected dependencies:
-   - `astrid.core.pack_store` (just ported in Step 3)
-   - `astrid.packs.gitignore` (just ported in Step 4)
-   - Possibly `astrid.core.pack` (exists on main with pack-system enrichments)
-   - Possibly `astrid.core.registry` or similar (check against main)
-3. **Fix any import** that points to a PR #8-only module path — map to main's equivalent.
-4. **Defer** the `build_parser()` grafting of `install/uninstall/update/rollback` subcommands into `astrid/packs/cli.py` to Step 11.
-5. **Smoke:** `python -c "import astrid.packs.install"` (must succeed even before CLI wiring).
+Strategy: move implementation to `astrid/_media.py`, leave a `TODO(m5a)` re-export shim at
+`astrid/core/util/media.py`, update only `verify/checks.py` to import from `astrid._media`.
+Pack callers and the test file continue to work through the shim.
 
 ---
 
-## Phase 2: The 12-file registry/schema/CLI merge
+## Phase 1: Re-Baseline And Neutral Utilities
 
-*Concrete merge method for every file in this phase: (a) create the `../pr8-ref` worktree in Step 0, (b) diff main→PR8 with `git diff HEAD -- <file> > /tmp/diff_<file>.patch` from the PR8 worktree, (c) classify each hunk as "operational" (port it) or "identity" (discard it), (d) apply only operational hunks using targeted `patch` tool edits. Operational hunks = install/store/index/restructure/resolution wiring. Identity hunks = anything touching CapabilityHandle/Provenance/AliasRecord/OverrideStore/fork/override/dirty/update. Re-run the relevant targeted tests after each file.*
+### Step 1: Re-run the import and helper audit
+**Complexity: 1**
 
-### Step 6: Merge `astrid/core/{element,executor,orchestrator}/schema.py` (3 files)
-**Scope:** Medium — Complexity: 3
+1. Execute targeted greps for `astrid.packs`, relative `.packs`, and `astrid.orchestrate` imports
+   in `astrid/core/`.
+2. Confirm the exact invert-now list: `runner.py:229` and `cli.py:263`.
+3. Confirm the deferred (TODO(m5b)) exemption list: `lifecycle.py:143,252,267,281,1252,1275`
+   and all `pipeline.py` pack imports.
+4. Place a comment block at the top of the `validate_import_layering()` function body listing
+   these exemptions explicitly with line-number references and `TODO(m5b)` markers.
 
-**What PR #8 adds (operational, port these):**
-- Stricter field validations (additional `"required"`, `"minLength"`, `"pattern"` constraints)
-- Any new schema types related to install/restructure (e.g., pack-source descriptors)
+### Step 2: Relocate media helpers with compatibility shim
+**Complexity: 2**
 
-**What PR #8 may change (identity, DISCARD):**
-- Any removal or rewrites of `PackDefinition` enrichments
-- Changes to port types that would regress the runtime-aligned shape
+1. Create `astrid/_media.py` by copying the `ffprobe_duration_seconds` function from
+   `astrid/core/util/media.py`.
+2. Add `"_media.py"` to `TOP_LEVEL_ASTRID_FILES` in `astrid/structure.py`.
+3. Replace the body of `astrid/core/util/media.py` with a thin re-export:
+   `from astrid._media import ffprobe_duration_seconds  # TODO(m5a): migrate pack callers`.
+4. Update `astrid/verify/checks.py` line 23 to import `ffprobe_duration_seconds` from
+   `astrid._media` instead of `astrid.core.util.media`.
+5. Update `tests/core/util/test_media.py` to test the canonical export from `astrid._media`
+   (import both paths or just the new path).
+6. Verify: `python -c "import astrid.verify.checks; import sys; assert not any(m.startswith('astrid.core') for m in sys.modules if 'checks' in m or 'verify' in m)"` — this is the
+   specific cycle-break check. **Note:** `verify/checks.py` imports only stdlib + the media import;
+   there are no other transitive `astrid.core` dependencies through verify. (Verified: imports
+   only stdlib plus `astrid.core.util.media`.)
 
-**Targeted tests:** `tests/test_pack_yaml_schema.py`, `tests/test_packs_validate.py`, `tests/test_executor_schema_capabilities.py`.
+### Step 3: Establish the canonical utility surface
+**Complexity: 4**
 
-### Step 7: Merge `astrid/core/{element,executor,orchestrator}/registry.py` (3 files)
-**Scope:** Large — Complexity: 4
-
-**What PR #8 adds (operational, port these):**
-- Store/discovery hooks that wire into `pack_store`
-- Path-based lookup methods that complement (not replace) canonical resolution
-- Any new registry methods for install/uninstall/update/rollback operations
-
-**What PR #8 may change (identity, DISCARD):**
-- Changes that replace canonical resolution with path-based resolution
-- Removal of `AliasResolver` integration
-- Removal of `OverrideStore` hooks
-
-**Adaptation rule:** Where PR #8 adds a new discovery path, make it an additional code path that calls into pack-system's canonical resolver, not a replacement.
-
-**Targeted tests:** `tests/test_pack_discovery.py`, `tests/test_pack_discovery_canonical.py`, `tests/test_pack_local_priority.py`, `tests/test_canonical_aliases.py`.
-
-### Step 8: Merge `astrid/core/{element,executor,orchestrator}/cli.py` (3 files)
-**Scope:** Large — Complexity: 3
-
-**What PR #8 adds (operational, port these):**
-- New CLI verbs/flags for install/uninstall/update/rollback
-- Store-status output formatting
-- Trust-summary display
-
-**What PR #8 may change (identity, DISCARD):**
-- Changes to identity-aware output (CapabilityHandle display)
-- Removal of fork/override/dirty/update CLI verbs
-- Changes to the canonical-id display format
-
-**Adaptation rule:** Graft PR #8's new subcommands alongside (not replacing) existing pack-system CLI verbs.
-
-**Targeted tests:** `tests/test_elements_install.py`, `tests/test_executor_cli.py`, `tests/test_canonical_cli.py`, plus a `--help` smoke per module.
-
-### Step 9: Merge `astrid/core/pack.py` (1 file)
-**Scope:** Large — Complexity: 4
-
-**What PR #8 adds (operational, port these):**
-- Install/store-facing helpers (e.g., pack source resolution, installed-pack metadata)
-- Any new fields needed by `pack_store.py`/`install.py`
-
-**What PR #8 may change (identity, DISCARD):**
-- Changes to `PackDefinition` structure that remove pack-system enrichments
-- Removal of `Provenance`/`SafetyDeclaration` fields
-- Changes to canonical-id resolution logic
-
-**Adaptation rule:** Keep pack-system's `PackDefinition` as the spine; add PR #8's operational fields as optional additions.
-
-**Targeted tests:** `tests/test_pack_parser_binding.py`, `tests/test_pack_discovery_canonical.py`, `tests/test_provenance_fields.py`.
-
-### Step 10: Merge `astrid/packs/cli.py` + `astrid/packs/validate.py` (2 files)
-**Scope:** Large — Complexity: 4
-
-**packs/cli.py:**
-- **Operational (port):** Graft `install`, `uninstall`, `update`, `rollback` subcommands into `build_parser()`, wiring to `astrid.packs.install` functions.
-- **Identity (discard):** Any removal of existing pack-system subcommands.
-
-**packs/validate.py:**
-- **Operational (port):** Stricter validation logic from PR #8.
-- **Identity (discard):** Any validation that rejects pack-system's identity fields.
-
-**Targeted tests:** `tests/test_packs_cli.py`, `tests/test_packs_validate.py`, `tests/test_packs_shipped_ids.py`.
-
-### Step 11: Reconcile `astrid/core/executor/folder.py` + `astrid/core/orchestrator/folder.py` (2 files)
-**Scope:** Medium — Complexity: 3
-
-**What main has (MUST preserve):**
-- Subprocess metadata-extraction via `_RESULT_PREFIX` and `_load_folder_*` extractors
-- `rglob`-based discovery that walks content roots
-
-**What PR #8 may add (port if operational, discard if it replaces main's mechanism):**
-- Any additional discovery paths or metadata fields
-- Any install/store integration hooks
-
-**Adaptation rule:** Main's subprocess + rglob mechanism wins. Only add PR #8 code that is strictly additive (new fields, new hooks) — never replace main's discovery mechanism.
-
-**Targeted tests:** The discovery tests from Step 2h already cover the nested layout. Additionally verify `python -m pytest tests/test_pack_discovery.py -q`.
-
----
-
-## Phase 3: Remaining ports + agent index + schemas + examples
-
-### Step 12: Port `astrid/core/orchestrator/plan_v2.py` + `runtime.py` (new files)
-**Scope:** Medium — Complexity: 2
-
-1. **Copy** `../pr8-ref/astrid/core/orchestrator/plan_v2.py` → `astrid/core/orchestrator/plan_v2.py`. Smoke-import.
-2. **Copy** `../pr8-ref/astrid/core/orchestrator/runtime.py` → `astrid/core/orchestrator/runtime.py`.
-3. **Audit `runtime.py`'s module resolution.** Read the file to identify how it resolves module paths. If it uses a PR #8-specific resolver, repoint it to pack-system's canonical resolver (`astrid.core.pack` or the appropriate registry). If it's self-contained, just verify imports.
-4. **Smoke:** `python -c "import astrid.core.orchestrator.runtime"`.
-
-### Step 13: Port + reconcile `astrid/packs/agent_index.py` (new file)
-**Scope:** Medium — Complexity: 3
-
-1. **Copy** `../pr8-ref/astrid/packs/agent_index.py` → `astrid/packs/agent_index.py`.
-2. **Adapt** it to consume pack-system's canonical resolver as its enumeration source. PR #8's agent_index likely has its own discovery mechanism — keep it as a fallback but make the primary path use pack-system's registries.
-3. **Document** in a module docstring when each discovery mechanism applies.
-4. **Smoke:** generate the index (`python -m astrid.packs.agent_index` or equivalent entry point) and confirm it lists the merged layout's executors/orchestrators/elements.
-
-### Step 14: Merge strict JSON schemas (`astrid/packs/schemas/v1/*.json`)
-**Scope:** Medium — Complexity: 3
-
-1. **Fold** PR #8's stricter validations into the existing `_defs.json`, `element.json`, `executor.json`, `orchestrator.json`, `pack.json`.
-2. **Do not change** the v1 layout, `_defs.json` refs, or `html` PortType (main's runtime-aligned shape is the baseline).
-3. **Targeted test:** `tests/test_pack_yaml_schema.py`.
-
-### Step 15: Port example packs (`examples/packs/media/`, `examples/packs/minimal/`)
-**Scope:** Small — Complexity: 1
-
-1. **Copy** `../pr8-ref/examples/packs/media/` → `examples/packs/media/` (already nested on PR #8).
-2. **Merge** `../pr8-ref/examples/packs/minimal/` with main's existing `examples/packs/minimal/` — keep main's extra content, add PR #8's additions.
-
-### Step 16: Update `__init__.py` exports
-**Scope:** Small — Complexity: 1
-
-1. **Check** `astrid/core/__init__.py` — if it exports submodules, add `pack_store` if needed.
-2. **Check** `astrid/packs/__init__.py` — add exports for `install`, `gitignore`, `agent_index` if other code imports them via `astrid.packs.*`.
-3. **Check** `astrid/core/orchestrator/__init__.py` — add exports for `plan_v2`, `runtime` if needed.
-4. **Verify** by running `python -c "import astrid; import astrid.core; import astrid.packs"` and any known importers.
-
----
-
-## Phase 4: M3 cleanup, tests, validation, close
-
-### Step 17: Apply M3 cleanup on top of the new layout
-**Scope:** Small — Complexity: 2
-
-1. **Remove `comfy_t2i_ds1`** external wrapper (`astrid/packs/external/comfy_t2i_ds1/`). The brief says to delete comfy_* external wrappers. Verify: `ls astrid/packs/external/comfy_t2i_ds1/` exists. `git rm -r astrid/packs/external/comfy_t2i_ds1`.
-2. **Confirm** scaffold packs are `visibility: hidden`. Verified: `file_summarizer`, `text_digest`, `clip_tools`, `video_tools` all have `visibility: hidden` already. No change needed.
-3. **Verify** no moved pack ids need aliasing. Since the restructure moves subdirectories but pack ids are pack-qualified (e.g., `builtin.transcribe`), and pack.yaml content roots for non-builtin packs reference `executors: executors` (relative), ids should be unchanged. Run `tests/test_canonical_aliases.py` to confirm.
-
-### Step 18: Port parity/install tests
-**Scope:** Medium — Complexity: 2
-
-1. **Copy** the 4 test files from PR #8:
-   - `../pr8-ref/tests/packs/test_portfolio_parity.py` → `tests/packs/test_portfolio_parity.py`
-   - `../pr8-ref/tests/packs/test_public_id_resolution.py` → `tests/packs/test_public_id_resolution.py`
-   - `../pr8-ref/tests/test_git_pack_install.py` → `tests/test_git_pack_install.py`
-   - `../pr8-ref/tests/test_pack_install.py` → `tests/test_pack_install.py`
-2. **Audit each** for PR #8-specific imports, fixtures, or conftest.py dependencies. Fix any that reference PR #8-only paths.
-3. **Run** each ported file individually to localize failures: `python -m pytest <file> -q`.
-
-### Step 19: Full validation
-**Scope:** Medium — Complexity: 3
-
-1. **Run** `python scripts/gen_capability_index.py` (must succeed; index reflects merged layout). Confirm idempotence: re-run, verify `git diff` shows no changes to the index target files.
-2. **Run** the identity-layer test cluster:
+1. Add `astrid/core/util/hash.py` with:
+   ```python
+   def sha256_file(path: Path) -> str:
+       """Return the SHA-256 hex digest of *path* using 1 MB chunked reads."""
+       digest = hashlib.sha256()
+       with path.open("rb") as handle:
+           for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+               digest.update(chunk)
+       return digest.hexdigest()
    ```
-   python -m pytest tests/test_capability_handle.py tests/test_capability_alias_resolver.py \
-     tests/test_canonical_aliases.py tests/test_canonical_cli.py \
-     tests/test_fork_executor_orchestrator.py tests/test_override.py \
-     tests/test_dirty_detection.py tests/test_update_report.py \
-     tests/test_provenance_fields.py tests/test_pack_discovery.py \
-     tests/test_pack_discovery_canonical.py tests/test_pack_local_priority.py \
-     tests/test_packs_shipped_ids.py tests/test_pack_yaml_schema.py \
-     tests/test_pack_parser_binding.py -q
+   (1 MB chunks match the existing lifecycle/remote_artifact_fetch convention; dirty.py's
+   64 KB chunk size is a minor I/O difference with no correctness impact — 1 MB is the
+   better default.)
+
+2. Populate `astrid/core/util/__init__.py` with explicit `__all__` re-exports:
+   ```python
+   from astrid.core.util.time import utc_now_iso, utc_now_seconds, utc_now_milliseconds
+   from astrid.core.util.hash import sha256_file
+
+   __all__ = [
+       "sha256_file",
+       "utc_now_iso",
+       "utc_now_milliseconds",
+       "utc_now_seconds",
+   ]
    ```
-   Must be green (these are the invariant baseline).
-3. **Run** the 4 ported parity/install tests: `python -m pytest tests/packs/test_portfolio_parity.py tests/packs/test_public_id_resolution.py tests/test_git_pack_install.py tests/test_pack_install.py -q`. Must pass.
-4. **Run** full suite: `python -m pytest tests scripts/migrations -q`. Record any failures and triage against the known pre-existing set (golden-drift / generated-fixture / cloud-env). **No new failures permitted.**
-5. **Manual smoke (info):** `packs install/uninstall/update/rollback` end-to-end, local + Git-URL.
 
-### Step 20: Close PR #8 (MANUAL — user performs)
-**Scope:** Small — Complexity: 0 (not automated)
+3. Replace duplicate timestamp helpers — **preserving behavioral equivalence in each case**:
 
-This step is info-only in this plan. After all validation passes, the user should:
-1. Close PR #8 on the remote.
-2. Delete `origin/megaplan/git-backed-packs/sprint-02-resolver-runtime`.
-3. Delete residual `origin/megaplan/git-backed-packs/sprint-00-architecture-gate`.
-4. Clean up the `../pr8-ref` worktree: `git worktree remove ../pr8-ref`.
+   **Trivial wrappers** (already delegate to canonical helpers, just remove the wrapper):
+   - `session/identity.py:25` — replace `def _now_iso(): return utc_now_iso()` with direct
+     `utc_now_iso()` at the 2 call sites; remove the helper.
+   - `session/cli.py:81` — same pattern; replace at call sites.
+   - `session/lease.py:311` — same pattern; replace at call sites.
+   - `task/events.py:925` — same pattern; replace at call sites.
+   - `runpod/sweeper.py:24` — same pattern; replace at call sites.
+
+   **Behavioral-preserving replacements** (different precision/format):
+   - `update.py:404` (`_now_iso` → `+00:00` format): Replace with `utc_now_iso()` which
+     produces `Z` suffix. Both are valid ISO-8601; `Z` is the canonical form. The caller
+     at line 302 uses `applied_at` for display/comparison — ISO-8601 parsers handle both.
+     **Risk accepted:** format change from `+00:00` to `Z` is a normalization, not a break.
+   - `pack_store.py:464` (`_utc_now_iso` → seconds precision): Replace with
+     `utc_now_seconds()` from `core.util.time` — preserves seconds precision exactly.
+   - `adapter/manual.py:26` (`_utc_now_iso` → millisecond precision): Replace with
+     `utc_now_milliseconds()` from `core.util.time` — preserves millisecond precision.
+   - `adapter/local.py:31` (`_utc_now_iso` → millisecond precision): Replace with
+     `utc_now_milliseconds()` from `core.util.time` — preserves millisecond precision.
+   - `project/schema.py:33` (`utc_now_iso` → seconds precision): Replace with
+     `utc_now_seconds()` from `core.util.time` — preserves seconds precision.
+
+4. Replace duplicate sha256 helpers:
+   - `dirty.py:123` — import `sha256_file as _sha256_file` from `core.util.hash`;
+     remove the local definition. Call sites unchanged (already use `_sha256_file(...)`).
+   - `adapter/remote_artifact_fetch.py:28` — import `sha256_file as _sha256` from
+     `core.util.hash` (note the `as _sha256` alias to match existing call sites at lines
+     70 and 77 which call `_sha256(...)`). Remove the local definition.
+   - `lifecycle.py:179` — **Read-only touch for m4.** Add a comment noting the duplicate
+     and `TODO(m5b): import sha256_file from core.util.hash`. Do not change any imports
+     or call sites in lifecycle.py (m5b scope).
+
+5. Verify: `rg "def (_now_iso|_utc_now_iso|_sha256|_sha256_file)" astrid/core/` returns
+   only the lifecycle.py entry (exempted) and `core/util/hash.py:sha256_file` (canonical).
+   The `_now_iso` / `_utc_now_iso` definitions should all be gone from core.
+
+6. Add `DEFAULT_PACKS_ROOT = packs_root()` to `astrid/core/pack.py` alongside the existing
+   `packs_root()` function. Update `astrid/orchestrate/compile.py` to import
+   `DEFAULT_PACKS_ROOT` from `astrid.core.pack` instead of defining it locally from
+   `REPO_ROOT`. Update `astrid/orchestrate/cli.py`'s re-import accordingly.
+   **Rationale:** This creates an `orchestrate → core` dependency for a constant, which
+   is in the allowed direction (top-level can import from core). The circular-risk concern
+   (scope-3) is mitigated because `core.pack.packs_root()` is a pure path-computation
+   that will never need orchestrate. The lifecycle.py callers (deferred to m5b) continue
+   to work because `compile.py` still exports the constant.
+
+---
+
+## Phase 2: Manifest Callable Resolution
+
+### Step 4: Add the PackResolver and registry callable helpers
+**Complexity: 5**
+
+1. Create `astrid/core/pack_resolver.py` with:
+   - `PackResolver` Protocol: `resolve_callable(module: str, name: str) -> Callable[..., Any]`
+   - A concrete `importlib_resolve(module: str, name: str) -> Callable[..., Any]` function
+     that uses `importlib.import_module()` + `getattr()`.
+   - Custom error classes: `PackResolverError` (base), `CallableNotFoundError` (missing
+     module or attribute), each carrying `module`, `callable_name`, and `capability_id`
+     context. No silent skips — always raise a named error on failure.
+
+2. Add a `resolve_callable_from_metadata(metadata: dict, capability_id: str) -> Callable`
+   helper that reads `metadata.callable_module` and `metadata.callable_name`, validates
+   both are non-empty strings, and delegates to `importlib_resolve()`.
+
+3. Add to `astrid/core/executor/registry.py` (or a companion helper): a
+   `resolve_executor_callable(executor: ExecutorDefinition) -> Callable` that reads
+   the executor's metadata and calls `resolve_callable_from_metadata()`.
+
+4. Acknowledge and integrate with the existing `astrid/_paths.py:resolve_executor_runtime_module()`:
+   that function resolves *runtime modules* for CLI command execution; the new resolver
+   resolves *internal callables* for in-process use. They serve different purposes and
+   coexist — the new resolver reads different metadata keys (`callable_module`/`callable_name`
+   vs `runtime_module`/`runtime_entrypoint`).
+
+### Step 5: Add sanctioned manifest metadata
+**Complexity: 2**
+
+All additions go into the existing freeform `metadata` dict — pack schemas do not enforce
+`additionalProperties: false` on `metadata`, so no schema changes are needed.
+
+1. Add to the three orchestrator manifests (`video_editing.hype`, `video_editing.event_talks`,
+   `video_editing.thumbnail_maker`):
+   ```yaml
+   metadata:
+     callable_module: "astrid.packs.video_editing.orchestrators.<name>.plan_template"
+     callable_name: "build_plan_v2"
+   ```
+   (These are separate from the existing `runtime_module`/`runtime_entrypoint` which point
+   at `run.py::main` for CLI dispatch.)
+
+2. Add to `astrid/packs/youtube/executors/upload/executor.yaml`:
+   ```yaml
+   metadata:
+     callable_module: "astrid.packs.youtube.executors.upload.src.social_publish"
+     callable_name: "publish_youtube_video"
+   ```
+   This is separate from the existing `runtime_module: "astrid.packs.youtube.executors.upload.run"`
+   and `runtime_entrypoint: "main"` which route CLI invocations.
+
+3. No pack runtime logic changes. These are metadata-only additions.
+
+---
+
+## Phase 3: Remove Invert-Now Static Imports
+
+### Step 6: Invert `runner.py` and `cli.py`
+**Complexity: 3**
+
+1. **`runner.py:219-240` (`_run_upload_youtube`):**
+   Replace the function-body lazy import:
+   ```python
+   from astrid.packs.youtube.executors.upload.src.social_publish import publish_youtube_video
+   ```
+   with manifest-backed resolution using the new helpers from Step 4:
+   ```python
+   from astrid.core.pack_resolver import resolve_callable_from_metadata
+   # ... inside _run_upload_youtube, after dry_run check:
+   publish_youtube_video = resolve_callable_from_metadata(executor.metadata, executor_id)
+   ```
+   **Note:** `_run_upload_youtube` currently receives only `(request, executor_id)` but
+   needs the executor's metadata. Change the signature to also accept `executor` (or pass
+   metadata directly). Update the sole call site at `runner.py:190` to pass `executor`.
+   Preserve dry-run behavior (early return at lines 221-227 unchanged).
+
+2. **`cli.py:263` (`_cmd_scaffold_component`):**
+   Replace:
+   ```python
+   from astrid.packs.validate import validate_pack
+   ```
+   with:
+   ```python
+   from importlib import import_module
+   _validate_mod = import_module("astrid.packs.validate")
+   validate_pack = _validate_mod.validate_pack
+   ```
+   This is a dynamic `importlib` call, not a static `from astrid.packs...` import.
+   The call site at line ~362 uses `validate_pack(pack_root)` — no change needed.
+
+3. Update `tests/test_executor_runner_errors.py` tests that monkeypatch
+   `social_publish.publish_youtube_video`:
+   - Keep the `from astrid.packs.youtube.executors.upload.src import social_publish`
+     import in the test (needed for `unittest.mock.patch`).
+   - Add a test that asserts: (a) with correct `callable_module`/`callable_name` metadata,
+     the callable resolves and is invoked; (b) with missing or incorrect metadata,
+     a `CallableNotFoundError` (or `PackResolverError`) is raised with the youtube.upload
+     capability id in context.
+
+---
+
+## Phase 4: Enforce The Contract
+
+### Step 7: Add structure validators and wire them in
+**Complexity: 5**
+
+1. Add `validate_import_layering()` to `astrid/structure.py`:
+   - Uses AST parsing (`ast.parse`) to extract all `Import` and `ImportFrom` nodes from
+     every `.py` file under `astrid/core/`.
+   - Resolves relative imports to absolute module paths using the file's package context
+     (e.g., `from .packs.foo import bar` in `astrid/core/executor/runner.py` resolves to
+     `astrid.packs.foo`).
+   - Flags any import that resolves to `astrid.packs` or `astrid.orchestrate`.
+   - Exemptions (hardcoded with `TODO(m5b)` comments):
+     - `astrid/core/task/lifecycle.py` — all pack and orchestrate imports (5 locations:
+       lines 143, 252, 267, 281, 1252, 1275)
+   - **Does NOT scan `astrid/pipeline.py`** — scoped to `astrid/core/` only (SD2).
+   - Returns a list of violation strings; empty list = clean.
+
+2. Add `validate_migration_completion()` to `astrid/structure.py`:
+   - Scans `astrid/` (excluding `packs/` and `tests/`) for:
+     - `DEPRECATED` markers without a `TODO(mXa/mXb)` removal-target comment
+     - `sys.modules[...]` injections outside test files
+     - Dangling `__all__` aliases where both names are in the same `__all__`
+     - No-op compatibility shims imported by >0 live callers
+   - **Unit-tested in m4; repo-wide enforcement deferred to m5a.**
+   - Returns a list of advisory strings; `validate_repo_structure()` logs them as warnings
+     (not errors) until m5a.
+
+3. Wire both validators into `validate_repo_structure()` in `astrid/structure.py`:
+   - Add calls after the existing `_validate_*` calls.
+   - `validate_import_layering()` violations are **errors** (fail the report).
+   - `validate_migration_completion()` advisories are **warnings** (logged but don't fail)
+     with a `TODO(m5a): promote to errors`.
+
+4. Add a **pre-deployment smoke test**: before running on the post-m4 tree, verify the
+   import-layering validator flags the known pre-m4 violations (`runner.py:229`,
+   `cli.py:263`). This proves the validator's detection capability before SC2 depends on it.
+
+5. Update `astrid/structure.py`'s `__all__` to include the new public functions.
+   Update `astrid/doctor.py` if needed (the existing `_check_repo_structure()` calls
+   `validate_repo_structure()` which will now include the new checks automatically).
+
+6. Add `"_media.py"` to `TOP_LEVEL_ASTRID_FILES` in `astrid/structure.py` (ensuring
+   `astrid doctor` doesn't flag the new top-level file).
+
+### Step 8: Wire tests and focused regression coverage
+**Complexity: 3**
+
+1. Add `tests/test_structure_contracts.py`:
+   - Test `validate_import_layering()` detects known violations:
+     - Pre-m4: with a temp file mimicking `runner.py:229`'s static pack import → flagged
+     - Post-m4: with clean core files → no violations
+     - Relative import resolution: `from .packs.foo import bar` in a core file → correctly
+       resolved to `astrid.packs.foo` and flagged
+   - Test `validate_import_layering()` does NOT flag:
+     - Dynamic `importlib.import_module("astrid.packs.foo")` (AST sees a string, not an import)
+     - Exempted lifecycle.py imports
+   - Test `validate_migration_completion()` detects DEPRECATED markers without milestones
+
+2. Add `tests/test_core_util_surface.py`:
+   - Verify `astrid/core/util/__init__.py` has an explicit `__all__`
+   - Verify `sha256_file`, `utc_now_iso`, `utc_now_seconds`, `utc_now_milliseconds` are
+     all importable from `astrid.core.util`
+   - Verify that `rg "def (_now_iso|_utc_now_iso)" astrid/core/` (excluding lifecycle.py)
+     returns no matches — this is a positive assertion that duplicates are gone
+
+3. Add happy-path resolver test in `tests/test_pack_resolver.py`:
+   - Test `importlib_resolve()` successfully resolves a known callable
+   - Test `resolve_callable_from_metadata()` with valid metadata → returns callable
+   - Test `resolve_callable_from_metadata()` with missing `callable_module` → raises
+     `CallableNotFoundError` with capability id context
+   - Test `resolve_callable_from_metadata()` with wrong `callable_name` → raises
+     `CallableNotFoundError`
+
+4. Update `tests/test_executor_runner_errors.py`:
+   - Add test: youtube.upload with valid callable metadata → callable resolved and invoked
+   - Add test: youtube.upload with missing callable metadata → structured error raised
+   - Update existing monkeypatch tests to work with manifest-based resolution (the
+     `social_publish` import in the test stays for `unittest.mock.patch`)
+
+5. Update `tests/core/util/test_media.py` to test `ffprobe_duration_seconds` imported
+   from `astrid._media` (the canonical location).
 
 ---
 
 ## Execution Order
-1. **Step 0 first** — create pr8-ref worktree and verify all files exist. Gate: if any file is missing, adjust plan before proceeding.
-2. **Steps 1–2** — restructure + deletion + orphan disposition. Gate on discovery tests and `gen_capability_index.py`.
-3. **Steps 3–5** — wholesale new-file ports. These set up dependencies for the merge.
-4. **Steps 6–11** — 12-file merge in dependency order: schema → registry → cli → pack → packs.cli/validate → folder reconcile. Gate each step on its targeted tests.
-5. **Steps 12–16** — remaining ports, agent index, schema fold, examples, __init__.py updates.
-6. **Steps 17–18** — M3 cleanup, test port.
-7. **Step 19** — full validation.
-8. **Step 20** — user performs PR #8 close manually.
 
-## Validation Order (at each checkpoint)
-1. **Cheapest signal:** `python scripts/gen_capability_index.py` (must succeed and be idempotent).
-2. **Discovery cluster:** `test_pack_discovery*`, `test_packs_shipped_ids`, `test_pack_local_priority`.
-3. **Identity cluster:** `test_capability_handle`, `test_capability_alias_resolver`, `test_canonical_aliases`, `test_fork_executor_orchestrator`, `test_override`, `test_dirty_detection`, `test_update_report`, `test_provenance_fields`, `test_pack_parser_binding`.
-4. **Schema:** `test_pack_yaml_schema`, `test_packs_validate`, `test_executor_schema_capabilities`.
-5. **CLI:** `test_packs_cli`, `test_elements_install`, `test_executor_cli`, `test_canonical_cli`.
-6. **Ported tests:** `test_portfolio_parity`, `test_public_id_resolution`, `test_git_pack_install`, `test_pack_install`.
-7. **Full suite:** `pytest tests scripts/migrations` — no new failures.
+1. **Re-baseline** (Step 1) — confirm the exact violation list before touching code.
+2. **Neutral utility moves** (Steps 2–3) — land the media shim and canonical util surface
+   before import-layer enforcement so tests can validate the clean state.
+3. **Resolver helpers + manifest metadata** (Steps 4–5) — build the resolution infrastructure
+   and annotate manifests before rewriting runner.py.
+4. **Invert runner.py and cli.py** (Step 6) — remove the last static pack imports from core.
+5. **Structure validators** (Step 7) — add after the code is clean; run the pre-deployment
+   smoke test to confirm the validator catches known violations.
+6. **Tests** (Step 8) — comprehensive coverage after all code changes land.
+7. **Full test suite** — final validation pass.
+
+## Validation Order
+
+1. **Smoke test: validator detects pre-m4 violations** — `python -m pytest tests/test_structure_contracts.py -k "pre_m4"` — confirms the import-layering validator catches `runner.py:229` and `cli.py:263` static imports.
+2. **Cycle-break check:** `python -c "import sys; import astrid.verify.checks; raise SystemExit(any(m.startswith('astrid.core') for m in sys.modules))"` — exits 0 (no core modules loaded through verify).
+3. **Duplicate helper check:** `rg "def (_now_iso|_utc_now_iso)" astrid/core/ --glob '!**/lifecycle.py'` — no matches. `rg "def _sha256" astrid/core/ --glob '!**/lifecycle.py'` — only `core/util/hash.py:sha256_file`.
+4. **Targeted tests:** `tests/test_structure_contracts.py`, `tests/test_core_util_surface.py`, `tests/test_pack_resolver.py`, `tests/test_executor_runner_errors.py`, `tests/core/util/test_media.py`.
+5. **Import-layering validator green:** `python -c "from astrid.structure import validate_import_layering; violations = validate_import_layering(); assert not violations, violations"` — exits 0.
+6. **Registry parity:** executor/orchestrator/element list outputs remain identical before vs after (aside from added `callable_module`/`callable_name` metadata fields).
+7. **Full test suite:** `python -m pytest` exits 0 (all non-flaky tests pass).
+
+## Proposed Ticket Links
+- `01KRF15VFMCN7SYZ9K4NANXTAT`: related; only mark `resolves_on_complete=true` if the final implementation unifies the divergent resolution paths enough despite lifecycle deferral.
+- `01KRF15VTT59Q0P8N6R2619TRG`: related schema pressure, not fully resolved.
+- `01KRF16MX3VWY2Q993VHHAKNTG`: related, not resolved because plan-template consolidation is out of scope.

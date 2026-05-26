@@ -28,7 +28,7 @@ from uuid import uuid4
 
 from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import write_json_atomic
-from astrid.core.project.schema import utc_now_iso
+from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .events.schema import (
     EVENT_SCHEMA_VERSION,

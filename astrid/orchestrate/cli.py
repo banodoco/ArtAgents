@@ -20,6 +20,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from astrid.core.pack import DEFAULT_PACKS_ROOT
 from astrid.core.task.events import read_events
 from astrid.core.task.normalize import dump_events_jsonl, normalize_events
 from astrid.core.task.plan import (
@@ -37,7 +38,6 @@ from astrid.core.task.plan import (
 )
 
 from .compile import (
-    DEFAULT_PACKS_ROOT,
     _qualified_split,
     _resolver_for,
     compile_to_path,

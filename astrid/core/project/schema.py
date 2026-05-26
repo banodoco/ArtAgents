@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from astrid.core.util.time import utc_now_seconds
+from astrid.core.util.time import utc_now_seconds, utc_now_seconds as utc_now_iso
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id
 
@@ -28,12 +28,6 @@ RUN_STATUSES = {"prepared", "success", "failed", "skipped", "error"}
 
 class ProjectValidationError(ValueError):
     """Raised when project state fails validation."""
-
-
-def utc_now_iso() -> str:
-    return utc_now_seconds()
-
-
 def build_project(
     slug: str,
     *,
@@ -42,7 +36,7 @@ def build_project(
     created_at: str | None = None,
     default_timeline_id: str | None = None,
 ) -> dict[str, Any]:
-    now = created_at or utc_now_iso()
+    now = created_at or utc_now_seconds()
     slug = validate_project_slug(slug)
     payload: dict[str, Any] = {
         "created_at": now,
@@ -69,7 +63,7 @@ def build_source(
     metadata: dict[str, Any] | None = None,
     created_at: str | None = None,
 ) -> dict[str, Any]:
-    now = created_at or utc_now_iso()
+    now = created_at or utc_now_seconds()
     normalized_asset = _normalize_asset(asset, path="source.asset")
     return {
         "asset": normalized_asset,
@@ -100,7 +94,7 @@ def build_run_record(
     timeline_event_stream_id: str | None = None,
     timeline_binding_mode: str | None = None,
 ) -> dict[str, Any]:
-    now = created_at or utc_now_iso()
+    now = created_at or utc_now_seconds()
     merged_metadata = dict(metadata or {})
     if timeline_slug is not None:
         merged_metadata["timeline_slug"] = timeline_slug
@@ -167,7 +161,7 @@ def validate_source(raw: Any) -> dict[str, Any]:
             "source_id": validate_source_id(_require_string(data.get("source_id"), "source.source_id")),
         }
     )
-    payload.setdefault("created_at", utc_now_iso())
+    payload.setdefault("created_at", utc_now_seconds())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
 
@@ -217,7 +211,7 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
                     f"run.metadata.timeline_binding_mode must be 'managed' or 'unmanaged', got {mode!r}"
                 )
         payload["metadata"] = meta
-    payload.setdefault("created_at", utc_now_iso())
+    payload.setdefault("created_at", utc_now_seconds())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
 

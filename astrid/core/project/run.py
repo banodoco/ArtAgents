@@ -14,7 +14,9 @@ from astrid.threads.ids import generate_run_id
 from . import paths
 from .jsonio import read_json, write_json_atomic
 from .project import require_project
-from .schema import build_run_record, utc_now_iso, validate_run_record
+from astrid.core.util.time import utc_now_seconds
+
+from .schema import build_run_record, validate_run_record
 
 PROJECT_RUN_ENV = "ASTRID_PROJECT_RUN"
 # Metadata keys for managed timeline binding (m3.5).
@@ -96,7 +98,7 @@ def prepare_project_run(
             )
         run_root = step_dir_for(project_slug, parent_run_id, step_id, step_version=1, root=projects_root)
         run_root.mkdir(parents=True, exist_ok=True)
-        now = utc_now_iso()
+        now = utc_now_seconds()
         run_metadata = dict(metadata or {})
         run_metadata.update({"attached_to_task_run": True, "task_step_id": step_id})
         record: dict[str, Any] = {
@@ -251,7 +253,7 @@ def finalize_project_run(
     record["metadata"] = merged_metadata
     attached_to_task_run = bool(merged_metadata.get("attached_to_task_run"))
     record["status"] = _normalize_status(status, returncode=returncode)
-    record["updated_at"] = utc_now_iso()
+    record["updated_at"] = utc_now_seconds()
     artifacts = dict(record.get("artifacts", {}))
     mirror_dest = context.run_root / "produces" if attached_to_task_run else None
     artifacts.update(
@@ -299,7 +301,7 @@ def update_run_record(project_slug: str, run_id: str, updates: dict[str, Any], *
         raise TypeError("run updates must be an object")
     payload = require_run_record(project_slug, run_id, root=root)
     payload.update(updates)
-    payload["updated_at"] = utc_now_iso()
+    payload["updated_at"] = utc_now_seconds()
     if "argv" in payload and payload["argv"] is not None:
         payload["argv"] = redact_cli_args(list(payload["argv"]))
     normalized = validate_run_record(payload)

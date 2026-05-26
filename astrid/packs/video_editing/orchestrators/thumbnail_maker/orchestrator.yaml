@@ -17,6 +17,8 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "callable_module": "astrid.packs.video_editing.orchestrators.thumbnail_maker.run",
+    "callable_name": "main",
     "requires_output_path": true,
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",

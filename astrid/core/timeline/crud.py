@@ -11,7 +11,7 @@ from uuid import uuid4
 from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
-from astrid.core.project.schema import utc_now_iso
+from astrid.core.util.time import utc_now_seconds as utc_now_iso
 from astrid.threads.ids import generate_ulid
 
 from .integrity import compute_sha256, file_size
@@ -434,7 +434,7 @@ def finalize_output(
     if not op.is_file():
         raise TimelineCrudError(f"output file not found: {op}")
 
-    from astrid.core.project.schema import utc_now_iso
+    from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
     now = utc_now_iso()
     sha256 = compute_sha256(op)
@@ -519,7 +519,7 @@ def tombstone_timeline(
     if manifest.tombstoned_at is not None:
         raise TimelineCrudError(f"timeline '{slug}' is already tombstoned")
 
-    from astrid.core.project.schema import utc_now_iso
+    from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
     updated = Manifest(
         schema_version=TIMELINE_SCHEMA_VERSION,

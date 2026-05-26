@@ -177,6 +177,8 @@ def _generate_run_id() -> str:
 
 
 def _sha256_file(path: Path) -> str:
+    # TODO(m5b): import sha256_file from astrid.core.util.hash once the
+    # remaining lifecycle.py core↔orchestrate cleanup lands.
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):

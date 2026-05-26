@@ -459,13 +459,6 @@ def installed_pack_roots() -> tuple[Path, ...]:
 # ---------------------------------------------------------------------------
 # Timestamp helpers (used by install.py)
 # ---------------------------------------------------------------------------
-
-
-def _utc_now_iso() -> str:
-    """Return current UTC time as ISO-8601 string (suitable for filenames)."""
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
-
-
 def _revision_timestamp() -> str:
     """Return a compact UTC timestamp string suitable for revision dir names."""
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

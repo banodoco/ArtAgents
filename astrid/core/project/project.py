@@ -15,7 +15,9 @@ from typing import Any
 
 from . import paths
 from .jsonio import read_json, write_json_atomic
-from .schema import build_project, utc_now_iso, validate_project
+from astrid.core.util.time import utc_now_seconds
+
+from .schema import build_project, validate_project
 
 
 class ProjectError(RuntimeError):
@@ -94,5 +96,5 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
 
 def _touch_project(slug: str, *, root: str | Path | None = None) -> None:
     payload = load_project(slug, root=root)
-    payload["updated_at"] = utc_now_iso()
+    payload["updated_at"] = utc_now_seconds()
     write_json_atomic(paths.project_json_path(slug, root=root), validate_project(payload))

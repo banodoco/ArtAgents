@@ -15,6 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from astrid.core.pack_resolver import resolve_callable_from_metadata
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 from astrid.core.project.run import (
@@ -187,7 +188,7 @@ def _canonicalize_runner_argv_paths(argv: Sequence[str]) -> tuple[str, ...]:
 
 def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
     if executor.id == "youtube.upload":
-        return _run_upload_youtube(request, executor.id)
+        return _run_upload_youtube(request, executor)
     values = _request_values(request)
     _validate_required_inputs(executor, values)
     condition_result = evaluate_conditions(executor, values)
@@ -216,17 +217,22 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
     return _run_external_executor(executor, request, values)
 
 
-def _run_upload_youtube(request: ExecutorRunRequest, executor_id: str) -> ExecutorRunResult:
+def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
     inputs = dict(request.inputs)
     if request.dry_run:
         return ExecutorRunResult(
-            executor_id=executor_id,
+            executor_id=executor.id,
             kind="built_in",
             dry_run=True,
             payload={"would_run": "youtube.upload", "inputs": inputs},
         )
 
-    from astrid.packs.youtube.executors.upload.src.social_publish import publish_youtube_video
+    publish_youtube_video = resolve_callable_from_metadata(
+        executor.metadata,
+        owner_id=executor.id,
+        module_key="callable_module",
+        callable_key="callable_name",
+    )
 
     result = publish_youtube_video(
         video_url=_required_input(inputs, "video_url"),
@@ -237,7 +243,7 @@ def _run_upload_youtube(request: ExecutorRunRequest, executor_id: str) -> Execut
         playlist_id=_optional_input(inputs, "playlist_id"),
         made_for_kids=bool(_optional_input(inputs, "made_for_kids") or False),
     )
-    return ExecutorRunResult(executor_id=executor_id, kind="built_in", payload=result)
+    return ExecutorRunResult(executor_id=executor.id, kind="built_in", payload=result)
 
 
 @dataclass(frozen=True)

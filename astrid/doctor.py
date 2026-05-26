@@ -309,6 +309,8 @@ def _check_repo_structure() -> str:
     report = validate_repo_structure(REPO_ROOT)
     if not report.ok:
         raise RuntimeError("; ".join(report.errors))
+    if report.warnings:
+        return f"canonical folders ok; {len(report.warnings)} migration advisory warning(s)"
     return "canonical folders ok"
 
 

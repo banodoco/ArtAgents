@@ -1,34 +1,10 @@
-"""Small media-probing helpers."""
+"""TODO(m5a): Re-export shim — delete once all callers use astrid._media directly.
 
-from __future__ import annotations
+The canonical location for ``ffprobe_duration_seconds`` is ``astrid._media``.
+This module exists only to keep existing ``astrid.core.util.media`` imports working
+while packs migrate.
+"""
 
-from pathlib import Path
-import subprocess
-from typing import Callable
+# ruff: noqa: F401
 
-Runner = Callable[..., subprocess.CompletedProcess[str]]
-
-
-def ffprobe_duration_seconds(
-    media_path: str | Path,
-    *,
-    runner: Runner = subprocess.run,
-) -> float:
-    """Return format duration in seconds using the narrow ffprobe duration probe."""
-
-    result = runner(
-        [
-            "ffprobe",
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            str(media_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return float(str(result.stdout).strip())
+from astrid._media import ffprobe_duration_seconds  # noqa: F401

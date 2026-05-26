@@ -260,7 +260,8 @@ def _scaffold_component(
     Returns:
         Exit code (0 on success, non-zero on failure).
     """
-    from astrid.packs.validate import validate_pack
+    from importlib import import_module as _import_module
+    validate_pack = _import_module('astrid.packs.validate').validate_pack
 
     # Derive the correct CLI prefix for error messages.
     _cli_prefix = f"{component_type}s new"
