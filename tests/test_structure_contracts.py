@@ -42,7 +42,7 @@ def test_validate_import_layering_flags_absolute_and_relative_core_pack_imports(
     assert not any("dynamic_ok.py" in violation for violation in violations)
 
 
-def test_validate_import_layering_exempts_deferred_lifecycle_split_modules_only(tmp_path: Path) -> None:
+def test_validate_import_layering_flags_deferred_lifecycle_split_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "astrid/core/task/lifecycle.py",
@@ -66,10 +66,12 @@ def test_validate_import_layering_exempts_deferred_lifecycle_split_modules_only(
 
     violations = validate_import_layering(tmp_path)
 
-    assert violations == [
+    assert set(violations) == {
         "astrid/core/task/lifecycle.py:1 imports forbidden module 'astrid.orchestrate.compile'",
-        "astrid/core/task/not_lifecycle.py:1 imports forbidden module 'astrid.orchestrate.compile'"
-    ]
+        "astrid/core/task/orchestrator_resolver.py:1 imports forbidden module 'astrid.orchestrate.compile'",
+        "astrid/core/task/plan_builder.py:1 imports forbidden module 'astrid.packs.video_editing.orchestrators.hype.plan_template'",
+        "astrid/core/task/not_lifecycle.py:1 imports forbidden module 'astrid.orchestrate.compile'",
+    }
 
 
 def test_validate_migration_completion_reports_expected_advisories(tmp_path: Path) -> None:

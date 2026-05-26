@@ -11,47 +11,22 @@ Implementation lives in focused modules:
 from __future__ import annotations
 
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
-from astrid.core.task.events import _run_is_complete
-from astrid.core.task.gate import peek_current_step
 from astrid.core.task import operator_view as _operator_view
 from astrid.core.task import run_store as _run_store
+from astrid.core.task.events import _run_is_complete
+from astrid.core.task.gate import peek_current_step as peek_current_step
+from astrid.core.task.lifecycle_ack import cmd_ack
+from astrid.core.task.lifecycle_skip import cmd_skip
 from astrid.core.task.operator_view import (
-    _emit_for_each_autoclose_audit,
-    _format_ack_template,
-    _format_claim_line,
-    _format_schema_requirements,
-    _inline_failure_tail,
-    _leaf_progress,
     _dispatch_from_tail,
-    _print_post_completion_handoff,
     render_step_instructions,
 )
-from astrid.core.task.orchestrator_resolver import (
-    _canonical_orchestrator_id,
-    _list_orchestrator_ids,
-    _qualified_split,
-    _resolve_packs_root,
-)
 from astrid.core.task.plan_builder import (
-    _build_canonical_start_plan,
-    _event_talks_project_inputs,
-    _hype_project_inputs,
-    _thumbnail_maker_project_inputs,
     cmd_start,
 )
 from astrid.core.task.run_store import (
     _emit_run_completed_if_needed,
-    _summarize_run_dir,
 )
-from astrid.core.task.session_discovery import (
-    _list_project_slugs,
-    _most_recent_session_slug,
-    _os_environ_has_session,
-    _print_next_no_run_hint,
-    _print_next_unbound_hint,
-)
-from astrid.core.task.lifecycle_ack import cmd_ack
-from astrid.core.task.lifecycle_skip import cmd_skip
 
 
 def _sha256_file(path):

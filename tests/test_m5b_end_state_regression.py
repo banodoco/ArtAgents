@@ -346,13 +346,16 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
         concrete file in the repo (it should only be a stub for future use)."""
         from astrid.structure import _is_import_layering_exempt
 
-        # At end state, _is_import_layering_exempt should return False for
-        # lifecycle.py and any other real core file.
-        lifecycle_path = _REPO_ROOT / "astrid" / "core" / "task" / "lifecycle.py"
-        self.assertFalse(
-            _is_import_layering_exempt(lifecycle_path, _REPO_ROOT),
-            "No file should be exempt — lifecycle exemption must be removed",
-        )
+        for relpath in (
+            "astrid/core/task/lifecycle.py",
+            "astrid/core/task/orchestrator_resolver.py",
+            "astrid/core/task/plan_builder.py",
+        ):
+            path = _REPO_ROOT / relpath
+            self.assertFalse(
+                _is_import_layering_exempt(path, _REPO_ROOT),
+                f"No file should be exempt — {relpath} must be checked normally",
+            )
 
     def test_forbidden_imports_from_packs_are_flagged(self) -> None:
         """A core file importing from astrid.packs.* is flagged."""

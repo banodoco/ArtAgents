@@ -55,41 +55,61 @@ def resolve_artifact(artifact: dict) -> dict:
     return resolution
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python3 -m astrid modalities", description="Astrid modality renderers")
+def _handle_list(args: argparse.Namespace) -> int:
+    """Handler for ``modalities list``."""
+    payload = {"renderers": list_renderers()}
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        for renderer in payload["renderers"]:
+            fallback = " fallback" if renderer["fallback"] else ""
+            kinds = ",".join(renderer["kinds"])
+            print(f"{renderer['id']}\t{kinds}{fallback}")
+    return 0
+
+
+def _handle_inspect(args: argparse.Namespace) -> int:
+    """Handler for ``modalities inspect``."""
+    try:
+        payload = inspect_renderer(args.renderer)
+    except KeyError:
+        print(f"Unknown modality renderer: {args.renderer}", file=sys.stderr)
+        return 2
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        _print_inspect(payload)
+    return 0
+
+
+def _build_modalities_parser() -> argparse.ArgumentParser:
+    """Build the argparse parser for ``astrid modalities``."""
+    parser = argparse.ArgumentParser(
+        prog="python3 -m astrid modalities",
+        description="Astrid modality renderers",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     list_parser = subparsers.add_parser("list", help="List registered modality renderers")
     list_parser.add_argument("--json", action="store_true", help="Print renderer declarations as JSON")
+    list_parser.set_defaults(handler=_handle_list)
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect a modality renderer")
     inspect_parser.add_argument("renderer", help="Renderer id")
     inspect_parser.add_argument("--json", action="store_true", help="Print renderer declaration as JSON")
+    inspect_parser.set_defaults(handler=_handle_inspect)
 
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_modalities_parser()
     args = parser.parse_args(argv)
-    if args.command == "list":
-        payload = {"renderers": list_renderers()}
-        if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
-        else:
-            for renderer in payload["renderers"]:
-                fallback = " fallback" if renderer["fallback"] else ""
-                kinds = ",".join(renderer["kinds"])
-                print(f"{renderer['id']}\t{kinds}{fallback}")
-        return 0
-    if args.command == "inspect":
-        try:
-            payload = inspect_renderer(args.renderer)
-        except KeyError:
-            print(f"Unknown modality renderer: {args.renderer}", file=sys.stderr)
-            return 2
-        if args.json:
-            print(json.dumps(payload, indent=2, sort_keys=True))
-        else:
-            _print_inspect(payload)
-        return 0
-    parser.print_help()
-    return 2
+    handler = getattr(args, "handler", None)
+    if handler is None:
+        parser.print_help()
+        return 2
+    return handler(args)
 
 
 def _renderer_summary(renderer: ModuleType) -> dict:

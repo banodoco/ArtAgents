@@ -40,6 +40,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="include_closed",
         help="Include closed-weight models (hidden by default).",
     )
+    list_p.set_defaults(handler=_cmd_list)
 
     # ``astrid models show <model-id>``
     show_p = sub.add_parser("show", help="Show details for a single model")
@@ -54,6 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="use_json",
         help="Emit machine-readable JSON instead of formatted text.",
     )
+    show_p.set_defaults(handler=_cmd_show)
 
     return parser
 
@@ -69,10 +71,9 @@ def main(argv: list[str] | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    if args.cmd == "list":
-        return _cmd_list(args)
-    if args.cmd == "show":
-        return _cmd_show(args)
+    handler = getattr(args, "handler", None)
+    if handler is not None:
+        return handler(args)
     # argparse handles unknown subcommands via SystemExit
     return 2
 

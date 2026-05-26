@@ -525,12 +525,54 @@ def _cmd_explain(qid: str, packs_root: Optional[Path]) -> int:
     return 0
 
 
+def _handle_compile(args: argparse.Namespace) -> int:
+    return _cmd_compile(args.qualified_id, getattr(args, "packs_root", None))
+
+
+def _handle_check(args: argparse.Namespace) -> int:
+    return _cmd_check(args.qualified_id, getattr(args, "packs_root", None))
+
+
+def _handle_describe(args: argparse.Namespace) -> int:
+    return _cmd_describe(args.qualified_id, getattr(args, "packs_root", None))
+
+
+def _handle_new(args: argparse.Namespace) -> int:
+    return _cmd_new(args.qualified_id, getattr(args, "packs_root", None))
+
+
+def _handle_explain(args: argparse.Namespace) -> int:
+    return _cmd_explain(args.qualified_id, getattr(args, "packs_root", None))
+
+
+def _handle_test(args: argparse.Namespace) -> int:
+    return _cmd_test(
+        args.qualified_id,
+        args.fixture,
+        getattr(args, "packs_root", None),
+        regenerate=args.regenerate,
+    )
+
+
+_AUTHOR_HANDLERS: dict[str, Any] = {
+    "compile": _handle_compile,
+    "check": _handle_check,
+    "describe": _handle_describe,
+    "new": _handle_new,
+    "explain": _handle_explain,
+    "test": _handle_test,
+}
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="astrid author", description="Phase 4-5 author CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    for verb in ("compile", "check", "describe", "new", "explain"):
+    for verb, handler in _AUTHOR_HANDLERS.items():
+        if verb == "test":
+            continue  # test has extra args; handled below
         sp = sub.add_parser(verb, help=f"author {verb} <pack>.<name>")
         sp.add_argument("qualified_id", help="qualified id of the form <pack>.<name>")
+        sp.set_defaults(handler=handler)
     test_p = sub.add_parser("test", help="author test <pack>.<name> --fixture <name>")
     test_p.add_argument("qualified_id", help="qualified id of the form <pack>.<name>")
     test_p.add_argument("--fixture", required=True, help="fixture name (under <pack>/fixtures/)")
@@ -539,6 +581,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="write the current normalized events.jsonl as the new golden",
     )
+    test_p.set_defaults(handler=_handle_test)
     return parser
 
 
@@ -550,23 +593,10 @@ def main(argv: Optional[list] = None, *, packs_root: Optional[Path] = None) -> i
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
         return int(exc.code or 2)
-    qid = args.qualified_id
-    if args.cmd == "compile":
-        return _cmd_compile(qid, packs_root)
-    if args.cmd == "check":
-        return _cmd_check(qid, packs_root)
-    if args.cmd == "describe":
-        return _cmd_describe(qid, packs_root)
-    if args.cmd == "new":
-        return _cmd_new(qid, packs_root)
-    if args.cmd == "test":
-        return _cmd_test(
-            qid,
-            args.fixture,
-            packs_root,
-            regenerate=args.regenerate,
-        )
-    if args.cmd == "explain":
-        return _cmd_explain(qid, packs_root)
-    parser.print_usage(file=sys.stderr)
-    return 2
+    # Attach packs_root so handler wrappers can access it.
+    args.packs_root = packs_root
+    handler = getattr(args, "handler", None)
+    if handler is None:
+        parser.print_usage(file=sys.stderr)
+        return 2
+    return int(handler(args))

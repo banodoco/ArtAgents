@@ -14,22 +14,30 @@ import copy
 import hashlib
 import json
 import re
-import sys
-import uuid
 from collections.abc import Mapping
-from dataclasses import dataclass
 from enum import Enum
-from pathlib import Path
 from typing import Any, List, Literal, TypedDict, Union, cast
 
 try:
     from banodoco_timeline_schema import (
         AssetEntry as SharedAssetEntry,
+    )
+    from banodoco_timeline_schema import (
         Theme as SharedTheme,
+    )
+    from banodoco_timeline_schema import (
         ThemeOverrides as SharedThemeOverrides,
+    )
+    from banodoco_timeline_schema import (
         TimelineClip as SharedTimelineClip,
+    )
+    from banodoco_timeline_schema import (
         TimelineConfig as SharedTimelineConfig,
+    )
+    from banodoco_timeline_schema import (
         TimelineOutput as SharedTimelineOutput,
+    )
+    from banodoco_timeline_schema import (
         materialize_output as _materialize_output,
     )
     from banodoco_timeline_schema import validate_timeline as _shared_validate_timeline

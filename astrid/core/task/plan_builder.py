@@ -13,78 +13,49 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib
 import json
 import secrets
-import shlex
 import sys
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from astrid.core.project.current_run import (
-    clear_current_run,
     read_current_run,
-    read_current_run_state,
     write_current_run,
 )
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.project.paths import (
     project_dir,
-    resolve_projects_root,
     validate_project_slug,
     validate_run_id,
 )
 from astrid.core.project.project import ProjectError, require_project
-from astrid.core.alias_resolver import (
-    _register_pack_aliases,
-    create_shared_alias_resolver,
-    extract_pack_aliases,
-)
 from astrid.core.project.run import resolve_required_project_timeline
 from astrid.core.project.schema import build_run_record
-from astrid.core.pack import discover_packs
 from astrid.core.session.lease import (
-    release_writer_lease,
     write_lease_init,
 )
 from astrid.core.session.writer import writer_context_for_project
-from astrid.core.task.claim import active_claims_by_step
-from astrid.core.task.command_render import render_task_command
 from astrid.core.task.env import task_actor_env
 from astrid.core.task.events import (
-    EventLogError,
-    _run_is_complete,
     make_plan_initialized_event,
-    make_run_aborted_event,
-    make_run_completed_event,
     make_run_started_event,
-    make_step_awaiting_fetch_event,
-    make_step_completed_event,
-    make_step_failed_event,
-    read_events,
 )
-from astrid.core.task.gate import TaskRunGateError, peek_current_step
-from astrid.core.task.inbox import consume_inbox_entry, pending_count, scan_inbox
+from astrid.core.task.orchestrator_resolver import (
+    _canonical_orchestrator_id,
+    _qualified_split,
+    _resolve_packs_root,
+)
 from astrid.core.task.plan import (
-    STEP_PATH_SEP,
-    RepeatForEach,
     compute_plan_hash,
-    is_attested_kind,
-    is_code_kind,
-    is_group_step,
-    is_leaf_step,
-    iter_steps_with_path,
     load_plan,
-    step_dir_for_path,
 )
-from astrid.core.task.plan_verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.timeline.crud import record_contributing_run
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
-
-from astrid.core.task.orchestrator_resolver import _canonical_orchestrator_id, _qualified_split, _resolve_packs_root
 
 
 def _print_err(msg: str) -> None:
@@ -203,6 +174,30 @@ def _thumbnail_maker_project_inputs(
         _append_consume(consumes, path)
     return source, query_text, consumes
 
+
+def _load_plan_builder_callable(orchestrator_id: str) -> Any:
+    from astrid.core.orchestrator.registry import load_default_registry
+
+    orchestrator = load_default_registry(include_installed=False).get(orchestrator_id)
+    metadata = orchestrator.metadata or {}
+    module_name = metadata.get("plan_builder_module")
+    entrypoint_name = metadata.get("plan_builder_entrypoint")
+    if not isinstance(module_name, str) or not module_name:
+        raise ValueError(
+            f"{orchestrator_id} manifest is missing metadata.plan_builder_module"
+        )
+    if not isinstance(entrypoint_name, str) or not entrypoint_name:
+        raise ValueError(
+            f"{orchestrator_id} manifest is missing metadata.plan_builder_entrypoint"
+        )
+    module = importlib.import_module(module_name)
+    builder = getattr(module, entrypoint_name, None)
+    if not callable(builder):
+        raise ValueError(
+            f"{orchestrator_id} plan builder {module_name}.{entrypoint_name} is not callable"
+        )
+    return builder
+
 def _build_canonical_start_plan(
     orchestrator_id: str,
     *,
@@ -211,8 +206,7 @@ def _build_canonical_start_plan(
     run_id: str,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
     if orchestrator_id == "video_editing.hype":
-        from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
-
+        build_plan_v2 = _load_plan_builder_callable(orchestrator_id)
         video, brief, theme, consumes = _hype_project_inputs(proj_root)
         return (
             build_plan_v2(
@@ -226,8 +220,7 @@ def _build_canonical_start_plan(
             consumes,
         )
     if orchestrator_id == "video_editing.event_talks":
-        from astrid.packs.video_editing.orchestrators.event_talks.plan_template import build_plan_v2
-
+        build_plan_v2 = _load_plan_builder_callable(orchestrator_id)
         source, transcript, consumes = _event_talks_project_inputs(proj_root)
         return (
             build_plan_v2(
@@ -240,8 +233,7 @@ def _build_canonical_start_plan(
             consumes,
         )
     if orchestrator_id == "video_editing.thumbnail_maker":
-        from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import build_plan_v2
-
+        build_plan_v2 = _load_plan_builder_callable(orchestrator_id)
         source, query_text, consumes = _thumbnail_maker_project_inputs(proj_root)
         return (
             build_plan_v2(

@@ -1632,6 +1632,59 @@ def _find_pack_root_in_checkout(checkout: str | Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _run_install_command(args: argparse.Namespace) -> int:
+    """Execute the parsed ``packs install`` command."""
+    if _is_git_url(args.source):
+        return install_pack(
+            args.source,
+            dry_run=bool(args.dry_run),
+            skip_confirm=bool(args.yes),
+            force=bool(args.force),
+        )
+
+    source = Path(args.source).expanduser()
+    if not source.is_dir():
+        print(
+            f"install: {args.source} is not a directory or does not exist",
+            file=sys.stderr,
+        )
+        return 2
+
+    return install_pack(
+        source,
+        dry_run=bool(args.dry_run),
+        skip_confirm=bool(args.yes),
+        force=bool(args.force),
+    )
+
+
+def _run_update_command(args: argparse.Namespace) -> int:
+    """Execute the parsed ``packs update`` command."""
+    return update_pack(
+        args.pack_id,
+        dry_run=bool(args.dry_run),
+        skip_confirm=bool(args.yes),
+    )
+
+
+def _run_uninstall_command(args: argparse.Namespace) -> int:
+    """Execute the parsed ``packs uninstall`` command."""
+    return uninstall_pack(
+        args.pack_id,
+        keep_revisions=bool(args.keep_revisions),
+        skip_confirm=bool(args.yes),
+    )
+
+
+def _run_rollback_command(args: argparse.Namespace) -> int:
+    """Execute the parsed ``packs rollback`` command."""
+    return rollback_pack(
+        args.pack_id,
+        revision=args.revision,
+        skip_confirm=bool(args.yes),
+    )
+
+
 def cmd_install(argv: list[str]) -> int:
     """``packs install`` CLI handler."""
     parser = argparse.ArgumentParser(
@@ -1659,31 +1712,7 @@ def cmd_install(argv: list[str]) -> int:
         help="Overwrite existing install (preserve old revision).",
     )
     args = parser.parse_args(argv)
-
-    # Git URLs are detected BEFORE any filesystem path resolution
-    if _is_git_url(args.source):
-        return install_pack(
-            args.source,
-            dry_run=args.dry_run,
-            skip_confirm=args.yes,
-            force=args.force,
-        )
-
-    # Local path: resolve and check existence
-    source = Path(args.source).expanduser()
-    if not source.is_dir():
-        print(
-            f"install: {args.source} is not a directory or does not exist",
-            file=sys.stderr,
-        )
-        return 2
-
-    return install_pack(
-        source,
-        dry_run=args.dry_run,
-        skip_confirm=args.yes,
-        force=args.force,
-    )
+    return _run_install_command(args)
 
 
 def cmd_update(argv: list[str]) -> int:
@@ -1707,12 +1736,7 @@ def cmd_update(argv: list[str]) -> int:
         help="Skip confirmation prompt.",
     )
     args = parser.parse_args(argv)
-
-    return update_pack(
-        args.pack_id,
-        dry_run=args.dry_run,
-        skip_confirm=args.yes,
-    )
+    return _run_update_command(args)
 
 
 def cmd_uninstall(argv: list[str]) -> int:
@@ -1736,12 +1760,7 @@ def cmd_uninstall(argv: list[str]) -> int:
         help="Skip confirmation prompt.",
     )
     args = parser.parse_args(argv)
-
-    return uninstall_pack(
-        args.pack_id,
-        keep_revisions=args.keep_revisions,
-        skip_confirm=args.yes,
-    )
+    return _run_uninstall_command(args)
 
 
 def cmd_rollback(argv: list[str]) -> int:
@@ -1765,12 +1784,7 @@ def cmd_rollback(argv: list[str]) -> int:
         help="Skip confirmation prompt.",
     )
     args = parser.parse_args(argv)
-
-    return rollback_pack(
-        args.pack_id,
-        revision=args.revision,
-        skip_confirm=args.yes,
-    )
+    return _run_rollback_command(args)
 
 
 __all__ = [
@@ -1782,6 +1796,10 @@ __all__ = [
     "cmd_update",
     "cmd_uninstall",
     "cmd_rollback",
+    "_run_install_command",
+    "_run_update_command",
+    "_run_uninstall_command",
+    "_run_rollback_command",
     "_install_from_git",
     "_update_git_pack",
     "_diff_component_inventories",

@@ -137,7 +137,7 @@ def cmd_ack(
         if proj is None:
             _print_err("ack: --project is required for abort")
             return 1
-        from astrid.core.task.lifecycle import cmd_abort
+        from astrid.core.task.run_store import cmd_abort
         return cmd_abort(["--project", proj], projects_root=projects_root)
 
     parser = argparse.ArgumentParser(prog="astrid ack", add_help=True)
@@ -281,7 +281,7 @@ def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
     # ONLY in gate._dispatch_attested (never in record_dispatch_complete), so
     # code-step rewinds never reach this branch by design.
     if decision.inline_check_result is not None:
-        from astrid.core.task.lifecycle import render_step_instructions
+        from astrid.core.task.operator_view import render_step_instructions
         name, reason = decision.inline_check_result
         decision_run_id = decision.run_id or ""
         produces_entry = next(

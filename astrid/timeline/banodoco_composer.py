@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from .timeline_model import (
-    ARRANGEMENT_VERSION,
+    Arrangement,
     AssetRegistry,
     ClipClassifiedKind,
     PipelineMetadata,
@@ -20,7 +20,6 @@ from .timeline_model import (
     TimelineConfig,
     TimelineOutput,
     TrackDefinition,
-    Arrangement,
     _effect_ids,
     validate_arrangement,
     validate_metadata,

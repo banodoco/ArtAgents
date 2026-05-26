@@ -72,12 +72,8 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
 
 
 def validate_import_layering(root: str | Path = REPO_ROOT) -> list[str]:
-    # TODO(m5b) exemptions:
-    # - astrid/core/task/orchestrator_resolver.py and plan_builder.py retain
-    #   the deferred compile/plan-template imports after the lifecycle split.
-    #   Later batches add explicit plan-builder metadata and remove these.
-    # - astrid/pipeline.py is intentionally outside this validator's scope; it is
-    #   a top-level dispatcher and its pack imports are deferred to m5b.
+    # astrid/pipeline.py is intentionally outside this validator's scope; it is
+    # a top-level dispatcher and its pack imports are deferred to m5b.
     repo_root = Path(root)
     core_root = repo_root / "astrid" / "core"
     if not core_root.is_dir():
@@ -364,10 +360,7 @@ def _is_forbidden_core_import(module: str) -> bool:
 
 
 def _is_import_layering_exempt(path: Path, repo_root: Path) -> bool:
-    return _repo_rel(path, repo_root) in {
-        "astrid/core/task/orchestrator_resolver.py",
-        "astrid/core/task/plan_builder.py",
-    }
+    return False
 
 
 def _contains_sys_modules_injection(path: Path) -> bool:
