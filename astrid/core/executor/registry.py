@@ -18,6 +18,7 @@ from astrid.core.alias_resolver import (
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
+from astrid.core.pack_resolver import PackResolver
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,
@@ -411,6 +412,12 @@ def _rewrite_executor_manifest_fork(
     dump_manifest_payload(manifest_path, data)
 
 
+def resolve_executor_callable(executor: ExecutorDefinition):
+    """Resolve an executor's manifest-declared Python runtime callable."""
+
+    return PackResolver().resolve(executor.metadata, owner_id=executor.id)
+
+
 __all__ = [
     "BUILTIN_STEP_ORDER",
     "ExecutorRegistry",
@@ -418,4 +425,5 @@ __all__ = [
     "BanodocoCatalogConfig",
     "load_pack_executors",
     "load_default_registry",
+    "resolve_executor_callable",
 ]

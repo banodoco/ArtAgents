@@ -85,6 +85,9 @@ def packs_root() -> Path:
     return Path(__file__).resolve().parents[1] / "packs"
 
 
+DEFAULT_PACKS_ROOT = packs_root()
+
+
 def ensure_local_pack(*, project_root: str | Path = None) -> Path:
     """Create or return the ``local`` scratch pack under *project_root*.
 

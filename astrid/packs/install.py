@@ -32,8 +32,8 @@ from astrid.core.pack_store import (
     InstallRecord,
     InstalledPackStore,
     _revision_timestamp,
-    _utc_now_iso,
 )
+from astrid.core.util.time import utc_now_seconds
 from astrid.packs.gitignore import gitignore_filter
 from astrid.packs.validate import extract_trust_summary, validate_pack
 
@@ -545,7 +545,7 @@ def _do_install(
         astrid_version = str(manifest_raw.get("astrid_version", ""))
 
     # last_validation_time: record that we validated before install
-    last_validation_time = _utc_now_iso()
+    last_validation_time = utc_now_seconds()
 
     # Clean up any leftover staging
     if staging.is_dir():
@@ -645,7 +645,7 @@ def _do_install(
         version=str(trust_summary.get("version", "0.0.0")),
         schema_version=trust_summary.get("schema_version", 1),
         source_path=source_path_str,
-        installed_at=_utc_now_iso(),
+        installed_at=utc_now_seconds(),
         revision=pack_id,
         install_root=str(install_root),
         active=True,

@@ -13,6 +13,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from astrid.core.util.time import utc_now_iso
+
 
 def update_check(
     capability_id: str,
@@ -299,7 +301,7 @@ def update_apply(
         "forked_from": forked_from,
         "upstream_version": check_result["upstream_version"],
         "local_version": check_result["local_version"],
-        "applied_at": _now_iso(),
+        "applied_at": utc_now_iso(),
         "safety_escalations": check_result["safety_escalations"],
         "cost_escalations": check_result["cost_escalations"],
         "permission_escalations": check_result["permission_escalations"],
@@ -399,15 +401,6 @@ def _copy_upstream_content(local_root: Path, upstream_root: Path) -> None:
         fork_state_path.write_bytes(saved_fork_state)
     if saved_overrides is not None:
         overrides_path.write_bytes(saved_overrides)
-
-
-def _now_iso() -> str:
-    """Return an ISO-8601 timestamp string."""
-    from datetime import datetime, timezone
-
-    return datetime.now(timezone.utc).isoformat()
-
-
 __all__ = [
     "update_check",
     "update_apply",

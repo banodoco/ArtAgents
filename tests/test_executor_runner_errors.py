@@ -31,6 +31,7 @@ from astrid.core.executor.runner import (
     run_executor,
 )
 from astrid.core.executor.registry import load_default_registry
+from astrid.core.pack_resolver import PackResolverError
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
 
 
@@ -340,7 +341,14 @@ def test_builtin_executor_unknown_pipeline_step(tmp_path: Path) -> None:
 
 
 def test_upload_youtube_requires_video_url(tmp_path: Path) -> None:
-    executor = _executor(executor_id="youtube.upload", argv=None)
+    executor = _executor(
+        executor_id="youtube.upload",
+        argv=None,
+        metadata={
+            "callable_module": "astrid.packs.youtube.executors.upload.src.social_publish",
+            "callable_name": "publish_youtube_video",
+        },
+    )
     registry = _registry(executor)
 
     with pytest.raises(ExecutorRunnerError, match="video_url is required"):
@@ -376,7 +384,23 @@ def test_upload_youtube_alias_dispatches_through_canonical_special_case(
 
     assert result.executor_id == "youtube.upload"
     assert result.payload == {"ok": True}
-    assert called["video_url"] == "https://example.com/video.mp4"
+    assert called == {
+        "video_url": "https://example.com/video.mp4",
+        "title": "Title",
+        "description": "Desc",
+        "tags": None,
+        "privacy_status": "private",
+        "playlist_id": None,
+        "made_for_kids": False,
+    }
+
+
+def test_upload_youtube_reports_missing_callable_metadata(tmp_path: Path) -> None:
+    executor = _executor(executor_id="youtube.upload", argv=None, metadata={})
+    registry = _registry(executor)
+
+    with pytest.raises(PackResolverError, match=r"youtube\.upload manifest is missing metadata\.callable_module"):
+        run_executor(ExecutorRunRequest(executor_id="youtube.upload", out=tmp_path), registry)
 
 
 def test_pipeline_module_uses_orchestrator_runtime_module_lookup(

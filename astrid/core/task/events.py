@@ -373,7 +373,7 @@ def make_run_started_event(
         "kind": "run_started",
         "plan_hash": plan_hash,
         "run_id": run_id,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if started_by is None and actor is not None:
         started_by = _canonical_identity("human", actor)
@@ -392,7 +392,7 @@ def make_plan_initialized_event(
         "run_id": run_id,
         "plan_hash": plan_hash,
         "plan": plan,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -400,7 +400,7 @@ def make_run_aborted_event(run_id: str, *, reason: str | None = None) -> dict[st
     payload: dict[str, Any] = {
         "kind": "run_aborted",
         "run_id": run_id,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
@@ -420,7 +420,7 @@ def make_step_dispatched_event(
         "command": command,
         "kind": "step_dispatched",
         "plan_step_path": plan_step_path.split("/") if "/" in plan_step_path else [plan_step_path],
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if adapter is not None:
         payload["adapter"] = adapter
@@ -445,7 +445,7 @@ def make_step_completed_event(
         "kind": "step_completed",
         "plan_step_path": plan_step_path.split("/") if "/" in plan_step_path else [plan_step_path],
         "returncode": returncode,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if cost is not None:
         payload["cost"] = cost
@@ -472,7 +472,7 @@ def make_step_failed_event(
     payload: dict[str, Any] = {
         "kind": "step_failed",
         "plan_step_path": plan_step_path.split("/") if "/" in plan_step_path else [plan_step_path],
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if returncode is not None:
         payload["returncode"] = returncode
@@ -509,7 +509,7 @@ def make_step_awaiting_fetch_event(
         "missing": list(missing),
         "mismatched": list(mismatched),
         "plan_step_path": path_str.split("/") if "/" in path_str else [path_str],
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
@@ -527,7 +527,7 @@ def make_run_completed_event(run_id: str) -> dict[str, Any]:
     return {
         "kind": "run_completed",
         "run_id": run_id,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -547,7 +547,7 @@ def make_step_attested_event(
         "evidence": list(evidence),
         "kind": "step_attested",
         "plan_step_id": plan_step_path,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -574,7 +574,7 @@ def make_step_skipped_event(
         "skipped_by": _canonical_identity(actor_kind, actor_id),
         "skipped_by_id": actor_id,
         "skipped_by_kind": actor_kind,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
@@ -603,7 +603,7 @@ def make_item_skipped_event(
         "skipped_by": _canonical_identity(actor_kind, actor_id),
         "skipped_by_id": actor_id,
         "skipped_by_kind": actor_kind,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if reason is not None:
         payload["reason"] = reason
@@ -617,7 +617,7 @@ def make_nested_entered_event(plan_step_path: str, child_plan_hash: str) -> dict
         "child_plan_hash": child_plan_hash,
         "kind": "nested_entered",
         "plan_step_id": plan_step_path,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -626,7 +626,7 @@ def make_nested_exited_event(plan_step_path: str, returncode: int) -> dict[str, 
         "kind": "nested_exited",
         "plan_step_id": plan_step_path,
         "returncode": returncode,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -644,7 +644,7 @@ def make_produces_check_passed_event(
         "kind": "produces_check_passed",
         "plan_step_path": list(plan_step_path),
         "produces_name": produces_name,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if cas_sha256 is not None:
         event["cas_sha256"] = cas_sha256
@@ -670,7 +670,7 @@ def make_produces_check_failed_event(
         "plan_step_path": list(plan_step_path),
         "produces_name": produces_name,
         "reason": reason,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -687,7 +687,7 @@ def make_iteration_started_event(
         "iteration": int(iteration),
         "kind": "iteration_started",
         "plan_step_path": list(plan_step_path),
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -703,7 +703,7 @@ def make_iteration_failed_event(
         "kind": "iteration_failed",
         "plan_step_path": list(plan_step_path),
         "reason": reason,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -721,7 +721,7 @@ def make_iteration_exhausted_event(
         "max_iterations": int(max_iterations),
         "on_exhaust": on_exhaust,
         "plan_step_path": list(plan_step_path),
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -735,7 +735,7 @@ def make_for_each_expanded_event(
         "item_ids": list(item_ids),
         "kind": "for_each_expanded",
         "plan_step_path": list(plan_step_path),
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -752,7 +752,7 @@ def make_item_started_event(
         "item_id": item_id,
         "kind": "item_started",
         "plan_step_path": list(plan_step_path),
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -771,7 +771,7 @@ def make_item_completed_event(
         "kind": "item_completed",
         "plan_step_path": list(plan_step_path),
         "returncode": int(returncode),
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -796,7 +796,7 @@ def make_item_attested_event(
         "item_id": item_id,
         "kind": "item_attested",
         "plan_step_path": list(plan_step_path),
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -814,7 +814,7 @@ def make_cursor_rewind_event(
         "kind": "cursor_rewind",
         "plan_step_path": list(plan_step_path),
         "reason": reason,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
     if step_version is not None:
         payload["step_version"] = step_version
@@ -920,10 +920,6 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
 def _event_hash(prev_hash: str, event: dict[str, Any]) -> str:
     digest = hashlib.sha256((prev_hash + canonical_event_json(event)).encode("utf-8")).hexdigest()
     return f"sha256:{digest}"
-
-
-def _utc_now_iso() -> str:
-    return utc_now_iso()
 
 
 def _read_tail_hash(handle) -> str:

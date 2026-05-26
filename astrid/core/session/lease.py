@@ -165,7 +165,7 @@ def bump_epoch_and_swap_session(
                 "prev_epoch": prev_epoch,
                 "new_epoch": new_epoch,
                 "reason": reason,
-                "ts": _utc_now_iso(),
+                "ts": utc_now_iso(),
             }
             append_event_to_locked_handle(handle, takeover_event)
         finally:
@@ -217,7 +217,7 @@ def claim_orphan_lease(
                 "prev_epoch": prev_epoch,
                 "new_epoch": new_epoch,
                 "reason": "orphan-claim",
-                "ts": _utc_now_iso(),
+                "ts": utc_now_iso(),
             }
             append_event_to_locked_handle(handle, event)
         finally:
@@ -306,7 +306,3 @@ def _normalize_lease(data: dict[str, Any], lease_path: Path) -> dict[str, Any]:
     if not isinstance(plan_hash, str):
         raise LeaseError(f"lease {lease_path} plan_hash must be a string, got {plan_hash!r}")
     return out
-
-
-def _utc_now_iso() -> str:
-    return utc_now_iso()

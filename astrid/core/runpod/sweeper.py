@@ -21,11 +21,6 @@ SWEEPER_EVENT_APPEND_RETRIES = 3
 RUNPOD_SWEEPER_AUDIT_FILENAME = "runpod_sweeper_audit.jsonl"
 
 
-def _utc_now_iso() -> str:
-    """Return current UTC timestamp in ISO 8601."""
-    return utc_now_iso()
-
-
 def collect_handles(projects_root: Path) -> list[tuple[Path, dict[str, Any]]]:
     """Walk *projects_root* and return every ``(path, handle_dict)`` pair.
 
@@ -345,7 +340,7 @@ async def _sweep_async(
             "terminate_at": terminate_at_str,
             "mode": mode,
             "reason": f"sweeper {mode}-mode: pod {pod_id} terminated",
-            "ts": _utc_now_iso(),
+            "ts": utc_now_iso(),
             "handle_path": str(handle_path),
         }
 
@@ -357,7 +352,7 @@ async def _sweep_async(
             _append_sweep_audit(
                 projects_root,
                 {
-                    "ts": _utc_now_iso(),
+                    "ts": utc_now_iso(),
                     "task_event": False,
                     "run_dir": str(run_dir),
                     "handle_path": str(handle_path),
@@ -381,7 +376,7 @@ async def _sweep_async(
         _append_sweep_audit(
             projects_root,
             {
-                "ts": _utc_now_iso(),
+                "ts": utc_now_iso(),
                 "task_event": False,
                 "run_dir": str(run_dir),
                 "handle_path": str(handle_path),

@@ -20,12 +20,6 @@ _AGENT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
 class IdentityError(ValueError):
     """Raised when an agent identity record is malformed or input is invalid."""
-
-
-def _now_iso() -> str:
-    return utc_now_iso()
-
-
 @dataclass(frozen=True)
 class Identity:
     agent_id: str
@@ -96,7 +90,7 @@ def bootstrap_identity(*, prompt: Callable[[str], str] | None = None) -> Identit
         except IdentityError as exc:
             print(f"  invalid: {exc}")
             continue
-        identity = Identity(agent_id=slug, created_at=_now_iso())
+        identity = Identity(agent_id=slug, created_at=utc_now_iso())
         write_identity(identity)
         return identity
     raise IdentityError("agent id bootstrap exhausted 3 attempts")

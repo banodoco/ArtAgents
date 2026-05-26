@@ -331,13 +331,13 @@ def _dispatched_step_paths(events: Sequence[dict[str, Any]]) -> set[str]:
 
 
 def _make_plan_mutated_event(author: str, writer_epoch: int, diff: dict[str, Any]) -> dict[str, Any]:
-    from astrid.core.task.events import _utc_now_iso  # internal helper reuse
+    from astrid.core.util.time import utc_now_iso
     return {
         "kind": PLAN_MUTATED_KIND,
         "author": author,
         "writer_epoch": writer_epoch,
         "diff": diff,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 

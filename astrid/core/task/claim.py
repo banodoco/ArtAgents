@@ -46,14 +46,14 @@ def _make_claim_event(
     claimed_by_kind: str,
     writer_epoch: int,
 ) -> dict:
-    from astrid.core.task.events import _utc_now_iso
+    from astrid.core.util.time import utc_now_iso
     return {
         "kind": CLAIM_KIND,
         "step": step,
         "claimed_by": claimed_by,
         "claimed_by_kind": claimed_by_kind,
         "writer_epoch": writer_epoch,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 
@@ -64,14 +64,14 @@ def _make_unclaim_event(
     unclaimed_by_kind: str,
     writer_epoch: int,
 ) -> dict:
-    from astrid.core.task.events import _utc_now_iso
+    from astrid.core.util.time import utc_now_iso
     return {
         "kind": UNCLAIM_KIND,
         "step": step,
         "unclaimed_by": unclaimed_by,
         "unclaimed_by_kind": unclaimed_by_kind,
         "writer_epoch": writer_epoch,
-        "ts": _utc_now_iso(),
+        "ts": utc_now_iso(),
     }
 
 

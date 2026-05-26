@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
-from astrid.core.project.schema import utc_now_iso
+from astrid.core.util.time import utc_now_seconds as utc_now_iso
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,

@@ -6,13 +6,13 @@ to a ``.astrid_fork_state.json`` hash-based comparison otherwise.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
 from astrid.contracts.schema import LocalEditState
 from astrid.core.git_util import GitUtilError, is_git_worktree, git_status
+from astrid.core.util.hash import sha256_file as _sha256_file
 
 
 _FORK_STATE_FILENAME = ".astrid_fork_state.json"
@@ -118,20 +118,6 @@ def _compute_file_hashes(root: Path) -> dict[str, str]:
             continue
         hashes[rel] = _sha256_file(path)
     return hashes
-
-
-def _sha256_file(path: Path) -> str:
-    """Return the SHA-256 hex digest of *path*."""
-    hasher = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while True:
-            chunk = fh.read(65536)
-            if not chunk:
-                break
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
 __all__ = [
     "detect_local_edits",
     "read_fork_state",

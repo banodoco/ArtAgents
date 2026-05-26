@@ -26,12 +26,6 @@ def _step_dir(run_ctx: RunContext) -> Path:
         iteration=run_ctx.iteration,
         item_id=run_ctx.item_id,
     )
-
-
-def _utc_now_iso() -> str:
-    return utc_now_milliseconds()
-
-
 class LocalAdapter:
     """Local subprocess adapter. Spawns detached so a closed tab does not kill the child."""
 
@@ -70,7 +64,7 @@ class LocalAdapter:
         finally:
             log_handle.close()
 
-        started_at = _utc_now_iso()
+        started_at = utc_now_milliseconds()
         write_json_sidecar(
             meta_path,
             {

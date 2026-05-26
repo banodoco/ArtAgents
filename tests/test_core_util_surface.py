@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+from astrid._paths import REPO_ROOT
+from astrid.core import util as core_util
+from astrid.core.util import sha256_file, utc_now_iso, utc_now_milliseconds, utc_now_seconds
+
+
+def _core_function_defs() -> dict[str, list[str]]:
+    defs: dict[str, list[str]] = {}
+    for path in sorted((REPO_ROOT / "astrid" / "core").rglob("*.py")):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(node.name, []).append(rel)
+    return defs
+
+
+def test_core_util_reexports_are_explicit_and_importable() -> None:
+    assert core_util.__all__ == [
+        "sha256_file",
+        "utc_now_iso",
+        "utc_now_milliseconds",
+        "utc_now_seconds",
+    ]
+    assert core_util.sha256_file is sha256_file
+    assert core_util.utc_now_iso is utc_now_iso
+    assert core_util.utc_now_milliseconds is utc_now_milliseconds
+    assert core_util.utc_now_seconds is utc_now_seconds
+
+
+def test_duplicate_core_hash_and_timestamp_helpers_remain_collapsed() -> None:
+    defs = _core_function_defs()
+
+    assert defs["sha256_file"] == ["astrid/core/util/hash.py"]
+    assert defs.get("_sha256", []) == []
+    assert defs.get("_now_iso", []) == []
+    assert defs.get("_utc_now_iso", []) == []
+    assert defs.get("_sha256_file", []) == ["astrid/core/task/lifecycle.py"]
+
+    lifecycle_text = (REPO_ROOT / "astrid/core/task/lifecycle.py").read_text(encoding="utf-8")
+    assert "TODO(m5b)" in lifecycle_text

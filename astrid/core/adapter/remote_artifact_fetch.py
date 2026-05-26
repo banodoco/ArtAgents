@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Any, Literal
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import Step
+from astrid.core.util.hash import sha256_file as _sha256
 
 FetchStatus = Literal["completed", "awaiting_fetch", "failed"]
 
@@ -23,16 +23,6 @@ class FetchResult:
     mismatched: list[str] = field(default_factory=list)
     checksums: dict[str, str] = field(default_factory=dict)
     reason: str | None = None
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _step_dir(run_ctx: "RunContext") -> Path:  # noqa: F821
     return step_dir_for_context(
         run_ctx.project_root,
