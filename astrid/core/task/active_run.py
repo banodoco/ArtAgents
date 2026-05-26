@@ -27,7 +27,6 @@ The public symbols are NO LONGER re-exported from ``astrid.core.task``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from astrid.core.project.paths import project_dir
 

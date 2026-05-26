@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from astrid.core.element import catalog, cli, install, registry, schema
+from astrid.core.element import install, registry, schema
 
 _EXPORTS = {
     "ELEMENT_KINDS": schema,

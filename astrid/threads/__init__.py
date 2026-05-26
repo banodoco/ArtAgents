@@ -20,7 +20,6 @@ from .index import ThreadIndexError, ThreadIndexLockTimeout, ThreadIndexStore
 from .record import build_run_record, finalize_run_record
 from .schema import SCHEMA_VERSION
 
-
 __all__ = [
     "SCHEMA_VERSION",
     "ThreadIndexError",

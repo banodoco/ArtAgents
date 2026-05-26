@@ -12,7 +12,6 @@ from astrid.core.executor.folder import load_folder_executors
 from astrid.core.orchestrator.folder import load_folder_orchestrators
 from astrid.core.pack import ELEMENT_KINDS as _ELEMENT_KINDS
 
-
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
 INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}

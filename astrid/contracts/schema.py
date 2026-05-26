@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, get_args
 
-
 PortType = Literal[
     "string", "path", "file", "directory", "json", "boolean", "number", "integer", "html"
 ]
