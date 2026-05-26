@@ -1,4 +1,4 @@
-"""DEPRECATED compatibility shim (Sprint 1 / T9).
+"""DEPRECATED compatibility shim (Sprint 1 / T9, TODO(m5b)).
 
 The old ``<project>/active_run.json`` pointer was replaced by the new
 ``<project>/current_run.json`` pointer + ``runs/<id>/lease.json`` pair to
@@ -15,8 +15,9 @@ Callers should migrate to:
   :func:`write_lease_init` / :func:`release_writer_lease`
 
 The brief asks for full deletion of this module; the shim keeps existing
-non-lifecycle callers functional while T10's test fixtures land. The
-public symbols are NO LONGER re-exported from ``astrid.core.task``.
+non-lifecycle callers functional while T10's test fixtures land, and the
+remaining shim retirement is deferred to m5b. The public symbols are NO
+LONGER re-exported from ``astrid.core.task``.
 """
 
 from __future__ import annotations

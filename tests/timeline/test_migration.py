@@ -44,6 +44,18 @@ _LEGACY_DECODERS = _MIGRATION_SCRIPT.parent / "legacy_decoders.py"
 _EVENTLOG_REWRITE = _MIGRATION_SCRIPT.parent / "eventlog_rewrite.py"
 
 
+def test_migration_module_exports_live_apis_only() -> None:
+    import astrid.core.timeline.migration as migration
+
+    assert not hasattr(migration, "main")
+    assert not hasattr(migration, "audit")
+    assert "main" not in migration.__all__
+    assert "audit" not in migration.__all__
+    assert "classify_timeline_dir" in migration.__all__
+    assert "discover_projects_for_migration" in migration.__all__
+    assert "discover_timelines_for_project" in migration.__all__
+
+
 def _load_legacy_decoders():
     spec = importlib.util.spec_from_file_location("sprint2_legacy_decoders", _LEGACY_DECODERS)
     assert spec is not None

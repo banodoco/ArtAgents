@@ -1,22 +1,10 @@
-"""Element content package with compatibility aliases for framework modules."""
+"""Element content package with public re-exports for framework modules."""
 
 from __future__ import annotations
 
-import sys
 from typing import Any
 
 from astrid.core.element import catalog, cli, install, registry, schema
-
-_ALIASES = {
-    "catalog": catalog,
-    "cli": cli,
-    "install": install,
-    "registry": registry,
-    "schema": schema,
-}
-
-for _name, _module in _ALIASES.items():
-    sys.modules[f"{__name__}.{_name}"] = _module
 
 _EXPORTS = {
     "ELEMENT_KINDS": schema,
@@ -38,7 +26,7 @@ _EXPORTS = {
     "validate_element_definition": schema,
 }
 
-__all__ = sorted([*_ALIASES, *_EXPORTS])
+__all__ = sorted(_EXPORTS)
 
 
 def __getattr__(name: str) -> Any:

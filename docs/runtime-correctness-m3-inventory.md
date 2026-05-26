@@ -57,9 +57,9 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 - `M3-INV-007: narrow corrupt session display handling in status.` Site: `astrid/core/session/cli.py:121`.
 - `M3-INV-008: log skipped corrupt timeline status rows.` Site: `astrid/core/session/cli.py:871`.
 - `M3-INV-004: make audit follow interrupt return deterministic instead of pass.` Site: `astrid/core/task/run_audit.py:581`.
-- `M3-INV-017: log schema detection fallback failures.` Site: `astrid/core/timeline/migration.py:189`.
-- `M3-INV-018: log schema detection fallback failures.` Site: `astrid/core/timeline/migration.py:199`.
-- `M3-INV-019: log checkpoint resolution failures.` Site: `astrid/core/timeline/migration.py:581`.
+- `M3-INV-017: log schema detection fallback failures.` Site: `astrid/core/timeline/migration.py:166`.
+- `M3-INV-018: log schema detection fallback failures.` Site: `astrid/core/timeline/migration.py:176`.
+- `M3-INV-019: log checkpoint resolution failures.` Site: `astrid/core/timeline/migration.py:558`.
 - `M3-INV-020: log checkpoint projection degradation.` Site: `astrid/core/timeline/projection.py:959`.
 - `M3-INV-012: explain skipped invalid child orchestrator definitions in list/search.` Site: `astrid/orchestrate/cli.py:223`.
 - `M3-INV-011: report plan explanation render failures.` Site: `astrid/orchestrate/cli.py:509`.
@@ -532,8 +532,8 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 79 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 132 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 80 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 133 | `except` | `FileNotFoundError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/core/task/claim.py`
 
@@ -864,11 +864,11 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 189 | `except` | `Exception` | `deferred` | M3-INV-017: log schema detection fallback failures. |
-| 199 | `except` | `Exception` | `deferred` | M3-INV-018: log schema detection fallback failures. |
-| 414 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 490 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
-| 581 | `except` | `Exception` | `deferred` | M3-INV-019: log checkpoint resolution failures. |
+| 166 | `except` | `Exception` | `deferred` | M3-INV-017: log schema detection fallback failures. |
+| 176 | `except` | `Exception` | `deferred` | M3-INV-018: log schema detection fallback failures. |
+| 391 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 467 | `except` | `Exception` | `justified-with-caveat` | Broad catch preserves best-effort optional discovery/projection behavior; caveat: should be narrowed or logged when touched. |
+| 558 | `except` | `Exception` | `deferred` | M3-INV-019: log checkpoint resolution failures. |
 
 ### `astrid/core/timeline/model.py`
 
@@ -1021,7 +1021,7 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 74 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 70 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
 
 ### `astrid/orchestrate/dsl.py`
 
@@ -1116,15 +1116,15 @@ rg -n '\bexcept\b|\bassert\b' astrid --glob '!astrid/packs/**'
 
 | line | kind | caught/test | status | reason |
 | ---: | --- | --- | --- | --- |
-| 94 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 97 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 130 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 141 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 203 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
-| 233 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
-| 306 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 357 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
-| 432 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 92 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 95 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 143 | `except` | `UnicodeDecodeError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 154 | `except` | `SyntaxError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 220 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 250 | `except` | `Exception` | `justified-with-caveat` | Broad catch is bounded by wrapping, stderr/reporting, validation accumulation, or final CLI guard; keep under review for narrower exception tuples. |
+| 323 | `except` | `ValueError` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 374 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
+| 449 | `except` | `(SyntaxError, UnicodeDecodeError)` | `justified` | Named catch handles expected filesystem, JSON, CLI, validation, process, import, network, or domain-error boundary. |
 
 ### `astrid/theme_schema.py`
 

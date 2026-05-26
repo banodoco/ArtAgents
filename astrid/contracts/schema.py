@@ -43,10 +43,6 @@ class Output:
     extension: str | None = None
 
 
-PerformerPort = Port
-PerformerOutput = Output
-
-
 @dataclass(frozen=True)
 class CommandInputArg:
     input: str
@@ -173,8 +169,6 @@ __all__ = [
     "IsolationMetadata",
     "Output",
     "Port",
-    "PerformerOutput",
-    "PerformerPort",
     "Provenance",
     "SafetyDeclaration",
 ]
