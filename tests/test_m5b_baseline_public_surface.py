@@ -775,8 +775,8 @@ class LifecycleCommandParsingTest(unittest.TestCase):
             with self.subTest(verb=verb):
                 self.assertIn(f"astrid {verb}", help_text, f"missing {verb} in help")
 
-        # skip is NOT in top-level help (known pre-split gap)
-        self.assertNotIn("astrid skip", help_text)
+        # After T11 normalization, skip is listed in top-level help
+        self.assertIn("astrid skip", help_text)
 
     def test_entrypoint_help_lists_runs_and_claim(self) -> None:
         """Top-level help mentions the 'runs ls' and 'claim' verbs."""
