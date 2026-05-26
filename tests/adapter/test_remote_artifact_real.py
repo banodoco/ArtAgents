@@ -7,6 +7,8 @@ controllable manifest + fetchable bytes — no real network.
 from __future__ import annotations
 
 import json
+import os
+import signal
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
@@ -97,6 +99,12 @@ def _make_produces(names: list[str]) -> tuple[ProducesEntry, ...]:
         )
         for name in names
     )
+
+
+def _wait_for_exit(pid: int) -> int:
+    waited_pid, status = os.waitpid(pid, 0)
+    assert waited_pid == pid
+    return os.waitstatus_to_exitcode(status)
 
 
 def _write_produces(step_dir: Path, files: dict[str, bytes]) -> None:
@@ -253,13 +261,21 @@ def test_poll_running_for_live_process(
     """poll() returns running when the subprocess is still alive."""
     ctx = _make_ctx(tmp_path)
     step = _make_step(command="sleep 10")
-    adapter.dispatch(step, ctx)
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
 
-    # The subprocess should still be alive
-    result = adapter.poll(step, ctx)
-    assert result.status in ("running", "done"), (
-        f"Expected running or done, got {result.status}"
-    )
+    try:
+        result = adapter.poll(step, ctx)
+        assert result.status in ("running", "done"), (
+            f"Expected running or done, got {result.status}"
+        )
+    finally:
+        try:
+            os.kill(dispatched.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        else:
+            _wait_for_exit(dispatched.pid)
 
 
 def test_poll_done_when_process_exits(
@@ -270,11 +286,8 @@ def test_poll_done_when_process_exits(
     step = _make_step(command="true")  # exits immediately
     result = adapter.dispatch(step, ctx)
     assert result.status == "dispatched"
-
-    # Give it a tiny moment to exit
-    import time
-
-    time.sleep(0.05)
+    assert result.pid is not None
+    assert _wait_for_exit(result.pid) == 0
 
     poll_result = adapter.poll(step, ctx)
     assert poll_result.status in ("done", "running")

@@ -316,12 +316,7 @@ class TestCLIDispatchRegression(unittest.TestCase):
 
 
 class TestFullExistingSuitePasses(unittest.TestCase):
-    """Run the full existing test suite and confirm all pass (except pre-existing failures)."""
-
-    # Tests known to have pre-existing failures (documented in baseline)
-    KNOWN_FAILURES = {
-        "test_root_help_explains_canonical_gateway",  # Help text updated with 'new' but test not updated
-    }
+    """Run the key test files via subprocess and confirm all pass."""
 
     def test_existing_regression_suite_passes(self) -> None:
         """Run pytest on the key test files and confirm all pass."""
@@ -352,23 +347,12 @@ class TestFullExistingSuitePasses(unittest.TestCase):
             text=True,
             cwd=str(Path(__file__).resolve().parent.parent),
         )
-        # We check that the return code is 0 meaning all passed
-        # If there's a failure, print stderr for debug
-        if result.returncode != 0:
-            # Filter out the known pre-existing failure
-            lines = result.stdout.split("\n")
-            failures = [l for l in lines if "FAILED" in l]
-            real_failures = [
-                f for f in failures
-                if not any(kf in f for kf in self.KNOWN_FAILURES)
-            ]
-            if real_failures:
-                self.fail(
-                    f"Regression failures found:\n{chr(10).join(real_failures)}\n\n"
-                    f"Full stderr:\n{result.stderr}\n"
-                    f"Full stdout:\n{result.stdout[-3000:]}"
-                )
-            # Only known pre-existing failures — acceptable
+        self.assertEqual(
+            result.returncode, 0,
+            f"Regression suite failed (rc={result.returncode}):\n"
+            f"stderr:\n{result.stderr}\n"
+            f"stdout:\n{result.stdout[-3000:]}"
+        )
 
 
 class TestNewCLICoexistsWithOld(unittest.TestCase):

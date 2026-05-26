@@ -52,6 +52,8 @@ def _canonical_hash(payload) -> str:
 
 
 @pytest.mark.renderer_parity
+@pytest.mark.integration
+@pytest.mark.opt_in
 def test_renderer_parity_against_sprint08_fixtures() -> None:
     if not RUN_RENDERER_PARITY:
         pytest.skip("renderer parity integration is opt-in; set ASTRID_RENDERER_PARITY=1")

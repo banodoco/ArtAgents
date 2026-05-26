@@ -176,3 +176,7 @@ of history is permitted per the non-negotiable constraint above.
 - m5a → `directed`: renames, deletions, doc edits — low residual complexity.
 - m5b → `partnered/full/high`: god-module splits along real domain seams + CLI unification + the
   deferred de-inversion is genuinely cross-cutting and benefits from premium critique/review.
+
+## Cross-references
+
+- [Root EPIC.md](../../../EPIC.md) — m3 handoff entries surfaced during m2 test-integrity work (denylist removals, strict xfails, deferred product bugs).

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import subprocess
 from pathlib import Path
 
@@ -14,6 +13,27 @@ from astrid.core.task.env import child_subprocess_env
 from astrid.core.task.events import read_events, verify_chain
 from astrid.core.task.gate import TaskRunGateError, gate_command, record_dispatch_complete
 from astrid.core.task.plan import compute_plan_hash, load_plan
+
+
+def _wait_for_dispatched_returncode(decision) -> int:
+    adapter_kind = getattr(decision, "adapter", None)
+    if adapter_kind == "manual":
+        return 0
+
+    pid = getattr(decision, "pid", None)
+    if pid is None:
+        return -1
+
+    try:
+        _, status = os.waitpid(pid, 0)
+    except (ChildProcessError, ProcessLookupError):
+        return -1
+
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return -abs(os.WTERMSIG(status))
+    return -1
 
 
 def test_two_step_plan_drives_kernel_end_to_end(tmp_projects_root: Path) -> None:
@@ -41,18 +61,22 @@ def test_two_step_plan_drives_kernel_end_to_end(tmp_projects_root: Path) -> None
         assert decision.plan_step_id == step.id
         events_path = decision.events_path
 
-        env = child_subprocess_env(base=os.environ)
-        completed = subprocess.run(
-            shlex.split(step.command),
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert completed.returncode == 0
-        assert completed.stdout.strip() == "ok"
+        if decision.adapter is None:
+            env = child_subprocess_env(base=os.environ)
+            completed = subprocess.run(
+                step.command,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                shell=True,
+            )
+            returncode = completed.returncode
+        else:
+            returncode = _wait_for_dispatched_returncode(decision)
 
-        record_dispatch_complete(decision, completed.returncode)
+        assert returncode == 0
+        record_dispatch_complete(decision, returncode)
 
     assert events_path is not None
     ok, last_index, error = verify_chain(events_path)

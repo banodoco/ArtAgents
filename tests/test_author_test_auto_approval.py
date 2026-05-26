@@ -15,18 +15,21 @@ active_run.json/plan.json by hand.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
-from _lifecycle_fixtures import bind_writer_session  # noqa: E402
+from _lifecycle_fixtures import bind_writer_session, setup_packs_and_compile  # noqa: E402
 
 from astrid.core.task.env import ASTRID_ACTOR, ASTRID_AUTHOR_TEST
 from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.lifecycle_ack import cmd_ack
+from astrid.orchestrate.test_runner import _finish_code_step, run_fixture
 
 
 _DEMO_PACK_BODY = '''from astrid.orchestrate import attested, orchestrator
@@ -42,6 +45,13 @@ def app():
             ack="human",
         ),
     ]
+'''
+
+_CODE_PACK_BODY = '''from astrid.orchestrate import code, orchestrator
+
+@orchestrator("demo.code_once")
+def app():
+    return [code("write_once", argv=["python3", "-c", {script!r}])]
 '''
 
 
@@ -128,3 +138,63 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
     assert last["attestor_id"] == "mallory"
     # Provenance rides on a separate event['source'] field.
     assert last["source"] == "author_test"
+
+
+def test_runner_dispatches_exactly_once(
+    tmp_path: Path,
+    tmp_projects_root: Path,
+) -> None:
+    count_path = tmp_path / "dispatch-count.json"
+    script = (
+        "import json\n"
+        "from pathlib import Path\n"
+        f"path = Path({str(count_path)!r})\n"
+        "count = 0\n"
+        "if path.exists():\n"
+        "    count = json.loads(path.read_text())['count']\n"
+        "path.write_text(json.dumps({'count': count + 1}))\n"
+    )
+    packs, _projects = setup_packs_and_compile(
+        tmp_path,
+        "demo",
+        "code_once",
+        _CODE_PACK_BODY.format(script=script),
+        "demo.code_once",
+    )
+
+    with patch(
+        "astrid.orchestrate.test_runner._run_fallback_subprocess",
+        side_effect=AssertionError("adapter-dispatched steps must not hit subprocess fallback"),
+    ):
+        events_path = run_fixture(
+            qualified_id="demo.code_once",
+            fixture_dir=None,
+            packs_root=packs,
+            projects_root=tmp_projects_root,
+        )
+
+    assert json.loads(count_path.read_text(encoding="utf-8")) == {"count": 1}
+    events = read_events(events_path)
+    assert [event["kind"] for event in events] == [
+        "plan_initialized",
+        "run_started",
+        "step_dispatched",
+        "step_completed",
+    ]
+
+
+def test_finish_code_step_uses_subprocess_fallback_for_non_adapter_steps() -> None:
+    class _Decision:
+        adapter = None
+
+    decision = _Decision()
+    with patch(
+        "astrid.orchestrate.test_runner._run_fallback_subprocess",
+        return_value=type("_Completed", (), {"returncode": 7})(),
+    ) as run_fallback, patch(
+        "astrid.orchestrate.test_runner.record_dispatch_complete"
+    ) as record_complete:
+        _finish_code_step(decision, ["echo", "fallback"])
+
+    run_fallback.assert_called_once_with(["echo", "fallback"])
+    record_complete.assert_called_once_with(decision, 7)
