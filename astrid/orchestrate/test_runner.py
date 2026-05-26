@@ -13,6 +13,7 @@ import shlex
 import shutil
 import subprocess
 from pathlib import Path
+from subprocess import CompletedProcess
 from typing import Optional
 
 from astrid.core.project.current_run import read_current_run_state
@@ -122,6 +123,46 @@ def _restore_env(snapshot: dict[str, Optional[str]]) -> None:
             os.environ[name] = value
 
 
+def _wait_for_adapter_completion(decision) -> int:
+    """Return the exit status for an already-dispatched adapter step."""
+    adapter_kind = getattr(decision, "adapter", None)
+    if adapter_kind == "manual":
+        return 0
+
+    pid = getattr(decision, "pid", None)
+    if pid is None:
+        return -1
+
+    try:
+        _, status = os.waitpid(pid, 0)
+    except (ChildProcessError, ProcessLookupError):
+        return -1
+
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return -abs(os.WTERMSIG(status))
+    return -1
+
+
+def _run_fallback_subprocess(cmd_argv: list[str]) -> CompletedProcess[str]:
+    """Legacy fallback for code steps that were not adapter-dispatched."""
+    return subprocess.run(
+        cmd_argv,
+        env={**os.environ, **child_subprocess_env()},
+        check=False,
+        text=True,
+    )
+
+
+def _finish_code_step(decision, cmd_argv: list[str]) -> None:
+    if getattr(decision, "adapter", None) is None:
+        returncode = _run_fallback_subprocess(cmd_argv).returncode
+    else:
+        returncode = _wait_for_adapter_completion(decision)
+    record_dispatch_complete(decision, returncode)
+
+
 def run_fixture(
     *,
     qualified_id: str,
@@ -198,12 +239,7 @@ def run_fixture(
                     raise RuntimeError(
                         f"author test: gate rejected code step {path_str!r}: {exc.reason}"
                     ) from exc
-                completed = subprocess.run(
-                    cmd_argv,
-                    env={**os.environ, **child_subprocess_env()},
-                    check=False,
-                )
-                record_dispatch_complete(decision, completed.returncode)
+                _finish_code_step(decision, cmd_argv)
                 continue
 
             if is_attested_kind(step):

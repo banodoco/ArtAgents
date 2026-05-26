@@ -17,6 +17,11 @@ import pytest
 
 from astrid.core.util.http import HttpClient
 
+
+@pytest.fixture(autouse=True)
+def _fake_fal_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAL_KEY", "test-fal-key")
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -463,6 +468,8 @@ def _comfyui_binary_present() -> bool:
     return shutil.which("comfyui") is not None
 
 
+@pytest.mark.integration
+@pytest.mark.opt_in
 @pytest.mark.skipif(not _vibecomfy_importable(), reason="vibecomfy not importable")
 @pytest.mark.skipif(not _comfyui_binary_present(), reason="comfyui binary not on PATH")
 def test_e2e_local_smoke(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

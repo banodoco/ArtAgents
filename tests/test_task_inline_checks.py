@@ -154,41 +154,6 @@ def test_code_produces_check_passes_advances(tmp_projects_root: Path) -> None:
     assert decision2.plan_step_id == "step-2"
 
 
-@pytest.mark.skip(
-    reason="blocked by missing validation in astrid/core/task/plan.py: "
-    "attested steps with sentinel-only produces checks are not yet rejected at load. "
-    "Aspirational contract; no 'requires a semantic check' validation has ever existed in source."
-)
-def test_attested_sentinel_only_check_rejected_at_load(tmp_path: Path) -> None:
-    plan_path = tmp_path / "plan.json"
-    plan_path.write_text(
-        json.dumps({
-            "plan_id": "p",
-            "version": 2,
-            "steps": [
-                {
-                    "id": "s1",
-                    "requires_ack": True,
-                    "adapter": "manual",
-                    "command": "ack --project demo --step s1",
-                    "instructions": "review",
-                    "ack": {"kind": "agent"},
-                    "cost": {"amount": 0, "currency": "USD", "source": "local"},
-                    "produces": {
-                        "out": {
-                            "path": "out.bin",
-                            "check": {"check_id": "file_nonempty", "params": {}, "sentinel": True},
-                        }
-                    },
-                }
-            ],
-        }),
-        encoding="utf-8",
-    )
-    with pytest.raises(TaskPlanError, match="requires a semantic check"):
-        load_plan(plan_path)
-
-
 def test_attested_with_all_of_semantic_check_accepts(tmp_path: Path) -> None:
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(

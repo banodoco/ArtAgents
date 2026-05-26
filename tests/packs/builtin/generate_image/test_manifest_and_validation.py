@@ -23,6 +23,11 @@ from astrid.core.executor.schema import load_executor_manifest
 from astrid.core.util.http import Transport
 
 
+@pytest.fixture(autouse=True)
+def _fake_fal_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAL_KEY", "test-fal-key")
+
+
 # Path to the executor manifest
 _EXECUTOR_YAML = (
     Path(__file__).resolve().parents[4]

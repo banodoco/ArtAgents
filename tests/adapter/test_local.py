@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,12 @@ def _make_step(**kwargs) -> Step:
     defaults = {"id": "s1", "adapter": "local", "command": "echo ok"}
     defaults.update(kwargs)
     return Step(**defaults)
+
+
+def _wait_for_exit(pid: int) -> int:
+    waited_pid, status = os.waitpid(pid, 0)
+    assert waited_pid == pid
+    return os.waitstatus_to_exitcode(status)
 
 
 # ---------------------------------------------------------------------------
@@ -88,9 +95,18 @@ def test_poll_pending_when_no_dispatch(adapter: LocalAdapter, tmp_path: Path) ->
 def test_poll_running_after_dispatch(adapter: LocalAdapter, tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path)
     step = _make_step(command="sleep 10")
-    adapter.dispatch(step, ctx)
-    result = adapter.poll(step, ctx)
-    assert result.status in ("running", "done")  # race: may finish before poll
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
+    try:
+        result = adapter.poll(step, ctx)
+        assert result.status in ("running", "done")  # race: may finish before poll
+    finally:
+        try:
+            os.kill(dispatched.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        else:
+            _wait_for_exit(dispatched.pid)
 
 
 # ---------------------------------------------------------------------------
@@ -100,13 +116,12 @@ def test_poll_running_after_dispatch(adapter: LocalAdapter, tmp_path: Path) -> N
 def test_complete_success(adapter: LocalAdapter, tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path)
     step = _make_step(command="echo hello")
-    adapter.dispatch(step, ctx)
-    # Wait for subprocess to finish
-    import time
-    time.sleep(0.3)
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
+    assert _wait_for_exit(dispatched.pid) == 0
     # Write returncode sidecar (normally done by cmd_next)
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
-    rc_path.write_text("0")
+    rc_path.write_text("0", encoding="utf-8")
 
     result = adapter.complete(step, ctx)
     assert result.status == "completed"
@@ -115,12 +130,12 @@ def test_complete_success(adapter: LocalAdapter, tmp_path: Path) -> None:
 
 def test_complete_failure_nonzero_exit(adapter: LocalAdapter, tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path)
-    step = _make_step(command="exit 1")
-    adapter.dispatch(step, ctx)
-    import time
-    time.sleep(0.3)
+    step = _make_step(command="sh -c 'exit 1'")
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
+    assert _wait_for_exit(dispatched.pid) == 1
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
-    rc_path.write_text("1")
+    rc_path.write_text("1", encoding="utf-8")
 
     result = adapter.complete(step, ctx)
     assert result.status == "failed"
@@ -133,15 +148,15 @@ def test_complete_with_produces_check(adapter: LocalAdapter, tmp_path: Path) -> 
         command="echo out",
         produces=(ProducesEntry(name="out", path="out.txt", check=file_nonempty()),),
     )
-    adapter.dispatch(step, ctx)
-    import time
-    time.sleep(0.3)
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
+    assert _wait_for_exit(dispatched.pid) == 0
 
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
-    rc_path.write_text("0")
+    rc_path.write_text("0", encoding="utf-8")
     produces_dir = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "produces"
     produces_dir.mkdir(exist_ok=True)
-    (produces_dir / "out.txt").write_text("output data")
+    (produces_dir / "out.txt").write_text("output data", encoding="utf-8")
 
     result = adapter.complete(step, ctx)
     assert result.status == "completed"
@@ -153,12 +168,12 @@ def test_complete_missing_produces_fails(adapter: LocalAdapter, tmp_path: Path) 
         command="echo ok",
         produces=(ProducesEntry(name="out", path="missing.txt", check=file_nonempty()),),
     )
-    adapter.dispatch(step, ctx)
-    import time
-    time.sleep(0.3)
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
+    assert _wait_for_exit(dispatched.pid) == 0
 
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
-    rc_path.write_text("0")
+    rc_path.write_text("0", encoding="utf-8")
 
     result = adapter.complete(step, ctx)
     assert result.status == "failed"
@@ -167,11 +182,11 @@ def test_complete_missing_produces_fails(adapter: LocalAdapter, tmp_path: Path) 
 def test_complete_cost_omitted_when_absent(adapter: LocalAdapter, tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path)
     step = _make_step()
-    adapter.dispatch(step, ctx)
-    import time
-    time.sleep(0.3)
+    dispatched = adapter.dispatch(step, ctx)
+    assert dispatched.pid is not None
+    assert _wait_for_exit(dispatched.pid) == 0
     rc_path = tmp_path / "runs" / "run-1" / "steps" / "s1" / "v1" / "returncode"
-    rc_path.write_text("0")
+    rc_path.write_text("0", encoding="utf-8")
 
     result = adapter.complete(step, ctx)
     assert result.status == "completed"
@@ -195,8 +210,9 @@ def test_subprocess_outlives_tab_detached(adapter: LocalAdapter, tmp_path: Path)
     assert poll_result.status in ("running", "done")
     
     # Kill the subprocess to clean up
-    import signal
     try:
         os.kill(result.pid, signal.SIGTERM)
     except ProcessLookupError:
         pass  # already exited
+    else:
+        _wait_for_exit(result.pid)

@@ -17,6 +17,11 @@ import pytest
 
 from astrid.core.util.http import HttpClient
 
+
+@pytest.fixture(autouse=True)
+def _fake_fal_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FAL_KEY", "test-fal-key")
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
