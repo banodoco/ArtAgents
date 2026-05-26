@@ -84,7 +84,7 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         1,
         "lease_release_after_inbox_abort",
     ),
-    CallSite("astrid/core/task/lifecycle.py", "cmd_abort", "release_writer_lease"): (
+    CallSite("astrid/core/task/run_store.py", "cmd_abort", "release_writer_lease"): (
         1,
         "lease_release_after_abort",
     ),

@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal, Sequence
 
-from astrid import timeline as timeline_contract
+from astrid.timeline.timeline_model import validate_timeline_config_for_container
 
 from .events.schema import (
     ArrangementReplacedPayload,
@@ -826,7 +826,7 @@ def _inverse_timeline_config_replaced(
             "timeline.config_replaced payload not available",
         )
     try:
-        config = timeline_contract.validate_timeline_config_for_container(before)
+        config = validate_timeline_config_for_container(before)
     except ValueError as exc:
         return _non_invertible(
             event,
