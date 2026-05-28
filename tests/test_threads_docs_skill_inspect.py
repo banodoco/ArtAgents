@@ -85,8 +85,8 @@ def test_historical_thread_plans_do_not_publish_retired_binding_guidance() -> No
         "@active",
     )
     for path in (
-        Path("docs/design-thread-layer.md"),
-        Path("docs/sprint-thread-layer.md"),
+        Path("docs/archive/design-thread-layer.md"),
+        Path("docs/archive/sprint-thread-layer.md"),
     ):
         text = path.read_text(encoding="utf-8")
         assert "Retired context:" in text

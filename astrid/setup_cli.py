@@ -65,25 +65,38 @@ def _plan_projects_root(*, apply: bool) -> SetupStep:
 
 
 def _plan_agents_symlink(root: Path, *, apply: bool) -> SetupStep:
-    """Ensure AGENTS.md is a symlink to SKILL.md so both loaders read the same source."""
+    """Ensure AGENTS.md points directly at the core skill source."""
     agents = root / "AGENTS.md"
-    target = "SKILL.md"
+    target = Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md"
     skill = root / target
     if not skill.is_file():
         return SetupStep(name="agents.md symlink", status="warn", detail=f"{skill} missing; cannot link AGENTS.md")
+    target_text = target.as_posix()
     if agents.is_symlink() and (root / agents.readlink()).resolve() == skill.resolve():
-        return SetupStep(name="agents.md symlink", status="ok", detail=f"AGENTS.md → {target}")
+        if agents.readlink().as_posix() == target_text:
+            return SetupStep(name="agents.md symlink", status="ok", detail=f"AGENTS.md -> {target_text}")
+        status = "applied" if apply else "planned"
+        detail = f"{'updated' if apply else 'will update'} AGENTS.md -> {target_text}"
+        if apply:
+            agents.unlink()
+            agents.symlink_to(target_text)
+        return SetupStep(name="agents.md symlink", status=status, detail=detail)
+    if agents.is_symlink() and not (root / agents.readlink()).exists():
+        kind = "broken symlink"
+    elif agents.is_symlink():
+        kind = "wrong symlink"
+    else:
+        kind = "regular file"
     if not agents.exists() and not agents.is_symlink():
         if apply:
-            agents.symlink_to(target)
-            return SetupStep(name="agents.md symlink", status="applied", detail=f"created AGENTS.md → {target}")
-        return SetupStep(name="agents.md symlink", status="planned", detail=f"will create AGENTS.md → {target}")
-    kind = "wrong symlink" if agents.is_symlink() else "regular file"
+            agents.symlink_to(target_text)
+            return SetupStep(name="agents.md symlink", status="applied", detail=f"created AGENTS.md -> {target_text}")
+        return SetupStep(name="agents.md symlink", status="planned", detail=f"will create AGENTS.md -> {target_text}")
     if apply:
         agents.unlink()
-        agents.symlink_to(target)
-        return SetupStep(name="agents.md symlink", status="applied", detail=f"replaced AGENTS.md ({kind}) with symlink → {target}")
-    return SetupStep(name="agents.md symlink", status="planned", detail=f"will replace AGENTS.md ({kind}) with symlink → {target}")
+        agents.symlink_to(target_text)
+        return SetupStep(name="agents.md symlink", status="applied", detail=f"replaced AGENTS.md ({kind}) with symlink -> {target_text}")
+    return SetupStep(name="agents.md symlink", status="planned", detail=f"will replace AGENTS.md ({kind}) with symlink -> {target_text}")
 
 
 def main(argv: list[str] | None = None) -> int:
