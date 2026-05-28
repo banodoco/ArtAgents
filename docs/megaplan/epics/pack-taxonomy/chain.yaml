@@ -1,0 +1,75 @@
+# Epic: Astrid purpose-shaped pack taxonomy
+# Spec for `megaplan chain start --spec docs/megaplan/epics/pack-taxonomy/chain.yaml`
+#
+# Review docs/megaplan/epics/pack-taxonomy/EPIC.md first. This chain is
+# intentionally staged so metadata and aliases land before broad file moves.
+# It is configured to run all milestones back-to-back:
+#   PYENV_VERSION=3.11.11 megaplan chain start --spec docs/megaplan/epics/pack-taxonomy/chain.yaml
+
+base_branch: main
+merge_policy: auto
+vendor: codex
+
+milestones:
+  - label: m1-taxonomy-foundation
+    idea: docs/megaplan/epics/pack-taxonomy/briefs/m1-taxonomy-foundation.md
+    branch: megaplan/pack-taxonomy-m1-foundation
+    profile: directed
+    robustness: full
+    vendor: codex
+    notes: >
+      Add pack metadata and grouped CLI/docs without broad file moves. Fix the
+      text_review visibility leak and preserve existing runtime behavior.
+
+  - label: m2-alias-compatibility
+    idea: docs/megaplan/epics/pack-taxonomy/briefs/m2-alias-compatibility.md
+    branch: megaplan/pack-taxonomy-m2-aliases
+    profile: partnered
+    robustness: full
+    vendor: codex
+    notes: >
+      Add manifest-declared aliases and registry loading so builtin.*,
+      external.*, and upload.* compatibility is tested before migration.
+
+  - label: m3-examples-cleanup
+    idea: docs/megaplan/epics/pack-taxonomy/briefs/m3-examples-cleanup.md
+    branch: megaplan/pack-taxonomy-m3-examples
+    profile: directed
+    robustness: full
+    vendor: codex
+    notes: >
+      Delete pure scaffold packs and move useful text demo packs into examples.
+      Keep canonical media.clip_extract as the product surface.
+
+  - label: m4-physical-pack-migration
+    idea: docs/megaplan/epics/pack-taxonomy/briefs/m4-physical-pack-migration.md
+    branch: megaplan/pack-taxonomy-m4-migration
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true
+    prep_direction: >
+      Read EPIC.md, M1-M3 handoff artifacts, alias tests, pack discovery code,
+      _paths.executor_argv, validate.py builtin special cases, pipeline.py,
+      orchestrator/executor registries, and hardcoded builtin/external imports.
+      Produce a precise move map before editing. Preserve old ids through
+      aliases and avoid unrelated runtime refactors.
+    notes: >
+      Split builtin/external/upload into purpose-named packs after compatibility
+      exists. Update imports, manifests, docs, generated skill index, and tests.
+      Full CI is required before review.
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+
+driver:
+  robustness: full
+  auto_approve: true
+  on_escalate: abort
+  stall_threshold: 5
+  max_iterations: 120
+  phase_timeout: 3600
+  status_timeout: 60
