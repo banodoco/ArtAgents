@@ -2,52 +2,22 @@
 
 Astrid is a harness toolkit for agents and humans to make art.
 
-## How it works
+> **Agents:** Read [`AGENTS.md`](./AGENTS.md) — the canonical operating guide.
+> The entrypoint flow is `python3 -m astrid next` → `python3 -m astrid status`.
+> Attach only when instructed.
 
-Give this to your agents to get started:
+## Quick start
 
-<div align="center">
-
-```text
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃ ·                                                                        · ┃
-┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳               ═══  A S T R I D  ═══                ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
-┃                                                                            ┃
-┃                             ◇  What This Is  ◇                             ┃
-┃            a harness toolkit for agents and humans to make art             ┃
-┃                                                                            ┃
-┃                EXECUTORS      perform one piece of work                    ┃
-┃                ORCHESTRATORS  combine executors together                   ┃
-┃                ELEMENTS       reusable pieces used by both                 ┃
-◇                                                                            ◇
-┃                           ◇  Getting Started  ◇                            ┃
-┃            git clone https://github.com/peteromallet/Astrid.git            ┃
-┃        python3 -m astrid [executors|orchestrators|packs] list              ┃
-┃       python3 -m astrid modalities list                                    ┃
-┃           python3 -m astrid elements list --kind <kind>                    ┃
-┃        python3 -m astrid [executors|orchestrators] inspect <id>            ┃
-┃       python3 -m astrid elements inspect <kind> <element_id>               ┃
-┃       python3 -m astrid [executors|orchestrators] run <id> -- <args>       ┃
-┃       python3 -m astrid doctor       # health check                        ┃
-┃       python3 -m astrid setup        # configure local env                 ┃
-◇                                                                            ◇
-┃                          ◇  Make Something New  ◇                          ┃
-┃            copy docs/templates/{executor,orchestrator,element}/            ┃
-┃                        read docs/creating-tools.md                         ┃
-┃                                                                            ┃
-┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳          ask the maker what they must do           ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳         docs/ideas.md has a thought or two         ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳       out/runs/ is where the outputs stay           ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳          just begin, you'll find your way          ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
-┃ ·                                                                        · ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
+```bash
+git clone https://github.com/peteromallet/Astrid.git
+cd Astrid
+python3 -m astrid next            # get the next legal action
+python3 -m astrid status          # show session and project detail when needed
+python3 -m astrid attach <project>  # bind to a project (only when instructed)
 ```
 
-</div>
+Deeper discovery (`orchestrators list`, `executors list`, `doctor`, etc.)
+follows after session binding — see [`docs/architecture.md`](docs/architecture.md).
 
 ## License
 

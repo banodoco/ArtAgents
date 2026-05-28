@@ -30,6 +30,6 @@ The plan referenced `tests/_lifecycle_fixtures.py` as a candidate for fixture-fa
 
 ## Related epics
 
-- [Harness Polish](docs/megaplan/epics/harness-polish/EPIC.md) — the parent epic governing m2 test-integrity work.
-- [Pack Taxonomy](docs/megaplan/epics/pack-taxonomy/EPIC.md)
-- [Timeline Event Sourcing](docs/megaplan/epics/timeline-event-sourcing/EPIC.md)
+- [Harness Polish](../megaplan/epics/harness-polish/EPIC.md) — the parent epic governing m2 test-integrity work.
+- [Pack Taxonomy](../megaplan/epics/pack-taxonomy/EPIC.md)
+- [Timeline Event Sourcing](../megaplan/epics/timeline-event-sourcing/EPIC.md)

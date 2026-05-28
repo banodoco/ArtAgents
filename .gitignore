@@ -22,6 +22,7 @@ venv/
 .ruff_cache/
 .coverage
 htmlcov/
+*.egg-info/
 
 # Node / Remotion
 node_modules/
@@ -38,6 +39,7 @@ cache/
 .astrid/
 **/.cas/
 */cache/
+out/
 */out/
 *.log
 *.mp4

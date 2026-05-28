@@ -41,7 +41,7 @@ def make_brief_case(testcase, *, quality_zones=None, refine_report=None):
         {
             "id": "pool_v_stinger",
             "kind": "source",
-                    "category": "visual",
+            "category": "visual",
             "asset": "main",
             "src_start": 0.0,
             "src_end": 4.0,
@@ -54,7 +54,7 @@ def make_brief_case(testcase, *, quality_zones=None, refine_report=None):
         {
             "id": "pool_d_0001",
             "kind": "source",
-                    "category": "dialogue",
+            "category": "dialogue",
             "asset": "main",
             "src_start": 10.0,
             "src_end": 14.2,
@@ -69,7 +69,7 @@ def make_brief_case(testcase, *, quality_zones=None, refine_report=None):
         {
             "id": "pool_v_0001",
             "kind": "source",
-                    "category": "visual",
+            "category": "visual",
             "asset": "main",
             "src_start": 100.0,
             "src_end": 104.0,
@@ -82,7 +82,7 @@ def make_brief_case(testcase, *, quality_zones=None, refine_report=None):
         {
             "id": "pool_d_0002",
             "kind": "source",
-                    "category": "dialogue",
+            "category": "dialogue",
             "asset": "main",
             "src_start": 25.0,
             "src_end": 30.0,
@@ -97,7 +97,7 @@ def make_brief_case(testcase, *, quality_zones=None, refine_report=None):
         {
             "id": "pool_v_0002",
             "kind": "source",
-                    "category": "visual",
+            "category": "visual",
             "asset": "main",
             "src_start": 120.0,
             "src_end": 125.0,
@@ -151,7 +151,7 @@ def make_brief_case(testcase, *, quality_zones=None, refine_report=None):
             {
                 "id": f"pool_d_{order:04d}",
                 "kind": "source",
-                    "category": "dialogue",
+                "category": "dialogue",
                 "asset": "main",
                 "src_start": src_start,
                 "src_end": src_end,

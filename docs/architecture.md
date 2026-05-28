@@ -12,15 +12,21 @@ executable package gateway; every runnable tool is reached via
 
 ## Onboarding Commands
 
-Run these from the repository root before editing:
+Start with session-aware verbs before exploring the registry:
 
 ```bash
-python3 -m astrid --help
-git status --short
-python3 -m astrid doctor
+python3 -m astrid status          # list sessions and projects
+python3 -m astrid next            # get the next legal action
+python3 -m astrid attach <project>  # bind to a project (only when instructed)
+```
+
+After binding, deeper discovery commands become available:
+
+```bash
 python3 -m astrid orchestrators list
 python3 -m astrid executors list
 python3 -m astrid elements list
+python3 -m astrid doctor
 python3 -m astrid setup
 ```
 
