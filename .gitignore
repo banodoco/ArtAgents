@@ -70,6 +70,7 @@ plan_v1.revised.md
 .megaplan/
 .compactify/
 .megaplan-worktrees/
+mgt-*/
 *.bak
 
 # Local scratch pack (gitignored)
