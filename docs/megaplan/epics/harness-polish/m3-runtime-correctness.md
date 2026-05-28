@@ -25,8 +25,9 @@ sprint: today these bugs can silently stall or corrupt a run — in production, 
 3. **Map the terminal-event paths and design the `_finalize_step` choke-point** (see below).
 4. **Determine `threads/` liveness** (does any in-process concurrent caller touch `ThreadIndexStore`?) and
    **write the verdict** — this is an m3→m5a handoff artifact; m5a must not have to guess.
-5. **Ground-truth the step model from CODE, not the planning docs.** `idea.md` and archived `docs/archive/project.md` contradict
-   each other on the `code`/`attested`/`nested` model; the code is authoritative for this work.
+5. **Ground-truth the step model from CODE, not planning docs.** Retired
+   planning notes contradicted the shipped `code`/`attested`/`nested` model; the
+   code is authoritative for this work.
 
 ## Scope (IN)
 **The single choke-point (the root fix, not N patches):**

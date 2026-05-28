@@ -83,9 +83,9 @@ CI status, manifest-loading policy, session-helper caveat, and reviewer
 checklist. It is limited to Sprint 0 prerequisites and does not claim later
 sprint migrations or reshape behavior are complete.
 
-`idea.md` and `docs/reshape/review-findings.md` are protected reshape planning
-inputs. Sprint 0 docs may reference them as provenance, but Sprint 0 does not
-claim their existing worktree diffs as implementation output.
+Retired reshape planning inputs are not current operating guidance. Sprint 0
+handoff docs preserve only the implementation evidence needed to replay or
+audit that sprint.
 
 ## Sprint 0 Deliverables
 

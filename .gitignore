@@ -42,6 +42,8 @@ cache/
 out/
 */out/
 *.log
+*.preview.*
+*tmp_*
 *.mp4
 *.mov
 *.wav
@@ -68,6 +70,7 @@ plan_v1.revised.md
 .claude/
 .desloppify/
 .megaplan/
+.megaplan-agentic/
 .compactify/
 .megaplan-worktrees/
 mgt-*/
