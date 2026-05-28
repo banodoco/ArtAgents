@@ -34,8 +34,8 @@ no still-imported no-op shim, no stray `sys.modules` injection, no dangling `__a
 - README `elements inspect <id>` is wrong — code needs `inspect <kind> <element_id>` (`core/element/cli.py:72-78`). Fix README:28.
 - README:38 "runs/ is where the outputs stay" — outputs land in `out/runs/`. Fix.
 - README usage block omits the `packs`/`modalities` verb families — add or deliberately document why not.
-- **Pick ONE canonical planning doc** among `idea.md`/`plan_v2.md`/`project.md`/`plan_revision.json`; mark the rest
-  obsolete/archived; resolve the `idea.md` vs `project.md` step-model contradiction (use the model the CODE
+- **Pick ONE canonical planning doc** among `idea.md`/archived `docs/archive/plan_v2.md`/archived `docs/archive/project.md`/`plan_revision.json`; mark the rest
+  obsolete/archived; resolve the `idea.md` vs archived `docs/archive/project.md` step-model contradiction (use the model the CODE
   implements — m3 already ground-truthed this; cite its conclusion).
 - Fix `docs/templates/{executor,orchestrator}/*.yaml` stubs so a scaffolded tool validates (add `schema_version`
   etc.); add the missing `docs/templates/element/STAGE.md`.
@@ -70,5 +70,5 @@ no still-imported no-op shim, no stray `sys.modules` injection, no dangling `__a
 ## Touchpoints
 - `astrid/threads/.../wrapper.py:30-63`, `astrid/threads/__init__.py:3-10`, `astrid/packs/builtin/_legacy/*`, `astrid/contracts/schema.py:46-47`
 - `astrid/modalities/__init__.py`, `astrid/elements/__init__.py`, `astrid/domains/`, `astrid/orchestrate/__init__.py`
-- `README.md:28,38`, `astrid/core/element/cli.py:72-78`, `idea.md`, `plan_v2.md`, `project.md`, `plan_revision.json`, `docs/templates/{executor,orchestrator,element}/`
+- `README.md:28,38`, `astrid/core/element/cli.py:72-78`, `idea.md`, archived `docs/archive/plan_v2.md`, archived `docs/archive/project.md`, `plan_revision.json`, `docs/templates/{executor,orchestrator,element}/`
 - New: `tests/verify_docs_commands.sh`

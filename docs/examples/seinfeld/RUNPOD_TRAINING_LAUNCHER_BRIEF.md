@@ -9,7 +9,7 @@ existing `runs/seinfeld-dataset/` (131 accepted clips +
 RunPod GPU pod using Ostris's `ai-toolkit`, with the AI Toolkit UI
 exposed for live sample review and a human-gated checkpoint pick.
 
-This sprint implements **lora_train (Phase 2)** from `project.md`. It
+This sprint implements **lora_train (Phase 2)** from `docs/archive/project.md`. It
 does **not** implement the broader `seinfeld_demo` umbrella that chains
 `dataset_build → lora_train → script_to_shots → scene_render`; that is
 a separate follow-up sprint (see "Out of scope" below).
@@ -62,9 +62,9 @@ These items were identified as gaps after the initial brief was written. The pla
 
 10. **Reproducibility seed**: Default `seed: 42` in the ai-toolkit config. Expose `--seed` on `lora_train` so the human can vary it for the same dataset. Record the seed used in `registered_lora.json`.
 
-## Architecture (aligned with `project.md` and the existing skeleton)
+## Architecture (aligned with `docs/archive/project.md` and the existing skeleton)
 
-`project.md` defines four seinfeld orchestrators (`dataset_build`,
+`docs/archive/project.md` defines four seinfeld orchestrators (`dataset_build`,
 `lora_train`, `script_to_shots`, `scene_render`) plus a top-level
 `seinfeld_demo` chaining them. The `lora_train` STAGE.md already
 specifies the step list and target executor names. This brief fills
@@ -215,7 +215,7 @@ Runs inference samples on the pod for both baseline LTX (no LoRA) and each check
 Inputs: `pod_handle`, `checkpoint_manifest`, `vocabulary` (for prompt construction), `prompts` (optional explicit list — defaults to deriving from vocabulary).
 Outputs: `<out>/eval_grid/baseline/*.mp4`, `<out>/eval_grid/<step>/*.mp4`, `<out>/eval_grid/index.html`.
 
-This step is what makes the human gate trustworthy. Don't skip it; per `project.md` risk #3, character identity across cuts is exactly what the grid is checking for.
+This step is what makes the human gate trustworthy. Don't skip it; per `docs/archive/project.md` risk #3, character identity across cuts is exactly what the grid is checking for.
 
 ### `seinfeld.lora_register` (executor)
 
@@ -287,7 +287,7 @@ child_executors:
 - `astrid/packs/external/vibecomfy/` — another external-service wrapper, cross-reference for unclear cases.
 - `astrid/packs/seinfeld/dataset_build/run.py` and `orchestrator.yaml` — pattern for seinfeld-internal orchestrators.
 - `astrid/packs/seinfeld/lora_train/STAGE.md` — the spec we're implementing.
-- `project.md` — the canonical project plan with the four-orchestrator architecture.
+- `docs/archive/project.md` — the canonical project plan with the four-orchestrator architecture.
 - The `ostris/ai-toolkit` upstream once submoduled — for the config schema.
 
 ## Constraints / non-goals
@@ -322,8 +322,8 @@ child_executors:
 
 ## Out of scope (next sprints)
 
-- **`seinfeld_demo` umbrella orchestrator**: chains `dataset_build → lora_train → script_to_shots → scene_render` per `project.md`. Each stage is a discrete invocation; the umbrella shouldn't run the whole thing end-to-end in one shot (training takes hours and needs human review in the middle). Instead, it should expose a task-list-style entry point: `astrid seinfeld next` prints the next step the user should run, with copy-pasteable commands.
-- **`script_to_shots`** and **`scene_render`** orchestrators (Phases 3 and 4 of `project.md`).
+- **`seinfeld_demo` umbrella orchestrator**: chains `dataset_build → lora_train → script_to_shots → scene_render` per `docs/archive/project.md`. Each stage is a discrete invocation; the umbrella shouldn't run the whole thing end-to-end in one shot (training takes hours and needs human review in the middle). Instead, it should expose a task-list-style entry point: `astrid seinfeld next` prints the next step the user should run, with copy-pasteable commands.
+- **`script_to_shots`** and **`scene_render`** orchestrators (Phases 3 and 4 of `docs/archive/project.md`).
 - **Live training-run smoke test on a real RunPod pod**: this brief gets acceptance criteria via dry-run + unit tests; verifying the end-to-end run works against a live pod is a separate manual step the human performs.
 - **Auto-resume from `last_run.json`** (data is written but not consumed).
 - **Multi-GPU training, distributed training, gradient checkpointing tuning.**
@@ -338,7 +338,7 @@ child_executors:
 - `astrid/packs/seinfeld/lora_train/STAGE.md` — the spec being filled in.
 - `astrid/packs/external/runpod/run.py` — the lifecycle helpers to call.
 - `astrid/core/runpod/storage.py` — `ensure_storage()` for the network volume.
-- `project.md` — canonical four-orchestrator project plan.
+- `docs/archive/project.md` — canonical four-orchestrator project plan.
 - `AGENTS.md` — executors/orchestrators contract and build-order rule.
 - `docs/creating-tools.md` — build-order rule expanded.
 - `docs/templates/executor/`, `docs/templates/orchestrator/` — scaffolding.

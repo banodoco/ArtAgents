@@ -155,7 +155,7 @@ runs/seinfeld-dataset/
 ## What's NOT in scope here
 
 - Training itself — that's `seinfeld.lora_train`.
-- RunPod lifecycle — separate cross-cutting refactor (see project.md "Cross-cutting infra").
+- RunPod lifecycle — separate cross-cutting refactor (see docs/archive/project.md "Cross-cutting infra").
 - Anything to do with rendering or script generation.
 
 ## Open questions / blockers
@@ -163,7 +163,7 @@ runs/seinfeld-dataset/
 Surface these to the user before implementing:
 
 1. **Pack location: gitignored or committed?**
-   Currently `astrid/packs/seinfeld/` is gitignored (matches `project.md`).
+   Currently `astrid/packs/seinfeld/` is gitignored (matches `docs/archive/project.md`).
    If this is real ongoing infra, flip — just drop the line in `.gitignore`.
 
 2. **VLM cost.** A naïve loop sends every scene clip to the API. Order of
@@ -174,7 +174,7 @@ Surface these to the user before implementing:
    transcript keyword match (needs `builtin.transcribe` first), or
    `visual_understand` on the middle frame as a sub-cent first-gate.
 
-4. **Source legality.** project.md mentions YouTube ToS. For a demo this is
+4. **Source legality.** docs/archive/project.md mentions YouTube ToS. For a demo this is
    fine; if it goes public we need a different sourcing plan.
 
 5. **Bucket target shape.** Per-scene? Per (scene × character)? Per
@@ -189,4 +189,4 @@ Surface these to the user before implementing:
 - Treat the **tables above** as the current source-of-truth list of tools.
   When we build a new executor, move it from "we need to build" to "exists".
 - Treat **Open questions** as a live punch list — close them as we go.
-- Cross-link to `project.md` for the big picture, not the implementation details.
+- Cross-link to `docs/archive/project.md` for the big picture, not the implementation details.

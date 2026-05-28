@@ -1,7 +1,7 @@
 # Epic: Timeline event sourcing with dual backends
 # Spec for `megaplan chain start --spec docs/megaplan/epics/timeline-event-sourcing/chain.yaml`
 #
-# See EPIC.md in this directory for the overarching vision.
+# See docs/megaplan/epics/timeline-event-sourcing/EPIC.md for the overarching vision.
 # Each milestone has its own brief at m<N>-*.md.
 
 base_branch: megaplan/git-backed-packs-chain-setup

@@ -235,7 +235,7 @@ class RefineTest(unittest.TestCase):
         return {
             "id": entry_id,
             "kind": "source",
-                    "category": "visual",
+            "category": "visual",
             "asset": asset,
             "src_start": src_start,
             "src_end": src_end,

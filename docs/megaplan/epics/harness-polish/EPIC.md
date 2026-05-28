@@ -179,7 +179,7 @@ of history is permitted per the non-negotiable constraint above.
 
 ## Cross-references
 
-- [Root EPIC.md](../../../EPIC.md) — m3 handoff entries surfaced during m2 test-integrity work (denylist removals, strict xfails, deferred product bugs).
+- [Archived root EPIC.md](../../../archive/EPIC.md) — m3 handoff entries surfaced during m2 test-integrity work (denylist removals, strict xfails, deferred product bugs).
 
 ## m5a taxonomy handoff
 

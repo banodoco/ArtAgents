@@ -93,7 +93,12 @@ def main(argv: list[str] | None = None) -> int:
         _print_entrypoint_help()
         return 0
     if first_arg == "--version":
-        print("astrid")
+        try:
+            from importlib.metadata import version
+
+            print(f"astrid {version('astrid')}")
+        except Exception:
+            print("astrid")
         return 0
     # Help for a subcommand (e.g. `astrid elements list --help`) must never
     # require a bound session — argparse should print usage and exit 0
@@ -214,8 +219,8 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
 
 
 def _print_unbound_gate_recovery(message: str) -> None:
-    print("first recovery action: astrid status", file=sys.stderr)
     print(message, file=sys.stderr)
+    print("run `astrid status` to see available projects and next steps", file=sys.stderr)
 
 
 def _dispatch(raw: list[str]) -> int:
@@ -817,11 +822,17 @@ def _print_entrypoint_help() -> None:
 Usage:
   python3 -m astrid doctor
   python3 -m astrid setup [--apply]
+
+Start here:
+  python3 -m astrid next
+  python3 -m astrid status
+  python3 -m astrid attach [<project>]  # only when next/status tells you to bind
+
     # orchestrators — multi-step pipelines
   python3 -m astrid orchestrators {{list,inspect,validate,fork,run}} ...
-    # authoring \\u2014 create and compile new tools
+    # authoring -- create and compile new tools
   python3 -m astrid author {{new,check,describe,compile,test,explain}} <pack>.<name>
-    # task-mode \\u2014 lifecycle verbs for running orchestrated plans
+    # task-mode -- lifecycle verbs for running orchestrated plans
   Task-mode operator verbs:
     python3 -m astrid start <pack>.<name> --project <slug> [--name <run-id>]
     python3 -m astrid abort --project <slug>
@@ -839,14 +850,14 @@ Usage:
     python3 -m astrid ack <step> --project <slug> --decision {{approve,retry,iterate,abort}} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
     python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/HOOKS.md
     python3 -m astrid skip   # skip a step (use --help for details)
-    # sessions \\u2014 tab binding and takeover
+    # sessions -- tab binding and takeover
   Session verbs (Sprint 1):
     python3 -m astrid attach [<project>] [--default] [--timeline <slug>] [--session <id>] [--as agent:<id>]
     python3 -m astrid status
     python3 -m astrid sessions {{ls,detach,takeover}} ...
-    # skills \\u2014 installable agent capabilities
+    # skills -- installable agent capabilities
   python3 -m astrid skills {{list,install,uninstall,sync,doctor}} ...
-    # packs \\u2014 build and validate packs
+    # packs -- build and validate packs
   python3 -m astrid packs {{{packs_verbs}}} ...
     # executors — single-step CLI tools
   python3 -m astrid executors {{new,list,inspect,validate,fork,install,run}} ...
@@ -854,18 +865,18 @@ Usage:
   python3 -m astrid elements {{list,inspect,fork,install}} ...
     # projects — project CRUD
   python3 -m astrid projects {{ls,default,create,show,source}} ...
-    # timelines \\u2014 timeline management
+    # timelines -- timeline management
   python3 -m astrid timelines {{ls,create,show,rename,finalize,tombstone,purge,set-default}} ...
-    # models \\u2014 model catalog discovery
+    # models -- model catalog discovery
   python3 -m astrid models {{list,show}} ...
-    # modalities \\u2014 output modality discovery
+    # modalities -- output modality discovery
   python3 -m astrid modalities {{list,inspect}} ...
   python3 -m astrid reigh-data --project-id PROJECT_ID [--out PATH]
   python3 -m astrid worker --pool banodoco [--worker-id ID] [--max-iterations N]
-    # run-audit \\u2014 inspect completed runs
+    # run-audit -- inspect completed runs
   python3 -m astrid events {{verify,tail}} --run <id> --project <slug>
   python3 -m astrid audit --run RUN_DIR
-    # infrastructure \\u2014 setup, events, worker, runpod
+    # infrastructure -- setup, events, worker, runpod
   python3 -m astrid runpod sweep [--hard] [--dry-run] [--projects-root PATH]
   python3 -m astrid runpod volumes ls
   python3 -m astrid runpod ensure-storage <name> [--size <GB>] [--datacenter <id>]
@@ -875,11 +886,6 @@ Usage:
   python3 -m astrid upload-youtube ...
   python3 -m astrid --video SRC --brief BRIEF --out out/runs/name [--render]
   python3 -m astrid --brief BRIEF --out out/runs/name --target-duration SECONDS [--render]
-Start here:
-  python3 -m astrid status
-  python3 -m astrid attach [<project>]
-  python3 -m astrid projects ls
-
 Build a new pack:
   python3 -m astrid packs new <id>
   python3 -m astrid executors new <pack>.<slug>

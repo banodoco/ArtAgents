@@ -110,5 +110,5 @@ runs/seinfeld-lora/
 
 - ai-toolkit by ostris: https://github.com/ostris/ai-toolkit (pinned at SHA in `seinfeld.repo_setup`).
 - The eval grid is what makes the human gate trustworthy — don't skip it
-  even if a quick visual on one prompt looks good. `project.md` risk #3
+  even if a quick visual on one prompt looks good. `docs/archive/project.md` risk #3
   (character identity across cuts) is exactly what the grid is checking for.
