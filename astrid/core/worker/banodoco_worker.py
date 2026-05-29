@@ -40,10 +40,9 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
-from astrid.core.project import paths as project_paths
+from astrid.contracts.run_status import RunStatus
 from astrid.core.project.run import write_run_record
 from astrid.core.reigh import env as reigh_env
 from astrid.core.reigh.data_provider import SupabaseDataProvider
@@ -53,7 +52,8 @@ from astrid.core.reigh.task_client import (
     claim_next_task,
     update_task_status,
 )
-from astrid.core.reigh.timeline_io import Mutator, RawTimelinePayload as TimelineConfig
+from astrid.core.reigh.timeline_io import Mutator
+from astrid.core.reigh.timeline_io import RawTimelinePayload as TimelineConfig
 from astrid.core.reigh.worker_jwt import JwtVerificationError, VerifiedJwt, verify_user_jwt
 
 logger = logging.getLogger(__name__)
@@ -233,10 +233,10 @@ def _worker_append_events(
             f"remote-only claim deferred to m6 (project_id={project_id})"
         )
 
-    from astrid.core.timeline._edit_helpers import pack_write_gateway
-    from astrid.core.timeline.paths import find_timeline_by_event_stream_id
-    from astrid.core.timeline.events.schema import TimelineActor
     from astrid import timeline as timeline_contract
+    from astrid.core.timeline._edit_helpers import pack_write_gateway
+    from astrid.core.timeline.events.schema import TimelineActor
+    from astrid.core.timeline.paths import find_timeline_by_event_stream_id
 
     # Resolve a local timeline slug from the remote timeline_id (event-stream UUID).
     found = find_timeline_by_event_stream_id(project_slug, timeline_id)
@@ -473,7 +473,7 @@ class BanodocoWorker:
         }
         update_task_status(
             task_id,
-            status="Complete",
+            status=RunStatus.COMPLETED.to_reigh_wire(),
             result_data=result_data,
             service_role_key=service_role_key,
         )
@@ -489,7 +489,7 @@ class BanodocoWorker:
         try:
             update_task_status(
                 task_id,
-                status="Failed",
+                status=RunStatus.FAILED.to_reigh_wire(),
                 error=error,
                 result_data={"correlation_id": correlation_id},
                 service_role_key=service_role_key,

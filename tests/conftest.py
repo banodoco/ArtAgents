@@ -37,6 +37,36 @@ if "ASTRID_TIMELINE_COMPOSITION_SRC" not in os.environ:
 os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
 
 
+def make_session(**overrides: Any) -> Any:
+    """Create a :class:`Session` dataclass with sensible test defaults.
+
+    Use ``**overrides`` to customize any field. The defaults produce::
+
+        id="S-TEST", project="demo", agent_id="claude-1",
+        attached_at="2026-05-11T00:00:00Z", last_used_at="2026-05-11T00:00:00Z",
+        role="writer", timeline=None, timeline_id=None, run_id=None
+
+    Callers that also need on-disk persistence typically follow with
+    ``sess.to_json(session_path(sess.id))`` or use the ``mint_session``
+    fixture which writes the session file for you.
+    """
+    from astrid.core.session.model import Session
+
+    defaults: dict[str, Any] = dict(
+        id="S-TEST",
+        project="demo",
+        agent_id="claude-1",
+        attached_at="2026-05-11T00:00:00Z",
+        last_used_at="2026-05-11T00:00:00Z",
+        role="writer",
+        timeline=None,
+        timeline_id=None,
+        run_id=None,
+    )
+    defaults.update(overrides)
+    return Session(**defaults)
+
+
 @pytest.fixture
 def mint_session() -> Callable[..., Any]:
     """Return a callable that writes an explicit session fixture to disk."""
@@ -51,19 +81,15 @@ def mint_session() -> Callable[..., Any]:
         timeline: str | None = None,
         agent_id: str = "claude-1",
     ) -> Any:
-        from astrid.core.session.model import Session
-
         sessions = astrid_home / "sessions"
         sessions.mkdir(parents=True, exist_ok=True)
-        sess = Session(
+        sess = make_session(
             id=sid,
             project=project,
-            timeline=timeline,
             run_id=run_id,
             agent_id=agent_id,
-            attached_at="2026-05-11T00:00:00Z",
-            last_used_at="2026-05-11T00:00:00Z",
-            role=role,  # type: ignore[arg-type]
+            timeline=timeline,
+            role=role,
         )
         sess.to_json(sessions / f"{sid}.json")
         return sess
@@ -197,7 +223,6 @@ def _seed_identity_and_session(
     from astrid.core.project.paths import project_dir
     from astrid.core.session.identity import Identity, write_identity
     from astrid.core.session.lease import write_lease_init
-    from astrid.core.session.model import Session
     from astrid.core.session.paths import session_path
     from astrid.core.session.ulid import generate_ulid
 
@@ -232,14 +257,9 @@ def _seed_identity_and_session(
         write_lease_init(run_path, session_id=sid, plan_hash="")
         write_current_run(project, run_id)
 
-    sess = Session(
+    sess = make_session(
         id=sid,
         project=project,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-        timeline=None,
         run_id=run_id,
     )
     sess.to_json(session_path(sid))

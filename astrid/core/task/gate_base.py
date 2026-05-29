@@ -14,10 +14,14 @@ ITERATE_FEEDBACK_PREFIX = "iterate_feedback="
 class TaskRunGateError(RuntimeError):
     """Raised when task-mode dispatch is rejected."""
 
-    def __init__(self, reason: str, recovery: str) -> None:
+    def __init__(self, reason: str, recovery: str, code: str | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
         self.recovery = recovery
+        # Additive machine-readable slug for agent branching. Optional and
+        # appended last so existing catch sites that read only
+        # reason/recovery keep working unchanged.
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -62,6 +66,10 @@ class InlineCheckResult:
     events: tuple[dict[str, Any], ...] = field(default_factory=tuple, compare=False)
 
 
-def _reject(slug: str, reason: str, *, abort: bool) -> NoReturn:
+def _reject(
+    slug: str, reason: str, *, abort: bool, code: str = "gate_rejected"
+) -> NoReturn:
     verb = "abort" if abort else "next"
-    raise TaskRunGateError(reason=reason, recovery=f"astrid {verb} --project {slug}")
+    raise TaskRunGateError(
+        reason=reason, recovery=f"astrid {verb} --project {slug}", code=code
+    )

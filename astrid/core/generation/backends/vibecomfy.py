@@ -352,6 +352,7 @@ class VibeComfyBackend(BackendAdapter):
             duration_ms=duration_ms,
             applied_features=applied_features,
             dropped_features=dropped_features,
+            error=None,
         )
 
 

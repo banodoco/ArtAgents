@@ -13,8 +13,8 @@ import os
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from astrid.core.project.project import create_project
 from astrid.core.project.paths import PROJECTS_ROOT_ENV
+from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session
 from astrid.core.session.paths import session_path
@@ -64,16 +64,9 @@ def bind_writer_session(
     sid = sid or f"S-{project}-{run_id or 'pending'}"
     os.environ[PROJECTS_ROOT_ENV] = str(projects_root)
     os.environ[ASTRID_SESSION_ID_ENV] = sid
-    sess = Session(
-        id=sid,
-        project=project,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-        timeline=None,
-        run_id=run_id,
-    )
+    from tests.conftest import make_session
+
+    sess = make_session(id=sid, project=project, agent_id="claude-1", run_id=run_id)
     path = session_path(sid)
     path.parent.mkdir(parents=True, exist_ok=True)
     sess.to_json(path)

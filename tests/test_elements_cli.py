@@ -1,5 +1,3 @@
-import contextlib
-import io
 import json
 import os
 import tempfile
@@ -9,15 +7,13 @@ from pathlib import Path
 from astrid.core.element import cli
 from astrid.core.element.install import build_element_install_plan
 from astrid.core.element.registry import load_default_registry
+from tests.helpers.cli_runner import run_cli
 
 
 class ElementsCliTest(unittest.TestCase):
     def capture(self, argv):
-        stdout = io.StringIO()
-        stderr = io.StringIO()
-        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            result = cli.main(argv)
-        return result, stdout.getvalue(), stderr.getvalue()
+        r = run_cli(cli.main, argv)
+        return r.exit_code, r.stdout, r.stderr
 
     def test_list_inspect_and_validate(self) -> None:
         result, stdout, stderr = self.capture(["list", "--json", "--kind", "effects"])

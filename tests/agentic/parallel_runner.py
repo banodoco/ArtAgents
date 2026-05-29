@@ -21,6 +21,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -28,6 +29,9 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
+
+# Per-suite sandbox under $TMPDIR — never touches the developer's real ~/.astrid.
+_SUITE_SANDBOX = Path(tempfile.gettempdir()) / "astrid-agentic-suite"
 
 
 def _parallel_root(run_tag: str) -> Path:
@@ -85,7 +89,7 @@ def _run_one(
     # identity; otherwise synthesize a minimal valid record.
     isolated_identity = home_dir / "identity.json"
     if not isolated_identity.exists():
-        source_identity = Path.home() / ".astrid" / "identity.json"
+        source_identity = _SUITE_SANDBOX / "home" / "identity.json"
         if source_identity.is_file():
             shutil.copyfile(source_identity, isolated_identity)
         else:

@@ -234,7 +234,9 @@ def _dry_run_stdout(argv: list[str]) -> str:
     with redirect_stdout(out), redirect_stderr(err):
         rc = executor_cli_main(argv)
     assert rc == 0, err.getvalue()
-    return out.getvalue().strip()
+    # Command echo goes to stderr (T1); return combined so assertions on command
+    # content continue to work regardless of which stream carries the echo.
+    return (err.getvalue() + out.getvalue()).strip()
 
 
 def test_runpod_dry_run_forwards_supplied_flags_and_omits_absent_optional_flags(

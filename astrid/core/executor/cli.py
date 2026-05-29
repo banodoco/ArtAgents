@@ -69,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    list_parser = subparsers.add_parser("list", help="List available executors.")
+    list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available executors.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--kind", choices=("built_in", "external"), help="Filter executors by kind.")
     list_parser.add_argument("--pack", help="Filter executors by source pack id.")
@@ -139,6 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--privacy-status", default=None, help="YouTube privacy status: private, unlisted, or public.")
     run_parser.add_argument("--playlist-id", help="Optional YouTube playlist ID.")
     run_parser.add_argument("--made-for-kids", action="store_true", help="Mark the video as made for kids.")
+    run_parser.add_argument("--json", action="store_true", help="Suppress the command echo and emit only the JSON payload to stdout.")
     run_parser.set_defaults(handler=_cmd_run)
 
     new_parser = subparsers.add_parser("new", help="Scaffold a new executor in an existing pack.")
@@ -764,7 +765,7 @@ def _cmd_install(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     if plan.python_path is not None:
         print(f"python: {plan.python_path}")
     for command in plan.commands:
-        print(shlex.join(command))
+        print(shlex.join(command), file=sys.stderr)
     return result.returncode
 
 
@@ -808,10 +809,16 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     if result.skipped:
         print(f"{args.executor_id}: skipped: {result.skipped_reason}")
         return 0
-    if result.command:
-        print(shlex.join(result.command))
+    emit_json = bool(getattr(args, "json", False))
+    if result.command and not emit_json:
+        print(shlex.join(result.command), file=sys.stderr)
     if result.payload:
         print(json.dumps(dict(result.payload), separators=(",", ":"), sort_keys=True))
+    # Success/failure flows through ``ok``/``error`` (returncode is descriptive).
+    if not result.ok:
+        if result.error is not None:
+            print(f"{args.executor_id}: {result.error.message}", file=sys.stderr)
+        return int(result.returncode or 1)
     rc = int(result.returncode or 0)
     if rc == 0 and project_uuid is not None and not args.dry_run:
         rc = _emit_uuid_handoff_metadata(

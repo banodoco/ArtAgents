@@ -8,8 +8,11 @@ import shutil
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
+import pytest
+
 from astrid.orchestrate import cli as author_cli
 
+pytestmark = pytest.mark.opt_in
 
 _REPO_PACKS = Path(__file__).resolve().parents[1] / "astrid" / "packs"
 

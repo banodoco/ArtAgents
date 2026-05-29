@@ -10,6 +10,9 @@ from typing import Any, cast
 
 # Single source of truth for element kinds lives in astrid.core.pack to avoid a
 # circular import (element.__init__ would import pack.py during schema load).
+from astrid.contracts.capability_schema import (
+    validate_capability_text as _validate_capability_text,
+)
 from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
 from astrid.core.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import ELEMENT_KINDS, ElementKind
@@ -204,6 +207,7 @@ def validate_element_definition(raw: ElementDefinition | dict[str, Any]) -> Elem
         definition.short_description,
         definition.keywords,
         manifest_id=f"{definition.kind}/{definition.id}",
+        error_cls=ElementValidationError,
     )
     return definition
 
@@ -276,12 +280,6 @@ def _validate_kind(kind: str) -> ElementKind:
     return cast(ElementKind, kind)
 
 
-SHORT_DESCRIPTION_MAX_LEN = 120
-DESCRIPTION_MAX_LEN = 500
-KEYWORD_MAX_LEN = 32
-KEYWORDS_MAX_COUNT = 12
-
-
 def _optional_capability_string(payload: dict[str, Any], key: str, manifest_path: Path) -> str:
     value = payload.get(key)
     if value is None:
@@ -300,46 +298,6 @@ def _optional_capability_string_list(
     if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
         raise ElementValidationError(f"{manifest_path}: {key} must be a list of strings")
     return tuple(raw)
-
-
-def _validate_capability_text(
-    description: str,
-    short_description: str,
-    keywords: tuple[str, ...],
-    *,
-    manifest_id: str,
-) -> None:
-    if len(description) > DESCRIPTION_MAX_LEN:
-        raise ElementValidationError(
-            f"{manifest_id}: description is {len(description)} chars; max is {DESCRIPTION_MAX_LEN}"
-        )
-    if len(short_description) > SHORT_DESCRIPTION_MAX_LEN:
-        raise ElementValidationError(
-            f"{manifest_id}: short_description is {len(short_description)} chars; max is {SHORT_DESCRIPTION_MAX_LEN}"
-        )
-    if len(keywords) > KEYWORDS_MAX_COUNT:
-        raise ElementValidationError(
-            f"{manifest_id}: keywords has {len(keywords)} entries; max is {KEYWORDS_MAX_COUNT}"
-        )
-    seen: set[str] = set()
-    for index, keyword in enumerate(keywords):
-        if len(keyword) > KEYWORD_MAX_LEN:
-            raise ElementValidationError(
-                f"{manifest_id}: keywords[{index}] is {len(keyword)} chars; max is {KEYWORD_MAX_LEN}"
-            )
-        if any(ch.isspace() for ch in keyword):
-            raise ElementValidationError(
-                f"{manifest_id}: keywords[{index}] {keyword!r} must not contain whitespace"
-            )
-        if keyword.lower() != keyword:
-            raise ElementValidationError(
-                f"{manifest_id}: keywords[{index}] {keyword!r} must be lowercase"
-            )
-        if keyword in seen:
-            raise ElementValidationError(
-                f"{manifest_id}: keywords[{index}] {keyword!r} is a duplicate"
-            )
-        seen.add(keyword)
 
 
 def _validate_id(value: str, path: str) -> None:

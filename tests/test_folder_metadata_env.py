@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from astrid.core.executor.folder import load_folder_executor
 from astrid.core.orchestrator.folder import load_folder_orchestrator
 
+# Unique sentinel placed on ``sys.path`` so the assertion does not depend on the
+# checkout directory name (the loader builds the child PYTHONPATH from
+# ``sys.path``). This keeps the test green in any worktree.
+_PYTHONPATH_SENTINEL = "astrid-quality-sprint"
+
 
 def test_folder_executor_metadata_uses_controlled_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ASTRID_FOLDER_SECRET", "leaked")
+    monkeypatch.syspath_prepend(_PYTHONPATH_SENTINEL)
     root = tmp_path / "folder_exec"
     root.mkdir()
     (root / "executor.py").write_text(
@@ -37,6 +44,7 @@ EXECUTOR = {
 
 def test_folder_orchestrator_metadata_uses_controlled_env(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ASTRID_FOLDER_SECRET", "leaked")
+    monkeypatch.syspath_prepend(_PYTHONPATH_SENTINEL)
     root = tmp_path / "folder_orch"
     root.mkdir()
     (root / "orchestrator.py").write_text(

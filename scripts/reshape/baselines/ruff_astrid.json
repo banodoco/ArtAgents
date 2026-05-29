@@ -1,14 +1,10 @@
 {
   "tool": "ruff",
   "scope": [
-    "astrid",
-    "scripts/reshape",
-    "tests/reshape",
-    "tests/concurrency/two_tab_harness.py",
-    "tests/concurrency/test_two_tab_harness_smoke.py"
+    "pyproject.toml [tool.ruff].include"
   ],
   "command": [
-    "python3",
+    "/Users/peteromalley/.pyenv/versions/3.11.11/bin/python3",
     "-m",
     "ruff",
     "check",
@@ -16,16 +12,15 @@
     "--output-format",
     "json"
   ],
-  "finding_count": 1003,
+  "finding_count": 1004,
   "code_counts": {
+    "I001": 223,
+    "F401": 128,
     "E402": 609,
-    "I001": 236,
-    "F401": 105,
     "F821": 19,
-    "F541": 18,
+    "F541": 11,
     "F841": 11,
-    "F811": 2,
-    "E702": 2,
-    "F402": 1
+    "F811": 1,
+    "E702": 2
   }
 }

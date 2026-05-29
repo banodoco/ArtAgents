@@ -25,22 +25,27 @@ run_quarantine_lane() {
 
   echo "QUARANTINE owner=${owner} expiry=${expiry} path=${path}"
   echo "  reason: ${reason}"
-  if "$PYTHON_BIN" -m pytest "$path" -q; then
+  # Select by marker so the lane remains run-but-allowed-to-fail even if the
+  # file gains non-opt_in tests in the future.
+  if "$PYTHON_BIN" -m pytest "$path" -m opt_in -q; then
     echo "  status: pass"
   else
     echo "  status: fail (non-blocking)"
   fi
 }
 
+# SD-CI-LANES: three distinct mechanisms, kept separate.
+#
+# TARGETED_BLOCKING_TESTS  — by-path blocking pre-checks (lines 6-11 above).
+# QUARANTINE_TESTS         — opt_in-marked, allowed-to-fail lane (below).
+# BROAD_PYTEST_ARGS        — broad default run; opt_in/integration excluded by
+#                            marker (-m "not integration and not opt_in") so no
+#                            --ignore= entries are needed for quarantine files.
 BROAD_PYTEST_ARGS=(
   --tb=no
   -q
   --no-header
   -m "not integration and not opt_in"
-  --ignore=tests/test_agent_probe_regression.py
-  --ignore=tests/test_author_test_drift.py
-  --ignore=tests/test_author_test_pass.py
-  --ignore=tests/test_author_test_regenerate.py
 )
 
 "$PYTHON_BIN" scripts/reshape/compare_ruff_baseline.py
@@ -54,15 +59,23 @@ bash tests/verify_docs_commands.sh
 "$PYTHON_BIN" -m pytest "${TARGETED_BLOCKING_TESTS[@]}" -q
 "$PYTHON_BIN" -m pytest "${BROAD_PYTEST_ARGS[@]}" --cov=astrid --cov-report=term --cov-report=xml --cov-fail-under=0
 
-# Named Remotion typecheck lane. Blocking when the Remotion toolchain is present
-# (mirrors the GitHub CI `npm run typecheck` lane); on a checkout without
-# remotion/node_modules it documents the skip rather than failing, since the
-# dependency provisioning is environmental, not a repo defect.
-if [ -d remotion/node_modules ]; then
-  echo "LANE remotion-typecheck: running (remotion/node_modules present)"
-  (cd remotion && npm run typecheck)
-else
+# Named Remotion typecheck lane. Blocking when the Remotion toolchain is fully
+# provisioned (mirrors the GitHub CI `npm run typecheck` lane); on a checkout
+# without remotion/node_modules — or with a node_modules that predates the
+# generated augmentation/registry surface — it documents the skip rather than
+# failing, since the dependency provisioning is environmental, not a repo
+# defect. The generated surface (`remotion/src/types.augmentations.ts`, a
+# gitignored per-run artifact) and the `@banodoco/timeline-composition`
+# package's `@pack-rendering-*` path aliases must both be present/resolvable
+# for the typecheck to mean anything; when they are not the toolchain is only
+# partially provisioned and the lane is non-blocking.
+if [ ! -d remotion/node_modules ]; then
   echo "LANE remotion-typecheck: SKIP (remotion/node_modules absent; run 'cd remotion && npm ci' to enable)"
+elif [ ! -f remotion/src/types.augmentations.ts ]; then
+  echo "LANE remotion-typecheck: SKIP (remotion/src/types.augmentations.ts absent; generated augmentation surface not provisioned)"
+else
+  echo "LANE remotion-typecheck: running (remotion/node_modules + generated surface present)"
+  (cd remotion && npm run typecheck)
 fi
 
 for entry in "${QUARANTINE_TESTS[@]}"; do

@@ -33,15 +33,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Iterable
 
-PROJECTS_ROOT = Path.home() / "Documents" / "reigh-workspace" / "astrid-projects"
-ASTRID_HOME = Path.home() / ".astrid"
+# Per-suite sandbox root under $TMPDIR so this script never touches the
+# developer's real ~/Documents/reigh-workspace/astrid-projects or ~/.astrid.
+# Callers (parallel_runner, CI) override these with ASTRID_PROJECTS_ROOT /
+# ASTRID_HOME env vars; the tmpdir fallback ensures standalone invocations
+# (e.g. `python -m tests.agentic.cleanup`) are also sandboxed by default.
+_SUITE_SANDBOX = Path(tempfile.gettempdir()) / "astrid-agentic-suite"
+PROJECTS_ROOT = Path(os.environ["ASTRID_PROJECTS_ROOT"]) if os.environ.get("ASTRID_PROJECTS_ROOT") else _SUITE_SANDBOX / "projects"
+ASTRID_HOME = Path(os.environ["ASTRID_HOME"]) if os.environ.get("ASTRID_HOME") else _SUITE_SANDBOX / "home"
 AGENTIC_REPORTS = Path(__file__).resolve().parent / "reports"
 
 # Prefixes that identify test-generated project slugs. KEEP ALPHABETIZED.

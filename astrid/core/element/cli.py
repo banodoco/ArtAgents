@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover elements from; may be repeated.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    list_parser = subparsers.add_parser("list", help="List available elements.")
+    list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available elements.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--kind", choices=ELEMENT_KINDS, help="Filter by element kind.")
     list_parser.add_argument("--pack", help="Filter elements by pack id.")

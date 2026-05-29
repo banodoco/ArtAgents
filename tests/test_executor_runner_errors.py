@@ -457,6 +457,41 @@ def test_external_executor_captures_nonzero_returncode(tmp_path: Path) -> None:
     assert result.payload["returncode"] == 2
 
 
+def test_nonzero_returncode_populates_exec_error(tmp_path: Path) -> None:
+    executor = _executor(
+        executor_id="test.exit_3_error",
+        argv=(sys.executable, "-c", "import sys; sys.exit(3)"),
+    )
+    registry = _registry(executor)
+
+    result = run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
+
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "nonzero_exit"
+    assert result.error.type == "process"
+    assert "3" in result.error.message
+
+
+def test_missing_binary_run_surfaces_exec_error(tmp_path: Path) -> None:
+    executor = _executor(
+        executor_id="test.missing_binary_error",
+        isolation=IsolationMetadata(binaries=("definitely-not-a-real-binary-12345",)),
+    )
+    registry = _registry(executor)
+
+    result = run_executor(
+        ExecutorRunRequest(executor_id=executor.id, out=tmp_path, check_binaries=True),
+        registry,
+    )
+
+    assert result.ok is False
+    assert result.missing_binaries == ("definitely-not-a-real-binary-12345",)
+    assert result.error is not None
+    assert result.error.code == "missing_binaries"
+    assert result.error.type == "precondition"
+
+
 def test_external_executor_returncode_zero_is_ok(tmp_path: Path) -> None:
     executor = _executor(
         executor_id="test.subprocess_exit_0",

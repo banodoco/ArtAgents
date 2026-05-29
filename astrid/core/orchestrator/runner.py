@@ -10,11 +10,10 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from astrid.contracts.capability_runner import CapabilityRunner
+from astrid.contracts.run_status import RunStatus
 from astrid.contracts.schema import Output
 from astrid.core.executor.runner import _has_value, _stringify_value
-from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
 from astrid.core.project.run import (
     ProjectRunContext,
     finalize_project_run,
@@ -22,10 +21,17 @@ from astrid.core.project.run import (
     project_run_env,
     reject_project_with_out,
 )
+from astrid.core.subprocess_env import build_child_subprocess_env
+from astrid.core.task import env as task_env
+from astrid.core.task import gate as task_gate
 
 from .registry import OrchestratorRegistry, load_default_registry
-from .schema import OrchestratorDefinition, OrchestratorKind, OrchestratorValidationError, RuntimeKind
-
+from .schema import (
+    OrchestratorDefinition,
+    OrchestratorKind,
+    OrchestratorValidationError,
+    RuntimeKind,
+)
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -127,8 +133,24 @@ class OrchestratorRunResult:
         }
 
 
-def run_orchestrator(request: OrchestratorRunRequest, registry: OrchestratorRegistry | None = None) -> OrchestratorRunResult:
-    if request.project and task_env.is_in_task_run(request.project):
+class OrchestratorCapabilityRunner(CapabilityRunner[OrchestratorRunRequest, OrchestratorRunResult, OrchestratorDefinition]):
+    """Orchestrator binding of the shared :class:`CapabilityRunner` skeleton."""
+
+    def load_default_registry(self) -> OrchestratorRegistry:
+        return load_default_registry()
+
+    def request_id(self, request: OrchestratorRunRequest) -> str:
+        return request.orchestrator_id
+
+    def build_command(
+        self, request: OrchestratorRunRequest, registry: object | None = None
+    ) -> tuple[str, ...]:
+        active_registry = registry if isinstance(registry, OrchestratorRegistry) else self.load_default_registry()
+        return build_orchestrator_command(request, active_registry)
+
+    def maybe_gate(self, request: OrchestratorRunRequest) -> None:
+        if not (request.project and task_env.is_in_task_run(request.project)):
+            return
         try:
             task_gate.gate_command(
                 request.project,
@@ -138,23 +160,38 @@ def run_orchestrator(request: OrchestratorRunRequest, registry: OrchestratorRegi
             )
         except task_gate.TaskRunGateError as exc:
             raise OrchestratorRunnerError(exc.recovery) from exc
-    active_registry = registry or load_default_registry()
-    orchestrator = active_registry.get(request.orchestrator_id)
-    project_context, effective_request = _prepare_project_request(request, orchestrator)
-    try:
-        result = _run_orchestrator_inner(effective_request, orchestrator)
-    except Exception as exc:
-        if project_context is not None:
-            _finalize_project_orchestrator(project_context, effective_request, status="error", returncode=-1, error=exc)
-        raise
-    if project_context is not None:
-        _finalize_project_orchestrator(
-            project_context,
-            effective_request,
-            status=_project_status_for_result(result),
-            returncode=result.returncode,
-        )
-    return result
+
+    def prepare_project(
+        self, request: OrchestratorRunRequest, definition: OrchestratorDefinition
+    ) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
+        return _prepare_project_request(request, definition)
+
+    def run_inner(self, request: OrchestratorRunRequest, definition: OrchestratorDefinition) -> OrchestratorRunResult:
+        return _run_orchestrator_inner(request, definition)
+
+    def finalize_project(
+        self,
+        context: ProjectRunContext,
+        request: OrchestratorRunRequest,
+        *,
+        status: str,
+        returncode: int | None,
+        error: BaseException | str | None = None,
+    ) -> None:
+        _finalize_project_orchestrator(context, request, status=status, returncode=returncode, error=error)
+
+    def status_for_result(self, result: OrchestratorRunResult) -> str:
+        return _project_status_for_result(result)
+
+    def result_returncode(self, result: OrchestratorRunResult) -> int | None:
+        return result.returncode
+
+
+_ORCHESTRATOR_RUNNER = OrchestratorCapabilityRunner()
+
+
+def run_orchestrator(request: OrchestratorRunRequest, registry: OrchestratorRegistry | None = None) -> OrchestratorRunResult:
+    return _ORCHESTRATOR_RUNNER.run(request, registry)
 
 
 def _request_argv_for_gate(request: OrchestratorRunRequest) -> tuple[str, ...]:
@@ -458,10 +495,10 @@ def _project_argv(request: OrchestratorRunRequest) -> list[str]:
 
 def _project_status_for_result(result: OrchestratorRunResult) -> str:
     if result.dry_run:
-        return "skipped"
+        return RunStatus.SKIPPED.to_project_record_status()
     if not result.ok:
-        return "failed"
-    return "success"
+        return RunStatus.FAILED.to_project_record_status()
+    return RunStatus.COMPLETED.to_project_record_status()
 
 
 def _finalize_project_orchestrator(
@@ -617,6 +654,7 @@ def _optional_string(value: Any) -> str | None:
 
 
 __all__ = [
+    "OrchestratorCapabilityRunner",
     "OrchestratorRunError",
     "OrchestratorRunRequest",
     "OrchestratorRunResult",

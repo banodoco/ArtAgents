@@ -63,6 +63,24 @@ def test_gate_base_reject_builds_recovery_string() -> None:
     assert abort_exc.value.recovery == "astrid abort --project demo"
 
 
+def test_gate_base_error_code_is_additive() -> None:
+    # Catch sites that read only reason/recovery keep working: code defaults
+    # to None when not supplied.
+    err = TaskRunGateError(reason="nope", recovery="astrid next")
+    assert err.code is None
+    coded = TaskRunGateError(reason="nope", recovery="astrid next", code="x")
+    assert coded.code == "x"
+
+
+def test_gate_base_reject_surfaces_stable_non_null_code() -> None:
+    with pytest.raises(TaskRunGateError) as exc:
+        _reject("demo", "bad", abort=False)
+    assert exc.value.code == "gate_rejected"
+    with pytest.raises(TaskRunGateError) as custom:
+        _reject("demo", "bad", abort=True, code="pinned_failure")
+    assert custom.value.code == "pinned_failure"
+
+
 def test_gate_base_decision_and_inline_defaults() -> None:
     decision = GateDecision(active=False)
     assert decision.active is False
@@ -176,3 +194,10 @@ def test_gate_repeat_json_field_navigates_and_rejects() -> None:
     assert _json_field(payload, ("a", "b"), Path("x.json")) == 7
     with pytest.raises(TaskRunGateError):
         _json_field(payload, ("a", "missing"), Path("x.json"))
+
+
+def test_gate_repeat_direct_raise_sites_have_stable_code() -> None:
+    # _json_field direct-raise path surfaces a non-null code slug
+    with pytest.raises(TaskRunGateError) as exc:
+        _json_field({}, ("missing_field",), Path("test.json"))
+    assert exc.value.code == "repeat_until_json_field_missing"

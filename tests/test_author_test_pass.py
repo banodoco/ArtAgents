@@ -6,7 +6,11 @@ from __future__ import annotations
 import io
 from contextlib import redirect_stderr, redirect_stdout
 
+import pytest
+
 from astrid.orchestrate import cli as author_cli
+
+pytestmark = pytest.mark.opt_in
 
 
 def test_author_test_passes_against_committed_golden() -> None:

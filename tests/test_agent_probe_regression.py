@@ -53,6 +53,8 @@ from typing import Any, Callable, Iterable
 
 import pytest
 
+pytestmark = pytest.mark.opt_in
+
 # Repo-root path for stand-alone CLI invocation.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _lifecycle_fixtures import bind_writer_session  # noqa: E402

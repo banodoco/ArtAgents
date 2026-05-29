@@ -50,16 +50,9 @@ def test_resolve_current_session_errors_on_missing_file(
 
 
 def test_is_writer_for_matches_lease(tmp_path: Path) -> None:
-    sess = Session(
-        id="S-1",
-        project="demo",
-        timeline=None,
-        run_id="01RUN",
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-    )
+    from tests.conftest import make_session
+
+    sess = make_session(id="S-1", run_id="01RUN")
     run_dir = tmp_path / "runs" / "01RUN"
     run_dir.mkdir(parents=True)
     write_lease_init(run_dir, session_id=sess.id, plan_hash="")
@@ -80,16 +73,9 @@ def test_current_run_dir_returns_path_when_run_id_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
-    sess = Session(
-        id="S-3",
-        project="demo",
-        timeline=None,
-        run_id="01RUN",
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-    )
+    from tests.conftest import make_session
+
+    sess = make_session(id="S-3", run_id="01RUN")
     rd = binding.current_run_dir(sess)
     assert rd is not None
     assert rd.parts[-3:] == ("demo", "runs", "01RUN")

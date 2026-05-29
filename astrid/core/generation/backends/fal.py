@@ -9,7 +9,6 @@ via :func:`~astrid.core.util.http.fal_submit_and_poll`.
 from __future__ import annotations
 
 import logging
-import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -280,6 +279,7 @@ class FalBackend(BackendAdapter):
             dropped_features=dropped_features,
             request_id=request_id,
             source_urls=source_urls,
+            error=None,
         )
 
 

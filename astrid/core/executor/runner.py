@@ -15,6 +15,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from astrid.contracts.capability_runner import CapabilityRunner
+from astrid.contracts.exec_error import (
+    ExecError,
+    error_from_missing_binaries,
+    error_from_returncode,
+)
+from astrid.contracts.run_status import RunStatus
 from astrid.core.pack_resolver import resolve_callable_from_metadata
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
@@ -90,20 +97,56 @@ class ExecutorRunResult:
     skipped: bool = False
     skipped_reason: str = ""
     missing_binaries: tuple[str, ...] = ()
+    error: ExecError | None = None
+
+    def __post_init__(self) -> None:
+        if self.error is None:
+            derived = error_from_missing_binaries(self.missing_binaries) or error_from_returncode(
+                self.returncode
+            )
+            if derived is not None:
+                object.__setattr__(self, "error", derived)
 
     @property
     def ok(self) -> bool:
-        return not self.missing_binaries and (self.returncode is None or self.returncode == 0)
+        return self.error is None
 
 
-def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None = None) -> ExecutorRunResult:
-    task_project = task_env.task_project_env()
-    task_run_id = task_env.task_run_id_env()
-    task_step_id = task_env.task_step_id_env()
-    env_task_context = bool(task_project and task_run_id and task_step_id)
-    project_task_context = bool(request.project and task_env.is_in_task_run(request.project))
-    should_gate = env_task_context or project_task_context
-    if should_gate:
+class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunResult, ExecutorDefinition]):
+    """Executor binding of the shared :class:`CapabilityRunner` skeleton."""
+
+    def load_default_registry(self) -> ExecutorRegistry:
+        return load_default_registry()
+
+    def request_id(self, request: ExecutorRunRequest) -> str:
+        return request.executor_id
+
+    def build_command(
+        self, request: ExecutorRunRequest, registry: ExecutorRegistry | None = None
+    ) -> tuple[str, ...]:
+        active_registry = registry or self.load_default_registry()
+        executor = active_registry.get(request.executor_id)
+        values = _request_values(request)
+        _validate_required_inputs(executor, values)
+        condition_result = evaluate_conditions(executor, values)
+        if condition_result.skipped:
+            return ()
+        if executor.command is not None:
+            return _expand_external_command(executor, request, values)[0]
+        if executor.kind == "built_in" and "pipeline_step" in executor.metadata:
+            step = _step_for_executor(executor)
+            args = build_pipeline_context(request, executor)
+            return tuple(step.build_cmd(args))
+        return _expand_external_command(executor, request, values)[0]
+
+    def maybe_gate(self, request: ExecutorRunRequest) -> None:
+        task_project = task_env.task_project_env()
+        task_run_id = task_env.task_run_id_env()
+        task_step_id = task_env.task_step_id_env()
+        env_task_context = bool(task_project and task_run_id and task_step_id)
+        project_task_context = bool(request.project and task_env.is_in_task_run(request.project))
+        if not (env_task_context or project_task_context):
+            return
         gate_project = task_project or request.project
         if gate_project is None:
             raise ExecutorRunnerError("task project is missing")
@@ -120,26 +163,42 @@ def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None 
             )
         except task_gate.TaskRunGateError as exc:
             if env_task_context and not project_task_context and exc.reason == "active_run.json is missing":
-                should_gate = False
-            else:
-                raise ExecutorRunnerError(f"{exc.reason}; recovery: {exc.recovery}") from exc
-    active_registry = registry or load_default_registry()
-    executor = active_registry.get(request.executor_id)
-    project_context, effective_request = _prepare_project_request(request, executor)
-    try:
-        result = _run_executor_inner(effective_request, executor)
-    except Exception as exc:
-        if project_context is not None:
-            _finalize_project_executor(project_context, effective_request, status="error", returncode=-1, error=exc)
-        raise
-    if project_context is not None:
+                return
+            raise ExecutorRunnerError(f"{exc.reason}; recovery: {exc.recovery}") from exc
+
+    def prepare_project(
+        self, request: ExecutorRunRequest, definition: ExecutorDefinition
+    ) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
+        return _prepare_project_request(request, definition)
+
+    def run_inner(self, request: ExecutorRunRequest, definition: ExecutorDefinition) -> ExecutorRunResult:
+        return _run_executor_inner(request, definition)
+
+    def finalize_project(
+        self,
+        context: ProjectRunContext,
+        request: ExecutorRunRequest,
+        *,
+        status: str,
+        returncode: int | None,
+        error: BaseException | str | None = None,
+    ) -> None:
         _finalize_project_executor(
-            project_context,
-            effective_request,
-            status=_project_status_for_result(result),
-            returncode=result.returncode,
+            context, request, status=status, returncode=returncode, error=error
         )
-    return result
+
+    def status_for_result(self, result: ExecutorRunResult) -> str:
+        return _project_status_for_result(result)
+
+    def result_returncode(self, result: ExecutorRunResult) -> int | None:
+        return result.returncode
+
+
+_EXECUTOR_RUNNER = ExecutorCapabilityRunner()
+
+
+def run_executor(request: ExecutorRunRequest, registry: ExecutorRegistry | None = None) -> ExecutorRunResult:
+    return _EXECUTOR_RUNNER.run(request, registry)
 
 
 def _request_argv_for_gate(request: ExecutorRunRequest) -> tuple[str, ...]:
@@ -319,20 +378,7 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
 
 
 def build_executor_command(request: ExecutorRunRequest, registry: ExecutorRegistry | None = None) -> tuple[str, ...]:
-    active_registry = registry or load_default_registry()
-    executor = active_registry.get(request.executor_id)
-    values = _request_values(request)
-    _validate_required_inputs(executor, values)
-    condition_result = evaluate_conditions(executor, values)
-    if condition_result.skipped:
-        return ()
-    if executor.command is not None:
-        return _expand_external_command(executor, request, values)[0]
-    if executor.kind == "built_in" and "pipeline_step" in executor.metadata:
-        step = _step_for_executor(executor)
-        args = build_pipeline_context(request, executor)
-        return tuple(step.build_cmd(args))
-    return _expand_external_command(executor, request, values)[0]
+    return _EXECUTOR_RUNNER.build_command(request, registry)
 
 
 def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequest) -> ExecutorRunResult:
@@ -459,10 +505,10 @@ def _project_argv(request: ExecutorRunRequest) -> list[str]:
 
 def _project_status_for_result(result: ExecutorRunResult) -> str:
     if result.skipped or result.dry_run:
-        return "skipped"
+        return RunStatus.SKIPPED.to_project_record_status()
     if not result.ok:
-        return "failed"
-    return "success"
+        return RunStatus.FAILED.to_project_record_status()
+    return RunStatus.COMPLETED.to_project_record_status()
 
 
 def _finalize_project_executor(
@@ -755,6 +801,7 @@ def _optional_input(inputs: Mapping[str, Any], key: str) -> Any:
 
 __all__ = [
     "ConditionResult",
+    "ExecutorCapabilityRunner",
     "ExecutorRunRequest",
     "ExecutorRunResult",
     "ExecutorRunnerError",

@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RunPodHandle
 
@@ -156,7 +157,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "trainer_config_path": str(built_config_path),
         "planned_cost_path": str(cost_path),
     }
-    state["status"] = "preflight_ready" if local_only else "blocked"
+    state["status"] = "preflight_ready" if local_only else RunStatus.BLOCKED.value
     state["phase"] = "preflight_ready"
 
     if not local_only:
@@ -185,7 +186,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     state = read_last_run_state(run_dir)
     payload = {
         "schema_version": 1,
-        "status": "resume_ready" if args.dry_run else "blocked",
+        "status": "resume_ready" if args.dry_run else RunStatus.BLOCKED.value,
         "mode": "resume-dry-run" if args.dry_run else "resume",
         "run_dir": str(run_dir),
         "previous_state_path": str(run_dir / "last_run.json"),

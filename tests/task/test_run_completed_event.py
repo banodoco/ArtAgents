@@ -7,10 +7,9 @@ import json
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from astrid.core.task.events import _run_is_complete
 from astrid.core.task.lifecycle import cmd_runs_ls
 from astrid.core.task.plan import Step, TaskPlan
-
+from astrid.core.task.run_state import _run_is_complete
 
 # ---------------------------------------------------------------------------
 # helpers

@@ -7,11 +7,12 @@ this single-method interface so the executor stays thin.
 
 from __future__ import annotations
 
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from astrid.contracts.exec_error import ExecError
 
 
 @dataclass
@@ -68,6 +69,16 @@ class GenerationResult:
     #: providers often return temporary download URLs before the adapter
     #: fetches them).
     source_urls: list[str] | None = None
+
+    #: Structured failure, if the generation did not succeed.  ``ok`` is
+    #: derived from this being ``None`` — adapters populate it instead of
+    #: signalling failure out of band.
+    error: ExecError | None = None
+
+    @property
+    def ok(self) -> bool:
+        """A generation succeeded exactly when it carries no :class:`ExecError`."""
+        return self.error is None
 
 
 class BackendAdapter(ABC):

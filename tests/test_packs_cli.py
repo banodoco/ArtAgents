@@ -392,12 +392,12 @@ class TestScaffoldAndValidateRoundTrip(unittest.TestCase):
             result = _run_packs("new", "taxonomy_pack", cwd=str(tmp))
             self.assertEqual(result.returncode, 0, result.stderr)
             manifest = (tmp / "taxonomy_pack" / "pack.yaml").read_text(encoding="utf-8")
-            self.assertIn("origin: project", manifest)
-            self.assertIn("install_tier: default", manifest)
+            self.assertIn("origin: external", manifest)
+            self.assertIn("install_tier: core", manifest)
             self.assertIn("pack_type: capability", manifest)
-            self.assertIn("domain: general", manifest)
+            self.assertIn("domain: system", manifest)
             self.assertIn("stability: stable", manifest)
-            self.assertIn("support: project", manifest)
+            self.assertIn("support: core", manifest)
 
     def test_scaffold_pack_then_add_executor_and_orchestrator_programmatic(self) -> None:
         """Use the CLI modules directly (not subprocess) to test the internal API."""
@@ -821,6 +821,102 @@ class TestTaxonomyGroupingAndOutput(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("taxonomy:", result.stdout)
         self.assertIn("domain:", result.stdout)
+
+
+class TaxonomyEnumValidationTest(unittest.TestCase):
+    """T4: pack.json taxonomy enum constraints reject typo'd values."""
+
+    def test_typo_origin_rejected(self) -> None:
+        with ScratchPackFixture(self) as tmp:
+            pack_dir = tmp / "typo_pack"
+            pack_dir.mkdir()
+            (pack_dir / "pack.yaml").write_text(
+                "schema_version: 1\nid: typo.pack\nname: Typo Pack\nversion: 0.1.0\n"
+                "origin: typo_value\n",
+                encoding="utf-8",
+            )
+            result = _run_packs("validate", str(pack_dir), cwd=str(tmp))
+            self.assertNotEqual(result.returncode, 0, "typo'd origin should fail validation")
+
+    def test_typo_domain_rejected(self) -> None:
+        with ScratchPackFixture(self) as tmp:
+            pack_dir = tmp / "typo_domain"
+            pack_dir.mkdir()
+            (pack_dir / "pack.yaml").write_text(
+                "schema_version: 1\nid: typo.domain\nname: Typo Domain\nversion: 0.1.0\n"
+                "domain: notadomain\n",
+                encoding="utf-8",
+            )
+            result = _run_packs("validate", str(pack_dir), cwd=str(tmp))
+            self.assertNotEqual(result.returncode, 0, "typo'd domain should fail validation")
+
+    def test_valid_taxonomy_passes(self) -> None:
+        with ScratchPackFixture(self) as tmp:
+            pack_dir = tmp / "good_pack"
+            pack_dir.mkdir()
+            (pack_dir / "pack.yaml").write_text(
+                "schema_version: 1\nid: good_pack\nname: Good Pack\nversion: 0.1.0\n"
+                "origin: builtin\ninstall_tier: core\npack_type: capability\n"
+                "domain: media\nstability: stable\nsupport: core\n",
+                encoding="utf-8",
+            )
+            result = _run_packs("validate", str(pack_dir), cwd=str(tmp))
+            self.assertEqual(result.returncode, 0, f"valid taxonomy pack should pass: {result.stderr}")
+
+
+class PacksLsListAliasTest(unittest.TestCase):
+    """T3: packs ls and packs list resolve to the same handler."""
+
+    def test_packs_ls_same_as_list(self) -> None:
+        result_ls = _run_packs("ls", cwd=str(_REPO_ROOT))
+        result_list = _run_packs("list", cwd=str(_REPO_ROOT))
+        self.assertEqual(result_ls.returncode, result_list.returncode)
+        self.assertEqual(result_ls.stdout, result_list.stdout)
+
+
+class NounGroupLsListParityTest(unittest.TestCase):
+    """T3: every noun group has both ls and list resolving to the same handler."""
+
+    def _run_astrid(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-m", "astrid", *args],
+            capture_output=True, text=True,
+        )
+
+    def _assert_ls_list_parity(self, noun: str, expect_option: str = "") -> None:
+        r_ls = self._run_astrid(noun, "ls", "--help")
+        r_list = self._run_astrid(noun, "list", "--help")
+        # Both must emit help text (presence of "options:" or "-h" is sufficient).
+        self.assertIn("-h", r_ls.stdout + r_ls.stderr,
+                      f"{noun} ls should emit help")
+        self.assertIn("-h", r_list.stdout + r_list.stderr,
+                      f"{noun} list should emit help")
+        # Both must resolve to the same handler (same help content).
+        self.assertEqual(r_ls.stdout, r_list.stdout,
+                         f"{noun} ls and list should produce identical help output")
+        if expect_option:
+            self.assertIn(expect_option, r_ls.stdout + r_ls.stderr)
+
+    def test_executors_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("executors", "--json")
+
+    def test_orchestrators_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("orchestrators")
+
+    def test_elements_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("elements")
+
+    def test_models_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("models")
+
+    def test_packs_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("packs")
+
+    def test_sessions_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("sessions")
+
+    def test_timelines_ls_and_list_help(self) -> None:
+        self._assert_ls_list_parity("timelines")
 
 
 if __name__ == "__main__":

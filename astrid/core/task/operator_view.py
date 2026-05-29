@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.project.current_run import (
     read_current_run_state,
 )
@@ -32,7 +33,6 @@ from astrid.core.task.claim import active_claims_by_step
 from astrid.core.task.command_render import render_task_command
 from astrid.core.task.events import (
     EventLogError,
-    _run_is_complete,
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
@@ -51,6 +51,7 @@ from astrid.core.task.plan import (
 )
 from astrid.core.task.plan_verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
+from astrid.core.task.run_state import _run_is_complete
 from astrid.core.task.run_store import _emit_run_completed_if_needed
 from astrid.core.task.session_discovery import (
     _most_recent_session_slug,
@@ -220,7 +221,7 @@ def cmd_status(
     if inline_failure is not None:
         path_str = STEP_PATH_SEP.join(inline_failure.path)
         print(
-            "blocked:   produces check failed"
+            f"{RunStatus.BLOCKED.value}:   produces check failed"
             f"{f' for {path_str}' if path_str else ''}: "
             f"{_format_inline_failure_tail(inline_failure)}"
         )
@@ -229,7 +230,7 @@ def cmd_status(
         if reason:
             path_str = STEP_PATH_SEP.join(_path_tuple_from_event(events[-1]))
             print(
-                f"blocked:   {f'{path_str}: ' if path_str else ''}{reason}"
+                f"{RunStatus.BLOCKED.value}:   {f'{path_str}: ' if path_str else ''}{reason}"
             )
 
     print("recent events:")

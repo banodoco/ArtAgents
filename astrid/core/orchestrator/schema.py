@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from typing import Literal as _Literal
-from typing import TypeVar as _TypeVar
-from typing import cast as _cast
 from typing import get_args as _get_args
 
+from astrid.contracts.capability_schema import (
+    DESCRIPTION_MAX_LEN,
+    KEYWORD_MAX_LEN,
+    KEYWORDS_MAX_COUNT,
+    SHORT_DESCRIPTION_MAX_LEN,
+    SchemaValidator,
+)
+from astrid.contracts.capability_schema import (
+    drop_none as _drop_none,
+)
+from astrid.contracts.capability_schema import (
+    validate_capability_text as _validate_capability_text,
+)
 from astrid.contracts.schema import (
     CACHE_MODES,
     ISOLATION_MODES,
@@ -31,7 +41,7 @@ from astrid.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
-from astrid.core.manifest import ManifestParseError, load_manifest_payload
+from astrid.core.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
 
 OrchestratorKind = _Literal["built_in", "external"]
 RuntimeKind = _Literal["python", "command"]
@@ -44,16 +54,9 @@ class OrchestratorValidationError(ValueError):
     """Raised when a orchestrator manifest or definition is structurally invalid."""
 
 
-_LiteralT = _TypeVar("_LiteralT")
+_primitives = SchemaValidator(OrchestratorValidationError)
 
-
-def _require_literal(value: Any, allowed: frozenset[str], path: str, literal_type: type[_LiteralT]) -> _LiteralT:
-    """Validate ``value`` is a string in ``allowed`` and return it typed as the Literal alias."""
-    if not isinstance(value, str):
-        raise OrchestratorValidationError(f"{path} must be a string")
-    if value not in allowed:
-        raise OrchestratorValidationError(f"{path} must be one of {sorted(allowed)} (got {value!r})")
-    return _cast(literal_type, value)
+_require_literal = _primitives.require_literal
 
 
 @dataclass(frozen=True)
@@ -185,6 +188,9 @@ def _parse_orchestrator(raw: Any) -> OrchestratorDefinition:
     metadata = data.get("metadata", {})
     if not isinstance(metadata, dict):
         raise OrchestratorValidationError("orchestrator.metadata must be an object")
+    metadata = reconcile_runtime_module(
+        data.get("runtime"), metadata, OrchestratorValidationError, "orchestrator"
+    )
 
     child_executors = _canonical_child_list(
         data,
@@ -420,13 +426,13 @@ def _validate_isolation(isolation: IsolationMetadata) -> None:
     _validate_unique_env_passthrough(isolation.env_passthrough)
 
 
+_validate_env_name = _primitives.validate_env_name
+
+
 def _validate_unique_env_passthrough(values: tuple[str, ...]) -> None:
     seen: set[str] = set()
     for index, value in enumerate(values):
-        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
-            raise OrchestratorValidationError(
-                f"isolation.env_passthrough[{index}] must be a valid environment variable name"
-            )
+        _validate_env_name(value, f"isolation.env_passthrough[{index}]")
         if value in seen:
             raise OrchestratorValidationError(f"isolation.env_passthrough contains duplicate name {value!r}")
         seen.add(value)
@@ -445,158 +451,19 @@ def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:
         _validate_placeholders(value, placeholders, f"runtime.command.env[{key!r}]")
 
 
-SHORT_DESCRIPTION_MAX_LEN = 120
-DESCRIPTION_MAX_LEN = 500
-KEYWORD_MAX_LEN = 32
-KEYWORDS_MAX_COUNT = 12
-
-
-def _validate_capability_text(
-    description: str,
-    short_description: str,
-    keywords: tuple[str, ...],
-    *,
-    manifest_id: str,
-    error_cls: type[Exception],
-) -> None:
-    if len(description) > DESCRIPTION_MAX_LEN:
-        raise error_cls(
-            f"{manifest_id}: description is {len(description)} chars; max is {DESCRIPTION_MAX_LEN}"
-        )
-    if len(short_description) > SHORT_DESCRIPTION_MAX_LEN:
-        raise error_cls(
-            f"{manifest_id}: short_description is {len(short_description)} chars; max is {SHORT_DESCRIPTION_MAX_LEN}"
-        )
-    if len(keywords) > KEYWORDS_MAX_COUNT:
-        raise error_cls(
-            f"{manifest_id}: keywords has {len(keywords)} entries; max is {KEYWORDS_MAX_COUNT}"
-        )
-    seen: set[str] = set()
-    for index, keyword in enumerate(keywords):
-        if len(keyword) > KEYWORD_MAX_LEN:
-            raise error_cls(
-                f"{manifest_id}: keywords[{index}] is {len(keyword)} chars; max is {KEYWORD_MAX_LEN}"
-            )
-        if any(ch.isspace() for ch in keyword):
-            raise error_cls(
-                f"{manifest_id}: keywords[{index}] {keyword!r} must not contain whitespace"
-            )
-        if keyword.lower() != keyword:
-            raise error_cls(
-                f"{manifest_id}: keywords[{index}] {keyword!r} must be lowercase"
-            )
-        if keyword in seen:
-            raise error_cls(
-                f"{manifest_id}: keywords[{index}] {keyword!r} is a duplicate"
-            )
-        seen.add(keyword)
-
-
-def _validate_placeholders(value: str, allowed: set[str], path: str) -> None:
-    for placeholder in re.findall(r"\{([A-Za-z_][A-Za-z0-9_]*)\}", value):
-        if placeholder not in allowed:
-            raise OrchestratorValidationError(f"{path} uses unknown placeholder {{{placeholder}}}")
-
-
-def _validate_unique_named(values: tuple[Port, ...] | tuple[Output, ...], label: str) -> set[str]:
-    names: set[str] = set()
-    for value in values:
-        if value.name in names:
-            raise OrchestratorValidationError(f"duplicate {label} name {value.name!r}")
-        names.add(value.name)
-    return names
-
-
-def _validate_non_empty_identifier(value: Any, path: str) -> None:
-    _validate_non_empty_string(value, path)
-    if not re.match(r"^[A-Za-z][A-Za-z0-9_.-]*$", value):
-        raise OrchestratorValidationError(f"{path} must start with a letter and contain only letters, numbers, '.', '_' or '-'")
-
-
-def _validate_qualified_identifier(value: Any, path: str) -> None:
-    _validate_non_empty_identifier(value, path)
-    if "." not in value or any(not part for part in value.split(".")):
-        raise OrchestratorValidationError(f"{path} must be qualified as <pack>.<name>")
-
-
-def _validate_non_empty_string(value: Any, path: str) -> None:
-    if not isinstance(value, str) or not value.strip():
-        raise OrchestratorValidationError(f"{path} must be a non-empty string")
-
-
-def _require_mapping(raw: Any, path: str) -> dict[str, Any]:
-    if not isinstance(raw, dict):
-        raise OrchestratorValidationError(f"{path} must be an object")
-    return raw
-
-
-def _require_string(data: dict[str, Any], key: str, path: str) -> str:
-    if key not in data:
-        raise OrchestratorValidationError(f"missing required field {path}")
-    value = data[key]
-    _validate_non_empty_string(value, path)
-    return value
-
-
-def _optional_string(data: dict[str, Any], key: str, path: str, *, default: str = "") -> str:
-    if key not in data:
-        return default
-    value = data[key]
-    _validate_non_empty_string(value, path)
-    return value
-
-
-def _optional_nullable_string(data: dict[str, Any], key: str, path: str) -> str | None:
-    if key not in data or data[key] is None:
-        return None
-    value = data[key]
-    _validate_non_empty_string(value, path)
-    return value
-
-
-def _optional_bool(data: dict[str, Any], key: str, path: str, *, default: bool) -> bool:
-    if key not in data:
-        return default
-    value = data[key]
-    if not isinstance(value, bool):
-        raise OrchestratorValidationError(f"{path} must be a boolean")
-    return value
-
-
-def _optional_list(data: dict[str, Any], key: str, path: str) -> list[Any]:
-    if key not in data:
-        return []
-    value = data[key]
-    if not isinstance(value, list):
-        raise OrchestratorValidationError(f"{path} must be a list")
-    return value
-
-
-def _string_list(raw: Any, path: str) -> list[str]:
-    if not isinstance(raw, (list, tuple)):
-        raise OrchestratorValidationError(f"{path} must be a list")
-    result: list[str] = []
-    for index, value in enumerate(raw):
-        if not isinstance(value, str) or not value.strip():
-            raise OrchestratorValidationError(f"{path}[{index}] must be a non-empty string")
-        result.append(value)
-    return result
-
-
-def _optional_string_list(data: dict[str, Any], key: str, path: str) -> list[str]:
-    if key not in data:
-        return []
-    return _string_list(data[key], path)
-
-
-def _drop_none(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _drop_none(item) for key, item in value.items() if item is not None}
-    if isinstance(value, tuple):
-        return [_drop_none(item) for item in value]
-    if isinstance(value, list):
-        return [_drop_none(item) for item in value]
-    return value
+_validate_placeholders = _primitives.validate_placeholders
+_validate_unique_named = _primitives.validate_unique_named
+_validate_non_empty_identifier = _primitives.validate_non_empty_identifier
+_validate_qualified_identifier = _primitives.validate_qualified_identifier
+_validate_non_empty_string = _primitives.validate_non_empty_string
+_require_mapping = _primitives.require_mapping
+_require_string = _primitives.require_string
+_optional_string = _primitives.optional_string
+_optional_nullable_string = _primitives.optional_nullable_string
+_optional_bool = _primitives.optional_bool
+_optional_list = _primitives.optional_list
+_string_list = _primitives.string_list
+_optional_string_list = _primitives.optional_string_list
 
 
 __all__ = [

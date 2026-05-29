@@ -519,12 +519,50 @@ class PackValidator:
                 self.errors.append(f"{rel}: {exc}")
 
         self._validate_runtime_entrypoints(component_dir, data, manifest_kind, rel)
+        self._validate_runtime_definition(data, manifest_kind, rel)
 
         docs = data.get("docs", {})
         stage = docs.get("stage", "STAGE.md") if isinstance(docs, dict) else "STAGE.md"
         stage_path = component_dir / stage
         if not stage_path.is_file():
             self.warnings.append(f"{self._rel(stage_path)}: STAGE.md not found")
+
+    def _validate_runtime_definition(
+        self, data: dict[str, Any], manifest_kind: str, rel: str
+    ) -> None:
+        """Run the raising runtime validators after the JSON-Schema pass.
+
+        The JSON Schema is permissive about shapes the runtime parser rejects
+        (e.g. a manifest declaring its runtime module twice with conflicting
+        values). The runtime validators ``validate_executor_definition`` /
+        ``validate_orchestrator_definition`` RAISE on those, so translate their
+        errors into the collected error structure rather than letting them
+        escape ``packs validate``.
+        """
+        if manifest_kind == "executor":
+            from astrid.core.executor.schema import (
+                ExecutorValidationError,
+                validate_executor_definition,
+            )
+
+            try:
+                if isinstance(data, dict) and isinstance(data.get("executors"), list):
+                    for item in data["executors"]:
+                        validate_executor_definition(item)
+                else:
+                    validate_executor_definition(data)
+            except ExecutorValidationError as exc:
+                self.errors.append(f"{rel}: {exc}")
+        elif manifest_kind == "orchestrator":
+            from astrid.core.orchestrator.schema import (
+                OrchestratorValidationError,
+                validate_orchestrator_definition,
+            )
+
+            try:
+                validate_orchestrator_definition(data)
+            except OrchestratorValidationError as exc:
+                self.errors.append(f"{rel}: {exc}")
 
     def _validate_element_manifest_file(
         self,

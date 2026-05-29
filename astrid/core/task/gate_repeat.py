@@ -6,27 +6,26 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from astrid.core.task.gate_base import TaskRunGateError
-from astrid.core.task.gate_cursor import (
-    CursorPath,
-    _ForEachSelection,
-    _Frame,
-    _make_exhaust_override_step,
-    _make_iteration_frame,
-    _make_item_frame,
-    _path_str_from_event,
-)
-from astrid.core.task.gate_attestation import match_attested_command
 from astrid.core.task.events import (
     make_for_each_expanded_event,
     make_item_started_event,
     make_iteration_exhausted_event,
     make_iteration_started_event,
 )
+from astrid.core.task.gate_attestation import match_attested_command
+from astrid.core.task.gate_base import TaskRunGateError
+from astrid.core.task.gate_cursor import (
+    CursorPath,
+    _ForEachSelection,
+    _Frame,
+    _make_exhaust_override_step,
+    _make_item_frame,
+    _make_iteration_frame,
+    _path_str_from_event,
+)
 from astrid.core.task.plan import (
     RepeatForEach,
     RepeatUntil,
-    Step,
     TaskPlan,
     is_attested_kind,
     iter_steps_with_path,
@@ -66,6 +65,7 @@ def _json_field(value: Any, field_path: tuple[str, ...], artifact_path: Path) ->
             raise TaskRunGateError(
                 reason=f"repeat.until cannot read JSON field {field!r} in {artifact_path}",
                 recovery="fix the produced JSON and rerun the current step",
+                code="repeat_until_json_field_missing",
             )
         current = current[field]
     return current
@@ -142,6 +142,7 @@ def _enter_repeat_until(
             raise TaskRunGateError(
                 reason="repeat.until max_iterations exhausted",
                 recovery=f"astrid abort --project {slug}",
+                code="repeat_until_max_iterations_exhausted",
             )
         # escalate: park on a synthetic exhaust-override attested step.
         override_step = _make_exhaust_override_step(slug, path_str)
@@ -187,6 +188,7 @@ def _resolve_for_each_items(
             raise TaskRunGateError(
                 reason=f"for_each.from references unknown sibling step {target_id!r}",
                 recovery=f"astrid abort --project {slug}",
+                code="for_each_unknown_sibling_step",
             )
         prior_step_dir = step_dir_for_path(
             slug,
@@ -200,6 +202,7 @@ def _resolve_for_each_items(
             raise TaskRunGateError(
                 reason=f"for_each.from references unknown produces {produces_name!r}",
                 recovery=f"astrid abort --project {slug}",
+                code="for_each_unknown_produces",
             )
         try:
             payload = json.loads((prior_step_dir / "produces" / produces_entry.path).read_text(encoding="utf-8"))
@@ -207,14 +210,15 @@ def _resolve_for_each_items(
             raise TaskRunGateError(
                 reason=f"for_each.from cannot read produces JSON: {exc}",
                 recovery=f"astrid abort --project {slug}",
+                code="for_each_produces_unreadable",
             ) from exc
         if not isinstance(payload, list):
-            raise TaskRunGateError(reason="for_each items must be unique strings", recovery=f"astrid next --project {slug}")
+            raise TaskRunGateError(reason="for_each items must be unique strings", recovery=f"astrid next --project {slug}", code="for_each_payload_not_list")
         items = tuple(payload)
     if not all(isinstance(x, str) and x for x in items):
-        raise TaskRunGateError(reason="for_each items must be unique strings", recovery=f"astrid next --project {slug}")
+        raise TaskRunGateError(reason="for_each items must be unique strings", recovery=f"astrid next --project {slug}", code="for_each_items_not_strings")
     if len(set(items)) != len(items):
-        raise TaskRunGateError(reason="for_each items must be unique strings", recovery=f"astrid next --project {slug}")
+        raise TaskRunGateError(reason="for_each items must be unique strings", recovery=f"astrid next --project {slug}", code="for_each_items_not_unique")
     return items
 
 

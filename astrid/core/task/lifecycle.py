@@ -13,7 +13,6 @@ from __future__ import annotations
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.task import operator_view as _operator_view
 from astrid.core.task import run_store as _run_store
-from astrid.core.task.events import _run_is_complete
 from astrid.core.task.gate import peek_current_step as peek_current_step
 from astrid.core.task.lifecycle_ack import cmd_ack
 from astrid.core.task.lifecycle_skip import cmd_skip
@@ -24,6 +23,7 @@ from astrid.core.task.operator_view import (
 from astrid.core.task.plan_builder import (
     cmd_start,
 )
+from astrid.core.task.run_state import _run_is_complete
 from astrid.core.task.run_store import (
     _emit_run_completed_if_needed,
 )

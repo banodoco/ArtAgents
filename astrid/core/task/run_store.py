@@ -31,7 +31,6 @@ from astrid.core.session.lease import (
 )
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.events import (
-    _run_is_complete,
     make_run_aborted_event,
     make_run_completed_event,
     make_step_awaiting_fetch_event,
@@ -44,6 +43,7 @@ from astrid.core.task.plan import (
     is_group_step,
     load_plan,
 )
+from astrid.core.task.run_state import _run_is_complete
 
 
 def _print_err(msg: str) -> None:

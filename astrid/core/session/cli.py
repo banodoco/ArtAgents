@@ -982,7 +982,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     attach.set_defaults(handler=cmd_attach)
 
-    ls = sub.add_parser("ls", help="List sessions in ~/.astrid/sessions/.")
+    ls = sub.add_parser("ls", aliases=["list"], help="List sessions in ~/.astrid/sessions/.")
     ls.set_defaults(handler=cmd_sessions_ls)
 
     detach = sub.add_parser("detach", help="Detach a session (defaults to current tab).")

@@ -23,7 +23,6 @@ from astrid.core.project import paths as project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.session import paths as session_paths
 from astrid.core.session.lease import write_lease_init
-from astrid.core.session.model import Session
 from astrid.core.session.writer import WriterContext
 
 
@@ -37,16 +36,9 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
 
 def test_writer_context_auto_rebinds_session_run_id_on_entry(env: dict[str, Path]) -> None:
     # Tab A's session is attached but has run_id=None.
-    sess_a = Session(
-        id="S-A",
-        project="demo",
-        timeline=None,
-        run_id=None,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-    )
+    from tests.conftest import make_session
+
+    sess_a = make_session(id="S-A", run_id=None)
     sessions_dir = env["home"] / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
     sess_a.to_json(sessions_dir / "S-A.json")

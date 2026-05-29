@@ -17,8 +17,8 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
-from unittest.mock import patch
+
+from tests.helpers.cli_runner import run_cli
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,20 +54,18 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
         timeline_path = out_dir / "hype.timeline.json"
         timeline_path.write_text('{"theme":"test","clips":[]}', encoding="utf-8")
 
-        # Capture stdout.
-        import io
-        import sys
-
-        captured = io.StringIO()
-        with patch.object(sys, "stdout", captured):
-            rc = _emit_uuid_handoff_metadata(
+        result = run_cli(
+            lambda _: _emit_uuid_handoff_metadata(
                 project_id="11111111-1111-1111-1111-111111111111",
                 timeline_id="22222222-2222-2222-2222-222222222222",
                 out_dir=out_dir,
-            )
+            ),
+            [],
+        )
 
+        rc = result.exit_code
         self.assertEqual(rc, 0)
-        output = captured.getvalue().strip()
+        output = result.stdout.strip()
         handoff = json.loads(output)
 
         # Verify required fields.
@@ -134,3 +132,102 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ExecutorRunStdioRoutingTest(unittest.TestCase):
+    """T1: executor run routes command echo to stderr; --json suppresses it."""
+
+    def _make_run_parser(self):
+        from astrid.core.executor.cli import main as _main
+        import argparse, sys
+        # Import the module and build parser to inspect args
+        import astrid.core.executor.cli as cli_mod
+        return cli_mod
+
+    def test_run_subparser_has_json_flag(self):
+        """run subparser must accept --json flag."""
+        import argparse
+        from astrid.core.executor.cli import main as _main
+        import astrid.core.executor.cli as cli_mod
+        # Check the flag is declared by looking at the source
+        import inspect
+        src = inspect.getsource(cli_mod)
+        self.assertIn('run_parser.add_argument("--json"', src)
+
+    def _run_cmd_run(self, command, payload, use_json):
+        import io, sys
+        from unittest.mock import MagicMock, patch
+        import astrid.core.executor.cli as cli_mod
+        import astrid.core.executor.runner as runner_mod
+
+        fake_result = MagicMock()
+        fake_result.missing_binaries = []
+        fake_result.skipped = False
+        fake_result.command = command
+        fake_result.payload = payload
+        fake_result.returncode = 0
+
+        fake_args = MagicMock()
+        fake_args.executor_id = "some.executor"
+        fake_args.project = None
+        fake_args.dry_run = False
+        fake_args.json = use_json
+
+        fake_registry = MagicMock()
+
+        stdout_buf = io.StringIO()
+        stderr_buf = io.StringIO()
+
+        with patch.object(runner_mod, "run_executor", return_value=fake_result), \
+             patch("astrid.core.executor.cli._reject_run_passthrough"), \
+             patch("astrid.core.executor.cli._require_qualified_id"), \
+             patch("astrid.core.executor.cli._project_uuid_or_none", return_value=None), \
+             patch("astrid.core.executor.cli._executor_needs_out", return_value=False), \
+             patch("astrid.core.executor.cli._run_inputs", return_value={}), \
+             patch.object(sys, "stdout", stdout_buf), \
+             patch.object(sys, "stderr", stderr_buf):
+            cli_mod._cmd_run(fake_args, fake_registry)
+
+        return stdout_buf.getvalue(), stderr_buf.getvalue()
+
+    def test_run_command_echo_goes_to_stderr(self):
+        """result.command echo must land on stderr, not stdout."""
+        stdout, stderr = self._run_cmd_run(command=["echo", "hello"], payload=None, use_json=False)
+        self.assertNotIn("echo hello", stdout)
+        self.assertIn("echo hello", stderr)
+
+    def test_run_json_flag_suppresses_command_echo(self):
+        """--json flag must suppress the command echo entirely (no stderr echo)."""
+        from unittest.mock import MagicMock
+        stdout, stderr = self._run_cmd_run(
+            command=["echo", "hello"], payload=MagicMock(), use_json=True
+        )
+        self.assertNotIn("echo hello", stdout)
+        self.assertNotIn("echo hello", stderr)
+
+
+import subprocess
+
+
+class ExecutorLsListAliasTest(unittest.TestCase):
+    """T3: executors ls and executors list resolve to the same handler."""
+
+    def test_ls_and_list_same_handler(self):
+        """Both ls and list resolve to _cmd_list in the executor CLI."""
+        import sys
+        r_ls = subprocess.run(
+            [sys.executable, "-m", "astrid", "executors", "ls", "--help"],
+            capture_output=True, text=True
+        )
+        r_list = subprocess.run(
+            [sys.executable, "-m", "astrid", "executors", "list", "--help"],
+            capture_output=True, text=True
+        )
+        # Both verbs must show help with --json option (same handler).
+        self.assertIn("--json", r_ls.stdout + r_ls.stderr,
+                      "executors ls --help should mention --json")
+        self.assertIn("--json", r_list.stdout + r_list.stderr,
+                      "executors list --help should mention --json")
+        # Both produce identical output (same handler registered).
+        self.assertEqual(r_ls.stdout, r_list.stdout,
+                         "executors ls and list must resolve to the same handler")

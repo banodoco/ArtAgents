@@ -81,16 +81,9 @@ def _build_synthetic_run(
             project=slug, run_id=run_id, last_used_at=now_iso()
         )
     except Exception:
-        sess = Session(
-            id=sid,
-            project=slug,
-            agent_id="retry-fetch-test",
-            attached_at="2026-05-11T00:00:00Z",
-            last_used_at="2026-05-11T00:00:00Z",
-            role="writer",
-            timeline=None,
-            run_id=run_id,
-        )
+        from tests.conftest import make_session
+
+        sess = make_session(id=sid, project=slug, agent_id="retry-fetch-test", run_id=run_id)
     path = session_path(sid)
     path.parent.mkdir(parents=True, exist_ok=True)
     sess.to_json(path)

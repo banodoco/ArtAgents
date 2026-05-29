@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 from pathlib import Path
 
 import pytest
 
+from astrid.core.project.current_run import write_current_run
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.lease import bump_epoch_and_swap_session, read_lease
+from astrid.core.session.model import Session, now_iso
+from astrid.core.session.paths import session_path
+from astrid.core.task.events import ZERO_HASH, canonical_event_json, read_events, verify_chain
 from astrid.core.task.plan import (
     _validate_plan,
     load_plan,
@@ -23,13 +29,6 @@ from astrid.core.task.plan_verbs import (
     cmd_plan_remove_step,
     cmd_plan_supersede_step,
 )
-from astrid.core.project.current_run import write_current_run
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
-from astrid.core.session.lease import bump_epoch_and_swap_session, read_lease
-from astrid.core.session.model import Session, now_iso
-from astrid.core.session.paths import session_path
-from astrid.core.task.events import ZERO_HASH, canonical_event_json, read_events, verify_chain
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -58,16 +57,9 @@ def _write_lease(run_dir: Path, epoch: int = 1) -> None:
         sess = Session.from_json(session_path(sid))
         sess = sess.with_changes(project=slug, run_id=run_id, last_used_at=now_iso())
     except Exception:
-        sess = Session(
-            id=sid,
-            project=slug,
-            agent_id="plan-mutation-test",
-            attached_at="2026-05-11T00:00:00Z",
-            last_used_at="2026-05-11T00:00:00Z",
-            role="writer",
-            timeline=None,
-            run_id=run_id,
-        )
+        from tests.conftest import make_session
+
+        sess = make_session(id=sid, project=slug, agent_id="plan-mutation-test", run_id=run_id)
     path = session_path(sid)
     path.parent.mkdir(parents=True, exist_ok=True)
     sess.to_json(path)

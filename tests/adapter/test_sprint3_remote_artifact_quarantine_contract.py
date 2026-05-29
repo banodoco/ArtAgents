@@ -9,14 +9,14 @@ import pytest
 from astrid.core.adapter import RunContext
 from astrid.core.adapter.remote_artifact import RemoteArtifactAdapter
 from astrid.core.adapter.remote_artifact_fetch import FetchResult, fetch_artifacts
+from astrid.core.project.current_run import write_current_run
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.lease import write_lease_init
-from astrid.core.session.model import Session, now_iso
+from astrid.core.session.model import now_iso
 from astrid.core.session.paths import session_path
 from astrid.core.task.events import append_event, read_events
 from astrid.core.task.lifecycle import cmd_step_retry_fetch
 from astrid.core.task.plan import Check, ProducesEntry, Step, compute_plan_hash
-from astrid.core.project.current_run import write_current_run
 
 
 def _ctx(tmp_path: Path) -> RunContext:
@@ -110,14 +110,13 @@ def _build_retry_fetch_run(tmp_path: Path) -> tuple[Path, Path]:
     (step_dir / "remote_state.json").write_text("{}", encoding="utf-8")
     sid = "S-REMOTE-ARTIFACT-DEFERRAL"
     session_path(sid).parent.mkdir(parents=True, exist_ok=True)
-    Session(
+    from tests.conftest import make_session
+
+    make_session(
         id=sid,
-        project="demo",
         agent_id="test",
         attached_at=now_iso(),
         last_used_at=now_iso(),
-        role="writer",
-        timeline=None,
         run_id="run-1",
     ).to_json(session_path(sid))
     with patch.dict("os.environ", {ASTRID_SESSION_ID_ENV: sid}):

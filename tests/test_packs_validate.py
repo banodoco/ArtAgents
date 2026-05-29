@@ -66,6 +66,7 @@ agent:
             f"""schema_version: 1
 id: {exec_id}
 name: Test Executor
+kind: built_in
 version: 0.1.0
 description: A test executor.
 runtime:
@@ -88,6 +89,7 @@ runtime:
             f"""schema_version: 1
 id: {orch_id}
 name: Test Orchestrator
+kind: built_in
 version: 0.1.0
 runtime:
   kind: python
@@ -887,6 +889,7 @@ class TestNoExecutionSafety(MinimalPackTestCase):
             """schema_version: 1
 id: test_pack.side_effect_exec
 name: Side Effect Executor
+kind: built_in
 version: 0.1.0
 runtime:
   type: python-cli
@@ -938,6 +941,7 @@ print('THIS SHOULD NOT PRINT')
             """schema_version: 1
 id: test_pack.import_test
 name: Import Test
+kind: built_in
 version: 0.1.0
 runtime:
   type: python-cli
@@ -1333,6 +1337,7 @@ aliases:
             """schema_version: 1
 id: test_pack.test_orch
 name: Test Orchestrator
+kind: built_in
 version: 0.1.0
 runtime:
   kind: command
@@ -1830,6 +1835,185 @@ metadata:
         errors, _ = validate_pack(root)
         self.assertTrue(
             any("must be an array" in error for error in errors), errors
+        )
+
+
+class TestRuntimeModuleCanonicalization(unittest.TestCase):
+    """T5: metadata.runtime_module is the single runtime declaration.
+
+    A python ``runtime`` block may legacy-declare the same module; the parser
+    folds it into metadata.runtime_module and rejects a conflicting
+    double-declaration.
+    """
+
+    def test_executor_only_metadata_runtime_module_loads(self) -> None:
+        from astrid.core.executor.schema import validate_executor_definition
+
+        definition = validate_executor_definition(
+            {
+                "schema_version": 1,
+                "id": "test_pack.test_exec",
+                "name": "Test Executor",
+                "kind": "built_in",
+                "version": "0.1.0",
+                "metadata": {"runtime_module": "astrid.packs.test_pack.executors.test_exec.run"},
+            }
+        )
+        self.assertEqual(
+            definition.metadata["runtime_module"],
+            "astrid.packs.test_pack.executors.test_exec.run",
+        )
+
+    def test_executor_runtime_module_folded_into_metadata(self) -> None:
+        from astrid.core.executor.schema import validate_executor_definition
+
+        definition = validate_executor_definition(
+            {
+                "schema_version": 1,
+                "id": "test_pack.test_exec",
+                "name": "Test Executor",
+                "kind": "built_in",
+                "version": "0.1.0",
+                "runtime": {"kind": "python", "module": "pkg.mod.run", "function": "main"},
+            }
+        )
+        self.assertEqual(definition.metadata["runtime_module"], "pkg.mod.run")
+
+    def test_executor_conflicting_double_declaration_rejected(self) -> None:
+        from astrid.core.executor.schema import (
+            ExecutorValidationError,
+            validate_executor_definition,
+        )
+
+        with self.assertRaises(ExecutorValidationError) as ctx:
+            validate_executor_definition(
+                {
+                    "schema_version": 1,
+                    "id": "test_pack.test_exec",
+                    "name": "Test Executor",
+                    "kind": "built_in",
+                    "version": "0.1.0",
+                    "runtime": {"kind": "python", "module": "pkg.a.run", "function": "main"},
+                    "metadata": {"runtime_module": "pkg.b.run"},
+                }
+            )
+        self.assertIn("twice with conflicting", str(ctx.exception))
+
+    def test_orchestrator_only_metadata_runtime_module_loads(self) -> None:
+        from astrid.core.orchestrator.schema import validate_orchestrator_definition
+
+        definition = validate_orchestrator_definition(
+            {
+                "schema_version": 1,
+                "id": "test_pack.test_orch",
+                "name": "Test Orchestrator",
+                "kind": "built_in",
+                "version": "0.1.0",
+                "runtime": {"kind": "command", "command": {"argv": ["x"]}},
+                "metadata": {"runtime_module": "pkg.orch.run"},
+            }
+        )
+        self.assertEqual(definition.metadata["runtime_module"], "pkg.orch.run")
+
+    def test_orchestrator_runtime_module_folded_into_metadata(self) -> None:
+        from astrid.core.orchestrator.schema import validate_orchestrator_definition
+
+        definition = validate_orchestrator_definition(
+            {
+                "schema_version": 1,
+                "id": "test_pack.test_orch",
+                "name": "Test Orchestrator",
+                "kind": "built_in",
+                "version": "0.1.0",
+                "runtime": {"kind": "python", "module": "pkg.orch.run", "function": "main"},
+            }
+        )
+        self.assertEqual(definition.metadata["runtime_module"], "pkg.orch.run")
+
+    def test_orchestrator_conflicting_double_declaration_rejected(self) -> None:
+        from astrid.core.orchestrator.schema import (
+            OrchestratorValidationError,
+            validate_orchestrator_definition,
+        )
+
+        with self.assertRaises(OrchestratorValidationError) as ctx:
+            validate_orchestrator_definition(
+                {
+                    "schema_version": 1,
+                    "id": "test_pack.test_orch",
+                    "name": "Test Orchestrator",
+                    "kind": "built_in",
+                    "version": "0.1.0",
+                    "runtime": {"kind": "python", "module": "pkg.a.run", "function": "main"},
+                    "metadata": {"runtime_module": "pkg.b.run"},
+                }
+            )
+        self.assertIn("twice with conflicting", str(ctx.exception))
+
+
+class TestRuntimeValidatorParity(MinimalPackTestCase):
+    """T6: packs validate runs the raising runtime validators after JSON Schema.
+
+    A manifest that passes the JSON-Schema pass but fails the runtime validator
+    (conflicting double-declaration of the runtime module) is now rejected by
+    ``packs validate``.
+    """
+
+    def test_orchestrator_runtime_invalid_but_schema_valid_is_rejected(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "orchestrators/test_orch"
+        # python runtime.module conflicts with metadata.runtime_module: both
+        # shapes are JSON-Schema valid, but the runtime parser rejects the
+        # conflicting double-declaration.
+        _write(
+            comp_dir / "orchestrator.yaml",
+            """schema_version: 1
+id: test_pack.test_orch
+name: Test Orchestrator
+kind: built_in
+version: 0.1.0
+runtime:
+  kind: python
+  module: pkg.a.run
+  function: main
+metadata:
+  runtime_module: pkg.b.run
+""",
+        )
+        _write(comp_dir / "run.py", "def main():\n    return None\n")
+        _write(comp_dir / "STAGE.md", "# Test Orchestrator\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any("twice with conflicting" in error for error in errors),
+            f"expected runtime-validator rejection, got: {errors}",
+        )
+
+    def test_executor_runtime_invalid_but_schema_valid_is_rejected(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        comp_dir = root / "executors/test_exec"
+        _write(
+            comp_dir / "executor.yaml",
+            """schema_version: 1
+id: test_pack.test_exec
+name: Test Executor
+version: 0.1.0
+kind: built_in
+runtime:
+  kind: python
+  module: pkg.a.run
+  function: main
+metadata:
+  runtime_module: pkg.b.run
+""",
+        )
+        _write(comp_dir / "run.py", "# Test executor\n")
+        _write(comp_dir / "STAGE.md", "# Test Executor\n")
+        errors, _ = validate_pack(root)
+        self.assertTrue(
+            any("twice with conflicting" in error for error in errors),
+            f"expected runtime-validator rejection, got: {errors}",
         )
 
 

@@ -357,7 +357,11 @@ def gate_command(
     cursor = derive_cursor(plan, events, slug=slug)
     if cursor.pinned_failure is not None:
         reason, _host_path = cursor.pinned_failure
-        raise TaskRunGateError(reason=reason, recovery=f"astrid abort --project {slug}")
+        raise TaskRunGateError(
+            reason=reason,
+            recovery=f"astrid abort --project {slug}",
+            code="pinned_failure",
+        )
     run_started_actor = _find_run_started_actor(events)
 
     # Auto-traverse: nested_entered/exited for group steps; iteration_started/
@@ -427,6 +431,7 @@ def gate_command(
     raise TaskRunGateError(
         reason=f"unexpected step kind: {type(current_step).__name__}",
         recovery=f"astrid next --project {slug}",
+        code="unexpected_step_kind",
     )
 
 
@@ -511,6 +516,7 @@ def _resolve_adapter(step: Step):
     raise TaskRunGateError(
         reason=f"unknown adapter {step.adapter!r}",
         recovery="use --adapter local or manual",
+        code="unknown_adapter",
     )
 
 
@@ -1136,6 +1142,7 @@ def _append_via_decision(decision: GateDecision, event: dict[str, Any]) -> dict[
         raise TaskRunGateError(
             reason="writer session missing for task-run mutation",
             recovery=f"astrid attach {decision.slug or '<project>'}",
+            code="writer_session_missing",
         )
     with writer_context_from_decision(
         decision,

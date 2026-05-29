@@ -36,8 +36,8 @@ from ._edit_helpers import TimelineEditError
 from .eventlog import EventLogError
 from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
-from .projection import ErasedPayloadProjectionError, ProjectionError
 from .paths import assembly_identity_path, find_timeline_by_slug
+from .projection import ErasedPayloadProjectionError, ProjectionError
 
 _SESSION_GATE_HINT = (
     "A timeline command requires a bound session. "
@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # --- ls ---
-    ls_parser = subparsers.add_parser("ls", help="List timelines in the current project.")
+    ls_parser = subparsers.add_parser("ls", aliases=["list"], help="List timelines in the current project.")
     ls_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -1920,6 +1920,8 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
 
     Returns nonzero on parity failures or unreadable source blobs.
     """
+    from .eventlog.local_fs import LocalFsBackend
+    from .events.schema import TimelineActor
     from .migration import (
         MigrationResult,
         SkippedTimeline,
@@ -1927,8 +1929,6 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
         discover_timelines_for_project,
         import_from_legacy_local,
     )
-    from .eventlog.local_fs import LocalFsBackend
-    from .events.schema import TimelineActor
 
     write_mode = bool(getattr(args, "apply", False))
     json_out = bool(getattr(args, "json_out", False))
@@ -2110,8 +2110,8 @@ def cmd_history(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
     from .eventlog import select_timeline_backend
+    from .observability import resolve_timeline_target
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
@@ -2187,8 +2187,8 @@ def cmd_diff(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
     from .eventlog import select_timeline_backend
+    from .observability import resolve_timeline_target
     from .projection import replay_projection
 
     try:
@@ -2300,8 +2300,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import read_ops_log, resolve_timeline_target
     from .eventlog import select_timeline_backend
+    from .observability import read_ops_log, resolve_timeline_target
     from .projection import replay_projection
 
     try:
@@ -2400,12 +2400,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
     # Projection parity
     if projection_parity_ok is None:
-        print(f"  Projection:  N/A  (no assembly.json to compare)")
+        print("  Projection:  N/A  (no assembly.json to compare)")
     elif projection_parity_ok:
-        print(f"  Projection:  OK  (assembly.json matches replay)")
+        print("  Projection:  OK  (assembly.json matches replay)")
     else:
         issues.append(f"projection: {projection_parity_error}")
-        print(f"  Projection:  MISMATCH")
+        print("  Projection:  MISMATCH")
         if projection_parity_error:
             print(f"    {projection_parity_error}")
 
@@ -2439,8 +2439,8 @@ def cmd_preview(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
     from .eventlog import select_timeline_backend
+    from .observability import resolve_timeline_target
     from .projection import replay_projection
 
     try:
@@ -2499,8 +2499,8 @@ def cmd_who_edited(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
     from .eventlog import select_timeline_backend
+    from .observability import resolve_timeline_target
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
@@ -2706,10 +2706,9 @@ def cmd_undo(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
-    from .eventlog import build_timeline_backend, select_timeline_stream
     from .inverses import plan_inverses
-    from .projection import replay_projection, regenerate_projection
+    from .observability import resolve_timeline_target
+    from .projection import regenerate_projection, replay_projection
 
     # Resolve the timeline
     try:
@@ -2743,10 +2742,10 @@ def cmd_undo(args: argparse.Namespace) -> int:
         return 1
 
     # Find the latest undoable event (skip lifecycle/ops by default)
-    from .inverses import _NON_REVERSIBLE_KINDS
-
     # Also skip erased events
     from astrid.core.timeline.events.schema import ErasedPayload
+
+    from .inverses import _NON_REVERSIBLE_KINDS
 
     target_idx: int | None = None
     target_event = None
@@ -2845,12 +2844,10 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
     project_slug = session.project
 
     from .observability import resolve_timeline_target
-    from .eventlog import build_timeline_backend, select_timeline_stream
     from .undo import (
         MassUndoSelector,
-        MassUndoResult,
-        plan_mass_undo,
         execute_mass_undo,
+        plan_mass_undo,
     )
 
     # Validate: at least one filter criterion
@@ -2921,7 +2918,7 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
         return 0
 
     # --- Execute mode (--yes) ---
-    print(f"mass-undo: executing with --yes ...")
+    print("mass-undo: executing with --yes ...")
     try:
         result = execute_mass_undo(
             backend,
@@ -2934,7 +2931,7 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
         print(f"timelines mass-undo: {exc}", file=sys.stderr)
         return 1
 
-    print(f"mass-undo result:")
+    print("mass-undo result:")
     print(f"  planned: {result.planned_count} inverses")
     print(f"  appended: {result.appended_count} events")
     print(f"  chunks: {result.chunk_count}")
@@ -2960,13 +2957,12 @@ def cmd_erase(args: argparse.Namespace) -> int:
     session = _require_session()
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
-    from .eventlog import build_timeline_backend, select_timeline_stream
     from .erasure import (
         ErasureSelector,
         apply_erasure,
         query_erasure,
     )
+    from .observability import resolve_timeline_target
 
     # Resolve the timeline
     try:
@@ -3043,7 +3039,7 @@ def cmd_erase(args: argparse.Namespace) -> int:
         print(f"timelines erase: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Erasure applied:")
+    print("Erasure applied:")
     print(f"  audit event: {result.audit_event_id}")
     print(f"  payloads replaced: {result.replaced_count}")
     print(f"  downstream recomputed: {result.downstream_count}")
@@ -3079,7 +3075,7 @@ def cmd_recover(args: argparse.Namespace) -> int:
         print(f"timelines recover: {exc}", file=sys.stderr)
         return 2
 
-    print(f"Recovery applied:")
+    print("Recovery applied:")
     print(f"  anchor event: {result.anchor_event_id} (type={result.anchor_type})")
     print(f"  recovered event: {result.new_event_id}")
     print(f"  new version: {result.new_version}")

@@ -71,7 +71,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    list_parser = subparsers.add_parser("list", help="List available orchestrators.")
+    list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available orchestrators.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--kind", choices=("built_in", "external"), help="Filter orchestrators by kind.")
     list_parser.add_argument("--pack", help="Filter orchestrators by source pack id.")
@@ -256,6 +256,7 @@ _ORCHESTRATOR_YAML_TEMPLATE = """\
 schema_version: 1
 id: {qualified_id}
 name: {slug}
+kind: built_in
 version: 0.1.0
 description: \"TODO: describe what this orchestrator does.\"
 
@@ -652,7 +653,7 @@ def _print_run_result(result: Any) -> None:
     commands = result.planned_commands or ((result.command,) if result.command else ())
     for command in commands:
         if command:
-            print(shlex.join(command))
+            print(shlex.join(command), file=sys.stderr)
     if result.errors:
         for error in result.errors:
             print(f"{error.kind}: {error.message}", file=sys.stderr)

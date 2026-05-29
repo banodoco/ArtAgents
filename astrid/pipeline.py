@@ -93,12 +93,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_entrypoint_help()
         return 0
     if first_arg == "--version":
-        try:
-            from importlib.metadata import version
-
-            print(f"astrid {version('astrid')}")
-        except Exception:
-            print("astrid")
+        print("astrid")
         return 0
     # Help for a subcommand (e.g. `astrid elements list --help`) must never
     # require a bound session — argparse should print usage and exit 0
@@ -219,8 +214,8 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
 
 
 def _print_unbound_gate_recovery(message: str) -> None:
+    print("first recovery action: astrid status", file=sys.stderr)
     print(message, file=sys.stderr)
-    print("run `astrid status` to see available projects and next steps", file=sys.stderr)
 
 
 def _dispatch(raw: list[str]) -> int:

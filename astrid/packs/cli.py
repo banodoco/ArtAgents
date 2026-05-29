@@ -21,11 +21,11 @@ import yaml
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
-    load_pack_manifest,
     pack_manifest_path,
     pack_taxonomy_from_manifest,
     packs_root,
 )
+from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 from astrid.packs.validate import validate_pack
 
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
@@ -315,12 +315,12 @@ id: {pack_id}
 name: {pack_name}
 version: 0.1.0
 description: {description}
-origin: project
-install_tier: default
+origin: external
+install_tier: core
 pack_type: capability
-domain: general
+domain: system
 stability: stable
-support: project
+support: core
 content:
   executors: executors
   orchestrators: orchestrators
@@ -678,8 +678,6 @@ def _print_agent_view(view: dict) -> None:
 # ---------------------------------------------------------------------------
 # Full inspect helpers
 # ---------------------------------------------------------------------------
-
-from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 
 # Recognised component manifest filenames keyed by kind.
 _INSPECT_COMPONENT_MANIFEST_NAMES: dict[str, tuple[str, ...]] = {
@@ -1181,7 +1179,7 @@ def build_parser() -> argparse.ArgumentParser:
     new_parser.set_defaults(handler=_handle_new)
 
     list_parser = subparsers.add_parser(
-        "list", help="List discovered packs."
+        "list", aliases=["ls"], help="List discovered packs."
     )
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--category", help="Filter by metadata.category.")
@@ -1414,7 +1412,6 @@ def _handle_rollback(args: argparse.Namespace) -> int:
 
 def _handle_agent_index(args: argparse.Namespace) -> int:
     """Handler for ``packs agent-index``."""
-    import json as _json
 
     from astrid.core.pack import PackResolver, packs_root
     from astrid.core.pack_store import InstalledPackStore

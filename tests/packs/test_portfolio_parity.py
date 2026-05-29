@@ -41,7 +41,6 @@ from astrid.core.executor.registry import load_default_registry as load_executor
 from astrid.core.pack import discover_packs
 from astrid.packs.validate import validate_pack
 
-
 # ---------------------------------------------------------------------------
 # Fixtures + helpers
 # ---------------------------------------------------------------------------
@@ -392,7 +391,6 @@ def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
     """Mint identity + Session + project so the CLI gate accepts the run."""
     from astrid.core.project.paths import project_dir
     from astrid.core.session.identity import Identity, write_identity
-    from astrid.core.session.model import Session
     from astrid.core.session.paths import session_path
     from astrid.core.session.ulid import generate_ulid
 
@@ -400,14 +398,11 @@ def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
     write_identity(Identity(agent_id="claude-1",
                             created_at="2026-05-11T00:00:00Z"))
     sid = generate_ulid()
-    sess = Session(
+    from tests.conftest import make_session
+
+    sess = make_session(
         id=sid,
         project=slug,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-        timeline=None,
         run_id=None,
     )
     sess.to_json(session_path(sid))
@@ -437,11 +432,12 @@ def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,
       * exit code 0
       * stdout contains the canonical empty-cache prune line
         ``removed=0 freed_bytes=0`` (asset_cache/run.py:501)
-      * stdout contains the runner's joined argv prefix
+      * stderr contains the runner's joined argv prefix
         ``-m astrid.packs.training.executors.asset_cache.run --prune-older-than``
         which is ONLY emitted on the ``_run_external_executor`` path
-        (``_cmd_run`` calls ``shlex.join(result.command)`` and the
-        in-process builtin path does NOT populate ``result.command``).
+        (``_cmd_run`` echoes ``shlex.join(result.command)`` to stderr and the
+        in-process builtin path does NOT populate ``result.command``). The
+        command echo lives on stderr so stdout carries only the JSON payload.
     """
     astrid_home = tmp_path / "astrid_home"
     projects_root = tmp_path / "projects"
@@ -485,14 +481,15 @@ def test_asset_cache_subprocess_shift_anchor(tmp_path: Path,
     assert "removed=0 freed_bytes=0" in r.stdout, (
         f"missing canonical empty-cache prune output in stdout:\n{r.stdout}"
     )
-    # Sentinel for the external-dispatch path: _cmd_run prints
-    # shlex.join(result.command) only when the runner went through
+    # Sentinel for the external-dispatch path: _cmd_run echoes
+    # shlex.join(result.command) to stderr only when the runner went through
     # _run_external_executor (the in-process builtin path returns no
-    # ``command`` on the result).
+    # ``command`` on the result). The echo moved off stdout so stdout carries
+    # only the JSON payload.
     assert (
         "-m astrid.packs.training.executors.asset_cache.run "
         "--prune-older-than"
-    ) in r.stdout, (
+    ) in r.stderr, (
         "expected runner to log the external argv prefix (external "
-        "dispatch sentinel) but it was not in stdout:\n" + r.stdout
+        "dispatch sentinel) but it was not in stderr:\n" + r.stderr
     )

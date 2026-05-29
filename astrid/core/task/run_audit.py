@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.task.events import canonical_event_json, read_events, verify_chain
 from astrid.core.task.plan import load_plan
@@ -614,14 +615,15 @@ def _print_tail(events_path: Path, *, n: int) -> None:
 
 
 def _run_status(events: list[dict[str, Any]]) -> str:
-    """Derive run status from terminal events."""
-    for e in events:
-        if e.get("kind") == "run_aborted":
-            return "aborted"
-    for e in events:
-        if e.get("kind") == "run_completed":
-            return "completed"
-    return "in-flight"
+    """Derive run status from terminal events via the canonical RunStatus.
+
+    The audit surface keeps its historical ``in-flight`` spelling for the
+    running state; every other state serializes to the canonical token.
+    """
+    status = RunStatus.from_run_events(events)
+    if status is RunStatus.RUNNING:
+        return "in-flight"
+    return status.value
 
 
 def _build_step_rows(

@@ -27,12 +27,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.session.identity import Identity, write_identity
-from astrid.core.session.model import Session
 from astrid.core.session.paths import session_path, sessions_dir
 from astrid.core.session.ulid import generate_ulid
 from astrid.core.task.hook import cmd_hook_stop
 from astrid.core.task.lifecycle import cmd_next
-
 
 _BODY_CODE = '''from astrid.orchestrate import orchestrator, code
 @orchestrator("demo.code")
@@ -120,15 +118,15 @@ def test_session_bound_resolution_wins(tmp_path: Path, monkeypatch) -> None:
     # `expected` so both invocations exercise the same code path.
     write_identity(Identity(agent_id="hook-test", created_at="2026-01-01T00:00:00Z"))
     sessions_dir().mkdir(parents=True, exist_ok=True)
-    session = Session(
+    from tests.conftest import make_session
+
+    session = make_session(
         id=generate_ulid(),
         project="p",
-        timeline=None,
         run_id="r3",
         agent_id="hook-test",
         attached_at="2026-01-01T00:00:00Z",
         last_used_at="2026-01-01T00:00:00Z",
-        role="writer",
     )
     session.to_json(session_path(session.id))
     import json

@@ -89,7 +89,9 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
             )
 
         self.assertEqual(result, 0, stderr.getvalue())
-        self.assertIn("astrid.packs.rendering.executors.html_canvas_effect.run", stdout.getvalue())
+        # The dry-run command echo goes to stderr; stdout carries the JSON
+        # payload (run echo moved off stdout so `--json` can own the stream).
+        self.assertIn("astrid.packs.rendering.executors.html_canvas_effect.run", stderr.getvalue())
 
 
 if __name__ == "__main__":

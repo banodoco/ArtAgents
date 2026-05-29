@@ -15,7 +15,6 @@ from astrid.core.project.project import create_project
 from astrid.core.session import paths as session_paths
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.identity import Identity, write_identity
-from astrid.core.session.model import Session
 
 # Settled Sprint 1 unbound contract. The implementation may temporarily carry
 # compatibility exceptions during migration, but the final gate must match this
@@ -341,16 +340,9 @@ def test_bound_session_lets_gated_verb_through(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Mint a minimal session so resolve_current_session succeeds.
-    sess = Session(
-        id="S-CLI",
-        project="demo",
-        timeline=None,
-        run_id=None,
-        agent_id="claude-1",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-    )
+    from tests.conftest import make_session
+
+    sess = make_session(id="S-CLI", run_id=None)
     sessions = env["home"] / "sessions"
     sessions.mkdir(parents=True, exist_ok=True)
     sess.to_json(sessions / "S-CLI.json")

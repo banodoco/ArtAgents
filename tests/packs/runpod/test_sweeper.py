@@ -11,9 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from astrid.core.project.current_run import write_current_run
-from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
-from astrid.core.session.model import Session
-from astrid.core.session.paths import session_path
 from astrid.core.runpod.sweeper import (
     POD_HANDLE_FILENAME,
     RUNPOD_SWEEPER_AUDIT_FILENAME,
@@ -21,6 +18,8 @@ from astrid.core.runpod.sweeper import (
     append_runpod_sweeper_event,
     collect_handles,
 )
+from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.paths import session_path
 
 SPRINT1_STOP_LINE_XFAIL = pytest.mark.xfail(
     strict=True,
@@ -110,16 +109,9 @@ def _bind_sweeper_session(base_dir: Path, project: str, run_id: str, sid: str) -
     import os
 
     os.environ[ASTRID_SESSION_ID_ENV] = sid
-    sess = Session(
-        id=sid,
-        project=project,
-        agent_id="sweeper-test",
-        attached_at="2026-05-11T00:00:00Z",
-        last_used_at="2026-05-11T00:00:00Z",
-        role="writer",
-        timeline=None,
-        run_id=run_id,
-    )
+    from tests.conftest import make_session
+
+    sess = make_session(id=sid, project=project, agent_id="sweeper-test", run_id=run_id)
     path = session_path(sid)
     path.parent.mkdir(parents=True, exist_ok=True)
     sess.to_json(path)
@@ -821,8 +813,8 @@ def test_append_runpod_sweeper_event_retries_tail_conflicts(
     sweeper_projects_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from astrid.core.task.events import StaleTailError
     import astrid.core.runpod.sweeper as sweeper_module
+    from astrid.core.task.events import StaleTailError
 
     handle_path = _write_handle_tree(sweeper_projects_root, "proj", "run-retry", "step-1", _make_handle())
     _write_lease(sweeper_projects_root, "proj", "run-retry", {"writer_epoch": 99, "attached_session_id": "active"})

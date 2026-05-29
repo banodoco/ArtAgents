@@ -142,7 +142,9 @@ class CanonicalCliTest(unittest.TestCase):
             ],
         )
         self.assertEqual(result, 0, stderr)
-        self.assertIn("astrid.packs.rendering.executors.render.run", stdout)
+        # The dry-run command echo goes to stderr; stdout carries the JSON
+        # payload (run echo moved off stdout so `--json` can own the stream).
+        self.assertIn("astrid.packs.rendering.executors.render.run", stderr)
 
     def test_pipeline_dispatches_canonical_cli_modules(self) -> None:
         with mock.patch(

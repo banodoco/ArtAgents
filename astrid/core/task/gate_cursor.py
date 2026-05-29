@@ -113,12 +113,14 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                 raise TaskRunGateError(
                     reason="nested_entered points past end of frame",
                     recovery="inspect events.jsonl",
+                    code="nested_entered_past_end",
                 )
             step = top.plan.steps[top.child_index]
             if not is_group_step(step):
                 raise TaskRunGateError(
                     reason="nested_entered did not land on a group step",
                     recovery="inspect events.jsonl",
+                    code="nested_entered_not_group",
                 )
             frames.append(
                 _Frame(
@@ -133,6 +135,7 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                 raise TaskRunGateError(
                     reason="nested_exited at root frame",
                     recovery="inspect events.jsonl",
+                    code="nested_exited_at_root",
                 )
             frames.pop()
             pending.pop()

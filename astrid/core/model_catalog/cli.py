@@ -27,7 +27,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="cmd")
 
     # ``astrid models list``
-    list_p = sub.add_parser("list", help="List registered models")
+    list_p = sub.add_parser("list", aliases=["ls"], help="List registered models")
     list_p.add_argument(
         "--json",
         action="store_true",
