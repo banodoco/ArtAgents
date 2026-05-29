@@ -539,6 +539,7 @@ def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
         requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
         binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
         network=_optional_bool(data, "network", f"{path}.network", default=False),
+        env_passthrough=tuple(_optional_string_list(data, "env_passthrough", f"{path}.env_passthrough")),
     )
 
 
@@ -669,6 +670,21 @@ def _validate_pipeline_requirements(values: tuple[str, ...]) -> None:
 def _validate_isolation(isolation: IsolationMetadata) -> None:
     if isolation.mode not in ISOLATION_MODES:
         raise ExecutorValidationError(f"isolation.mode must be one of {sorted(ISOLATION_MODES)}")
+    _validate_unique_env_passthrough(isolation.env_passthrough)
+
+
+def _validate_unique_env_passthrough(values: tuple[str, ...]) -> None:
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        _validate_env_name(value, f"isolation.env_passthrough[{index}]")
+        if value in seen:
+            raise ExecutorValidationError(f"isolation.env_passthrough contains duplicate name {value!r}")
+        seen.add(value)
+
+
+def _validate_env_name(value: str, path: str) -> None:
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+        raise ExecutorValidationError(f"{path} must be a valid environment variable name")
 
 
 def _validate_external_runtime(executor: ExecutorDefinition) -> None:

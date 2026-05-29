@@ -32,6 +32,7 @@ dependencies = [
 dev = [
     "mypy==1.17.0",
     "pytest==9.0.2",
+    "pytest-cov==7.1.0",
     "ruff==0.12.0",
 ]
 
@@ -53,6 +54,30 @@ include = [
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.coverage.run]
+source = ["astrid"]
+omit = [
+    ".megaplan/*",
+    "out/*",
+    "runs/*",
+    ".venv/*",
+    "venv/*",
+    "*/venv/*",
+    "*/.venv/*",
+    "remotion/*",
+    "tests/*",
+    "*/tests/*",
+    "scripts/*",
+    "*/site-packages/*",
+    "node_modules/*",
+    "build/*",
+    "dist/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 0
 
 [tool.mypy]
 python_version = "3.11"

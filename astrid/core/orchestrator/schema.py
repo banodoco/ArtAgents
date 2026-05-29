@@ -329,6 +329,7 @@ def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
         requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
         binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
         network=_optional_bool(data, "network", f"{path}.network", default=False),
+        env_passthrough=tuple(_optional_string_list(data, "env_passthrough", f"{path}.env_passthrough")),
     )
 
 
@@ -416,6 +417,19 @@ def _validate_cache(cache: CachePolicy) -> None:
 def _validate_isolation(isolation: IsolationMetadata) -> None:
     if isolation.mode not in ISOLATION_MODES:
         raise OrchestratorValidationError("isolation.mode must be one of ['in_process', 'subprocess']")
+    _validate_unique_env_passthrough(isolation.env_passthrough)
+
+
+def _validate_unique_env_passthrough(values: tuple[str, ...]) -> None:
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+            raise OrchestratorValidationError(
+                f"isolation.env_passthrough[{index}] must be a valid environment variable name"
+            )
+        if value in seen:
+            raise OrchestratorValidationError(f"isolation.env_passthrough contains duplicate name {value!r}")
+        seen.add(value)
 
 
 def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:

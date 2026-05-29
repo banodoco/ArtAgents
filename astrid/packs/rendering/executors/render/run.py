@@ -23,6 +23,7 @@ from pathlib import Path
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid import timeline
 from astrid.audit import AuditContext
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.theme_schema import ThemeValidationError, load_theme
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
 
@@ -311,14 +312,14 @@ def _regenerate_element_registries(project_dir: Path, theme_path: Path | None) -
     cmd = [sys.executable, str(generator)]
     if theme_path is not None:
         cmd.extend(["--theme", str(_resolve_theme_path(theme_path))])
-    env = os.environ.copy()
+    env: dict[str, str] = {}
     composition_src = project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
     if composition_src.is_dir():
-        env.setdefault("ASTRID_TIMELINE_COMPOSITION_SRC", str(composition_src))
+        env["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
     subprocess.run(
         cmd,
         cwd=str(REPO_ROOT),
-        env=env,
+        env=build_child_subprocess_env(explicit_env=env),
         capture_output=True,
         check=True,
         text=True,
@@ -387,6 +388,17 @@ def render(
         }
         out_path.parent.mkdir(parents=True, exist_ok=True)
         props_path.write_text(json.dumps(merged_props), encoding="utf-8")
+        # Build the Remotion launch env from the canonical safe base plus the
+        # Astrid runtime markers it propagates. We do NOT spread os.environ:
+        # the only Node/Remotion additions are the safe-base PATH/HOME/TMPDIR
+        # that npx + the headless renderer need, and any caller-provided
+        # composition source override declared as a build-tool variable.
+        remotion_env_additions: dict[str, str] = {}
+        composition_src = (
+            project_dir / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src"
+        )
+        if composition_src.is_dir():
+            remotion_env_additions["ASTRID_TIMELINE_COMPOSITION_SRC"] = str(composition_src)
         result = subprocess.run(
             [
                 "npx",
@@ -400,6 +412,7 @@ def render(
                 "--allow-html-in-canvas",
             ],
             cwd=str(project_dir),
+            env=build_child_subprocess_env(explicit_env=remotion_env_additions),
             capture_output=True,
             check=False,
             text=True,

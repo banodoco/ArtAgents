@@ -16,6 +16,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from astrid.core.pack_resolver import resolve_callable_from_metadata
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 from astrid.core.project.run import (
@@ -380,12 +381,7 @@ def _run_explicit_command_executor(
     completed = subprocess.run(
         list(command),
         cwd=cwd,
-        env={
-            **_base_subprocess_env(),
-            **env,
-            **_project_subprocess_env(request),
-            "ASTRID_INTERNAL_INVOCATION": "1",
-        },
+        env=_command_subprocess_env(executor, request, env),
         check=False,
     )
     return ExecutorRunResult(
@@ -492,8 +488,20 @@ def _project_subprocess_env(request: ExecutorRunRequest) -> dict[str, str]:
     return project_run_env() if request.project else {}
 
 
-def _base_subprocess_env() -> dict[str, str]:
-    return {key: value for key, value in os.environ.items() if not key.startswith("ASTRID_THREAD")}
+def _command_subprocess_env(
+    executor: ExecutorDefinition,
+    request: ExecutorRunRequest,
+    command_env: Mapping[str, str],
+) -> dict[str, str]:
+    return build_child_subprocess_env(
+        explicit_env={
+            **command_env,
+            **_project_subprocess_env(request),
+            "ASTRID_INTERNAL_INVOCATION": "1",
+        },
+        passthrough=executor.isolation.env_passthrough,
+        declared_passthrough=executor.isolation.env_passthrough,
+    )
 
 
 def _placeholder_values(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> dict[str, str]:

@@ -81,7 +81,20 @@
     "graph": {"type": "object"},
     "clip_kinds_supported": {"type": "array"},
     "pipeline_requirements": {"type": "array"},
-    "isolation": {"type": "object"},
+    "isolation": {
+      "type": "object",
+      "properties": {
+        "mode": {"type": "string", "enum": ["in_process", "subprocess"]},
+        "requirements": {"type": "array", "items": {"type": "string"}},
+        "binaries": {"type": "array", "items": {"type": "string"}},
+        "network": {"type": "boolean"},
+        "env_passthrough": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"}
+        }
+      },
+      "additionalProperties": true
+    },
     "external_runtime": {"type": "object"},
     "docs": {
       "type": "object",

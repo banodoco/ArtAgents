@@ -72,6 +72,7 @@ class IsolationMetadata:
     requirements: tuple[str, ...] = ()
     binaries: tuple[str, ...] = ()
     network: bool = False
+    env_passthrough: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------

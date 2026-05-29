@@ -9,6 +9,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from astrid.core.subprocess_env import build_child_subprocess_env
+
 from .schema import (
     OrchestratorDefinition,
     OrchestratorValidationError,
@@ -70,9 +72,10 @@ def _load_folder_orchestrator_definitions(orchestrator_root: str | Path) -> tupl
     if not orchestrator_path.is_file():
         raise FolderOrchestratorError(f"folder orchestrator is missing orchestrator.py or orchestrator manifest: {root}")
 
-    env = dict(os.environ)
     parent_paths = [str(Path.cwd()) if path == "" else path for path in sys.path]
-    env["PYTHONPATH"] = os.pathsep.join(parent_paths + [env.get("PYTHONPATH", "")])
+    env = build_child_subprocess_env(
+        explicit_env={"PYTHONPATH": os.pathsep.join(parent_paths + [os.environ.get("PYTHONPATH", "")])}
+    )
     completed = subprocess.run(
         [sys.executable, "-c", _EXTRACT_SCRIPT, str(orchestrator_path)],
         cwd=str(root),

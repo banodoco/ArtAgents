@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 
 from astrid._paths import executor_argv, resolve_executor_runtime_module
-from astrid.contracts.schema import CommandInputArg, CommandSpec, Output, Port
+from astrid.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.executor.cli import main as executor_cli_main
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor import runner as executor_runner
@@ -51,6 +51,7 @@ def _executor(
     kind: str = "external",
     env: dict[str, str] | None = None,
     cwd: str | None = None,
+    isolation: IsolationMetadata | None = None,
 ) -> ExecutorDefinition:
     command: CommandSpec | None
     if argv is None:
@@ -66,6 +67,7 @@ def _executor(
         outputs=outputs,
         command=command,
         conditions=conditions,
+        isolation=isolation or IsolationMetadata(),
         metadata=metadata or {},
     )
 
@@ -520,6 +522,7 @@ def test_external_executor_env_inherits_os_environ(
     executor = _executor(
         executor_id="test.env_inherits",
         argv=(sys.executable, "-c", script, str(out_file)),
+        isolation=IsolationMetadata(env_passthrough=("ASTRID_TEST_RUNNER_INHERITED",)),
     )
     registry = _registry(executor)
 
@@ -527,6 +530,30 @@ def test_external_executor_env_inherits_os_environ(
 
     assert result.returncode == 0
     assert out_file.read_text(encoding="utf-8") == "from-parent"
+
+
+def test_external_executor_does_not_inherit_undeclared_host_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTRID_TEST_RUNNER_UNDECLARED", "from-parent")
+    out_file = tmp_path / "undeclared.txt"
+    script = textwrap.dedent(
+        """
+        import os, sys
+        from pathlib import Path
+        Path(sys.argv[1]).write_text(os.environ.get('ASTRID_TEST_RUNNER_UNDECLARED', ''), encoding='utf-8')
+        """
+    )
+    executor = _executor(
+        executor_id="test.env_no_host_spread",
+        argv=(sys.executable, "-c", script, str(out_file)),
+    )
+    registry = _registry(executor)
+
+    result = run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
+
+    assert result.returncode == 0
+    assert out_file.read_text(encoding="utf-8") == ""
 
 
 def test_external_executor_definition_env_overrides_os_environ(

@@ -1,0 +1,93 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from scripts.reshape import check_repo_hygiene
+
+
+def _touch(root: Path, relpath: str, text: str = "") -> None:
+    path = root / relpath
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+
+
+def test_find_root_generated_artifacts_flags_root_reports_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _touch(tmp_path, "agentic-20260528.report.md")
+    _touch(tmp_path, "report-demo.md")
+    _touch(tmp_path, "nested/report-demo.md")
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+
+    assert check_repo_hygiene.find_root_generated_artifacts() == [
+        "agentic-20260528.report.md",
+        "report-demo.md",
+    ]
+
+
+def test_find_tracked_ignored_artifacts_classifies_synthetic_filenames(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracked_paths = [
+        ".env.local",
+        "config/dev.key",
+        "runs/demo/output.json",
+        "out/session-report.md",
+        "cache/render-state.json",
+        "astrid/packs/demo/build/compiled.json",
+        "exports/preview.mp4",
+        ".desloppify/state.json",
+        "notes/debug.bak",
+    ]
+    for relpath in tracked_paths:
+        _touch(tmp_path, relpath)
+
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check_repo_hygiene, "_tracked_files", lambda: tracked_paths)
+
+    assert check_repo_hygiene.find_tracked_ignored_artifacts() == [
+        ("local tool state", ".desloppify/state.json"),
+        ("local env filename", ".env.local"),
+        ("generated runtime directory", "astrid/packs/demo/build/compiled.json"),
+        ("generated runtime directory", "cache/render-state.json"),
+        ("credential-like filename", "config/dev.key"),
+        ("tracked runtime media output", "exports/preview.mp4"),
+        ("local tool state", "notes/debug.bak"),
+        ("generated runtime directory", "out/session-report.md"),
+        ("generated runtime directory", "runs/demo/output.json"),
+    ]
+
+
+def test_allowlists_preserve_legitimate_tracked_fixtures_and_source_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracked_paths = [
+        ".env.example",
+        "astrid/core/util/secrets.py",
+        "docs/assets/astrid-orchestration.png",
+        "tests/fixtures/reshape/hype_regression/main.mp4",
+        "tests/packs/builtin/generate_image/fixtures/tiny.png",
+    ]
+    for relpath in tracked_paths:
+        _touch(tmp_path, relpath)
+
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check_repo_hygiene, "_tracked_files", lambda: tracked_paths)
+
+    assert check_repo_hygiene.find_tracked_ignored_artifacts() == []
+
+
+def test_main_reports_category_and_path_names_without_file_contents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    tracked_path = ".env.local"
+    _touch(tmp_path, tracked_path, text="not-for-output\n")
+    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check_repo_hygiene, "_tracked_files", lambda: [tracked_path])
+
+    rc = check_repo_hygiene.main()
+
+    assert rc == 1
+    stderr = capsys.readouterr().err
+    assert "[local env filename] .env.local" in stderr
+    assert "not-for-output" not in stderr

@@ -52,6 +52,7 @@ def _candidate_module_paths(root: Path, pack: str, name: str) -> tuple[Path, ...
     candidates = [
         pack_root / f"{name}.py",
         pack_root / "orchestrators" / name / "run.py",
+        pack_root / "_legacy" / f"{name}.py",
     ]
     return tuple(candidates)
 

@@ -10,6 +10,7 @@ import subprocess
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.project.sidecar import write_json_sidecar
@@ -56,7 +57,7 @@ class LocalAdapter:
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
-                env={**os.environ, **(run_ctx.task_env or {})},
+                env=build_child_subprocess_env(explicit_env=run_ctx.task_env or {}),
             )
         except (FileNotFoundError, OSError) as exc:
             log_handle.close()

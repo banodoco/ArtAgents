@@ -9,6 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 from typing import Callable
+from collections.abc import Mapping
+
+from astrid.core.subprocess_env import build_child_subprocess_env
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -17,6 +20,7 @@ def ffprobe_duration_seconds(
     media_path: str | Path,
     *,
     runner: Runner = subprocess.run,
+    env: Mapping[str, str] | None = None,
 ) -> float:
     """Return format duration in seconds using the narrow ffprobe duration probe."""
 
@@ -33,6 +37,7 @@ def ffprobe_duration_seconds(
         ],
         check=True,
         capture_output=True,
+        env=build_child_subprocess_env(explicit_env=env or {}),
         text=True,
     )
     return float(str(result.stdout).strip())

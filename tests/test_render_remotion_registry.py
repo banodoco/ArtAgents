@@ -57,7 +57,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
                 return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
             with (
-                mock.patch.dict(render_remotion.os.environ, {}, clear=True),
+                mock.patch.dict(render_remotion.os.environ, {"ASTRID_RENDER_UNDECLARED": "host"}, clear=True),
                 mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
             ):
                 render_remotion._regenerate_element_registries(project_dir, theme_path)
@@ -71,6 +71,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
         env = kwargs["env"]
         self.assertIsInstance(env, dict)
         self.assertEqual(env["ASTRID_TIMELINE_COMPOSITION_SRC"], str(composition_src))
+        self.assertNotIn("ASTRID_RENDER_UNDECLARED", env)
         self.assertTrue(kwargs["capture_output"])
         self.assertTrue(kwargs["check"])
         self.assertTrue(kwargs["text"])
@@ -151,6 +152,70 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
         self.assertEqual(props["timeline"]["tracks"][0]["id"], "v1")
         self.assertEqual(len(props_paths), 1)
         self.assertFalse(props_paths[0].exists(), "render should remove the temporary props file")
+
+    def test_remotion_render_env_is_explicit_not_host_inherited(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="render-registry-") as tmp_text:
+            tmp = Path(tmp_text)
+            project_dir, composition_src = self._write_fake_remotion_project(tmp)
+            timeline_path, assets_path, out_path = self._write_empty_render_inputs(tmp)
+            remotion_envs: list[dict[str, str]] = []
+
+            def fake_run(cmd, **kwargs):
+                command = [str(part) for part in cmd]
+                if command[:3] == ["npx", "remotion", "render"]:
+                    remotion_envs.append(dict(kwargs["env"]))
+                return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+            class FakeServer:
+                def __init__(self, address, handler) -> None:
+                    pass
+
+                def serve_forever(self) -> None:
+                    return None
+
+                def shutdown(self) -> None:
+                    return None
+
+                def server_close(self) -> None:
+                    return None
+
+            host_env = {
+                "OPENAI_API_KEY": "sk-should-not-leak",
+                "AWS_SECRET_ACCESS_KEY": "synthetic-secret",
+                "RENDER_HOST_ONLY": "host-value",
+                "PATH": "/usr/bin:/bin",
+                "ASTRID_SESSION_ID": "sess-123",
+                "ASTRID_TASK_RUN_ID": "task-run-9",
+                "ASTRID_ACTOR": "human:peter",
+            }
+            with (
+                mock.patch.dict(render_remotion.os.environ, host_env, clear=True),
+                mock.patch.object(render_remotion.subprocess, "run", side_effect=fake_run),
+                mock.patch.object(render_remotion, "_pick_free_port", return_value=49152),
+                mock.patch.object(render_remotion, "ThreadingHTTPServer", FakeServer),
+            ):
+                render_remotion.render(
+                    timeline_path,
+                    assets_path,
+                    out_path,
+                    project_dir=project_dir,
+                    composition_id="TimelineComposition",
+                    theme_path=None,
+                )
+
+        self.assertEqual(len(remotion_envs), 1)
+        env = remotion_envs[0]
+        # Synthetic secrets and undeclared host variables must be absent.
+        self.assertNotIn("OPENAI_API_KEY", env)
+        self.assertNotIn("AWS_SECRET_ACCESS_KEY", env)
+        self.assertNotIn("RENDER_HOST_ONLY", env)
+        self.assertNotIn("ASTRID_ACTOR", env)
+        # Required Node and Astrid runtime variables must be preserved/propagated.
+        self.assertEqual(env["PATH"], "/usr/bin:/bin")
+        self.assertEqual(env["ASTRID_SESSION_ID"], "sess-123")
+        self.assertEqual(env["ASTRID_TASK_RUN_ID"], "task-run-9")
+        # The Remotion-specific build-tool addition is the composition source.
+        self.assertEqual(env["ASTRID_TIMELINE_COMPOSITION_SRC"], str(composition_src))
 
 
 if __name__ == "__main__":

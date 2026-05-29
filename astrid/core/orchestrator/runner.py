@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-import os
 import re
 import subprocess
 import sys
@@ -13,6 +12,7 @@ from typing import Any, Mapping
 
 from astrid.contracts.schema import Output
 from astrid.core.executor.runner import _has_value, _stringify_value
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 from astrid.core.project.run import (
@@ -230,12 +230,7 @@ def _run_command_orchestrator(
     completed = subprocess.run(
         list(command),
         cwd=cwd,
-        env={
-            **_base_subprocess_env(),
-            **env,
-            **_project_subprocess_env(request),
-            "ASTRID_INTERNAL_INVOCATION": "1",
-        },
+        env=_command_subprocess_env(orchestrator, request, env),
         check=False,
     )
     return OrchestratorRunResult(
@@ -492,8 +487,20 @@ def _project_subprocess_env(request: OrchestratorRunRequest) -> dict[str, str]:
     return project_run_env() if request.project else {}
 
 
-def _base_subprocess_env() -> dict[str, str]:
-    return {key: value for key, value in os.environ.items() if not key.startswith("ASTRID_THREAD")}
+def _command_subprocess_env(
+    orchestrator: OrchestratorDefinition,
+    request: OrchestratorRunRequest,
+    command_env: Mapping[str, str],
+) -> dict[str, str]:
+    return build_child_subprocess_env(
+        explicit_env={
+            **command_env,
+            **_project_subprocess_env(request),
+            "ASTRID_INTERNAL_INVOCATION": "1",
+        },
+        passthrough=orchestrator.isolation.env_passthrough,
+        declared_passthrough=orchestrator.isolation.env_passthrough,
+    )
 
 
 def _has_cli_option(args: tuple[str, ...], option: str) -> bool:

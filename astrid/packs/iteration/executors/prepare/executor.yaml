@@ -42,7 +42,12 @@
   ],
   "isolation": {
     "mode": "subprocess",
-    "network": false
+    "network": false,
+    "env_passthrough": [
+      "ASTRID_ITERATION_MAX",
+      "ASTRID_REPO_ROOT",
+      "ASTRID_THREADS_OFF"
+    ]
   },
   "keywords": [
     "iteration",

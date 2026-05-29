@@ -9,6 +9,8 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from astrid.core.subprocess_env import build_child_subprocess_env
+
 from .schema import (
     ExecutorDefinition,
     ExecutorValidationError,
@@ -80,9 +82,10 @@ def _load_folder_executor_definitions(executor_root: str | Path) -> tuple[Execut
     if not executor_path.is_file():
         raise FolderExecutorError(f"folder executor is missing executor.yaml or executor.py: {root}")
 
-    env = dict(os.environ)
     parent_paths = [str(Path.cwd()) if path == "" else path for path in sys.path]
-    env["PYTHONPATH"] = os.pathsep.join(parent_paths + [env.get("PYTHONPATH", "")])
+    env = build_child_subprocess_env(
+        explicit_env={"PYTHONPATH": os.pathsep.join(parent_paths + [os.environ.get("PYTHONPATH", "")])}
+    )
     completed = subprocess.run(
         [sys.executable, "-c", _EXTRACT_SCRIPT, str(executor_path)],
         cwd=str(root),

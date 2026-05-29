@@ -92,14 +92,17 @@ def _try_add_skill(
     descriptors: list[SkillDescriptor],
     skill_md: Path,
     pack_id: str,
-) -> None:
-    """Parse *skill_md* and append a SkillDescriptor if valid."""
+) -> bool:
+    """Parse *skill_md* and append a SkillDescriptor if valid.
+
+    Returns ``True`` when a descriptor was appended.
+    """
     if not skill_md.is_file():
-        return
+        return False
     try:
         text = skill_md.read_text(encoding="utf-8")
     except OSError:
-        return
+        return False
     front, body = _parse_frontmatter(text)
     name = str(front.get("name") or pack_id)
     description = str(front.get("description") or "")
@@ -122,6 +125,38 @@ def _try_add_skill(
             hermes_metadata=hermes_meta,
         )
     )
+    return True
+
+
+def _scan_discovered_packs(descriptors: list[SkillDescriptor]) -> None:
+    """Append skills from installed and extra-root packs via shared metadata.
+
+    The source-tree walk above already covers source packs (including
+    manifest-less ones such as ``_core`` that pack discovery does not
+    enumerate), so this layer only adds the ``extra`` and ``installed``
+    source kinds. It reuses :func:`discover_pack_metadata` so skills track the
+    same roots and priority ordering as the executor/orchestrator/element
+    registries. Source packs win on id collision (they were appended first).
+    """
+    from astrid.core.pack_discovery import discover_pack_metadata
+
+    seen_ids = {descriptor.pack_id for descriptor in descriptors}
+    for discovered in discover_pack_metadata(include_installed=True):
+        if discovered.source_kind not in ("extra", "installed"):
+            continue
+        pack = discovered.pack
+        if pack.status == "deprecated" or pack.visibility == "hidden":
+            continue
+        pack_skill = discovered.pack_dir / "skill" / "SKILL.md"
+        if pack.id not in seen_ids and _try_add_skill(descriptors, pack_skill, pack.id):
+            seen_ids.add(pack.id)
+        for content_dir in (*discovered.executor_roots(), *discovered.orchestrator_roots()):
+            qualified_id = f"{pack.id}.{content_dir.name}"
+            nested_skill = content_dir / "skill" / "SKILL.md"
+            if qualified_id not in seen_ids and _try_add_skill(
+                descriptors, nested_skill, qualified_id
+            ):
+                seen_ids.add(qualified_id)
 
 
 def list_skills(packs_dir: Path | None = None) -> list[SkillDescriptor]:
@@ -167,6 +202,12 @@ def list_skills(packs_dir: Path | None = None) -> list[SkillDescriptor]:
                 nested_skill = content_dir / "skill" / "SKILL.md"
                 qualified_id = f"{pack_dir.name}.{content_dir.name}"
                 _try_add_skill(descriptors, nested_skill, qualified_id)
+
+    # When scanning the default source tree, layer in installed/extra packs
+    # via the shared discovery metadata. An explicit *packs_dir* keeps the
+    # legacy single-root scan untouched (used by parity tests).
+    if packs_dir is None:
+        _scan_discovered_packs(descriptors)
 
     return descriptors
 

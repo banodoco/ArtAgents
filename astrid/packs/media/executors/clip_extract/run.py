@@ -16,6 +16,9 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Callable
+
+Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -65,7 +68,7 @@ def build_ffmpeg_cmd(src: Path, start: float, dur: float, out: Path) -> list[str
     ]
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, runner: Runner = subprocess.run) -> int:
     args = build_parser().parse_args(argv)
 
     # Resolve paths
@@ -80,21 +83,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Error: {error}", file=sys.stderr)
         return 1
 
+    # Ensure the output directory exists before ffmpeg writes to it.
     out.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = build_ffmpeg_cmd(src, args.start, args.dur, out)
 
-    # Defer actual invocation — print the command that would run.
-    # When wired through `astrid executors run`, the runtime handles
-    # dry-run vs. live execution.  Remove the guard below to execute
-    # ffmpeg directly.
-    print(f"[clip_extract] would run: {shlex.join(cmd)}")
+    print(f"  [clip_extract] {shlex.join(cmd)}", file=sys.stderr)
 
-    # Uncomment the lines below to invoke ffmpeg for real:
-    # result = subprocess.run(cmd, check=False)
-    # if result.returncode != 0:
-    #     print(f"Error: ffmpeg exited with {result.returncode}", file=sys.stderr)
-    # return result.returncode
+    result = runner(cmd, check=False)
+
+    if result.returncode != 0:
+        print(
+            f"Error: ffmpeg exited with {result.returncode}", file=sys.stderr
+        )
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+        return result.returncode
 
     return 0
 

@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.schema import CommandSpec, Output, Port
+from astrid.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.orchestrator.runner import (
     OrchestratorRunRequest,
@@ -37,15 +37,18 @@ def _command_orchestrator(
     inputs: tuple[Port, ...] = (),
     outputs: tuple[Output, ...] = (),
     metadata: dict[str, Any] | None = None,
+    env: dict[str, str] | None = None,
+    isolation: IsolationMetadata | None = None,
 ) -> OrchestratorDefinition:
     return OrchestratorDefinition(
         id=orchestrator_id,
         name="Command Orchestrator",
         kind="built_in",
         version="1.0",
-        runtime=RuntimeSpec(kind="command", command=CommandSpec(argv=argv)),
+        runtime=RuntimeSpec(kind="command", command=CommandSpec(argv=argv, env=env or {})),
         inputs=inputs,
         outputs=outputs,
+        isolation=isolation or IsolationMetadata(),
         metadata=metadata or {},
     )
 
@@ -142,6 +145,70 @@ def test_run_orchestrator_rejects_missing_required_input(tmp_path: Path) -> None
 
     with pytest.raises(OrchestratorRunnerError, match="missing required input"):
         run_orchestrator(request, registry)
+
+
+def test_command_orchestrator_preserves_declared_passthrough_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTRID_TEST_ORCH_PUBLIC", "from-parent")
+    out_file = tmp_path / "passthrough.txt"
+    script = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text(os.environ.get('ASTRID_TEST_ORCH_PUBLIC', ''), encoding='utf-8')\n"
+    )
+    orch = _command_orchestrator(
+        argv=(sys.executable, "-c", script, str(out_file)),
+        isolation=IsolationMetadata(env_passthrough=("ASTRID_TEST_ORCH_PUBLIC",)),
+    )
+    registry = _registry(orch)
+
+    result = run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+
+    assert result.returncode == 0
+    assert out_file.read_text(encoding="utf-8") == "from-parent"
+
+
+def test_command_orchestrator_does_not_spread_undeclared_host_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTRID_TEST_ORCH_UNDECLARED", "from-parent")
+    out_file = tmp_path / "undeclared.txt"
+    script = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text(os.environ.get('ASTRID_TEST_ORCH_UNDECLARED', ''), encoding='utf-8')\n"
+    )
+    orch = _command_orchestrator(argv=(sys.executable, "-c", script, str(out_file)))
+    registry = _registry(orch)
+
+    result = run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+
+    assert result.returncode == 0
+    assert out_file.read_text(encoding="utf-8") == ""
+
+
+def test_command_orchestrator_explicit_env_overrides_passthrough(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTRID_TEST_ORCH_OVERRIDE", "from-parent")
+    out_file = tmp_path / "override.txt"
+    script = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text(os.environ.get('ASTRID_TEST_ORCH_OVERRIDE', ''), encoding='utf-8')\n"
+    )
+    orch = _command_orchestrator(
+        argv=(sys.executable, "-c", script, str(out_file)),
+        env={"ASTRID_TEST_ORCH_OVERRIDE": "from-orchestrator"},
+        isolation=IsolationMetadata(env_passthrough=("ASTRID_TEST_ORCH_OVERRIDE",)),
+    )
+    registry = _registry(orch)
+
+    result = run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+
+    assert result.returncode == 0
+    assert out_file.read_text(encoding="utf-8") == "from-orchestrator"
 
 
 # ---------------------------------------------------------------------------

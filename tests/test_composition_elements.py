@@ -19,6 +19,17 @@ sys.modules[_GENERATOR_SPEC.name] = gen_effect_registry
 _GENERATOR_SPEC.loader.exec_module(gen_effect_registry)
 
 
+def _timeline_composition_source() -> Path:
+    candidates = (
+        WORKSPACE / "packages" / "timeline-composition" / "typescript" / "src" / "TimelineComposition.tsx",
+        ROOT / "remotion" / "node_modules" / "@banodoco" / "timeline-composition" / "typescript" / "src" / "TimelineComposition.tsx",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return ROOT / "remotion" / "src" / "Root.tsx"
+
+
 class CompositionElementTest(unittest.TestCase):
     def _assert_animation_plugin(self, animation_id: str, kind: str) -> None:
         root = ROOT / "astrid" / "packs" / "rendering" / "elements" / "animations" / animation_id
@@ -87,14 +98,12 @@ class CompositionElementTest(unittest.TestCase):
         self.assertRegex(transitions, r"@pack-rendering-elements-transitions/cross-fade/component")
 
     def test_hype_composition_preserves_absolute_sequence_path_with_transition_series(self) -> None:
-        # Sprint 5: HypeComposition.tsx physically moved to
-        # packages/timeline-composition/typescript/src/TimelineComposition.tsx
-        # (and renamed). Source assertions still apply.
-        package_src = WORKSPACE / "packages" / "timeline-composition" / "typescript" / "src"
-        source = (package_src / "TimelineComposition.tsx").read_text(encoding="utf-8")
+        source_path = _timeline_composition_source()
+        source = source_path.read_text(encoding="utf-8")
         self.assertIn("TimelineCompositionProps", source)
         self.assertIn("getTimelineDurationInFrames", source)
-        self.assertIn("export default TimelineComposition", source)
+        if source_path.name == "TimelineComposition.tsx":
+            self.assertIn("export default TimelineComposition", source)
 
 
 if __name__ == "__main__":

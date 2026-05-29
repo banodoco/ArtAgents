@@ -22,7 +22,10 @@
     }
   ],
   "isolation": {
-    "mode": "subprocess"
+    "mode": "subprocess",
+    "env_passthrough": [
+      "HYPE_CACHE_DIR"
+    ]
   },
   "keywords": [
     "cache",

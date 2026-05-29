@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -62,14 +63,13 @@ def test_two_step_plan_drives_kernel_end_to_end(tmp_projects_root: Path) -> None
         events_path = decision.events_path
 
         if decision.adapter is None:
-            env = child_subprocess_env(base=os.environ)
+            env = child_subprocess_env()
             completed = subprocess.run(
-                step.command,
+                shlex.split(step.command),
                 env=env,
                 capture_output=True,
                 text=True,
                 check=False,
-                shell=True,
             )
             returncode = completed.returncode
         else:

@@ -21,6 +21,7 @@ venv/
 .mypy_cache/
 .ruff_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Node / Remotion
@@ -90,3 +91,6 @@ plan_revision.json
 
 # Astrid file-bound session pointer (T9 / FLAG-S1-003)
 .astrid-session
+
+# Python build metadata (editable install)
+*.egg-info/

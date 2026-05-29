@@ -26,6 +26,7 @@ from astrid.core.pack import (
     iter_orchestrator_roots,
     validate_content_id_in_pack,
 )
+from astrid.core.pack_discovery import discover_packs_ordered
 
 from .folder import load_folder_orchestrators
 from .schema import (
@@ -386,47 +387,12 @@ def _discover_orchestrator_packs(
     extra_pack_roots: tuple[str, ...],
     include_installed: bool,
 ) -> tuple[Any, ...]:
-    # Mirror load_pack_elements(): discover source-tree packs (excluding
-    # local), then conditionally discover the project-scoped local pack
-    # when the project root differs from the repository root.
-    repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
-    project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
-
-    packs: list = []
-    for pack in discover_packs():
-        if pack.id == "local":
-            continue
-        packs.append(pack)
-    if project_pack_root != repo_pack_root and project_pack_root.is_dir():
-        for pack in discover_packs(project_pack_root):
-            if pack.id == "local":
-                packs.append(pack)
-
-    # Additional pack roots: extra roots + installed packs (PR #8 operational layer)
-    if extra_pack_roots or include_installed:
-        _discover_root = Path(project_root) if project_root != REPO_ROOT else REPO_ROOT
-        for extra_root in extra_pack_roots:
-            extra_path = Path(extra_root)
-            if not extra_path.is_absolute():
-                extra_path = (_discover_root / extra_path).resolve()
-            if extra_path.is_dir():
-                for pack in discover_packs(extra_path):
-                    if pack.id == "local":
-                        continue
-                    packs.append(pack)
-        if include_installed:
-            from astrid.core.pack_store import installed_pack_roots
-            from astrid.core.pack import load_pack_manifest, pack_manifest_path as _pmp
-
-            for installed_root in installed_pack_roots():
-                if installed_root.is_dir():
-                    mp = _pmp(installed_root)
-                    if mp is not None:
-                        pack = load_pack_manifest(mp)
-                        if pack.id == "local":
-                            continue
-                        packs.append(pack)
-    return tuple(packs)
+    return discover_packs_ordered(
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+        discover_packs_fn=discover_packs,
+    )
 
 
 def _load_pack_orchestrators_from_packs(

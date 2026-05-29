@@ -368,6 +368,52 @@ class NudgeTest(unittest.TestCase):
             fx.close()
 
 
+class InstalledDiscoveryTest(unittest.TestCase):
+    """list_skills() must layer in installed packs via shared metadata."""
+
+    def _write_installed_pack(self, root: Path, pack_id: str) -> Path:
+        pack_root = root / pack_id
+        skill_dir = pack_root / "skill"
+        skill_dir.mkdir(parents=True)
+        (pack_root / "pack.yaml").write_text(
+            f"schema_version: 1\nid: {pack_id}\nname: Installed Demo\nversion: 0.1.0\n",
+            encoding="utf-8",
+        )
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: installed-demo\ndescription: Installed demo skill.\n---\nBody.\n",
+            encoding="utf-8",
+        )
+        return pack_root
+
+    def test_installed_pack_included_by_default(self) -> None:
+        with TemporaryDirectory() as tmp:
+            pack_root = self._write_installed_pack(Path(tmp), "installed_demo")
+            with mock.patch(
+                "astrid.core.pack_store.installed_pack_roots",
+                return_value=(pack_root,),
+            ):
+                descriptors = discovery.list_skills()
+            pack_ids = [d.pack_id for d in descriptors]
+            self.assertIn("installed_demo", pack_ids)
+            # Source packs (e.g. _core) are still present alongside installed.
+            self.assertIn("_core", pack_ids)
+
+    def test_explicit_packs_dir_does_not_pull_installed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            installed_root = root / "installed"
+            installed_root.mkdir()
+            pack_root = self._write_installed_pack(installed_root, "installed_demo")
+            scan_dir = root / "scan"
+            scan_dir.mkdir()
+            with mock.patch(
+                "astrid.core.pack_store.installed_pack_roots",
+                return_value=(pack_root,),
+            ):
+                descriptors = discovery.list_skills(scan_dir)
+            self.assertEqual(descriptors, [])
+
+
 class LintTest(unittest.TestCase):
     def test_lint_flags_hermes_token(self) -> None:
         findings = discovery.lint_shared_skill_md("Hello ${HERMES_HOME}!")

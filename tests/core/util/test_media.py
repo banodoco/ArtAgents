@@ -32,7 +32,23 @@ def test_ffprobe_duration_seconds_uses_duration_only_probe() -> None:
         "default=noprint_wrappers=1:nokey=1",
         "clip.mp4",
     ]
-    assert kwargs == {"check": True, "capture_output": True, "text": True}
+    assert kwargs["check"] is True
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+    assert "PATH" in kwargs["env"]
+    assert "OPENAI_API_KEY" not in kwargs["env"]
+
+
+def test_ffprobe_duration_seconds_accepts_explicit_env() -> None:
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((cmd, kwargs))
+        return subprocess.CompletedProcess(cmd, 0, stdout="12.5\n", stderr="")
+
+    assert ffprobe_duration_seconds("clip.mp4", runner=runner, env={"FFPROBE_DATADIR": "/tmp/ffprobe"}) == 12.5
+
+    assert calls[0][1]["env"]["FFPROBE_DATADIR"] == "/tmp/ffprobe"
 
 
 def test_updated_duration_helpers_preserve_float_parsing(monkeypatch, tmp_path: Path) -> None:

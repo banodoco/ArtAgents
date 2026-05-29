@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
+import sys
 import time
 from pathlib import Path
 
@@ -103,6 +105,28 @@ def test_dispatch_rejects_unparseable_command(adapter: LocalAdapter, tmp_path: P
     step = _make_step(command="echo 'unclosed")
     result = adapter.dispatch(step, ctx)
     assert result.status == "rejected"
+
+
+def test_dispatch_uses_task_env_without_host_spread(
+    adapter: LocalAdapter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTRID_ADAPTER_UNDECLARED", "from-host")
+    out_file = tmp_path / "env.txt"
+    ctx = _make_ctx(tmp_path, task_env={"ASTRID_TASK_RUN_ID": "run-1", "ADAPTER_EXPLICIT": "yes"})
+    script = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text("
+        "os.environ.get('ADAPTER_EXPLICIT', '') + '|' + os.environ.get('ASTRID_ADAPTER_UNDECLARED', ''), "
+        "encoding='utf-8')\n"
+    )
+    step = _make_step(command=f"{sys.executable} -c {shlex.quote(script)} {out_file}")
+
+    result = adapter.dispatch(step, ctx)
+
+    assert result.pid is not None
+    assert _wait_for_exit(result.pid) in (0, None)
+    assert out_file.read_text(encoding="utf-8") == "yes|"
 
 
 # ---------------------------------------------------------------------------

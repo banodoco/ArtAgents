@@ -27,18 +27,24 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements-dev.txt
+          # Reproducible install: constraints.txt pins the full transitive closure.
+          python -m pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
 
-      - name: Validate editable install (advisory)
-        continue-on-error: true
+      - name: Validate editable install
         run: |
-          python -m pip install -e '.[dev]'
-          echo "Editable install validation passed (advisory only)"
+          # Blocking: constraints.txt pins the closure, so the editable install is reproducible.
+          python -m pip install -c constraints.txt -e '.[dev]'
+          echo "Editable install validation passed"
 
-      - name: Run doctor check (advisory)
-        continue-on-error: true
+      - name: Run doctor check
         run: |
+          # Blocking: on a CI runner with no .env on disk, the env-template check
+          # reports advisory-only, so a clean checkout exits 0.
           python -m astrid doctor --json
+
+      - name: Fresh-clone core smoke (advisory)
+        continue-on-error: true
+        run: bash scripts/smoke_fresh_clone.sh
 
       - name: Run Ruff baseline check (advisory)
         continue-on-error: true
@@ -52,3 +58,26 @@ jobs:
 
       - name: Run local CI mirror
         run: bash scripts/reshape/run_ci_checks.sh
+
+      - name: Set up Node for Remotion typecheck
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: remotion/package-lock.json
+
+      - name: Remotion typecheck
+        working-directory: remotion
+        run: |
+          # Blocking: install the pinned Remotion toolchain and run the existing
+          # `npm run typecheck` (tsc --noEmit) so the TypeScript surface stays sound.
+          npm ci
+          npm run typecheck
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: ignore

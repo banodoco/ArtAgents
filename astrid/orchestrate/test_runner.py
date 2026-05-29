@@ -49,6 +49,7 @@ from astrid.core.task.plan import (
     load_plan,
     step_dir_for_path,
 )
+from astrid.orchestrate.compile import compile_to_path
 
 _MAX_ITERATIONS = 200
 
@@ -149,7 +150,7 @@ def _run_fallback_subprocess(cmd_argv: list[str]) -> CompletedProcess[str]:
     """Legacy fallback for code steps that were not adapter-dispatched."""
     return subprocess.run(
         cmd_argv,
-        env={**os.environ, **child_subprocess_env()},
+        env=child_subprocess_env(),
         check=False,
         text=True,
     )
@@ -192,6 +193,11 @@ def run_fixture(
         create_project(project_slug, root=projects_root, exist_ok=True)
         create_timeline(project_slug, "main", root=projects_root, is_default=True)
         _bind_author_test_session(project_slug, projects_root)
+        pack, _, name = qualified_id.partition(".")
+        if pack and name:
+            build_path = packs_root / pack / "build" / f"{name}.json"
+            if not build_path.is_file():
+                compile_to_path(qualified_id, packs_root=packs_root)
 
         rc = cmd_start(
             [qualified_id, "--project", project_slug, "--name", run_id],

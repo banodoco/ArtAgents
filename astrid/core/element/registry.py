@@ -23,6 +23,7 @@ from astrid.core.pack import (
     iter_element_roots,
     validate_element_pack_id,
 )
+from astrid.core.pack_discovery import discover_pack_metadata
 
 from .schema import (
     ELEMENT_KINDS,
@@ -194,47 +195,18 @@ def load_pack_elements(
 ) -> tuple[ElementDefinition, ...]:
     from .schema import ELEMENT_MANIFEST_NAMES
 
-    # The `local` scratch pack is project-scoped (gitignored) — load it from
-    # <project_root>/astrid/packs/local only when project_root is distinct
-    # from the source-tree REPO_ROOT, so the workspace scratch pack never
-    # leaks into discovery for code that did not opt into a project.
-    repo_pack_root = (REPO_ROOT / "astrid" / "packs").resolve()
-    project_pack_root = (Path(project_root) / "astrid" / "packs").resolve()
-
-    packs: list = []
-    for pack in discover_packs():
-        if pack.id == "local":
-            continue
-        packs.append(pack)
-    if project_pack_root != repo_pack_root and project_pack_root.is_dir():
-        for pack in discover_packs(project_pack_root):
-            if pack.id == "local":
-                packs.append(pack)
-
-    # Additional pack roots: extra roots + installed packs (PR #8 operational layer)
-    if extra_pack_roots or include_installed:
-        _discover_root = Path(project_root) if project_root != REPO_ROOT else REPO_ROOT
-        for extra_root in extra_pack_roots:
-            extra_path = Path(extra_root)
-            if not extra_path.is_absolute():
-                extra_path = (_discover_root / extra_path).resolve()
-            if extra_path.is_dir():
-                for pack in discover_packs(extra_path):
-                    if pack.id == "local":
-                        continue
-                    packs.append(pack)
-        if include_installed:
-            from astrid.core.pack_store import installed_pack_roots
-            from astrid.core.pack import load_pack_manifest, pack_manifest_path as _pmp
-
-            for installed_root in installed_pack_roots():
-                if installed_root.is_dir():
-                    mp = _pmp(installed_root)
-                    if mp is not None:
-                        pack = load_pack_manifest(mp)
-                        if pack.id == "local":
-                            continue
-                        packs.append(pack)
+    # Shared discovery owns the source/local/extra/installed walk and ordering;
+    # this function wraps only the element-specific layering (manifest checks,
+    # priority, and element loading) on top of the discovered packs.
+    packs = [
+        dp.pack
+        for dp in discover_pack_metadata(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+            discover_packs_fn=discover_packs,
+        )
+    ]
 
     elements: list[ElementDefinition] = []
     for pack in packs:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import time
 from pathlib import Path
 
@@ -226,6 +227,34 @@ def test_dispatch_persists_rendered_canonical_and_display_command_metadata(
     assert dispatch["display_command"].startswith("ASTRID_TASK_PROJECT=demo")
     assert dispatch["task_env"]["ASTRID_TASK_RUN_ID"] == "run-1"
     assert state["status"] in {"running", "done"}
+
+
+def test_dispatch_uses_task_env_without_host_spread(
+    adapter: RemoteArtifactAdapter, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASTRID_REMOTE_UNDECLARED", "from-host")
+    out_file = tmp_path / "env.txt"
+    script = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "Path(sys.argv[1]).write_text("
+        "os.environ.get('REMOTE_EXPLICIT', '') + '|' + os.environ.get('ASTRID_REMOTE_UNDECLARED', ''), "
+        "encoding='utf-8')\n"
+    )
+    ctx = _make_rendered_ctx(
+        tmp_path,
+        command="remote explicit env probe",
+        argv=(sys.executable, "-c", script, str(out_file)),
+        display_command="REMOTE_EXPLICIT=yes python",
+    )
+    ctx = RunContext(**{**ctx.__dict__, "task_env": {"REMOTE_EXPLICIT": "yes"}})
+    step = _make_step(command="raw command")
+
+    result = adapter.dispatch(step, ctx)
+
+    assert result.pid is not None
+    assert _wait_for_exit(result.pid) in (0, None)
+    assert out_file.read_text(encoding="utf-8") == "yes|"
 
 
 def test_dispatch_writes_returncode_placeholder(

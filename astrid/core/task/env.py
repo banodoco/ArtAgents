@@ -5,13 +5,16 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
-TASK_RUN_ID_ENV = "ASTRID_TASK_RUN_ID"
-TASK_PROJECT_ENV = "ASTRID_TASK_PROJECT"
-TASK_STEP_ID_ENV = "ASTRID_TASK_STEP_ID"
-TASK_ITEM_ID_ENV = "ASTRID_TASK_ITEM_ID"
-TASK_ITERATION_ENV = "ASTRID_TASK_ITERATION"
-ASTRID_ACTOR = "ASTRID_ACTOR"
-ASTRID_AUTHOR_TEST = "ASTRID_AUTHOR_TEST"
+from astrid.core.subprocess_env import (
+    ASTRID_ACTOR,
+    ASTRID_AUTHOR_TEST,
+    TASK_ITEM_ID_ENV,
+    TASK_ITERATION_ENV,
+    TASK_PROJECT_ENV,
+    TASK_RUN_ID_ENV,
+    TASK_STEP_ID_ENV,
+    build_child_subprocess_env,
+)
 
 
 def task_project_env() -> str | None:
@@ -71,16 +74,4 @@ def apply_task_run_env(
 
 
 def child_subprocess_env(*, base: Mapping[str, str] | None = None) -> dict[str, str]:
-    env = dict(os.environ if base is None else base)
-    env.pop(ASTRID_ACTOR, None)
-    for key in (
-        TASK_RUN_ID_ENV,
-        TASK_PROJECT_ENV,
-        TASK_STEP_ID_ENV,
-        TASK_ITEM_ID_ENV,
-        TASK_ITERATION_ENV,
-    ):
-        value = os.environ.get(key)
-        if value is not None:
-            env[key] = value
-    return env
+    return build_child_subprocess_env(base=base)
