@@ -177,10 +177,6 @@ of history is permitted per the non-negotiable constraint above.
 - m5b → `partnered/full/high`: god-module splits along real domain seams + CLI unification + the
   deferred de-inversion is genuinely cross-cutting and benefits from premium critique/review.
 
-## Cross-references
-
-- [Root EPIC.md](../../../EPIC.md) — m3 handoff entries surfaced during m2 test-integrity work (denylist removals, strict xfails, deferred product bugs).
-
 ## m5a taxonomy handoff
 
 The following taxonomy areas are intentionally **out of scope** for m5a and belong to the

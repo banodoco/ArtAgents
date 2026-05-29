@@ -38,7 +38,7 @@ def plan_setup(*, apply: bool = False, project_root: str | Path | None = None) -
         )
     )
     steps.append(_plan_projects_root(apply=apply))
-    steps.append(_plan_agents_symlink(root, apply=apply))
+    steps.extend(_plan_root_skill_symlinks(root, apply=apply))
 
     registry = load_element_registry(project_root=root)
     for element in registry.list():
@@ -64,26 +64,52 @@ def _plan_projects_root(*, apply: bool) -> SetupStep:
     return SetupStep(name="projects root", status="planned", detail=f"will create {detail}")
 
 
-def _plan_agents_symlink(root: Path, *, apply: bool) -> SetupStep:
-    """Ensure AGENTS.md is a symlink to SKILL.md so both loaders read the same source."""
-    agents = root / "AGENTS.md"
-    target = "SKILL.md"
+def _plan_root_skill_symlinks(root: Path, *, apply: bool) -> tuple[SetupStep, ...]:
+    """Ensure root agent-doc aliases point directly at the core skill source."""
+    target = Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md"
     skill = root / target
     if not skill.is_file():
-        return SetupStep(name="agents.md symlink", status="warn", detail=f"{skill} missing; cannot link AGENTS.md")
-    if agents.is_symlink() and (root / agents.readlink()).resolve() == skill.resolve():
-        return SetupStep(name="agents.md symlink", status="ok", detail=f"AGENTS.md → {target}")
-    if not agents.exists() and not agents.is_symlink():
+        return (
+            SetupStep(
+                name="root skill symlinks",
+                status="warn",
+                detail=f"{skill} missing; cannot link AGENTS.md or SKILL.md",
+            ),
+        )
+    target_text = target.as_posix()
+    return tuple(
+        _plan_root_skill_symlink(root / name, root=root, target=target_text, skill=skill, apply=apply)
+        for name in ("AGENTS.md", "SKILL.md")
+    )
+
+
+def _plan_root_skill_symlink(path: Path, *, root: Path, target: str, skill: Path, apply: bool) -> SetupStep:
+    name = f"{path.name.lower()} symlink"
+    if path.is_symlink() and (root / path.readlink()).resolve() == skill.resolve():
+        if path.readlink().as_posix() == target:
+            return SetupStep(name=name, status="ok", detail=f"{path.name} -> {target}")
+        status = "applied" if apply else "planned"
+        detail = f"{'updated' if apply else 'will update'} {path.name} -> {target}"
         if apply:
-            agents.symlink_to(target)
-            return SetupStep(name="agents.md symlink", status="applied", detail=f"created AGENTS.md → {target}")
-        return SetupStep(name="agents.md symlink", status="planned", detail=f"will create AGENTS.md → {target}")
-    kind = "wrong symlink" if agents.is_symlink() else "regular file"
+            path.unlink()
+            path.symlink_to(target)
+        return SetupStep(name=name, status=status, detail=detail)
+    if path.is_symlink() and not (root / path.readlink()).exists():
+        kind = "broken symlink"
+    elif path.is_symlink():
+        kind = "wrong symlink"
+    else:
+        kind = "regular file"
+    if not path.exists() and not path.is_symlink():
+        if apply:
+            path.symlink_to(target)
+            return SetupStep(name=name, status="applied", detail=f"created {path.name} -> {target}")
+        return SetupStep(name=name, status="planned", detail=f"will create {path.name} -> {target}")
     if apply:
-        agents.unlink()
-        agents.symlink_to(target)
-        return SetupStep(name="agents.md symlink", status="applied", detail=f"replaced AGENTS.md ({kind}) with symlink → {target}")
-    return SetupStep(name="agents.md symlink", status="planned", detail=f"will replace AGENTS.md ({kind}) with symlink → {target}")
+        path.unlink()
+        path.symlink_to(target)
+        return SetupStep(name=name, status="applied", detail=f"replaced {path.name} ({kind}) with symlink -> {target}")
+    return SetupStep(name=name, status="planned", detail=f"will replace {path.name} ({kind}) with symlink -> {target}")
 
 
 def main(argv: list[str] | None = None) -> int:

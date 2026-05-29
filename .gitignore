@@ -23,6 +23,7 @@ venv/
 .coverage
 coverage.xml
 htmlcov/
+*.egg-info/
 
 # Node / Remotion
 node_modules/
@@ -39,8 +40,11 @@ cache/
 .astrid/
 **/.cas/
 */cache/
+out/
 */out/
 *.log
+*.preview.*
+*tmp_*
 *.mp4
 *.mov
 *.wav
@@ -67,8 +71,10 @@ plan_v1.revised.md
 .claude/
 .desloppify/
 .megaplan/
+.megaplan-agentic/
 .compactify/
 .megaplan-worktrees/
+mgt-*/
 *.bak
 
 # Local scratch pack (gitignored)

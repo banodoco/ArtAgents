@@ -2,12 +2,20 @@
 
 ## When to Use This Pack
 
-Explain in 1-2 sentences when an agent should choose this pack.
+Use when you need to trim a segment from a video file quickly and losslessly
+without re-encoding. The pack provides a single ffmpeg stream-copy executor.
 
 ## Entrypoints
 
-List the orchestrators agents should start with for common tasks.
+This pack has no orchestrators. Agents should invoke the executor directly:
+
+```bash
+python3 -m astrid executors run media.clip_extract \
+  -- --input <video> --start <seconds> --dur <seconds> --output <clip.mp4>
+```
 
 ## Executors
 
-Briefly describe each executor and its purpose.
+- **`media.clip_extract`** — Clip extraction via `ffmpeg -ss/-t/-c copy`.
+  Inputs: `input` (file), `start` (number), `dur` (number). Outputs: `output`
+  (file). Requires `ffmpeg` on PATH.

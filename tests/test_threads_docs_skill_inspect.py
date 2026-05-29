@@ -71,25 +71,6 @@ def test_stop_line_active_thread_runtime_and_guidance_are_retired() -> None:
         assert ".project_thread_env()" not in text
 
 
-def test_historical_thread_plans_do_not_publish_retired_binding_guidance() -> None:
-    forbidden = (
-        "[thread]",
-        "thread keep",
-        "thread show @active",
-        "active-thread",
-        "active thread",
-        "active_thread",
-        "ASTRID_THREAD_ID",
-        "ASTRID_RUN_ID",
-        "--thread",
-        "@active",
-    )
-    for path in (
-        Path("docs/design-thread-layer.md"),
-        Path("docs/sprint-thread-layer.md"),
-    ):
-        text = path.read_text(encoding="utf-8")
-        assert "Retired context:" in text
-        assert "not current" in text or "not as current" in text
-        for phrase in forbidden:
-            assert phrase not in text
+def test_retired_thread_plans_are_not_kept_as_current_docs() -> None:
+    assert not Path("docs/archive/design-thread-layer.md").exists()
+    assert not Path("docs/archive/sprint-thread-layer.md").exists()

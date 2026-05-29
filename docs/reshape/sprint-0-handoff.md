@@ -137,10 +137,8 @@ failures in model-catalog, dataset-build offline fixtures, and author-test
 golden/drift tests; no new Sprint 0 failure was identified by T19 or the
 post-review verification pass.
 
-`idea.md` and `docs/reshape/review-findings.md` were protected pre-existing
-reshape planning inputs in the worktree before Sprint 0 execution began. Sprint
-0 used them as read-only planning context and does not claim their diffs as S0
-implementation output.
+Retired reshape planning inputs were read-only context during Sprint 0 and are
+not S0 implementation output.
 
 Targeted validation passed for:
 

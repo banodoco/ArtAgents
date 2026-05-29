@@ -1,23 +1,67 @@
-"""Guard against generated root artifacts and tracked ignored outputs."""
+"""Guard against generated root artifacts and tracked ignored outputs.
+
+Detection is name-only / path-pattern based: this checker classifies tracked
+paths by their *names* and never reads or prints the contents of any file.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 import fnmatch
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+# Approved top-level files. Anything else tracked at the repo root is flagged
+# as an unknown root entry.
+ROOT_FILE_ALLOWLIST = {
+    ".env.example",
+    ".gitignore",
+    ".python-version",
+    "AGENTS.md",
+    "LICENSE",
+    "README.md",
+    "SKILL.md",
+    "package-lock.json",
+    "package.json",
+    "pyproject.toml",
+    "pytest.ini",
+    "requirements-dev.txt",
+    "requirements.txt",
+}
+
+# Approved top-level directories.
+ROOT_DIR_ALLOWLIST = {
+    ".github",
+    "agents",
+    "astrid",
+    "docs",
+    "examples",
+    "fixtures",
+    "remotion",
+    "scripts",
+    "tests",
+}
+
 ROOT_GENERATED_PATTERNS = (
     "agentic-*.report.md",
+    "chain.yaml",
     "dry_run_map.json",
+    "idea.md",
     "M5_TEST_STATUS.md",
+    "plan_revision.json",
     "plan_v1.revised.md",
     "report-*.md",
+    "scorecard.png",
 )
 
+# Legitimate tracked files/sources that look output-ish but must be kept.
+# The classifier consults this allowlist before applying any rule so that
+# fixtures, example env files, and the secrets *source module* are never
+# flagged. We match by path/name only; contents are never inspected.
 TRACKED_PATH_ALLOWLISTS = (
     ".env.example",
     "astrid/core/util/secrets.py",
@@ -26,6 +70,8 @@ TRACKED_PATH_ALLOWLISTS = (
     "tests/fixtures/**",
 )
 
+# Each rule is (category-label, name/path globs). A tracked path is flagged
+# under every category whose globs it matches (after the allowlist check).
 TRACKED_PATH_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "local env filename",
@@ -52,17 +98,30 @@ TRACKED_PATH_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         "generated runtime directory",
         (
+            "runs",
             "runs/*",
+            "runs/**",
             "*/runs/*",
+            "out",
             "out/*",
+            "out/**",
             "*/out/*",
             "cache/*",
             "*/cache/*",
+            ".astrid",
             ".astrid/*",
+            ".astrid/**",
             "*/.astrid/*",
             "tests/agentic/reports/*",
             "astrid/packs/*/build/*",
             "examples/packs/*/build/*",
+        ),
+    ),
+    (
+        "generated project worktree",
+        (
+            "mgt-*",
+            "mgt-*/**",
         ),
     ),
     (
@@ -77,18 +136,54 @@ TRACKED_PATH_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        "preview/temp artifact",
+        (
+            "*.preview.*",
+            "*tmp_*",
+        ),
+    ),
+    (
         "local tool state",
         (
+            ".DS_Store",
+            "*/.DS_Store",
+            ".compactify",
+            ".compactify/*",
+            ".compactify/**",
             ".desloppify",
             ".desloppify/*",
             ".desloppify/**",
             "*/.desloppify",
             "*/.desloppify/*",
             "*/.desloppify/**",
+            ".venv",
+            ".venv/*",
+            ".venv/**",
+            "node_modules",
+            "node_modules/*",
+            "node_modules/**",
             "*.bak",
         ),
     ),
+    (
+        "megaplan local state",
+        (
+            # docs/megaplan/ is the source-of-truth directory and is
+            # intentionally NOT matched here; only local state roots are.
+            ".megaplan",
+            ".megaplan/*",
+            ".megaplan/**",
+            ".megaplan-agentic",
+            ".megaplan-agentic/*",
+            ".megaplan-agentic/**",
+        ),
+    ),
 )
+
+ROOT_SKILL_SYMLINKS = {
+    "AGENTS.md": Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md",
+    "SKILL.md": Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md",
+}
 
 
 def _tracked_files() -> list[str]:
@@ -117,24 +212,63 @@ def find_root_generated_artifacts() -> list[str]:
     return sorted(set(findings))
 
 
+def find_unknown_root_entries(tracked: list[str] | None = None) -> list[str]:
+    findings: list[str] = []
+    for path in tracked if tracked is not None else _tracked_files():
+        if "/" in path:
+            root = path.split("/", 1)[0]
+            if root not in ROOT_DIR_ALLOWLIST and (REPO_ROOT / path).exists():
+                findings.append(root + "/")
+            continue
+        if path not in ROOT_FILE_ALLOWLIST and (REPO_ROOT / path).exists():
+            findings.append(path)
+    return sorted(set(findings))
+
+
 def classify_tracked_path(path: str) -> list[str]:
     if _is_allowlisted(path):
         return []
     return [label for label, patterns in TRACKED_PATH_RULES if _matches_any(path, patterns)]
 
 
-def find_tracked_ignored_artifacts() -> list[tuple[str, str]]:
+def find_tracked_ignored_artifacts(
+    tracked: list[str] | None = None,
+) -> list[tuple[str, str]]:
     findings: set[tuple[str, str]] = set()
-    for tracked in _tracked_files():
-        if not (REPO_ROOT / tracked).exists():
+    for path in tracked if tracked is not None else _tracked_files():
+        if not (REPO_ROOT / path).exists():
             continue
-        for category in classify_tracked_path(tracked):
-            findings.add((category, tracked))
+        for category in classify_tracked_path(path):
+            findings.add((category, path))
     return sorted(findings, key=lambda item: (item[1], item[0]))
+
+
+def find_root_skill_symlink_violations() -> list[str]:
+    findings: list[str] = []
+    for name, expected in ROOT_SKILL_SYMLINKS.items():
+        path = REPO_ROOT / name
+        if not path.is_symlink():
+            findings.append(f"{name} must be a symlink to {expected.as_posix()}")
+            continue
+        link = Path(os.readlink(path))
+        if link != expected:
+            findings.append(f"{name} points to {link.as_posix()}, expected {expected.as_posix()}")
+            continue
+        if not (REPO_ROOT / link).is_file():
+            findings.append(f"{name} points to missing target {link.as_posix()}")
+    return sorted(findings)
 
 
 def main() -> int:
     failed = False
+
+    unknown_root = find_unknown_root_entries()
+    if unknown_root:
+        failed = True
+        print("unknown root entries must not be committed or kept at repository root:", file=sys.stderr)
+        for path in unknown_root:
+            print(f"  {path}", file=sys.stderr)
+
     root_findings = find_root_generated_artifacts()
     if root_findings:
         failed = True
@@ -148,6 +282,13 @@ def main() -> int:
         print("tracked ignored artifacts must not be committed:", file=sys.stderr)
         for category, path in tracked_findings:
             print(f"  [{category}] {path}", file=sys.stderr)
+
+    symlink_findings = find_root_skill_symlink_violations()
+    if symlink_findings:
+        failed = True
+        print("root skill symlink violations:", file=sys.stderr)
+        for finding in symlink_findings:
+            print(f"  {finding}", file=sys.stderr)
 
     return 1 if failed else 0
 

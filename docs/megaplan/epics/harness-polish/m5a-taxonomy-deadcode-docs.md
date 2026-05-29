@@ -34,9 +34,9 @@ no still-imported no-op shim, no stray `sys.modules` injection, no dangling `__a
 - README `elements inspect <id>` is wrong — code needs `inspect <kind> <element_id>` (`core/element/cli.py:72-78`). Fix README:28.
 - README:38 "runs/ is where the outputs stay" — outputs land in `out/runs/`. Fix.
 - README usage block omits the `packs`/`modalities` verb families — add or deliberately document why not.
-- **Pick ONE canonical planning doc** among `idea.md`/`plan_v2.md`/`project.md`/`plan_revision.json`; mark the rest
-  obsolete/archived; resolve the `idea.md` vs `project.md` step-model contradiction (use the model the CODE
-  implements — m3 already ground-truthed this; cite its conclusion).
+- Delete stale planning docs rather than preserving them as competing
+  authorities; use the model the CODE implements — m3 already ground-truthed
+  this; cite its conclusion.
 - Fix `docs/templates/{executor,orchestrator}/*.yaml` stubs so a scaffolded tool validates (add `schema_version`
   etc.); add the missing `docs/templates/element/STAGE.md`.
 
@@ -50,7 +50,7 @@ no still-imported no-op shim, no stray `sys.modules` injection, no dangling `__a
 ## Locked decisions
 - Dead code is deleted, not commented or `_deprecated`-renamed.
 - Taxonomy terms are renamed-to-agree unless test+grep prove the name is the public API.
-- One canonical planning doc; the rest explicitly archived.
+- Current code and active milestone docs are authoritative; stale planning docs are deleted.
 - `threads/` action follows m3's written verdict; pack.yaml element keys untouched.
 
 ## Open questions (resolve in plan)
@@ -64,11 +64,11 @@ no still-imported no-op shim, no stray `sys.modules` injection, no dangling `__a
 - The four taxonomy renames are filed as pack-taxonomy handoff tickets/notes (recorded in EPIC.md) — NOT renamed in this milestone.
 - `validate_migration_completion()` (built in m4) runs GREEN after the dead-code deletion.
 - Every command in README + `docs/` runs as written — verified by `tests/verify_docs_commands.sh` (extracts code-block commands, asserts exit 0), wired as a CI step.
-- Exactly one planning doc lacks an "OBSOLETE/ARCHIVED" header; the step-model contradiction is resolved citing m3's verdict.
+- No stale root/archive planning docs remain; the step-model contradiction is resolved citing m3's verdict.
 - Templates validate (a scaffolded tool passes `validate_pack`); `docs/templates/element/STAGE.md` exists.
 
 ## Touchpoints
 - `astrid/threads/.../wrapper.py:30-63`, `astrid/threads/__init__.py:3-10`, `astrid/packs/builtin/_legacy/*`, `astrid/contracts/schema.py:46-47`
 - `astrid/modalities/__init__.py`, `astrid/elements/__init__.py`, `astrid/domains/`, `astrid/orchestrate/__init__.py`
-- `README.md:28,38`, `astrid/core/element/cli.py:72-78`, `idea.md`, `plan_v2.md`, `project.md`, `plan_revision.json`, `docs/templates/{executor,orchestrator,element}/`
+- `README.md:28,38`, `astrid/core/element/cli.py:72-78`, `plan_revision.json`, `docs/templates/{executor,orchestrator,element}/`
 - New: `tests/verify_docs_commands.sh`
