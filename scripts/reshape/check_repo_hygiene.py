@@ -25,6 +25,7 @@ ROOT_FILE_ALLOWLIST = {
     "LICENSE",
     "README.md",
     "SKILL.md",
+    "constraints.txt",
     "package-lock.json",
     "package.json",
     "pyproject.toml",
