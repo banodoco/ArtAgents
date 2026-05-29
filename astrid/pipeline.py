@@ -25,7 +25,9 @@ orchestrator registry.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 
@@ -81,6 +83,7 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
+    ("test",),
     ("doctor",),
 )
 _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
@@ -136,9 +139,12 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
 
+            from astrid.core.project.paths import resolve_projects_root
+
             session = resolve_current_session_with_fs_fallback(
                 slug=_slug_hint,
                 on_auto_resolve=_nudge,
+                projects_root=resolve_projects_root(),
             )
         except SessionBindingError as exc:
             _print_unbound_gate_recovery(f"session: {exc}")
@@ -423,6 +429,19 @@ def _dispatch_worker(args: list[str]) -> int:
     return banodoco_worker.main(args)
 
 
+def _dispatch_test(args: list[str]) -> int:
+    """Run the CI check suite via the hermetic bash script (SD2).
+
+    Resolves ``scripts/reshape/run_ci_checks.sh`` relative to the Astrid
+    repo root and forwards all trailing arguments (e.g. ``--changed``,
+    ``--json``) through to the script via ``subprocess.run``.
+    """
+    _REPO_ROOT = Path(__file__).resolve().parent.parent
+    _CI_SCRIPT = _REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh"
+    result = subprocess.run([str(_CI_SCRIPT)] + args)
+    return result.returncode
+
+
 _TOP_LEVEL_HANDLERS = {
     "attach": _dispatch_attach,
     "sessions": lambda args: _dispatch_sessions(args),
@@ -459,6 +478,7 @@ _TOP_LEVEL_HANDLERS = {
     "events": lambda args: _dispatch_events(args),
     "reigh-data": _dispatch_reigh_data,
     "worker": _dispatch_worker,
+    "test": _dispatch_test,
 }
 
 

@@ -36,6 +36,7 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
+    ("test",),
     ("doctor",),
 )
 
@@ -108,6 +109,31 @@ def test_every_gated_verb_errors_without_session(
     assert "no session bound" in stderr
     assert "astrid status" in stderr
     assert "astrid attach" in stderr
+
+
+def test_gate_does_not_resolve_stray_projects_root(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The gate must only scan ASTRID_PROJECTS_ROOT, not any other directory.
+
+    Plants a valid .astrid-session under a *separate* stray root (standing in
+    for what DEFAULT_PROJECTS_ROOT would be on disk) while ASTRID_PROJECTS_ROOT
+    is already set to the env fixture's isolated tmp dir. The gated verb must
+    still return rc=2 because pipeline.py passes projects_root=resolve_projects_root()
+    explicitly, so the stray root is never walked.
+    """
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    # Build a stray root that looks like a real projects root with a bound session.
+    stray_root = tmp_path / "stray_default_root"
+    stray_project = stray_root / "demo"
+    stray_project.mkdir(parents=True)
+    (stray_project / "project.json").write_text('{"schema_version": 1}', encoding="utf-8")
+    (stray_project / ".astrid-session").write_text("stray-session-id", encoding="utf-8")
+    # ASTRID_PROJECTS_ROOT is already set to env["projects"] (an empty tmp dir)
+    # by the env fixture — the stray_root is completely separate.
+    rc, _stdout, stderr = _run_pipeline(["runs", "ls"])
+    assert rc == 2
+    assert "no session bound" in stderr
 
 
 def test_unbound_next_prints_discovery_hint(
