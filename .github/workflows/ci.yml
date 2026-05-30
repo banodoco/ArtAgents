@@ -46,13 +46,11 @@ jobs:
         continue-on-error: true
         run: bash scripts/smoke_fresh_clone.sh
 
-      - name: Run Ruff baseline check (advisory)
-        continue-on-error: true
+      - name: Run Ruff baseline check (blocking)
         run: |
           python scripts/reshape/compare_ruff_baseline.py
 
-      - name: Run mypy baseline check (advisory)
-        continue-on-error: true
+      - name: Run mypy baseline check (blocking)
         run: |
           python scripts/reshape/compare_mypy_baseline.py
 

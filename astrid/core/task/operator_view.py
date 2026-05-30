@@ -41,6 +41,7 @@ from astrid.core.task.orchestrator_resolver import _list_orchestrator_ids
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
+    find_step_by_path,
     is_attested_kind,
     is_code_kind,
     is_group_step,
@@ -382,22 +383,6 @@ def _format_claim_line(*, step, claimed_identity: str | None) -> str:
         parts.append(f"claimed: {claimed_identity}")
     return "  ".join(parts)
 
-def _find_step_by_path(plan, path_tuple):
-    """Walk a TaskPlan to find the step at ``path_tuple``.
-
-    Descends through group-step children and returns None if the path does not
-    resolve.
-    """
-    if not path_tuple:
-        return None
-    steps = plan.steps
-    for segment in path_tuple[:-1]:
-        match = next((s for s in steps if s.id == segment), None)
-        if match is None or not is_group_step(match):
-            return None
-        steps = match.children or ()
-    return next((s for s in steps if s.id == path_tuple[-1]), None)
-
 def _command_has_project_arg(command: str | None) -> bool:
     if not command:
         return False
@@ -450,7 +435,7 @@ def _expected_for_each_total(plan, events, host_path_tuple) -> int | None:
             if isinstance(raw, list):
                 return len(raw)
             break
-    host = _find_step_by_path(plan, host_path_tuple)
+    host = find_step_by_path(plan, host_path_tuple)
     host_repeat = getattr(host, "repeat", None) if host is not None else None
     if isinstance(host_repeat, RepeatForEach) and host_repeat.items_source == "static":
         return len(host_repeat.items)
@@ -972,7 +957,7 @@ def cmd_next(
         # is None to handle a top-level for_each that hasn't dispatched yet.
         host_has_for_each = peek.item_id is not None
         if not host_has_for_each:
-            host_step = _find_step_by_path(plan, peek.path_tuple)
+            host_step = find_step_by_path(plan, peek.path_tuple)
             if host_step is not None and isinstance(
                 getattr(host_step, "repeat", None), RepeatForEach
             ):
@@ -1027,7 +1012,7 @@ def cmd_next(
     # derive_cursor's for_each_progress would be empty here).
     if peek.item_id is not None:
         host_path = STEP_PATH_SEP.join(peek.path_tuple)
-        host_step = _find_step_by_path(plan, peek.path_tuple)
+        host_step = find_step_by_path(plan, peek.path_tuple)
         items: list[str] = []
         host_repeat = getattr(host_step, "repeat", None) if host_step is not None else None
         if isinstance(host_repeat, RepeatForEach):

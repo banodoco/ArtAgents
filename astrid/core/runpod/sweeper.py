@@ -21,6 +21,14 @@ SWEEPER_EVENT_APPEND_RETRIES = 3
 RUNPOD_SWEEPER_AUDIT_FILENAME = "runpod_sweeper_audit.jsonl"
 
 
+class SweeperLoopError(RuntimeError):
+    """Raised when ``sweep()`` is called from inside a running event loop.
+
+    The sync wrapper cannot call ``asyncio.run()`` from a running loop (SD1).
+    The caller must switch to ``await sweep_async(...)`` instead.
+    """
+
+
 def collect_handles(projects_root: Path) -> list[tuple[Path, dict[str, Any]]]:
     """Walk *projects_root* and return every ``(path, handle_dict)`` pair.
 
@@ -189,13 +197,28 @@ def sweep(
         actually call the RunPod API.
 
     Returns a summary dict: ``{total, terminated, skipped, errors, details}``.
+
+    Raises
+    ------
+    SweeperLoopError
+        When called from inside a running event loop. The caller must switch
+        to ``await sweep_async(...)`` (SD1 — never silently create_task).
     """
-    return asyncio.run(_sweep_async(projects_root, mode, dry_run=dry_run))
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise SweeperLoopError(
+            "sweep() cannot be called from a running event loop. "
+            "Use `await sweep_async(...)` instead (SD1)."
+        )
+    return asyncio.run(sweep_async(projects_root, mode, dry_run=dry_run))
 
 
-async def _sweep_async(
+async def sweep_async(
     projects_root: Path,
-    mode: Literal["default", "hard"],
+    mode: Literal["default", "hard"] = "default",
     *,
     dry_run: bool = False,
 ) -> dict[str, Any]:

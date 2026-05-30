@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Optional
 
 from astrid.core.session.paths import installed_packs_root
+from astrid.core.util.log_and_swallow import log_and_swallow
 
 try:
     from filelock import FileLock as _FileLock
@@ -420,9 +421,10 @@ class InstalledPackStore:
             return None
         try:
             return InstallRecord.from_dict(data)
-        except TypeError:
+        except TypeError:  # noqa: BLE001
             return None
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            log_and_swallow(exc, context="pack_store.load_record")
             return None
 
 

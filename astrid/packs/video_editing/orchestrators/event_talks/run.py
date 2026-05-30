@@ -30,18 +30,9 @@ from astrid.core.project.paths import project_dir, validate_project_slug
 # Constants — preserved from the legacy orchestrator
 # ---------------------------------------------------------------------------
 
-ADOS_SUNDAY_SPEAKERS = [
-    {"speaker": "Enigmatic E", "title": "Creative Intent in an Automated World"},
-    {"speaker": "Miki Durán", "title": "Creating with LTX Studio"},
-    {"speaker": "Mohamed Oumoumad", "title": "IC LoRAs and the End of Impossible"},
-    {"speaker": "VisualFrisson", "title": "Custom Pipelines: The Open Source Advantage"},
-    {"speaker": "Yaron Inger", "title": "Your Model Now: LTX and the Builders Who Define It"},
-    {"speaker": "Ziv Ilan", "title": "You Might Not Need 50 Diffusion Steps"},
-    {"speaker": "Calvin Herbst", "title": "Creating New Aesthetics with Old Data"},
-    {"speaker": "Matt Szymanowski", "title": "When AI Kills the Artist"},
-    {"speaker": "Nekodificador", "title": "Embracing the Liquid Paradigm"},
-    {"speaker": "Ingi Erlingsson", "title": "Remix Culture"},
-]
+ADOS_SUNDAY_SPEAKERS: list[dict[str, str]] = json.loads(
+    (Path(__file__).with_name("data") / "ados_sunday_speakers.json").read_text(encoding="utf-8")
+)
 
 
 # ---------------------------------------------------------------------------
@@ -338,33 +329,9 @@ def _exec_find_holding_screens(args: argparse.Namespace) -> int:
 
 
 def _exec_render_manifest(args: argparse.Namespace) -> int:
-    """Render each manifest talk.
-
-    Lightweight port — writes a placeholder manifest so the pipeline
-    can proceed.  Full ffmpeg/Remotion rendering may be restored in a
-    follow-up.
-    """
-    manifest: Path = args.manifest
-    out_dir: Path = getattr(args, "out_dir", args.out) if hasattr(args, "out_dir") else args.out
-
-    # Load the template manifest
-    data = json.loads(manifest.read_text(encoding="utf-8"))
-    talks = data.get("talks", [])
-
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Emit a render manifest even for dry-run / placeholder mode
-    render_manifest = {
-        "orchestrator": "video_editing.event_talks",
-        "step": "render",
-        "talks_rendered": len(talks),
-        "outputs": [f"{_slugify(t.get('speaker', 'unknown'))}.mp4" for t in talks],
-        "note": "placeholder — full ffmpeg/Remotion rendering deferred",
-    }
-    manifest_out = out_dir / "render-manifest.json"
-    manifest_out.write_text(json.dumps(render_manifest, indent=2), encoding="utf-8")
-    print(f"event_talks: wrote={manifest_out}")
-    return 0
+    raise NotImplementedError(
+        "event_talks.render_manifest: not implemented; see SPRINT_1 milestone D"
+    )
 
 
 def _probe_duration(video: Path) -> float:

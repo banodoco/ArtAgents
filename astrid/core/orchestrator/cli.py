@@ -20,6 +20,11 @@ from astrid.core.dirty import detect_local_edits
 from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
 from astrid.core.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
+from astrid.core.scaffold import (
+    QID_RE as _QID_RE,
+    TEST_RUN_PY_TEMPLATE as _TEST_RUN_PY_TEMPLATE,
+    scaffold_component as _scaffold_component,
+)
 from astrid.core.update import update_apply, update_check
 
 from .registry import OrchestratorRegistry, load_default_registry
@@ -209,12 +214,6 @@ def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
 
     Short-circuits before ``load_default_registry()`` — never imports pack code.
     """
-    from astrid.core.executor.cli import (
-        _QID_RE,
-        _TEST_RUN_PY_TEMPLATE,
-        _scaffold_component,
-    )
-
     qualified_id: str = args.qualified_id
 
     # Validate early so we can safely split for the plan-template format.

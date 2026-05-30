@@ -39,6 +39,7 @@ from astrid.core.session.config import (
     set_default_project,
 )
 from astrid.core.session.discovery import discover_projects
+from astrid.core.util.log_and_swallow import log_and_swallow
 
 from . import paths
 from .project import ProjectError, create_project, require_project, show_project
@@ -563,7 +564,8 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
                     if rid not in seen_runs:
                         seen_runs.add(rid)
                         run_ids.append(rid)
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            log_and_swallow(exc, context="project.cost.timeline_scan")
             continue
 
     # Aggregate costs across runs
@@ -654,7 +656,7 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
             try:
                 from astrid.core.timeline.paths import load_assembly_json_with_repair
                 load_assembly_json_with_repair(tdir)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
 
             # Copy timeline container files
@@ -673,7 +675,8 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
                         if rid not in seen_runs:
                             seen_runs.add(rid)
                             all_run_ids.append(rid)
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                log_and_swallow(exc, context="project.export.run_id_collection")
                 continue
 
         # Copy project-level files
@@ -841,7 +844,7 @@ def _print_project_tree(payload: dict[str, Any]) -> None:
     try:
         from astrid.core.timeline import crud as timeline_crud
         summaries = timeline_crud.list_timelines(payload["project"]["slug"])
-    except Exception:
+    except Exception:  # noqa: BLE001
         summaries = []
     if summaries:
         print("  timelines/")

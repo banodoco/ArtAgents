@@ -28,7 +28,7 @@ done
 
 # Coverage flags are omitted on the --changed fast path (SD-004: no-arg
 # invocation MUST keep coverage). T6 wires the fast-path lane using this.
-COV_ARGS="--cov=astrid --cov-report=term --cov-report=xml --cov-fail-under=0"
+COV_ARGS="--cov=astrid --cov-report=term --cov-report=xml --cov-fail-under=72"
 if $CHANGED_MODE; then
   COV_ARGS=""
 fi

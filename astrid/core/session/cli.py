@@ -57,6 +57,7 @@ from astrid.core.session.paths import (
 )
 from astrid.core.session.ulid import generate_ulid
 from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.util.time import utc_now_iso
 
 # ----- Templates --------------------------------------------------------
@@ -861,8 +862,9 @@ def _render_bound_status(session: Session, *, out: Any) -> int:
                 data = timeline_crud.show_timeline(session.project, timeline_slug)
                 if data is not None:
                     timeline_final_count = len(data["manifest"].final_outputs)
-            except Exception:
-                pass  # best-effort; don't break status for a corrupt timeline
+            except Exception as exc:  # noqa: BLE001
+                # best-effort; don't break status for a corrupt timeline
+                log_and_swallow(exc, context="session.cli.status.timeline_count")
 
     timeline_line = f"timeline: {timeline_slug or NONE_PLACEHOLDER}"
     if timeline_final_count > 0:

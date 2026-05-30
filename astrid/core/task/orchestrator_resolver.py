@@ -20,6 +20,7 @@ from astrid.core.alias_resolver import (
     extract_pack_aliases,
 )
 from astrid.core.pack import DEFAULT_PACKS_ROOT, discover_packs
+from astrid.core.util.log_and_swallow import log_and_swallow
 
 
 def _resolve_packs_root(packs_root: Optional[Path]) -> Path:
@@ -109,8 +110,8 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
                     qid = f"{pack_dir.name}.{build_file.stem}"
                     if qid not in _CANONICAL_DYNAMIC_IDS:
                         ids.add(qid)
-    except Exception:
-        pass
+    except Exception as exc:  # noqa: BLE001
+        log_and_swallow(exc, context="orchestrator_resolver.build_dir_scan")
 
     if not ids:
         return [], registry_err

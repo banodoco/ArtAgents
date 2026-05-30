@@ -19,6 +19,10 @@ from astrid.core._search import (
 
 from astrid.core.dirty import detect_local_edits
 from astrid.core.override import OverrideStore, OverrideStoreError
+from astrid.core.scaffold import (
+    TEST_RUN_PY_TEMPLATE as _TEST_RUN_PY_TEMPLATE,
+    scaffold_component as _scaffold_component,
+)
 from astrid.core.update import update_check, update_apply
 
 from .banodoco_catalog import BanodocoCatalogConfig
@@ -240,169 +244,9 @@ def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
     )
 
 
-def _scaffold_component(
-    qualified_id: str,
-    component_type: str,
-    yaml_template: str,
-    run_py_template: str,
-    *,
-    extra_files: dict[str, str] | None = None,
-) -> int:
-    """Shared scaffolding logic for executors new / orchestrators new.
-
-    Args:
-        qualified_id: ``<pack>.<slug>`` identifier.
-        component_type: ``'executor'`` or ``'orchestrator'``.
-        yaml_template: str.format template for the component manifest.
-        run_py_template: str.format template for run.py stub.
-        extra_files: Optional mapping of filename → already-formatted content
-            to write into the component directory (e.g., ``plan_template.py``).
-
-    Returns:
-        Exit code (0 on success, non-zero on failure).
-    """
-    from importlib import import_module as _import_module
-    validate_pack = _import_module('astrid.packs.validate').validate_pack
-
-    # Derive the correct CLI prefix for error messages.
-    _cli_prefix = f"{component_type}s new"
-
-    # --- 1. Validate the qualified id ------------------------------------------
-    if not _QID_RE.fullmatch(qualified_id):
-        print(
-            f"{_cli_prefix}: qualified id {qualified_id!r} must be "
-            f"'<pack>.<slug>' with letters/digits/underscore",
-            file=sys.stderr,
-        )
-        return 2
-
-    pack, slug = qualified_id.split(".", 1)
-
-    # --- 2. Find the target pack root (CWD-relative) ---------------------------
-    pack_root = Path.cwd().resolve()
-    pack_yaml = pack_root / "pack.yaml"
-    if not pack_yaml.is_file():
-        print(
-            f"{_cli_prefix}: pack.yaml not found at {pack_root}. "
-            f"Scaffold the pack first with: python3 -m astrid packs new {pack}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # Verify the pack id in pack.yaml matches
-    import yaml as _yaml_module
-    try:
-        with open(pack_yaml, "r", encoding="utf-8") as fh:
-            doc = _yaml_module.safe_load(fh)
-    except Exception as exc:
-        print(f"{_cli_prefix}: cannot read {pack_yaml}: {exc}", file=sys.stderr)
-        return 1
-
-    if isinstance(doc, dict) and doc.get("id") != pack:
-        print(
-            f"{_cli_prefix}: pack id mismatch — {qualified_id!r} expects "
-            f"pack id {pack!r} but {pack_yaml} has id {doc.get('id')!r}",
-            file=sys.stderr,
-        )
-        return 1
-
-    # --- 3. Determine the content root for this component type -----------------
-    content = doc.get("content", {}) if isinstance(doc, dict) else {}
-    rel_dir = content.get(f"{component_type}s", f"{component_type}s")
-    components_root = pack_root / rel_dir
-    component_dir = components_root / slug
-
-    # --- 4. Reject overwrite collisions ----------------------------------------
-    if component_dir.exists():
-        print(
-            f"{_cli_prefix}: {component_dir} already exists; refusing to overwrite",
-            file=sys.stderr,
-        )
-        return 1
-
-    # --- 5. Create the scaffold ------------------------------------------------
-    component_dir.mkdir(parents=True)
-    created: list[str] = []
-
-    # Component manifest (executor.yaml / orchestrator.yaml)
-    manifest_path = component_dir / f"{component_type}.yaml"
-    manifest_text = yaml_template.format(pack=pack, slug=slug, qualified_id=qualified_id)
-    manifest_path.write_text(manifest_text, encoding="utf-8")
-    created.append(str(manifest_path.relative_to(pack_root)))
-
-    # run.py stub
-    run_py_path = component_dir / "run.py"
-    run_py_text = run_py_template.format(qualified_id=qualified_id, component_type=component_type)
-    run_py_path.write_text(run_py_text, encoding="utf-8")
-    created.append(str(run_py_path.relative_to(pack_root)))
-
-    # STAGE.md stub
-    stage_md_path = component_dir / "STAGE.md"
-    stage_md_text = _STAGE_MD_TEMPLATE.format(
-        qualified_id=qualified_id, component_type=component_type.title()
-    )
-    stage_md_path.write_text(stage_md_text, encoding="utf-8")
-    created.append(str(stage_md_path.relative_to(pack_root)))
-
-    # Extra files (e.g., plan_template.py for orchestrators, tests/)
-    for filename, content in (extra_files or {}).items():
-        extra_path = component_dir / filename
-        extra_path.parent.mkdir(parents=True, exist_ok=True)
-        extra_path.write_text(content, encoding="utf-8")
-        created.append(str(extra_path.relative_to(pack_root)))
-
-    # --- 6. Validate the pack after scaffolding --------------------------------
-    # We only fail when errors involve the JUST-scaffolded file. Pre-existing
-    # pack-level issues (other components missing schema_version, stale
-    # element manifests, etc.) get surfaced as warnings so they don't mask
-    # the scaffold success and don't block the agent from making forward
-    # progress. The dogfood found that the pack-author schema (used here)
-    # and the runtime registry schema diverge — runtime-form executors that
-    # the registry accepts as `kind/command/inputs` look "unknown" to the
-    # pack-author schema. Use `astrid executors validate <id>` separately
-    # for the authoritative runtime check.
-    errors, warnings = validate_pack(pack_root)
-    component_rel = str(component_dir.relative_to(pack_root))
-    own_errors = [err for err in errors if component_rel in str(err)]
-    foreign_errors = [err for err in errors if component_rel not in str(err)]
-    if own_errors:
-        print(
-            f"{_cli_prefix}: scaffolded {component_type} fails validation "
-            f"({len(own_errors)} error(s))",
-            file=sys.stderr,
-        )
-        for err in own_errors:
-            print(f"  {err}", file=sys.stderr)
-        return 1
-    if foreign_errors:
-        print(
-            f"{_cli_prefix}: pre-existing pack issues (not from this scaffold; "
-            f"surfaced as a warning):",
-            file=sys.stderr,
-        )
-        for err in foreign_errors:
-            print(f"  {err}", file=sys.stderr)
-
-    # --- 7. Report ------------------------------------------------------------
-    for rel in created:
-        print(f"created {rel}")
-    if warnings:
-        for w in warnings:
-            print(f"warning: {w}", file=sys.stderr)
-    print(f"{component_type} {qualified_id!r} created and validated")
-    return 0
-
-
 # ---------------------------------------------------------------------------
-# Qualified-id validation (matches the v1 _defs.json qualified_id pattern)
-# ---------------------------------------------------------------------------
-
-import re as _re
-
-_QID_RE = _re.compile(r"^[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*$")
-
-# ---------------------------------------------------------------------------
-# Scaffold templates
+# Scaffold templates (executor-specific; shared helpers live in
+# astrid.core.scaffold)
 # ---------------------------------------------------------------------------
 
 _EXECUTOR_YAML_TEMPLATE = """\
@@ -484,43 +328,8 @@ if __name__ == "__main__":
     sys.exit(main())
 """
 
-_STAGE_MD_TEMPLATE = """\
-# {qualified_id}
-
-## Purpose
-
-TODO: describe what this {component_type} does and when to use it.
-
-## Inputs
-
-TODO: list the inputs this {component_type} expects.
-
-## Outputs
-
-TODO: list the outputs this {component_type} produces.
-
-## Dependencies
-
-TODO: any Python, npm, or system dependencies.
-"""
-
-_TEST_RUN_PY_TEMPLATE = '''\
-"""Basic smoke test for {qualified_id}."""
-import subprocess
-import sys
-
-
-def test_dry_run() -> None:
-    """Verify the {component_type} runs in dry-run mode without errors."""
-    result = subprocess.run(
-        [sys.executable, "-m", "astrid", "{component_type}s", "run",
-         "{qualified_id}", "--dry-run"],
-        capture_output=True,
-        text=True,
-    )
-    # TODO: assert on expected behavior
-    assert result.returncode == 0, f"dry-run failed: {{result.stderr}}"
-'''
+# _STAGE_MD_TEMPLATE, _TEST_RUN_PY_TEMPLATE and the qualified-id regex now live
+# in astrid.core.scaffold; _scaffold_component consumes STAGE_MD_TEMPLATE there.
 
 
 def _banodoco_config_from_args(args: argparse.Namespace) -> BanodocoCatalogConfig:
@@ -849,7 +658,8 @@ def _emit_uuid_handoff_metadata(
     """Emit bridge/handoff metadata for UUID-mode runs (m3.5).
 
     UUID mode is a handoff contract: the local executor completes, produces
-    explicit bridge metadata, and does NOT call SupabaseDataProvider.save_timeline().
+    explicit bridge metadata, and does NOT call the SupabaseDataProvider
+    save_timeline method.
     The actual Supabase push is deferred to m6 (open_in_reigh bridge replay).
 
     When hype.timeline.json is present, emit JSON handoff metadata on stdout

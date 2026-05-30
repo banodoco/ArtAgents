@@ -40,7 +40,7 @@ from astrid.core.task.events import (
 )
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
-    is_group_step,
+    find_step_by_path,
     load_plan,
 )
 from astrid.core.task.run_state import _run_is_complete
@@ -179,18 +179,6 @@ def _summarize_run_dir(run_dir: Path) -> tuple[str, str, str]:
 _RUNS_LS_STATUSES = ("completed", "in-flight", "aborted")
 
 
-def _find_step_by_path(plan, path_tuple):
-    """Walk a TaskPlan to find the step at ``path_tuple``."""
-    if not path_tuple:
-        return None
-    steps = plan.steps
-    for segment in path_tuple[:-1]:
-        match = next((s for s in steps if s.id == segment), None)
-        if match is None or not is_group_step(match):
-            return None
-        steps = match.children or ()
-    return next((s for s in steps if s.id == path_tuple[-1]), None)
-
 def cmd_runs_ls(
     argv: Sequence[str],
     *,
@@ -264,7 +252,7 @@ def cmd_step_retry_fetch(
     plan = load_plan(proj_root / "plan.json")
     events = read_events(events_path)
     step_path = tuple(args.step.split(STEP_PATH_SEP))
-    step = _find_step_by_path(plan, step_path)
+    step = find_step_by_path(plan, step_path)
     if step is None:
         _print_err(f"step retry-fetch: unknown step {args.step!r}")
         return 1

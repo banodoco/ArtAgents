@@ -30,6 +30,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.core.util.log_and_swallow import log_and_swallow
+
 
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
 # of main(): for these verbs the --project flag identifies the run, NOT a
@@ -111,9 +113,9 @@ def main(argv: list[str] | None = None) -> int:
         from .skills import nudge_if_needed
 
         nudge_if_needed(argv=raw)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         # Never let the nudge break a real command.
-        pass
+        log_and_swallow(exc, context="pipeline.nudge_if_needed")
 
     # Session gate. Verbs outside the unbound allowlist require a resolvable
     # session record; print the documented hint and exit 2 otherwise.

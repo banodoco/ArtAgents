@@ -56,10 +56,10 @@ from astrid.core.task.gate import (
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatUntil,
+    find_step_by_path,
     is_legacy_repeat_until_condition,
     is_attested_kind,
     is_code_kind,
-    is_group_step,
     load_plan,
     step_dir_for_path,
 )
@@ -72,18 +72,6 @@ def _print_err(msg: str) -> None:
 def _system_exit_code(exc: SystemExit) -> int:
     return int(exc.code) if isinstance(exc.code, int) else 2
 
-
-def _find_step_by_path(plan, path_tuple):
-    """Walk a TaskPlan to find the step at ``path_tuple``."""
-    if not path_tuple:
-        return None
-    steps = plan.steps
-    for segment in path_tuple[:-1]:
-        match = next((s for s in steps if s.id == segment), None)
-        if match is None or not is_group_step(match):
-            return None
-        steps = match.children or ()
-    return next((s for s in steps if s.id == path_tuple[-1]), None)
 
 
 def _latest_event_for_path(events, path_tuple, *, step_version: int | None = None):
@@ -401,7 +389,7 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
     # Find the host step in the plan (peek.step has repeat stripped because
     # it is the body of an iteration frame). peek.path_tuple == host path
     # because _make_iteration_frame uses path_prefix = parent_prefix.
-    host = _find_step_by_path(plan, peek.path_tuple)
+    host = find_step_by_path(plan, peek.path_tuple)
     host_repeat = getattr(host, "repeat", None) if host is not None else None
     if (
         host is None

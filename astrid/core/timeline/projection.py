@@ -120,6 +120,12 @@ class ErasedPayloadProjectionError(ProjectionError):
     this error.
     """
 
+    def __str__(self) -> str:
+        return (
+            f"erased payload cannot be projected at event {self.event_id!r} "
+            f"({self.kind!r}): {self.reason}"
+        )
+
 
 _PROJECTED_TOP_ALLOWED = frozenset({
     "tracks",
@@ -167,12 +173,6 @@ def _validate_projected_timeline_boundary(state: dict[str, Any]) -> dict[str, An
         if not isinstance(clip.get("at"), (int, float)) or isinstance(clip.get("at"), bool):
             raise ValueError(f"projected TimelineConfig.clips[{index}].at must be a number")
     return json.loads(json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False))
-
-    def __str__(self) -> str:
-        return (
-            f"erased payload cannot be projected at event {self.event_id!r} "
-            f"({self.kind!r}): {self.reason}"
-        )
 
 
 # ============================================================================

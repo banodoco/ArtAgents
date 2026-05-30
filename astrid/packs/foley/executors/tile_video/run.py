@@ -28,6 +28,15 @@ def _parse_grid(value: str) -> tuple[int, int]:
     return int(match.group(1)), int(match.group(2))
 
 
+class FoleyProbeError(ValueError):
+    """Raised when ffprobe JSON for the input video is missing required fields.
+
+    Subclasses ``ValueError`` so existing ``except ValueError`` handlers in
+    callers still catch the typed error, while still being uniquely
+    discriminable for tests / structured logging.
+    """
+
+
 def _ffprobe(video: Path) -> dict[str, Any]:
     cmd = [
         "ffprobe", "-v", "error",
@@ -38,8 +47,37 @@ def _ffprobe(video: Path) -> dict[str, Any]:
     ]
     out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
     data = json.loads(out)
-    stream = data["streams"][0]
-    duration = float(stream.get("duration") or data["format"]["duration"])
+    streams = data.get("streams")
+    if not isinstance(streams, list) or not streams:
+        raise FoleyProbeError(
+            f"ffprobe returned no video streams for {video}"
+        )
+    stream = streams[0]
+    stream_duration = stream.get("duration")
+    if stream_duration is None:
+        fmt = data.get("format")
+        if not isinstance(fmt, dict):
+            raise FoleyProbeError(
+                f"ffprobe returned no 'format' block for {video}"
+            )
+        fmt_duration = fmt.get("duration")
+        if fmt_duration is None:
+            raise FoleyProbeError(
+                f"ffprobe returned no duration on stream or format for {video}"
+            )
+        try:
+            duration = float(fmt_duration)
+        except (TypeError, ValueError) as exc:
+            raise FoleyProbeError(
+                f"ffprobe format.duration {fmt_duration!r} is not numeric for {video}"
+            ) from exc
+    else:
+        try:
+            duration = float(stream_duration)
+        except (TypeError, ValueError) as exc:
+            raise FoleyProbeError(
+                f"ffprobe stream duration {stream_duration!r} is not numeric for {video}"
+            ) from exc
     num, den = stream["r_frame_rate"].split("/")
     fps = float(num) / float(den) if float(den) else 0.0
     return {

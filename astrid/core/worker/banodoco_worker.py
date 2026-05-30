@@ -177,18 +177,17 @@ def _write_baseline_snapshot(
 
     digest = sha256_hex(canonical_json(payload))
     if not project_slug:
-        return digest
-    try:
-        run_record = write_run_record(
-            project_slug,
-            run_id,
-            tool_id="astrid.core.worker.banodoco_worker",
-            kind="banodoco_timeline_generate",
-            metadata={"baseline_snapshot": digest},
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Failed to write run record for %s: %s", run_id, exc)
-        return digest
+        # None reserved ONLY for "no project slug configured" — failures
+        # below must propagate so the claim loop can mark the task Failed
+        # rather than silently recording a success-shaped digest.
+        return None
+    run_record = write_run_record(
+        project_slug,
+        run_id,
+        tool_id="astrid.core.worker.banodoco_worker",
+        kind="banodoco_timeline_generate",
+        metadata={"baseline_snapshot": digest},
+    )
     if not isinstance(run_record.get("metadata"), dict) or run_record["metadata"].get("baseline_snapshot") != digest:
         logger.warning("baseline_snapshot did not round-trip into run record for %s", run_id)
     return digest
@@ -398,12 +397,24 @@ class BanodocoWorker:
                 )
                 return
 
-        # SD-008 baseline_snapshot
-        _write_baseline_snapshot(
-            project_slug=self.config.project_slug,
-            run_id=run_id,
-            payload=snapshot_payload,
-        )
+        # SD-008 baseline_snapshot — write must propagate failures (mirrors
+        # the load_timeline failure pattern above): a snapshot-write crash
+        # cannot silently leak past the claim loop or the task will appear
+        # to succeed without provenance.
+        try:
+            _write_baseline_snapshot(
+                project_slug=self.config.project_slug,
+                run_id=run_id,
+                payload=snapshot_payload,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._fail(
+                claim.task_id,
+                error=f"baseline snapshot write failed: {exc}",
+                correlation_id=correlation_id,
+                service_role_key=service_role_key,
+            )
+            return
 
         # (e) intent dispatch -> mutator
         intent = str(params.get("intent") or "")

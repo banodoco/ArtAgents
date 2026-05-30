@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
+from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.packs.training.orchestrators.dataset_build.state import read_review_state, write_review_state
 
 
@@ -363,7 +364,7 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
                     return
                 try:
                     body = json.loads(raw.decode("utf-8") or "{}")
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     self._send_json(400, {"error": "bad_json", "detail": str(exc)})
                     return
                 if _is_dataset_diff_save(body):
@@ -392,7 +393,7 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
                     return
                 try:
                     body = json.loads(raw.decode("utf-8") or "{}")
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     self._send_json(400, {"error": "bad_json", "detail": str(exc)})
                     return
                 if not isinstance(body, dict) or "base_state_version" not in body:
@@ -418,7 +419,7 @@ def make_handler_class(*, html_path: Path, data_path: Path, state_path: Path | N
             if url.path == "/submit":
                 try:
                     body = json.loads(raw.decode("utf-8") or "{}")
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     self._send_json(400, {"error": "bad_json", "detail": str(exc)})
                     return
                 if schema_path is not None:
@@ -515,8 +516,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.no_open:
         try:
             webbrowser.open(url)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            log_and_swallow(exc, context="human_review.webbrowser_open")
 
     start_t = time.time()
     while not shutdown_event.is_set():

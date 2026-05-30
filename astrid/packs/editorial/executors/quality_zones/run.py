@@ -59,9 +59,17 @@ def compute(
     silence_dur: float = 0.5,
     black_dur: float = 0.3,
     black_pic_th: float = 0.98,
+    source_sha256: str | None = None,
 ) -> QualityZonesReport:
     source_path = source_path.resolve()
-    source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    # SD3 — accept a pre-computed SHA from the caller to close the TOCTOU
+    # window: if the caller already hashed the file (e.g. main() at the top
+    # of the entrypoint), re-hashing here would let in-flight file mutations
+    # silently shift the recorded cache key. ffmpeg still reads the on-disk
+    # Path below — that's unavoidable — but the recorded source_sha256 must
+    # match the caller's single source of truth.
+    if source_sha256 is None:
+        source_sha256 = hashlib.sha256(source_path.read_bytes()).hexdigest()
     audio_logs = _run_ffmpeg(
         [
             "ffmpeg",
@@ -114,6 +122,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         silence_dur=args.silence_dur,
         black_dur=args.black_dur,
         black_pic_th=args.black_pic_th,
+        source_sha256=source_sha256,
     ).to_payload()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")

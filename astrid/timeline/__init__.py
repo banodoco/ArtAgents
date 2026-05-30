@@ -99,6 +99,14 @@ from .timeline_model import (
 
 
 def _sync_private_hooks() -> None:
+    # Mirror the catalog-backed validation hooks from this facade module onto
+    # ``timeline_model`` before each validation entrypoint runs. This is NOT
+    # dead code: ``timeline_model`` reads ``_animation_ids`` / ``_animation_meta``
+    # / ``_effect_ids`` / ``_transition_ids`` directly, while tests (and callers)
+    # patch them on the ``astrid.timeline`` facade. Copying the (possibly
+    # patched) facade bindings onto ``timeline_model`` here makes those patches
+    # take effect in the validator. Removing this seam silently disables that
+    # injection point (see tests/test_schema_contract.py).
     _timeline_model._effect_ids = _effect_ids
     _timeline_model._animation_ids = _animation_ids
     _timeline_model._animation_meta = _animation_meta

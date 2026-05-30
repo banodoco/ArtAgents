@@ -341,59 +341,21 @@ def _exec_plan_evidence(args: argparse.Namespace) -> int:
 
 
 def _exec_discover_video_evidence(args: argparse.Namespace) -> int:
-    out: Path = args.out
-    previous = json.loads(args.previous_manifest.read_text(encoding="utf-8"))
-    candidates = {
-        "query": args.query,
-        "video": args.video,
-        "evidence_plan": previous,
-        "candidates": [
-            {
-                "id": "candidate-001",
-                "kind": "scene_frame",
-                "score": 1.0,
-                "reason": "Deterministic placeholder candidate for task-mode port.",
-            }
-        ],
-    }
-    write_json(out, candidates)
-    print(f"thumbnail_maker: wrote={out}")
-    return 0
+    raise NotImplementedError(
+        "thumbnail_maker.discover_video_evidence: not implemented; see SPRINT_1 milestone D"
+    )
 
 
 def _exec_build_reference_pack(args: argparse.Namespace) -> int:
-    out: Path = args.out
-    previous = json.loads(args.previous_manifest.read_text(encoding="utf-8"))
-    payload = {
-        "query": args.query,
-        "references": previous.get("candidates", []),
-        "source_manifest": str(args.previous_manifest),
-    }
-    write_json(out, payload)
-    print(f"thumbnail_maker: wrote={out}")
-    return 0
+    raise NotImplementedError(
+        "thumbnail_maker.build_reference_pack: not implemented; see SPRINT_1 milestone D"
+    )
 
 
 def _exec_generate_thumbnails(args: argparse.Namespace) -> int:
-    out: Path = args.out
-    previous = json.loads(args.previous_manifest.read_text(encoding="utf-8"))
-    payload = {
-        "query": args.query,
-        "count": int(args.count),
-        "size": args.size,
-        "outputs": [
-            {
-                "id": f"thumb-{index + 1:03d}",
-                "path": f"generated/thumb-{index + 1:03d}.png",
-                "reference_count": len(previous.get("references", [])),
-            }
-            for index in range(int(args.count))
-        ],
-        "source_manifest": str(args.previous_manifest),
-    }
-    write_json(out, payload)
-    print(f"thumbnail_maker: wrote={out}")
-    return 0
+    raise NotImplementedError(
+        "thumbnail_maker.generate_thumbnails: not implemented; see SPRINT_1 milestone D"
+    )
 
 
 def run_orchestrator(args: argparse.Namespace) -> int:

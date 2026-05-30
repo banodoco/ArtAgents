@@ -685,6 +685,12 @@ def build_pool_cut_cmd(args: argparse.Namespace) -> list[str]:
     return cmd
 
 
+def _verdict_build_cmd(args: argparse.Namespace) -> list[str]:
+    raise NotImplementedError(
+        "hype.verdict: stub step requires a real verdict implementation"
+    )
+
+
 def build_pool_steps() -> list[Step]:
     return [
         Step(
@@ -964,16 +970,7 @@ def build_pool_steps() -> list[Step]:
         Step(
             "verdict",
             ("verdict.json",),
-            lambda args: add_extra_args(
-                args,
-                "verdict",
-                [
-                    "bash",
-                    "-c",
-                    "echo '{\"verdict\": \"pass\"}' > "
-                    + str(args.brief_out / "verdict.json"),
-                ],
-            ),
+            _verdict_build_cmd,
             per_brief=True,
         ),
     ]

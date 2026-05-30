@@ -28,6 +28,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from astrid.core.util.log_and_swallow import log_and_swallow
+
 from astrid.core.project.paths import project_dir
 
 
@@ -80,7 +82,8 @@ def _session_id_for_legacy_write(slug: str, run_id: str) -> str:
         sess = Session.from_json(session_path(sid))
         sess = sess.with_changes(project=slug, run_id=run_id, last_used_at=now_iso())
         sess.to_json(session_path(sid))
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        log_and_swallow(exc, context="active_run.update_session")
         return sid
     return sess.id
 
