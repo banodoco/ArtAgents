@@ -1,38 +1,51 @@
 base_branch: main
 
+# Revised per Codex sense-check (verdict: don't launch the old 4-milestone shape).
+# M1 split into contract+adapter (m1) and the check battery (m2); migration/scenario
+# assertions corrected for the THREE distinct persistence logs and cas_sha256 hashing.
+
 milestones:
-  # M1 — architectural keystone: adapter API + evidence-pack contract + 12 universal checks.
-  # Novel, cross-cutting, unfamiliar Sisypy API; no cheap recovery from a wrong adapter contract.
+  # M1 — freeze ADAPTER.md contract + minimal adapter + capture + smoke. Keystone.
   # partnered//high +prep @codex
-  - label: m1-embed
-    idea: docs/megaplan/epics/astrid-sisypy/m1-embed.md
+  - label: m1-contract
+    idea: docs/megaplan/epics/astrid-sisypy/m1-contract.md
     profile: partnered
     robustness: full
     depth: high
     vendor: codex
     with_prep: true
-    prep_direction: "Read Sisypy's adapter/runner/evidence API (sibling repo /Users/peteromalley/Documents/reigh-workspace/sisypy: docs/embedding.md, docs/evidence.md, sisypy/adapters.py, public_api.py) and the vibecomfy reference embed (vibecomfy/tests/test_sisypy_integration.py). Map Astrid's persistence surfaces (assembly.jsonl/head/identity, run.json, step events.jsonl, ledger.jsonl, verify_chain, projection.py) so the adapter capture + 12 universal checks are grounded. Ignore net-new scenario design."
+    prep_direction: "Read Sisypy's adapter/runner/evidence API (sibling repo /Users/peteromalley/Documents/reigh-workspace/sisypy: docs/embedding.md, docs/evidence.md, sisypy/adapters.py, public_api.py, schema.py, runner.py) and the vibecomfy reference embed. Confirm the EXACT signatures of the three verifiers the contract names: LocalFsBackend.verify_chain (astrid/core/timeline/eventlog/local_fs.py), astrid.core.task.events.verify_chain, astrid.audit.graph.verify_audit_ledger. Confirm whether assembly.json is derived-on-read (astrid/core/timeline/crud.py). The output is a correct ADAPTER.md, not scenario design."
 
-  # M2 — mechanical port of 29 scenarios behind an objective structural gate. directed @codex
-  - label: m2-migrate
-    idea: docs/megaplan/epics/astrid-sisypy/m2-migrate.md
-    profile: directed
-    robustness: full
-    depth: medium
-    vendor: codex
-
-  # M3 — adversarial data-retention + orchestrator-execution scenarios (the 4 focus areas).
-  # Real design judgment per scenario (crash/concurrency/large-scale priming). partnered//high @codex
-  - label: m3-retention-orchestrator
-    idea: docs/megaplan/epics/astrid-sisypy/m3-retention-orchestrator.md
+  # M2 — implement the classified check battery (universal/conditional/scenario-specific) + unit tests.
+  # Subtle correctness (erasure exemption, na-skip semantics, no false positives). partnered//high @codex
+  - label: m2-checks
+    idea: docs/megaplan/epics/astrid-sisypy/m2-checks.md
     profile: partnered
     robustness: full
     depth: high
     vendor: codex
 
-  # M4 — remaining discovery/authoring/refuse gap scenarios + synthesis wiring. directed//medium @codex
-  - label: m4-gaps-synthesis
-    idea: docs/megaplan/epics/astrid-sisypy/m4-gaps-synthesis.md
+  # M3 — convert 29 scenarios to Sisypy schema (${VAR}, enforced/graded/observed, no --all). Legacy kept.
+  # directed @codex
+  - label: m3-migrate
+    idea: docs/megaplan/epics/astrid-sisypy/m3-migrate.md
+    profile: directed
+    robustness: full
+    depth: medium
+    vendor: codex
+
+  # M4 — net-new data-retention + orchestrator scenarios (corrected: cas_sha256, lease vs version-conflict).
+  # partnered//high @codex
+  - label: m4-retention-orchestrator
+    idea: docs/megaplan/epics/astrid-sisypy/m4-retention-orchestrator.md
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+
+  # M5 — discovery/authoring/refuse scenarios + synthesis + COVERAGE.md + decommission legacy. directed//medium @codex
+  - label: m5-gaps-synthesis
+    idea: docs/megaplan/epics/astrid-sisypy/m5-gaps-synthesis.md
     profile: directed
     robustness: full
     depth: medium

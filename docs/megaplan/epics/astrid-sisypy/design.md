@@ -22,20 +22,46 @@ Data-Retention/Integrity · Infrastructure(sessions/leases/projects/sync) · Pla
 - **Evidence depth (proof ladder):** invoked → artifact → chain-integrity → substantiated
 - **Scale:** S(1-3 events/1 orch) · M(multi-step) · L(100+ events / many runs)
 
-## 2. Universal adapter checks (run over EVERY evidence pack — the data-correctness backbone)
-This is the core answer to "do we save data correctly". Every scenario's frozen evidence is checked, not just dedicated retention tests.
-1. claim-vs-evidence consistency — report claims of files/outputs must appear in tree_after + event log
-2. canonical-surface enforcement — no `python -m astrid.packs.X.run` / direct import bypass
-3. no-mutation-on-read — read/audit verbs produce zero new events, empty git diff
-4. append-not-rewrite — "edit/append" ops grow the file / superset JSON, never truncate
-5. chain-integrity — verify_chain() ok on assembly.jsonl, run events.jsonl, audit/ledger.jsonl
-6. artifact-provenance — every `produces` path exists; sha256(file)==event hash; no orphan artifacts
-7. projection-fidelity — project_to_assembly(events) == assembly.json (canonical compare)
-8. head/sidecar consistency — head.event_count==len(events), head.last_hash==events[-1].hash, version ok
-9. idempotency — reattach (strip ASTRID_SESSION_ID) → no duplicate events, same event_id
-10. no-cross-project-leak — run.json.project_slug matches; no sibling-slug references in events
-11. auditability — every event has actor.id + ISO ts; mutation events (erase/takeover/abort) carry reason
-12. report/deliverable hygiene — report.md exists, ≥30 lines, covers requested numbered sections
+## 2. Integrity/evidence check battery — CLASSIFIED (the data-correctness backbone)
+Core answer to "do we save data correctly". CORRECTED per Codex sense-check: checks are NOT all
+universal, and there are THREE distinct persistence logs each with its OWN verifier — do not conflate:
+- **Timeline chain**: `<proj>/<slug>/timelines/<ulid>/assembly.jsonl` → `LocalFsBackend.verify_chain()`
+  (astrid/core/timeline/eventlog/local_fs.py). Sidecars: assembly.head.json, assembly.identity.json.
+  Derived `assembly.json` is REGENERATED on normal reads (crud.py) — only usable for projection-fidelity
+  if captured as a frozen read-only snapshot taken BEFORE any regeneration.
+- **Task-run chain**: `<proj>/<slug>/runs/<id>/events.jsonl` → `astrid.core.task.events.verify_chain(path)`.
+  Artifact hashes live in `produces_check_passed.cas_sha256` events — NOT in run.json (which carries
+  path/source-path only). Writer concurrency here is lease-based (lease.json, epoch CAS).
+- **Audit ledger**: `<proj>/<slug>/runs/<id>/audit/ledger.jsonl` → `verify_audit_ledger()`
+  (astrid/audit/graph.py) — NOT verify_chain.
+
+Every check returns pass / fail / **na (skip, scored as pass)** with evidence refs; "na" is explicit.
+
+UNIVERSAL (run on every pack):
+- U1 claim-vs-evidence — report claims of files/outputs must appear in tree_after + the relevant log
+- U2 canonical-surface enforcement — no `python -m astrid.packs.X.run` / direct import bypass
+- U3 chain-integrity — for EACH chained log PRESENT in the pack, run ITS verifier (above); na if absent
+- U4 no-cross-project-leak — run.json.project_slug matches; no sibling-slug references in events
+- U5 auditability — every event has actor.id + ISO ts; mutation events (erase/takeover/abort) carry reason
+- U6 report/deliverable hygiene — report.md exists, ≥30 lines, covers requested numbered sections
+
+CONDITIONAL (run only when the triggering artifact/verb is present; else na):
+- C1 head/sidecar consistency — when a timeline head.json is captured: head.event_count==len(events),
+  head.last_hash==events[-1].hash, version ok
+- C2 artifact-provenance — when the scenario produced artifacts: every `produces` path exists AND its
+  hash matches the `produces_check_passed.cas_sha256` event (NOT a run.json hash); no orphan artifacts
+- C3 no-mutation-on-read — only for read/audit-verb scenarios: zero new events, empty git diff
+- C4 projection-fidelity — ONLY against a frozen read-only assembly.json snapshot: project_to_assembly(events)
+  == snapshot (canonical compare). Skipped otherwise (normal reads regenerate it).
+
+SCENARIO-SPECIFIC (declared per scenario, not auto-applied):
+- S1 append-not-rewrite — edit scenarios grow the file / superset JSON; EXEMPT erasure/repair, which
+  legitimately rewrites historical payloads + downstream hashes (local_fs.py erasure path).
+- S2 idempotent-reattach — only reattach scenarios: re-attach (strip ASTRID_SESSION_ID) → no duplicate
+  events, same event_id.
+
+The exact pack layout, per-log verifier, result shape, and this classification are FROZEN in
+`tests/agentic/ADAPTER.md` (milestone m1) before any check is implemented.
 
 ## 3. Coverage matrix (Domain × Challenge) — existing vs gap
 - Timeline×Operate: 9-12 scenarios (OVERPOPULATED — one-per-CLI-verb bloat → collapse into 1 compose test)
