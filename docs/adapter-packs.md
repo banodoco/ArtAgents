@@ -11,9 +11,9 @@ the manifest, entrypoint, and integration glue; the substrate provides the
 actual work.
 
 Each external substrate now lives in its own direct-child pack (e.g., `fal`,
-`vibecomfy`, `runpod`, `moirae`). The legacy `external` pack is a hidden
-shell that preserves backward compatibility through pack-level aliases
-(`external.moirae` → `moirae.moirae`, etc.).
+`vibecomfy`, `runpod`, `moirae`). The legacy `external` pack definition was
+removed; backward compatibility comes from deprecated pack-level aliases
+declared in those canonical packs (`external.moirae` → `moirae.moirae`, etc.).
 
 ## Adapter Packs
 
@@ -29,8 +29,8 @@ Shipped with Astrid. Each pack adapts one external substrate:
 | `reigh` | `reigh.open_in_reigh`, `reigh.publish`, `reigh.reigh_data`, `reigh.spatial_audio_page` | Reigh | Project handoff and publishing |
 
 Legacy ids under `external.*` (e.g., `external.runpod.session`,
-`external.vibecomfy.run`, `external.moirae`) remain functional as deprecated
-pack-level aliases. See
+`external.vibecomfy.run`, `external.moirae`) remain functional only where a
+canonical adapter pack declares the deprecated pack-level alias. See
 [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
 alias mechanics.
 

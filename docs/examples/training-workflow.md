@@ -116,7 +116,7 @@ python3 -m astrid orchestrators run training.training_run -- \
 
 For script generation, use the built-in script pipeline with a preset. The
 Seinfeld and Always Sunny styles are data under
-`astrid/packs/builtin/script_pipeline/presets/`.
+`astrid/packs/editorial/executors/script_pipeline/presets/`.
 
 ```bash
 python3 -m astrid executors run editorial.script_pipeline -- \

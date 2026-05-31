@@ -28,6 +28,9 @@ dependencies = [
     # "runpod-lifecycle>=0.3",
 ]
 
+[project.scripts]
+astrid = "astrid.pipeline:main"
+
 [project.optional-dependencies]
 dev = [
     "mypy==1.17.0",

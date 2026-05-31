@@ -136,8 +136,8 @@ JSON to force a pool.
 
 **No brief file exists.** Briefs are first-class input artifacts today. Use
 `examples/briefs/` as samples. If the user repeatedly asks from a topic, add a
-`generation.generate_brief` executor (or its legacy alias `builtin.generate_brief`)
-and call it from a topic-to-video orchestrator.
+`generation.generate_brief` executor and call it from a topic-to-video
+orchestrator.
 
 **Render is missing assets.** Rendering consumes the timeline and assets pair
 created by cut. Do not skip cut unless both `hype.timeline.json` and

@@ -30,7 +30,7 @@ python3 -m astrid executors inspect local.render --json
 
 | State | What it means | How to reach it |
 |---|---|---|
-| **Clean (original)** | Shipped with Astrid, never forked | Default for all builtin/external/seinfeld capabilities |
+| **Clean (original)** | Shipped with Astrid, never forked | Default for builtin-shipped capabilities (now under `video_editing`, `editorial`, `generation`, etc.) |
 | **Clean (fork)** | Forked but unmodified since fork time | Fork, then don't edit |
 | **Dirty** | Forked and modified locally | Fork, then edit files |
 | **Conflict** | Forked, upstream has a newer version | Not yet implemented (deferred) |

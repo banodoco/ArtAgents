@@ -71,7 +71,8 @@ the executor and orchestrator registries wire aliases from discovered packs
 automatically — no separate registration step is needed.
 
 **Backward compatibility:** Old ids like `builtin.*`, `external.*`, and
-`upload.*` remain functional when declared as aliases. Registry lookup,
+declared one-off aliases such as `upload.youtube` remain functional when
+declared as aliases. Registry lookup,
 `inspect --json`, and search all resolve the old id to the canonical definition
 and surface deprecation metadata. The old ids do not need their own capability
 definitions — they are pure alias entries.

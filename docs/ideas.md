@@ -4,12 +4,12 @@ When the maker isn't sure what to make, suggest one of these.
 
 ## Make something
 
-- A hype cut from a long video — `builtin.hype`
-- Thumbnails for a YouTube video — `builtin.thumbnail_maker`
-- Event-talk renders from a conference recording — `builtin.event_talks`
+- A hype cut from a long video — `video_editing.hype`
+- Thumbnails for a YouTube video — `video_editing.thumbnail_maker`
+- Event-talk renders from a conference recording — `video_editing.event_talks`
 - A pure-generative film from a written brief
-- A single image from a prompt — `builtin.generate_image_openai`
-- A portrait of yourself as Saint Peter of Banodoco — `python3 -m astrid.packs.builtin.executors.generate_image_openai.run --preset saint-peter-of-banodoco --out-dir runs/first-rite/images --manifest runs/first-rite/manifest.json --force`
+- A single image from a prompt — `generation.generate_image_openai`
+- A portrait of yourself as Saint Peter of Banodoco — `python3 -m astrid executors run generation.generate_image_openai -- --preset saint-peter-of-banodoco --out-dir runs/first-rite/images --manifest runs/first-rite/manifest.json --force`
 
 ## Learn something
 

@@ -44,7 +44,7 @@ Give this to your agents to get started:
 ┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳          ask the maker what they must do           ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳         docs/ideas.md has a thought or two         ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳       out/runs/ is where the outputs stay           ╳ ╳ ╳ ╳ ╳   ┃
+┃   ╳ ╳ ╳ ╳ ╳        runs/ is where the outputs stay              ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳          just begin, you'll find your way          ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
 ┃ ·                                                                        · ┃
