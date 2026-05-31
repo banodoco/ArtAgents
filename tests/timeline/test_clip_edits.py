@@ -17,7 +17,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.core.timeline.assembly_helper import AssemblyMutationError
 from astrid.core.timeline.clip_edits import (
     ClipEditError,
     add_clip,

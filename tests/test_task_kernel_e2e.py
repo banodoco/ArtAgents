@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.project.project import create_project
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import child_subprocess_env
 from astrid.core.task.events import read_events, verify_chain
 from astrid.core.task.gate import TaskRunGateError, gate_command, record_dispatch_complete
@@ -52,7 +52,7 @@ def test_two_step_plan_drives_kernel_end_to_end(tmp_projects_root: Path) -> None
 
     plan = load_plan(plan_path)
     plan_hash = compute_plan_hash(plan_path)
-    write_active_run("demo", run_id="run-1", plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run("demo", run_id="run-1", plan_hash=plan_hash, root=tmp_projects_root)
 
     events_path = None
     for step in plan.steps:

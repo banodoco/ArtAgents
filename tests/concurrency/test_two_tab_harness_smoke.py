@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from astrid.core.project.project import create_project
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.plan import compute_plan_hash
 from tests.concurrency.two_tab_harness import race_two_tabs
 
@@ -37,7 +37,7 @@ def test_two_concurrent_status_reads_ok(tmp_projects_root: Path) -> None:
         __import__("json").dumps(plan_payload), encoding="utf-8"
     )
     plan_hash = compute_plan_hash(plan_path)
-    write_active_run(slug, run_id="run-1", plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id="run-1", plan_hash=plan_hash, root=tmp_projects_root)
 
     projects_root = str(tmp_projects_root)
 

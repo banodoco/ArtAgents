@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from _lifecycle_fixtures import bind_writer_session, setup_packs_and_compile, setup_run  # noqa: E402
 
 from astrid.core.project.project import create_project
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task import gate as task_gate
 from astrid.core.task.events import (
     append_event,
@@ -64,7 +64,7 @@ def _write_project_plan(projects_root: Path, plan: dict, *, slug: str = "demo", 
     plan_path = project_root / "plan.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
     bind_writer_session(projects_root, slug, run_id=run_id)
-    write_active_run(slug, run_id=run_id, plan_hash=compute_plan_hash(plan_path), root=projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=compute_plan_hash(plan_path), root=projects_root)
     return project_root / "runs" / run_id / "events.jsonl"
 
 

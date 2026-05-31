@@ -1932,24 +1932,18 @@ class TestMigratedPackAliasFixtures:
             alias_ids = {a.alias for a in aliases}
             assert alias_ids == {"builtin.render", "old.render", "legacy.render"}
 
-    # -- Guard: no real builtin/external/upload files are touched ---------
+    # -- Guard: no real builtin files are touched -------------------------
 
-    def test_no_real_builtin_external_or_upload_files_are_moved(self) -> None:
-        """Assert that the real source-tree directories for ``builtin``,
-        ``external``, and ``upload`` packs still exist at their original
-        paths, proving these temp-pack fixture tests did not move or
-        delete any real capability files."""
-        import os
+    def test_no_real_builtin_files_are_moved(self) -> None:
+        """Assert that the real source-tree directory for ``builtin`` still exists."""
         repo_root = Path(__file__).resolve().parents[1]
-        for pack_name in ("builtin", "external", "upload"):
-            pack_path = repo_root / "astrid" / "packs" / pack_name
-            assert pack_path.is_dir(), (
-                f"Real pack directory {pack_path} is missing — "
-                f"temp-pack fixture tests must not move real source-tree files"
-            )
-            # At minimum the pack.yaml should still exist
-            pack_yaml = pack_path / "pack.yaml"
-            assert pack_yaml.is_file(), (
-                f"pack.yaml missing from {pack_path} — "
-                f"temp-pack fixture tests must not alter real pack manifests"
-            )
+        pack_path = repo_root / "astrid" / "packs" / "builtin"
+        assert pack_path.is_dir(), (
+            f"Real pack directory {pack_path} is missing; "
+            f"temp-pack fixture tests must not move real source-tree files"
+        )
+        pack_yaml = pack_path / "pack.yaml"
+        assert pack_yaml.is_file(), (
+            f"pack.yaml missing from {pack_path}; "
+            f"temp-pack fixture tests must not alter real pack manifests"
+        )

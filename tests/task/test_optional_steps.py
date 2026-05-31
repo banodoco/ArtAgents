@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.project.project import create_project
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.events import (
     _event_hash,
     ZERO_HASH,
@@ -59,7 +59,7 @@ def _seed_project_with_plan(
     run_dir = proj_root / "runs" / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     plan_hash = compute_plan_hash(plan_path)
-    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=projects_root)
     # Seed a run_started event so the gate can read a populated log.
     events_path = run_dir / "events.jsonl"
     run_started = {

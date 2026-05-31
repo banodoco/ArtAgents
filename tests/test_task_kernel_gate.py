@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.project.project import create_project
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.events import (
     append_event,
     make_run_started_event,
@@ -32,7 +32,7 @@ def test_five_event_hash_chain_append_verify_round_trip(tmp_path: Path) -> None:
 
 def test_plan_hash_mismatch_rejects_with_abort_recovery(tmp_projects_root: Path) -> None:
     command = _write_plan(tmp_projects_root, [{"id": "step-1", "command": "echo one"}])[0]
-    write_active_run("demo", run_id="run-1", plan_hash="sha256:" + "1" * 64, root=tmp_projects_root)
+    seed_current_run("demo", run_id="run-1", plan_hash="sha256:" + "1" * 64, root=tmp_projects_root)
 
     with pytest.raises(TaskRunGateError) as exc_info:
         gate_command("demo", command, [], root=tmp_projects_root)
@@ -171,4 +171,4 @@ def _write_plan(tmp_projects_root: Path, steps: list[dict[str, str]]) -> tuple[s
 
 def _activate_plan(tmp_projects_root: Path) -> None:
     plan_path = tmp_projects_root / "demo" / "plan.json"
-    write_active_run("demo", run_id="run-1", plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
+    seed_current_run("demo", run_id="run-1", plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)

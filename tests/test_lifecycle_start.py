@@ -16,7 +16,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import bind_writer_session, make_pack, setup_packs_and_compile  # noqa: E402
 
-from astrid.core.task.active_run import read_active_run
+from tests.helpers.current_run import read_seeded_current_run
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.plan import compute_plan_hash
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
@@ -42,7 +42,7 @@ def test_start_writes_active_run_with_correct_hash(tmp_path: Path) -> None:
         projects_root=projects,
     )
     assert rc == 0
-    active = read_active_run("p", root=projects)
+    active = read_seeded_current_run("p", root=projects)
     assert active is not None
     assert active["run_id"] == "r1"
     plan_hash = compute_plan_hash(projects / "p" / "plan.json")

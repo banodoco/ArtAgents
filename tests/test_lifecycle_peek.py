@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import (
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
@@ -73,7 +73,7 @@ def _stage_run(
     plan_path = proj / "plan.json"
     plan_path.write_text(json.dumps(plan.to_dict()), encoding="utf-8")
     plan_hash = compute_plan_hash(plan_path)
-    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
     runs_dir = proj / "runs" / run_id
     runs_dir.mkdir(parents=True, exist_ok=True)
     events_path = runs_dir / "events.jsonl"

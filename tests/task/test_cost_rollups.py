@@ -51,7 +51,7 @@ def cost_fixture(tmp_projects_root: Path) -> dict:
     """Project + timeline with 3 runs: local-only, mixed, aborted."""
     from astrid.core.project.project import create_project
     from astrid.core.project.paths import project_dir
-    from astrid.core.task.active_run import write_active_run
+    from tests.helpers.current_run import seed_current_run
     from astrid.core.task.plan import compute_plan_hash
     from astrid.core.timeline import crud
 
@@ -118,7 +118,7 @@ def cost_fixture(tmp_projects_root: Path) -> dict:
     ])
     _write_events(run3_root / "events.jsonl", events3)
 
-    write_active_run(slug, run_id=R1, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=R1, plan_hash=plan_hash, root=tmp_projects_root)
 
     # Write manifest.json directly (frozen dataclass can't be mutated)
     manifest_path = timeline_dir / "manifest.json"

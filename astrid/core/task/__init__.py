@@ -1,13 +1,4 @@
-"""Task-mode kernel APIs.
-
-Sprint 1 (T9): ``active_run`` re-exports are retired from this package
-namespace. The on-disk pointer moved to ``<project>/current_run.json`` +
-``runs/<id>/lease.json``; new callers should import
-``astrid.core.project.current_run`` and ``astrid.core.session.lease``
-directly. A thin backward-compatibility shim still lives at
-``astrid.core.task.active_run`` for in-flight callers (it writes the new
-on-disk shape).
-"""
+"""Task-mode kernel APIs."""
 
 from .env import (
     ASTRID_ACTOR,

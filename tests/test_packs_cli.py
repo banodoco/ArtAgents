@@ -701,7 +701,7 @@ class TestTaxonomyHiddenPackBehavior(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
-        for visible_id in ("builtin", "external", "iteration", "media", "upload"):
+        for visible_id in ("builtin", "iteration", "media"):
             self.assertIn(visible_id, pack_ids, f"{visible_id} must be in default discovery")
 
 
@@ -723,7 +723,6 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
-        self.assertIn("external", pack_ids)
         self.assertIn("media", pack_ids)
 
     def test_install_tier_filter_includes_only_matching(self) -> None:
@@ -732,7 +731,6 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
-        self.assertIn("external", pack_ids)
         # Example-only packs are not runtime-discovered even with --show-hidden.
         self.assertNotIn("text_review", pack_ids)
 
@@ -742,7 +740,6 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
-        self.assertIn("external", pack_ids)
 
     def test_stability_filter_includes_only_matching(self) -> None:
         result = _run_packs("list", "--json", "--stability", "stable", "--show-hidden", cwd=str(_REPO_ROOT))
@@ -750,7 +747,6 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
-        self.assertIn("external", pack_ids)
 
     def test_support_filter_includes_only_matching(self) -> None:
         result = _run_packs("list", "--json", "--support", "core", "--show-hidden", cwd=str(_REPO_ROOT))
@@ -758,7 +754,6 @@ class TestTaxonomyAllFilters(unittest.TestCase):
         listed = json.loads(result.stdout)
         pack_ids = {pack["id"] for pack in listed["packs"]}
         self.assertIn("builtin", pack_ids)
-        self.assertIn("external", pack_ids)
         # Example-only packs are not runtime-discovered even with --show-hidden.
         self.assertNotIn("text_review", pack_ids)
 

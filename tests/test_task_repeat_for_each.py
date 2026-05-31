@@ -7,7 +7,7 @@ import pytest
 
 from astrid.core.project.project import create_project
 from astrid.core.task import gate as task_gate
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import (
     ASTRID_ACTOR,
     TASK_ITEM_ID_ENV,
@@ -28,7 +28,7 @@ def _setup(tmp_projects_root: Path, plan: dict, *, slug: str = "demo", run_id: s
     create_project(slug, root=tmp_projects_root)
     plan_path = tmp_projects_root / slug / "plan.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
-    write_active_run(slug, run_id=run_id, plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
     return plan_path
 
 

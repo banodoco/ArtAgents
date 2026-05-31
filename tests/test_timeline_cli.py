@@ -1423,12 +1423,6 @@ def test_arrangement_set_handler_rejects_runtime_container_write(
         timeline_cli.cmd_arrangement_set(argparse.Namespace(slug="primary", from_json=str(arrangement_path)))
 
 
-def test_arrangement_replace_not_public_cli_write_surface() -> None:
-    source = Path(timeline_cli.__file__).read_text(encoding="utf-8")
-    assert "arrangement_edits" not in source
-    assert "arrangement_replace(" not in source
-
-
 def test_arrangement_show_handler_reads_arrangement_via_crud(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

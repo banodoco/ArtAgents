@@ -49,7 +49,7 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
     """Create a project with a timeline, two runs (1 completed, 1 aborted)."""
     from astrid.core.project.project import create_project
     from astrid.core.project.paths import project_dir
-    from astrid.core.task.active_run import write_active_run
+    from tests.helpers.current_run import seed_current_run
     from astrid.core.task.plan import compute_plan_hash
     from astrid.core.timeline import crud
 
@@ -143,7 +143,7 @@ def timeline_fixture(tmp_projects_root: Path) -> dict:
     produces2.mkdir(exist_ok=True)
     (produces2 / "partial.txt").write_text("incomplete")
 
-    write_active_run(slug, run_id=R1, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=R1, plan_hash=plan_hash, root=tmp_projects_root)
 
     # Write manifest.json with both runs contributing
     manifest_path = timeline_dir / "manifest.json"

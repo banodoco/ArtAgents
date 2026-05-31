@@ -28,9 +28,6 @@ WATCHED_CALLS = {
     "append_event",
     "append_event_locked",
     "record_dispatch_complete",
-    "read_active_run",
-    "write_active_run",
-    "clear_active_run",
     "bump_epoch_and_swap_session",
     "claim_orphan_lease",
     "release_writer_lease",
@@ -61,11 +58,6 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "WriterContext.append",
         "append_event_locked",
     ): (1, "normal_writer_context_boundary"),
-    CallSite(
-        "astrid/core/task/active_run.py",
-        "clear_active_run",
-        "release_writer_lease",
-    ): (1, "legacy_active_run_shim_release"),
     CallSite("astrid/core/task/events.py", "append_event", "append_event_locked"): (
         1,
         "guarded_legacy_test_migration_wrapper",
@@ -231,18 +223,6 @@ EXPECTED_RUNPOD_NON_TASK_AUDIT_WRITES = {
     ): (1, "runpod_sweeper_supplemental_audit_log_non_task"),
 }
 
-EXPECTED_ACTIVE_RUN_SHIM_DEFS = {
-    CallSite("astrid/core/task/active_run.py", "read_active_run", "def"): (
-        "legacy_active_run_shim_definition"
-    ),
-    CallSite("astrid/core/task/active_run.py", "write_active_run", "def"): (
-        "legacy_active_run_shim_definition"
-    ),
-    CallSite("astrid/core/task/active_run.py", "clear_active_run", "def"): (
-        "legacy_active_run_shim_definition"
-    ),
-}
-
 EXPECTED_LEASE_REWRITER_DEFS = {
     CallSite("astrid/core/session/lease.py", "write_lease_init", "def"): (
         "lease_initializer"
@@ -350,10 +330,6 @@ def test_stop_line_no_pending_task_run_mutation_categories_remain() -> None:
         site: category
         for site, (_count, category) in EXPECTED_TASK_RUN_CALLS.items()
         if "pending" in category
-        or category
-        in {
-            "legacy_active_run_shim_release",
-        }
     }
     assert pending == {}
 
@@ -525,8 +501,7 @@ def test_runpod_sweeper_event_append_is_classified() -> None:
     }
 
 
-def test_active_run_and_lease_rewriter_definitions_are_named() -> None:
-    active_defs = _collect_defs({"read_active_run", "write_active_run", "clear_active_run"})
+def test_lease_rewriter_definitions_are_named() -> None:
     lease_defs = _collect_defs(
         {
             "write_lease_init",
@@ -535,21 +510,4 @@ def test_active_run_and_lease_rewriter_definitions_are_named() -> None:
             "release_writer_lease",
         }
     )
-    assert set(EXPECTED_ACTIVE_RUN_SHIM_DEFS) <= set(active_defs)
     assert set(EXPECTED_LEASE_REWRITER_DEFS) <= set(lease_defs)
-
-
-def test_active_run_shim_has_no_production_importers() -> None:
-    importers: list[str] = []
-    for path in _python_files():
-        rel = _relative(path)
-        if rel == "astrid/core/task/active_run.py":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module == "astrid.core.task.active_run":
-                importers.append(rel)
-            if isinstance(node, ast.Import):
-                if any(alias.name == "astrid.core.task.active_run" for alias in node.names):
-                    importers.append(rel)
-    assert importers == []

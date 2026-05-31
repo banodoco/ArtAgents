@@ -158,7 +158,7 @@ def test_strict_mode_with_clean_plan(
     a plan_mutated event whose diff passes the six-invariant check.
     """
     from astrid.core.project.project import create_project
-    from astrid.core.task.active_run import write_active_run
+    from tests.helpers.current_run import seed_current_run
 
     slug = "strict-test"
     run_id = "run-strict"
@@ -226,7 +226,7 @@ def test_strict_mode_with_clean_plan(
     events_path = run_root / "events.jsonl"
     _write_events(events_path, chain)
 
-    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
     # Invoke cmd_events_verify with --strict
     from astrid.core.task.run_audit import cmd_events_verify
@@ -243,7 +243,7 @@ def test_strict_mode_with_invalid_mutation(
 ) -> None:
     """``--strict`` catches a mutation that violates invariants."""
     from astrid.core.project.project import create_project
-    from astrid.core.task.active_run import write_active_run
+    from tests.helpers.current_run import seed_current_run
 
     slug = "strict-bad"
     run_id = "run-bad"
@@ -301,7 +301,7 @@ def test_strict_mode_with_invalid_mutation(
     events_path = run_root / "events.jsonl"
     _write_events(events_path, chain)
 
-    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
     from astrid.core.task.run_audit import cmd_events_verify
 
@@ -317,7 +317,7 @@ def test_strict_mode_rejects_initial_plan_hash_mismatch(
     tmp_projects_root: Path,
 ) -> None:
     from astrid.core.project.project import create_project
-    from astrid.core.task.active_run import write_active_run
+    from tests.helpers.current_run import seed_current_run
     from astrid.core.task.plan import compute_plan_hash
 
     slug = "strict-plan-hash"
@@ -342,7 +342,7 @@ def test_strict_mode_rejects_initial_plan_hash_mismatch(
         {"kind": "run_started", "run_id": run_id, "plan_hash": plan_hash, "ts": "2026-01-01T00:00:01Z"},
     ]
     _write_events(run_root / "events.jsonl", _build_chain(raw_events))
-    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
     from astrid.core.task.run_audit import cmd_events_verify
 
@@ -354,7 +354,7 @@ def test_strict_mode_rejects_unknown_step_event_path(
     tmp_projects_root: Path,
 ) -> None:
     from astrid.core.project.project import create_project
-    from astrid.core.task.active_run import write_active_run
+    from tests.helpers.current_run import seed_current_run
     from astrid.core.task.plan import compute_plan_hash
 
     slug = "strict-step-path"
@@ -379,7 +379,7 @@ def test_strict_mode_rejects_unknown_step_event_path(
         {"kind": "step_attested", "plan_step_id": "missing-step", "attested_by": "agent:test", "decision": "approve", "ts": "2026-01-01T00:00:02Z"},
     ]
     _write_events(run_root / "events.jsonl", _build_chain(raw_events))
-    write_active_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
     from astrid.core.task.run_audit import cmd_events_verify
 

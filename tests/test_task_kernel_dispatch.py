@@ -16,7 +16,7 @@ from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunResult, E
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, OrchestratorRunnerError, run_orchestrator
 from astrid.core.project.project import create_project
 from astrid.core.task import gate as task_gate
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.task.plan import compute_plan_hash
 from astrid.packs.video_editing.orchestrators.hype import run as hype_run
@@ -72,12 +72,9 @@ def test_orchestrator_runner_rejects_before_project_run_side_effects(
 
     assert gate_spy.call_count == 1
     assert gate_spy.call_args.kwargs["reentry"] is True
-    # Sprint 1 (T9): the legacy write_active_run shim creates
-    # runs/<run_id>/lease.json (the new on-disk shape replaces the old
-    # single-file active_run.json). The test assertion was originally "no
-    # runs/ entries after rejected dispatch"; under the new model the
-    # setup-created `task-run-1` lease dir is present, but events.jsonl
-    # should still be empty (no events appended) since dispatch rejected.
+    # The canonical current-run test helper creates runs/<run_id>/lease.json.
+    # The setup-created `task-run-1` lease dir is present, but events.jsonl
+    # should still be empty since dispatch rejected.
     runs_dir = tmp_projects_root / "demo" / "runs"
     if runs_dir.exists():
         events_path = runs_dir / "task-run-1" / "events.jsonl"
@@ -97,12 +94,9 @@ def test_executor_runner_rejects_before_project_run_side_effects(
 
     assert gate_spy.call_count == 1
     assert gate_spy.call_args.kwargs["reentry"] is True
-    # Sprint 1 (T9): the legacy write_active_run shim creates
-    # runs/<run_id>/lease.json (the new on-disk shape replaces the old
-    # single-file active_run.json). The test assertion was originally "no
-    # runs/ entries after rejected dispatch"; under the new model the
-    # setup-created `task-run-1` lease dir is present, but events.jsonl
-    # should still be empty (no events appended) since dispatch rejected.
+    # The canonical current-run test helper creates runs/<run_id>/lease.json.
+    # The setup-created `task-run-1` lease dir is present, but events.jsonl
+    # should still be empty since dispatch rejected.
     runs_dir = tmp_projects_root / "demo" / "runs"
     if runs_dir.exists():
         events_path = runs_dir / "task-run-1" / "events.jsonl"
@@ -121,12 +115,9 @@ def test_hype_runtime_rejects_before_project_run_side_effects(
 
     assert gate_spy.call_count == 1
     assert gate_spy.call_args.kwargs["reentry"] is True
-    # Sprint 1 (T9): the legacy write_active_run shim creates
-    # runs/<run_id>/lease.json (the new on-disk shape replaces the old
-    # single-file active_run.json). The test assertion was originally "no
-    # runs/ entries after rejected dispatch"; under the new model the
-    # setup-created `task-run-1` lease dir is present, but events.jsonl
-    # should still be empty (no events appended) since dispatch rejected.
+    # The canonical current-run test helper creates runs/<run_id>/lease.json.
+    # The setup-created `task-run-1` lease dir is present, but events.jsonl
+    # should still be empty since dispatch rejected.
     runs_dir = tmp_projects_root / "demo" / "runs"
     if runs_dir.exists():
         events_path = runs_dir / "task-run-1" / "events.jsonl"
@@ -145,7 +136,7 @@ def _setup_active_plan(tmp_projects_root: Path, *, command: str) -> None:
         }),
         encoding="utf-8",
     )
-    write_active_run("demo", run_id="task-run-1", plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
+    seed_current_run("demo", run_id="task-run-1", plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
 
 
 def _set_task_env(monkeypatch: pytest.MonkeyPatch) -> None:

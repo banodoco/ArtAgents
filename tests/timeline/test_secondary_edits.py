@@ -14,9 +14,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid import timeline as timeline_contract
-from astrid.core.timeline.assembly_helper import AssemblyMutationError, materialize_event
-from astrid.core.timeline.arrangement_edits import arrangement_replace
 from astrid.core.timeline.audio_edits import audio_bind, audio_unbind
 from astrid.core.timeline.clip_edits import add_clip
 from astrid.core.timeline.crud import create_timeline
@@ -121,15 +118,6 @@ def _read_assembly_json(tdir: Path) -> dict:
     return json.loads((tdir / "assembly.json").read_text(encoding="utf-8"))
 
 
-def _write_raw_assembly_json(tdir: Path, data: dict[str, object] | None = None) -> None:
-    payload = timeline_contract.canonical_empty_timeline()
-    if data:
-        payload.update(data)
-    (tdir / "assembly.json").write_text(
-        json.dumps(payload, sort_keys=True), encoding="utf-8"
-    )
-
-
 def _backend(demo_timeline: dict[str, object]) -> LocalFsBackend:
     return LocalFsBackend(timeline_id=_timeline_id(demo_timeline), timeline_home=_tdir(demo_timeline))
 
@@ -152,159 +140,6 @@ def _assert_last_event(
     assert events[-1].timeline_id == _timeline_id(demo_timeline)
     assert isinstance(events[-1].payload, payload_type)
     assert _backend(demo_timeline).verify_chain().ok is True
-
-
-def _assert_transition_empty_init(assembly: dict) -> None:
-    assert assembly["clips"] == []
-
-
-def _assert_effect_empty_init(assembly: dict) -> None:
-    assert assembly["clips"] == []
-
-
-def _assert_track_empty_init(assembly: dict) -> None:
-    assert assembly["tracks"] == [{"id": "track-1", "kind": "visual", "label": "Main"}]
-
-
-def _assert_theme_empty_init(assembly: dict) -> None:
-    assert assembly["theme"] == "banodoco-default"
-    assert assembly["theme_overrides"] == {}
-
-
-def _assert_transition_existing_shape(assembly: dict) -> None:
-    assert assembly["clips"][0]["transition"]["params"]["right_clip_id"] == "b"
-
-
-def _assert_track_existing_shape(assembly: dict) -> None:
-    assert assembly["tracks"] == []
-
-
-def _assert_theme_existing_shape(assembly: dict) -> None:
-    assert assembly["theme"] == "old"
-    assert assembly["theme_overrides"]["audio"] == {"ducking": 0.3}
-
-
-@pytest.mark.parametrize(
-    ("kind", "payload", "assertion"),
-    [
-        (
-            "transition.set",
-            {"left_clip_id": "a", "right_clip_id": "b", "kind": "cross-fade", "duration_seconds": 0.5},
-            _assert_transition_empty_init,
-        ),
-        (
-            "effect.added",
-            {"clip_id": "a", "effect_id": "fade-up", "params": {"strength": 0.7}},
-            _assert_effect_empty_init,
-        ),
-        (
-            "track.added",
-            {"track_id": "track-1", "kind": "visual", "label": "Main"},
-            _assert_track_empty_init,
-        ),
-        (
-            "theme.set",
-            {"theme_id": "banodoco-default"},
-            _assert_theme_empty_init,
-        ),
-    ],
-)
-def test_materializer_initializes_empty_assembly_for_secondary_domains(
-    demo_timeline: dict[str, object],
-    kind: str,
-    payload: dict[str, object],
-    assertion,
-) -> None:
-    tdir = _tdir(demo_timeline)
-    _write_raw_assembly_json(tdir)
-    event = TimelineEvent.new(
-        timeline_id=_timeline_id(demo_timeline),
-        ts="2026-05-20T12:00:00Z",
-        actor=_actor("materializer"),
-        kind=kind,
-        payload=payload,
-    )
-
-    materialize_event(tdir, event)
-
-    assembly = _read_assembly_json(tdir)
-    assertion(assembly)
-
-
-@pytest.mark.parametrize(
-    ("seed", "kind", "payload", "assertion"),
-    [
-        (
-            {
-                "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
-                "clips": [{"id": "a", "at": 0, "track": "v1", "asset": "old"}],
-            },
-            "transition.set",
-            {"left_clip_id": "a", "right_clip_id": "b", "kind": "cross-fade", "duration_seconds": 0.25},
-            _assert_transition_existing_shape,
-        ),
-        (
-            {"tracks": [{"id": "v1", "kind": "visual", "label": "Video"}]},
-            "track.removed",
-            {"track_id": "v1"},
-            _assert_track_existing_shape,
-        ),
-        (
-            {"theme": "old", "theme_overrides": {"visual": {"fps": 24}}},
-            "theme.overridden",
-            {"override_id": "audio", "value": {"ducking": 0.3}},
-            _assert_theme_existing_shape,
-        ),
-    ],
-)
-def test_materializer_updates_existing_compatible_secondary_shapes(
-    demo_timeline: dict[str, object],
-    seed: dict[str, object],
-    kind: str,
-    payload: dict[str, object],
-    assertion,
-) -> None:
-    tdir = _tdir(demo_timeline)
-    _write_raw_assembly_json(tdir, seed)
-    event = TimelineEvent.new(
-        timeline_id=_timeline_id(demo_timeline),
-        ts="2026-05-20T12:00:00Z",
-        actor=_actor("materializer"),
-        kind=kind,
-        payload=payload,
-    )
-
-    materialize_event(tdir, event)
-
-    assembly = _read_assembly_json(tdir)
-    assertion(assembly)
-
-
-@pytest.mark.parametrize(
-    ("kind", "payload", "match"),
-    [
-        ("pool.asset_added", {"asset_id": "asset-1"}, "non_container_read_model"),
-        ("pool.asset_scored", {"asset_id": "asset-1", "score": 0.8}, "non_container_read_model"),
-        ("arrangement.replaced", {"arrangement": {"clips": []}}, "migration_only_legacy"),
-    ],
-)
-def test_materializer_rejects_non_container_and_migration_only_kinds(
-    demo_timeline: dict[str, object],
-    kind: str,
-    payload: dict[str, object],
-    match: str,
-) -> None:
-    tdir = _tdir(demo_timeline)
-    event = TimelineEvent.new(
-        timeline_id=_timeline_id(demo_timeline),
-        ts="2026-05-20T12:00:00Z",
-        actor=_actor("materializer"),
-        kind=kind,
-        payload=payload,
-    )
-
-    with pytest.raises(AssemblyMutationError, match=match):
-        materialize_event(tdir, event)
 
 
 def test_transition_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:
@@ -579,19 +414,6 @@ def test_pool_score_rejects_out_of_range(demo_timeline: dict[str, object]) -> No
             "primary",
             asset_id="asset-1",
             score=1.5,
-            actor=_actor(),
-            root=demo_timeline["root"],
-        )
-
-
-def test_arrangement_replace_rejects_runtime_edit_path(demo_timeline: dict[str, object]) -> None:
-    arrangement = {"clips": [{"uuid": "clip-1", "order": 1}], "title": "draft"}
-
-    with pytest.raises(TimelineEditError, match="migration-only legacy"):
-        arrangement_replace(
-            "demo",
-            "primary",
-            arrangement=arrangement,
             actor=_actor(),
             root=demo_timeline["root"],
         )

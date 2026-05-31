@@ -16,7 +16,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
-from astrid.core.task.active_run import read_active_run
+from tests.helpers.current_run import read_seeded_current_run
 from astrid.core.task.events import (
     append_event,
     make_produces_check_failed_event,
@@ -270,6 +270,6 @@ def test_m_abort_decision_delegates_without_identity(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "review", _ATTESTED_REVIEW, "demo.review", run_id="rm")
     rc, _, _ = _ack(packs, projects, "review", "--project", "p", "--decision", "abort")
     assert rc == 0
-    assert read_active_run("p", root=projects) is None
+    assert read_seeded_current_run("p", root=projects) is None
     events = [json.loads(line) for line in (projects/"p"/"runs"/"rm"/"events.jsonl").read_text().splitlines()]
     assert events[-1]["kind"] == "run_aborted"

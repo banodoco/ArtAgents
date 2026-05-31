@@ -7,7 +7,7 @@ from pathlib import Path
 
 from astrid.core.project.project import create_project
 from astrid.core.task import gate as task_gate
-from astrid.core.task.active_run import write_active_run
+from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import (
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
@@ -54,7 +54,7 @@ def test_produces_pass_interns_into_cas_and_links(tmp_projects_root: Path) -> No
     create_project(slug, root=tmp_projects_root)
     plan_path = tmp_projects_root / slug / "plan.json"
     plan_path.write_text(json.dumps(plan), encoding="utf-8")
-    write_active_run(slug, run_id=run_id, plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
+    seed_current_run(slug, run_id=run_id, plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
     events_path = tmp_projects_root / slug / "runs" / run_id / "events.jsonl"
 
     try:
