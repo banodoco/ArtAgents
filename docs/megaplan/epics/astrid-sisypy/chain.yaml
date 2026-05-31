@@ -1,0 +1,51 @@
+base_branch: main
+
+milestones:
+  # M1 — architectural keystone: adapter API + evidence-pack contract + 12 universal checks.
+  # Novel, cross-cutting, unfamiliar Sisypy API; no cheap recovery from a wrong adapter contract.
+  # partnered//high +prep @codex
+  - label: m1-embed
+    idea: docs/megaplan/epics/astrid-sisypy/m1-embed.md
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+    with_prep: true
+    prep_direction: "Read Sisypy's adapter/runner/evidence API (sibling repo /Users/peteromalley/Documents/reigh-workspace/sisypy: docs/embedding.md, docs/evidence.md, sisypy/adapters.py, public_api.py) and the vibecomfy reference embed (vibecomfy/tests/test_sisypy_integration.py). Map Astrid's persistence surfaces (assembly.jsonl/head/identity, run.json, step events.jsonl, ledger.jsonl, verify_chain, projection.py) so the adapter capture + 12 universal checks are grounded. Ignore net-new scenario design."
+
+  # M2 — mechanical port of 29 scenarios behind an objective structural gate. directed @codex
+  - label: m2-migrate
+    idea: docs/megaplan/epics/astrid-sisypy/m2-migrate.md
+    profile: directed
+    robustness: full
+    depth: medium
+    vendor: codex
+
+  # M3 — adversarial data-retention + orchestrator-execution scenarios (the 4 focus areas).
+  # Real design judgment per scenario (crash/concurrency/large-scale priming). partnered//high @codex
+  - label: m3-retention-orchestrator
+    idea: docs/megaplan/epics/astrid-sisypy/m3-retention-orchestrator.md
+    profile: partnered
+    robustness: full
+    depth: high
+    vendor: codex
+
+  # M4 — remaining discovery/authoring/refuse gap scenarios + synthesis wiring. directed//medium @codex
+  - label: m4-gaps-synthesis
+    idea: docs/megaplan/epics/astrid-sisypy/m4-gaps-synthesis.md
+    profile: directed
+    robustness: full
+    depth: medium
+    vendor: codex
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+merge_policy: auto
+
+driver:
+  robustness: full
+  auto_approve: true
+  max_iterations: 80
+  poll_sleep: 8.0
