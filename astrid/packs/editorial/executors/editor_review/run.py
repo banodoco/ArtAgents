@@ -17,7 +17,7 @@ from typing import Any, Sequence
 
 from ..arrange.run import pool_digest
 from astrid.audit import AuditContext
-from astrid.core.util.media import ffprobe_duration_seconds
+from astrid._media import ffprobe_duration_seconds
 from astrid.utilities.llm_clients import build_claude_client
 from astrid.timeline import load_arrangement, load_metadata, load_pool
 from ..transcribe.run import load_api_key

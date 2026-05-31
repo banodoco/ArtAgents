@@ -294,7 +294,7 @@ _ORCHESTRATOR_PLAN_TEMPLATE = """\
 #
 # This file defines ``build_plan_v2``, the function that produces the plan
 # dict emitted by the orchestrator runner.  Import helpers from
-# ``astrid.core.orchestrator.plan_v2`` so you don't need to copy-paste the
+# ``astrid.core.orchestrator.plan_template`` so you don't need to copy-paste the
 # emit / step-command / produces boilerplate into your pack.
 
 from __future__ import annotations
@@ -303,7 +303,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.core.orchestrator.plan_v2 import (
+from astrid.core.orchestrator.plan_template import (
     emit_plan_json,
     build_step_command,
     make_produces,

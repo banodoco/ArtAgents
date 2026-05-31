@@ -274,7 +274,7 @@ def probe_asset(path: Path | str) -> dict[str, Any]:
     }
 
 def probe_video_duration(video_path: Path) -> float:
-    from astrid.core.util.media import ffprobe_duration_seconds
+    from astrid._media import ffprobe_duration_seconds
 
     return ffprobe_duration_seconds(video_path)
 

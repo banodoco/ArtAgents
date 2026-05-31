@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, Literal, Mapping, cast
+from typing import Any, Iterable, Literal, Mapping, TypedDict, cast
 
 from astrid.core.task.plan import (
     AckRule,
@@ -18,6 +18,26 @@ from astrid.core.task.plan import (
     TaskPlan,
 )
 from astrid.verify import Check, canonical_check_params
+
+
+class PlanStep(TypedDict, total=False):
+    """A single step in a plan-v2 document."""
+
+    id: str
+    adapter: str
+    command: str
+    produces: dict[str, Any]
+    cost: dict[str, Any]
+    repeat: dict[str, Any]
+    children: list["PlanStep"]
+
+
+class PlanV2(TypedDict):
+    """Top-level plan-v2 document."""
+
+    plan_id: str
+    version: int
+    steps: list[PlanStep]
 
 
 def file_output(
@@ -144,13 +164,49 @@ def emit_plan_json(plan: Mapping[str, object], path: str | Path) -> None:
     output_path.write_text(payload, encoding="utf-8")
 
 
+def build_step_command(
+    python_exec: str,
+    run_root: Path,
+    step_id: str,
+    module_path: str,
+    *,
+    extra_args: str = "",
+) -> str:
+    """Construct a canonical step command string."""
+
+    out = run_root / "steps" / step_id / "v1" / "produces"
+    cmd = f"{python_exec} -m {module_path} --out {out}"
+    if extra_args:
+        cmd += f" {extra_args}"
+    return cmd
+
+
+def make_produces(path: str, check_id: str = "file_nonempty") -> dict[str, Any]:
+    """Return a minimal ``produces`` block for a plan step."""
+
+    return {
+        path: {
+            "path": path,
+            "check": {
+                "check_id": check_id,
+                "params": {},
+                "sentinel": False,
+            },
+        }
+    }
+
+
 __all__ = [
     "build_group_template",
     "build_leaf_template",
     "build_plan_template",
+    "build_step_command",
     "cost_entry",
     "emit_plan_json",
     "file_output",
+    "make_produces",
+    "PlanStep",
+    "PlanV2",
     "repeat_for_each_from",
     "repeat_for_each_items",
     "repeat_until",

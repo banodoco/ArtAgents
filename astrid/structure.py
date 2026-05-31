@@ -114,13 +114,7 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         "astrid/orchestrate/compile.py",
     }
 )
-_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
-    {
-        # TODO(m5b): astrid.core.util.media remains as a narrow re-export shim
-        # until the last live pack caller migrates to astrid._media.
-        "astrid/core/util/media.py",
-    }
-)
+_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset()
 
 
 def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:

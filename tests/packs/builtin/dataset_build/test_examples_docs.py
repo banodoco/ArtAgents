@@ -63,35 +63,17 @@ def test_training_workflow_doc_uses_canonical_builtin_commands() -> None:
     assert "checkpoints/checkpoint_manifest.json" in text
     assert "registered/registered_lora.json" in text
     assert "runs/seinfeld-dataset" in text
-    assert "docs/examples/seinfeld/" in text
+    assert "docs/examples/seinfeld/vocabulary.yaml" in text
     assert "python3 -m astrid.packs." + "seinfeld" not in text
 
 
-def test_historical_seinfeld_archive_contains_migration_materials() -> None:
-    expected = [
-        "README.md",
-        "TRAINING_PLAN.md",
-        "DATASET_QUALITY.md",
-        "CAPTIONING.md",
-        "RUNPOD_TRAINING_LAUNCHER_BRIEF.md",
-        "vocabulary.yaml",
-        "vocab_compile.py",
-        "schemas/bucket_judge.json",
-        "schemas/caption.json",
-        "schemas/scene_verify.json",
-        "dataset_build/sprint-brief.md",
-        "dataset_build/review.schema.json",
-        "dataset_build/review.html",
-        "lora_train/config_template.yaml",
-    ]
-    missing = [path for path in expected if not (SEINFELD_ARCHIVE / path).is_file()]
-    assert missing == []
-
-    readme = (SEINFELD_ARCHIVE / "README.md").read_text(encoding="utf-8")
-    assert "training.dataset_build" in readme
-    assert "training.training_run" in readme
-    assert "editorial.script_pipeline" in readme
-    assert "compatibility shims" in readme
+def test_seinfeld_archive_keeps_only_wired_vocabulary() -> None:
+    survivors = sorted(
+        path.relative_to(SEINFELD_ARCHIVE).as_posix()
+        for path in SEINFELD_ARCHIVE.rglob("*")
+        if path.is_file()
+    )
+    assert survivors == ["vocabulary.yaml"]
 
 
 def test_builtin_dataset_build_code_has_no_seinfeld_literals() -> None:
@@ -99,7 +81,15 @@ def test_builtin_dataset_build_code_has_no_seinfeld_literals() -> None:
     for path in BUILTIN_PACKAGE.rglob("*"):
         if "schemas" in path.parts:
             continue
-        if path.is_file() and path.suffix in {".py", ".js", ".html", ".css", ".md", ".yaml", ".json"}:
+        if path.is_file() and path.suffix in {
+            ".py",
+            ".js",
+            ".html",
+            ".css",
+            ".md",
+            ".yaml",
+            ".json",
+        }:
             if "seinfeld" in path.read_text(encoding="utf-8").lower():
                 matches.append(path.relative_to(ROOT))
 

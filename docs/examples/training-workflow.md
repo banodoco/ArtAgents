@@ -1,9 +1,9 @@
 # Built-In Dataset And Training Workflow
 
 This workflow is the canonical path for building a reviewed video dataset and
-training an LTX LoRA with the built-in tools. The Seinfeld material under
-`docs/examples/seinfeld/` is historical archive content; it documents the old
-prototype but does not define registered tools.
+training an LTX LoRA with the built-in tools. The surviving Seinfeld example
+asset is `docs/examples/seinfeld/vocabulary.yaml`, which is used by the
+training config vocabulary path.
 
 ## 1. Build A Dataset
 

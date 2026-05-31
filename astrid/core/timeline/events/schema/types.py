@@ -13,7 +13,7 @@ from uuid import UUID
 
 from astrid import timeline as timeline_contract
 
-from .version import EVENT_SCHEMA_VERSION
+EVENT_SCHEMA_VERSION = 2
 
 ActorType = Literal["agent", "human", "system"]
 TimelineEventKind = Literal[

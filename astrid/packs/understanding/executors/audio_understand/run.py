@@ -19,7 +19,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.core.util.media import ffprobe_duration_seconds
+from astrid._media import ffprobe_duration_seconds
 from astrid.core.util.secrets import load_api_key
 
 

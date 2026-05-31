@@ -13,7 +13,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
+from astrid.core.generation.backends.base import (
+    BackendAdapter,
+    GenerationResult,
+    derive_frames_from_duration,
+    parse_dimension_pair,
+    split_feature_support,
+)
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry
 from astrid.core.util.http import (
     HttpClient,
@@ -24,12 +30,6 @@ from astrid.core.util.http import (
 from astrid.core.util.secrets import load_api_key
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Size / resolution parsing (shared with VibeComfyBackend via the base
-# module, but duplicated here to keep backends independent).
-# ---------------------------------------------------------------------------
 
 
 def _parse_size(size: str) -> str | None:
@@ -44,18 +44,10 @@ def _parse_size(size: str) -> str | None:
     size = size.strip()
     if not size:
         return None
-    # If it looks like WxH, convert to fal's expected format
-    for sep in ("x", "X", "*", ","):
-        if sep in size:
-            parts = size.split(sep)
-            if len(parts) == 2:
-                try:
-                    w = int(parts[0].strip())
-                    h = int(parts[1].strip())
-                    return f"{w}x{h}"
-                except (ValueError, TypeError):
-                    pass
-            break
+    parsed = parse_dimension_pair(size)
+    if parsed:
+        w, h = parsed
+        return f"{w}x{h}"
     # Pass through as-is (could be a fal preset name like "square_hd")
     return size
 
@@ -66,22 +58,7 @@ def _parse_resolution(res: str) -> tuple[int, int] | None:
     Accepted separators: ``x``, ``X``, ``*``, ``,``.  Returns ``None`` if
     *res* is empty or unparseable.
     """
-    if not res or not isinstance(res, str):
-        return None
-    res = res.strip()
-    if not res:
-        return None
-    for sep in ("x", "X", "*", ","):
-        if sep in res:
-            parts = res.split(sep)
-            if len(parts) == 2:
-                try:
-                    w = int(parts[0].strip())
-                    h = int(parts[1].strip())
-                    return w, h
-                except (ValueError, TypeError):
-                    pass
-    return None
+    return parse_dimension_pair(res)
 
 
 # ---------------------------------------------------------------------------
@@ -131,28 +108,13 @@ class FalBackend(BackendAdapter):
         api_key = self._resolve_api_key()
 
         # --- compute applied / dropped feature lists -------------------------
-        supported = set(mode_spec.supports)
-        supplied_features = {k for k, v in params.items() if v is not None}
-        applied_features = sorted(supplied_features & supported)
-        dropped_features = sorted(supplied_features - supported)
+        applied_features, dropped_features = split_feature_support(params, mode_spec.supports)
 
         # --- compute-from-duration shim (Sprint 04) --------------------------
         # If duration is supplied without frames, and fps is known, derive frames
-        if (
-            params.get("duration") is not None
-            and params.get("frames") is None
-            and params.get("fps") is not None
-        ):
-            try:
-                duration_s = float(params["duration"])
-                fps_val = float(params["fps"])
-                params["frames"] = round(duration_s * fps_val)
-                logger.debug(
-                    "Computed frames=%d from duration=%s * fps=%s",
-                    params["frames"], duration_s, fps_val,
-                )
-            except (ValueError, TypeError):
-                pass
+        computed_frames = derive_frames_from_duration(params)
+        if computed_frames is not None:
+            logger.debug("Computed frames=%d from duration * fps", computed_frames)
 
         # --- build payload ---------------------------------------------------
         payload: dict[str, Any] = {}

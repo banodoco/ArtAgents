@@ -47,8 +47,7 @@ A naive "core imports nothing from packs" needs the right mechanism. The clean i
   `astrid.orchestrate.compile`. Move the shared constant to a neutral `core` location. (Reading/relocating the
   constant is fine; do not rewrite `lifecycle.py`'s other imports — those are m5b.)
 - **Break the `core ↔ verify` cycle.** `core/task/plan.py:15` and `core/orchestrator/plan_template.py:20` import
-  `astrid.verify`, while `verify/checks.py:22` imports `astrid.core.util.media`. Move the shared `media` util to a
-  leaf module both can import. (Coordinate with m3, which also edits `verify/checks.py:99-122` — non-overlapping ranges.)
+  `astrid.verify`; media probing now lives in the leaf module `astrid._media`.
 - **De-dup helpers into a named `core/util` surface (sweep ALL copies, not 3):**
   - `_sha256` family: `core/.../dirty.py:123-132`, `core/task/lifecycle.py:157-162` (read-only here — the *helper*
     moves to `core/util`; lifecycle's call site updates land in m5b), `core/adapter/remote_artifact_fetch.py:28`.

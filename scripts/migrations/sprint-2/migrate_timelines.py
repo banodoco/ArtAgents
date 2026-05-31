@@ -67,7 +67,7 @@ from astrid.core.timeline.paths import (
 from astrid.threads.ids import generate_ulid, is_ulid
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineEvent
-from astrid.core.timeline.events.schema.version import EVENT_SCHEMA_VERSION
+from astrid.core.timeline.events.schema.types import EVENT_SCHEMA_VERSION
 
 from eventlog_rewrite import rewrite_local_fs_event_log_from_index
 from legacy_decoders import (

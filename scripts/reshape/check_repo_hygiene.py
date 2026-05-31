@@ -19,25 +19,20 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ROOT_FILE_ALLOWLIST = {
     ".env.example",
     ".gitignore",
-    ".python-version",
     "LICENSE",
     "README.md",
-    "package-lock.json",
     "package.json",
     "pyproject.toml",
     "pytest.ini",
-    "requirements-dev.txt",
     "requirements.txt",
 }
 
 # Approved top-level directories.
 ROOT_DIR_ALLOWLIST = {
     ".github",
-    "agents",
     "astrid",
     "docs",
     "examples",
-    "fixtures",
     "remotion",
     "scripts",
     "tests",

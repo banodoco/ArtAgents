@@ -103,7 +103,7 @@ def seed_project() -> Callable[[Path, str], Path]:
 
     def _seed_project(projects_root: Path, slug: str) -> Path:
         from astrid import timeline as timeline_contract
-        from astrid.core.session.ulid import generate_ulid
+        from astrid.threads.ids import generate_ulid
 
         pdir = projects_root / slug
         pdir.mkdir(parents=True, exist_ok=True)
@@ -224,7 +224,7 @@ def _seed_identity_and_session(
     from astrid.core.session.identity import Identity, write_identity
     from astrid.core.session.lease import write_lease_init
     from astrid.core.session.paths import session_path
-    from astrid.core.session.ulid import generate_ulid
+    from astrid.threads.ids import generate_ulid
 
     astrid_home.mkdir(parents=True, exist_ok=True)
     write_identity(Identity(agent_id="claude-1", created_at="2026-05-11T00:00:00Z"))
@@ -307,7 +307,7 @@ def attached_session(
     file after a potential WriterContext auto-rebind.
     """
 
-    from astrid.core.session.ulid import generate_ulid
+    from astrid.threads.ids import generate_ulid
 
     astrid_home = tmp_path / "astrid_home"
     monkeypatch.setenv("ASTRID_HOME", str(astrid_home))

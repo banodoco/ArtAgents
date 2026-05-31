@@ -203,7 +203,7 @@ def test_allowlist_attach_runs_without_session(
 
     # Seed a default timeline so Sprint 2 resolution works.
     from astrid import timeline as timeline_contract
-    from astrid.core.session.ulid import generate_ulid
+    from astrid.threads.ids import generate_ulid
 
     timeline_ulid = generate_ulid()
     pdir = env["projects"] / "demo"

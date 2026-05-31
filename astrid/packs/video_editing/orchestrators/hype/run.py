@@ -504,7 +504,7 @@ def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
 
 
 def probe_audio_duration(path: Path | str) -> float:
-    from astrid.core.util.media import ffprobe_duration_seconds
+    from astrid._media import ffprobe_duration_seconds
 
     return ffprobe_duration_seconds(path)
 

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from astrid.core.util.media import ffprobe_duration_seconds
+from astrid._media import ffprobe_duration_seconds
 from astrid.utilities.llm_clients import build_gemini_client
 
 

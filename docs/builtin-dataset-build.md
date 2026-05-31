@@ -37,8 +37,8 @@ Use `examples/configs/dataset/seinfeld-dataset.yaml` as the migration template. 
 
 M1 reproduces the prototype's generic VLM bucket-judge and caption flow. It does not implement the M2b top-up loop, and there is intentionally no Seinfeld compatibility shim in built-in code. Continue using explicit config if a show-specific dataset needs different buckets, prompts, rights policy, or budgets.
 
-Historical Seinfeld stage notes now live under `docs/examples/seinfeld/` as
-archive-only reference material. Active workflows should use
+The checked-in Seinfeld example keeps only the wired training vocabulary at
+`docs/examples/seinfeld/vocabulary.yaml`. Active workflows should use
 `training.dataset_build`, `training.training_run`, and `editorial.script_pipeline`
 with example configs or presets rather than direct pack-module execution.
 

@@ -10,9 +10,67 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from astrid.contracts.exec_error import ExecError
+
+
+def parse_dimension_pair(
+    value: str, *, allow_single: bool = False
+) -> tuple[int, int] | None:
+    """Parse ``WxH`` style strings into ``(width, height)``."""
+
+    if not value or not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    for sep in ("x", "X", "*", ","):
+        if sep in value:
+            parts = value.split(sep)
+            if len(parts) == 2:
+                try:
+                    return int(parts[0].strip()), int(parts[1].strip())
+                except (ValueError, TypeError):
+                    pass
+            return None
+    if allow_single:
+        try:
+            dim = int(value)
+            return dim, dim
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
+def derive_frames_from_duration(params: dict[str, Any]) -> int | None:
+    """Fill ``params['frames']`` from duration and fps when possible."""
+
+    if (
+        params.get("duration") is None
+        or params.get("frames") is not None
+        or params.get("fps") is None
+    ):
+        return None
+    try:
+        duration_s = float(params["duration"])
+        fps_val = float(params["fps"])
+        params["frames"] = round(duration_s * fps_val)
+        return int(params["frames"])
+    except (ValueError, TypeError):
+        return None
+
+
+def split_feature_support(
+    params: dict[str, Any], supported: Iterable[str]
+) -> tuple[list[str], list[str]]:
+    """Return sorted ``(applied, dropped)`` feature names for non-None params."""
+
+    supported_set = set(supported)
+    supplied_features = {key for key, value in params.items() if value is not None}
+    return sorted(supplied_features & supported_set), sorted(
+        supplied_features - supported_set
+    )
 
 
 @dataclass

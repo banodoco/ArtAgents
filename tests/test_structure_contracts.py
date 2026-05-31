@@ -246,61 +246,6 @@ def test_validate_repo_structure_keeps_compile_sys_modules_exemption_green(tmp_p
     assert report.errors == ()
 
 
-def test_validate_migration_completion_requires_todo_marker_for_media_shim_exemption(tmp_path: Path) -> None:
-    _write(
-        tmp_path,
-        "astrid/core/util/media.py",
-        '"""TODO(m5b): Re-export shim for ffprobe_duration_seconds."""\n'
-        "from astrid._media import ffprobe_duration_seconds\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/packs/example/use_media.py",
-        "from astrid.core.util.media import ffprobe_duration_seconds\n",
-    )
-
-    advisories = validate_migration_completion(tmp_path)
-
-    assert "astrid/core/util/media.py: compatibility shim still has 1 live import caller(s)" not in advisories
-
-
-def test_validate_repo_structure_keeps_media_shim_exemption_green(tmp_path: Path) -> None:
-    _bootstrap_structure_root(tmp_path)
-    _write(
-        tmp_path,
-        "astrid/core/util/media.py",
-        '"""TODO(m5b): Re-export shim for ffprobe_duration_seconds."""\n'
-        "from astrid._media import ffprobe_duration_seconds\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/packs/example/use_media.py",
-        "from astrid.core.util.media import ffprobe_duration_seconds\n",
-    )
-
-    report = validate_repo_structure(tmp_path)
-
-    assert report.errors == ()
-
-
-def test_validate_migration_completion_flags_media_shim_without_m5b_todo(tmp_path: Path) -> None:
-    _write(
-        tmp_path,
-        "astrid/core/util/media.py",
-        '"""Re-export shim for ffprobe_duration_seconds."""\n'
-        "from astrid._media import ffprobe_duration_seconds\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/packs/example/use_media.py",
-        "from astrid.core.util.media import ffprobe_duration_seconds\n",
-    )
-
-    advisories = validate_migration_completion(tmp_path)
-
-    assert "astrid/core/util/media.py: compatibility shim still has 1 live import caller(s)" in advisories
-
-
 def test_structure_report_ok_tracks_errors_only() -> None:
     assert StructureReport(errors=(), warnings=("warn",)).ok is True
     assert StructureReport(errors=("error",), warnings=()).ok is False

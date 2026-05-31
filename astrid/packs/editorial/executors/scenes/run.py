@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import register_outputs
-from astrid.core.util.media import ffprobe_duration_seconds
+from astrid._media import ffprobe_duration_seconds
 
 
 def build_parser() -> argparse.ArgumentParser:

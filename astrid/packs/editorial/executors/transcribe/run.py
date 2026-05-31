@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import AuditContext
-from astrid.core.util.media import ffprobe_duration_seconds
+from astrid._media import ffprobe_duration_seconds
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 
 SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")

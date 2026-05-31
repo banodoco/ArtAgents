@@ -4,12 +4,17 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from astrid._media import ffprobe_duration_seconds as canonical_ffprobe_duration_seconds
-from astrid.core.util.media import ffprobe_duration_seconds
+from astrid._media import ffprobe_duration_seconds
 from astrid.verify.checks import ffprobe_duration_seconds as checks_ffprobe_duration_seconds
-from astrid.packs.understanding.executors.audio_understand.run import _probe_duration as audio_probe_duration
-from astrid.packs.editorial.executors.editor_review.run import _probe_duration as editor_probe_duration
-from astrid.packs.understanding.executors.video_understand.run import _probe_duration as video_probe_duration
+from astrid.packs.understanding.executors.audio_understand.run import (
+    _probe_duration as audio_probe_duration,
+)
+from astrid.packs.editorial.executors.editor_review.run import (
+    _probe_duration as editor_probe_duration,
+)
+from astrid.packs.understanding.executors.video_understand.run import (
+    _probe_duration as video_probe_duration,
+)
 
 
 def test_ffprobe_duration_seconds_uses_duration_only_probe() -> None:
@@ -46,7 +51,12 @@ def test_ffprobe_duration_seconds_accepts_explicit_env() -> None:
         calls.append((cmd, kwargs))
         return subprocess.CompletedProcess(cmd, 0, stdout="12.5\n", stderr="")
 
-    assert ffprobe_duration_seconds("clip.mp4", runner=runner, env={"FFPROBE_DATADIR": "/tmp/ffprobe"}) == 12.5
+    assert (
+        ffprobe_duration_seconds(
+            "clip.mp4", runner=runner, env={"FFPROBE_DATADIR": "/tmp/ffprobe"}
+        )
+        == 12.5
+    )
 
     assert calls[0][1]["env"]["FFPROBE_DATADIR"] == "/tmp/ffprobe"
 
@@ -58,15 +68,17 @@ def test_updated_duration_helpers_preserve_float_parsing(monkeypatch, tmp_path: 
     def fake_runner(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(cmd, 0, stdout="7.25\n", stderr="")
 
-    monkeypatch.setattr("astrid.packs.understanding.executors.audio_understand.run._run", fake_runner)
-    monkeypatch.setattr("astrid.packs.understanding.executors.video_understand.run._run", fake_runner)
+    monkeypatch.setattr(
+        "astrid.packs.understanding.executors.audio_understand.run._run", fake_runner
+    )
+    monkeypatch.setattr(
+        "astrid.packs.understanding.executors.video_understand.run._run", fake_runner
+    )
 
     assert audio_probe_duration(media) == 7.25
     assert video_probe_duration(media) == 7.25
     assert editor_probe_duration(media, ffprobe_runner=fake_runner) == 7.25
 
 
-def test_canonical_media_module_same_as_shim() -> None:
-    """The canonical astrid._media module exports the same callable as the re-export shim."""
-    assert canonical_ffprobe_duration_seconds is ffprobe_duration_seconds
-    assert checks_ffprobe_duration_seconds is canonical_ffprobe_duration_seconds
+def test_verify_uses_canonical_media_helper() -> None:
+    assert checks_ffprobe_duration_seconds is ffprobe_duration_seconds

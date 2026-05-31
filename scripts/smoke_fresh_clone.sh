@@ -35,8 +35,8 @@ echo "Creating throwaway venv at: $VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
 python -m pip install --upgrade pip
-# requirements*.txt declares the direct top-level dependencies for the core smoke.
-python -m pip install -r requirements.txt -r requirements-dev.txt
+# requirements.txt declares the direct top-level dependencies for the core smoke.
+python -m pip install -r requirements.txt
 # Editable core install so `python -m astrid` resolves from the source tree.
 python -m pip install -e .
 

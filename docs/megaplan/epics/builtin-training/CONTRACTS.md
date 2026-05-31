@@ -401,7 +401,7 @@ No compatibility shim is created in M0. If a temporary shim is required later, i
 - Be removed by M4
 - Require explicit human stakeholder approval
 
-Historical Seinfeld docs (`TRAINING_PLAN.md`, `DATASET_QUALITY.md`, `CAPTIONING.md`, `RUNPOD_TRAINING_LAUNCHER_BRIEF.md`, `sprint-brief.md`) move to `docs/examples/seinfeld/` or `docs/historical/seinfeld/` after migration.
+The Seinfeld example now keeps only the wired vocabulary fixture at `docs/examples/seinfeld/vocabulary.yaml`; historical archive docs and schemas were retired after migration.
 
 ---
 

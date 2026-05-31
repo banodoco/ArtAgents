@@ -106,8 +106,9 @@ audit that sprint.
 ## Local CI
 
 ```bash
-# Install the same top-level dependency sets used by GitHub Actions.
-python3 -m pip install -r requirements.txt -r requirements-dev.txt
+# Install the same dependency sets used by GitHub Actions (dev tools via the [dev] extra).
+python3 -m pip install -r requirements.txt
+python3 -m pip install -e '.[dev]'
 
 # Run the local mirror of .github/workflows/ci.yml.
 bash scripts/reshape/run_ci_checks.sh

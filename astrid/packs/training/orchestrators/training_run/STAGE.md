@@ -50,9 +50,9 @@ python3 -m astrid.packs.training.orchestrators.training_run.run \
 ## Seinfeld Example
 
 `examples/configs/training/seinfeld-training.yaml` carries the current Seinfeld
-LoRA defaults as config for `training.training_run`. Historical Seinfeld pack
-notes are archived under `docs/examples/seinfeld/`; active runs should use this
-built-in orchestrator and explicit example config.
+LoRA defaults as config for `training.training_run`. Its wired vocabulary lives
+at `docs/examples/seinfeld/vocabulary.yaml`; active runs should use this built-in
+orchestrator and explicit example config.
 
 ## Live Run
 

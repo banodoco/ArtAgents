@@ -84,15 +84,10 @@
 
 ## Historical / Archived Locations
 
-### Historical Seinfeld Docs
-- **Location:** `docs/examples/seinfeld/` or `docs/historical/seinfeld/`
-- **Contents:** `TRAINING_PLAN.md`, `DATASET_QUALITY.md`, `CAPTIONING.md`, `RUNPOD_TRAINING_LAUNCHER_BRIEF.md`, `sprint-brief.md`
-- **Notes:** Archived after migration. Not runtime code.
-
-### Historical Seinfeld Schemas
-- **Location:** `docs/examples/seinfeld/schemas/` or archived alongside docs
-- **Contents:** `bucket_judge.json`, `caption.json`, `scene_verify.json`, `review.schema.json`
-- **Notes:** Reference material only. Generic schemas live in the dataset_build package.
+### Seinfeld Example Vocabulary
+- **Location:** `docs/examples/seinfeld/vocabulary.yaml`
+- **Contents:** Wired vocabulary fixture referenced by `examples/configs/training/seinfeld-training.yaml`.
+- **Notes:** Historical Seinfeld archive docs and schemas were retired after migration.
 
 ## Existing Executors (Unchanged)
 

@@ -55,7 +55,7 @@ from astrid.core.session.paths import (
     session_path,
     sessions_dir,
 )
-from astrid.core.session.ulid import generate_ulid
+from astrid.threads.ids import generate_ulid
 from astrid.core.task.events import EVENTS_FILENAME, read_events
 from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.util.time import utc_now_iso

@@ -336,7 +336,7 @@ def _exec_render_manifest(args: argparse.Namespace) -> int:
 
 def _probe_duration(video: Path) -> float:
     """Return video duration in seconds via ffprobe."""
-    from astrid.core.util.media import ffprobe_duration_seconds
+    from astrid._media import ffprobe_duration_seconds
 
     return ffprobe_duration_seconds(video)
 

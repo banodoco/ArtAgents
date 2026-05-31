@@ -15,7 +15,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
+from astrid.core.generation.backends.base import (
+    BackendAdapter,
+    GenerationResult,
+    derive_frames_from_duration,
+    parse_dimension_pair,
+    split_feature_support,
+)
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry
 
 logger = logging.getLogger(__name__)
@@ -163,23 +169,7 @@ def _parse_size(size: str) -> tuple[int, int]:
 
     Returns ``(1024, 1024)`` if *size* is empty or unparseable.
     """
-    if not size or not isinstance(size, str):
-        return 1024, 1024
-    size = size.strip()
-    for sep in ("x", "X", "*", ","):
-        if sep in size:
-            parts = size.split(sep)
-            if len(parts) == 2:
-                try:
-                    return int(parts[0].strip()), int(parts[1].strip())
-                except (ValueError, TypeError):
-                    pass
-    # Single integer — use as both dimensions
-    try:
-        val = int(size)
-        return val, val
-    except (ValueError, TypeError):
-        return 1024, 1024
+    return parse_dimension_pair(size, allow_single=True) or (1024, 1024)
 
 
 def _parse_resolution(res: str) -> tuple[int, int] | None:
@@ -188,22 +178,7 @@ def _parse_resolution(res: str) -> tuple[int, int] | None:
     Accepted separators: ``x``, ``X``, ``*``, ``,``.  Returns ``None`` if
     *res* is empty or unparseable.
     """
-    if not res or not isinstance(res, str):
-        return None
-    res = res.strip()
-    if not res:
-        return None
-    for sep in ("x", "X", "*", ","):
-        if sep in res:
-            parts = res.split(sep)
-            if len(parts) == 2:
-                try:
-                    w = int(parts[0].strip())
-                    h = int(parts[1].strip())
-                    return w, h
-                except (ValueError, TypeError):
-                    pass
-    return None
+    return parse_dimension_pair(res)
 
 
 # ---------------------------------------------------------------------------
@@ -246,29 +221,14 @@ class VibeComfyBackend(BackendAdapter):
 
         # --- compute-from-duration shim (Sprint 04) --------------------------
         # If duration is supplied without frames, and fps is known, derive frames
-        if (
-            params.get("duration") is not None
-            and params.get("frames") is None
-            and params.get("fps") is not None
-        ):
-            try:
-                duration_s = float(params["duration"])
-                fps_val = float(params["fps"])
-                params["frames"] = round(duration_s * fps_val)
-                logger.debug(
-                    "Computed frames=%d from duration=%s * fps=%s",
-                    params["frames"], duration_s, fps_val,
-                )
-            except (ValueError, TypeError):
-                pass
+        computed_frames = derive_frames_from_duration(params)
+        if computed_frames is not None:
+            logger.debug("Computed frames=%d from duration * fps", computed_frames)
 
         # --- compute applied / dropped feature lists -------------------------
-        supported = set(mode_spec.supports)
-        applied_features: list[str] = []
-        dropped_features: list[str] = []
-        supplied_features = {k for k, v in params.items() if v is not None}
-        applied_features = sorted(supplied_features & supported)
-        dropped_features = sorted(supplied_features - supported)
+        applied_features, dropped_features = split_feature_support(
+            params, mode_spec.supports
+        )
 
         # --- load workflow ---------------------------------------------------
         t0 = time.monotonic()
