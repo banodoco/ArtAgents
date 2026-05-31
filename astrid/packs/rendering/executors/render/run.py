@@ -231,7 +231,31 @@ def _validate_project_dir(project_dir: Path) -> None:
         raise FileNotFoundError(f"Remotion project is missing package.json: {package_json}")
     node_modules = project_dir / "node_modules"
     if not node_modules.exists():
-        raise FileNotFoundError("Run `npm install` in tools/remotion/ first")
+        raise FileNotFoundError(
+            "Run `npm install` in tools/remotion/ first; "
+            "see docs/render-adapter.md for @banodoco adapter package install instructions"
+        )
+
+    # Fail closed if any required @banodoco adapter package is missing.
+    # These packages are adapter-installed (GitHub tarball), not published
+    # to a public npm registry.  See docs/render-adapter.md (SD2).
+    banodoco_root = node_modules / "@banodoco"
+    _BANODOCO_REQUIRED = (
+        "timeline-composition",
+        "timeline-schema",
+        "timeline-theme-2rp",
+    )
+    missing: list[str] = []
+    for pkg in _BANODOCO_REQUIRED:
+        pkg_dir = banodoco_root / pkg
+        if not pkg_dir.is_dir():
+            missing.append(f"@banodoco/{pkg}")
+    if missing:
+        raise FileNotFoundError(
+            f"Missing @banodoco render package(s): {', '.join(missing)}. "
+            f"These packages are adapter-required and not published to a public npm registry. "
+            f"See docs/render-adapter.md for adapter install instructions."
+        )
 
 
 def _serialize_timeline(timeline_path: Path, *, default_theme: str = "banodoco-default") -> dict:

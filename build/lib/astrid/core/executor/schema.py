@@ -1,0 +1,845 @@
+"""Stdlib schema and validation for Astrid executable executors."""
+
+from __future__ import annotations
+
+import json
+import keyword
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Any
+from typing import Literal as _Literal
+from typing import get_args as _get_args
+
+from astrid.contracts.capability_schema import (
+    DESCRIPTION_MAX_LEN,
+    KEYWORD_MAX_LEN,
+    KEYWORDS_MAX_COUNT,
+    SHORT_DESCRIPTION_MAX_LEN,
+    SchemaValidator,
+)
+from astrid.contracts.capability_schema import (
+    drop_none as _drop_none,
+)
+from astrid.contracts.capability_schema import (
+    validate_capability_text as _validate_capability_text,
+)
+from astrid.contracts.schema import (
+    CACHE_MODES,
+    ISOLATION_MODES,
+    OUTPUT_MODES,
+    PORT_REQUIRED_TYPES,
+    AliasRecord,
+    CacheMode,
+    CachePolicy,
+    CapabilityHandle,
+    CommandInputArg,
+    CommandSpec,
+    IsolationMetadata,
+    IsolationMode,
+    OutputMode,
+    PortType,
+    Provenance,
+    SafetyDeclaration,
+)
+from astrid.contracts.schema import (
+    Output as ExecutorOutput,
+)
+from astrid.contracts.schema import (
+    Port as ExecutorPort,
+)
+from astrid.core.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
+from astrid.timeline import ClipClassifiedKind
+
+ExecutorKind = _Literal["built_in", "external"]
+ExternalRuntimeMode = _Literal["api", "package"]
+ExternalRuntimeSourceKind = _Literal["git", "path", "pypi"]
+ExternalRuntimeInstallStrategy = _Literal["pip_args", "pyproject", "requirements"]
+ConditionKind = _Literal["requires_input", "requires_file", "skip_if_input", "always"]
+
+# Runtime allowlists derived from the Literal aliases (single source of truth).
+EXECUTOR_KINDS: frozenset[str] = frozenset(_get_args(ExecutorKind))
+EXTERNAL_RUNTIME_MODES: frozenset[str] = frozenset(_get_args(ExternalRuntimeMode))
+EXTERNAL_RUNTIME_SOURCE_KINDS: frozenset[str] = frozenset(_get_args(ExternalRuntimeSourceKind))
+EXTERNAL_RUNTIME_INSTALL_STRATEGIES: frozenset[str] = frozenset(_get_args(ExternalRuntimeInstallStrategy))
+CONDITION_KINDS: frozenset[str] = frozenset(_get_args(ConditionKind))
+
+CLIP_KIND_VALUES = tuple(kind.value for kind in ClipClassifiedKind)
+PIPELINE_REQUIREMENT_FACTS = {
+    "arrangement",
+    "assets",
+    "assets_registry",
+    "audio",
+    "brief",
+    "generative_visuals_enabled",
+    "metadata",
+    "pool",
+    "quality_zones",
+    "quote_candidates",
+    "rendered_video",
+    "scene_descriptions",
+    "scene_triage",
+    "scenes",
+    "shots",
+    "source_audio",
+    "source_media",
+    "source_video",
+    "target_duration",
+    "theme",
+    "timeline",
+    "transcript",
+    "video",
+}
+
+KNOWN_RUNTIME_PLACEHOLDERS = {
+    "asset_pairs",
+    "audio",
+    "brief",
+    "brief_copy",
+    "brief_out",
+    "brief_slug",
+    "cache_dir",
+    "drift",
+    "env_file",
+    "extra_args",
+    "keep_downloads",
+    "no_prefetch",
+    "out",
+    "primary_asset",
+    "python_exec",
+    "render",
+    "skip",
+    "source_slug",
+    "target_duration",
+    "theme",
+    "theme_explicit",
+    "verbose",
+    "video",
+}
+
+
+class ExecutorValidationError(ValueError):
+    """Raised when a executor manifest or definition is structurally invalid."""
+
+
+_primitives = SchemaValidator(ExecutorValidationError)
+
+_validate_in_allowed = _primitives.validate_in_allowed
+_require_literal = _primitives.require_literal
+
+
+@dataclass(frozen=True)
+class ConditionSpec:
+    kind: ConditionKind
+    input: str | None = None
+    path: str | None = None
+    value: Any = None
+
+
+@dataclass(frozen=True)
+class GraphMetadata:
+    depends_on: tuple[str, ...] = ()
+    provides: tuple[str, ...] = ()
+    consumes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExternalRuntimeSource:
+    kind: ExternalRuntimeSourceKind
+    url: str | None = None
+    ref: str | None = None
+    path: str | None = None
+    package: str | None = None
+
+
+@dataclass(frozen=True)
+class ExternalRuntimeInstall:
+    strategy: ExternalRuntimeInstallStrategy
+    target: str
+
+
+@dataclass(frozen=True)
+class ExternalRuntimeMetadata:
+    mode: ExternalRuntimeMode = "package"
+    source: ExternalRuntimeSource | None = None
+    install: ExternalRuntimeInstall | None = None
+    import_check: str | None = None
+    binary_check: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ExecutorDefinition:
+    id: str
+    name: str
+    kind: ExecutorKind
+    version: str
+    description: str = ""
+    short_description: str = ""
+    keywords: tuple[str, ...] = ()
+    inputs: tuple[ExecutorPort, ...] = ()
+    outputs: tuple[ExecutorOutput, ...] = ()
+    command: CommandSpec | None = None
+    cache: CachePolicy = field(default_factory=CachePolicy)
+    conditions: tuple[ConditionSpec, ...] = ()
+    graph: GraphMetadata = field(default_factory=GraphMetadata)
+    clip_kinds_supported: tuple[str, ...] = ()
+    pipeline_requirements: tuple[str, ...] = ()
+    isolation: IsolationMetadata = field(default_factory=IsolationMetadata)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    external_runtime: ExternalRuntimeMetadata | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        data = _drop_none(asdict(self))
+        data.pop("external_runtime", None)
+        return data
+
+    def to_json(self, *, indent: int | None = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
+
+
+def to_capability_handle(
+    definition: ExecutorDefinition,
+    *,
+    aliases: tuple[AliasRecord, ...] = (),
+    resolved_alias: str | None = None,
+    deprecated: bool = False,
+    deprecation_message: str = "",
+) -> CapabilityHandle:
+    """Adapt an ``ExecutorDefinition`` into a ``CapabilityHandle``.
+
+    Field mapping:
+
+    * ``canonical_id`` — ``definition.id`` (qualified form ``pack.name``)
+    * ``local_id`` — the portion after the first dot in ``definition.id``
+    * ``pack_id`` — the portion before the first dot in ``definition.id``
+    * ``kind`` — ``definition.kind`` (preserved as-is)
+    * ``provenance`` — source derived from metadata, default ``"pack"``
+    * ``safety`` — network flag from ``definition.isolation.network``
+
+    Alias metadata (*aliases*, *resolved_alias*, *deprecated*,
+    *deprecation_message*) is carried on the handle and never mutates
+    ``ExecutorDefinition.metadata``.
+    """
+    parts = definition.id.split(".", 1)
+    pack_id = parts[0]
+    local_id = parts[1] if len(parts) > 1 else definition.id
+
+    metadata = definition.metadata
+    metadata_source = metadata.get("source")
+    provenance_source = str(metadata_source) if metadata_source else "pack"
+
+    forked_from = str(metadata.get("forked_from") or "")
+    upstream_version = str(metadata.get("upstream_version") or "")
+    compatibility_token=str(metadata.get("compatibility_token") or "")
+    local_edit_state = str(metadata.get("local_edit_state") or "clean")
+    override_target = str(metadata.get("override_target") or "")
+
+    return CapabilityHandle(
+        canonical_id=definition.id,
+        local_id=local_id,
+        pack_id=pack_id,
+        kind=definition.kind,
+        name=definition.name,
+        version=definition.version,
+        provenance=Provenance(
+            source=provenance_source,
+            forked_from=forked_from or None,
+            upstream_version=upstream_version or None,
+            compatibility_token=compatibility_token or None,
+            resolved_alias=resolved_alias,
+        ),
+        safety=SafetyDeclaration(network=definition.isolation.network),
+        description=definition.description,
+        short_description=definition.short_description,
+        keywords=definition.keywords,
+        local_edit_state=local_edit_state,
+        override_target=override_target or None,
+        aliases=aliases,
+        deprecated=deprecated,
+        deprecation_message=deprecation_message,
+        inputs=definition.inputs,
+        outputs=definition.outputs,
+    )
+
+
+def validate_executor_definition(raw: Any) -> ExecutorDefinition:
+    if isinstance(raw, ExecutorDefinition):
+        executor = raw
+    else:
+        executor = _parse_executor(raw)
+    _validate_executor(executor)
+    return executor
+
+
+def load_executor_manifest(path: str | Path) -> ExecutorDefinition:
+    definitions = load_executor_manifest_definitions(path)
+    if len(definitions) != 1:
+        raise ExecutorValidationError(f"executor manifest must define exactly one executor: {Path(path)}")
+    return definitions[0]
+
+
+def load_executor_manifest_definitions(path: str | Path) -> tuple[ExecutorDefinition, ...]:
+    manifest_path = Path(path)
+    try:
+        raw = _load_manifest_payload(manifest_path)
+    except FileNotFoundError as exc:
+        raise ExecutorValidationError(f"executor manifest not found: {manifest_path}") from exc
+    except ValueError as exc:
+        raise ExecutorValidationError(f"invalid executor manifest {manifest_path}: {exc}") from exc
+    try:
+        return _validate_manifest_payload(raw)
+    except ExecutorValidationError as exc:
+        raise ExecutorValidationError(f"{manifest_path}: {exc}") from exc
+
+
+def _load_manifest_payload(path: Path) -> Any:
+    try:
+        return load_manifest_payload(path, manifest_kind="executor")
+    except ManifestParseError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _validate_manifest_payload(raw: Any) -> tuple[ExecutorDefinition, ...]:
+    if isinstance(raw, dict) and "executors" in raw:
+        raw_executors = raw["executors"]
+        if not isinstance(raw_executors, list):
+            raise ExecutorValidationError("executor manifest field executors must be a list")
+        return tuple(validate_executor_definition(item) for item in raw_executors)
+    return (validate_executor_definition(raw),)
+
+
+def _parse_executor(raw: Any) -> ExecutorDefinition:
+    data = _require_mapping(raw, "executor")
+    for field_name in ("id", "name", "kind", "version"):
+        _require_string(data, field_name, f"executor.{field_name}")
+
+    inputs = tuple(_parse_port(item, f"executor.inputs[{index}]") for index, item in enumerate(_optional_list(data, "inputs", "executor.inputs")))
+    outputs = tuple(_parse_output(item, f"executor.outputs[{index}]") for index, item in enumerate(_optional_list(data, "outputs", "executor.outputs")))
+    # v1 manifests place argv under runtime.command when
+    # runtime.type == "command". Fall back to top-level executor.command.
+    runtime_raw = data.get("runtime")
+    runtime_command: Any = None
+    if isinstance(runtime_raw, dict) and runtime_raw.get("type") == "command":
+        runtime_command = runtime_raw.get("command")
+    if runtime_command is not None:
+        command = _parse_command(runtime_command, "executor.runtime.command")
+    else:
+        command = _parse_command(data.get("command"), "executor.command")
+    cache = _parse_cache(data.get("cache", {}), "executor.cache")
+    conditions = tuple(
+        _parse_condition(item, f"executor.conditions[{index}]")
+        for index, item in enumerate(_optional_list(data, "conditions", "executor.conditions"))
+    )
+    graph = _parse_graph(data.get("graph", {}), "executor.graph")
+    clip_kinds_supported = tuple(_parse_clip_kinds_supported(data))
+    pipeline_requirements = tuple(_optional_string_list(data, "pipeline_requirements", "executor.pipeline_requirements"))
+    isolation = _parse_isolation(data.get("isolation", {}), "executor.isolation")
+    metadata = data.get("metadata", {})
+    if not isinstance(metadata, dict):
+        raise ExecutorValidationError("executor.metadata must be an object")
+    metadata = reconcile_runtime_module(
+        runtime_raw, metadata, ExecutorValidationError, "executor"
+    )
+    external_runtime = _parse_external_runtime(metadata.get("external_runtime"), "executor.metadata.external_runtime")
+
+    return ExecutorDefinition(
+        id=data["id"],
+        name=data["name"],
+        kind=_require_literal(data.get("kind"), EXECUTOR_KINDS, "executor.kind", ExecutorKind),
+        version=data["version"],
+        description=_optional_string(data, "description", "executor.description"),
+        short_description=_optional_string(data, "short_description", "executor.short_description"),
+        keywords=tuple(_optional_string_list(data, "keywords", "executor.keywords")),
+        inputs=inputs,
+        outputs=outputs,
+        command=command,
+        cache=cache,
+        conditions=conditions,
+        graph=graph,
+        clip_kinds_supported=clip_kinds_supported,
+        pipeline_requirements=pipeline_requirements,
+        isolation=isolation,
+        metadata=dict(metadata),
+        external_runtime=external_runtime,
+    )
+
+
+def _parse_port(raw: Any, path: str) -> ExecutorPort:
+    data = _require_mapping(raw, path)
+    name = _require_string(data, "name", f"{path}.name")
+    return ExecutorPort(
+        name=name,
+        type=_require_literal(
+            data.get("type", "path"), PORT_REQUIRED_TYPES, f"{path}.type", PortType
+        ),
+        required=_optional_bool(data, "required", f"{path}.required", default=True),
+        description=_optional_string(data, "description", f"{path}.description"),
+        default=data.get("default"),
+        placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
+    )
+
+
+def _parse_output(raw: Any, path: str) -> ExecutorOutput:
+    data = _require_mapping(raw, path)
+    name = _require_string(data, "name", f"{path}.name")
+    return ExecutorOutput(
+        name=name,
+        type=_require_literal(
+            data.get("type", "path"), PORT_REQUIRED_TYPES, f"{path}.type", PortType
+        ),
+        mode=_require_literal(
+            data.get("mode", "create_or_replace"), OUTPUT_MODES, f"{path}.mode", OutputMode
+        ),
+        description=_optional_string(data, "description", f"{path}.description"),
+        placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
+        path_template=_optional_nullable_string(data, "path_template", f"{path}.path_template"),
+        extension=_optional_nullable_string(data, "extension", f"{path}.extension"),
+    )
+
+
+def _parse_external_runtime(raw: Any, path: str) -> ExternalRuntimeMetadata | None:
+    if raw is None:
+        return None
+    data = _require_mapping(raw, path)
+    source = _parse_external_runtime_source(data.get("source"), f"{path}.source")
+    install = _parse_external_runtime_install(data.get("install"), f"{path}.install")
+    binary_check_raw = data.get("binary_check", [])
+    if binary_check_raw is None:
+        binary_check: tuple[str, ...] = ()
+    else:
+        binary_check = tuple(_string_list(binary_check_raw, f"{path}.binary_check"))
+    mode = _require_literal(
+        data.get("mode", "package"),
+        EXTERNAL_RUNTIME_MODES,
+        f"{path}.mode",
+        ExternalRuntimeMode,
+    )
+    return ExternalRuntimeMetadata(
+        mode=mode,
+        source=source,
+        install=install,
+        import_check=_optional_nullable_string(data, "import_check", f"{path}.import_check"),
+        binary_check=binary_check,
+    )
+
+
+def _parse_external_runtime_source(raw: Any, path: str) -> ExternalRuntimeSource | None:
+    if raw is None:
+        return None
+    data = _require_mapping(raw, path)
+    kind = _require_literal(
+        data.get("kind"),
+        EXTERNAL_RUNTIME_SOURCE_KINDS,
+        f"{path}.kind",
+        ExternalRuntimeSourceKind,
+    )
+    ref = _optional_nullable_string(data, "ref", f"{path}.ref")
+    return ExternalRuntimeSource(
+        kind=kind,
+        url=_optional_nullable_string(data, "url", f"{path}.url"),
+        ref=ref or "main" if kind == "git" else ref,
+        path=_optional_nullable_string(data, "path", f"{path}.path"),
+        package=_optional_nullable_string(data, "package", f"{path}.package"),
+    )
+
+
+def _parse_external_runtime_install(raw: Any, path: str) -> ExternalRuntimeInstall | None:
+    if raw is None:
+        return None
+    data = _require_mapping(raw, path)
+    strategy = _require_literal(
+        data.get("strategy"),
+        EXTERNAL_RUNTIME_INSTALL_STRATEGIES,
+        f"{path}.strategy",
+        ExternalRuntimeInstallStrategy,
+    )
+    return ExternalRuntimeInstall(
+        strategy=strategy,
+        target=_require_string(data, "target", f"{path}.target"),
+    )
+
+
+def _parse_command(raw: Any, path: str) -> CommandSpec | None:
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        argv = tuple(_string_list(raw, f"{path}.argv"))
+        return CommandSpec(argv=argv)
+    data = _require_mapping(raw, path)
+    argv = tuple(_string_list(data.get("argv"), f"{path}.argv"))
+    cwd = _optional_nullable_string(data, "cwd", f"{path}.cwd")
+    env_raw = data.get("env", {})
+    if not isinstance(env_raw, dict):
+        raise ExecutorValidationError(f"{path}.env must be an object")
+    env: dict[str, str] = {}
+    for key, value in env_raw.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ExecutorValidationError(f"{path}.env keys and values must be strings")
+        env[key] = value
+    input_args = tuple(
+        _parse_command_input_arg(item, f"{path}.input_args[{index}]")
+        for index, item in enumerate(_optional_list(data, "input_args", f"{path}.input_args"))
+    )
+    return CommandSpec(argv=argv, cwd=cwd, env=env, input_args=input_args)
+
+
+def _parse_command_input_arg(raw: Any, path: str) -> CommandInputArg:
+    data = _require_mapping(raw, path)
+    input_name = _require_string(data, "input", f"{path}.input")
+    return CommandInputArg(
+        input=input_name,
+        flag=_optional_nullable_string(data, "flag", f"{path}.flag"),
+        repeatable=_optional_bool(data, "repeatable", f"{path}.repeatable", default=False),
+        optional=_optional_bool(data, "optional", f"{path}.optional", default=False),
+    )
+
+
+def _parse_cache(raw: Any, path: str) -> CachePolicy:
+    data = _require_mapping(raw, path)
+    return CachePolicy(
+        mode=_require_literal(
+            data.get("mode", "sentinel"), CACHE_MODES, f"{path}.mode", CacheMode
+        ),
+        sentinels=tuple(_optional_string_list(data, "sentinels", f"{path}.sentinels")),
+        always_run=_optional_bool(data, "always_run", f"{path}.always_run", default=False),
+        per_brief=_optional_bool(data, "per_brief", f"{path}.per_brief", default=False),
+    )
+
+
+def _parse_condition(raw: Any, path: str) -> ConditionSpec:
+    data = _require_mapping(raw, path)
+    kind = _require_literal(
+        data.get("kind"),
+        CONDITION_KINDS,
+        f"{path}.kind",
+        ConditionKind,
+    )
+    return ConditionSpec(
+        kind=kind,
+        input=_optional_nullable_string(data, "input", f"{path}.input"),
+        path=_optional_nullable_string(data, "path", f"{path}.path"),
+        value=data.get("value"),
+    )
+
+
+def _parse_graph(raw: Any, path: str) -> GraphMetadata:
+    data = _require_mapping(raw, path)
+    return GraphMetadata(
+        depends_on=tuple(_optional_string_list(data, "depends_on", f"{path}.depends_on")),
+        provides=tuple(_optional_string_list(data, "provides", f"{path}.provides")),
+        consumes=tuple(_optional_string_list(data, "consumes", f"{path}.consumes")),
+    )
+
+
+def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
+    data = _require_mapping(raw, path)
+    return IsolationMetadata(
+        mode=_require_literal(
+            data.get("mode", "subprocess"), ISOLATION_MODES, f"{path}.mode", IsolationMode
+        ),
+        requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
+        binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
+        network=_optional_bool(data, "network", f"{path}.network", default=False),
+        env_passthrough=tuple(_optional_string_list(data, "env_passthrough", f"{path}.env_passthrough")),
+    )
+
+
+def _validate_executor(executor: ExecutorDefinition) -> None:
+    _validate_qualified_identifier(executor.id, "executor.id")
+    _validate_non_empty_string(executor.name, "executor.name")
+    if executor.kind not in EXECUTOR_KINDS:
+        raise ExecutorValidationError(f"executor.kind must be one of {sorted(EXECUTOR_KINDS)}")
+    _validate_non_empty_string(executor.version, "executor.version")
+    _validate_capability_text(
+        executor.description,
+        executor.short_description,
+        executor.keywords,
+        manifest_id=executor.id,
+        error_cls=ExecutorValidationError,
+    )
+
+    input_names = _validate_unique_named(executor.inputs, "input")
+    output_names = _validate_unique_named(executor.outputs, "output")
+    placeholders: set[str] = set(KNOWN_RUNTIME_PLACEHOLDERS)
+    placeholders.update(input_names)
+    placeholders.update(output_names)
+
+    for port in executor.inputs:
+        _validate_port(port)
+        if port.placeholder:
+            _validate_non_empty_identifier(port.placeholder, f"input {port.name!r}.placeholder")
+            placeholders.add(port.placeholder)
+
+    for output in executor.outputs:
+        _validate_output(output)
+        if output.placeholder:
+            _validate_non_empty_identifier(output.placeholder, f"output {output.name!r}.placeholder")
+            placeholders.add(output.placeholder)
+        if output.path_template:
+            _validate_placeholders(output.path_template, placeholders, f"output {output.name!r}.path_template")
+
+    _validate_cache(executor.cache)
+    _validate_conditions(executor.conditions, input_names)
+    _validate_graph(executor.graph)
+    _validate_clip_kinds_supported(executor.clip_kinds_supported)
+    _validate_pipeline_requirements(executor.pipeline_requirements)
+    _validate_isolation(executor.isolation)
+    _validate_external_runtime(executor)
+    if executor.command is not None:
+        _validate_command(executor.command, placeholders)
+
+
+def _validate_port(port: ExecutorPort) -> None:
+    _validate_non_empty_identifier(port.name, "input.name")
+    if port.type not in PORT_REQUIRED_TYPES:
+        raise ExecutorValidationError(f"input {port.name!r}.type must be one of {sorted(PORT_REQUIRED_TYPES)}")
+    if port.required and port.default is not None:
+        raise ExecutorValidationError(f"input {port.name!r} cannot be both required and have a default")
+
+
+def _validate_output(output: ExecutorOutput) -> None:
+    _validate_non_empty_identifier(output.name, "output.name")
+    if output.type not in PORT_REQUIRED_TYPES:
+        raise ExecutorValidationError(f"output {output.name!r}.type must be one of {sorted(PORT_REQUIRED_TYPES)}")
+    if output.mode not in OUTPUT_MODES:
+        raise ExecutorValidationError(f"output {output.name!r}.mode must be one of {sorted(OUTPUT_MODES)}")
+    if output.extension is not None:
+        if not output.extension.startswith("."):
+            raise ExecutorValidationError(f"output {output.name!r}.extension must start with '.'")
+        if len(output.extension) > 16:
+            raise ExecutorValidationError(f"output {output.name!r}.extension must be 16 characters or fewer")
+        if any(char in output.extension for char in ("/", "\\")):
+            raise ExecutorValidationError(f"output {output.name!r}.extension must not contain path separators")
+
+
+def _validate_cache(cache: CachePolicy) -> None:
+    if cache.mode not in CACHE_MODES:
+        raise ExecutorValidationError(f"cache.mode must be one of {sorted(CACHE_MODES)}")
+    if cache.always_run and cache.sentinels:
+        raise ExecutorValidationError("cache.always_run cannot be combined with cache.sentinels")
+    if cache.mode == "none" and (cache.sentinels or cache.always_run or cache.per_brief):
+        raise ExecutorValidationError("cache.mode 'none' cannot include sentinels, always_run, or per_brief")
+    if cache.mode == "always_run" and not cache.always_run:
+        raise ExecutorValidationError("cache.mode 'always_run' requires cache.always_run=true")
+
+
+def _validate_conditions(conditions: tuple[ConditionSpec, ...], input_names: set[str]) -> None:
+    for index, condition in enumerate(conditions):
+        if condition.kind not in CONDITION_KINDS:
+            raise ExecutorValidationError(f"condition[{index}].kind must be one of {sorted(CONDITION_KINDS)}")
+        if condition.input is not None and condition.input not in input_names:
+            raise ExecutorValidationError(f"condition[{index}].input references unknown input {condition.input!r}")
+        if condition.kind == "requires_input" and not condition.input:
+            raise ExecutorValidationError(f"condition[{index}] requires an input")
+        if condition.kind == "requires_file" and not (condition.input or condition.path):
+            raise ExecutorValidationError(f"condition[{index}] requires an input or path")
+
+
+def _validate_graph(graph: GraphMetadata) -> None:
+    for label, values in (("depends_on", graph.depends_on), ("provides", graph.provides), ("consumes", graph.consumes)):
+        for value in values:
+            if label == "depends_on":
+                _validate_qualified_identifier(value, f"graph.{label}[]")
+            else:
+                _validate_non_empty_string(value, f"graph.{label}[]")
+
+
+def _validate_clip_kinds_supported(values: tuple[str, ...]) -> None:
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        if value not in CLIP_KIND_VALUES:
+            raise ExecutorValidationError(
+                f"clip_kinds_supported[{index}] must be one of {sorted(CLIP_KIND_VALUES)}"
+            )
+        if value in seen:
+            raise ExecutorValidationError(f"clip_kinds_supported contains duplicate kind {value!r}")
+        seen.add(value)
+
+
+def _validate_pipeline_requirements(values: tuple[str, ...]) -> None:
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        if value not in PIPELINE_REQUIREMENT_FACTS:
+            raise ExecutorValidationError(
+                f"pipeline_requirements[{index}] must be one of {sorted(PIPELINE_REQUIREMENT_FACTS)}"
+            )
+        if value in seen:
+            raise ExecutorValidationError(f"pipeline_requirements contains duplicate fact {value!r}")
+        seen.add(value)
+
+
+def _validate_isolation(isolation: IsolationMetadata) -> None:
+    if isolation.mode not in ISOLATION_MODES:
+        raise ExecutorValidationError(f"isolation.mode must be one of {sorted(ISOLATION_MODES)}")
+    _validate_unique_env_passthrough(isolation.env_passthrough)
+
+
+def _validate_unique_env_passthrough(values: tuple[str, ...]) -> None:
+    seen: set[str] = set()
+    for index, value in enumerate(values):
+        _validate_env_name(value, f"isolation.env_passthrough[{index}]")
+        if value in seen:
+            raise ExecutorValidationError(f"isolation.env_passthrough contains duplicate name {value!r}")
+        seen.add(value)
+
+
+_validate_env_name = _primitives.validate_env_name
+
+
+def _validate_external_runtime(executor: ExecutorDefinition) -> None:
+    runtime = executor.external_runtime
+    if runtime is None:
+        return
+    if executor.kind != "external":
+        raise ExecutorValidationError("executor.metadata.external_runtime is only valid for external executors")
+    if runtime.mode not in EXTERNAL_RUNTIME_MODES:
+        raise ExecutorValidationError(f"executor.metadata.external_runtime.mode must be one of {sorted(EXTERNAL_RUNTIME_MODES)}")
+    if runtime.mode == "package":
+        if runtime.source is None:
+            raise ExecutorValidationError("executor.metadata.external_runtime.source is required when mode is 'package'")
+        if runtime.install is None:
+            raise ExecutorValidationError("executor.metadata.external_runtime.install is required when mode is 'package'")
+    if runtime.mode == "api" and (runtime.source is not None or runtime.install is not None):
+        raise ExecutorValidationError("executor.metadata.external_runtime mode 'api' must not declare source or install")
+    if runtime.source is not None:
+        _validate_external_runtime_source(runtime.source)
+    if runtime.install is not None:
+        _validate_external_runtime_install(runtime.install)
+    if runtime.import_check is not None:
+        _validate_python_import_target(runtime.import_check, "executor.metadata.external_runtime.import_check")
+    for index, binary in enumerate(runtime.binary_check):
+        _validate_non_empty_string(binary, f"executor.metadata.external_runtime.binary_check[{index}]")
+
+
+def _validate_external_runtime_source(source: ExternalRuntimeSource) -> None:
+    path = "executor.metadata.external_runtime.source"
+    if source.kind not in EXTERNAL_RUNTIME_SOURCE_KINDS:
+        raise ExecutorValidationError(f"{path}.kind must be one of {sorted(EXTERNAL_RUNTIME_SOURCE_KINDS)}")
+    if source.kind == "git":
+        _validate_non_empty_string(source.url, f"{path}.url")
+        _validate_non_empty_string(source.ref, f"{path}.ref")
+        _validate_absent(source.path, f"{path}.path", "git")
+        _validate_absent(source.package, f"{path}.package", "git")
+    elif source.kind == "path":
+        _validate_non_empty_string(source.path, f"{path}.path")
+        _validate_absent(source.url, f"{path}.url", "path")
+        _validate_absent(source.ref, f"{path}.ref", "path")
+        _validate_absent(source.package, f"{path}.package", "path")
+    elif source.kind == "pypi":
+        _validate_non_empty_string(source.package, f"{path}.package")
+        _validate_absent(source.url, f"{path}.url", "pypi")
+        _validate_absent(source.ref, f"{path}.ref", "pypi")
+        _validate_absent(source.path, f"{path}.path", "pypi")
+
+
+def _validate_external_runtime_install(install: ExternalRuntimeInstall) -> None:
+    path = "executor.metadata.external_runtime.install"
+    if install.strategy not in EXTERNAL_RUNTIME_INSTALL_STRATEGIES:
+        raise ExecutorValidationError(f"{path}.strategy must be one of {sorted(EXTERNAL_RUNTIME_INSTALL_STRATEGIES)}")
+    _validate_non_empty_string(install.target, f"{path}.target")
+
+
+def _validate_python_import_target(value: str, path: str) -> None:
+    _validate_non_empty_string(value, path)
+    for part in value.split("."):
+        if not part or not part.isidentifier() or keyword.iskeyword(part):
+            raise ExecutorValidationError(f"{path} must be a valid Python import path")
+
+
+def _validate_absent(value: Any, path: str, kind: str) -> None:
+    if value is not None:
+        raise ExecutorValidationError(f"{path} must not be set for source kind {kind!r}")
+
+
+def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:
+    if not command.argv:
+        raise ExecutorValidationError("command.argv must contain at least one argument")
+    for index, part in enumerate(command.argv):
+        _validate_non_empty_string(part, f"command.argv[{index}]")
+        _validate_placeholders(part, placeholders, f"command.argv[{index}]")
+    if command.cwd:
+        _validate_placeholders(command.cwd, placeholders, "command.cwd")
+    for key, value in command.env.items():
+        _validate_non_empty_string(key, "command.env key")
+        _validate_placeholders(value, placeholders, f"command.env[{key!r}]")
+    for index, mapping in enumerate(command.input_args):
+        path = f"command.input_args[{index}]"
+        _validate_non_empty_string(mapping.input, f"{path}.input")
+        if mapping.input not in placeholders:
+            raise ExecutorValidationError(f"{path}.input references unknown input {mapping.input!r}")
+        if mapping.flag is not None:
+            _validate_non_empty_string(mapping.flag, f"{path}.flag")
+
+
+_validate_placeholders = _primitives.validate_placeholders
+_validate_unique_named = _primitives.validate_unique_named
+_validate_non_empty_identifier = _primitives.validate_non_empty_identifier
+_validate_qualified_identifier = _primitives.validate_qualified_identifier
+_validate_non_empty_string = _primitives.validate_non_empty_string
+_require_mapping = _primitives.require_mapping
+_require_string = _primitives.require_string
+_optional_string = _primitives.optional_string
+_optional_nullable_string = _primitives.optional_nullable_string
+_optional_bool = _primitives.optional_bool
+_optional_list = _primitives.optional_list
+_string_list = _primitives.string_list
+_optional_string_list = _primitives.optional_string_list
+
+
+def _parse_clip_kinds_supported(data: dict[str, Any]) -> list[str]:
+    has_canonical = "clip_kinds_supported" in data
+    has_alias = "produces_for" in data
+    if not has_canonical and not has_alias:
+        return []
+    key = "clip_kinds_supported" if has_canonical else "produces_for"
+    path = f"executor.{key}"
+    values = _string_list(data[key], path)
+    normalized: list[str] = []
+    for index, value in enumerate(values):
+        candidate = value.strip()
+        try:
+            kind = ClipClassifiedKind(candidate.lower())
+        except ValueError:
+            try:
+                kind = ClipClassifiedKind[candidate.upper()]
+            except KeyError as exc:
+                raise ExecutorValidationError(
+                    f"{path}[{index}] must be one of {sorted(CLIP_KIND_VALUES)}"
+                ) from exc
+        normalized.append(kind.value)
+    return normalized
+
+
+__all__ = [
+    "CACHE_MODES",
+    "CONDITION_KINDS",
+    "DESCRIPTION_MAX_LEN",
+    "EXTERNAL_RUNTIME_INSTALL_STRATEGIES",
+    "EXTERNAL_RUNTIME_MODES",
+    "EXTERNAL_RUNTIME_SOURCE_KINDS",
+    "ISOLATION_MODES",
+    "KEYWORDS_MAX_COUNT",
+    "KEYWORD_MAX_LEN",
+    "KNOWN_RUNTIME_PLACEHOLDERS",
+    "CLIP_KIND_VALUES",
+    "EXECUTOR_KINDS",
+    "OUTPUT_MODES",
+    "PIPELINE_REQUIREMENT_FACTS",
+    "PORT_REQUIRED_TYPES",
+    "SHORT_DESCRIPTION_MAX_LEN",
+    "CachePolicy",
+    "CommandSpec",
+    "ConditionSpec",
+    "GraphMetadata",
+    "IsolationMetadata",
+    "ExecutorDefinition",
+    "ExecutorOutput",
+    "ExecutorPort",
+    "ExecutorValidationError",
+    "ExternalRuntimeInstall",
+    "ExternalRuntimeMetadata",
+    "ExternalRuntimeSource",
+    "load_executor_manifest",
+    "load_executor_manifest_definitions",
+    "to_capability_handle",
+    "validate_executor_definition",
+]

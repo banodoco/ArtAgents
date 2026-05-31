@@ -1,0 +1,25 @@
+schema_version: 1
+id: vibecomfy
+name: Astrid VibeComfy
+version: 1.0.0
+origin: external
+install_tier: core
+pack_type: capability
+domain: integration
+stability: stable
+support: core
+visibility: visible
+description: VibeComfy and ComfyUI workflow executors.
+content:
+  executors: executors
+aliases:
+- kind: executor
+  alias: external.vibecomfy.run
+  canonical_id: vibecomfy.run
+  deprecated: true
+  deprecation_message: Moved to vibecomfy.run
+- kind: executor
+  alias: external.vibecomfy.validate
+  canonical_id: vibecomfy.validate
+  deprecated: true
+  deprecation_message: Moved to vibecomfy.validate

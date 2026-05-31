@@ -1,4 +1,10 @@
 # Astrid targets runpod-lifecycle v0.3's detached-run signature and fixed
 # artifact-root behavior. Do not lower this without updating the RunPod pack
 # contract tests and STAGE.md.
+#
+# runpod-lifecycle is an *optional* dependency gated behind the [runpod]
+# extra.  A default ``pip install astrid`` does NOT install it.  Use
+# ``pip install 'astrid[runpod]'`` (requires a configured private index;
+# see pyproject.toml).  This pack is skipped when the dependency is not
+# resolvable.
 runpod-lifecycle>=0.3

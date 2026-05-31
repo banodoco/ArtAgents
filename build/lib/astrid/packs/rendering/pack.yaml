@@ -1,0 +1,31 @@
+schema_version: 1
+id: rendering
+name: Astrid Rendering
+version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: media
+stability: stable
+support: core
+visibility: visible
+description: Rendering executors and render-time visual elements.
+content:
+  executors: executors
+  elements: elements
+aliases:
+- kind: executor
+  alias: builtin.render
+  canonical_id: rendering.render
+  deprecated: true
+  deprecation_message: Moved to rendering.render
+- kind: executor
+  alias: builtin.html_canvas_effect
+  canonical_id: rendering.html_canvas_effect
+  deprecated: true
+  deprecation_message: Moved to rendering.html_canvas_effect
+- kind: executor
+  alias: builtin.sprite_sheet
+  canonical_id: rendering.sprite_sheet
+  deprecated: true
+  deprecation_message: Moved to rendering.sprite_sheet
