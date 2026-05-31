@@ -106,8 +106,7 @@ audit that sprint.
 ## Local CI
 
 ```bash
-# Install the same dependency sets used by GitHub Actions (dev tools via the [dev] extra).
-python3 -m pip install -r requirements.txt
+# Install the same dependency set used by GitHub Actions (core + dev via the [dev] extra).
 python3 -m pip install -e '.[dev]'
 
 # Run the local mirror of .github/workflows/ci.yml.

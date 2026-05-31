@@ -23,8 +23,6 @@ ROOT_FILE_ALLOWLIST = {
     "README.md",
     "package.json",
     "pyproject.toml",
-    "pytest.ini",
-    "requirements.txt",
 }
 
 # Approved top-level directories.

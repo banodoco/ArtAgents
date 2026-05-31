@@ -91,3 +91,29 @@ explicit_package_bases = true
 pretty = true
 show_error_codes = true
 warn_unused_configs = true
+
+[tool.pytest.ini_options]
+# Scope collection to Astrid's own tests; exclude vendored upstream test trees
+# (e.g. any pack's `ai_toolkit/upstream` submodule, which targets the upstream
+# project, needs heavy deps like torch, and is not part of Astrid's suite).
+testpaths = [
+    "tests",
+    "scripts/migrations",
+]
+norecursedirs = [
+    "astrid/packs/*/ai_toolkit/upstream",
+    ".claude",
+    ".git",
+    ".venv",
+    "node_modules",
+]
+markers = [
+    "slow: slower integration-style tests that should remain opt-in for tight loops",
+    "performance_smoke: lightweight performance smoke tests with loose CI-safe thresholds",
+    "renderer_parity: optional renderer parity integration against committed sprint-08 fixtures",
+    "timeout: per-test timeout marker used when pytest-timeout is installed",
+    "standalone: tests intended to run independently from the default suite",
+    "hype_cut_invariants: standalone hype cut invariant coverage",
+    "integration: tests that require external dependencies, heavyweight fixtures, or env prerequisites",
+    "opt_in: tests that are explicitly opt-in and should never run in the default lane",
+]

@@ -20,18 +20,16 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: |
-            requirements.txt
             pyproject.toml
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
+          python -m pip install -e '.[dev]'
 
       - name: Validate editable install
         run: |
-          python -m pip install -e '.[dev]'
-          echo "Editable install validation passed"
+          python -c "import astrid; print('Editable install validation passed')"
 
       - name: Run doctor check
         run: |
