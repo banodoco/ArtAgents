@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from astrid._paths import REPO_ROOT
 from astrid import modalities, timeline
+from astrid.core.task.managed_binding import is_managed_mode
 from astrid.threads.schema import SCHEMA_VERSION
 
 QUALITY_FLOOR = 0.6
@@ -51,11 +52,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
     )
     return parser
-
-
-def _is_managed_mode(args: argparse.Namespace) -> bool:
-    """Return True when the pack is invoked with both --project and --timeline-slug."""
-    return bool(getattr(args, "project", None) and getattr(args, "timeline_slug", None))
 
 
 # Thread-local managed binding state (set by main before assemble_iteration).
@@ -123,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     global _managed_project, _managed_timeline_slug
     args = build_parser().parse_args(argv)
     # m3.5 managed binding seam: detect managed vs unmanaged mode.
-    managed = _is_managed_mode(args)
+    managed = is_managed_mode(args)
     if managed:
         from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
 

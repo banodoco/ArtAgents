@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
 from astrid.audit import AuditContext, PARENT_IDS_ENV
+from astrid.core.util.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid import timeline
 from astrid._paths import WORKSPACE_ROOT, executor_argv
@@ -435,12 +436,6 @@ def asset_args(asset_pairs: list[tuple[str, Path | str]]) -> list[str]:
     return args
 
 
-def _sha256_for_path(path: Path) -> str:
-    import hashlib
-
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
     """Write or update ``run.json`` in the run directory with hype metadata.
 
@@ -455,7 +450,7 @@ def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
     consumes: list[dict[str, str]] = []
     video = getattr(args, "video", None)
     if video is not None and isinstance(video, Path) and video.is_file():
-        consumes.append({"source": str(video), "sha256": _sha256_for_path(video)})
+        consumes.append({"source": str(video), "sha256": sha256_file(video)})
     audio = getattr(args, "audio", None)
     if (
         audio is not None
@@ -463,17 +458,17 @@ def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
         and audio.is_file()
         and audio != video
     ):
-        consumes.append({"source": str(audio), "sha256": _sha256_for_path(audio)})
+        consumes.append({"source": str(audio), "sha256": sha256_file(audio)})
     brief = getattr(args, "brief", None)
     if brief is not None and isinstance(brief, Path) and brief.is_file():
-        consumes.append({"source": str(brief), "sha256": _sha256_for_path(brief)})
+        consumes.append({"source": str(brief), "sha256": sha256_file(brief)})
     theme = getattr(args, "theme", None)
     if theme is not None and isinstance(theme, Path) and theme.is_file():
-        consumes.append({"source": str(theme), "sha256": _sha256_for_path(theme)})
+        consumes.append({"source": str(theme), "sha256": sha256_file(theme)})
     for key, path in getattr(args, "asset_pairs", []):
         if isinstance(path, Path) and path.is_file():
             consumes.append(
-                {"source": str(path), "sha256": _sha256_for_path(path)}
+                {"source": str(path), "sha256": sha256_file(path)}
             )
 
     hype_fields: dict[str, Any] = {
@@ -643,7 +638,7 @@ def prepare_brief_artifacts(args: argparse.Namespace) -> None:
     args.brief_allow_generative_visuals = _brief_allow_generative_visuals(metadata)
     body_bytes = body.encode("utf-8")
     body_hash = hashlib.sha256(body_bytes).hexdigest()
-    existing_hash = _sha256_for_path(args.brief_copy) if args.brief_copy.is_file() else None
+    existing_hash = sha256_file(args.brief_copy) if args.brief_copy.is_file() else None
     if existing_hash == body_hash:
         return
     if existing_hash is not None:

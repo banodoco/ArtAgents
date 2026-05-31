@@ -12,12 +12,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
+from astrid.core.task.managed_binding import is_managed_mode
 from astrid.packs.video_editing.executors.cut.run import build_parser as cut_build_parser
-from astrid.packs.video_editing.executors.cut.run import _is_managed_mode as cut_is_managed
 from astrid.packs.editorial.executors.refine.run import build_parser as refine_build_parser
-from astrid.packs.editorial.executors.refine.run import _is_managed_mode as refine_is_managed
 from astrid.packs.iteration.executors.assemble.run import build_parser as assemble_build_parser
-from astrid.packs.iteration.executors.assemble.run import _is_managed_mode as assemble_is_managed
 
 
 class ManagedBindingParserTests(unittest.TestCase):
@@ -94,7 +92,7 @@ class ManagedBindingParserTests(unittest.TestCase):
             ["--scenes", "/tmp/s.json", "--arrangement", "/tmp/a.json",
              "--pool", "/tmp/p.json", "--brief", "/tmp/b.txt",
              "--out", "/tmp/out", "--project", "p", "--timeline-slug", "t"])
-        self.assertTrue(cut_is_managed(args))
+        self.assertTrue(is_managed_mode(args))
 
     def test_cut_unmanaged_mode_neither_flag(self) -> None:
         parser = cut_build_parser()
@@ -102,7 +100,7 @@ class ManagedBindingParserTests(unittest.TestCase):
             ["--scenes", "/tmp/s.json", "--arrangement", "/tmp/a.json",
              "--pool", "/tmp/p.json", "--brief", "/tmp/b.txt",
              "--out", "/tmp/out"])
-        self.assertFalse(cut_is_managed(args))
+        self.assertFalse(is_managed_mode(args))
 
     def test_cut_unmanaged_mode_only_project(self) -> None:
         parser = cut_build_parser()
@@ -110,7 +108,7 @@ class ManagedBindingParserTests(unittest.TestCase):
             ["--scenes", "/tmp/s.json", "--arrangement", "/tmp/a.json",
              "--pool", "/tmp/p.json", "--brief", "/tmp/b.txt",
              "--out", "/tmp/out", "--project", "p"])
-        self.assertFalse(cut_is_managed(args))
+        self.assertFalse(is_managed_mode(args))
 
     def test_refine_managed_mode_both_flags(self) -> None:
         parser = refine_build_parser()
@@ -119,14 +117,14 @@ class ManagedBindingParserTests(unittest.TestCase):
              "--timeline", "/tmp/t.json", "--assets", "/tmp/a.json",
              "--metadata", "/tmp/m.json", "--transcript", "/tmp/t.json",
              "--out", "/tmp/out", "--project", "p", "--timeline-slug", "t"])
-        self.assertTrue(refine_is_managed(args))
+        self.assertTrue(is_managed_mode(args))
 
     def test_assemble_managed_mode_both_flags(self) -> None:
         parser = assemble_build_parser()
         args = parser.parse_args(
             ["--prepare-dir", "/tmp/prep", "--out", "/tmp/out",
              "--project", "p", "--timeline-slug", "t"])
-        self.assertTrue(assemble_is_managed(args))
+        self.assertTrue(is_managed_mode(args))
 
 
 # ── m3.5 T18: Hype subprocess caller tests ────────────────────────────

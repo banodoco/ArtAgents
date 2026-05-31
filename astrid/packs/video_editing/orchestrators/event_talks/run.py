@@ -8,13 +8,14 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('video_editing.event_talks')
 import argparse
 import datetime as dt
-import hashlib
 import json
 import re
 import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from astrid._media import ffprobe_duration_seconds
+from astrid.core.util.hash import sha256_file
 from astrid.packs.video_editing.orchestrators.event_talks.plan_template import build_plan_v2, emit_plan_json
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
@@ -56,10 +57,6 @@ def _fmt_time(seconds: float) -> str:
     m = int((seconds % 3600) // 60)
     s = seconds % 60
     return f"{h:02d}:{m:02d}:{s:06.3f}"
-
-
-def _sha256_for_path(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +279,7 @@ def _exec_find_holding_screens(args: argparse.Namespace) -> int:
     work_dir = out.parent / f"{out.stem}.frames"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    duration = _probe_duration(video)
+    duration = ffprobe_duration_seconds(video)
     phrases = ["LUNCH BREAK", "WE'LL BE BACK", "THANK YOU", "BREAK"]
     folded_phrases = [_fold(p) for p in phrases]
     hits: list[dict[str, Any]] = []
@@ -332,13 +329,6 @@ def _exec_render_manifest(args: argparse.Namespace) -> int:
     raise NotImplementedError(
         "event_talks.render_manifest: not implemented; see SPRINT_1 milestone D"
     )
-
-
-def _probe_duration(video: Path) -> float:
-    """Return video duration in seconds via ffprobe."""
-    from astrid._media import ffprobe_duration_seconds
-
-    return ffprobe_duration_seconds(video)
 
 
 def _coalesce_hit_intervals(
@@ -391,11 +381,11 @@ def _write_run_json(args: argparse.Namespace) -> None:
     consumes: list[dict[str, str]] = []
     source = getattr(args, "source", None)
     if source is not None and isinstance(source, Path) and source.is_file():
-        consumes.append({"source": str(source), "sha256": _sha256_for_path(source)})
+        consumes.append({"source": str(source), "sha256": sha256_file(source)})
     transcript = getattr(args, "transcript", None)
     if transcript is not None and isinstance(transcript, Path) and transcript.is_file():
         consumes.append(
-            {"source": str(transcript), "sha256": _sha256_for_path(transcript)}
+            {"source": str(transcript), "sha256": sha256_file(transcript)}
         )
 
     fields: dict[str, Any] = {

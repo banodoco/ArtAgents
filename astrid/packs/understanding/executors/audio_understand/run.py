@@ -114,10 +114,6 @@ def _parse_times(values: list[str] | None) -> list[float]:
     return times
 
 
-def _probe_duration(media_path: Path) -> float:
-    return ffprobe_duration_seconds(media_path, runner=_run)
-
-
 def _window_plan(args: argparse.Namespace, duration_sec: float, *, base_index: int = 0, source_label: str = "") -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     if args.start is not None or args.end is not None:
@@ -186,7 +182,7 @@ def _extract_window(source: Path, window: dict[str, Any], out_dir: Path, *, forc
 
 
 def _extract_whole_clip(source: Path, index: int, out_dir: Path, *, force: bool, sample_rate: int, max_clip_sec: float | None) -> dict[str, Any]:
-    duration = _probe_duration(source)
+    duration = ffprobe_duration_seconds(source, runner=_run)
     end = duration if max_clip_sec is None else min(duration, max_clip_sec)
     window = {
         "index": index,
@@ -415,7 +411,7 @@ def run(args: argparse.Namespace) -> int:
         duration_sec = sum(float(item["duration"]) for item in extracted)
     else:
         assert video_source is not None
-        duration_sec = _probe_duration(video_source)
+        duration_sec = ffprobe_duration_seconds(video_source, runner=_run)
         windows = _window_plan(args, duration_sec)
         for window in windows:
             path = _extract_window(video_source, window, out_dir, force=args.force, sample_rate=args.sample_rate)

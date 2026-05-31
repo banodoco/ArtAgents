@@ -8,7 +8,6 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('video_editing.thumbnail_maker')
 import argparse
 import datetime as dt
-import hashlib
 import json
 import math
 import os
@@ -18,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from astrid.core.util.hash import sha256_file
 from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import build_plan_v2, emit_plan_json
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.core.task import env as task_env
@@ -192,10 +192,6 @@ def resolve_video_for_analysis(video: str, *, dry_run: bool) -> dict[str, Any]:
     }
 
 
-def _sha256_for_path(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 # ---------------------------------------------------------------------------
 # Orchestrator (plan v2 + task gate)
 # ---------------------------------------------------------------------------
@@ -289,7 +285,7 @@ def _write_run_json(args: argparse.Namespace) -> None:
     consumes: list[dict[str, str]] = []
     video = getattr(args, "video", None)
     if video is not None and isinstance(video, Path) and video.is_file():
-        consumes.append({"source": str(video), "sha256": _sha256_for_path(video)})
+        consumes.append({"source": str(video), "sha256": sha256_file(video)})
 
     fields: dict[str, Any] = {
         "consumes": consumes,

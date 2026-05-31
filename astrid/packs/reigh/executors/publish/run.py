@@ -31,7 +31,6 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('reigh.publish')
 import argparse
 import base64
-import hashlib
 import json
 import mimetypes
 import os
@@ -44,6 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid import timeline
+from astrid.core.util.hash import sha256_file
 
 
 TIMELINE_ASSETS_BUCKET = "timeline-assets"
@@ -190,14 +190,6 @@ _EXT_OVERRIDES = {
 }
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _ext_for(path: Path, content_type: str | None) -> str:
     suffix = path.suffix.lower()
     if suffix:
@@ -280,7 +272,7 @@ def _content_sha256_from_entry(entry: dict[str, Any], local_path: Path) -> str:
     sha = entry.get("content_sha256")
     if isinstance(sha, str) and len(sha) == 64:
         return sha
-    return _sha256_file(local_path)
+    return sha256_file(local_path)
 
 
 def _local_path_for_entry(entry: dict[str, Any]) -> Path | None:

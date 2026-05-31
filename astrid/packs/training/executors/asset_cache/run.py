@@ -31,6 +31,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Literal
 
+from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_iso
 
 try:
@@ -213,14 +214,6 @@ def _touch_accessed(path: Path) -> None:
     _write_meta(path, meta)
 
 
-def _sha256_path(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def _head(url: str) -> dict[str, str]:
     request = urllib.request.Request(url, method="HEAD")
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -266,7 +259,7 @@ def _download_once(url: str, path: Path, expected_sha256: str | None, head_meta:
     finally:
         response.close()
 
-    actual_sha256 = _sha256_path(partial_path)
+    actual_sha256 = sha256_file(partial_path)
     if expected_sha256 and actual_sha256 != expected_sha256:
         raise ContentDriftError(f"Content drift for {url}: expected sha256 {expected_sha256}, got {actual_sha256}")
 
@@ -296,7 +289,7 @@ def fetch(url: str, *, expected_sha256: str | None = None, force: bool = False) 
     preexisted = path.exists() and not force
     with lock:
         if path.exists() and not force:
-            actual_sha256 = _sha256_path(path) if expected_sha256 else None
+            actual_sha256 = sha256_file(path) if expected_sha256 else None
             if expected_sha256 and actual_sha256 != expected_sha256:
                 refetch = _handle_drift(path, expected_sha256, actual_sha256 or "", allow_refetch=True)
                 if not refetch:
@@ -319,7 +312,7 @@ def fetch(url: str, *, expected_sha256: str | None = None, force: bool = False) 
                     verify_sha256 = expected_sha256 if _drift_mode() == "strict" else None
                     downloaded = _download_once(url, path, verify_sha256, head_meta)
                     if expected_sha256:
-                        actual_sha256 = _sha256_path(downloaded)
+                        actual_sha256 = sha256_file(downloaded)
                         if actual_sha256 != expected_sha256:
                             _handle_drift(downloaded, expected_sha256, actual_sha256, allow_refetch=False)
                     _register_with_session(downloaded, preexisted=preexisted)
@@ -327,7 +320,7 @@ def fetch(url: str, *, expected_sha256: str | None = None, force: bool = False) 
                 except ContentDriftError:
                     if expected_sha256:
                         partial_path = Path(str(path) + ".partial")
-                        actual_sha256 = _sha256_path(partial_path) if partial_path.exists() else ""
+                        actual_sha256 = sha256_file(partial_path) if partial_path.exists() else ""
                         if _handle_drift(path, expected_sha256, actual_sha256, allow_refetch=False):
                             continue
                     raise
@@ -338,7 +331,7 @@ def fetch(url: str, *, expected_sha256: str | None = None, force: bool = False) 
             verify_sha256 = expected_sha256 if _drift_mode() == "strict" else None
             downloaded = _download_once(url, path, verify_sha256, head_meta)
             if expected_sha256:
-                actual_sha256 = _sha256_path(downloaded)
+                actual_sha256 = sha256_file(downloaded)
                 if actual_sha256 != expected_sha256:
                     _handle_drift(downloaded, expected_sha256, actual_sha256, allow_refetch=False)
             _register_with_session(downloaded, preexisted=preexisted)

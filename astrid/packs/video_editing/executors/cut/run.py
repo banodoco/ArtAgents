@@ -25,6 +25,8 @@ from typing import Any, Sequence
 
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.audit import AuditContext
+from astrid.core.task.managed_binding import is_managed_mode
+from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_seconds
 from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
 from astrid.theme_schema import load_theme, theme_root
@@ -105,15 +107,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
     )
     return parser
-
-def _is_managed_mode(args: argparse.Namespace) -> bool:
-    """Return True when the pack is invoked with both --project and --timeline-slug.
-
-    Managed mode: canonical timeline mutations emit events through the event
-    gateway.  Unmanaged mode (default): writes run-local compatibility outputs
-    only.
-    """
-    return bool(getattr(args, "project", None) and getattr(args, "timeline_slug", None))
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -468,10 +461,6 @@ def _quality_zones_ref_from_args(args: argparse.Namespace) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
-
-
-def _sha256_for_path(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _clip_bounds_for_duration(entry: dict[str, Any], duration: float, *, start: float | None = None) -> dict[str, float]:
@@ -1146,7 +1135,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     # m3.5 managed binding seam: detect managed vs unmanaged mode.
-    managed = _is_managed_mode(args)
+    managed = is_managed_mode(args)
     if managed:
         # Managed mode: canonical mutations will route through the event gateway
         # (T10).  For now, validate that both flags are present.
@@ -1236,9 +1225,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     arrangement_path = args.arrangement.resolve()
     pool_path = args.pool.resolve()
     brief_path = args.brief.resolve()
-    pool_sha256 = _sha256_for_path(pool_path)
-    arrangement_sha256 = _sha256_for_path(arrangement_path)
-    brief_sha256 = _sha256_for_path(brief_path)
+    pool_sha256 = sha256_file(pool_path)
+    arrangement_sha256 = sha256_file(arrangement_path)
+    brief_sha256 = sha256_file(brief_path)
     pool = load_pool(pool_path)
     pool_ids = {entry["id"] for entry in pool["entries"]}
     arrangement = load_arrangement(arrangement_path, pool_ids, assign_missing_uuids=True)

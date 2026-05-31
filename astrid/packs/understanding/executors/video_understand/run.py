@@ -118,10 +118,6 @@ def _parse_times(values: list[str] | None) -> list[float]:
     return times
 
 
-def _probe_duration(media_path: Path) -> float:
-    return ffprobe_duration_seconds(media_path, runner=_run)
-
-
 def _window_plan(args: argparse.Namespace, duration_sec: float) -> list[dict[str, Any]]:
     windows: list[dict[str, Any]] = []
     if args.start is not None or args.end is not None:
@@ -211,7 +207,7 @@ def run(args: argparse.Namespace) -> int:
         _die("--max-width must be >= 0")
 
     out_dir = args.out_dir.expanduser()
-    duration_sec = _probe_duration(video_source)
+    duration_sec = ffprobe_duration_seconds(video_source, runner=_run)
     windows = _window_plan(args, duration_sec)
     extracted = []
     for window in windows:

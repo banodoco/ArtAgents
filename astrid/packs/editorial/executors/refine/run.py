@@ -8,7 +8,6 @@ from __future__ import annotations
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('editorial.refine')
 import argparse
-import hashlib
 import json
 import copy
 import subprocess
@@ -18,6 +17,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
+from astrid.core.task.managed_binding import is_managed_mode
+from astrid.core.util.hash import sha256_file
 from astrid.domains.hype import enriched_arrangement
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.domains.hype.arrangement_rules import (
@@ -88,15 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional JSON TimelineActor for upstream provenance chaining (actor.via).",
     )
     return parser
-
-
-def _is_managed_mode(args: argparse.Namespace) -> bool:
-    """Return True when the pack is invoked with both --project and --timeline-slug."""
-    return bool(getattr(args, "project", None) and getattr(args, "timeline_slug", None))
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _pool_map(pool: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -599,7 +591,7 @@ def _emit_refine_managed_events(
 
 def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: dict[str, Any], transcript_segments: list[dict[str, Any]], prior_meta: dict[str, Any], args: argparse.Namespace, report: dict[str, Any]) -> None:
     pool_entries = _pool_map(enriched.pool)
-    managed = _is_managed_mode(args)
+    managed = is_managed_mode(args)
     if not is_all_generative_arrangement(enriched.arrangement, enriched.pool):
         validate_arrangement_duration_window(enriched.arrangement)
     save_arrangement(enriched.arrangement, args.arrangement, set(pool_entries))
@@ -615,8 +607,8 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
         args.primary_asset,
         transcript_segments,
         quality_zones_ref=regen_args.quality_zones,
-        pool_sha256=str(provenance.get("pool_sha256") or _sha256(args.pool)),
-        arrangement_sha256=_sha256(args.arrangement),
+        pool_sha256=str(provenance.get("pool_sha256") or sha256_file(args.pool)),
+        arrangement_sha256=sha256_file(args.arrangement),
         brief_sha256=str(provenance.get("brief_sha256") or enriched.arrangement.get("brief_sha256") or ""),
         compiled_plan=compiled_plan,
     )
@@ -673,7 +665,7 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
 def main(argv: Sequence[str] | None = None, *, transcriber: SnippetTranscriber | None = None) -> int:
     args = build_parser().parse_args(argv)
     # m3.5 managed binding seam: detect managed vs unmanaged mode.
-    managed = _is_managed_mode(args)
+    managed = is_managed_mode(args)
     if managed:
         print(f"refine: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
     else:
