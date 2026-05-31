@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 import fnmatch
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,11 +20,8 @@ ROOT_FILE_ALLOWLIST = {
     ".env.example",
     ".gitignore",
     ".python-version",
-    "AGENTS.md",
     "LICENSE",
     "README.md",
-    "SKILL.md",
-    "constraints.txt",
     "package-lock.json",
     "package.json",
     "pyproject.toml",
@@ -181,12 +177,6 @@ TRACKED_PATH_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
-ROOT_SKILL_SYMLINKS = {
-    "AGENTS.md": Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md",
-    "SKILL.md": Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md",
-}
-
-
 def _tracked_files() -> list[str]:
     result = subprocess.run(
         ["git", "ls-files"],
@@ -244,22 +234,6 @@ def find_tracked_ignored_artifacts(
     return sorted(findings, key=lambda item: (item[1], item[0]))
 
 
-def find_root_skill_symlink_violations() -> list[str]:
-    findings: list[str] = []
-    for name, expected in ROOT_SKILL_SYMLINKS.items():
-        path = REPO_ROOT / name
-        if not path.is_symlink():
-            findings.append(f"{name} must be a symlink to {expected.as_posix()}")
-            continue
-        link = Path(os.readlink(path))
-        if link != expected:
-            findings.append(f"{name} points to {link.as_posix()}, expected {expected.as_posix()}")
-            continue
-        if not (REPO_ROOT / link).is_file():
-            findings.append(f"{name} points to missing target {link.as_posix()}")
-    return sorted(findings)
-
-
 def main() -> int:
     failed = False
 
@@ -283,13 +257,6 @@ def main() -> int:
         print("tracked ignored artifacts must not be committed:", file=sys.stderr)
         for category, path in tracked_findings:
             print(f"  [{category}] {path}", file=sys.stderr)
-
-    symlink_findings = find_root_skill_symlink_violations()
-    if symlink_findings:
-        failed = True
-        print("root skill symlink violations:", file=sys.stderr)
-        for finding in symlink_findings:
-            print(f"  {finding}", file=sys.stderr)
 
     return 1 if failed else 0
 

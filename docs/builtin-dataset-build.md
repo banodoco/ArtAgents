@@ -8,9 +8,9 @@ Run a no-network fixture smoke path:
 
 ```bash
 python3 -m astrid orchestrators run training.dataset_build -- \
-  --config fixtures/builtin-training/dataset-config.json \
+  --config path/to/your/dataset-config.json \
   --out runs/builtin-training-fixture \
-  --review-decisions fixtures/builtin-training/review-decisions.json
+  --review-decisions path/to/your/review-decisions.json
 ```
 
 Run the Seinfeld example after replacing source URLs and providing the required API key:

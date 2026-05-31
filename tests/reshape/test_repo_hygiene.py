@@ -126,25 +126,6 @@ def test_allowlists_preserve_legitimate_tracked_fixtures_and_source_files(
     assert check_repo_hygiene.find_tracked_ignored_artifacts() == []
 
 
-def test_root_skill_symlink_policy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(check_repo_hygiene, "REPO_ROOT", tmp_path)
-    target = Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md"
-    skill = tmp_path / target
-    skill.parent.mkdir(parents=True)
-    skill.write_text("---\nname: astrid\n---\n", encoding="utf-8")
-    (tmp_path / "AGENTS.md").symlink_to(target)
-    (tmp_path / "SKILL.md").symlink_to(target)
-
-    assert check_repo_hygiene.find_root_skill_symlink_violations() == []
-
-    (tmp_path / "SKILL.md").unlink()
-    (tmp_path / "SKILL.md").write_text("copy\n", encoding="utf-8")
-
-    assert check_repo_hygiene.find_root_skill_symlink_violations() == [
-        "SKILL.md must be a symlink to astrid/packs/_core/skill/SKILL.md"
-    ]
-
-
 def test_main_reports_category_and_path_names_without_file_contents(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

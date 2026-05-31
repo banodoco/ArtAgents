@@ -15,8 +15,7 @@ class OnboardingDocsTest(unittest.TestCase):
             (ROOT / path).read_text(encoding="utf-8")
             for path in (
                 "README.md",
-                "AGENTS.md",
-                "SKILL.md",
+                "astrid/packs/_core/skill/SKILL.md",
                 "docs/architecture.md",
                 "docs/creating-tools.md",
             )

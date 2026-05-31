@@ -27,13 +27,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # Reproducible install: constraints.txt pins the full transitive closure.
-          python -m pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
+          python -m pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Validate editable install
         run: |
-          # Blocking: constraints.txt pins the closure, so the editable install is reproducible.
-          python -m pip install -c constraints.txt -e '.[dev]'
+          python -m pip install -e '.[dev]'
           echo "Editable install validation passed"
 
       - name: Run doctor check

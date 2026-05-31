@@ -22,7 +22,7 @@ For a CI or fixture-style run, pass review decisions explicitly:
 python3 -m astrid orchestrators run training.dataset_build -- \
   --config examples/configs/dataset/seinfeld-dataset.yaml \
   --out runs/seinfeld-dataset \
-  --review-decisions fixtures/builtin-training/review-decisions.json
+  --review-decisions path/to/your/review-decisions.json
 ```
 
 The dataset run writes `review_data.json`, `review_state.json`,

@@ -238,25 +238,24 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertFalse(payload["applied"])
         self.assertIn("dry-run", {step["status"] for step in payload["steps"]})
 
-    def test_setup_repairs_root_skill_symlinks(self) -> None:
+    def test_setup_apply_does_not_create_root_skill_symlinks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             project_root = Path(tmp)
             core_skill = project_root / "astrid" / "packs" / "_core" / "skill" / "SKILL.md"
             core_skill.parent.mkdir(parents=True)
             core_skill.write_text("---\nname: astrid\n---\n", encoding="utf-8")
-            (project_root / "AGENTS.md").write_text("stale copy\n", encoding="utf-8")
 
             with mock.patch.object(setup_cli, "REPO_ROOT", project_root):
                 result, stdout, stderr = self.capture(setup_cli.main, ["--apply"])
 
             self.assertEqual(result, 0, stderr)
-            target = Path("astrid") / "packs" / "_core" / "skill" / "SKILL.md"
             for name in ("AGENTS.md", "SKILL.md"):
                 path = project_root / name
-                self.assertTrue(path.is_symlink(), name)
-                self.assertEqual(path.readlink(), target)
-            self.assertIn("AGENTS.md (regular file) with symlink -> astrid/packs/_core/skill/SKILL.md", stdout)
-            self.assertIn("created SKILL.md -> astrid/packs/_core/skill/SKILL.md", stdout)
+                self.assertFalse(path.exists(), name)
+                self.assertFalse(path.is_symlink(), name)
+            self.assertNotIn("root skill symlinks", stdout)
+            self.assertNotIn("AGENTS.md", stdout)
+            self.assertNotIn("SKILL.md", stdout)
 
     def test_setup_apply_delegates_to_install_helpers(self) -> None:
         registry = load_element_registry()

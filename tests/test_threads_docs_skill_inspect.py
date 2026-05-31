@@ -11,6 +11,7 @@ from pathlib import Path
 SKILL_PARAGRAPH = (
     "When in doubt, run `astrid next`"
 )
+CORE_SKILL_PATH = Path("astrid/packs/_core/skill/SKILL.md")
 
 
 def test_threads_doc_covers_required_t11_sections_without_lock_repair_command() -> None:
@@ -36,7 +37,7 @@ def test_threads_doc_covers_required_t11_sections_without_lock_repair_command() 
 
 
 def test_skill_includes_thread_session_guidance() -> None:
-    text = Path("SKILL.md").read_text(encoding="utf-8")
+    text = CORE_SKILL_PATH.read_text(encoding="utf-8")
     assert SKILL_PARAGRAPH in text
     assert "python3 -m astrid.packs.video_editing.orchestrators.iteration_video.run inspect <thread>" in text
 
@@ -52,7 +53,7 @@ def test_stop_line_active_thread_runtime_and_guidance_are_retired() -> None:
         assert "active_thread:" not in text
         assert "python3 -m astrid thread" not in text
 
-    skill_text = Path("SKILL.md").read_text(encoding="utf-8")
+    skill_text = CORE_SKILL_PATH.read_text(encoding="utf-8")
     assert "active_thread:" not in skill_text
     assert "python3 -m astrid thread" not in skill_text
     assert "pack-level `--thread <id>` argument identifies a non-binding variant lineage" in skill_text

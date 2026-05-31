@@ -1,6 +1,8 @@
 # FIXTURES: Offline Test Strategy
 
-> **Status:** FROZEN — M0 handoff. M1 creates the actual fixture media files; M0 specifies the strategy, paths, and expected outputs.
+> **Status:** ARCHIVED — the checked-in offline fixture tree has been retired.
+> This document records the original strategy only; active commands should use
+> project-local fixture paths.
 
 ## Strategy
 
@@ -19,10 +21,10 @@ The built-in training pipeline MUST be testable without network access, OpenAI/G
 
 | Path | Description | Expected Content |
 |---|---|---|
-| `fixtures/builtin-training/media/test_clip_01.mp4` | 5-second test clip | Minimal valid MP4, e.g., black frame with silent audio |
-| `fixtures/builtin-training/media/test_clip_02.mp4` | 3-second test clip (too short for default filter) | Minimal valid MP4 |
-| `fixtures/builtin-training/media/test_clip_03.mp4` | 7.5-second test clip | Minimal valid MP4 |
-| `fixtures/builtin-training/media/test_clip_04.mp4` | 2-second test clip (barely at min boundary) | Minimal valid MP4 |
+| `path/to/local-fixtures/media/test_clip_01.mp4` | 5-second test clip | Minimal valid MP4, e.g., black frame with silent audio |
+| `path/to/local-fixtures/media/test_clip_02.mp4` | 3-second test clip (too short for default filter) | Minimal valid MP4 |
+| `path/to/local-fixtures/media/test_clip_03.mp4` | 7.5-second test clip | Minimal valid MP4 |
+| `path/to/local-fixtures/media/test_clip_04.mp4` | 2-second test clip (barely at min boundary) | Minimal valid MP4 |
 
 All media files must:
 - Be valid video files (MP4 container, H.264 or similar)
@@ -36,7 +38,7 @@ File: `contracts/fixtures/dataset-config.valid.json`
 
 A complete v1 dataset config pointing at local fixture media. Key properties:
 - `schema_version: 1`, `media_type: video`
-- `source.provider: local_folder` pointing at `fixtures/builtin-training/media/`
+- `source.provider: local_folder` pointing at `path/to/local-fixtures/media/`
 - Single bucket with `target_count: 2`
 - Budgets set to zero (`max_api_calls: 10`, `max_estimated_cost_usd: 0.50`)
 - All filters enabled with wide thresholds (accept test clips)
@@ -97,7 +99,7 @@ Example caption sidecar matching the ai-toolkit preflight expectation. Format:
 ## No-Network / No-GPU Validation Behavior
 
 When running with fixture configs:
-1. Source provider reads from `fixtures/builtin-training/media/` (local files only, no YouTube/network)
+1. Source provider reads from `path/to/local-fixtures/media/` (local files only, no YouTube/network)
 2. Caption provider uses pre-baked caption sidecars (no API calls)
 3. Filter stages use deterministic logic (no VLM/API calls)
 4. Human review uses pre-baked decisions (no browser/server launch)

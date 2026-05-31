@@ -106,35 +106,22 @@ audit that sprint.
 ## Local CI
 
 ```bash
-# Install the same tool versions used by GitHub Actions, pinned reproducibly
-# by the compiled constraints.txt (full transitive closure).
-python3 -m pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
+# Install the same top-level dependency sets used by GitHub Actions.
+python3 -m pip install -r requirements.txt -r requirements-dev.txt
 
 # Run the local mirror of .github/workflows/ci.yml.
 bash scripts/reshape/run_ci_checks.sh
 ```
 
-`constraints.txt` is a compiled lockfile (it is generated, not hand-edited).
 Private/local pack dependencies (e.g. `runpod-lifecycle`, `pyannote.audio`) are
 intentionally excluded and stay optional — install them separately as documented
 in `pyproject.toml` and the relevant pack `requirements.txt` files.
 
-To validate a brand-new clone end-to-end (isolated venv, constraints-pinned
-install, then `python -m astrid doctor --json`):
+To validate a brand-new clone end-to-end (isolated venv, dependency install,
+then `python -m astrid doctor --json`):
 
 ```bash
 bash scripts/smoke_fresh_clone.sh
-```
-
-### Regenerating constraints.txt (maintainers)
-
-After changing the top-level dependencies in `requirements.txt`,
-`requirements-dev.txt`, or `pyproject.toml`, regenerate the lockfile with
-compile semantics (do **not** use `pip freeze`):
-
-```bash
-uv pip compile --universal --python-version 3.11 \
-  --output-file constraints.txt requirements.txt requirements-dev.txt
 ```
 
 The local CI mirror runs:

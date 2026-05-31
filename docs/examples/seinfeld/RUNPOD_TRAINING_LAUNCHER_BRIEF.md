@@ -315,7 +315,7 @@ child_executors:
 7. If the `runpod-lifecycle` upstream patch was needed: `runpod-lifecycle/pyproject.toml` reflects the bumped version; `runpod-lifecycle/tests/` has a new test covering `ports`; the change is committed in the sibling repo but not pushed; `astrid/packs/external/runpod/requirements.txt` pin is updated to match.
 8. `pytest tests/packs/runpod/` still passes (no regressions in the existing RunPod test suite).
 9. STAGE.md exists for every new executor + the updated orchestrator. Each has a one-paragraph description and a copy-pasteable invocation.
-10. `python3 scripts/gen_capability_index.py` is re-run; `AGENTS.md` capability index reflects the new executors.
+10. `python3 scripts/gen_capability_index.py` is re-run; the core skill capability index reflects the new executors.
 11. If an upstream ai-toolkit checkout is needed, it is documented as an external
     dependency rather than committed as a repo submodule.
 12. **Brief amendments are all addressed**: HF_TOKEN validation + passthrough; image tag pinned (no `:latest` default); datacenter default with fallback list; training-crash detection short-circuits to teardown; `.env` auto-loading on pre-flight; UI URL written to `<out>/ui_url.txt`; cost summary printed and written to `<out>/cost_summary.json`; orchestrator-level lockfile + SIGINT-cleans-up-pod; trigger token (`seinfeld scene, `) is documented in STAGE.md; `seed: 42` default with `--seed` override, recorded in `registered_lora.json`.
@@ -338,7 +338,7 @@ child_executors:
 - `astrid/packs/seinfeld/lora_train/STAGE.md` — the spec being filled in.
 - `astrid/packs/external/runpod/run.py` — the lifecycle helpers to call.
 - `astrid/core/runpod/storage.py` — `ensure_storage()` for the network volume.
-- `AGENTS.md` — executors/orchestrators contract and build-order rule.
+- `astrid/packs/_core/skill/SKILL.md` — executors/orchestrators contract and build-order rule.
 - `docs/creating-tools.md` — build-order rule expanded.
 - `docs/templates/executor/`, `docs/templates/orchestrator/` — scaffolding.
 - The `ostris/ai-toolkit` upstream once submoduled — config schema, run entrypoint, UI start command.

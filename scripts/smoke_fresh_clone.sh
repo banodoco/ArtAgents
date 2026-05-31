@@ -4,8 +4,8 @@ set -euo pipefail
 # smoke_fresh_clone.sh
 # Reproducible fresh-clone / core smoke path.
 #
-# Installs ONLY the core + dev dependencies, pinned by constraints.txt, into a
-# throwaway virtual environment, then runs the core health check. Private/local
+# Installs ONLY the core + dev dependencies into a throwaway virtual
+# environment, then runs the core health check. Private/local
 # pack dependencies (e.g. runpod-lifecycle, pyannote.audio) are intentionally
 # NOT installed here -- they remain optional and are documented in pyproject.toml
 # and the relevant pack-level requirements files.
@@ -35,11 +35,10 @@ echo "Creating throwaway venv at: $VENV_DIR"
 source "$VENV_DIR/bin/activate"
 
 python -m pip install --upgrade pip
-# Compile-pinned, reproducible install: constraints.txt pins the full transitive
-# closure while requirements*.txt declares the direct top-level dependencies.
-python -m pip install -c constraints.txt -r requirements.txt -r requirements-dev.txt
+# requirements*.txt declares the direct top-level dependencies for the core smoke.
+python -m pip install -r requirements.txt -r requirements-dev.txt
 # Editable core install so `python -m astrid` resolves from the source tree.
-python -m pip install -c constraints.txt -e .
+python -m pip install -e .
 
 echo ""
 echo "=== core health check ==="

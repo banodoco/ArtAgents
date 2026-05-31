@@ -78,9 +78,9 @@
 - **Notes:** Config files for `builtin.training_run` with ai-toolkit-ltx trainer.
 
 ### Fixtures
-- **Location:** `fixtures/builtin-training/`
-- **Contents:** Tiny local media files, fixture config, expected manifests
-- **Notes:** Used by M1-M4 for no-network/no-GPU smoke tests. See `FIXTURES.md`.
+- **Location:** removed
+- **Contents:** The former checked-in offline fixture tree has been retired.
+- **Notes:** Historical fixture planning remains in `FIXTURES.md`; active docs should use placeholder paths or project-local fixtures.
 
 ## Historical / Archived Locations
 
