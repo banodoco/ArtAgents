@@ -331,7 +331,7 @@ catch:
   the wrong scene* (e.g., a long montage tagged as `jerrys_apt` but
   actually opening credits). The bucket-judge step is responsible for this.
 - Watermarks, channel logos, lower-thirds. Add a separate executor for
-  this if needed (see future-work in this doc).
+  this if needed.
 - Audio anomalies (music covering dialogue, dub mismatches). Whisper
   catches some of these by producing empty / garbled transcripts; the
   caption step can flag.

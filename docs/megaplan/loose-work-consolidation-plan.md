@@ -153,8 +153,8 @@ as part of finishing the pack-system epic — not a quick cherry-pick.
 
 ## 6. Epic scope ledger — done / incomplete / deferred (archaeology)
 
-The intended-scope record (chain.yaml, EPIC.md, briefs, `wakeup-note.md`, `docs/future-work.md`,
-`.megaplan/tickets/`) was read to separate **incomplete** (meant to ship, didn't) from **deferred**
+The intended-scope record (chain.yaml, EPIC.md, briefs, `wakeup-note.md`, `.megaplan/tickets/`)
+was read to separate **incomplete** (meant to ship, didn't) from **deferred**
 (intentionally out of scope). Note: local plan-state JSON is mostly absent/stale — these chains ran on a
 Railway cloud box, which is the real source of truth.
 

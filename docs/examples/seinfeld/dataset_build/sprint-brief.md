@@ -21,7 +21,6 @@ Read these before planning, in order:
 4. `astrid/packs/seinfeld/vocabulary.yaml` — the locked-vocab spine
 5. `astrid/packs/seinfeld/schemas/{bucket_judge,caption}.json` — schemas
 6. `docs/creating-tools.md` — Astrid executor/orchestrator conventions
-7. `docs/orchestrator-v1-plan.md` — task-mode step kinds (referenced; we're not on task-mode yet)
 
 ## What v0 got right (do not change)
 
