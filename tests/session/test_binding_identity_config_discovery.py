@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from astrid.core.project import paths as project_paths
+from astrid.core.project.current_run import write_current_run
 from astrid.core.project.project import create_project
 from astrid.core.session import binding, config, constants, discovery, identity, paths
 from astrid.core.session.identity import Identity, IdentityError
@@ -75,10 +76,28 @@ def test_current_run_dir_returns_path_when_run_id_set(
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     from tests.conftest import make_session
 
+    (tmp_path / "projects" / "demo").mkdir(parents=True)
+    write_current_run("demo", "01RUN")
     sess = make_session(id="S-3", run_id="01RUN")
     rd = binding.current_run_dir(sess)
     assert rd is not None
     assert rd.parts[-3:] == ("demo", "runs", "01RUN")
+
+
+def test_current_run_dir_uses_current_run_pointer_over_stale_session_run_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    from tests.conftest import make_session
+
+    (tmp_path / "projects" / "demo").mkdir(parents=True)
+    write_current_run("demo", "01CURRENT")
+    sess = make_session(id="S-STALE", run_id="01STALE")
+
+    rd = binding.current_run_dir(sess)
+
+    assert rd is not None
+    assert rd.parts[-3:] == ("demo", "runs", "01CURRENT")
 
 
 # ----- identity ----------------------------------------------------------

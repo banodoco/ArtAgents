@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from astrid.core.project.paths import project_dir
 from astrid.core.session.lease import read_lease
@@ -24,6 +26,65 @@ class SessionBindingError(RuntimeError):
 
 
 SESSION_FILE_NAME = ".astrid-session"
+AttachMode = Literal["created", "opened"]
+
+
+@dataclass(frozen=True)
+class AttachSessionResult:
+    mode: AttachMode
+    session: Session
+
+
+def attach_session(
+    *,
+    project_slug: str,
+    agent_id: str,
+    projects_root: str | Path,
+    session_root: str | Path,
+    session_id: str | None = None,
+    timeline: str | None = None,
+    timeline_id: str | None = None,
+    attached_at: str | None = None,
+    opened_at: str | None = None,
+    write_project_pointer: bool = False,
+) -> AttachSessionResult:
+    """Create or open a session using only explicit roots and supplied identity.
+
+    This is the SDK-facing attach primitive. It does not prompt, print, read
+    identity files, consult ``ASTRID_HOME``/``Path.home()``, or write the
+    project pointer unless ``write_project_pointer`` is true.
+    """
+
+    from astrid.core.session.lifecycle import create_session, open_session
+
+    if session_id is None:
+        return AttachSessionResult(
+            mode="created",
+            session=create_session(
+                project_slug=project_slug,
+                agent_id=agent_id,
+                projects_root=projects_root,
+                session_root=session_root,
+                timeline=timeline,
+                timeline_id=timeline_id,
+                attached_at=attached_at,
+                last_used_at=opened_at,
+                write_project_pointer=write_project_pointer,
+            ),
+        )
+
+    return AttachSessionResult(
+        mode="opened",
+        session=open_session(
+            session_id,
+            project_slug=project_slug,
+            agent_id=agent_id,
+            projects_root=projects_root,
+            session_root=session_root,
+            opened_at=opened_at,
+            write_project_pointer=write_project_pointer,
+        ),
+    )
 
 
 # T9 / FLAG-S1-003: callers that PASS `slug=` get the file fallback. The
@@ -144,8 +205,16 @@ def is_writer_for(session: Session, run_dir: str | Path) -> bool:
 
 
 def current_run_dir(session: Session, *, root: str | Path | None = None) -> Path | None:
-    """Return the run directory bound to this session, or ``None`` when run_id is unset."""
+    """Return the project active-run directory from ``current_run.json``.
 
-    if session.run_id is None:
+    The session record may lag another tab's run start or takeover. Keep the
+    project pointer authoritative and let writer/session lifecycle paths handle
+    rebinding when they need to mutate the session record.
+    """
+
+    from astrid.core.project.current_run import read_current_run
+
+    run_id = read_current_run(session.project, root=root)
+    if run_id is None:
         return None
-    return project_dir(session.project, root=root) / "runs" / session.run_id
+    return project_dir(session.project, root=root) / "runs" / run_id

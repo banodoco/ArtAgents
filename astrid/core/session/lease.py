@@ -32,8 +32,9 @@ import fcntl
 import json
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
@@ -61,6 +62,17 @@ class LeaseRecoveryHintError(LeaseError):
     def __init__(self, message: str, *, recovery_hint: str) -> None:
         self.recovery_hint = recovery_hint
         super().__init__(f"{message} ({recovery_hint})")
+
+
+TakeoverLeaseOperation = Literal["orphan-claim", "takeover"]
+
+
+@dataclass(frozen=True)
+class LeaseTakeoverResult:
+    """Structured result for prompt-free takeover/recovery callers."""
+
+    operation: TakeoverLeaseOperation
+    lease: dict[str, Any]
 
 
 def read_lease(run_dir: str | Path) -> dict[str, Any]:
@@ -224,6 +236,46 @@ def claim_orphan_lease(
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     return updated
+
+
+def mutate_lease_for_takeover(
+    run_dir: str | Path,
+    *,
+    new_session_id: str,
+    prev_session_id: str | None = None,
+    reason: str,
+    force: bool = False,
+) -> LeaseTakeoverResult:
+    """Claim or take over ``run_dir`` using the current lease state.
+
+    This is the prompt-free lifecycle boundary around the two same-lock lease
+    rewriters. It preflights the canonical lease without mutation, then lets
+    the selected helper re-read and mutate under the events-file lock. If any
+    precondition fails, no lease/session/event state is changed by this
+    function.
+    """
+
+    lease = read_lease(run_dir)
+    attached = lease.get("attached_session_id")
+    if attached is None:
+        return LeaseTakeoverResult(
+            operation="orphan-claim",
+            lease=claim_orphan_lease(
+                run_dir,
+                new_session_id=new_session_id,
+                force=force,
+            ),
+        )
+    return LeaseTakeoverResult(
+        operation="takeover",
+        lease=bump_epoch_and_swap_session(
+            run_dir,
+            new_session_id=new_session_id,
+            prev_session_id=prev_session_id if prev_session_id is not None else attached,
+            reason=reason,
+            force=force,
+        ),
+    )
 
 
 def _raise_if_events_file_warm(handle: Any, *, force: bool, operation: str) -> None:

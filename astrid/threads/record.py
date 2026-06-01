@@ -13,6 +13,8 @@ from typing import Any, Mapping
 
 import xxhash
 
+from astrid.contracts.run_status import RunStatus
+
 from . import variants
 from .ids import generate_run_id, is_ulid
 from .provenance import enrich_run_provenance
@@ -53,7 +55,7 @@ def build_run_record(
         "orchestrator_id": orchestrator_id,
         "kind": kind,
         "pid": os.getpid(),
-        "status": "running",
+        "status": RunStatus.RUNNING.value,
         "started_at": utc_now(),
         "ended_at": None,
         "returncode": None,
@@ -78,15 +80,15 @@ def finalize_run_record(
     repo_root: Path,
     out_path: Path,
     returncode: int | None,
-    status: str | None = None,
+    status: RunStatus | str | None = None,
     error: BaseException | str | None = None,
 ) -> dict[str, Any]:
     updated = dict(record)
     updated["ended_at"] = utc_now()
     updated["returncode"] = returncode
     if status is None:
-        status = "succeeded" if returncode in (0, None) else "failed"
-    updated["status"] = status
+        status = RunStatus.COMPLETED if returncode in (0, None) else RunStatus.FAILED
+    updated["status"] = status.value if isinstance(status, RunStatus) else status
     if error is not None:
         updated["error"] = {
             "type": error.__class__.__name__ if isinstance(error, BaseException) else "runtime",
@@ -98,10 +100,11 @@ def finalize_run_record(
 
 
 def write_run_record(record: Mapping[str, Any], path: Path) -> None:
+    normalized = validate_run_record(record)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     with tmp.open("w", encoding="utf-8") as handle:
-        json.dump(dict(record), handle, indent=2, sort_keys=True)
+        json.dump(normalized, handle, indent=2, sort_keys=True)
         handle.write("\n")
         handle.flush()
         os.fsync(handle.fileno())

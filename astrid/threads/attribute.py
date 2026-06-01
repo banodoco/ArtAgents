@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from astrid.contracts.run_status import RunStatus
+
 from .ids import generate_thread_id, is_ulid, require_ulid
 from .index import ThreadIndexStore
 from .record import write_run_record
@@ -276,7 +278,13 @@ def reap_orphans(repo_root: Path) -> int:
             record = json.loads(run_json.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             continue
-        if record.get("ended_at") is not None or record.get("status") != "running":
+        if record.get("ended_at") is not None:
+            continue
+        try:
+            status = RunStatus.from_run_record_status(record.get("status"))
+        except (TypeError, ValueError):
+            continue
+        if status is not RunStatus.RUNNING:
             continue
         pid = record.get("pid")
         if _pid_alive(pid):
@@ -284,7 +292,7 @@ def reap_orphans(repo_root: Path) -> int:
         updated = dict(record)
         updated["ended_at"] = utc_now()
         updated["returncode"] = -1
-        updated["status"] = "orphaned"
+        updated["status"] = RunStatus.FAILED.value
         updated["error"] = {"type": "orphaned", "message": "Run was marked orphaned after its owning process exited."}
         try:
             write_run_record(updated, run_json)

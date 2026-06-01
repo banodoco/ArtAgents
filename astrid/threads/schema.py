@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
+from astrid.contracts.run_status import RunStatus
+
 from .ids import require_ulid
 
 SCHEMA_VERSION = 1
@@ -112,8 +114,9 @@ def validate_run_record(raw: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise ThreadSchemaError("run record must be an object")
     _require_schema_version(raw, "run record")
-    require_ulid(raw.get("run_id"), "run_id")
-    require_ulid(raw.get("thread_id"), "thread_id")
+    run_id = require_ulid(raw.get("run_id"), "run_id")
+    thread_id = require_ulid(raw.get("thread_id"), "thread_id")
+    status = _normalize_run_record_status(raw.get("status"))
     parent_run_ids = raw.get("parent_run_ids", [])
     if not isinstance(parent_run_ids, list):
         raise ThreadSchemaError("parent_run_ids must be a list")
@@ -130,8 +133,12 @@ def validate_run_record(raw: Mapping[str, Any]) -> dict[str, Any]:
         raise ThreadSchemaError("external_service_calls must be a list")
     for index, call in enumerate(calls):
         validate_external_service_call(call, f"external_service_calls[{index}]")
-    validate_persisted_paths(raw)
-    return copy.deepcopy(dict(raw))
+    record = copy.deepcopy(dict(raw))
+    record["run_id"] = run_id
+    record["thread_id"] = thread_id
+    record["status"] = status
+    validate_persisted_paths(record)
+    return record
 
 
 def validate_parent_edge(raw: object, path: str = "parent_run_ids[]") -> dict[str, Any]:
@@ -196,6 +203,17 @@ def validate_persisted_path(value: object, field: str = "path") -> str:
     if any(part in {"", ".", ".."} for part in posix.parts):
         raise ThreadSchemaError(f"{field} must not contain empty, '.', or '..' segments")
     return value
+
+
+def _normalize_run_record_status(raw: object) -> str:
+    if isinstance(raw, RunStatus):
+        return raw.value
+    if not isinstance(raw, str) or not raw:
+        raise ThreadSchemaError("status must be a non-empty string")
+    try:
+        return RunStatus.from_run_record_status(raw).value
+    except ValueError as exc:
+        raise ThreadSchemaError(str(exc)) from None
 
 
 def _require_schema_version(raw: Mapping[str, Any], label: str) -> None:

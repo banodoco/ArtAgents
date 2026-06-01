@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.run_status import RunStatus
 from astrid.contracts.schema import CommandSpec, Port
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
@@ -31,14 +32,16 @@ def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_coll
     registry = ExecutorRegistry([_writer_executor("test.writer"), _requires_executor("test.requires"), _skip_executor("test.skip")])
 
     success = run_executor(ExecutorRunRequest("test.writer", out="", project="demo"), registry)
-    with pytest.raises(ExecutorRunnerError):
+    with pytest.raises(ExecutorRunnerError, match="missing required input") as excinfo:
         run_executor(ExecutorRunRequest("test.requires", out="", project="demo"), registry)
     skipped = run_executor(ExecutorRunRequest("test.skip", out="", project="demo", inputs={"skip_me": "1"}), registry)
 
     assert success.returncode == 0
     assert skipped.skipped is True
     records = _project_records(projects_root)
-    assert [record["status"] for record in records] == ["success", "error", "skipped"]
+    assert [record["status"] for record in records] == ["completed", "failed", "skipped"]
+    assert records[1]["metadata"]["returncode"] == -1
+    assert records[1]["metadata"]["error"] == str(excinfo.value)
     writer_out = Path(records[0]["out"])
     assert (writer_out / "env.txt").read_text(encoding="utf-8") == "1"
     assert (writer_out / "run.json").exists()
@@ -74,7 +77,7 @@ def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_p
 
     assert result.returncode == 0
     record = _project_records(projects_root)[0]
-    assert record["status"] == "success"
+    assert record["status"] == "completed"
     assert record["tool_id"] == "test.orch"
     assert (Path(record["out"]) / "orch-env.txt").read_text(encoding="utf-8") == "1"
 
@@ -103,7 +106,7 @@ def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_
     code = hype.main(["--project", "demo", "--target-duration", "1"])
     assert code == 2
     error_record = _project_records(projects_root)[0]
-    assert error_record["status"] == "error"
+    assert error_record["status"] == "failed"
     assert error_record["metadata"]["returncode"] == 2
 
     brief = tmp_path / "brief.txt"
@@ -120,7 +123,7 @@ def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_
     code = hype.main(["--project", "demo", "--brief", str(brief), "--target-duration", "1", "--brief-slug", "brief-a"])
     assert code == 0
     success_record = _project_records(projects_root)[1]
-    assert success_record["status"] == "success"
+    assert success_record["status"] == "completed"
     assert sorted(success_record["artifacts"]) == ["assets", "metadata", "timeline"]
     assert success_record["artifacts"]["timeline"]["source_path"].endswith("briefs/brief-a/hype.timeline.json")
     assert (Path(success_record["out"]) / "timeline.json").exists()
@@ -175,6 +178,36 @@ def test_run_record_baseline_snapshot_is_sha256_hex_at_canonical_path(
     assert run_json_path.is_file()
     on_disk = json.loads(run_json_path.read_text(encoding="utf-8"))
     assert on_disk["metadata"]["baseline_snapshot"] == expected_digest
+
+
+def test_load_run_record_normalizes_legacy_status_without_rewriting_disk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import load_run_record
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    create_project("demo")
+    legacy_path = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAV" / "run.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_payload = {
+        "artifacts": {},
+        "created_at": "2026-06-01T00:00:00Z",
+        "metadata": {},
+        "out": str(legacy_path.parent),
+        "project_slug": "demo",
+        "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "schema_version": 1,
+        "status": "prepared",
+        "updated_at": "2026-06-01T00:00:00Z",
+    }
+    encoded = json.dumps(legacy_payload, indent=2, sort_keys=True) + "\n"
+    legacy_path.write_text(encoded, encoding="utf-8")
+
+    loaded = load_run_record("demo", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+
+    assert loaded["status"] == RunStatus.RUNNING.value
+    assert legacy_path.read_text(encoding="utf-8") == encoded
 
 
 def _writer_executor(executor_id: str) -> ExecutorDefinition:

@@ -179,7 +179,7 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
         context: ProjectRunContext,
         request: ExecutorRunRequest,
         *,
-        status: str,
+        status: RunStatus,
         returncode: int | None,
         error: BaseException | str | None = None,
     ) -> None:
@@ -187,7 +187,7 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
             context, request, status=status, returncode=returncode, error=error
         )
 
-    def status_for_result(self, result: ExecutorRunResult) -> str:
+    def status_for_result(self, result: ExecutorRunResult) -> RunStatus:
         return _project_status_for_result(result)
 
     def result_returncode(self, result: ExecutorRunResult) -> int | None:
@@ -503,19 +503,19 @@ def _project_argv(request: ExecutorRunRequest) -> list[str]:
     return argv
 
 
-def _project_status_for_result(result: ExecutorRunResult) -> str:
+def _project_status_for_result(result: ExecutorRunResult) -> RunStatus:
     if result.skipped or result.dry_run:
-        return RunStatus.SKIPPED.to_project_record_status()
+        return RunStatus.SKIPPED
     if not result.ok:
-        return RunStatus.FAILED.to_project_record_status()
-    return RunStatus.COMPLETED.to_project_record_status()
+        return RunStatus.FAILED
+    return RunStatus.COMPLETED
 
 
 def _finalize_project_executor(
     context: ProjectRunContext,
     request: ExecutorRunRequest,
     *,
-    status: str,
+    status: RunStatus,
     returncode: int | None,
     error: BaseException | str | None = None,
 ) -> None:

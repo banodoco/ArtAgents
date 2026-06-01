@@ -107,6 +107,38 @@ class TestBlockedRepresentableEndToEnd:
         assert _run_status([{"kind": "run_aborted"}]) == "aborted"
 
 
+class TestRunRecordBoundary:
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("running", RunStatus.RUNNING),
+            ("completed", RunStatus.COMPLETED),
+            ("failed", RunStatus.FAILED),
+            ("blocked", RunStatus.BLOCKED),
+            ("aborted", RunStatus.ABORTED),
+            ("skipped", RunStatus.SKIPPED),
+            ("prepared", RunStatus.RUNNING),
+            ("success", RunStatus.COMPLETED),
+            ("succeeded", RunStatus.COMPLETED),
+            ("error", RunStatus.FAILED),
+            ("orphaned", RunStatus.FAILED),
+        ],
+    )
+    def test_from_run_record_status_accepts_canonical_and_legacy_tokens(self, raw, expected):
+        assert RunStatus.from_run_record_status(raw) is expected
+
+    def test_run_record_boundary_serializes_canonically(self):
+        assert RunStatus.from_run_record_status("prepared").value == "running"
+        assert RunStatus.from_run_record_status("success").value == "completed"
+        assert RunStatus.from_run_record_status("succeeded").value == "completed"
+        assert RunStatus.from_run_record_status("error").value == "failed"
+        assert RunStatus.from_run_record_status("orphaned").value == "failed"
+
+    def test_unknown_run_record_status_rejected(self):
+        with pytest.raises(ValueError):
+            RunStatus.from_run_record_status("success-ish")
+
+
 class TestProjectRecordBoundary:
     def test_project_record_status_tokens(self):
         assert RunStatus.COMPLETED.to_project_record_status() == "success"

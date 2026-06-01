@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.task import env as task_env
 from astrid.core.task.plan import step_dir_for
 from astrid.threads.ids import generate_run_id
@@ -109,7 +110,7 @@ def prepare_project_run(
             "project_slug": project_slug,
             "run_id": parent_run_id,
             "schema_version": 1,
-            "status": "attached",
+            "status": RunStatus.RUNNING.value,
             "updated_at": now,
         }
         if tool_id is not None:
@@ -141,7 +142,7 @@ def prepare_project_run(
         effective_run_id,
         tool_id=tool_id,
         kind=kind,
-        status="prepared",
+        status=RunStatus.RUNNING,
         out=run_root,
         argv=redact_cli_args(list(argv or ())),
         metadata=dict(metadata or {}),
@@ -235,7 +236,7 @@ def _record_contributing_run(
 def finalize_project_run(
     context: ProjectRunContext,
     *,
-    status: str,
+    status: RunStatus | str,
     returncode: int | None = None,
     error: BaseException | str | None = None,
     metadata: Mapping[str, Any] | None = None,
@@ -437,20 +438,30 @@ def discover_hype_artifact_root(
     return matches[0] if matches else None
 
 
-def _normalize_status(status: str, *, returncode: int | None) -> str:
-    if status == "success" and returncode not in (None, 0):
-        return "failed"
-    if status in {"success", "failed", "skipped", "error", "prepared"}:
-        return status
-    if status in {"succeeded", "ok"}:
-        return "success"
-    if status in {"skip"}:
-        return "skipped"
-    if status in {"nonzero"}:
-        return "failed"
-    if returncode not in (None, 0):
-        return "failed"
-    raise ProjectRunError(f"unsupported project run status: {status}")
+def _normalize_status(status: RunStatus | str, *, returncode: int | None) -> str:
+    normalized = status if isinstance(status, RunStatus) else _normalize_status_token(status)
+    if normalized is RunStatus.COMPLETED and returncode not in (None, 0):
+        return RunStatus.FAILED.value
+    if normalized is RunStatus.RUNNING and returncode not in (None, 0):
+        return RunStatus.FAILED.value
+    return normalized.value
+
+
+def _normalize_status_token(status: str) -> RunStatus:
+    try:
+        return RunStatus.from_run_record_status(status)
+    except ValueError:
+        pass
+    legacy_map = {
+        "attached": RunStatus.RUNNING,
+        "ok": RunStatus.COMPLETED,
+        "nonzero": RunStatus.FAILED,
+        "skip": RunStatus.SKIPPED,
+    }
+    try:
+        return legacy_map[status]
+    except KeyError:
+        raise ProjectRunError(f"unsupported project run status: {status}") from None
 
 
 def _has_hype_artifact_set(path: Path) -> bool:

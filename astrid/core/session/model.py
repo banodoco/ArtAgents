@@ -1,4 +1,4 @@
-"""Session dataclass + JSON serialization.
+"""Session dataclass + explicit-root storage primitives.
 
 A :class:`Session` is the per-tab binding record stored under
 ``~/.astrid/sessions/<ulid>.json``. Frozen — :func:`dataclasses.replace` is
@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core.project.jsonio import ProjectJsonError, read_json, write_json_atomic
 from astrid.core.util.time import utc_now_iso
 
 SessionRole = Literal["writer", "reader", "orphan-pending"]
@@ -21,6 +21,18 @@ _ALLOWED_ROLES: tuple[SessionRole, ...] = ("writer", "reader", "orphan-pending")
 
 class SessionValidationError(ValueError):
     """Raised when a session record fails validation."""
+
+
+class SessionStoreError(RuntimeError):
+    """Raised when explicit-root session storage cannot complete an operation."""
+
+
+class SessionRecordNotFoundError(SessionStoreError, FileNotFoundError):
+    """Raised when an explicit-root session record does not exist."""
+
+
+class SessionRecordMalformedError(SessionStoreError):
+    """Raised when an explicit-root session record cannot be decoded."""
 
 
 def now_iso() -> str:
@@ -75,6 +87,67 @@ class Session:
     @classmethod
     def from_json(cls, path: str | Path) -> "Session":
         return cls.from_dict(read_json(path))
+
+
+class SessionStore:
+    """Persist :class:`Session` records under an explicit ``session_root``.
+
+    This SDK-facing storage helper never consults ``ASTRID_HOME``,
+    ``Path.home()``, or any prompt-driven bootstrap path. Callers must pass the
+    concrete directory that owns the session files.
+    """
+
+    def __init__(self, *, session_root: str | Path) -> None:
+        self._session_root = Path(session_root).resolve()
+
+    @property
+    def session_root(self) -> Path:
+        return self._session_root
+
+    def session_path(self, session_id: str) -> Path:
+        if not isinstance(session_id, str) or not session_id:
+            raise SessionStoreError("session_id must be a non-empty string")
+        return self._session_root / f"{session_id}.json"
+
+    def save(self, session: Session) -> Path:
+        path = self.session_path(session.id)
+        session.to_json(path)
+        return path
+
+    def load(self, session_id: str) -> Session:
+        path = self.session_path(session_id)
+        try:
+            return Session.from_json(path)
+        except FileNotFoundError as exc:
+            raise SessionRecordNotFoundError(
+                f"session record not found: {path}"
+            ) from exc
+        except (ProjectJsonError, SessionValidationError) as exc:
+            raise SessionRecordMalformedError(
+                f"session record is malformed: {path}: {exc}"
+            ) from exc
+
+    def iter_sessions(self, *, skip_malformed: bool = False) -> list[Session]:
+        if not self._session_root.exists():
+            return []
+        sessions: list[Session] = []
+        for entry in sorted(self._session_root.iterdir()):
+            if entry.suffix != ".json":
+                continue
+            try:
+                sessions.append(self.load(entry.stem))
+            except SessionStoreError:
+                if skip_malformed:
+                    continue
+                raise
+        return sessions
+
+    def delete(self, session_id: str) -> Path:
+        path = self.session_path(session_id)
+        if not path.exists():
+            raise SessionRecordNotFoundError(f"session record not found: {path}")
+        path.unlink()
+        return path
 
 
 def _require_str(raw: dict[str, Any], key: str) -> str:

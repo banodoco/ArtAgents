@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.project import paths
 from astrid.core.project.project import create_project, show_project
 from astrid.core.project.schema import (
@@ -104,21 +105,21 @@ def test_build_and_validate_run_record_round_trip() -> None:
         "01HXYZ",
         tool_id="my-tool",
         kind="custom",
-        status="prepared",
+        status=RunStatus.RUNNING,
         argv=["--flag", "value"],
         metadata={"baseline_snapshot": "abc"},
     )
     normalized = validate_run_record(record)
-    assert normalized["status"] == "prepared"
+    assert normalized["status"] == "running"
     assert normalized["argv"] == ["--flag", "value"]
     assert normalized["metadata"]["baseline_snapshot"] == "abc"
     assert normalized["schema_version"] == RUN_SCHEMA_VERSION
 
 
 def test_run_record_status_must_be_known() -> None:
-    record = build_run_record("demo", "01HXYZ", status="prepared")
+    record = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
     record["status"] = "garbage"
-    with pytest.raises(ProjectValidationError, match="run.status"):
+    with pytest.raises(ProjectValidationError, match="unmapped run-record status"):
         validate_run_record(record)
 
 
@@ -256,12 +257,25 @@ def test_managed_binding_metadata_with_timeline_id_round_trip() -> None:
 def test_legacy_run_without_binding_metadata_validates() -> None:
     """Runs written before m3.5 lack timeline_slug/event_stream_id/binding_mode in metadata."""
 
-    record = build_run_record("demo", "01HXYZ", status="prepared")
+    record = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
     assert "timeline_slug" not in record["metadata"]
     assert "timeline_event_stream_id" not in record["metadata"]
     assert "timeline_binding_mode" not in record["metadata"]
     validated = validate_run_record(record)
-    assert validated["status"] == "prepared"
+    assert validated["status"] == "running"
+
+
+def test_legacy_run_status_normalizes_in_memory_without_rewrite(tmp_path: Path) -> None:
+    run_json = tmp_path / "run.json"
+    legacy = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
+    legacy["status"] = "prepared"
+    encoded = json.dumps(legacy, sort_keys=True, indent=2) + "\n"
+    run_json.write_text(encoded, encoding="utf-8")
+
+    loaded = validate_run_record(json.loads(run_json.read_text(encoding="utf-8")))
+
+    assert loaded["status"] == "running"
+    assert run_json.read_text(encoding="utf-8") == encoded
 
 
 def test_managed_binding_mode_must_be_known() -> None:

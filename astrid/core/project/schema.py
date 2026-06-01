@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.util.time import utc_now_seconds, utc_now_seconds as utc_now_iso
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id
@@ -23,7 +24,7 @@ PROJECT_SCHEMA_VERSION = 1
 SOURCE_SCHEMA_VERSION = 1
 RUN_SCHEMA_VERSION = 1
 SOURCE_KINDS = {"audio", "image", "other", "video"}
-RUN_STATUSES = {"prepared", "success", "failed", "skipped", "error"}
+RUN_STATUSES = {status.value for status in RunStatus}
 
 
 class ProjectValidationError(ValueError):
@@ -83,7 +84,7 @@ def build_run_record(
     *,
     tool_id: str | None = None,
     kind: str | None = None,
-    status: str = "prepared",
+    status: str | RunStatus = RunStatus.RUNNING,
     out: str | Path | None = None,
     argv: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
@@ -109,7 +110,7 @@ def build_run_record(
         "project_slug": validate_project_slug(project_slug),
         "run_id": validate_run_id(run_id),
         "schema_version": RUN_SCHEMA_VERSION,
-        "status": status,
+        "status": _normalize_run_record_status(status),
         "updated_at": now,
     }
     if tool_id is not None:
@@ -169,9 +170,7 @@ def validate_source(raw: Any) -> dict[str, Any]:
 def validate_run_record(raw: Any) -> dict[str, Any]:
     data = _require_mapping(raw, "run")
     _require_version(data, RUN_SCHEMA_VERSION, "run")
-    status = _require_string(data.get("status"), "run.status")
-    if status not in RUN_STATUSES:
-        raise ProjectValidationError(f"run.status must be one of {sorted(RUN_STATUSES)}")
+    status = _normalize_run_record_status(data.get("status"))
     payload = dict(data)
     payload.update(
         {
@@ -214,6 +213,16 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
     payload.setdefault("created_at", utc_now_seconds())
     payload.setdefault("updated_at", payload["created_at"])
     return payload
+
+
+def _normalize_run_record_status(raw: Any) -> str:
+    if isinstance(raw, RunStatus):
+        return raw.value
+    status = _require_string(raw, "run.status")
+    try:
+        return RunStatus.from_run_record_status(status).value
+    except ValueError as exc:
+        raise ProjectValidationError(str(exc)) from None
 
 
 def validate_source_kind(raw: Any, *, path: str = "source.kind") -> str:
