@@ -1,0 +1,33 @@
+name: canonical_dry_run
+tier: dry_run
+description: |
+  Canonical dry-run validation scenario used by validate_scenario_dry_run.
+  Exercises all required fields: name, tier, description, brief, agents, acceptance.
+brief: canonical.md
+
+priming:
+  - create_project: $SLUG
+
+target_orchestrator: video_editing.hype
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  - no_aborts
+  - subjective:
+      - exercised_clip_verbs
+      - verified_event_log
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 10
+
+tags:
+  - dry_run
+  - canonical
+
+assessment:
+  universal_checks: true

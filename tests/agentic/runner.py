@@ -706,6 +706,129 @@ def _run_scenario(name: str, run_tag: str) -> dict[str, Any]:
     return summary
 
 
+# ---------------------------------------------------------------------------
+# Dry-run validation (pytest-facing, no subprocess / network)
+# ---------------------------------------------------------------------------
+
+import re as _re  # noqa: E402
+
+_KNOWN_TOKENS = frozenset({"$SLUG", "$AGENT_ID", "$RUN_TAG", "$TARGET_ORCH"})
+_TOKEN_RE = _re.compile(r"\$[A-Z][A-Z0-9_]{1,30}")
+
+
+def _find_unresolved_tokens(text: str) -> set[str]:
+    """Return every $TOKEN-like substring that is not a known variable."""
+    return {m.group(0) for m in _TOKEN_RE.finditer(text)} - _KNOWN_TOKENS
+
+
+def validate_scenario_dry_run(
+    name: str,
+    *,
+    run_tag: str = "dry-run-validation",
+    report_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Load a scenario YAML, validate its shape, render briefs, and report
+    any unresolved template tokens — all without subprocess or network calls.
+
+    Returns a dict with keys ``ok``, ``errors``, ``warnings``, and
+    ``invocations``.  Callers must monkeypatch ``SCENARIOS_DIR`` and
+    ``BRIEFS_DIR`` if they want to point at synthetic fixtures.
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    invocations: list[dict[str, Any]] = []
+
+    # -- load YAML -----------------------------------------------------------
+    try:
+        scenario = _load_scenario(name)
+    except (FileNotFoundError, ValueError) as exc:
+        return {
+            "ok": False,
+            "errors": [str(exc)],
+            "warnings": [],
+            "invocations": [],
+        }
+    # _load_scenario already checks name/tier/description/brief/agents/acceptance
+    # plus name-match; we mirror those checks explicitly for the dry-run result.
+
+    required = {"name", "tier", "description", "brief", "agents", "acceptance"}
+    missing = required - scenario.keys()
+    if missing:
+        errors.append(f"missing required keys: {sorted(missing)}")
+    if scenario.get("name") != name:
+        errors.append(
+            f"name-field mismatch: file is {name}.yaml but `name` field "
+            f"is {scenario.get('name')!r}"
+        )
+    if not isinstance(scenario.get("agents"), list) or not scenario.get("agents"):
+        errors.append("agents must be a non-empty list")
+    if errors:
+        return {"ok": False, "errors": errors, "warnings": warnings, "invocations": invocations}
+
+    # -- brief template existence -------------------------------------------
+    brief_rel = scenario.get("brief", "")
+    brief_template = BRIEFS_DIR / brief_rel
+    if not brief_template.is_file():
+        errors.append(f"brief template not found: {brief_template}")
+        return {"ok": False, "errors": errors, "warnings": warnings, "invocations": invocations}
+
+    # -- build invocation summaries -----------------------------------------
+    target_orch = scenario.get("target_orchestrator")
+    scenario_name = scenario["name"]
+    idx = 0
+    for agent_spec in scenario["agents"]:
+        model = agent_spec.get("model", "unknown")
+        count = int(agent_spec.get("count", 1))
+        for _i in range(count):
+            idx += 1
+            short_model = (
+                model.replace("deepseek-v4-pro", "ds")
+                .replace("kimi-k2p5", "k")
+                .replace("claude", "cl")
+            )
+            slug = f"agentic-{scenario_name.replace('_', '-')}-{short_model}-{idx}"[:48]
+            agent_id = f"agentic-{scenario_name}-{short_model}-{idx}"
+            rendered = _render_brief(
+                brief_template,
+                slug=slug,
+                agent_id=agent_id,
+                run_tag=run_tag,
+                target_orchestrator=target_orch,
+            )
+            # Write rendered brief to report_dir when provided (pytest tmp_path).
+            if report_dir is not None:
+                brief_path = report_dir / f"{slug}.brief.md"
+                brief_path.write_text(rendered, encoding="utf-8")
+
+            unresolved = _find_unresolved_tokens(rendered)
+            inv_summary = {
+                "index": idx,
+                "model": model,
+                "slug": slug,
+                "agent_id": agent_id,
+                "unresolved_tokens": sorted(unresolved),
+            }
+            invocations.append(inv_summary)
+            if unresolved:
+                warnings.append(
+                    f"invocation {idx} ({agent_id}): "
+                    f"unresolved tokens: {sorted(unresolved)}"
+                )
+
+    if any(inv["unresolved_tokens"] for inv in invocations):
+        all_unresolved = sorted(
+            {t for inv in invocations for t in inv["unresolved_tokens"]}
+        )
+        errors.append(f"unresolved template tokens: {all_unresolved}")
+
+    return {
+        "ok": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "invocations": invocations,
+    }
+
+
 def _scenario_files() -> list[Path]:
     return sorted(p for p in SCENARIOS_DIR.glob("*.yaml") if not p.name.startswith("_"))
 
