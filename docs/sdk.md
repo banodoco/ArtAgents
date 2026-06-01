@@ -196,6 +196,59 @@ except astrid.CapabilityInvocationError as e:
     original = e.__cause__  # The exception raised by the runner
 ```
 
+### Event Observation
+
+`read_events()` returns a verified, read-only snapshot of a completed run's
+event stream. `subscribe_events()` yields events from an in-progress run as
+they are appended.
+
+```python
+import astrid
+
+# Offline inspection of a completed run
+events = astrid.read_events(
+    "my-project",
+    "my-run-id",
+    projects_root="/tmp/astrid-projects",
+    verify=True,
+)
+for event in events:
+    print(event.kind, event.timestamp)
+
+# Live observation of an in-progress run
+for event in astrid.subscribe_events(
+    "my-project",
+    "my-run-id",
+    projects_root="/tmp/astrid-projects",
+    follow=True,
+    poll_interval=0.5,
+):
+    print(f"[{event.kind}] {event.payload.get('command', '')}")
+```
+
+Each event is an `EventStreamRecord` with fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `source` | `str` | `"task"` or `"audit"` |
+| `line` | `int` | One-indexed line number in the event log |
+| `timestamp` | `str \| None` | ISO-8601 timestamp from the event |
+| `kind` | `str \| None` | Event kind (`"run_started"`, `"step_dispatched"`, `"run_completed"`, etc.) |
+| `hash` | `str \| None` | SHA-256 hash for chain verification |
+| `payload` | `dict[str, Any]` | The raw event dict from the JSONL file |
+
+When `verify=True` (the default), both functions validate the hash chain
+before returning or yielding. A broken chain raises `CapabilityEventLogError`.
+An invalid project slug raises `CapabilityPreconditionError`.
+
+`subscribe_events()` accepts two additional keyword arguments:
+
+- `follow: bool = False` — when `True`, the generator polls for new events
+  instead of exiting after consuming the current file.
+- `poll_interval: float = 0.1` — seconds between polls when following.
+- `idle_polls: int | None = None` — maximum consecutive empty polls before
+  the generator exits. `None` means block indefinitely.
+
 ## DTO Reference
 
 ### `Capability` vs `CapabilityHandle`
@@ -308,6 +361,9 @@ version bump. Breaking changes require a deprecation cycle.
 | `CapabilityHandle` | Existence as a field of `Capability` and its own exported name |
 | `DiscoveryResult` | Top-level fields: `executors`, `orchestrators`, `elements`, `capabilities` |
 | `InvocationResult` | Top-level fields: `capability_id`, `capability_type`, `native_kind`, `ok`, `error`, `raw_result` |
+| `read_events()` | Signature and return type (`tuple[EventStreamRecord, ...]`) |
+| `subscribe_events()` | Signature as a generator function |
+| `EventStreamRecord` | Top-level fields: `source`, `line`, `timestamp`, `kind`, `hash`, `payload` |
 | `Port`, `Output`, `AliasRecord`, `Provenance`, `SafetyDeclaration`, `ExecError` | Exported names and existence as types |
 
 ### Tier 2 — Evolving (backward-compatible additions only)

@@ -1,0 +1,3 @@
+{"hash":"sha256:934ddd404b6e6379b68eba139fff5002ae4c2ac07db1ad416c7debfa93358ae0","kind":"run_started","plan_hash":"demo-plan-hash","run_id":"demo-run-001","ts":"2026-06-01T00:00:00.000000Z"}
+{"command":"python3 -m astrid.packs.editorial.executors.arrange.run --out /tmp/demo-out --brief \"test brief\" --pool default --theme default --target_duration 60","hash":"sha256:ae7010efcb0e1175ac018f22defc7e39b73128b7577782f998b8ad58eb0f95ad","kind":"step_dispatched","plan_step_path":["editorial.arrange"],"ts":"2026-06-01T00:00:01.000000Z"}
+{"hash":"sha256:92c32c1da202924c3c096bff4c7ff035b850000f6225274515cfa036ad24d938","kind":"run_completed","run_id":"demo-run-001","ts":"2026-06-01T00:00:02.000000Z"}
