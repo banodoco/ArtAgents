@@ -22,6 +22,7 @@ TOP_LEVEL_ASTRID_FILES = {
     "_paths.py",
     "doctor.py",
     "pipeline.py",
+    "sdk.py",
     "setup_cli.py",
     "structure.py",
     "theme_schema.py",
