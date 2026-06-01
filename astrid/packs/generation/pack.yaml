@@ -18,7 +18,13 @@ permissions:
     reason: Reads reference images and prompt files; writes generated outputs.
   - id: environment
     reason: Reads FAL_KEY for cloud generation backends.
-description: Generative image and video executors.
+description: Text-to-image and text-to-video generation across local (vibecomfy/ComfyUI) and cloud (fal, OpenAI) backends, with t2i/i2i/edit and t2v/i2v/flf modes.
+keywords: [image, video, generate, flux, fal, vibecomfy, t2i, t2v]
+capabilities: [generate_image, generate_image_openai, generate_video]
+agent:
+  purpose: "Use to synthesize new image or video frames from text prompts (optionally with reference images), choosing a model and a local or cloud execution backend."
+  do_not_use_for: "Editing/arranging existing footage (use the editorial pack), Foley/audio generation (use the foley or fal packs), or lossless clip trimming (use the media pack)."
+  normal_entrypoints: [generation.generate_image, generation.generate_video, generation.generate_image_openai]
 content:
   executors: executors
 aliases:

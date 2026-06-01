@@ -4,6 +4,13 @@ The `astrid` package exposes a public Python SDK for capability discovery,
 schema inspection, and invocation. Import the top-level package — the SDK
 surface is available directly from `import astrid`.
 
+> **Compatibility policy**: This document is a user-facing walkthrough. The
+> normative v1 compatibility contract lives in
+> [docs/platform-contract.md](platform-contract.md). That file defines the
+> supported export list, SemVer rules, deprecation window, DTO stability tiers,
+> manifest schema contract, and disclosure-only trust block. When this doc and
+> `platform-contract.md` differ, the platform contract wins.
+
 ```python
 import astrid
 
@@ -344,7 +351,10 @@ dicts. Dataclasses are converted via their `to_dict()` method.
 
 ## Stability Tiers
 
-The SDK follows a three-tier stability model.
+The SDK follows a three-tier stability model. The normative definitions and
+the authoritative list of Tier-1, Tier-2, and Tier-3 surfaces are in
+[docs/platform-contract.md](platform-contract.md). This section summarises
+the tiers for SDK users; the platform contract is the source of truth.
 
 ### Tier 1 — Stable (semver-guarded)
 
@@ -356,7 +366,7 @@ version bump. Breaking changes require a deprecation cycle.
 | `discover()` | Signature and return type (`DiscoveryResult`) |
 | `get_capability()` | Signature and return type (`Capability`) |
 | `invoke()` | Signature and return type (`InvocationResult`) |
-| Exception classes | `AstridSDKError`, `CapabilityNotFoundError`, `CapabilityAmbiguousError`, `UnsupportedCapabilityError`, `CapabilityInvocationError` — all names and their position in the hierarchy |
+| Exception classes | `AstridSDKError`, `CapabilityNotFoundError`, `CapabilityAmbiguousError`, `CapabilityValidationError`, `CapabilityMissingInputError`, `CapabilityPreconditionError`, `CapabilityRuntimeError`, `CapabilityLeaseError`, `CapabilityEventLogError`, `UnsupportedCapabilityError`, `CapabilityInvocationError` — all 11 names and their position in the hierarchy |
 | `Capability` | Top-level fields: `id`, `capability_type`, `native_kind`, `handle`, `inputs`, `outputs`, `schema`, `defaults`, `definition` |
 | `CapabilityHandle` | Existence as a field of `Capability` and its own exported name |
 | `DiscoveryResult` | Top-level fields: `executors`, `orchestrators`, `elements`, `capabilities` |
@@ -405,11 +415,24 @@ RuntimeError
       ├── CapabilityNotFoundError
       ├── CapabilityAmbiguousError
       ├── UnsupportedCapabilityError
-      └── CapabilityInvocationError
+      ├── CapabilityInvocationError
+      ├── CapabilityValidationError
+      │    └── CapabilityMissingInputError
+      ├── CapabilityPreconditionError
+      ├── CapabilityRuntimeError
+      ├── CapabilityLeaseError
+      └── CapabilityEventLogError
 ```
 
-All SDK exceptions are public and importable from `astrid`. `CapabilityInvocationError`
+All 11 SDK exceptions are public and importable from `astrid`.
+`CapabilityMissingInputError` is a subclass of `CapabilityValidationError` and
+carries the names of missing required inputs. `CapabilityInvocationError`
 preserves the original runner exception as `__cause__`.
+`CapabilityEventLogError` is raised by `read_events()` when the hash chain is
+broken; `CapabilityPreconditionError` is raised when a project slug or
+prerequisite check fails. `CapabilityLeaseError` is raised when the writer
+lease cannot be acquired. `CapabilityRuntimeError` signals an unexpected
+failure during SDK operations.
 
 ## Lazy Loading
 

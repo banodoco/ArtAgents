@@ -18,7 +18,25 @@ permissions:
     reason: Reads workflow JSON files and writes generated outputs.
   - id: accelerator
     reason: May use GPU for ComfyUI model inference.
-description: VibeComfy and ComfyUI workflow executors.
+description: Run and validate ComfyUI / VibeComfy workflow JSON to generate images, video, and audio.
+keywords:
+- comfyui
+- vibecomfy
+- workflow
+- generate
+- image
+- video
+- gpu
+- runpod
+capabilities:
+- run_workflow
+- validate_workflow
+agent:
+  purpose: Choose this pack to execute or validate a ComfyUI/VibeComfy workflow JSON — generating images, video, or audio from a graph, locally or on GPU.
+  do_not_use_for: Do not use to understand existing media (use understanding) or to cut/render timelines (use video_editing); it runs workflow graphs, not editorial pipelines.
+  normal_entrypoints:
+  - vibecomfy.run
+  - vibecomfy.validate
 content:
   executors: executors
 aliases:

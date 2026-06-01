@@ -1,14 +1,236 @@
-# Platform Contract — v1 Permissions and Trust
+# Astrid Platform Contract — v1
 
-This document defines the v1 platform contract for pack permissions, trust
-acknowledgement, and SDK discovery. It is a normative reference for
-implementors and pack authors. For the user-facing security guidance, see
-[SECURITY.md](../SECURITY.md).
+This document is the normative v1 platform contract for the public Python SDK,
+manifest schemas, and the disclosure-only trust model. If this document and any
+other SDK or pack-system doc disagree, this file wins.
 
-## V1 Trust Block Invariants
+For user-facing safe-use guidance, see [SECURITY.md](../SECURITY.md). For a
+friendlier SDK walkthrough, see [docs/sdk.md](sdk.md).
 
-Every pack trust summary carries a fixed trust block. These values are v1
-invariants — they will not change within the v1 major version:
+## Contract Scope
+
+Astrid v1 has one public Python import boundary:
+
+```python
+import astrid
+```
+
+The v1 contract is defined by:
+
+- The exact top-level names exported by `astrid.__all__`
+- The documented signatures and DTO categories reachable from `import astrid`
+- The v1 manifest schema files under `astrid/packs/schemas/v1/`
+- The disclosure-only trust/install rules in this document
+
+The v1 contract is **not** defined by internal module layout, lazy-loader
+implementation details, registry internals, or CLI implementation modules.
+
+## Public SDK Boundary
+
+### Supported Top-Level Exports
+
+`astrid.__all__` is the source of truth for the supported top-level Python SDK
+surface in v1. It contains exactly 27 names:
+
+- Functions: `discover`, `get_capability`, `invoke`, `read_events`,
+  `subscribe_events`
+- DTOs: `Capability`, `DiscoveryResult`, `EventStreamRecord`,
+  `InvocationResult`, `CapabilityHandle`, `Port`, `Output`, `AliasRecord`,
+  `Provenance`, `SafetyDeclaration`, `ExecError`
+- Exceptions: `AstridSDKError`, `CapabilityNotFoundError`,
+  `CapabilityAmbiguousError`, `CapabilityValidationError`,
+  `CapabilityMissingInputError`, `CapabilityPreconditionError`,
+  `CapabilityRuntimeError`, `CapabilityLeaseError`,
+  `CapabilityEventLogError`, `UnsupportedCapabilityError`,
+  `CapabilityInvocationError`
+
+Anything importable from `astrid` outside this list is out of contract for v1.
+
+### Public Boundary Rule
+
+The supported import pattern is:
+
+```python
+import astrid
+```
+
+Callers may access the supported names as `astrid.<name>`. This is the public
+boundary Astrid commits to for v1.
+
+### Non-Contract Surfaces
+
+The following surfaces are explicitly out of the v1 public contract, even if
+they are importable today:
+
+- `astrid.sdk` as a direct import target
+- Everything under `astrid.core.*`
+- Everything under `astrid.packs.*`
+- Registry internals, resolver internals, and helper functions used to build
+  DTOs
+- CLI implementation modules and verb routing modules (for example pipeline and
+  command-entry internals)
+- Internal tests, fixtures, and generated discovery payload shapes not exposed
+  through the documented DTO contract
+
+These surfaces may change in any minor or patch release without deprecation.
+
+## SemVer And Deprecation
+
+Astrid follows SemVer for the public boundary defined above.
+
+- Patch releases may fix bugs and clarify behavior without breaking the
+  documented v1 contract.
+- Minor releases may add new top-level keyword parameters, DTO fields, manifest
+  schema fields, and discovery metadata when those additions are backward
+  compatible.
+- Major releases may remove or break previously public v1 surfaces.
+
+### Deprecation Window
+
+The default deprecation window for a public v1 surface is **two minor
+releases**.
+
+Example: if a deprecation first ships in `1.4.0`, the surface remains supported
+through `1.5.x` and may be removed no earlier than `1.6.0`.
+
+This two-minor rule is the concrete v1 policy unless a stricter per-surface
+guarantee is documented. It is intentionally conservative while broader SDK
+governance remains lightweight.
+
+Deprecations should use the existing alias/deprecation metadata model where
+possible and should point callers at the replacement surface.
+
+## DTO Stability Tiers
+
+Astrid v1 uses three stability tiers for data returned from the public SDK.
+
+### Tier 1 — Stable Contract Fields
+
+These names, signatures, and top-level DTO fields are SemVer-guarded:
+
+- Exported names in `astrid.__all__`
+- Function signatures for `discover()`, `get_capability()`, `invoke()`,
+  `read_events()`, and `subscribe_events()`
+- The existence of these DTO types: `Capability`, `DiscoveryResult`,
+  `InvocationResult`, `EventStreamRecord`, `CapabilityHandle`, `Port`,
+  `Output`, `AliasRecord`, `Provenance`, `SafetyDeclaration`, `ExecError`
+- `Capability` top-level fields: `id`, `capability_type`, `native_kind`,
+  `handle`, `inputs`, `outputs`, `schema`, `defaults`, `definition`
+- `DiscoveryResult` top-level fields: `executors`, `orchestrators`, `elements`,
+  `capabilities`, `packs`, `generation_backends`, `element_kinds`,
+  `generation_features`, `generation_modes`
+- `InvocationResult` top-level fields: `capability_id`, `capability_type`,
+  `native_kind`, `ok`, `error`, `raw_result`
+- `EventStreamRecord` top-level fields: `source`, `line`, `timestamp`, `kind`,
+  `hash`, `payload`
+- The exported exception names and their place in the public exception family
+
+### Tier 2 — Evolving/Additive Fields
+
+These fields are part of the public contract, but may grow additional keys or
+keyword parameters in minor releases:
+
+- Fields on `CapabilityHandle`, `Port`, `Output`, `AliasRecord`, `Provenance`,
+  `SafetyDeclaration`, and `ExecError`
+- New keyword-only parameters on `discover()`, `get_capability()`, and
+  `invoke()`
+- The key sets of `to_dict()` results for public DTOs
+- Pack records in `DiscoveryResult.packs`
+- Records in `DiscoveryResult.generation_backends`,
+  `DiscoveryResult.element_kinds`, `DiscoveryResult.generation_features`, and
+  `DiscoveryResult.generation_modes`
+
+Tier 2 means Astrid will not silently remove or rename existing documented
+fields in a v1 minor or patch release, but additive growth is allowed.
+
+### Tier 3 — Opaque/Evolving Payloads
+
+These values are public return fields, but their internal key names, nesting,
+and value shapes are intentionally treated as opaque payloads:
+
+- `Capability.schema`
+- `Capability.definition`
+- `Capability.defaults`
+- `InvocationResult.raw_result`
+- `InvocationResult.error`
+- `EventStreamRecord.payload`
+- Nested output of `DiscoveryResult.to_dict()`
+
+Callers may serialize these payloads, display them, or pass them through, but
+should not build brittle logic around undocumented nested keys.
+
+## Manifest And Schema Contract
+
+### Canonical v1 Manifest Files
+
+Astrid v1 recognizes these manifest families:
+
+- Pack manifests: `pack.yaml`, `pack.yml`, or `pack.json`
+- Executor manifests: `executor.yaml`, `executor.yml`, or `executor.json`
+- Orchestrator manifests: `orchestrator.yaml`, `orchestrator.yml`, or
+  `orchestrator.json`
+- Element manifests: `element.yaml`, `element.yml`, or `element.json`
+
+The schema contract for those manifests is defined by the JSON Schema files
+under `astrid/packs/schemas/v1/`.
+
+### Normative v1 Schema Files
+
+All v1 manifest schema files are part of the contract:
+
+| File | Role |
+|---|---|
+| `astrid/packs/schemas/v1/pack.json` | Validates pack manifests and pack-level declarations |
+| `astrid/packs/schemas/v1/executor.json` | Validates executor manifests |
+| `astrid/packs/schemas/v1/orchestrator.json` | Validates orchestrator manifests |
+| `astrid/packs/schemas/v1/element.json` | Validates element manifests |
+| `astrid/packs/schemas/v1/_defs.json` | Shared schema definitions referenced by the manifest schemas above |
+
+The v1 contract covers the existence and intended roles of these files. It does
+not promise byte-for-byte immutability of schema internals; backward-compatible
+validation additions may land in minor releases.
+
+### Stable Vs Opaque Manifest Areas
+
+Stable manifest contract areas include:
+
+- Which manifest families exist
+- Which top-level schema files validate them
+- Pack-level permissions being declared in the pack manifest
+- Executor/orchestrator secrets being declared in their component manifests
+- The existence of alias/deprecation metadata in pack manifests
+
+Opaque or evolving manifest areas include:
+
+- Undocumented nested schema keys
+- Generator-facing metadata used only by internal discovery/build tooling
+- Exact serialized ordering of manifest keys
+- Any internal registry-only normalization details not surfaced through the
+  public SDK
+
+## Element Extension APIs
+
+Element extension support exists in v1, but the extension API itself is
+**provisional**.
+
+This includes:
+
+- `pack.extensions.elements.kinds`
+- External element pack discovery through `ASTRID_PACKS_PATH`
+- Related registry/typegen behavior that makes external element kinds visible
+
+Astrid supports these workflows in v1, but does not yet treat their detailed
+programmatic contract as Tier 1. Callers and pack authors should expect
+additive or structural refinement in minor releases.
+
+## Disclosure-Only Trust And Security
+
+This section preserves the existing v1 trust/security contract as a first-class
+part of the platform boundary.
+
+### V1 Trust Block Invariants
+
+Every pack trust summary carries this fixed v1 trust block:
 
 ```python
 V1_TRUST_BLOCK = {
@@ -18,298 +240,87 @@ V1_TRUST_BLOCK = {
 }
 ```
 
-These invariants are defined once in `astrid/packs/validate.py` and
-consumed by every surface that displays trust metadata: install, update,
-inspect, agent view, and SDK discovery.
+These values are v1 invariants. They will not change within the v1 major
+version.
 
-When a future version adds sandboxing, the trust block will be the first
-thing to change. All current consumers source these values through
-`extract_trust_summary()` or through direct import of `V1_TRUST_BLOCK`
-— there is no second copy.
+### Permissions Are Pack-Level Disclosure Metadata
 
-## Pack-Level Permissions (v1 Scope)
+Permissions are declared at the pack level only in v1. There is no separate
+per-executor or per-orchestrator permission contract.
 
-Permissions are declared at the **pack level only** in v1. Every executor
-and orchestrator in a pack shares the same declared permission set. There
-is no per-executor or per-orchestrator permission declaration in the v1
-schema.
+The `permissions` field in the pack manifest:
 
-### Schema
+- Requires `id` and `reason`
+- Allows optional `access` and `services`
+- Rejects unknown keys
+- Is validated by `astrid/packs/schemas/v1/pack.json`
 
-The `permissions` field in `pack.yaml` is an array of permission objects
-validated against `astrid/packs/schemas/v1/pack.json`. Each object:
+Permissions are disclosure metadata. They do **not**:
 
-- Requires `id` (one of six approved enum values) and `reason` (non-blank
-  string)
-- Accepts optional `access` (non-blank string) and `services` (array of
-  non-blank strings)
-- Rejects unknown keys (`additionalProperties: false`)
+- Create sandbox rules
+- Configure `IsolationMetadata`
+- Enforce runtime allow/deny checks
+- Restrict filesystem, subprocess, network, or environment access
 
-### Normalization
+The canonical statement of that boundary is
+`permission_enforcement: disclosure_only`.
 
-`astrid/core/pack.py` normalizes all permission declarations through
-`_normalize_pack_permissions()`. Both construction paths — normal
-`load_pack_manifest()` and discovery-validation
-`Validator._pack_definition_for_discovery()` — use the same helper.
+### Secrets Are Separate From Permissions
 
-Normalized permissions become immutable `PackPermission` tuples on
-`PackDefinition.permissions`. `PackDefinition.to_dict()` includes the
-full structured permission objects.
+This distinction is part of the v1 contract:
 
-### Disclosure-Only
-
-Permission declarations are **disclosure metadata**. They do not:
-
-- Configure `IsolationMetadata` or executor isolation behavior
-- Derive sandbox profiles or seccomp filters
-- Gate runtime capability access
-- Restrict filesystem, network, subprocess, or environment access
-
-The `permission_enforcement: disclosure_only` trust block field is the
-canonical statement of this boundary. Any code that reads permissions to
-make an access-control decision is violating the v1 contract.
-
-## Secrets Are Not Permissions
-
-This is a platform-level distinction:
-
-| Concept | Scope | Declares | Enforcement |
-|---|---|---|---|
-| Permissions | Pack-level (`pack.yaml`) | Capability domains (network, files, subprocess, etc.) | Disclosure-only |
-| Secrets | Executor/orchestrator-level (`executor.yaml`, `orchestrator.yaml`) | Specific environment variable names | Disclosure-only |
-
-A permission says *what kind of thing* the pack does. A secret says
-*which specific variable* an executor reads. Both are disclosure-only in
-v1. Neither is enforced.
-
-A pack that reads `OPENAI_API_KEY` should declare both:
-
-1. `permissions: [{id: environment, reason: "Reads API keys from environment"}]`
-   in `pack.yaml`
-2. `secrets: [{name: OPENAI_API_KEY, required: true}]` in the relevant
-   executor's manifest
-
-The `environment` permission does not name the variable. The `secrets`
-block does not describe the capability domain. They are complementary.
-
-## Trust-on-Install Contract
-
-Installing a pack requires explicit trust acknowledgement. This is a
-platform-level contract enforced by `astrid/packs/install.py`.
-
-### Interactive Trust
-
-The interactive flow displays the trust summary (permissions, entrypoints,
-secrets, dependencies, v1 trust block, disclosure notice) and requires the
-user to type `trust <pack_id>` exactly. The prompt is case-sensitive and
-exact-match. Any other input, EOF, or interrupt cancels the install.
-
-### Non-Interactive Trust
-
-The `--trust` CLI flag records non-interactive trust acknowledgement.
-`--yes` alone is **not** sufficient — it only skips the ordinary
-confirmation prompt (`[y/N]`). An install or update with `--yes` but
-without `--trust` fails with an explicit error message.
-
-Both `--yes --trust` together skip both prompts.
-
-### Git Install Trust
-
-Git-backed installs follow the same contract. The trust summary shows the
-durable Git URL (not the temp checkout path), the pinned commit SHA (first
-8 chars), and the trust tier (`git`). Trust is acknowledged through the
-same interactive or `--trust` paths.
-
-### Persistence
-
-Trust decisions are persisted in `InstallRecord` fields written to
-`.astrid/install.json`:
-
-```
-trust_acknowledged_at: ISO-8601 UTC timestamp
-trust_method:           "interactive", "cli_flag", "api", or "test"
-trust_actor:            "cli", "api", "test", or another caller label
-no_sandbox_warning_version: 1
-permissions_accepted:   list of structured permission dicts at accept time
-```
-
-The `trust_summary` field on `InstallRecord` preserves the full trust
-summary as it was displayed when the user accepted it.
-
-### Update Trust
-
-Updating a pack requires **renewed** trust. The update flow:
-
-1. Extracts trust summaries for both old and new pack versions
-2. Formats a diff showing permission additions, removals, and changes
-3. Displays the full new trust summary
-4. Requires interactive `trust <pack_id>` or `--trust` acknowledgement
-5. Persists new trust metadata in the updated install record
-
-Even if permissions have not changed between versions, the update still
-requires fresh trust acknowledgement. This is intentional — a new
-version may have changed code without changing declared permissions.
-
-### Test Seam
-
-`install_pack()` and `update_pack()` accept `trust_method` and
-`trust_actor` keyword parameters for test/internal callers:
-
-```python
-install_pack(
-    source_path,
-    trust_acknowledged=True,
-    trust_method="test",
-    trust_actor="test",
-)
-```
-
-These parameters exist so tests can exercise the full install path
-without interactive prompts. They must not be exposed through the public
-CLI help text.
-
-## Anti-Scope Boundaries
-
-The following are explicit **non-goals** of the v1 permission system.
-These boundaries exist so that future versions can introduce enforcement
-without breaking the disclosure contract:
-
-### Not Per-Executor
-
-Permissions are pack-level only. There is no `permissions` field on
-`executor.yaml` or `orchestrator.yaml` in v1. Every capability in a pack
-shares the same declared permission set.
-
-### Not Isolation Configuration
-
-Permissions are not consumed by `IsolationMetadata`. The executor
-isolation system (`isolation.mode`, `isolation.binaries`,
-`isolation.network`, etc.) is a separate concept. Permissions do not
-derive isolation profiles, and isolation metadata does not read
-permissions.
-
-### Not Runtime Enforcement
-
-No code path in Astrid v1 reads pack permissions to make an allow/deny
-decision at runtime. A pack that declares `permissions: []` runs with
-the same full user privileges as a pack that declares all six permissions.
-
-### Not a Diff Against Baseline
-
-Declaring a permission is a positive statement, not a diff. "This pack
-needs network access" — not "this pack needs more network access than
-before."
-
-### Not Per-Capability
-
-`SafetyDeclaration.permissions` mirrors pack permission IDs into
-capability-level metadata, but this is a **mirror**, not a separate
-declaration. Capabilities do not independently declare permissions.
-The source of truth is the pack manifest.
-
-## SDK Discovery Contract
-
-The public SDK (`astrid.discover()`) exposes pack permissions through
-two channels with different shapes:
-
-### Pack-Level (Structured)
-
-`discover().to_dict()["packs"]` includes for each pack:
-
-- `permissions`: list of full structured permission dicts (`id`,
-  `reason`, `access`, `services`)
-- `permission_ids`: list of compact permission ID strings
-- `trust`: the v1 trust block dict (`sandbox`, `runs_with_user_process_permissions`,
-  `permission_enforcement`)
-
-These fields are sourced exclusively through `extract_trust_summary()`.
-No SDK code re-derives permissions from raw pack data.
-
-### Capability-Level (String IDs Only)
-
-`SafetyDeclaration.permissions` is `tuple[str, ...]`. It contains only
-permission ID strings, not structured permission objects. The SDK mirrors
-the owning pack's `permission_ids` into each capability's safety
-declaration through `_apply_pack_permission_ids()`.
-
-This type contract is stable:
-
-```python
-@dataclass(frozen=True)
-class SafetyDeclaration:
-    network: bool = False
-    cost_estimate: str = ""
-    secrets_required: tuple[str, ...] = ()
-    permissions: tuple[str, ...] = ()  # String IDs only, never structured objects
-```
-
-Callers can safely iterate `safety.permissions` without type-narrowing
-on individual permission fields. Every element is a plain `str`
-matching one of the six approved permission IDs.
-
-### Discovery Output Stability
-
-The `permissions` and `trust` keys in pack records are Tier 2 (evolving)
-— new fields may be added within permission objects, but the top-level
-keys will not be removed. The `permission_ids` list is also Tier 2.
-
-`SafetyDeclaration.permissions` is Tier 1 (stable) — its type
-(`tuple[str, ...]`) will not change without a major version bump.
-
-## Validation Contract
-
-`python3 -m astrid packs validate` checks permission syntax:
-
-- Permission `id` must be one of the six approved values
-- `reason` must be present and non-blank
-- `access` must be non-blank if present
-- `services` must be an array of non-blank strings if present
-- Unknown keys on permission objects are rejected
-- The `permissions` field must be an array or absent
-
-Validation is **static** — it checks the manifest shape, not runtime
-behavior. It does not import or execute pack code.
-
-## Trust Summary Contract
-
-`extract_trust_summary()` in `astrid/packs/validate.py` is the single
-canonical source for trust summary data. Every consumer — install, update,
-inspect, agent view, SDK discovery — sources trust metadata through this
-function or through the `V1_TRUST_BLOCK` constant it defines.
-
-The trust summary dict always contains:
-
-| Key | Type | Description |
+| Concept | Declared In | Meaning |
 |---|---|---|
-| `pack_id` | string | Canonical pack id |
-| `name` | string | Human-readable name |
-| `version` | string | Semver version |
-| `schema_version` | int or string | Pack schema version |
-| `source_path` | string | Absolute path to pack root |
-| `component_counts` | dict | Counts of executors, orchestrators, elements |
-| `entrypoints` | list of strings | Normal entrypoints for agent discovery |
-| `declared_secrets` | list of strings | Formatted secret declarations |
-| `dependencies` | list of strings | Formatted dependency declarations |
-| `permissions` | list of dicts | Full structured permission objects |
-| `permission_ids` | list of strings | Compact permission ID strings |
-| `trust` | dict | V1_TRUST_BLOCK copy (sandbox, runs_with_user_process_permissions, permission_enforcement) |
-| `warnings` | list of strings | Advisory warnings (missing docs, missing content roots) |
+| Permissions | Pack manifest | Capability domains such as network, files, subprocess, environment |
+| Secrets | Executor/orchestrator manifests | Specific environment variable names |
 
-Consumers must not construct trust metadata independently. If a new
-consumer needs trust data, it must call `extract_trust_summary()` or
-accept its output from a caller that did.
+Permissions answer "what kind of access does this pack claim to use?" Secrets
+answer "which variable names does this component claim to read?"
+
+### Trust-On-Install Contract
+
+Astrid requires explicit trust acknowledgement before installing or updating a
+pack.
+
+- Interactive installs require exact `trust <pack_id>` input
+- `--yes` is not enough by itself
+- `--trust` is the non-interactive trust acknowledgement
+- Git installs follow the same trust rules
+- Updates require renewed trust, even if declared permissions did not change
+
+Trust decisions are persisted in `.astrid/install.json`, including accepted
+permissions and acknowledgement metadata.
+
+### Trust Summary Contract
+
+`extract_trust_summary()` is the canonical source for trust summary data used by
+install, update, inspect, agent-facing views, and SDK discovery.
+
+The trust summary includes:
+
+- Pack identity and version
+- Component counts and entrypoints
+- Declared secrets and dependencies
+- Structured permissions and compact `permission_ids`
+- The v1 trust block
+- Advisory warnings
+
+Consumers must not reconstruct this data independently.
+
+## Validation Boundary
+
+`python3 -m astrid packs validate` performs static manifest validation. In v1 it
+checks schema/shape validity, not runtime behavior. Validation does not promise
+that a pack behaves safely or only does what its declarations describe.
 
 ## References
 
-- [SECURITY.md](../SECURITY.md) — User-facing security model and safe-use guidance
-- [docs/creating-packs.md](creating-packs.md) — Pack authoring guide with permission examples
-- `astrid/packs/schemas/v1/pack.json` — JSON Schema for the `permissions` field
-- `astrid/packs/validate.py` — `V1_TRUST_BLOCK`, `extract_trust_summary()`
-- `astrid/packs/install.py` — `_confirm_trust()`, trust persistence, update diff
-- `astrid/core/pack.py` — `PackPermission`, `_normalize_pack_permissions()`
-- `astrid/contracts/schema.py` — `SafetyDeclaration` with `permissions: tuple[str, ...]`
-- `astrid/sdk.py` — `discover()`, `_apply_pack_permission_ids()`
-
----
-
-*Last updated: v1 permission system (disclosure-only trust model)*
+- [SECURITY.md](../SECURITY.md) — user-facing security posture
+- [docs/sdk.md](sdk.md) — SDK walkthrough and examples
+- [docs/creating-packs.md](creating-packs.md) — pack authoring reference
+- `astrid/__init__.py` — top-level public export list
+- `astrid/sdk.py` — public SDK DTOs and function entrypoints
+- `astrid/contracts/schema.py` — shared DTO field types
+- `astrid/packs/schemas/v1/` — normative v1 manifest schema files
+- `astrid/packs/validate.py` — trust summary extraction and trust block source
+- `astrid/packs/install.py` — trust acknowledgement/install behavior

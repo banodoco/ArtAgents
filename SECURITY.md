@@ -5,6 +5,16 @@ installed packs. It is a disclosure-and-trust model, not a sandbox or
 enforcement model. If you are evaluating whether a pack you found online
 is safe to install, start here.
 
+> **Platform contract**: The disclosure-only trust block (sandbox: none,
+> runs_with_user_process_permissions: true, permission_enforcement:
+> disclosure_only) is a first-class part of the normative v1 platform
+> contract defined in [docs/platform-contract.md](docs/platform-contract.md).
+> That document is the source of truth for the v1 trust invariants,
+> pack-level permission contract, trust-on-install rules, and the
+> SemVer/deprecation guarantees that protect these security boundaries.
+> When this document and the platform contract differ, the platform
+> contract wins.
+
 ## v1 No-Sandbox Promise
 
 Astrid v1 does **not** sandbox installed packs. Every pack runs with your

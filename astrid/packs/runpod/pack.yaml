@@ -18,7 +18,28 @@ permissions:
     reason: Reads RUNPOD_API_KEY for authentication.
   - id: external_services
     reason: Manages cloud GPU infrastructure on RunPod.
-description: RunPod provisioning and remote execution executors.
+description: Provision RunPod GPU pods, ship and run scripts on them, pull artifacts, and tear pods down — including a guaranteed-cleanup composite session.
+keywords:
+- runpod
+- gpu
+- provision
+- exec
+- pull
+- teardown
+- session
+- ssh
+capabilities:
+- provision_pod
+- exec_on_pod
+- pull_artifacts
+- teardown_pod
+- run_pod_session
+agent:
+  purpose: Choose this pack when you need ephemeral cloud GPU compute on RunPod — to spin up a pod, run a script remotely, retrieve artifacts/checkpoints, and shut it down. Prefer runpod.session for one-shot jobs that should always clean up.
+  do_not_use_for: Not for orchestrating LoRA training workflows end to end; use the training pack, which drives RunPod under the hood.
+  normal_entrypoints:
+  - runpod.session
+  - runpod.provision
 content:
   executors: executors
 aliases:
