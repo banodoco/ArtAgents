@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import importlib
+import os
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from astrid.contracts.capability_runner import CapabilityRunner
 from astrid.contracts.run_status import RunStatus
@@ -21,7 +22,13 @@ from astrid.core.project.run import (
     project_run_env,
     reject_project_with_out,
 )
+from astrid.core.runtime import (
+    InProcessExecutionPreconditionError,
+    InProcessInvocationError,
+    invoke_in_process_command,
+)
 from astrid.core.subprocess_env import build_child_subprocess_env
+from astrid.core.runtime._normalize import normalize_python_runtime_result
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 
@@ -52,6 +59,7 @@ class OrchestratorRunRequest:
     dry_run: bool = False
     python_exec: str | None = None
     verbose: bool = False
+    execution_mode: Literal["subprocess", "in_process"] = "subprocess"
 
 
 @dataclass(frozen=True)
@@ -264,6 +272,14 @@ def _run_command_orchestrator(
             dry_run=True,
             plan=_plan_from_commands(planned_commands, prefix=orchestrator.id),
         )
+    if request.execution_mode == "in_process":
+        return _run_in_process_command_orchestrator(
+            orchestrator,
+            request,
+            command=command,
+            cwd=cwd,
+            env=env,
+        )
     completed = subprocess.run(
         list(command),
         cwd=cwd,
@@ -279,6 +295,79 @@ def _run_command_orchestrator(
         cwd=cwd,
         env=env,
         returncode=completed.returncode,
+    )
+
+
+def _run_in_process_command_orchestrator(
+    orchestrator: OrchestratorDefinition,
+    request: OrchestratorRunRequest,
+    *,
+    command: tuple[str, ...],
+    cwd: str | None,
+    env: Mapping[str, str],
+) -> OrchestratorRunResult:
+    effective_env = _command_subprocess_env(orchestrator, request, env)
+    try:
+        result = invoke_in_process_command(
+            command,
+            metadata=orchestrator.metadata,
+            owner_id=orchestrator.id,
+            cwd=cwd,
+            env=effective_env,
+            parent_env=os.environ,
+        )
+    except InProcessExecutionPreconditionError as exc:
+        return _in_process_orchestrator_error_result(
+            orchestrator,
+            command=command,
+            cwd=cwd,
+            env=env,
+            error=OrchestratorRunError(
+                message=str(exc),
+                kind="precondition",
+            ),
+        )
+    except InProcessInvocationError as exc:
+        return _in_process_orchestrator_error_result(
+            orchestrator,
+            command=command,
+            cwd=cwd,
+            env=env,
+            error=OrchestratorRunError(
+                message=str(exc),
+                kind="runtime",
+            ),
+        )
+    return OrchestratorRunResult(
+        orchestrator_id=orchestrator.id,
+        kind=orchestrator.kind,
+        runtime_kind="command",
+        command=command,
+        planned_commands=(command,),
+        cwd=cwd,
+        env=dict(env),
+        returncode=result.returncode,
+    )
+
+
+def _in_process_orchestrator_error_result(
+    orchestrator: OrchestratorDefinition,
+    *,
+    command: tuple[str, ...],
+    cwd: str | None,
+    env: Mapping[str, str],
+    error: OrchestratorRunError,
+) -> OrchestratorRunResult:
+    return OrchestratorRunResult(
+        orchestrator_id=orchestrator.id,
+        kind=orchestrator.kind,
+        runtime_kind="command",
+        command=command,
+        planned_commands=(command,),
+        cwd=cwd,
+        env=dict(env),
+        returncode=1,
+        errors=(error,),
     )
 
 
@@ -307,30 +396,32 @@ def _normalize_python_result(
     request: OrchestratorRunRequest,
     raw_result: Any,
 ) -> OrchestratorRunResult:
+    # Already a result — pass through with dry-run plan if needed.
     if isinstance(raw_result, OrchestratorRunResult):
         return _ensure_dry_run_plan(raw_result)
-    if raw_result is None:
-        return _ensure_dry_run_plan(OrchestratorRunResult(
-            orchestrator_id=orchestrator.id,
-            kind=orchestrator.kind,
-            runtime_kind="python",
-            returncode=None if request.dry_run else 0,
-            dry_run=request.dry_run,
-        ))
-    if isinstance(raw_result, int):
-        return _ensure_dry_run_plan(OrchestratorRunResult(
-            orchestrator_id=orchestrator.id,
-            kind=orchestrator.kind,
-            runtime_kind="python",
-            returncode=None if request.dry_run else raw_result,
-            dry_run=request.dry_run,
-        ))
+
+    # Rich dict normalisation (planned_commands, errors, plan, etc.).
     if isinstance(raw_result, dict):
         return _result_from_mapping(orchestrator, request, raw_result)
-    raise OrchestratorRunnerError(
-        f"orchestrator {orchestrator.id!r} returned unsupported result type {type(raw_result).__name__}; "
-        "expected OrchestratorRunResult, dict, int, or None"
-    )
+
+    # Delegate the remaining patterns (None, int, SystemExit, Mapping,
+    # objects with a returncode attribute) to the shared helper.
+    try:
+        normalized = normalize_python_runtime_result(raw_result)
+    except ValueError as exc:
+        raise OrchestratorRunnerError(
+            f"orchestrator {orchestrator.id!r} returned unsupported result "
+            f"type {type(raw_result).__name__}; "
+            "expected OrchestratorRunResult, dict, int, or None"
+        ) from exc
+
+    return _ensure_dry_run_plan(OrchestratorRunResult(
+        orchestrator_id=orchestrator.id,
+        kind=orchestrator.kind,
+        runtime_kind="python",
+        returncode=None if request.dry_run else normalized.returncode,
+        dry_run=request.dry_run,
+    ))
 
 
 def _result_from_mapping(

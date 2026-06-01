@@ -113,6 +113,11 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         # importlib relative imports and pops it in finally; keep the guard
         # narrow so only this approved register-then-pop pattern is exempt.
         "astrid/orchestrate/compile.py",
+        # The in-process runtime invoker reloads pack modules fresh on each
+        # invocation via importlib.util + sys.modules pop/assign.  This is
+        # a controlled, necessary pattern to guarantee source-level freshness
+        # without subprocess isolation.
+        "astrid/core/runtime/in_process.py",
     }
 )
 _COMPATIBILITY_SHIM_EXEMPTIONS = frozenset()
@@ -354,8 +359,20 @@ def _is_forbidden_core_import(module: str) -> bool:
     )
 
 
+# Modules in core/runtime/ are sanctioned to import from astrid.packs for the
+# in-process entrypoint machinery.  This is a deliberate architectural choice:
+# the runtime package bridges between framework and pack boundaries and needs
+# access to the canonical entrypoint context that guards pack entrypoints.
+_IMPORT_LAYERING_EXEMPT_REL = frozenset(
+    {
+        "astrid/core/runtime/in_process.py",
+    }
+)
+
+
 def _is_import_layering_exempt(path: Path, repo_root: Path) -> bool:
-    return False
+    rel = _repo_rel(path, repo_root)
+    return rel in _IMPORT_LAYERING_EXEMPT_REL
 
 
 def _contains_sys_modules_injection(path: Path) -> bool:

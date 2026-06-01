@@ -58,6 +58,7 @@ from .gate import (
     validate_attested_identity,
     write_iteration_feedback,
 )
+from .event_stream import EventStreamRecord, read_event_stream, subscribe_event_stream
 from .plan import compute_plan_hash, load_plan, step_dir_for, step_dir_for_path
 
 __all__ = [
@@ -70,6 +71,7 @@ __all__ = [
     "TASK_RUN_ID_ENV",
     "TASK_STEP_ID_ENV",
     "CursorPath",
+    "EventStreamRecord",
     "GateDecision",
     "InboxEntry",
     "PeekResult",
@@ -100,10 +102,12 @@ __all__ = [
     "peek_current_step",
     "pending_count",
     "read_events",
+    "read_event_stream",
     "record_dispatch_complete",
     "record_nested_entered",
     "record_nested_exited",
     "scan_inbox",
+    "subscribe_event_stream",
     "step_dir_for",
     "step_dir_for_path",
     "task_actor_env",

@@ -14,7 +14,7 @@ import sys
 import textwrap
 import types
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pytest
 
@@ -516,6 +516,128 @@ def test_external_executor_missing_executable_raises_oserror(tmp_path: Path) -> 
 
     with pytest.raises(FileNotFoundError):
         run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
+
+
+def test_external_executor_in_process_mode_avoids_subprocess_and_returns_executor_result_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor(
+        executor_id="test.in_process_help",
+        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(executor)
+
+    def _fail_subprocess(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("subprocess.run should not be used in in_process mode")
+
+    monkeypatch.setattr(executor_runner.subprocess, "run", _fail_subprocess)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    assert result.command == executor.command.argv
+    assert result.cwd is None
+    assert result.env == {}
+    assert result.returncode == 0
+    assert result.ok is True
+    assert result.error is None
+    assert result.payload == {
+        "executor_id": executor.id,
+        "missing_binaries": [],
+        "returncode": 0,
+        "skipped": False,
+        "skipped_reason": "",
+    }
+
+
+def test_external_executor_default_mode_remains_subprocess_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor(
+        executor_id="test.subprocess_default",
+        argv=(sys.executable, "-c", "pass"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(executor)
+    seen: dict[str, Any] = {}
+
+    def _fake_subprocess_run(
+        argv: list[str],
+        *,
+        cwd: str | None,
+        env: Mapping[str, str],
+        check: bool,
+    ) -> types.SimpleNamespace:
+        seen["argv"] = tuple(argv)
+        seen["cwd"] = cwd
+        seen["check"] = check
+        seen["env"] = env
+        return types.SimpleNamespace(returncode=0)
+
+    def _fail_in_process(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("invoke_in_process_command should not be used by default")
+
+    monkeypatch.setattr(executor_runner.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fail_in_process)
+
+    result = run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
+
+    assert seen["argv"] == executor.command.argv
+    assert seen["cwd"] is None
+    assert seen["check"] is False
+    assert result.returncode == 0
+    assert result.ok is True
+
+
+def test_external_executor_in_process_mode_rejects_different_python_interpreter(
+    tmp_path: Path,
+) -> None:
+    foreign_python = tmp_path / "venv" / "bin" / "python"
+    executor = _executor(
+        executor_id="test.in_process_wrong_python",
+        argv=(
+            str(foreign_python),
+            "-m",
+            "astrid.packs.youtube.executors.upload.run",
+            "--help",
+        ),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(executor)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    assert result.returncode == 1
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "in_process_precondition"
+    assert result.error.type == "precondition"
+    assert "requires interpreter" in result.error.message
 
 
 def test_external_executor_env_includes_definition_env(tmp_path: Path) -> None:
