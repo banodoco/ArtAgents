@@ -176,11 +176,41 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
 
     assert any(pack["id"] == "builtin" for pack in inventory.packs)
     assert all("source_kind" in pack for pack in inventory.packs)
+    assert all("trust" in pack for pack in inventory.packs)
     assert any(backend["id"] == "local" for backend in inventory.generation_backends)
     assert any(backend["id"] == "cloud" for backend in inventory.generation_backends)
     assert any(kind["canonical_kind"] == "effects" for kind in inventory.element_kinds)
     assert any(feature["id"] == "prompt" for feature in inventory.generation_features)
     assert any(mode["id"] == "t2i" for mode in inventory.generation_modes)
+
+    editorial_pack = next(pack for pack in inventory.packs if pack["id"] == "editorial")
+    assert editorial_pack["permissions"] == [
+        {
+            "id": "subprocess",
+            "reason": "Runs editorial executors as subprocesses for transcription, review, and arrangement.",
+        },
+        {
+            "id": "project_files",
+            "reason": "Reads and writes transcripts, scenes, arrangements, and review artifacts.",
+        },
+    ]
+    assert editorial_pack["permission_ids"] == ["subprocess", "project_files"]
+    assert editorial_pack["trust"] == {
+        "sandbox": "none",
+        "runs_with_user_process_permissions": True,
+        "permission_enforcement": "disclosure_only",
+    }
+
+    editorial_capability = next(
+        capability
+        for capability in inventory.capabilities
+        if capability.handle.pack_id == "editorial"
+    )
+    assert editorial_capability.handle.safety.permissions == ("subprocess", "project_files")
+    assert all(
+        isinstance(permission_id, str)
+        for permission_id in editorial_capability.handle.safety.permissions
+    )
 
     aliased_executor = astrid.get_capability(
         "editorial.inspect_cut",
@@ -1104,6 +1134,216 @@ def test_invoke_maps_executor_result_error_into_public_taxonomy(
         "sdk_error": "CapabilityPreconditionError",
         "sdk_category": "precondition",
     }
+
+
+# ---------------------------------------------------------------------------
+# T12: systematic pack permissions + trust metadata in discover().to_dict()
+# ---------------------------------------------------------------------------
+
+
+def test_discover_packs_all_have_permissions_and_trust_metadata() -> None:
+    """Every pack record returned by discover().to_dict() must carry
+    ``permissions``, ``permission_ids``, and the v1 trust block."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    assert inventory.packs, "discover() returned zero packs"
+    for pack in inventory.packs:
+        assert "permissions" in pack, (
+            f"pack {pack.get('id', '?')!r} is missing 'permissions' key"
+        )
+        assert "permission_ids" in pack, (
+            f"pack {pack.get('id', '?')!r} is missing 'permission_ids' key"
+        )
+        assert "trust" in pack, (
+            f"pack {pack.get('id', '?')!r} is missing 'trust' key"
+        )
+        # trust block v1 invariants
+        trust = pack["trust"]
+        assert trust["sandbox"] == "none", (
+            f"pack {pack['id']!r} trust.sandbox is {trust.get('sandbox')!r}, expected 'none'"
+        )
+        assert trust["runs_with_user_process_permissions"] is True, (
+            f"pack {pack['id']!r} trust.runs_with_user_process_permissions is "
+            f"{trust.get('runs_with_user_process_permissions')!r}, expected True"
+        )
+        assert trust["permission_enforcement"] == "disclosure_only", (
+            f"pack {pack['id']!r} trust.permission_enforcement is "
+            f"{trust.get('permission_enforcement')!r}, expected 'disclosure_only'"
+        )
+
+    # round-trip serialization
+    payload = inventory.to_dict()
+    json.dumps(payload)
+    for pack in payload["packs"]:
+        assert "permissions" in pack
+        assert "permission_ids" in pack
+        assert "trust" in pack
+
+
+def test_discover_pack_permission_objects_have_expected_shape() -> None:
+    """Every permission object inside a pack record must be a dict with
+    string ``id`` and ``reason`` keys (no structured sub-objects)."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    for pack in inventory.packs:
+        permissions = pack.get("permissions", [])
+        assert isinstance(permissions, list), (
+            f"pack {pack['id']!r} permissions is not a list"
+        )
+        for idx, perm in enumerate(permissions):
+            assert isinstance(perm, dict), (
+                f"pack {pack['id']!r} permissions[{idx}] is not a dict"
+            )
+            assert "id" in perm, (
+                f"pack {pack['id']!r} permissions[{idx}] missing 'id'"
+            )
+            assert "reason" in perm, (
+                f"pack {pack['id']!r} permissions[{idx}] missing 'reason'"
+            )
+            assert isinstance(perm["id"], str), (
+                f"pack {pack['id']!r} permissions[{idx}].id is not str"
+            )
+            assert isinstance(perm["reason"], str), (
+                f"pack {pack['id']!r} permissions[{idx}].reason is not str"
+            )
+            # optional fields, if present, must be the right type
+            for key in ("services", "access"):
+                if key in perm:
+                    val = perm[key]
+                    if key == "services":
+                        assert isinstance(val, list), (
+                            f"pack {pack['id']!r} permissions[{idx}].services is not a list"
+                        )
+                    elif key == "access":
+                        assert isinstance(val, str), (
+                            f"pack {pack['id']!r} permissions[{idx}].access is not str"
+                        )
+
+
+def test_discover_permission_ids_match_permissions_list() -> None:
+    """For every pack, ``permission_ids`` must be a list of strings that
+    corresponds 1:1 with the ``id`` fields in ``permissions``."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    for pack in inventory.packs:
+        permission_ids = pack.get("permission_ids", [])
+        permissions = pack.get("permissions", [])
+        assert isinstance(permission_ids, list), (
+            f"pack {pack['id']!r} permission_ids is not a list"
+        )
+        assert all(isinstance(pid, str) for pid in permission_ids), (
+            f"pack {pack['id']!r} permission_ids contains non-string values"
+        )
+        expected_ids = [perm["id"] for perm in permissions]
+        assert permission_ids == expected_ids, (
+            f"pack {pack['id']!r} permission_ids {permission_ids!r} != "
+            f"expected {expected_ids!r}"
+        )
+
+
+def test_capability_safety_permissions_are_only_string_ids() -> None:
+    """Every capability in discovery must have ``SafetyDeclaration.permissions``
+    as a tuple of plain strings — no structured permission objects leak in."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    assert inventory.capabilities, "discover() returned zero capabilities"
+    for capability in inventory.capabilities:
+        safety_permissions = capability.handle.safety.permissions
+        assert isinstance(safety_permissions, tuple), (
+            f"capability {capability.id!r} safety.permissions is not a tuple"
+        )
+        for perm_id in safety_permissions:
+            assert isinstance(perm_id, str), (
+                f"capability {capability.id!r} safety.permissions contains "
+                f"non-string value {perm_id!r} (type={type(perm_id).__name__})"
+            )
+
+
+def test_capability_safety_permissions_mirror_pack_permission_ids() -> None:
+    """For every pack that declares permissions, every capability owned by
+    that pack must have its ``safety.permissions`` equal to the pack's
+    ``permission_ids``."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    pack_permission_ids: dict[str, list[str]] = {}
+    for pack in inventory.packs:
+        pack_permission_ids[pack["id"]] = list(pack.get("permission_ids", []))
+
+    for capability in inventory.capabilities:
+        pack_id = capability.handle.pack_id
+        if not pack_id:
+            continue
+        expected = tuple(pack_permission_ids.get(pack_id, []))
+        actual = capability.handle.safety.permissions
+        assert actual == expected, (
+            f"capability {capability.id!r} (pack {pack_id!r}) "
+            f"safety.permissions={actual!r}, expected={expected!r}"
+        )
+
+
+def test_discover_to_dict_roundtrip_preserves_trust_metadata() -> None:
+    """``discover().to_dict()`` must round-trip through json and still
+    carry pack-level trust metadata."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    payload = inventory.to_dict()
+    reencoded = json.loads(json.dumps(payload))
+    assert "packs" in reencoded
+    for pack in reencoded["packs"]:
+        assert "permissions" in pack
+        assert "permission_ids" in pack
+        assert "trust" in pack
+        trust = pack["trust"]
+        assert trust["sandbox"] == "none"
+        assert trust["runs_with_user_process_permissions"] is True
+        assert trust["permission_enforcement"] == "disclosure_only"
+
+
+def test_capability_to_dict_preserves_safety_permissions_as_strings() -> None:
+    """Every individual capability ``to_dict()`` must serialize
+    ``safety.permissions`` as a list of strings."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    for capability in inventory.capabilities:
+        d = capability.to_dict()
+        safety = d.get("handle", {}).get("safety", {})
+        perms = safety.get("permissions", ())
+        assert isinstance(perms, (tuple, list)), (
+            f"capability {capability.id!r} to_dict safety.permissions is "
+            f"not a sequence: {type(perms).__name__}"
+        )
+        for perm_id in perms:
+            assert isinstance(perm_id, str), (
+                f"capability {capability.id!r} to_dict safety.permissions "
+                f"contains non-string {perm_id!r}"
+            )
+
+
+def test_discover_empty_permissions_pack_has_empty_lists_and_trust() -> None:
+    """A pack that declares no permissions must still have empty
+    ``permissions``/``permission_ids`` lists and the trust block."""
+    astrid = _import_public_module()
+    inventory = astrid.discover(include_installed=False)
+
+    # The builtin (deprecated) meta-pack should have empty permissions
+    builtin_pack = next(
+        (pack for pack in inventory.packs if pack["id"] == "builtin"), None
+    )
+    if builtin_pack is not None:
+        assert builtin_pack["permissions"] == []
+        assert builtin_pack["permission_ids"] == []
+        assert builtin_pack["trust"] == {
+            "sandbox": "none",
+            "runs_with_user_process_permissions": True,
+            "permission_enforcement": "disclosure_only",
+        }
 
 
 def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(

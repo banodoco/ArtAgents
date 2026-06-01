@@ -9,6 +9,15 @@ domain: integration
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs ComfyUI and VibeComfy workflow executors.
+  - id: network
+    reason: May download models and access network during ComfyUI workflow setup.
+  - id: project_files
+    reason: Reads workflow JSON files and writes generated outputs.
+  - id: accelerator
+    reason: May use GPU for ComfyUI model inference.
 description: VibeComfy and ComfyUI workflow executors.
 content:
   executors: executors

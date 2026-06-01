@@ -10,3 +10,8 @@ content:
   elements: elements
 agent:
   purpose: "Use when the summary step should be fully automated by code (not agent-attested) and only the final verdict requires human/agent judgment in an attested step."
+permissions:
+  - id: subprocess
+    reason: Runs text review pipeline executors as subprocesses.
+  - id: project_files
+    reason: Reads text files for review and writes summary and verdict outputs.

@@ -18,3 +18,8 @@ agent:
 docs:
   readme: README.md
   agents: AGENTS.md
+permissions:
+  - id: subprocess
+    reason: Runs example executor and orchestrator subprocesses.
+  - id: project_files
+    reason: Reads and validates project assets.

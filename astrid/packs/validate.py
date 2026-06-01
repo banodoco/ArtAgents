@@ -26,12 +26,13 @@ from astrid.core.pack import (
     EXECUTOR_MANIFEST_NAMES,
     ORCHESTRATOR_MANIFEST_NAMES,
     PackDefinition,
+    _normalize_pack_permissions,
+    _optional_pack_aliases,
     _optional_pack_extensions,
     element_kind_registry_for_pack,
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
-    _optional_pack_aliases,
     pack_taxonomy_from_manifest,
     pack_manifest_path,
     validate_content_id_in_pack,
@@ -58,6 +59,11 @@ KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
 }
 
 KNOWN_VERSIONS_STR = ", ".join(str(v) for v in sorted(KNOWN_SCHEMA_VERSIONS))
+V1_TRUST_BLOCK: dict[str, Any] = {
+    "sandbox": "none",
+    "runs_with_user_process_permissions": True,
+    "permission_enforcement": "disclosure_only",
+}
 
 
 def _check_schema_version(version_value: Any, manifest_relpath: str) -> int:
@@ -483,6 +489,7 @@ class PackValidator:
             metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
             agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
             aliases=_optional_pack_aliases(data.get("aliases"), path="pack.aliases"),
+            permissions=_normalize_pack_permissions(data.get("permissions")),
             extensions=_optional_pack_extensions(data.get("extensions"), path="pack.extensions"),
             **taxonomy,
         )
@@ -994,6 +1001,9 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
     keywords = [str(value) for value in data.get("keywords", []) if value] if isinstance(data.get("keywords"), list) else []
     capabilities = [str(value) for value in data.get("capabilities", []) if value] if isinstance(data.get("capabilities"), list) else []
     required_context = [str(value) for value in agent.get("required_context", []) if value] if isinstance(agent.get("required_context"), list) else []
+    permissions = _normalize_pack_permissions(data.get("permissions"))
+    normalized_permissions = [permission.to_dict() for permission in permissions]
+    permission_ids = [permission.id for permission in permissions]
 
     return {
         "pack_id": pack_id,
@@ -1013,6 +1023,9 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
         "required_context": required_context,
         "keywords": keywords,
         "capabilities": capabilities,
+        "permissions": normalized_permissions,
+        "permission_ids": permission_ids,
+        "trust": dict(V1_TRUST_BLOCK),
         "astrid_version": data.get("astrid_version"),
     }
 
@@ -1020,6 +1033,7 @@ def extract_trust_summary(pack_root: str | Path) -> dict[str, Any]:
 __all__ = [
     "PackValidator",
     "ValidationError",
+    "V1_TRUST_BLOCK",
     "validate_pack",
     "extract_trust_summary",
 ]

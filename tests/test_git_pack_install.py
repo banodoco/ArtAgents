@@ -587,6 +587,33 @@ class TestDiffComponentInventories(unittest.TestCase):
         self.assertIn("Secrets added:", result)
         self.assertIn("SECRET_B", result)
 
+    def test_permission_additions_removals_and_changes(self) -> None:
+        old = {
+            "component_counts": {},
+            "entrypoints": [],
+            "permissions": [
+                {"id": "network", "reason": "Old reason", "services": ["fal"]},
+                {"id": "environment", "reason": "Read env"},
+            ],
+        }
+        new = {
+            "component_counts": {},
+            "entrypoints": [],
+            "permissions": [
+                {"id": "network", "reason": "New reason", "services": ["fal", "runpod"]},
+                {"id": "project_files", "reason": "Read project files", "access": "read-only"},
+            ],
+        }
+        result = _diff_component_inventories(old, new)
+        self.assertIn("Permissions added:", result)
+        self.assertIn("project_files: Read project files; access=read-only", result)
+        self.assertIn("Permissions removed:", result)
+        self.assertIn("environment: Read env", result)
+        self.assertIn("Permissions changed:", result)
+        self.assertIn("network:", result)
+        self.assertIn("Old reason", result)
+        self.assertIn("New reason", result)
+
 
 # ---------------------------------------------------------------------------
 # _format_trust_summary Git fields
@@ -648,6 +675,38 @@ class TestFormatTrustSummaryGit(unittest.TestCase):
         result = _format_trust_summary(summary, astrid_version="1.0.0")
         self.assertIn("Astrid Ver:", result)
         self.assertIn("1.0.0", result)
+
+    def test_permissions_and_v1_disclosure_are_always_shown(self) -> None:
+        summary = {
+            "pack_id": "trusted_pack",
+            "name": "Trusted Pack",
+            "version": "0.1.0",
+            "schema_version": 1,
+            "source_path": "/tmp",
+            "component_counts": {},
+            "entrypoints": [],
+            "permissions": [
+                {
+                    "id": "network",
+                    "reason": "Call remote APIs",
+                    "services": ["fal"],
+                }
+            ],
+            "trust": {
+                "sandbox": "none",
+                "runs_with_user_process_permissions": True,
+                "permission_enforcement": "disclosure_only",
+            },
+        }
+        result = _format_trust_summary(summary)
+        self.assertIn("Permissions:", result)
+        self.assertIn("network: Call remote APIs; services=fal", result)
+        self.assertIn("Trust (v1):", result)
+        self.assertIn("sandbox=none", result)
+        self.assertIn("runs_with_user_process_permissions=true", result)
+        self.assertIn("permission_enforcement=disclosure_only", result)
+        self.assertIn("Astrid v1 does not sandbox installed packs.", result)
+        self.assertIn("Permission declarations are disclosure-only and not enforced.", result)
 
 
 # ---------------------------------------------------------------------------

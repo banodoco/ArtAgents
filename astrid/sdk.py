@@ -21,7 +21,7 @@ Public exception taxonomy:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, is_dataclass
+from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any, Literal
@@ -541,9 +541,52 @@ def _discover_pack_inventory(
 
 def _pack_record(discovered_pack: Any) -> dict[str, Any]:
     payload = discovered_pack.pack.to_dict()
+    from astrid.packs.validate import extract_trust_summary
+
+    trust_summary = extract_trust_summary(discovered_pack.pack.root)
+    if "permissions" in trust_summary:
+        payload["permissions"] = trust_summary["permissions"]
+    if "permission_ids" in trust_summary:
+        payload["permission_ids"] = trust_summary["permission_ids"]
+    if "trust" in trust_summary:
+        payload["trust"] = trust_summary["trust"]
     payload["source_kind"] = discovered_pack.source_kind
     payload["priority_index"] = discovered_pack.priority_index
     return _json_safe_mapping(payload)
+
+
+def _pack_permission_ids_by_pack_id(discovered_packs: tuple[Any, ...]) -> dict[str, tuple[str, ...]]:
+    permission_ids_by_pack_id: dict[str, tuple[str, ...]] = {}
+    for discovered_pack in discovered_packs:
+        pack = getattr(discovered_pack, "pack", None)
+        if pack is None:
+            continue
+        permissions = getattr(pack, "permissions", ())
+        permission_ids_by_pack_id[pack.id] = tuple(
+            permission.id for permission in permissions
+        )
+    return permission_ids_by_pack_id
+
+
+def _apply_pack_permission_ids(
+    capability: Capability,
+    *,
+    pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
+) -> Capability:
+    if not pack_permission_ids_by_pack_id:
+        return capability
+    permission_ids = pack_permission_ids_by_pack_id.get(capability.handle.pack_id, ())
+    if not permission_ids:
+        return capability
+    if capability.handle.safety.permissions == permission_ids:
+        return capability
+    return replace(
+        capability,
+        handle=replace(
+            capability.handle,
+            safety=replace(capability.handle.safety, permissions=permission_ids),
+        ),
+    )
 
 
 def _generation_backend_record(descriptor: Any) -> dict[str, Any]:
@@ -669,6 +712,7 @@ def _capability_from_executor(
     registry: Any,
     *,
     requested_id: str | None = None,
+    pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Capability:
     from astrid.core.executor.schema import to_capability_handle
 
@@ -685,7 +729,8 @@ def _capability_from_executor(
                 deprecated = alias_record.deprecated
                 deprecation_message = alias_record.deprecation_message
     definition_mapping = _json_safe_mapping(definition.to_dict())
-    return Capability(
+    return _apply_pack_permission_ids(
+        Capability(
         id=definition.id,
         capability_type="executor",
         native_kind=definition.kind,
@@ -701,6 +746,8 @@ def _capability_from_executor(
         schema=definition_mapping,
         defaults={},
         definition=definition_mapping,
+        ),
+        pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
     )
 
 
@@ -709,6 +756,7 @@ def _capability_from_orchestrator(
     registry: Any,
     *,
     requested_id: str | None = None,
+    pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Capability:
     from astrid.core.orchestrator.schema import to_capability_handle
 
@@ -725,7 +773,8 @@ def _capability_from_orchestrator(
                 deprecated = alias_record.deprecated
                 deprecation_message = alias_record.deprecation_message
     definition_mapping = _json_safe_mapping(definition.to_dict())
-    return Capability(
+    return _apply_pack_permission_ids(
+        Capability(
         id=definition.id,
         capability_type="orchestrator",
         native_kind=definition.kind,
@@ -741,13 +790,20 @@ def _capability_from_orchestrator(
         schema=definition_mapping,
         defaults={},
         definition=definition_mapping,
+        ),
+        pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
     )
 
 
-def _capability_from_element(definition: Any) -> Capability:
+def _capability_from_element(
+    definition: Any,
+    *,
+    pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
+) -> Capability:
     from astrid.core.element.schema import to_capability_handle
 
-    return Capability(
+    return _apply_pack_permission_ids(
+        Capability(
         id=f"{definition.kind}/{definition.id}",
         capability_type="element",
         native_kind=definition.kind,
@@ -755,6 +811,8 @@ def _capability_from_element(definition: Any) -> Capability:
         schema=_json_safe_mapping(definition.schema),
         defaults=_json_safe_mapping(definition.defaults),
         definition=_json_safe_mapping(definition.to_dict()),
+        ),
+        pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
     )
 
 
@@ -985,6 +1043,7 @@ def discover(
         extra_pack_roots=extra_pack_roots,
         include_installed=include_installed,
     )
+    pack_permission_ids_by_pack_id = _pack_permission_ids_by_pack_id(discovered_packs)
     executor_registry, orchestrator_registry, element_registry = _load_registries(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
@@ -1007,18 +1066,43 @@ def discover(
         element_registry=element_registry,
     )
 
-    executors = tuple(
-        _capability_from_executor(definition, executor_registry)
-        for definition in executor_registry.list()
-    )
-    orchestrators = tuple(
-        _capability_from_orchestrator(definition, orchestrator_registry)
-        for definition in orchestrator_registry.list()
-    )
-    elements = tuple(
-        _capability_from_element(definition)
-        for definition in element_registry.list()
-    )
+    if pack_permission_ids_by_pack_id:
+        executors = tuple(
+            _capability_from_executor(
+                definition,
+                executor_registry,
+                pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
+            )
+            for definition in executor_registry.list()
+        )
+        orchestrators = tuple(
+            _capability_from_orchestrator(
+                definition,
+                orchestrator_registry,
+                pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
+            )
+            for definition in orchestrator_registry.list()
+        )
+        elements = tuple(
+            _capability_from_element(
+                definition,
+                pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
+            )
+            for definition in element_registry.list()
+        )
+    else:
+        executors = tuple(
+            _capability_from_executor(definition, executor_registry)
+            for definition in executor_registry.list()
+        )
+        orchestrators = tuple(
+            _capability_from_orchestrator(definition, orchestrator_registry)
+            for definition in orchestrator_registry.list()
+        )
+        elements = tuple(
+            _capability_from_element(definition)
+            for definition in element_registry.list()
+        )
     return DiscoveryResult(
         executors=executors,
         orchestrators=orchestrators,

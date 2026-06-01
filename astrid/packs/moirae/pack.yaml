@@ -9,6 +9,11 @@ domain: integration
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs Moirae terminal-as-cinema renderer with asciinema and ffmpeg.
+  - id: project_files
+    reason: Reads screenplay files and writes rendered video.
 description: Moirae integration executors.
 content:
   executors: executors

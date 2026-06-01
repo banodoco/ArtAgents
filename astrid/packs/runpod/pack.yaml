@@ -9,6 +9,15 @@ domain: infrastructure
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs RunPod CLI commands as subprocesses.
+  - id: network
+    reason: Calls RunPod GraphQL API for pod provisioning and management.
+  - id: environment
+    reason: Reads RUNPOD_API_KEY for authentication.
+  - id: external_services
+    reason: Manages cloud GPU infrastructure on RunPod.
 description: RunPod provisioning and remote execution executors.
 content:
   executors: executors

@@ -9,6 +9,13 @@ domain: media
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs Remotion render process and ffmpeg sprite processing.
+  - id: project_files
+    reason: Reads timeline, asset, and theme files; writes rendered video.
+  - id: network
+    reason: Sprite sheet executor calls OpenAI GPT Image API.
 description: Rendering executors and render-time visual elements.
 content:
   executors: executors

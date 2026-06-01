@@ -8,6 +8,11 @@ pack_type: capability
 domain: development
 stability: stable
 support: core
+permissions:
+  - id: subprocess
+    reason: Runs iteration assembly and preparation executors as subprocesses.
+  - id: project_files
+    reason: Reads iteration manifests and writes timeline and asset files.
 content:
   executors: executors
   orchestrators: orchestrators

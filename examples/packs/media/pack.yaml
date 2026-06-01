@@ -56,3 +56,12 @@ docs:
   readme: README.md
   agents: AGENTS.md
   stage: STAGE.md
+permissions:
+  - id: subprocess
+    reason: Runs ffmpeg and media production executors.
+  - id: network
+    reason: Calls OpenAI and Unsplash APIs for AI-assisted media generation.
+  - id: project_files
+    reason: Reads and writes media assets and production artifacts.
+  - id: environment
+    reason: Reads OPENAI_API_KEY and UNSPLASH_ACCESS_KEY.

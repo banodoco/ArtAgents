@@ -9,6 +9,11 @@ domain: media
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs audio, visual, and video understanding executors.
+  - id: project_files
+    reason: Reads audio, video, and image files for analysis.
 description: Audio, visual, and video understanding executors.
 content:
   executors: executors

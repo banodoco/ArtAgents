@@ -9,6 +9,15 @@ domain: integration
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs Reigh integration executors as subprocesses.
+  - id: project_files
+    reason: Reads timeline and asset files for handoff into Reigh projects.
+  - id: network
+    reason: Publishes timelines and assets to Reigh API.
+  - id: environment
+    reason: Reads REIGH_USER_TOKEN and REIGH_SUPABASE_URL.
 description: Reigh platform integration executors.
 content:
   executors: executors

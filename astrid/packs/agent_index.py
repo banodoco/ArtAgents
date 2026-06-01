@@ -491,4 +491,8 @@ def _assemble_pack_entry(
         "components": components,
         "docs_paths": docs_paths,
         "warnings": warnings,
+        # Permissions and trust metadata — sourced from extract_trust_summary()
+        "permissions": trust.get("permissions", []),
+        "permission_ids": trust.get("permission_ids", []),
+        "trust": trust.get("trust", {}),
     }

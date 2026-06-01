@@ -9,6 +9,11 @@ domain: media
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs ffmpeg for audio and video foley processing.
+  - id: project_files
+    reason: Reads source media files and writes foley-processed outputs.
 description: Foley processing executors and orchestration.
 content:
   executors: executors

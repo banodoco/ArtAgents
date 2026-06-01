@@ -9,6 +9,15 @@ domain: generation
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs vibecomfy and ComfyUI locally for image and video generation.
+  - id: network
+    reason: Calls fal.ai cloud API and downloads models for cloud backends.
+  - id: project_files
+    reason: Reads reference images and prompt files; writes generated outputs.
+  - id: environment
+    reason: Reads FAL_KEY for cloud generation backends.
 description: Generative image and video executors.
 content:
   executors: executors

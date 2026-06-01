@@ -27,7 +27,7 @@ from typing import Optional
 
 import yaml
 
-from astrid.core.pack import pack_manifest_path
+from astrid.core.pack import _normalize_pack_permissions, pack_manifest_path
 from astrid.core.pack_store import (
     InstallRecord,
     InstalledPackStore,
@@ -35,11 +35,53 @@ from astrid.core.pack_store import (
 )
 from astrid.core.util.time import utc_now_seconds
 from astrid.packs.gitignore import gitignore_filter
-from astrid.packs.validate import extract_trust_summary, validate_pack
+from astrid.packs.validate import V1_TRUST_BLOCK, extract_trust_summary, validate_pack
 
 # ---------------------------------------------------------------------------
 # Pretty-printing helpers
 # ---------------------------------------------------------------------------
+
+
+def _trust_block(summary: dict) -> dict[str, object]:
+    trust = summary.get("trust")
+    payload = dict(V1_TRUST_BLOCK)
+    if isinstance(trust, dict):
+        for key in V1_TRUST_BLOCK:
+            if key in trust:
+                payload[key] = trust[key]
+    return payload
+
+
+def _normalized_summary_permissions(summary: dict) -> list[dict[str, object]]:
+    raw = summary.get("permissions")
+    if isinstance(raw, list):
+        try:
+            return [permission.to_dict() for permission in _normalize_pack_permissions(raw, field="trust_summary.permissions")]
+        except Exception:
+            pass
+    raw_ids = summary.get("permission_ids")
+    if isinstance(raw_ids, list):
+        return [{"id": str(value)} for value in raw_ids if value]
+    return []
+
+
+def _format_permission(permission: dict[str, object]) -> str:
+    label = str(permission.get("id", "?"))
+    details: list[str] = []
+    reason = permission.get("reason")
+    if isinstance(reason, str) and reason.strip():
+        details.append(reason.strip())
+    access = permission.get("access")
+    if isinstance(access, str) and access.strip():
+        details.append(f"access={access.strip()}")
+    services = permission.get("services")
+    if isinstance(services, list):
+        service_names = [str(service).strip() for service in services if str(service).strip()]
+        if service_names:
+            details.append(f"services={', '.join(service_names)}")
+    if not details:
+        return label
+    return f"{label}: {'; '.join(details)}"
 
 
 def _format_trust_summary(
@@ -113,6 +155,30 @@ def _format_trust_summary(
         doc_parts = [f"{k}={v}" for k, v in docs.items() if v]
         if doc_parts:
             lines.append(f"  Docs:          {', '.join(doc_parts)}")
+
+    permissions = _normalized_summary_permissions(summary)
+    lines.append("  Permissions:")
+    if permissions:
+        for permission in permissions:
+            lines.append(f"    - {_format_permission(permission)}")
+    else:
+        lines.append("    - none declared")
+
+    trust = _trust_block(summary)
+    lines.append("  Trust (v1):")
+    lines.append(f"    - sandbox={trust['sandbox']}")
+    lines.append(
+        "    - runs_with_user_process_permissions="
+        f"{str(bool(trust['runs_with_user_process_permissions'])).lower()}"
+    )
+    lines.append(
+        "    - permission_enforcement="
+        f"{trust['permission_enforcement']}"
+    )
+    lines.append("  Disclosure:")
+    lines.append("    - Astrid v1 does not sandbox installed packs.")
+    lines.append("    - Permission declarations are disclosure-only and not enforced.")
+    lines.append("    - Installed pack code runs with your user's process permissions.")
 
     # Warnings
     warnings = summary.get("warnings", [])
@@ -739,7 +805,7 @@ def uninstall_pack(
 # ---------------------------------------------------------------------------
 
 
-def _diff_component_inventories(
+def _format_update_diff(
     old_summary: dict,
     new_summary: dict,
     *,
@@ -816,7 +882,70 @@ def _diff_component_inventories(
     if not added_secrets and not removed_secrets and (old_secrets or new_secrets):
         lines.append("  Secrets: (unchanged)")
 
+    old_permissions = {
+        str(permission.get("id", "?")): permission
+        for permission in _normalized_summary_permissions(old_summary)
+        if permission.get("id")
+    }
+    new_permissions = {
+        str(permission.get("id", "?")): permission
+        for permission in _normalized_summary_permissions(new_summary)
+        if permission.get("id")
+    }
+    added_permission_ids = sorted(set(new_permissions) - set(old_permissions))
+    removed_permission_ids = sorted(set(old_permissions) - set(new_permissions))
+    changed_permission_ids = sorted(
+        permission_id
+        for permission_id in set(old_permissions) & set(new_permissions)
+        if old_permissions[permission_id] != new_permissions[permission_id]
+    )
+    if added_permission_ids:
+        lines.append("  Permissions added:")
+        for permission_id in added_permission_ids:
+            lines.append(f"    - {_format_permission(new_permissions[permission_id])}")
+    if removed_permission_ids:
+        lines.append("  Permissions removed:")
+        for permission_id in removed_permission_ids:
+            lines.append(f"    - {_format_permission(old_permissions[permission_id])}")
+    if changed_permission_ids:
+        lines.append("  Permissions changed:")
+        for permission_id in changed_permission_ids:
+            lines.append(
+                "    - "
+                f"{permission_id}: {_format_permission(old_permissions[permission_id])} "
+                f"→ {_format_permission(new_permissions[permission_id])}"
+            )
+    if (
+        not added_permission_ids
+        and not removed_permission_ids
+        and not changed_permission_ids
+    ):
+        if old_permissions or new_permissions:
+            lines.append("  Permissions: (unchanged)")
+        else:
+            lines.append("  Permissions: none declared")
+
     return "\n".join(lines)
+
+
+def _diff_component_inventories(
+    old_summary: dict,
+    new_summary: dict,
+    *,
+    old_version: str = "",
+    new_version: str = "",
+    old_commit: str = "",
+    new_commit: str = "",
+) -> str:
+    """Backward-compatible wrapper for the update diff formatter."""
+    return _format_update_diff(
+        old_summary,
+        new_summary,
+        old_version=old_version,
+        new_version=new_version,
+        old_commit=old_commit,
+        new_commit=new_commit,
+    )
 
 
 def update_pack(

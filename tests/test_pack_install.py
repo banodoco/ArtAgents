@@ -207,10 +207,62 @@ class TestInstallDryRun(InstallTestBase):
         self.assertIn("dry_test", output)
         self.assertIn("Dry Test", output)
         self.assertIn("0.1.0", output)
+        self.assertIn("Permissions:", output)
+        self.assertIn("none declared", output)
+        self.assertIn("Astrid v1 does not sandbox installed packs.", output)
+        self.assertIn("disclosure-only", output)
 
         # No side effects — store should be empty
         self.assertIsNone(store.get_active("dry_test"))
         self.assertFalse(store.is_installed("dry_test"))
+
+
+class TestTrustSummaryPermissions(InstallTestBase):
+    def test_extract_trust_summary_includes_permissions_and_v1_trust_block(self) -> None:
+        src = self._temp_pack("perm_pack")
+        (src / "pack.yaml").write_text(
+            (src / "pack.yaml").read_text(encoding="utf-8")
+            + textwrap.dedent(
+                """\
+                permissions:
+                  - id: network
+                    reason: Call remote APIs for media generation.
+                    services:
+                      - fal
+                  - id: project_files
+                    reason: Read and write project files.
+                    access: read-write
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        summary = extract_trust_summary(src)
+
+        self.assertEqual(
+            summary["permissions"],
+            [
+                {
+                    "id": "network",
+                    "reason": "Call remote APIs for media generation.",
+                    "services": ["fal"],
+                },
+                {
+                    "id": "project_files",
+                    "reason": "Read and write project files.",
+                    "access": "read-write",
+                },
+            ],
+        )
+        self.assertEqual(summary["permission_ids"], ["network", "project_files"])
+        self.assertEqual(
+            summary["trust"],
+            {
+                "sandbox": "none",
+                "runs_with_user_process_permissions": True,
+                "permission_enforcement": "disclosure_only",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,6 @@ Covers:
 
 from __future__ import annotations
 
-import os
 import shutil
 import tempfile
 import unittest
@@ -19,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.pack import PackValidationError
-from astrid.packs.validate import PackValidator, ValidationError, validate_pack
+from astrid.packs.validate import PackValidator, validate_pack
 
 
 def _write(path: Path, content: str) -> None:
@@ -209,6 +208,37 @@ agent:
         self.assertEqual(pack.support, "community")
         self.assertEqual(pack.stability, "experimental")
 
+    def test_discovery_pack_definition_preserves_permissions(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+permissions:
+  - id: network
+    reason: Contacts hosted APIs.
+    services:
+      - github
+agent:
+  purpose: Testing
+""",
+        )
+        validator = PackValidator(root)
+        validator._pack_data = validator._load_yaml(root / "pack.yaml")
+        pack = validator._pack_definition_for_discovery({"executors": "executors"})
+        self.assertEqual(
+            pack.to_dict()["permissions"],
+            [
+                {
+                    "id": "network",
+                    "reason": "Contacts hosted APIs.",
+                    "services": ["github"],
+                }
+            ],
+        )
+
     def test_docs_scaffold_templates_validate_in_minimal_pack(self) -> None:
         """Scaffold templates should validate together in a minimal pack shell."""
         root = self.make_pack_root()
@@ -247,6 +277,27 @@ content:
         errors, warnings = validate_pack(root)
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
         self.assertEqual(warnings, [], f"Unexpected warnings: {warnings}")
+
+
+class TestPermissionValidation(MinimalPackTestCase):
+    def test_invalid_permission_key_is_reported(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+permissions:
+  - id: network
+    reason: Contacts hosted APIs.
+    unsupported: true
+agent:
+  purpose: Testing
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertTrue(any("permissions" in error for error in errors), errors)
 
 
 class TestLayoutValidation(MinimalPackTestCase):
