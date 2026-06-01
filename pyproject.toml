@@ -19,12 +19,9 @@ dependencies = [
     # It is an optional/heavy dependency; install separately if needed.
     # "pyannote.audio==3.3.2",
     #
-    # runpod-lifecycle is a private/local dependency not published to PyPI.
-    # It lives in a sibling repo: /Users/peteromalley/Documents/reigh-workspace/runpod-lifecycle
-    # Install it locally before running RunPod executors:
-    #   pip install -e /Users/peteromalley/Documents/reigh-workspace/runpod-lifecycle
-    # The pack-level requirements.txt at astrid/packs/runpod/executors/session/requirements.txt
-    # pins runpod-lifecycle>=0.3 for pack consumers.
+    # runpod-lifecycle has been moved to [project.optional-dependencies].runpod.
+    # It is not published on public PyPI and requires a configured private index
+    # or local wheelhouse to resolve.  Install with: pip install 'astrid[runpod]'
     # "runpod-lifecycle>=0.3",
 ]
 
@@ -37,6 +34,14 @@ dev = [
     "pytest==9.0.2",
     "pytest-cov==7.1.0",
     "ruff==0.12.0",
+    "build",
+]
+
+# Requires a configured private package index (e.g. local wheelhouse or git
+# source) because runpod-lifecycle is not published on public PyPI.
+# Install: pip install 'astrid[runpod]'
+runpod = [
+    "runpod-lifecycle>=0.3",
 ]
 
 [tool.setuptools.packages.find]

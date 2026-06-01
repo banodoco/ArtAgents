@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.runpod.executors.teardown.run",
+      "teardown",
+      "--produces-dir",
+      "{out}/produces"
+    ],
+    "input_args": [
+      {
+        "input": "pod_handle",
+        "flag": "--pod-handle"
+      }
+    ]
+  },
+  "conditions": [
+    {
+      "input": "pod_handle",
+      "kind": "requires_input"
+    }
+  ],
+  "description": "Terminate a RunPod pod by pod_handle. Idempotent \u2014 'not found' is a no-op.",
+  "graph": {
+    "consumes": [
+      "pod_handle"
+    ],
+    "provides": [
+      "teardown_receipt",
+      "cost"
+    ]
+  },
+  "id": "runpod.teardown",
+  "inputs": [
+    {
+      "description": "Path to the pod_handle.json from a prior provision step.",
+      "name": "pod_handle",
+      "required": true,
+      "type": "file"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "network": true,
+    "requirements": [
+      "runpod-lifecycle>=0.3"
+    ]
+  },
+  "keywords": [
+    "runpod",
+    "gpu",
+    "teardown",
+    "terminate",
+    "stop",
+    "cleanup"
+  ],
+  "kind": "external",
+  "metadata": {
+    "catalog_source": "none_declared",
+    "cli_module": "astrid.packs.runpod.executors.teardown.run",
+    "command_names": [
+      "provision",
+      "exec",
+      "teardown",
+      "pull",
+      "session"
+    ],
+    "homepage": "https://github.com/peteromallet/runpod-lifecycle",
+    "network_behavior": {
+      "provision": true,
+      "exec": true,
+      "teardown": true,
+      "pull": true,
+      "session": true
+    },
+    "nodes": [],
+    "pack_id": "runpod",
+    "prompts": [],
+    "requirements": [
+      "runpod-lifecycle>=0.3"
+    ],
+    "requirements_source": "requirements.txt",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.runpod.executors.teardown.run"
+  },
+  "name": "RunPod Teardown",
+  "short_description": "Terminate a RunPod pod. Idempotent.",
+  "version": "0.1.0"
+}

@@ -1,0 +1,233 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.runpod.executors.session.run",
+      "session",
+      "--produces-dir",
+      "{out}/produces"
+    ],
+    "input_args": [
+      {
+        "input": "gpu_type",
+        "flag": "--gpu-type",
+        "optional": true
+      },
+      {
+        "input": "storage_name",
+        "flag": "--storage-name",
+        "optional": true
+      },
+      {
+        "input": "max_runtime_seconds",
+        "flag": "--max-runtime-seconds",
+        "optional": true
+      },
+      {
+        "input": "name_prefix",
+        "flag": "--name-prefix",
+        "optional": true
+      },
+      {
+        "input": "image",
+        "flag": "--image",
+        "optional": true
+      },
+      {
+        "input": "container_disk_gb",
+        "flag": "--container-disk-gb",
+        "optional": true
+      },
+      {
+        "input": "datacenter_id",
+        "flag": "--datacenter-id",
+        "optional": true
+      },
+      {
+        "input": "ports",
+        "flag": "--ports",
+        "optional": true
+      },
+      {
+        "input": "local_root",
+        "flag": "--local-root",
+        "optional": true
+      },
+      {
+        "input": "remote_root",
+        "flag": "--remote-root",
+        "optional": true
+      },
+      {
+        "input": "remote_script",
+        "flag": "--remote-script",
+        "optional": true
+      },
+      {
+        "input": "timeout",
+        "flag": "--timeout",
+        "optional": true
+      },
+      {
+        "input": "upload_mode",
+        "flag": "--upload-mode",
+        "optional": true
+      },
+      {
+        "input": "excludes",
+        "flag": "--excludes",
+        "optional": true
+      }
+    ]
+  },
+  "conditions": [],
+  "description": "Composite provision \u2192 exec \u2192 download \u2192 terminate session with guaranteed cleanup via try/finally. Writes pod_handle.json as a sweeper breadcrumb immediately after provision and deletes it on graceful teardown.",
+  "graph": {
+    "consumes": [],
+    "provides": [
+      "exec_result",
+      "artifact_dir",
+      "cost"
+    ]
+  },
+  "id": "runpod.session",
+  "inputs": [
+    {
+      "description": "GPU type to request (e.g. RTX 4090, A100).",
+      "name": "gpu_type",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Name of a pre-existing RunPod network storage volume.",
+      "name": "storage_name",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Maximum runtime in seconds before the pod guard triggers.",
+      "name": "max_runtime_seconds",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "description": "Name prefix for the pod.",
+      "name": "name_prefix",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Docker image to run on the pod.",
+      "name": "image",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Container disk size in GB.",
+      "name": "container_disk_gb",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "description": "RunPod datacenter ID.",
+      "name": "datacenter_id",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Comma-separated port spec for the pod (default: '8888/http,22/tcp').",
+      "name": "ports",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Local directory to upload to the pod.",
+      "name": "local_root",
+      "required": false,
+      "type": "path"
+    },
+    {
+      "description": "Remote path on the pod where the script runs.",
+      "name": "remote_root",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Path to the script to execute on the pod.",
+      "name": "remote_script",
+      "required": false,
+      "type": "file"
+    },
+    {
+      "description": "Execution timeout in seconds.",
+      "name": "timeout",
+      "required": false,
+      "type": "integer"
+    },
+    {
+      "description": "Upload mode: sftp_walk or tarball.",
+      "name": "upload_mode",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "description": "Glob patterns to exclude from upload.",
+      "name": "excludes",
+      "required": false,
+      "type": "string"
+    }
+  ],
+  "isolation": {
+    "mode": "subprocess",
+    "network": true,
+    "requirements": [
+      "runpod-lifecycle>=0.3"
+    ]
+  },
+  "keywords": [
+    "runpod",
+    "gpu",
+    "session",
+    "provision",
+    "exec",
+    "teardown",
+    "composite"
+  ],
+  "kind": "external",
+  "metadata": {
+    "catalog_source": "none_declared",
+    "cli_module": "astrid.packs.runpod.executors.session.run",
+    "command_names": [
+      "provision",
+      "exec",
+      "teardown",
+      "pull",
+      "session"
+    ],
+    "homepage": "https://github.com/peteromallet/runpod-lifecycle",
+    "network_behavior": {
+      "provision": true,
+      "exec": true,
+      "teardown": true,
+      "pull": true,
+      "session": true
+    },
+    "nodes": [],
+    "pack_id": "runpod",
+    "prompts": [],
+    "requirements": [
+      "runpod-lifecycle>=0.3"
+    ],
+    "requirements_source": "requirements.txt",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.runpod.executors.session.run"
+  },
+  "name": "RunPod Session",
+  "short_description": "Composite provision \u2192 exec \u2192 teardown session with guaranteed cleanup.",
+  "version": "0.1.0"
+}

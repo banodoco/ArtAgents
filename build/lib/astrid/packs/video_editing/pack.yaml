@@ -1,0 +1,56 @@
+schema_version: 1
+id: video_editing
+name: Astrid Video Editing
+version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: media
+stability: stable
+support: core
+visibility: visible
+description: Timeline editing executors and video production orchestrators.
+content:
+  executors: executors
+  orchestrators: orchestrators
+aliases:
+- kind: executor
+  alias: builtin.cut
+  canonical_id: video_editing.cut
+  deprecated: true
+  deprecation_message: Moved to video_editing.cut
+- kind: orchestrator
+  alias: builtin.hype
+  canonical_id: video_editing.hype
+  deprecated: true
+  deprecation_message: Moved to video_editing.hype
+- kind: orchestrator
+  alias: builtin.event_talks
+  canonical_id: video_editing.event_talks
+  deprecated: true
+  deprecation_message: Moved to video_editing.event_talks
+- kind: orchestrator
+  alias: builtin.thumbnail_maker
+  canonical_id: video_editing.thumbnail_maker
+  deprecated: true
+  deprecation_message: Moved to video_editing.thumbnail_maker
+- kind: orchestrator
+  alias: builtin.iteration_video
+  canonical_id: video_editing.iteration_video
+  deprecated: true
+  deprecation_message: Moved to video_editing.iteration_video
+- kind: orchestrator
+  alias: builtin.animate_image
+  canonical_id: video_editing.animate_image
+  deprecated: true
+  deprecation_message: Moved to video_editing.animate_image
+- kind: orchestrator
+  alias: builtin.logo_ideas
+  canonical_id: video_editing.logo_ideas
+  deprecated: true
+  deprecation_message: Moved to video_editing.logo_ideas
+- kind: orchestrator
+  alias: builtin.vary_grid
+  canonical_id: video_editing.vary_grid
+  deprecated: true
+  deprecation_message: Moved to video_editing.vary_grid

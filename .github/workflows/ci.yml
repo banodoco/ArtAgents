@@ -31,6 +31,13 @@ jobs:
         run: |
           python -c "import astrid; print('Editable install validation passed')"
 
+      - name: Blocking clean wheel-install proof
+        run: bash scripts/smoke_wheel_install.sh
+
+      - name: RunPod-extra validation (advisory — skipped without private index)
+        continue-on-error: true
+        run: bash scripts/smoke_runpod_extra.sh
+
       - name: Run doctor check
         run: |
           # Blocking: on a CI runner with no .env on disk, the env-template check

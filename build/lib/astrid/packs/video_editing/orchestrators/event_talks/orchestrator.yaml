@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "cache": {
+    "mode": "none"
+  },
+  "child_executors": [],
+  "child_orchestrators": [],
+  "description": "Orchestrates event-talk template, search, holding-screen, and render commands.",
+  "id": "video_editing.event_talks",
+  "keywords": [
+    "event",
+    "talks",
+    "video",
+    "render",
+    "search",
+    "template"
+  ],
+  "kind": "built_in",
+  "metadata": {
+    "callable_module": "astrid.packs.video_editing.orchestrators.event_talks.run",
+    "callable_name": "main",
+    "plan_builder_entrypoint": "build_plan_v2",
+    "plan_builder_module": "astrid.packs.video_editing.orchestrators.event_talks.plan_template",
+    "requires_output_path": true,
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.video_editing.orchestrators.event_talks.run",
+    "subcommands": [
+      "ados-sunday-template",
+      "search-transcript",
+      "find-holding-screens",
+      "render"
+    ]
+  },
+  "name": "Event Talks",
+  "runtime": {
+    "command": {
+      "argv": [
+        "{python_exec}",
+        "-m",
+        "astrid.packs.video_editing.orchestrators.event_talks.run",
+        "{orchestrator_args}"
+      ]
+    },
+    "kind": "command"
+  },
+  "short_description": "Orchestrate event-talk template, search, holding-screen, and render commands into a finished video.",
+  "version": "1.0"
+}

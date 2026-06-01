@@ -1,0 +1,40 @@
+schema_version: 1
+id: understanding
+name: Astrid Understanding
+version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: media
+stability: stable
+support: core
+visibility: visible
+description: Audio, visual, and video understanding executors.
+content:
+  executors: executors
+aliases:
+- kind: executor
+  alias: builtin.scene_describe
+  canonical_id: understanding.scene_describe
+  deprecated: true
+  deprecation_message: Moved to understanding.scene_describe
+- kind: executor
+  alias: builtin.understand
+  canonical_id: understanding.understand
+  deprecated: true
+  deprecation_message: Moved to understanding.understand
+- kind: executor
+  alias: builtin.video_understand
+  canonical_id: understanding.video_understand
+  deprecated: true
+  deprecation_message: Moved to understanding.video_understand
+- kind: executor
+  alias: builtin.visual_understand
+  canonical_id: understanding.visual_understand
+  deprecated: true
+  deprecation_message: Moved to understanding.visual_understand
+- kind: executor
+  alias: builtin.audio_understand
+  canonical_id: understanding.audio_understand
+  deprecated: true
+  deprecation_message: Moved to understanding.audio_understand

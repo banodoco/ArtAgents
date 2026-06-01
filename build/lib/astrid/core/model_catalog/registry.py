@@ -1,0 +1,127 @@
+"""Model registry — loads models.yaml, validates, and provides lookup.
+
+Uses ``yaml.safe_load`` (stdlib PyYAML) because the YAML subset parser
+(``_parse_yaml_subset``) does not tolerate flow-style inline mappings in
+``param_map`` blocks (see T2 findings).
+
+Schema v2: model → mode → backend taxonomy.  Lookups are keyed by
+(model_id, mode) rather than model_id alone.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from astrid.core.model_catalog.schema import ModelEntry, ModeSpec, validate_registry
+
+
+class ModelRegistry:
+    """In-memory registry of generation model entries.
+
+    Loaded from the shipped ``models.yaml`` via :meth:`load_default`.
+    Schema v2 — every lookup that cares about generation capability
+    must specify both *model_id* and *mode*.
+    """
+
+    def __init__(self, entries: list[ModelEntry]) -> None:
+        self._by_id: dict[str, ModelEntry] = {e.id: e for e in entries}
+
+    # -- lookup ----------------------------------------------------------
+
+    def get(self, model_id: str) -> ModelEntry:
+        """Return the :class:`ModelEntry` for *model_id*.
+
+        Raises:
+            KeyError: If *model_id* is not registered.
+        """
+        try:
+            return self._by_id[model_id]
+        except KeyError:
+            available = ", ".join(sorted(self._by_id))
+            raise KeyError(
+                f"Unknown model {model_id!r}. Available: {available}"
+            ) from None
+
+    def get_by_mode(self, model_id: str, mode: str) -> tuple[ModelEntry, ModeSpec]:
+        """Return ``(ModelEntry, ModeSpec)`` for a specific *(model_id, mode)*.
+
+        Raises:
+            KeyError: If *model_id* is unknown or *mode* is not supported
+                by that model.
+        """
+        entry = self.get(model_id)
+        if mode not in entry.modes:
+            available = ", ".join(sorted(entry.modes))
+            raise KeyError(
+                f"Model {model_id!r} does not support mode {mode!r}. "
+                f"Available modes: {available}"
+            )
+        return entry, entry.modes[mode]
+
+    def backend_available(self, model_id: str, mode: str, execution: str) -> bool:
+        """Return ``True`` if *execution* backend is available for *(model_id, mode)*.
+
+        *execution* must be ``"local"`` or ``"cloud"``.
+        """
+        _, mode_spec = self.get_by_mode(model_id, mode)
+        return execution in mode_spec.backends
+
+    def list_by_modality(
+        self, modality: str, *, include_closed: bool = False
+    ) -> list[ModelEntry]:
+        """Return all entries belonging to *modality* (e.g. ``"image"``).
+
+        Closed-weight models (``closed: true``) are hidden by default;
+        pass ``include_closed=True`` to include them.
+        """
+        entries = [e for e in self._by_id.values() if e.modality == modality]
+        if not include_closed:
+            entries = [e for e in entries if not e.closed]
+        return entries
+
+    def list_all(self, *, include_closed: bool = False) -> list[ModelEntry]:
+        """Return every registered entry.
+
+        Closed-weight models (``closed: true``) are hidden by default;
+        pass ``include_closed=True`` to include them.
+        """
+        entries = list(self._by_id.values())
+        if not include_closed:
+            entries = [e for e in entries if not e.closed]
+        return entries
+
+    # -- loading ---------------------------------------------------------
+
+    @classmethod
+    def load_default(cls) -> ModelRegistry:
+        """Load the shipped ``models.yaml`` from the catalog directory."""
+        yaml_path = Path(__file__).resolve().parent / "models.yaml"
+        if not yaml_path.is_file():
+            raise FileNotFoundError(f"model registry not found: {yaml_path}")
+        raw = _load_yaml(yaml_path)
+        entries = validate_registry(raw)
+        return cls(entries)
+
+
+# ------------------------------------------------------------------
+# Internal helpers
+# ------------------------------------------------------------------
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    """Load a YAML file using ``yaml.safe_load``.
+
+    This is the fallback parser chosen over ``_parse_yaml_subset`` after
+    T2 confirmed that flow-style inline mappings (``{key: value}``) in
+    ``param_map`` blocks cannot be parsed by the YAML subset parser.
+    """
+    import yaml
+
+    with open(path, "r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"{path}: expected a YAML mapping at top level, "
+            f"got {type(data).__name__}"
+        )
+    return data
