@@ -174,13 +174,13 @@ class OrchestratorCapabilityRunner(CapabilityRunner[OrchestratorRunRequest, Orch
         context: ProjectRunContext,
         request: OrchestratorRunRequest,
         *,
-        status: str,
+        status: RunStatus,
         returncode: int | None,
         error: BaseException | str | None = None,
     ) -> None:
         _finalize_project_orchestrator(context, request, status=status, returncode=returncode, error=error)
 
-    def status_for_result(self, result: OrchestratorRunResult) -> str:
+    def status_for_result(self, result: OrchestratorRunResult) -> RunStatus:
         return _project_status_for_result(result)
 
     def result_returncode(self, result: OrchestratorRunResult) -> int | None:
@@ -493,19 +493,19 @@ def _project_argv(request: OrchestratorRunRequest) -> list[str]:
     return argv
 
 
-def _project_status_for_result(result: OrchestratorRunResult) -> str:
+def _project_status_for_result(result: OrchestratorRunResult) -> RunStatus:
     if result.dry_run:
-        return RunStatus.SKIPPED.to_project_record_status()
+        return RunStatus.SKIPPED
     if not result.ok:
-        return RunStatus.FAILED.to_project_record_status()
-    return RunStatus.COMPLETED.to_project_record_status()
+        return RunStatus.FAILED
+    return RunStatus.COMPLETED
 
 
 def _finalize_project_orchestrator(
     context: ProjectRunContext,
     request: OrchestratorRunRequest,
     *,
-    status: str,
+    status: RunStatus,
     returncode: int | None,
     error: BaseException | str | None = None,
 ) -> None:

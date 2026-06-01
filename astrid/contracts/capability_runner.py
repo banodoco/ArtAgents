@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from typing import Generic, Protocol, TypeVar
 
+from astrid.contracts.run_status import RunStatus
+
 RequestT = TypeVar("RequestT")
 ResultT = TypeVar("ResultT")
 DefinitionT = TypeVar("DefinitionT")
@@ -67,13 +69,13 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
         context: object,
         request: RequestT,
         *,
-        status: str,
+        status: RunStatus,
         returncode: int | None,
         error: BaseException | str | None = None,
     ) -> None:
         raise NotImplementedError
 
-    def status_for_result(self, result: ResultT) -> str:
+    def status_for_result(self, result: ResultT) -> RunStatus:
         raise NotImplementedError
 
     def result_returncode(self, result: ResultT) -> int | None:
@@ -96,7 +98,11 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
         except Exception as exc:
             if project_context is not None:
                 self.finalize_project(
-                    project_context, effective_request, status="error", returncode=-1, error=exc
+                    project_context,
+                    effective_request,
+                    status=RunStatus.FAILED,
+                    returncode=-1,
+                    error=exc,
                 )
             raise
         if project_context is not None:

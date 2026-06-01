@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.executor import runner as executor_runner
 from astrid.core.executor.runner import ExecutorRunRequest
 from astrid.core.orchestrator import runner as orchestrator_runner
@@ -30,7 +31,7 @@ def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
     assert context.run_root == tmp_projects_root / "demo" / "runs" / "task-run-1" / "steps" / "step-1" / "v1"
     assert context.run_id == "task-run-1"
     assert not context.run_json_path.exists()
-    assert context.record["status"] == "attached"
+    assert context.record["status"] == "running"
     assert context.record["timeline_id"] == timeline_id
     assert context.record["metadata"]["attached_to_task_run"] is True
     assert context.record["metadata"]["task_step_id"] == "step-1"
@@ -75,7 +76,7 @@ def test_env_unset_standalone_path_still_writes_run_json(tmp_projects_root: Path
 
     assert context.run_root == tmp_projects_root / "demo" / "runs" / "standalone-run"
     assert context.run_json_path.is_file()
-    assert context.record["status"] == "prepared"
+    assert context.record["status"] == "running"
     assert context.record["timeline_id"] == timeline_id
     manifest = json.loads(
         (tmp_projects_root / "demo" / "timelines" / timeline_id / "manifest.json").read_text(
@@ -95,7 +96,7 @@ def test_attached_hype_artifacts_mirror_under_step_produces(tmp_projects_root: P
     for name in ("hype.timeline.json", "hype.assets.json", "hype.metadata.json"):
         (artifact_root / name).write_text("{}\n", encoding="utf-8")
 
-    record = finalize_project_run(context, status="success", artifact_roots=[artifact_root])
+    record = finalize_project_run(context, status=RunStatus.COMPLETED, artifact_roots=[artifact_root])
 
     assert not context.run_json_path.exists()
     produces = context.run_root / "produces"
@@ -135,6 +136,28 @@ def test_prepare_project_run_is_central_chokepoint_for_project_callers(tmp_path:
     assert calls == [("demo", "executor"), ("demo", "orchestrator"), ("demo", "orchestrator")]
 
 
+def test_project_run_status_producers_return_runstatus_members() -> None:
+    assert executor_runner._project_status_for_result(  # type: ignore[attr-defined]
+        SimpleNamespace(skipped=False, dry_run=False, ok=True)
+    ) is RunStatus.COMPLETED
+    assert executor_runner._project_status_for_result(  # type: ignore[attr-defined]
+        SimpleNamespace(skipped=True, dry_run=False, ok=True)
+    ) is RunStatus.SKIPPED
+    assert executor_runner._project_status_for_result(  # type: ignore[attr-defined]
+        SimpleNamespace(skipped=False, dry_run=False, ok=False)
+    ) is RunStatus.FAILED
+
+    assert orchestrator_runner._project_status_for_result(  # type: ignore[attr-defined]
+        SimpleNamespace(dry_run=False, ok=True)
+    ) is RunStatus.COMPLETED
+    assert orchestrator_runner._project_status_for_result(  # type: ignore[attr-defined]
+        SimpleNamespace(dry_run=True, ok=True)
+    ) is RunStatus.SKIPPED
+    assert orchestrator_runner._project_status_for_result(  # type: ignore[attr-defined]
+        SimpleNamespace(dry_run=False, ok=False)
+    ) is RunStatus.FAILED
+
+
 def _set_task_env(monkeypatch: pytest.MonkeyPatch, *, project: str, run_id: str, step_id: str) -> None:
     monkeypatch.setenv(TASK_RUN_ID_ENV, run_id)
     monkeypatch.setenv(TASK_PROJECT_ENV, project)
@@ -154,6 +177,6 @@ def _seed_parent_run(root: Path, project: str, run_id: str, timeline_id: str) ->
         root=root,
         tool_id="demo.parent",
         kind="orchestrator",
-        status="prepared",
+        status=RunStatus.RUNNING,
         timeline_id=timeline_id,
     )

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.run_status import RunStatus
 from astrid.threads.ids import generate_run_id, generate_thread_id
 from astrid.threads.index import ThreadIndexLockTimeout, ThreadIndexStore
 from astrid.threads.schema import (
@@ -91,6 +92,7 @@ def test_repo_relative_and_content_addressed_path_validation() -> None:
                 "schema_version": SCHEMA_VERSION,
                 "run_id": generate_run_id(),
                 "thread_id": generate_thread_id(),
+                "status": RunStatus.RUNNING.value,
                 "parent_run_ids": [],
                 "out_path": "/tmp/absolute",
                 "input_artifacts": [],
@@ -98,6 +100,42 @@ def test_repo_relative_and_content_addressed_path_validation() -> None:
                 "external_service_calls": [],
             }
         )
+
+
+def test_validate_run_record_normalizes_legacy_orphaned_to_failed() -> None:
+    normalized = validate_run_record(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "run_id": generate_run_id(),
+            "thread_id": generate_thread_id(),
+            "status": "orphaned",
+            "parent_run_ids": [],
+            "out_path": "runs/demo",
+            "input_artifacts": [],
+            "output_artifacts": [],
+            "external_service_calls": [],
+        }
+    )
+
+    assert normalized["status"] == RunStatus.FAILED.value
+
+
+def test_validate_run_record_normalizes_legacy_succeeded_to_completed() -> None:
+    normalized = validate_run_record(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "run_id": generate_run_id(),
+            "thread_id": generate_thread_id(),
+            "status": "succeeded",
+            "parent_run_ids": [],
+            "out_path": "runs/demo",
+            "input_artifacts": [],
+            "output_artifacts": [],
+            "external_service_calls": [],
+        }
+    )
+
+    assert normalized["status"] == RunStatus.COMPLETED.value
 
 
 def test_concurrent_writers_do_not_lose_updates(tmp_path: Path) -> None:

@@ -108,6 +108,7 @@ def open_task_run_writer(
     session: Session,
     *,
     root: str | Path | None = None,
+    session_root: str | Path | None = None,
 ) -> TaskRunWriter:
     """Authenticate ``session`` as the current task-run writer.
 
@@ -128,7 +129,12 @@ def open_task_run_writer(
     on_disk_run_id = read_current_run(session.project, root=root)
     if on_disk_run_id != session.run_id:
         session = replace(session, run_id=on_disk_run_id, last_used_at=now_iso())
-        session.to_json(session_path(session.id))
+        if session_root is None:
+            session.to_json(session_path(session.id))
+        else:
+            from astrid.core.session.model import SessionStore
+
+            SessionStore(session_root=session_root).save(session)
 
     if session.run_id is None:
         raise NoRunBoundError(session.id, session.project)
@@ -154,6 +160,7 @@ def writer_context_for_project(
     slug: str,
     *,
     root: str | Path | None = None,
+    session_root: str | Path | None = None,
 ) -> WriterContext:
     """Resolve the bound session for ``slug`` and return a WriterContext.
 
@@ -167,21 +174,32 @@ def writer_context_for_project(
     session = resolve_current_session(slug=slug)
     if session is None:
         raise NoRunBoundError("", slug)
-    return WriterContext(session, root=root)
+    return WriterContext(session, root=root, session_root=session_root)
 
 
 class WriterContext:
     """Auto-rebinding writer-auth gate around the locked event-append helper."""
 
-    def __init__(self, session: Session, *, root: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        session: Session,
+        *,
+        root: str | Path | None = None,
+        session_root: str | Path | None = None,
+    ) -> None:
         self.session: Session = session
         self._root = root
+        self._session_root = session_root
         self.run_dir: Path | None = None
         self.expected_writer_epoch: int = -1
         self.plan_hash: str = ""
 
     def __enter__(self) -> "WriterContext":
-        writer = open_task_run_writer(self.session, root=self._root)
+        writer = open_task_run_writer(
+            self.session,
+            root=self._root,
+            session_root=self._session_root,
+        )
         self.session = writer.session
         self.run_dir = writer.run_dir
         self.expected_writer_epoch = writer.expected_writer_epoch
@@ -224,6 +242,7 @@ def writer_context_from_decision(
     decision: _HasSession,
     *,
     root: str | Path | None = None,
+    session_root: str | Path | None = None,
 ) -> WriterContext:
     """Factory used by post-dispatch ``record_*`` helpers.
 
@@ -232,4 +251,4 @@ def writer_context_from_decision(
     writer-auth check on ``__enter__`` as :class:`WriterContext`.
     """
 
-    return WriterContext(decision.session, root=root)
+    return WriterContext(decision.session, root=root, session_root=session_root)

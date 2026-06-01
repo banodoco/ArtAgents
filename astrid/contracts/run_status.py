@@ -74,6 +74,22 @@ class RunStatus(StrEnum):
             return cls.BLOCKED
         return cls.RUNNING
 
+    @classmethod
+    def from_run_record_status(cls, raw: str) -> "RunStatus":
+        """Parse a persisted run-record status token.
+
+        Accepts canonical persisted tokens and a read-through set of legacy
+        spellings used by older project/thread records. Callers must only
+        serialize canonical tokens back to disk via ``RunStatus.value``.
+        """
+        try:
+            return _RUN_RECORD_STATUS_TO_RUN_STATUS[raw]
+        except KeyError:
+            raise ValueError(
+                f"unmapped run-record status {raw!r}; expected one of "
+                f"{sorted(_RUN_RECORD_STATUS_TO_RUN_STATUS)!r}"
+            ) from None
+
     # ------------------------------------------------------------------ #
     # reigh wire boundary (Title-Case) — used ONLY by the reigh task client.
     # ------------------------------------------------------------------ #
@@ -152,4 +168,18 @@ _RUN_STATUS_TO_PROJECT_RECORD: dict[RunStatus, str] = {
     RunStatus.COMPLETED: "success",
     RunStatus.FAILED: "failed",
     RunStatus.SKIPPED: "skipped",
+}
+
+_RUN_RECORD_STATUS_TO_RUN_STATUS: dict[str, RunStatus] = {
+    RunStatus.RUNNING.value: RunStatus.RUNNING,
+    RunStatus.COMPLETED.value: RunStatus.COMPLETED,
+    RunStatus.FAILED.value: RunStatus.FAILED,
+    RunStatus.BLOCKED.value: RunStatus.BLOCKED,
+    RunStatus.ABORTED.value: RunStatus.ABORTED,
+    RunStatus.SKIPPED.value: RunStatus.SKIPPED,
+    "prepared": RunStatus.RUNNING,
+    "success": RunStatus.COMPLETED,
+    "succeeded": RunStatus.COMPLETED,
+    "error": RunStatus.FAILED,
+    "orphaned": RunStatus.FAILED,
 }

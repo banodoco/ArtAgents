@@ -399,3 +399,123 @@ def test_validate_migration_completion_flags_reintroduced_wrapper_all_aliases(
                 f"Lineage symbol {alias_name!r} incorrectly flagged as "
                 f"__all__ alias: {adv}"
             )
+
+
+# ── m5a run-record status boundary guards ───────────────────────────────
+
+from astrid.structure import validate_run_record_status_boundary
+
+
+def test_run_record_status_boundary_flags_legacy_token_in_dict_literal(tmp_path: Path) -> None:
+    """A dict literal with ``\"status\": \"prepared\"`` outside of run_status.py
+    must produce an advisory."""
+    _write(
+        tmp_path,
+        "astrid/core/bad_run_builder.py",
+        "def build() -> dict:\n"
+        '    return {"status": "prepared", "run_id": "01ABC"}\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == 1
+    assert "legacy token 'prepared'" in advisories[0]
+    assert "write RunStatus.value instead" in advisories[0]
+
+
+def test_run_record_status_boundary_flags_legacy_token_orphaned(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "astrid/threads/bad_reaper.py",
+        "def reap() -> None:\n"
+        '    record["status"] = "orphaned"\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    # Assignment with subscript target is not a dict literal; the check
+    # currently only scans Dict AST nodes.  This proves the check is
+    # scoped: it catches the most common bypass (dict-literal writes) but
+    # does not over-claim coverage of subscript assignments.
+    assert len(advisories) == 0
+
+
+def test_run_record_status_boundary_does_not_flag_canonical_tokens(tmp_path: Path) -> None:
+    """Canonical tokens (running, completed, failed) are NOT legacy and must
+    not produce advisories."""
+    _write(
+        tmp_path,
+        "astrid/core/ok_builder.py",
+        "def build() -> dict:\n"
+        '    return {"status": "running", "run_id": "01ABC"}\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == 0
+
+
+def test_run_record_status_boundary_does_not_flag_run_status_py(tmp_path: Path) -> None:
+    """The canonical mapping in run_status.py is exempt."""
+    _write(
+        tmp_path,
+        "astrid/contracts/run_status.py",
+        '_RUN_RECORD_STATUS_TO_RUN_STATUS = {"prepared": "running"}\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == 0
+
+
+def test_run_record_status_boundary_does_not_flag_tests(tmp_path: Path) -> None:
+    """Test files are excluded from the scan."""
+    _write(
+        tmp_path,
+        "astrid/tests/test_legacy.py",
+        "def test_legacy() -> None:\n"
+        '    assert {"status": "prepared"}["status"] == "prepared"\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == 0
+
+
+def test_run_record_status_boundary_does_not_flag_packs(tmp_path: Path) -> None:
+    """Pack files are excluded from the scan."""
+    _write(
+        tmp_path,
+        "astrid/packs/training/some_executor/run.py",
+        "def run() -> dict:\n"
+        '    return {"status": "prepared"}\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == 0
+
+
+def test_run_record_status_boundary_does_not_flag_non_status_key(tmp_path: Path) -> None:
+    """A legacy token used as a value for a non-``status`` key is innocent."""
+    _write(
+        tmp_path,
+        "astrid/core/harmless.py",
+        "def describe() -> dict:\n"
+        '    return {"error_type": "orphaned"}\n',
+    )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == 0
+
+
+def test_run_record_status_boundary_each_legacy_token_is_detected(tmp_path: Path) -> None:
+    """Every legacy token listed in the guard set is flagged when written
+    into a ``\"status\"`` key of a dict literal."""
+    legacy_tokens = ("prepared", "success", "succeeded", "error", "orphaned")
+    for token in legacy_tokens:
+        _write(
+            tmp_path,
+            f"astrid/core/bad_{token}.py",
+            "def build() -> dict:\n"
+            f'    return {{"status": "{token}"}}\n',
+        )
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert len(advisories) == len(legacy_tokens)
+    for token in legacy_tokens:
+        assert any(token in adv for adv in advisories), (
+            f"Expected advisory for legacy token {token!r}, got: {advisories}"
+        )
+
+
+def test_run_record_status_boundary_accepts_empty_root(tmp_path: Path) -> None:
+    """An empty or non-existent astrid directory produces zero advisories."""
+    advisories = validate_run_record_status_boundary(tmp_path)
+    assert advisories == []

@@ -12,6 +12,7 @@ from astrid._paths import REPO_ROOT
 
 from .attribute import archive_thread, backfill_runs, create_thread, enforce_lifecycle, reopen_thread, resolve_thread_ref
 from .index import ThreadIndexStore
+from .schema import validate_run_record
 from .variants import SELECTION_SENTENCE, VariantState, keep_selection, read_current_keepers, selection_history
 
 
@@ -195,7 +196,10 @@ def _load_run(repo_root: Path, run_id: str) -> dict[str, Any] | None:
         except (OSError, json.JSONDecodeError):
             continue
         if data.get("run_id") == run_id:
-            return data
+            try:
+                return validate_run_record(data)
+            except Exception:
+                return data
     return None
 
 

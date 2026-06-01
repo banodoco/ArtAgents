@@ -221,6 +221,8 @@ def test_takeover_refuses_warm_target_without_force(
     )
     mint_session(env["home"], "S-PREV", project="demo", run_id="01RUN")
     caller = mint_session(env["home"], "S-NEW", project="demo", run_id="01RUN")
+    before_events = (run_dir / "events.jsonl").read_bytes()
+    before_session = session_path(caller.id).read_bytes()
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
 
     rc = cli.cmd_sessions_takeover(
@@ -229,6 +231,35 @@ def test_takeover_refuses_warm_target_without_force(
     assert rc == 2
     # Lease still names the previous writer.
     assert read_lease(run_dir)["attached_session_id"] == "S-PREV"
+    assert (run_dir / "events.jsonl").read_bytes() == before_events
+    assert session_path(caller.id).read_bytes() == before_session
+
+
+def test_unbound_takeover_refuses_warm_target_before_session_creation(
+    env: dict[str, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    seed_project_run: Any,
+) -> None:
+    run_dir = seed_project_run(env["projects"], "demo", "01RUN", writer_session_id="S-PREV")
+    append_event_locked(
+        run_dir,
+        {"kind": "step_dispatched", "plan_step_id": "x", "command": "noop"},
+        expected_writer_epoch=0,
+        expected_prev_hash=ZERO_HASH,
+    )
+    before_lease = (run_dir / "lease.json").read_bytes()
+    before_events = (run_dir / "events.jsonl").read_bytes()
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    rc = cli.cmd_sessions_takeover(
+        argparse.Namespace(target="01RUN", force=False), out=StringIO()
+    )
+
+    assert rc == 2
+    assert (run_dir / "lease.json").read_bytes() == before_lease
+    assert (run_dir / "events.jsonl").read_bytes() == before_events
+    assert not (env["home"] / "sessions").exists()
+    assert not (env["projects"] / "demo" / SESSION_FILE_NAME).exists()
 
 
 def test_takeover_force_overrides_warm_guard(
@@ -261,13 +292,19 @@ def test_takeover_unknown_target_errors(
     mint_session: Any,
     seed_project_run: Any,
 ) -> None:
-    seed_project_run(env["projects"], writer_session_id="S-PREV")
+    run_dir = seed_project_run(env["projects"], writer_session_id="S-PREV")
     caller = mint_session(env["home"], "S-NEW", project="demo", run_id="01RUN")
+    before_lease = (run_dir / "lease.json").read_bytes()
+    before_events = (run_dir / "events.jsonl").read_bytes()
+    before_session = session_path(caller.id).read_bytes()
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
     rc = cli.cmd_sessions_takeover(
         argparse.Namespace(target="NONEXISTENT", force=False), out=StringIO()
     )
     assert rc == 2
+    assert (run_dir / "lease.json").read_bytes() == before_lease
+    assert (run_dir / "events.jsonl").read_bytes() == before_events
+    assert session_path(caller.id).read_bytes() == before_session
 
 
 def test_takeover_missing_lease_errors_without_appending(

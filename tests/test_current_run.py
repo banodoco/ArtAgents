@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from pathlib import Path
 
 import pytest
@@ -49,3 +50,11 @@ def test_read_rejects_malformed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     current_run_path("demo").write_text(json.dumps({"run_id": ""}), encoding="utf-8")
     with pytest.raises(CurrentRunError, match="run_id"):
         read_current_run("demo")
+
+
+def test_cmd_start_preserves_lease_first_current_run_ordering() -> None:
+    from astrid.core.task.plan_builder import cmd_start
+
+    source = inspect.getsource(cmd_start)
+
+    assert source.index("write_lease_init(") < source.index("write_current_run(")

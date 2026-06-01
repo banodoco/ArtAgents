@@ -7,6 +7,7 @@ from unittest import mock
 
 import pytest
 
+from astrid.contracts.run_status import RunStatus
 from astrid.contracts.schema import CommandSpec, Output, Port
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
@@ -160,6 +161,68 @@ def test_internal_thread_record_preserves_parent_lineage(tmp_path: Path, monkeyp
         parent_run_ids=[{"kind": "chosen", "run_id": parent_run_id}],
     )
     assert record["parent_run_ids"] == [{"kind": "chosen", "run_id": parent_run_id}]
+
+
+def test_thread_run_record_finalize_writes_canonical_statuses(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path, monkeypatch)
+    out = repo / "runs" / "status"
+
+    running = build_run_record(
+        run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        kind="executor",
+        executor_id="test.writer",
+        out_path=out,
+        repo_root=repo,
+    )
+    completed = finalize_run_record(running, repo_root=repo, out_path=out, returncode=0)
+    failed = finalize_run_record(running, repo_root=repo, out_path=out, returncode=7, status=RunStatus.FAILED)
+
+    assert running["status"] == RunStatus.RUNNING.value
+    assert completed["status"] == RunStatus.COMPLETED.value
+    assert failed["status"] == RunStatus.FAILED.value
+
+
+def test_thread_run_record_write_normalizes_legacy_succeeded_to_canonical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path, monkeypatch)
+    out = repo / "runs" / "legacy"
+    record = build_run_record(
+        run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        kind="executor",
+        executor_id="test.writer",
+        out_path=out,
+        repo_root=repo,
+    )
+    record["status"] = "succeeded"
+
+    from astrid.threads.record import write_run_record
+
+    write_run_record(record, out / "run.json")
+
+    on_disk = _read_json(out / "run.json")
+    assert on_disk["status"] == RunStatus.COMPLETED.value
+
+
+def test_thread_run_record_write_normalizes_legacy_orphaned_to_canonical(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path, monkeypatch)
+    out = repo / "runs" / "orphan"
+    record = build_run_record(
+        run_id=RUN_ID,
+        thread_id=THREAD_ID,
+        kind="executor",
+        executor_id="test.writer",
+        out_path=out,
+        repo_root=repo,
+    )
+    record["status"] = "orphaned"
+
+    from astrid.threads.record import write_run_record
+
+    write_run_record(record, out / "run.json")
+
+    on_disk = _read_json(out / "run.json")
+    assert on_disk["status"] == RunStatus.FAILED.value
 
 
 def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

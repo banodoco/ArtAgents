@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 
 from astrid import pipeline
+from astrid.contracts.run_status import RunStatus
 from astrid.threads import cli
 from astrid.threads.ids import generate_run_id, generate_thread_id
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.record import build_run_record, finalize_run_record, write_run_record
+from astrid.threads.schema import make_thread_record
 
 
 def test_thread_cli_lifecycle_show_no_content_and_route(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -80,6 +82,56 @@ def test_thread_help_has_no_deferred_commands(capsys: pytest.CaptureFixture[str]
     output = capsys.readouterr().out
     for forbidden in ("split", "merge", "attach", "detach", " gc"):
         assert forbidden not in output
+
+
+def test_thread_show_normalizes_legacy_succeeded_to_completed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _repo(tmp_path, monkeypatch)
+    thread_id = generate_thread_id()
+    ThreadIndexStore(repo).write(
+        {
+            "schema_version": 1,
+            "active_thread_id": thread_id,
+            "threads": {thread_id: make_thread_record(thread_id=thread_id, label="Legacy")},
+        }
+    )
+    run_id = _write_run(repo, thread_id)
+    run_json = repo / "runs" / "one" / "run.json"
+    payload = json.loads(run_json.read_text(encoding="utf-8"))
+    payload["status"] = "succeeded"
+    run_json.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert cli.main(["show", thread_id, "--no-content", "--json"]) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["runs"][0]["run_id"] == run_id
+    assert shown["runs"][0]["status"] == RunStatus.COMPLETED.value
+
+
+def test_thread_show_normalizes_legacy_orphaned_to_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repo = _repo(tmp_path, monkeypatch)
+    thread_id = generate_thread_id()
+    ThreadIndexStore(repo).write(
+        {
+            "schema_version": 1,
+            "active_thread_id": thread_id,
+            "threads": {thread_id: make_thread_record(thread_id=thread_id, label="Legacy")},
+        }
+    )
+    run_id = _write_run(repo, thread_id)
+    run_json = repo / "runs" / "one" / "run.json"
+    payload = json.loads(run_json.read_text(encoding="utf-8"))
+    payload["status"] = "orphaned"
+    run_json.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert cli.main(["show", thread_id, "--no-content", "--json"]) == 0
+
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["runs"][0]["run_id"] == run_id
+    assert shown["runs"][0]["status"] == RunStatus.FAILED.value
 
 
 def _repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

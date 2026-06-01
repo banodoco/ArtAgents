@@ -208,6 +208,58 @@ def test_attach_with_session_resumes_existing(
     assert len(list((env["home"] / "sessions").iterdir())) == 1
 
 
+def test_attach_delegates_create_to_sdk_helper(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
+    original_attach = cli.attach_session
+    calls: list[dict[str, object]] = []
+
+    def _spy_attach_session(**kwargs: object):
+        calls.append(dict(kwargs))
+        return original_attach(**kwargs)
+
+    monkeypatch.setattr(cli, "attach_session", _spy_attach_session)
+
+    buf = StringIO()
+    rc = cli.cmd_attach(_args(timeline="primary"), out=buf)
+
+    assert rc == 0
+    assert len(calls) == 1
+    assert calls[0]["project_slug"] == "demo"
+    assert calls[0]["timeline"] == "primary"
+    assert "session_id" not in calls[0]
+    assert calls[0]["write_project_pointer"] is True
+    assert "export ASTRID_SESSION_ID=" in buf.getvalue()
+
+
+def test_attach_resume_delegates_open_to_sdk_helper(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
+    cli.cmd_attach(_args(timeline="primary"), out=StringIO())
+    first_sid = next(iter((env["home"] / "sessions").iterdir())).stem
+
+    original_attach = cli.attach_session
+    calls: list[dict[str, object]] = []
+
+    def _spy_attach_session(**kwargs: object):
+        calls.append(dict(kwargs))
+        return original_attach(**kwargs)
+
+    monkeypatch.setattr(cli, "attach_session", _spy_attach_session)
+
+    buf = StringIO()
+    rc = cli.cmd_attach(_args(session=first_sid), out=buf)
+
+    assert rc == 0
+    assert len(calls) == 1
+    assert calls[0]["project_slug"] == "demo"
+    assert calls[0]["session_id"] == first_sid
+    assert calls[0]["write_project_pointer"] is True
+    assert f"export ASTRID_SESSION_ID={first_sid}" in buf.getvalue()
+
+
 def test_attach_resume_missing_id_errors(
     env: dict[str, Path], seed_project
 ) -> None:
@@ -285,6 +337,28 @@ def test_sessions_ls_lists_all(env: dict[str, Path], seed_project) -> None:
     assert any("project=other" in ln for ln in lines)
 
 
+def test_sessions_ls_delegates_to_store_iteration(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
+    cli.cmd_attach(_args(project="demo", timeline="primary"), out=StringIO())
+    original_iter = cli.SessionStore.iter_sessions
+    calls: list[bool] = []
+
+    def _spy_iter_sessions(self, *, skip_malformed: bool = False):
+        calls.append(skip_malformed)
+        return original_iter(self, skip_malformed=skip_malformed)
+
+    monkeypatch.setattr(cli.SessionStore, "iter_sessions", _spy_iter_sessions)
+
+    buf = StringIO()
+    rc = cli.cmd_sessions_ls(argparse.Namespace(), out=buf)
+
+    assert rc == 0
+    assert calls == [True]
+    assert "project=demo" in buf.getvalue()
+
+
 # ----- cmd_sessions_detach ----------------------------------------------
 
 
@@ -297,6 +371,27 @@ def test_detach_by_id_removes_session_file(
     rc = cli.cmd_sessions_detach(argparse.Namespace(session_id=sid), out=StringIO())
     assert rc == 0
     assert not (env["home"] / "sessions" / f"{sid}.json").exists()
+
+
+def test_detach_delegates_to_store_delete(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, seed_project
+) -> None:
+    seed_project(env["projects"], "demo")
+    cli.cmd_attach(_args(timeline="primary"), out=StringIO())
+    sid = next(iter((env["home"] / "sessions").iterdir())).stem
+    original_delete = cli.SessionStore.delete
+    calls: list[str] = []
+
+    def _spy_delete(self, session_id: str):
+        calls.append(session_id)
+        return original_delete(self, session_id)
+
+    monkeypatch.setattr(cli.SessionStore, "delete", _spy_delete)
+
+    rc = cli.cmd_sessions_detach(argparse.Namespace(session_id=sid), out=StringIO())
+
+    assert rc == 0
+    assert calls == [sid]
 
 
 def test_detach_without_id_uses_env(
