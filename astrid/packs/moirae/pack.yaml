@@ -14,9 +14,26 @@ permissions:
     reason: Runs Moirae terminal-as-cinema renderer with asciinema and ffmpeg.
   - id: project_files
     reason: Reads screenplay files and writes rendered video.
-description: Moirae integration executors.
+description: Renders a YAML screenplay into a terminal-as-cinema video via Moirae (asciinema, agg, ffmpeg).
+keywords:
+  - moirae
+  - terminal
+  - screenplay
+  - asciinema
+  - render
+  - video
+  - demo
+  - cinema
+capabilities:
+  - render_screenplay
+  - produce_terminal_video
 content:
   executors: executors
+agent:
+  purpose: "Use to turn a Moirae screenplay file into a scripted terminal/CLI demo video (typewriter text, simulated agent Q&A, camera moves). External pack — requires the moirae package plus asciinema, agg, and ffmpeg binaries."
+  do_not_use_for: "Not for trimming real video files (use the media pack) or assembling iteration videos from run provenance (use the iteration pack)."
+  normal_entrypoints:
+    - moirae.moirae
 aliases:
 - kind: executor
   alias: external.moirae

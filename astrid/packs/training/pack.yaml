@@ -18,7 +18,29 @@ permissions:
     reason: Training run orchestrator provisions RunPod GPUs and downloads checkpoints.
   - id: environment
     reason: Reads RunPod API credentials for GPU provisioning.
-description: Dataset and training executors plus training orchestrators.
+description: Build video training datasets and run LoRA training end to end — clip pools, captioning/review, RunPod-backed trainer execution, and checkpoint registration.
+keywords:
+- training
+- lora
+- dataset
+- captioning
+- runpod
+- checkpoint
+- pool
+- huggingface
+capabilities:
+- build_dataset
+- run_training
+- build_clip_pool
+- merge_clip_pool
+- search_loras
+- manage_asset_cache
+agent:
+  purpose: Choose this pack to assemble a video training dataset (acquire, split, caption, review) or to run a LoRA training job that provisions GPUs, executes the trainer remotely, pulls checkpoints, and registers artifacts.
+  do_not_use_for: Not for raw GPU provisioning or one-off remote script execution on its own; use the runpod pack for bare pod lifecycle control.
+  normal_entrypoints:
+  - training.training_run
+  - training.dataset_build
 content:
   executors: executors
   orchestrators: orchestrators

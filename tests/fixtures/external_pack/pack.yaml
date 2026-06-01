@@ -1,0 +1,23 @@
+schema_version: 1
+id: external_pack
+name: External Pack
+version: 1.0.0
+origin: external
+install_tier: optional
+pack_type: capability
+domain: editorial
+stability: experimental
+support: community
+visibility: visible
+permissions: []
+description: Minimal reviewable external pack fixture for contract testing.
+extensions:
+  elements:
+    kinds:
+    - id: widgets
+      singular: widget
+      plural: widgets
+      label: Widgets
+      description: Custom widget elements from an external pack.
+content:
+  elements: elements

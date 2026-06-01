@@ -14,7 +14,32 @@ permissions:
     reason: Runs ffmpeg-based cut and foley executors plus orchestrator child processes.
   - id: project_files
     reason: Reads and writes timelines, assets, and editorial artifacts.
-description: Timeline editing executors and video production orchestrators.
+description: End-to-end video production orchestrators (hype edits, talks, thumbnails, logos, image animation) plus the timeline-cut executor.
+keywords:
+- video
+- timeline
+- edit
+- hype
+- thumbnail
+- render
+- animate
+- grid
+capabilities:
+- run_hype_pipeline
+- build_timeline
+- assemble_event_talk
+- make_thumbnails
+- generate_logo_grid
+- animate_image
+- vary_image_grid
+- render_iteration_video
+agent:
+  purpose: Choose this pack to assemble and render finished video from source media — run the canonical hype edit pipeline, build event-talk videos, or generate thumbnails, logo grids, and animated/varied images.
+  do_not_use_for: Do not use to merely understand/caption media (use understanding) or to run a raw ComfyUI generation graph (use vibecomfy); this pack owns the editorial assembly and render flow, distinct from the editorial pack's analysis stages it depends on.
+  normal_entrypoints:
+  - video_editing.hype
+  - video_editing.event_talks
+  - video_editing.thumbnail_maker
 content:
   executors: executors
   orchestrators: orchestrators

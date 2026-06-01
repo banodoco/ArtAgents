@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from tests._sdk_contract import EXPECTED_PUBLIC_NAMES, HEAVY_MODULES
 from astrid.contracts.event_log_error import EventLogError
 from astrid.core.executor.schema import ExecutorValidationError
 from astrid.core.orchestrator.runner import OrchestratorRunError
@@ -28,44 +29,6 @@ pytestmark = pytest.mark.skipif(
     reason="public SDK facade lands in later execution batches",
 )
 
-
-EXPECTED_PUBLIC_NAMES = (
-    "discover",
-    "get_capability",
-    "invoke",
-    "read_events",
-    "subscribe_events",
-    "Capability",
-    "DiscoveryResult",
-    "EventStreamRecord",
-    "InvocationResult",
-    "AstridSDKError",
-    "CapabilityNotFoundError",
-    "CapabilityAmbiguousError",
-    "CapabilityValidationError",
-    "CapabilityMissingInputError",
-    "CapabilityPreconditionError",
-    "CapabilityRuntimeError",
-    "CapabilityLeaseError",
-    "CapabilityEventLogError",
-    "UnsupportedCapabilityError",
-    "CapabilityInvocationError",
-    "CapabilityHandle",
-    "Port",
-    "Output",
-    "AliasRecord",
-    "Provenance",
-    "SafetyDeclaration",
-    "ExecError",
-)
-
-HEAVY_MODULES = (
-    "astrid.sdk",
-    "astrid.core.executor.registry",
-    "astrid.core.executor.runner",
-    "astrid.core.orchestrator.registry",
-    "astrid.core.orchestrator.runner",
-)
 
 REPRESENTATIVE_SUBMODULES = (
     "astrid.timeline",

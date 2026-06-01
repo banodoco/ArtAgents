@@ -14,7 +14,28 @@ permissions:
     reason: Runs audio, visual, and video understanding executors.
   - id: project_files
     reason: Reads audio, video, and image files for analysis.
-description: Audio, visual, and video understanding executors.
+description: LLM-based audio, image, and video understanding — caption, query, and structured extraction over media.
+keywords:
+- understanding
+- caption
+- vision
+- audio
+- video
+- transcribe-scene
+- llm
+- structured-output
+capabilities:
+- understand_media
+- understand_audio
+- understand_image
+- understand_video
+- describe_scene
+agent:
+  purpose: Choose this pack to inspect or describe media content — caption images/scenes, query audio or synchronized audio+video windows, or extract schema-constrained structured fields from a clip via an LLM.
+  do_not_use_for: Do not use to edit, cut, or render video (use video_editing) or to generate new media (use vibecomfy).
+  normal_entrypoints:
+  - understanding.understand
+  - understanding.scene_describe
 content:
   executors: executors
 aliases:

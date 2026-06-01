@@ -18,7 +18,27 @@ permissions:
     reason: Publishes timelines and assets to Reigh API.
   - id: environment
     reason: Reads REIGH_USER_TOKEN and REIGH_SUPABASE_URL.
-description: Reigh platform integration executors.
+description: Reigh platform integration — publish timelines/assets into Reigh projects, fetch project data, and build spatial-audio handoff pages.
+keywords:
+- reigh
+- publish
+- timeline
+- assets
+- project
+- handoff
+- spatial-audio
+- edge-function
+capabilities:
+- publish_timeline
+- open_in_reigh
+- fetch_reigh_data
+- build_spatial_audio_page
+agent:
+  purpose: Choose this pack when you need to hand off Astrid-generated timelines and assets to the Reigh platform — publishing them into a Reigh project, fetching canonical project data, or building a spatial-audio preview page.
+  do_not_use_for: Not for rendering or producing the timeline/video itself; use the rendering pack to generate output before publishing here.
+  normal_entrypoints:
+  - reigh.publish
+  - reigh.reigh_data
 content:
   executors: executors
 aliases:
