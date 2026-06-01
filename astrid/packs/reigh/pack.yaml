@@ -35,7 +35,7 @@ capabilities:
 - build_spatial_audio_page
 agent:
   purpose: Choose this pack when you need to hand off Astrid-generated timelines and assets to the Reigh platform — publishing them into a Reigh project, fetching canonical project data, or building a spatial-audio preview page.
-  do_not_use_for: Not for rendering or producing the timeline/video itself; use the rendering pack to generate output before publishing here.
+  do_not_use_for: Not for creating timelines/assets or rendering MP4s; use video_editing and rendering before handoff.
   normal_entrypoints:
   - reigh.publish
   - reigh.reigh_data

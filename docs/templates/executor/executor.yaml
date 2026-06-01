@@ -25,7 +25,7 @@
     "argv": [
       "{python_exec}",
       "-m",
-      "astrid.packs.rendering.example.run",
+      "astrid.packs.builtin.executors.example.run",
       "--input",
       "{input}",
       "--out",
@@ -40,7 +40,7 @@
     "network": false
   },
   "metadata": {
-    "runtime_module": "astrid.packs.rendering.example.run",
+    "runtime_module": "astrid.packs.builtin.executors.example.run",
     "runtime_file": "run.py"
   }
 }

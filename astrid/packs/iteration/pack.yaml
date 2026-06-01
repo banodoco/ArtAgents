@@ -31,7 +31,6 @@ capabilities:
   - emit_render_adapter
 content:
   executors: executors
-  orchestrators: orchestrators
 agent:
   purpose: "Use to turn a thread's run history into an iteration video artifact: prepare provenance/quality from a target run, then assemble the canonical iteration timeline and render-compatible hype inputs."
   do_not_use_for: "Not for raw video editing or clip trimming (use the media pack) or final video rendering (use the rendering pack on the emitted hype adapter)."

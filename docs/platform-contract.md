@@ -210,18 +210,94 @@ Opaque or evolving manifest areas include:
 
 ## Element Extension APIs
 
-Element extension support exists in v1, but the extension API itself is
-**provisional**.
+Astrid v1 supports pack-declared generation and element extensions through the
+pack manifest `extensions` block. The stable v1 contract is the manifest shape,
+external-pack discovery path, and public SDK discovery records described here.
+The internal registries and adapter protocols that consume these records remain
+provisional.
 
-This includes:
+### Generation Extensions
 
-- `pack.extensions.elements.kinds`
-- External element pack discovery through `ASTRID_PACKS_PATH`
-- Related registry/typegen behavior that makes external element kinds visible
+Packs may declare generation extensions under:
 
-Astrid supports these workflows in v1, but does not yet treat their detailed
-programmatic contract as Tier 1. Callers and pack authors should expect
-additive or structural refinement in minor releases.
+- `pack.extensions.generation.backends`
+- `pack.extensions.generation.features`
+- `pack.extensions.generation.modes`
+
+The stable v1 contract for generation extensions is:
+
+- These fields are valid pack-manifest fields under
+  `astrid/packs/schemas/v1/pack.json`.
+- `generation.backends` entries declare inert backend descriptors with `id`,
+  `module`, `class`, optional `label`, and optional `init_kwargs`.
+- `generation.features` and `generation.modes` entries may be strings or
+  objects with `id`, optional `label`, and optional `description`.
+- Packs discovered through source packs, explicit SDK `extra_pack_roots`,
+  `ASTRID_PACKS_PATH`, or installed-pack discovery can contribute these
+  declarations.
+- `astrid.discover()` exposes normalized records through
+  `DiscoveryResult.generation_backends`,
+  `DiscoveryResult.generation_features`, and
+  `DiscoveryResult.generation_modes`.
+
+The v1 SemVer guarantee covers the existence of those manifest locations, the
+required/optional field names listed above, and the existence of the matching
+`DiscoveryResult` tuple fields. Minor releases may add optional descriptor
+fields or new built-in records, but will not remove or rename these v1 fields
+without the normal two-minor deprecation window.
+
+The following generation details are provisional or opaque in v1:
+
+- The Python backend adapter base class and registry implementation under
+  `astrid.core.generation.*`
+- The exact constructor/import behavior for backend classes beyond the manifest
+  descriptor fields
+- The complete built-in taxonomy of feature ids, mode ids, backend ids, labels,
+  and descriptions
+- Nested `init_kwargs` contents
+- Ordering of discovery records, except that records are returned as tuples and
+  are safe to serialize
+
+### Element Kind Extensions
+
+Packs may declare element-kind extensions under
+`pack.extensions.elements.kinds`. Each entry declares an `id` and may include
+`singular`, `plural`, `label`, and `description`.
+
+The stable v1 contract for element extensions is:
+
+- `pack.extensions.elements.kinds` is a valid pack-manifest field under
+  `astrid/packs/schemas/v1/pack.json`.
+- External packs loaded through `ASTRID_PACKS_PATH` can declare element kinds
+  and elements using those kinds.
+- `astrid.discover()` exposes normalized element-kind records through
+  `DiscoveryResult.element_kinds`.
+- Element capabilities discovered from those packs remain visible through the
+  public SDK as `Capability` DTOs with `capability_type == "element"`.
+
+The v1 SemVer guarantee covers the manifest field names above and the existence
+of `DiscoveryResult.element_kinds`. Minor releases may add optional descriptor
+fields or additional built-in element kinds without deprecation.
+
+The following element details are provisional or opaque in v1:
+
+- The registry/typegen implementation that maps aliases to canonical element
+  kind names
+- Internal React/TypeScript component conventions for element rendering
+- Nested `Capability.schema`, `Capability.defaults`, and
+  `Capability.definition` payload shapes for elements
+
+### Extension Boundary
+
+The generation and element extension APIs are pack-authoring and discovery
+APIs, not a promise that every declared extension can be invoked through
+`astrid.invoke()`. In v1, `astrid.invoke()` supports executors and
+orchestrators; passing an element capability raises `UnsupportedCapabilityError`.
+
+Callers should use `astrid.discover()` and `astrid.get_capability()` for
+extension discovery, serialize opaque payloads rather than depending on nested
+internal keys, and treat direct imports from `astrid.core.*` or
+`astrid.packs.*` as outside the public v1 SDK contract.
 
 ## Disclosure-Only Trust And Security
 

@@ -32,7 +32,7 @@ capabilities:
 - describe_scene
 agent:
   purpose: Choose this pack to inspect or describe media content — caption images/scenes, query audio or synchronized audio+video windows, or extract schema-constrained structured fields from a clip via an LLM.
-  do_not_use_for: Do not use to edit, cut, or render video (use video_editing) or to generate new media (use vibecomfy).
+  do_not_use_for: Do not use to edit, cut, or render video (use video_editing) or to generate new media (use generation; use vibecomfy only for raw ComfyUI workflow graphs).
   normal_entrypoints:
   - understanding.understand
   - understanding.scene_describe
