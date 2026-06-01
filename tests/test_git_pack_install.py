@@ -19,15 +19,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-import yaml
-
 from astrid.core.pack_store import (
-    InstallRecord,
     InstalledPackStore,
 )
 from astrid.packs.install import (
     _check_git_available,
-    _clone_git_pack,
     _diff_component_inventories,
     _find_pack_root_in_checkout,
     _format_trust_summary,
@@ -35,10 +31,8 @@ from astrid.packs.install import (
     _is_git_url,
     _resolve_git_ref,
     _run_git,
-    _update_git_pack,
     install_pack,
     rollback_pack,
-    uninstall_pack,
     update_pack,
 )
 from astrid.packs.cli import cmd_inspect
@@ -179,8 +173,17 @@ class GitTestBase(unittest.TestCase):
             store=store,
             dry_run=dry_run,
             skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="test-helper",
             force=force,
         )
+
+    def _active_install_json(self, store: InstalledPackStore, pack_id: str) -> dict:
+        rev = store.active_revision_path(pack_id)
+        self.assertIsNotNone(rev)
+        assert rev is not None
+        return _json.loads((rev / ".astrid" / "install.json").read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +339,7 @@ class TestGitInstallFlow(GitTestBase):
             repo_path,
             store=store,
             skip_confirm=True,
+            trust_acknowledged=True,
         )
         self.assertEqual(rc, 0)
 
@@ -366,6 +370,80 @@ class TestGitInstallFlow(GitTestBase):
         self.assertIsNotNone(data.get("installed_at"))
         self.assertIsNotNone(data.get("manifest_digest"))
 
+    def test_git_url_install_uses_shared_install_record_trust_metadata(self) -> None:
+        """_install_from_git delegates to install_pack and records trust metadata."""
+        pack_id = "git_trust_record"
+        repo_path, commit_sha = _make_git_repo_with_pack(self._tmpdir, pack_id)
+        pack_yaml = Path(repo_path) / "pack.yaml"
+        pack_yaml.write_text(
+            pack_yaml.read_text()
+            + textwrap.dedent("""\
+                permissions:
+                  - id: environment
+                    access: read
+                    reason: Read test environment configuration.
+            """),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo_path, capture_output=True, check=True, timeout=30)
+        subprocess.run(["git", "commit", "-m", "add permissions"], cwd=repo_path, capture_output=True, check=True, timeout=30)
+        commit_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_path,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        ).stdout.strip()
+
+        store = self._store()
+        rc = _install_from_git(
+            repo_path,
+            store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="test",
+        )
+
+        self.assertEqual(rc, 0)
+        record = store.get_active(pack_id)
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.source_type, "git")
+        self.assertEqual(record.git_url, repo_path)
+        self.assertEqual(record.commit_sha, commit_sha)
+        self.assertTrue(record.trust_acknowledged_at.endswith("Z"))
+        self.assertEqual(record.trust_method, "test")
+        self.assertEqual(record.trust_actor, "test")
+        self.assertEqual(record.no_sandbox_warning_version, 1)
+        self.assertEqual(
+            record.permissions_accepted,
+            [
+                {
+                    "id": "environment",
+                    "reason": "Read test environment configuration.",
+                    "access": "read",
+                }
+            ],
+        )
+        install_json = self._active_install_json(store, pack_id)
+        self.assertEqual(install_json["source_type"], "git")
+        self.assertEqual(install_json["git_url"], repo_path)
+        self.assertEqual(install_json["commit_sha"], commit_sha)
+        self.assertTrue(install_json["trust_acknowledged_at"].endswith("Z"))
+        self.assertEqual(install_json["trust_method"], "test")
+        self.assertEqual(install_json["trust_actor"], "test")
+        self.assertEqual(install_json["no_sandbox_warning_version"], 1)
+        self.assertEqual(
+            install_json["permissions_accepted"],
+            record.permissions_accepted,
+        )
+        self.assertEqual(
+            install_json["trust_summary"]["permissions"],
+            record.permissions_accepted,
+        )
+
     def test_git_install_dry_run(self) -> None:
         """Git install --dry-run prints trust summary, does not create pack dir."""
         pack_id = "git_dry_install"
@@ -379,6 +457,7 @@ class TestGitInstallFlow(GitTestBase):
                 store=store,
                 dry_run=True,
                 skip_confirm=True,
+                trust_acknowledged=True,
             )
         self.assertEqual(rc, 0)
         output = buf.getvalue()
@@ -388,6 +467,87 @@ class TestGitInstallFlow(GitTestBase):
         # No state should have been created
         self.assertFalse(store.is_installed(pack_id))
         self.assertIsNone(store.get_active(pack_id))
+
+    def test_git_update_requires_renewed_trust_and_records_new_decision(self) -> None:
+        pack_id = "git_update_trust_record"
+        repo_path, _commit_sha = _make_git_repo_with_pack(self._tmpdir, pack_id)
+        store = self._store()
+        rc = _install_from_git(
+            repo_path,
+            store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="initial-test",
+        )
+        self.assertEqual(rc, 0)
+
+        pack_yaml = Path(repo_path) / "pack.yaml"
+        pack_yaml.write_text(
+            pack_yaml.read_text().replace("version: 0.1.0", "version: 0.2.0")
+            + textwrap.dedent("""\
+                permissions:
+                  - id: network
+                    access: connect
+                    services:
+                      - update-api
+                    reason: Call update API during tests.
+            """),
+            encoding="utf-8",
+        )
+        subprocess.run(["git", "add", "-A"], cwd=repo_path, capture_output=True, check=True, timeout=30)
+        subprocess.run(["git", "commit", "-m", "update permissions"], cwd=repo_path, capture_output=True, check=True, timeout=30)
+
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            rc = update_pack(pack_id, store=store, skip_confirm=True)
+        self.assertEqual(rc, 1)
+        self.assertIn("trust acknowledgement required", err.getvalue())
+        record = store.get_active(pack_id)
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.1.0")
+
+        rc = update_pack(
+            pack_id,
+            store=store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="update-test",
+        )
+        self.assertEqual(rc, 0)
+        updated = store.get_active(pack_id)
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual(updated.version, "0.2.0")
+        self.assertEqual(updated.source_type, "git")
+        self.assertEqual(updated.trust_method, "test")
+        self.assertEqual(updated.trust_actor, "update-test")
+        self.assertEqual(
+            updated.permissions_accepted,
+            [
+                {
+                    "id": "network",
+                    "reason": "Call update API during tests.",
+                    "access": "connect",
+                    "services": ["update-api"],
+                }
+            ],
+        )
+        install_json = self._active_install_json(store, pack_id)
+        self.assertEqual(install_json["source_type"], "git")
+        self.assertEqual(install_json["trust_method"], "test")
+        self.assertEqual(install_json["trust_actor"], "update-test")
+        self.assertEqual(install_json["no_sandbox_warning_version"], 1)
+        self.assertEqual(
+            install_json["permissions_accepted"],
+            updated.permissions_accepted,
+        )
+        self.assertEqual(
+            install_json["trust_summary"]["permissions"],
+            updated.permissions_accepted,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -439,7 +599,12 @@ class TestGitBackedWorkflow(GitTestBase):
         # ── 4. Real update ──
         buf = io.StringIO()
         with mock.patch.object(sys, "stdout", buf):
-            rc = update_pack(self._pack_id, store=store, skip_confirm=True)
+            rc = update_pack(
+                self._pack_id,
+                store=store,
+                skip_confirm=True,
+                trust_acknowledged=True,
+            )
         self.assertEqual(rc, 0)
 
         # Verify update
@@ -502,7 +667,12 @@ class TestGitBackedWorkflow(GitTestBase):
 
         buf = io.StringIO()
         with mock.patch.object(sys, "stdout", buf):
-            rc = update_pack(self._pack_id, store=store, skip_confirm=True)
+            rc = update_pack(
+                self._pack_id,
+                store=store,
+                skip_confirm=True,
+                trust_acknowledged=True,
+            )
         self.assertEqual(rc, 0)
 
         # Now we have 2+ revisions. Find the old one.
@@ -761,7 +931,13 @@ class TestRollbackMetadataConsistency(GitTestBase):
             (src / "pack.yaml").read_text().replace("0.1.0", "0.9.0")
         )
 
-        rc = install_pack(src, store=store, skip_confirm=True, force=True)
+        rc = install_pack(
+            src,
+            store=store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+            force=True,
+        )
         self.assertEqual(rc, 0)
 
         # Verify we have 2 revisions

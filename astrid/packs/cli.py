@@ -1297,6 +1297,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip confirmation prompt."
     )
     install_parser.add_argument(
+        "--trust", action="store_true",
+        help="Acknowledge the pack trust summary for noninteractive installs."
+    )
+    install_parser.add_argument(
         "--force", action="store_true",
         help="Overwrite existing install (preserve old revision)."
     )
@@ -1316,6 +1320,10 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument(
         "--yes", "-y", action="store_true",
         help="Skip confirmation prompt."
+    )
+    update_parser.add_argument(
+        "--trust", action="store_true",
+        help="Acknowledge the pack trust summary for noninteractive updates."
     )
     update_parser.set_defaults(handler=_handle_update)
 

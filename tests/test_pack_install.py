@@ -20,11 +20,12 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.pack_store import (
-    InstallRecord,
     InstalledPackStore,
-    installed_pack_roots,
 )
+from astrid.packs import cli as packs_cli
 from astrid.packs.install import (
+    cmd_install,
+    cmd_update,
     install_pack,
     uninstall_pack,
     update_pack,
@@ -159,6 +160,9 @@ class InstallTestBase(unittest.TestCase):
             store=store,
             dry_run=dry_run,
             skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="test-helper",
             force=force,
         )
 
@@ -183,6 +187,12 @@ class InstallTestBase(unittest.TestCase):
         src = Path(self._tmpdir) / "sources" / pack_id
         src.mkdir(parents=True, exist_ok=True)
         return _make_minimal_pack(src, pack_id=pack_id)
+
+    def _active_install_json(self, store: InstalledPackStore, pack_id: str) -> dict:
+        rev = store.active_revision_path(pack_id)
+        self.assertIsNotNone(rev)
+        assert rev is not None
+        return _json.loads((rev / ".astrid" / "install.json").read_text())
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +225,334 @@ class TestInstallDryRun(InstallTestBase):
         # No side effects — store should be empty
         self.assertIsNone(store.get_active("dry_test"))
         self.assertFalse(store.is_installed("dry_test"))
+
+
+class TestInstallTrustGate(InstallTestBase):
+    def _prepare_update(self, pack_id: str) -> tuple[Path, InstalledPackStore]:
+        src = self._temp_pack(pack_id)
+        store = self._store()
+        self._install(src, store=store)
+        pack_yaml = src / "pack.yaml"
+        pack_yaml.write_text(
+            pack_yaml.read_text().replace("version: 0.1.0", "version: 0.2.0")
+        )
+        return src, store
+
+    def test_install_yes_without_trust_fails_noninteractive(self) -> None:
+        src = self._temp_pack("trust_missing")
+        store = self._store()
+
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            rc = install_pack(src, store=store, skip_confirm=True)
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(store.is_installed("trust_missing"))
+        self.assertIn("trust acknowledgement required", err.getvalue())
+        self.assertIn("--trust", err.getvalue())
+        self.assertIn("--yes only skips", err.getvalue())
+
+    def test_install_interactive_requires_exact_trust_phrase(self) -> None:
+        src = self._temp_pack("trust_exact")
+        store = self._store()
+
+        err = io.StringIO()
+        with (
+            mock.patch("builtins.input", return_value="trust wrong"),
+            mock.patch.object(sys, "stderr", err),
+        ):
+            rc = install_pack(src, store=store)
+
+        self.assertEqual(rc, 1)
+        self.assertFalse(store.is_installed("trust_exact"))
+        self.assertIn("Cancelled.", err.getvalue())
+
+    def test_install_interactive_exact_trust_then_confirm_succeeds(self) -> None:
+        src = self._temp_pack("trust_exact_ok")
+        store = self._store()
+
+        with mock.patch("builtins.input", side_effect=["trust trust_exact_ok", "y"]):
+            rc = install_pack(src, store=store)
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(store.is_installed("trust_exact_ok"))
+
+    def test_update_yes_without_trust_fails_noninteractive(self) -> None:
+        _, store = self._prepare_update("trust_update")
+
+        err = io.StringIO()
+        with mock.patch.object(sys, "stderr", err):
+            rc = update_pack("trust_update", store=store, skip_confirm=True)
+
+        self.assertEqual(rc, 1)
+        self.assertIn("trust acknowledgement required", err.getvalue())
+        self.assertIn("--trust", err.getvalue())
+
+        record = store.get_active("trust_update")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.1.0")
+
+    def test_update_interactive_requires_exact_trust_phrase(self) -> None:
+        _, store = self._prepare_update("trust_update_exact")
+
+        err = io.StringIO()
+        with (
+            mock.patch("builtins.input", return_value="trust wrong"),
+            mock.patch.object(sys, "stderr", err),
+        ):
+            rc = update_pack("trust_update_exact", store=store)
+
+        self.assertEqual(rc, 1)
+        self.assertIn("Cancelled.", err.getvalue())
+        record = store.get_active("trust_update_exact")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.1.0")
+
+    def test_update_interactive_exact_trust_then_confirm_succeeds(self) -> None:
+        _, store = self._prepare_update("trust_update_exact_ok")
+
+        with mock.patch(
+            "builtins.input",
+            side_effect=["trust trust_update_exact_ok", "y"],
+        ):
+            rc = update_pack("trust_update_exact_ok", store=store)
+
+        self.assertEqual(rc, 0)
+        record = store.get_active("trust_update_exact_ok")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.2.0")
+
+    def test_install_trust_flag_still_requires_ordinary_confirmation(self) -> None:
+        src = self._temp_pack("trust_install_flag")
+        store = self._store()
+
+        with (
+            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.packs.install._confirm", return_value=False) as confirm_mock,
+        ):
+            rc = install_pack(src, store=store, trust_acknowledged=True)
+
+        self.assertEqual(rc, 1)
+        self.assertTrue(confirm_mock.called)
+        self.assertFalse(store.is_installed("trust_install_flag"))
+
+    def test_update_trust_flag_still_requires_ordinary_confirmation(self) -> None:
+        _, store = self._prepare_update("trust_update_flag")
+
+        with (
+            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.packs.install._confirm", return_value=False) as confirm_mock,
+        ):
+            rc = update_pack(
+                "trust_update_flag",
+                store=store,
+                trust_acknowledged=True,
+            )
+
+        self.assertEqual(rc, 1)
+        self.assertTrue(confirm_mock.called)
+        record = store.get_active("trust_update_flag")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.1.0")
+
+    def test_install_yes_and_trust_succeeds_without_prompts(self) -> None:
+        src = self._temp_pack("trust_install_yes_and_trust")
+        store = self._store()
+
+        with (
+            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.packs.install._confirm", side_effect=AssertionError("ordinary confirmation should be skipped")),
+        ):
+            rc = install_pack(
+                src,
+                store=store,
+                skip_confirm=True,
+                trust_acknowledged=True,
+            )
+
+        self.assertEqual(rc, 0)
+        self.assertTrue(store.is_installed("trust_install_yes_and_trust"))
+
+    def test_install_persists_trust_decision_metadata(self) -> None:
+        src = self._temp_pack("trust_record")
+        pack_yaml = src / "pack.yaml"
+        pack_yaml.write_text(
+            pack_yaml.read_text()
+            + textwrap.dedent("""\
+                permissions:
+                  - id: project_files
+                    access: read_write
+                    reason: Read and write project files during tests.
+            """),
+            encoding="utf-8",
+        )
+        store = self._store()
+
+        rc = install_pack(
+            src,
+            store=store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="test",
+        )
+
+        self.assertEqual(rc, 0)
+        record = store.get_active("trust_record")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertTrue(record.trust_acknowledged_at.endswith("Z"))
+        self.assertEqual(record.trust_method, "test")
+        self.assertEqual(record.trust_actor, "test")
+        self.assertEqual(record.no_sandbox_warning_version, 1)
+        self.assertEqual(
+            record.permissions_accepted,
+            [
+                {
+                    "id": "project_files",
+                    "reason": "Read and write project files during tests.",
+                    "access": "read_write",
+                }
+            ],
+        )
+        self.assertEqual(
+            record.trust_summary["permissions"],
+            record.permissions_accepted,
+        )
+        install_json = self._active_install_json(store, "trust_record")
+        self.assertTrue(install_json["trust_acknowledged_at"].endswith("Z"))
+        self.assertEqual(install_json["trust_method"], "test")
+        self.assertEqual(install_json["trust_actor"], "test")
+        self.assertEqual(install_json["no_sandbox_warning_version"], 1)
+        self.assertEqual(
+            install_json["permissions_accepted"],
+            record.permissions_accepted,
+        )
+        self.assertEqual(
+            install_json["trust_summary"]["permissions"],
+            record.permissions_accepted,
+        )
+
+    def test_update_yes_and_trust_succeeds_without_prompts(self) -> None:
+        _, store = self._prepare_update("trust_update_yes_and_trust")
+
+        with (
+            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.packs.install._confirm", side_effect=AssertionError("ordinary confirmation should be skipped")),
+        ):
+            rc = update_pack(
+                "trust_update_yes_and_trust",
+                store=store,
+                skip_confirm=True,
+                trust_acknowledged=True,
+            )
+
+        self.assertEqual(rc, 0)
+        record = store.get_active("trust_update_yes_and_trust")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.2.0")
+
+    def test_update_persists_renewed_trust_decision_metadata(self) -> None:
+        src, store = self._prepare_update("trust_update_record")
+        pack_yaml = src / "pack.yaml"
+        pack_yaml.write_text(
+            pack_yaml.read_text()
+            + textwrap.dedent("""\
+                permissions:
+                  - id: network
+                    access: connect
+                    services:
+                      - example-api
+                    reason: Call the example API during tests.
+            """),
+            encoding="utf-8",
+        )
+
+        rc = update_pack(
+            "trust_update_record",
+            store=store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+            trust_method="test",
+            trust_actor="test",
+        )
+
+        self.assertEqual(rc, 0)
+        record = store.get_active("trust_update_record")
+        self.assertIsNotNone(record)
+        assert record is not None
+        self.assertEqual(record.version, "0.2.0")
+        self.assertEqual(record.trust_method, "test")
+        self.assertEqual(record.trust_actor, "test")
+        self.assertEqual(
+            record.permissions_accepted,
+            [
+                {
+                    "id": "network",
+                    "reason": "Call the example API during tests.",
+                    "access": "connect",
+                    "services": ["example-api"],
+                }
+            ],
+        )
+        install_json = self._active_install_json(store, "trust_update_record")
+        self.assertTrue(install_json["trust_acknowledged_at"].endswith("Z"))
+        self.assertEqual(install_json["trust_method"], "test")
+        self.assertEqual(install_json["trust_actor"], "test")
+        self.assertEqual(install_json["no_sandbox_warning_version"], 1)
+        self.assertEqual(
+            install_json["permissions_accepted"],
+            record.permissions_accepted,
+        )
+        self.assertEqual(
+            install_json["trust_summary"]["permissions"],
+            record.permissions_accepted,
+        )
+
+    def test_install_update_standalone_parsers_thread_trust_flag(self) -> None:
+        src = self._temp_pack("parser_trust")
+
+        with mock.patch("astrid.packs.install.install_pack", return_value=0) as install_mock:
+            self.assertEqual(cmd_install([str(src), "--yes", "--trust"]), 0)
+        self.assertTrue(install_mock.call_args.kwargs["skip_confirm"])
+        self.assertTrue(install_mock.call_args.kwargs["trust_acknowledged"])
+        self.assertEqual(install_mock.call_args.kwargs["trust_method"], "cli_flag")
+        self.assertEqual(install_mock.call_args.kwargs["trust_actor"], "cli")
+
+        with mock.patch("astrid.packs.install.update_pack", return_value=0) as update_mock:
+            self.assertEqual(cmd_update(["parser_trust", "--yes", "--trust"]), 0)
+        self.assertTrue(update_mock.call_args.kwargs["skip_confirm"])
+        self.assertTrue(update_mock.call_args.kwargs["trust_acknowledged"])
+        self.assertEqual(update_mock.call_args.kwargs["trust_method"], "cli_flag")
+        self.assertEqual(update_mock.call_args.kwargs["trust_actor"], "cli")
+
+    def test_public_pack_cli_threads_trust_flag(self) -> None:
+        src = self._temp_pack("public_parser_trust")
+
+        with mock.patch("astrid.packs.install.install_pack", return_value=0) as install_mock:
+            self.assertEqual(
+                packs_cli.main(["install", str(src), "--yes", "--trust"]),
+                0,
+            )
+        self.assertTrue(install_mock.call_args.kwargs["skip_confirm"])
+        self.assertTrue(install_mock.call_args.kwargs["trust_acknowledged"])
+        self.assertEqual(install_mock.call_args.kwargs["trust_method"], "cli_flag")
+        self.assertEqual(install_mock.call_args.kwargs["trust_actor"], "cli")
+
+        with mock.patch("astrid.packs.install.update_pack", return_value=0) as update_mock:
+            self.assertEqual(
+                packs_cli.main(["update", "public_parser_trust", "--yes", "--trust"]),
+                0,
+            )
+        self.assertTrue(update_mock.call_args.kwargs["skip_confirm"])
+        self.assertTrue(update_mock.call_args.kwargs["trust_acknowledged"])
+        self.assertEqual(update_mock.call_args.kwargs["trust_method"], "cli_flag")
+        self.assertEqual(update_mock.call_args.kwargs["trust_actor"], "cli")
 
 
 class TestTrustSummaryPermissions(InstallTestBase):
@@ -636,7 +974,12 @@ class TestUpdatePack(InstallTestBase):
         pack_yaml = src / "pack.yaml"
         pack_yaml.write_text(pack_yaml.read_text().replace("version: 0.1.0", "version: 0.3.0"))
 
-        rc = update_pack("update_test", store=store, skip_confirm=True)
+        rc = update_pack(
+            "update_test",
+            store=store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+        )
         self.assertEqual(rc, 0)
 
         import yaml as _yaml
@@ -655,7 +998,12 @@ class TestUpdatePack(InstallTestBase):
         pack_yaml = src / "pack.yaml"
         pack_yaml.write_text(pack_yaml.read_text().replace("id: update_id_test", "id: changed_id"))
 
-        rc = update_pack("update_id_test", store=store, skip_confirm=True)
+        rc = update_pack(
+            "update_id_test",
+            store=store,
+            skip_confirm=True,
+            trust_acknowledged=True,
+        )
         self.assertNotEqual(rc, 0)
 
     def test_update_dry_run_prints_diff(self) -> None:

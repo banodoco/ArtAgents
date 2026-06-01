@@ -194,6 +194,9 @@ def _install_pack_into(astrid_home: Path, pack_id: str) -> None:
         PACKS_DIR / pack_id,
         store=store,
         skip_confirm=True,
+        trust_acknowledged=True,
+        trust_method="test",
+        trust_actor="test",
     )
     assert rc == 0, f"install_pack({pack_id!r}) returned {rc}"
 

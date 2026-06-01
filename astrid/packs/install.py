@@ -206,6 +206,30 @@ def _confirm(prompt: str, default_yes: bool = False) -> bool:
     return response in ("y", "yes")
 
 
+def _confirm_trust(pack_id: str, trust_summary: dict) -> bool:
+    """Require an exact trust acknowledgement before installing code."""
+    print(_format_trust_summary(trust_summary))
+    print()
+    expected = f"trust {pack_id}"
+    try:
+        response = input(
+            f"Type {expected!r} to acknowledge this pack's trust summary: "
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled.", file=sys.stderr)
+        raise SystemExit(1)
+    return response == expected
+
+
+def _trust_missing_error(command: str, pack_id: str) -> None:
+    print(
+        f"{command}: trust acknowledgement required for pack {pack_id!r}. "
+        f"Pass --trust for noninteractive use, or run interactively and type "
+        f"'trust {pack_id}'. --yes only skips the ordinary confirmation prompt.",
+        file=sys.stderr,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core install logic
 # ---------------------------------------------------------------------------
@@ -217,6 +241,9 @@ def install_pack(
     *,
     dry_run: bool = False,
     skip_confirm: bool = False,
+    trust_acknowledged: bool = False,
+    trust_method: str | None = None,
+    trust_actor: str | None = None,
     force: bool = False,
     git_url: str = "",
     commit_sha: str = "",
@@ -233,6 +260,9 @@ def install_pack(
         dry_run: If ``True``, print the trust summary and return 0 without
             mutating state.
         skip_confirm: If ``True``, skip the confirmation prompt.
+        trust_acknowledged: If ``True``, skip the exact trust acknowledgement.
+        trust_method: Audit label for the trust decision.
+        trust_actor: Audit actor/source for the trust decision.
         force: If ``True``, overwrite an existing install (old revision is
             renamed to ``<pack_id>.<timestamp>``).
         git_url: Durable Git URL (set by the Git branch).
@@ -259,6 +289,9 @@ def install_pack(
             store,
             dry_run=dry_run,
             skip_confirm=skip_confirm,
+            trust_acknowledged=trust_acknowledged,
+            trust_method=trust_method,
+            trust_actor=trust_actor,
             force=force,
         )
 
@@ -345,8 +378,10 @@ def install_pack(
         print(
             _format_trust_summary(
                 trust_summary,
+                git_url=git_url,
+                commit_sha=commit_sha,
                 astrid_version=str(raw.get("astrid_version", "")),
-                trust_tier="local",
+                trust_tier=source_type,
             )
         )
         return 0
@@ -373,17 +408,29 @@ def install_pack(
         return 1
 
     # ------------------------------------------------------------------
-    # 8. Confirmation
+    # 8. Trust acknowledgement and ordinary confirmation
     # ------------------------------------------------------------------
+    if not trust_acknowledged:
+        if skip_confirm:
+            _trust_missing_error("install", pack_id)
+            return 1
+        if not _confirm_trust(
+            pack_id,
+            {
+                **trust_summary,
+                "source_path": trust_summary.get("source_path", str(source)),
+            },
+        ):
+            print("Cancelled.", file=sys.stderr)
+            return 1
+        trust_acknowledged = True
+        trust_method = trust_method or "interactive"
+        trust_actor = trust_actor or "cli"
+    else:
+        trust_method = trust_method or "api"
+        trust_actor = trust_actor or "api"
+
     if not skip_confirm:
-        print(
-            _format_trust_summary(
-                trust_summary,
-                astrid_version=str(raw.get("astrid_version", "")),
-                trust_tier="local",
-            )
-        )
-        print()
         action = "overwrite" if existing else "install"
         if not _confirm(f"Proceed with {action}?"):
             print("Cancelled.", file=sys.stderr)
@@ -399,6 +446,12 @@ def install_pack(
             return _do_install(
                 source, pack_id, trust_summary, store, force, existing,
                 manifest_raw=raw,
+                trust_method=trust_method,
+                trust_actor=trust_actor,
+                git_url=git_url,
+                commit_sha=commit_sha,
+                requested_ref=requested_ref,
+                source_type=source_type,
             )
     except Exception:
         # Ensure no broken state — clean up staging if it exists
@@ -414,6 +467,9 @@ def _install_from_git(
     *,
     dry_run: bool = False,
     skip_confirm: bool = False,
+    trust_acknowledged: bool = False,
+    trust_method: str | None = None,
+    trust_actor: str | None = None,
     force: bool = False,
 ) -> int:
     """Install a pack from a Git URL (called by :func:`install_pack`).
@@ -426,7 +482,6 @@ def _install_from_git(
     _check_git_available()
 
     checkout_path: str | None = None
-    pack_root_copy: str | None = None
 
     try:
         # 1. Clone to temp (shallow) and get commit SHA
@@ -441,139 +496,25 @@ def _install_from_git(
         # 3. Auto-detect pack root inside the checkout
         pack_root = _find_pack_root_in_checkout(checkout_path)
 
-        # 4. Parse manifest to extract pack_id
-        manifest_path = pack_manifest_path(pack_root)
-        if manifest_path is None:
-            print(
-                f"install: no pack manifest found in {pack_root} "
-                f"(expected pack.yaml, pack.yml, or pack.json)",
-                file=sys.stderr,
-            )
-            return 2
-
-        try:
-            if manifest_path.suffix == ".json":
-                import json as _json
-
-                raw = _json.loads(manifest_path.read_text(encoding="utf-8"))
-            else:
-                raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        except Exception as e:
-            print(f"install: failed to parse pack manifest: {e}", file=sys.stderr)
-            return 2
-
-        if not isinstance(raw, dict):
-            print("install: pack manifest is not a mapping", file=sys.stderr)
-            return 2
-
-        pack_id = raw.get("id")
-        if not isinstance(pack_id, str) or not pack_id:
-            print(
-                "install: pack manifest missing required 'id' field",
-                file=sys.stderr,
-            )
-            return 2
-
-        # 5. Extract trust summary from the pack root
-        try:
-            trust_summary = extract_trust_summary(pack_root)
-        except Exception as e:
-            print(f"install: cannot extract trust summary: {e}", file=sys.stderr)
-            return 2
-
-        # 6. Dry-run: print trust summary with Git metadata and exit
-        if dry_run:
-            print(
-                _format_trust_summary(
-                    trust_summary,
-                    git_url=git_url,
-                    commit_sha=commit_sha,
-                    astrid_version=str(raw.get("astrid_version", "")),
-                    trust_tier="git",
-                )
-            )
-            return 0
-
-        # 7. Check collision
-        existing = store.get_active(pack_id)
-        if existing is not None and not force:
-            print(
-                f"install: pack {pack_id!r} is already installed.\n"
-                f"  Installed at: {existing.installed_at}\n"
-                f"  Source:       {existing.source_path}\n"
-                f"  Use --force to overwrite (old revision will be preserved).",
-                file=sys.stderr,
-            )
-            return 1
-
-        # 8. Copy pack root to temp dir named after pack_id so that
-        #    ``source.name == pack_id`` holds (PackResolver invariant).
-        pack_root_copy = tempfile.mkdtemp(prefix="astrid_pack_")
-        target_copy = Path(pack_root_copy) / pack_id
-        shutil.copytree(
-            str(pack_root), str(target_copy),
-            ignore=gitignore_filter(Path(pack_root)),
-            symlinks=True,
+        return install_pack(
+            pack_root,
+            store=store,
+            dry_run=dry_run,
+            skip_confirm=skip_confirm,
+            trust_acknowledged=trust_acknowledged,
+            trust_method=trust_method,
+            trust_actor=trust_actor,
+            force=force,
+            git_url=git_url,
+            commit_sha=commit_sha,
+            requested_ref=requested_ref,
+            source_type="git",
+            skip_name_check=True,
         )
-
-        # 9. Validate the staged copy
-        errors, warnings = validate_pack(target_copy)
-        if warnings:
-            for w in warnings:
-                print(f"warning: {w}", file=sys.stderr)
-
-        if errors:
-            print(
-                f"install: source pack validation failed with {len(errors)} error(s):",
-                file=sys.stderr,
-            )
-            for err in errors:
-                print(f"  {err}", file=sys.stderr)
-            print(
-                "install: refusing to install an invalid pack.",
-                file=sys.stderr,
-            )
-            return 1
-
-        # 10. Confirmation
-        if not skip_confirm:
-            print(
-                _format_trust_summary(
-                    trust_summary,
-                    git_url=git_url,
-                    commit_sha=commit_sha,
-                    astrid_version=str(raw.get("astrid_version", "")),
-                    trust_tier="git",
-                )
-            )
-            print()
-            action = "overwrite" if existing else "install"
-            if not _confirm(f"Proceed with {action}?"):
-                print("Cancelled.", file=sys.stderr)
-                return 1
-
-        # 11. Acquire lock and install
-        lock = store._acquire_lock(pack_id)
-        with lock:
-            return _do_install(
-                target_copy,
-                pack_id,
-                trust_summary,
-                store,
-                force,
-                existing,
-                manifest_raw=raw,
-                git_url=git_url,
-                commit_sha=commit_sha,
-                requested_ref=requested_ref,
-                source_type="git",
-            )
     finally:
         # Clean up temporary directories on every exit path
         if checkout_path is not None:
             shutil.rmtree(checkout_path, ignore_errors=True)
-        if pack_root_copy is not None:
-            shutil.rmtree(pack_root_copy, ignore_errors=True)
 
 
 def _do_install(
@@ -589,6 +530,8 @@ def _do_install(
     requested_ref: str = "",
     source_type: str = "local",
     manifest_raw: dict | None = None,
+    trust_method: str | None = None,
+    trust_actor: str | None = None,
 ) -> int:
     """Perform the actual install (called under lock)."""
 
@@ -612,6 +555,9 @@ def _do_install(
 
     # last_validation_time: record that we validated before install
     last_validation_time = utc_now_seconds()
+    trust_acknowledged_at = utc_now_seconds()
+    permissions_accepted = _normalized_summary_permissions(trust_summary)
+    no_sandbox_warning_version = 1
 
     # Clean up any leftover staging
     if staging.is_dir():
@@ -729,6 +675,11 @@ def _do_install(
         trust_tier=trust_tier,
         last_validation_time=last_validation_time,
         previous_active_revision=previous_active_revision,
+        trust_acknowledged_at=trust_acknowledged_at,
+        trust_method=trust_method or "api",
+        trust_actor=trust_actor or "api",
+        no_sandbox_warning_version=no_sandbox_warning_version,
+        permissions_accepted=permissions_accepted,
     )
     store.record_install(record)
 
@@ -954,6 +905,9 @@ def update_pack(
     *,
     dry_run: bool = False,
     skip_confirm: bool = False,
+    trust_acknowledged: bool = False,
+    trust_method: str | None = None,
+    trust_actor: str | None = None,
 ) -> int:
     """Update an installed pack from its source.
 
@@ -962,6 +916,9 @@ def update_pack(
         store: The ``InstalledPackStore`` to use.
         dry_run: If ``True``, print a diff summary without mutating.
         skip_confirm: If ``True``, skip confirmation.
+        trust_acknowledged: If ``True``, skip the exact trust acknowledgement.
+        trust_method: Audit label for the trust decision.
+        trust_actor: Audit actor/source for the trust decision.
 
     Returns:
         Exit code.
@@ -983,6 +940,9 @@ def update_pack(
             existing, pack_id, store,
             dry_run=dry_run,
             skip_confirm=skip_confirm,
+            trust_acknowledged=trust_acknowledged,
+            trust_method=trust_method,
+            trust_actor=trust_actor,
         )
 
     # ── Local-path packs ──────────────────────────────────────────────
@@ -1061,6 +1021,9 @@ def update_pack(
         store=store,
         dry_run=False,
         skip_confirm=skip_confirm,
+        trust_acknowledged=trust_acknowledged,
+        trust_method=trust_method,
+        trust_actor=trust_actor,
         force=True,
     )
 
@@ -1072,6 +1035,9 @@ def _update_git_pack(
     *,
     dry_run: bool = False,
     skip_confirm: bool = False,
+    trust_acknowledged: bool = False,
+    trust_method: str | None = None,
+    trust_actor: str | None = None,
 ) -> int:
     """Update a Git-backed pack from its remote.
 
@@ -1081,6 +1047,9 @@ def _update_git_pack(
         store: The ``InstalledPackStore`` to use.
         dry_run: If ``True``, print a structured diff without mutating.
         skip_confirm: If ``True``, skip the confirmation prompt.
+        trust_acknowledged: If ``True``, skip the exact trust acknowledgement.
+        trust_method: Audit label for the trust decision.
+        trust_actor: Audit actor/source for the trust decision.
 
     Returns:
         Exit code.
@@ -1237,6 +1206,9 @@ def _update_git_pack(
             store=store,
             dry_run=False,
             skip_confirm=skip_confirm,
+            trust_acknowledged=trust_acknowledged,
+            trust_method=trust_method,
+            trust_actor=trust_actor,
             force=True,
             git_url=git_url,
             commit_sha=new_commit_sha,
@@ -1768,6 +1740,9 @@ def _run_install_command(args: argparse.Namespace) -> int:
             args.source,
             dry_run=bool(args.dry_run),
             skip_confirm=bool(args.yes),
+            trust_acknowledged=bool(getattr(args, "trust", False)),
+            trust_method="cli_flag" if bool(getattr(args, "trust", False)) else None,
+            trust_actor="cli" if bool(getattr(args, "trust", False)) else None,
             force=bool(args.force),
         )
 
@@ -1783,6 +1758,9 @@ def _run_install_command(args: argparse.Namespace) -> int:
         source,
         dry_run=bool(args.dry_run),
         skip_confirm=bool(args.yes),
+        trust_acknowledged=bool(getattr(args, "trust", False)),
+        trust_method="cli_flag" if bool(getattr(args, "trust", False)) else None,
+        trust_actor="cli" if bool(getattr(args, "trust", False)) else None,
         force=bool(args.force),
     )
 
@@ -1793,6 +1771,9 @@ def _run_update_command(args: argparse.Namespace) -> int:
         args.pack_id,
         dry_run=bool(args.dry_run),
         skip_confirm=bool(args.yes),
+        trust_acknowledged=bool(getattr(args, "trust", False)),
+        trust_method="cli_flag" if bool(getattr(args, "trust", False)) else None,
+        trust_actor="cli" if bool(getattr(args, "trust", False)) else None,
     )
 
 
@@ -1836,6 +1817,11 @@ def cmd_install(argv: list[str]) -> int:
         help="Skip confirmation prompt.",
     )
     parser.add_argument(
+        "--trust",
+        action="store_true",
+        help="Acknowledge the pack trust summary for noninteractive installs.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing install (preserve old revision).",
@@ -1863,6 +1849,11 @@ def cmd_update(argv: list[str]) -> int:
         "--yes", "-y",
         action="store_true",
         help="Skip confirmation prompt.",
+    )
+    parser.add_argument(
+        "--trust",
+        action="store_true",
+        help="Acknowledge the pack trust summary for noninteractive updates.",
     )
     args = parser.parse_args(argv)
     return _run_update_command(args)
