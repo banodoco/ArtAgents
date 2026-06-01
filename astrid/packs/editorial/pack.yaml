@@ -14,7 +14,13 @@ permissions:
     reason: Runs editorial executors as subprocesses for transcription, review, and arrangement.
   - id: project_files
     reason: Reads and writes transcripts, scenes, arrangements, and review artifacts.
-description: Editorial review, arrangement, and validation executors.
+description: Transcript-to-cut editorial pipeline — transcribe, detect scenes/shots, arrange clip pools, run heuristic and human review, and validate the rendered cut.
+keywords: [transcribe, scenes, shots, arrange, review, validate, transcript, editorial]
+capabilities: [transcribe_audio, detect_scenes, slice_shots, arrange_clips, refine_arrangement, grade_quality_zones, run_editor_review, collect_human_review, ingest_human_notes, scout_quotes, generate_script, inspect_cut, validate_cut]
+agent:
+  purpose: "Use for the narrative-editing workflow: turning source video/audio into a structured cut — transcription, scene/shot detection, clip-pool arrangement, reviewer notes (heuristic or human-in-the-loop), and final cut validation."
+  do_not_use_for: "Generating new image/video frames (use the generation pack), Foley/spatial audio (use the foley pack), or raw lossless trimming (use the media pack)."
+  normal_entrypoints: [editorial.transcribe, editorial.scenes, editorial.shots, editorial.arrange, editorial.validate]
 content:
   executors: executors
 aliases:

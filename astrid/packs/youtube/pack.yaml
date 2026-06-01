@@ -18,7 +18,26 @@ permissions:
     reason: Reads video files for upload and writes downloaded audio.
   - id: environment
     reason: Reads YouTube and social API credentials.
-description: YouTube source acquisition and publishing executors.
+description: Acquire YouTube media (audio MP3 / video MP4 via yt-dlp) and publish finished videos to YouTube.
+keywords:
+- youtube
+- yt-dlp
+- download
+- audio
+- upload
+- publish
+- mp3
+- zapier
+capabilities:
+- download_youtube_audio
+- download_youtube_video
+- upload_youtube_video
+agent:
+  purpose: Choose this pack to fetch a YouTube video's audio or video (by search query or URL) for downstream use, or to publish a finished video to YouTube.
+  do_not_use_for: Do not use to edit or render the video itself (use video_editing) or to analyze its content (use understanding); this pack only ingests and publishes.
+  normal_entrypoints:
+  - youtube.youtube_audio
+  - youtube.upload
 content:
   executors: executors
 aliases:

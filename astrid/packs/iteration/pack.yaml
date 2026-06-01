@@ -13,6 +13,28 @@ permissions:
     reason: Runs iteration assembly and preparation executors as subprocesses.
   - id: project_files
     reason: Reads iteration manifests and writes timeline and asset files.
+description: Builds an iteration video from thread provenance — gathers candidate runs, scores quality, and assembles a canonical iteration timeline plus render-ready hype inputs.
+keywords:
+  - iteration
+  - provenance
+  - thread
+  - quality
+  - timeline
+  - hype
+  - video
+  - assemble
+capabilities:
+  - prepare_iteration
+  - collect_thread_provenance
+  - score_iteration_quality
+  - assemble_iteration_timeline
+  - emit_render_adapter
 content:
   executors: executors
   orchestrators: orchestrators
+agent:
+  purpose: "Use to turn a thread's run history into an iteration video artifact: prepare provenance/quality from a target run, then assemble the canonical iteration timeline and render-compatible hype inputs."
+  do_not_use_for: "Not for raw video editing or clip trimming (use the media pack) or final video rendering (use the rendering pack on the emitted hype adapter)."
+  normal_entrypoints:
+    - iteration.prepare
+    - iteration.assemble
