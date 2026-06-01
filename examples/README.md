@@ -1,7 +1,22 @@
 # Examples
 
 The `examples/` directory contains committed schema fixtures, small sample
-briefs, and teaching packs. Generated media does not belong here.
+briefs, teaching packs, and the **Agentic UX** example application.
+Generated media does not belong here.
+
+## Agentic UX Example
+
+A complete external-application walkthrough of the public Astrid SDK:
+**discover → inspect → invoke → read-events**.
+
+- **Source**: [`agentic_ux/agentic_ux.py`](agentic_ux/agentic_ux.py)
+- **Tutorial**: [`docs/build-your-first-agentic-ux.md`](../docs/build-your-first-agentic-ux.md)
+
+```bash
+python examples/agentic_ux/agentic_ux.py \
+    --projects-root /tmp/astrid-demo-projects \
+    --capability-id editorial.arrange
+```
 
 ## Briefs
 
