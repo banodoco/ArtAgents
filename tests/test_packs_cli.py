@@ -1161,5 +1161,95 @@ class TestAgentIndexPermissionsAndTrust(unittest.TestCase):
         self.assertEqual(entry["trust"]["sandbox"], "none")
 
 
+class TestAgentIndexAndInspectWiring(unittest.TestCase):
+    """Regression: agent-index and the installed-pack inspect path referenced
+    names that were never imported (PackResolver / extract_trust_summary) and
+    blew up on invocation. No CLI-level test exercised them."""
+
+    def test_agent_index_cli_runs_and_exposes_search_metadata(self) -> None:
+        # Previously: ImportError (PackResolver) before producing any output.
+        result = _run_packs("agent-index", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertIn("packs", data)
+        ids = {p["pack_id"] for p in data["packs"]}
+        self.assertIn("training", ids)
+        training = next(p for p in data["packs"] if p["pack_id"] == "training")
+        self.assertTrue(training.get("keywords"), "agent-index must expose keywords")
+        self.assertTrue(training.get("capabilities"), "agent-index must expose capabilities")
+
+    def test_agent_index_single_pack_form(self) -> None:
+        result = _run_packs("agent-index", "--pack-id", "training", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data.get("pack_id"), "training")
+
+    def test_extract_trust_summary_bound_in_cli_module(self) -> None:
+        # The installed-inspect path calls extract_trust_summary; it must be
+        # importable from the cli module (was previously unbound -> NameError).
+        self.assertTrue(callable(packs_cli.extract_trust_summary))
+
+    def test_inspect_installed_path_executes_without_nameerror(self) -> None:
+        gen_root = _REPO_ROOT / "astrid" / "packs" / "generation"
+        record = InstallRecord(
+            pack_id="generation", name="Astrid Generation", version="1.0.0",
+            schema_version=1, source_path=str(gen_root),
+            installed_at="2025-01-01T00:00:00Z", revision="generation",
+            install_root=str(gen_root),
+        )
+        with mock.patch(
+            "astrid.core.pack_store.InstalledPackStore.get_active",
+            return_value=record,
+        ), mock.patch(
+            "astrid.core.pack_store.InstalledPackStore.active_revision_path",
+            return_value=gen_root,
+        ):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = packs_cli._inspect_installed_pack(
+                    pack_id="generation", agent=False, json_output=True,
+                )
+        self.assertEqual(rc, 0)
+        payload = json.loads(buf.getvalue())
+        self.assertEqual(payload["pack_id"], "generation")
+
+
+class TestPacksSearchCLI(unittest.TestCase):
+    """packs search ranks packs by keyword/capability/purpose over the agent index."""
+
+    def test_search_finds_pack_by_keyword(self) -> None:
+        result = _run_packs("search", "lora", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        ids = {p["pack_id"] for p in json.loads(result.stdout)["packs"]}
+        self.assertIn("training", ids)
+
+    def test_search_results_are_sorted_by_descending_score(self) -> None:
+        result = _run_packs("search", "video", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        scores = [p["search_score"] for p in json.loads(result.stdout)["packs"]]
+        self.assertGreater(len(scores), 1)
+        self.assertEqual(scores, sorted(scores, reverse=True))
+        self.assertTrue(all(s > 0 for s in scores))
+
+    def test_search_no_match_is_empty_not_error(self) -> None:
+        result = _run_packs("search", "zzqqnomatchxyz", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["total"], 0)
+        self.assertEqual(data["packs"], [])
+
+    def test_search_limit_discloses_truncation(self) -> None:
+        # 'video' matches several packs; --limit 1 must disclose the rest exist.
+        result = _run_packs("search", "video", "--limit", "1", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("showing top 1 of", result.stdout)
+
+    def test_search_multiword_requires_all_terms(self) -> None:
+        result = _run_packs("search", "youtube", "download", "--json", cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        ids = {p["pack_id"] for p in json.loads(result.stdout)["packs"]}
+        self.assertIn("youtube", ids)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,7 +26,7 @@ from astrid.core.pack import (
     packs_root,
 )
 from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
-from astrid.packs.validate import validate_pack
+from astrid.packs.validate import extract_trust_summary, validate_pack
 
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
 _PACK_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -1388,6 +1388,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     agent_index_parser.set_defaults(handler=_handle_agent_index)
 
+    # ── search ──
+    search_parser = subparsers.add_parser(
+        "search",
+        help="Search packs by keyword/capability/purpose (ranked).",
+    )
+    search_parser.add_argument(
+        "query",
+        nargs="+",
+        help="One or more search terms (matched against id, name, "
+        "description, keywords, capabilities, and purpose).",
+    )
+    search_parser.add_argument(
+        "--limit", type=int, default=20,
+        help="Maximum results to show (default: 20; <=0 for all).",
+    )
+    search_parser.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON.",
+    )
+    search_parser.set_defaults(handler=_handle_search)
+
     return parser
 
 
@@ -1497,14 +1517,13 @@ def _handle_rollback(args: argparse.Namespace) -> int:
 def _handle_agent_index(args: argparse.Namespace) -> int:
     """Handler for ``packs agent-index``."""
 
-    from astrid.core.pack import PackResolver, packs_root
     from astrid.core.pack_store import InstalledPackStore
+    from astrid.packs.agent_index import build_agent_index
 
-    resolver = PackResolver(packs_root())
     store = InstalledPackStore()
 
     pack_id = getattr(args, "pack_id", None)
-    result = build_agent_index(resolver, store, pack_id=pack_id)
+    result = build_agent_index(store, pack_id=pack_id)
 
     if args.text_output:
         # Text table output
@@ -1593,6 +1612,108 @@ def _handle_agent_index(args: argparse.Namespace) -> int:
 
     return 0
 
+
+# ---------------------------------------------------------------------------
+# pack search
+# ---------------------------------------------------------------------------
+
+# Per-field weights for ranking a query term against a pack. Keyword and
+# capability hits are the strongest signal (authored for discovery); id/name
+# next; purpose/description are softer free-text matches. do_not_use_for is
+# deliberately excluded so negative guidance never yields a positive match.
+_SEARCH_FIELD_WEIGHTS = (
+    ("keywords", 3.0),
+    ("capabilities", 3.0),
+    ("pack_id", 2.0),
+    ("name", 2.0),
+    ("purpose", 1.5),
+    ("description", 1.0),
+)
+
+
+def _pack_search_text(pack: dict[str, Any], field: str) -> str:
+    """Return lowercased searchable text for *field* of an agent-index entry."""
+    value = pack.get(field)
+    if isinstance(value, (list, tuple)):
+        return " ".join(str(v) for v in value).lower()
+    return str(value or "").lower()
+
+
+def _score_pack(pack: dict[str, Any], terms: list[str]) -> float:
+    """Score *pack* against query *terms*; 0.0 means no match.
+
+    Every term must hit at least one field (AND semantics); a single
+    unmatched term drops the pack, keeping multi-word queries precise
+    rather than returning anything that matches one common word.
+    """
+    total = 0.0
+    for term in terms:
+        best = 0.0
+        for field, weight in _SEARCH_FIELD_WEIGHTS:
+            if term in _pack_search_text(pack, field):
+                best = max(best, weight)
+        if best == 0.0:
+            return 0.0
+        total += best
+    return total
+
+
+def _handle_search(args: argparse.Namespace) -> int:
+    """Handler for ``packs search``."""
+    from astrid.core.pack_store import InstalledPackStore
+    from astrid.packs.agent_index import build_agent_index
+
+    terms = [t.lower() for t in args.query if t.strip()]
+    if not terms:
+        print("search: empty query", file=sys.stderr)
+        return 2
+
+    index = build_agent_index(InstalledPackStore())
+    packs = index.get("packs", []) if isinstance(index, dict) else []
+
+    scored = [
+        (score, pack)
+        for pack in packs
+        if (score := _score_pack(pack, terms)) > 0.0
+    ]
+    scored.sort(key=lambda sp: (-sp[0], str(sp[1].get("pack_id", ""))))
+
+    total = len(scored)
+    limit = args.limit if args.limit and args.limit > 0 else total
+    shown = scored[:limit]
+
+    if args.json:
+        payload = {
+            "query": terms,
+            "total": total,
+            "shown": len(shown),
+            "packs": [
+                {**pack, "search_score": round(score, 2)}
+                for score, pack in shown
+            ],
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    if not shown:
+        print(f"No packs match: {' '.join(terms)}")
+        return 0
+
+    for score, pack in shown:
+        summary = pack.get("purpose") or pack.get("description") or ""
+        keywords = pack.get("keywords") or []
+        kw = ", ".join(str(k) for k in keywords[:6])
+        line = f"{pack.get('pack_id', '?')}\t{score:g}\t{summary}"
+        if kw:
+            line += f"\t[{kw}]"
+        print(line)
+
+    if total > len(shown):
+        print(
+            f"\n# showing top {len(shown)} of {total} matches — "
+            f"add terms to narrow, or pass --limit to see more"
+        )
+    return 0
 
 
 def main(argv: Optional[list[str]] = None) -> int:
