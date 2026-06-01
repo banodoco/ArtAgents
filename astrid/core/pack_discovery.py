@@ -10,6 +10,7 @@ skills discovery — consumes one ordered list with identical priority semantics
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -26,7 +27,8 @@ from astrid.core.pack import (
 DiscoverPacksFn = Callable[..., "tuple[PackDefinition, ...]"]
 
 # Source-kind labels in discovery (and therefore priority) order.
-SOURCE_KINDS: tuple[str, ...] = ("source", "local", "extra", "installed")
+SOURCE_KINDS: tuple[str, ...] = ("source", "local", "extra", "env", "installed")
+ASTRID_PACKS_PATH_ENV = "ASTRID_PACKS_PATH"
 
 
 @dataclass(frozen=True)
@@ -84,8 +86,9 @@ def discover_pack_metadata(
 
     Layers, in order: source-tree packs (excluding ``local``), the
     project-scoped ``local`` scratch pack when *project_root* differs from the
-    repository root, extra pack roots (excluding ``local``), and installed
-    packs (excluding ``local``) when *include_installed* is set.
+    repository root, explicit extra pack roots (excluding ``local``),
+    ``ASTRID_PACKS_PATH`` roots (excluding ``local``), and installed packs
+    (excluding ``local``) when *include_installed* is set.
 
     *discover_packs_fn* overrides the source/local/extra layer scanner; callers
     pass their own module-level ``discover_packs`` so the historical per-registry
@@ -117,17 +120,31 @@ def discover_pack_metadata(
             if pack.id == "local":
                 _add(pack, "local")
 
-    if extra_pack_roots or include_installed:
-        _discover_root = Path(project_root) if project_root != REPO_ROOT else REPO_ROOT
+    def _resolve_pack_root(raw_root: str | Path) -> Path:
+        candidate = Path(raw_root).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path(project_root) / candidate
+        return candidate.resolve()
+
+    raw_env_roots = os.environ.get(ASTRID_PACKS_PATH_ENV, "")
+    if extra_pack_roots or raw_env_roots or include_installed:
         for extra_root in extra_pack_roots:
-            extra_path = Path(extra_root)
-            if not extra_path.is_absolute():
-                extra_path = (_discover_root / extra_path).resolve()
+            extra_path = _resolve_pack_root(extra_root)
             if extra_path.is_dir():
                 for pack in scan(extra_path):
                     if pack.id == "local":
                         continue
                     _add(pack, "extra")
+        for env_root in raw_env_roots.split(os.pathsep):
+            if env_root == "":
+                continue
+            resolved_env_root = _resolve_pack_root(env_root)
+            if not resolved_env_root.is_dir():
+                continue
+            for pack in scan(resolved_env_root):
+                if pack.id == "local":
+                    continue
+                _add(pack, "env")
         if include_installed:
             from astrid.core.pack_store import installed_pack_roots
             from astrid.core.pack import load_pack_manifest, pack_manifest_path as _pmp
@@ -168,6 +185,7 @@ def discover_packs_ordered(
 
 
 __all__ = [
+    "ASTRID_PACKS_PATH_ENV",
     "SOURCE_KINDS",
     "DiscoveredPack",
     "discover_pack_metadata",

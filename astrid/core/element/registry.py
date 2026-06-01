@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Iterable, cast
+from typing import TYPE_CHECKING, Iterable
 
 from astrid._paths import REPO_ROOT
 from astrid.core.alias_resolver import (
@@ -19,14 +19,18 @@ from astrid.core.alias_resolver import (
 from astrid.core.manifest import dump_manifest_payload, load_manifest_mapping
 from astrid.core.pack import (
     discover_packs,
+    ELEMENT_KIND_REGISTRY,
+    ElementKindRegistry,
+    PackDefinition,
+    PackValidationError,
     ensure_local_pack,
     iter_element_roots,
+    pack_element_kind_descriptors,
     validate_element_pack_id,
 )
 from astrid.core.pack_discovery import discover_pack_metadata
 
 from .schema import (
-    ELEMENT_KINDS,
     ElementDefinition,
     ElementKind,
     ElementValidationError,
@@ -66,10 +70,12 @@ class ElementRegistry:
         *,
         alias_resolver: AliasResolver | None = None,
         override_store: "OverrideStore | None" = None,
+        element_kind_registry: ElementKindRegistry | None = None,
     ) -> None:
         self._all: dict[tuple[str, str], list[ElementDefinition]] = {}
         self.alias_resolver = alias_resolver
         self.override_store = override_store
+        self.element_kind_registry = element_kind_registry or ELEMENT_KIND_REGISTRY
         for element in elements:
             self.register(element)
 
@@ -80,21 +86,22 @@ class ElementRegistry:
         return element
 
     def get(self, kind: ElementKind, element_id: str) -> ElementDefinition:
-        key = (kind, element_id)
+        normalized_kind = self.element_kind_registry.normalize(kind, error_cls=ElementRegistryError)
+        key = (normalized_kind, element_id)
         try:
             definition = self._all[key][0]
         except KeyError as exc:
-            raise KeyError(f"unknown {kind} element {element_id!r}") from exc
+            raise KeyError(f"unknown {normalized_kind} element {element_id!r}") from exc
 
         # Check override store for a remapped target.
         if self.override_store is not None:
-            target_id = self.override_store.resolve(kind, element_id)
+            target_id = self.override_store.resolve(normalized_kind, element_id)
             if target_id is not None and target_id != element_id:
                 # Validate that the override target exists.
-                target_key = (kind, target_id)
+                target_key = (normalized_kind, target_id)
                 if target_key not in self._all:
                     raise ElementRegistryError(
-                        f"override target {target_id!r} for {kind} {element_id!r} not found in registry"
+                        f"override target {target_id!r} for {normalized_kind} {element_id!r} not found in registry"
                     )
                 target_def = self._all[target_key][0]
                 # Annotate the returned definition with override_target metadata.
@@ -106,9 +113,14 @@ class ElementRegistry:
         return definition
 
     def list(self, kind: ElementKind | None = None) -> tuple[ElementDefinition, ...]:
-        if kind is not None and kind not in ELEMENT_KINDS:
-            raise ElementRegistryError(f"kind must be one of {list(ELEMENT_KINDS)}")
-        winners = [definitions[0] for (item_kind, _), definitions in self._all.items() if kind is None or item_kind == kind]
+        normalized_kind = None
+        if kind is not None:
+            normalized_kind = self.element_kind_registry.normalize(kind, error_cls=ElementRegistryError)
+        winners = [
+            definitions[0]
+            for (item_kind, _), definitions in self._all.items()
+            if normalized_kind is None or item_kind == normalized_kind
+        ]
         return tuple(sorted(winners, key=lambda item: (item.kind, item.id)))
 
     def conflicts(self) -> tuple[ElementConflict, ...]:
@@ -117,7 +129,7 @@ class ElementRegistry:
             if len(definitions) > 1:
                 conflicts.append(
                     ElementConflict(
-                        kind=cast(ElementKind, kind),
+                        kind=kind,
                         id=element_id,
                         winner=definitions[0],
                         shadowed=tuple(definitions[1:]),
@@ -156,11 +168,23 @@ def load_default_registry(
 ) -> ElementRegistry:
     resolver = create_shared_alias_resolver()
     _register_pack_aliases(resolver, {})  # M1: no aliases yet
-    registry = ElementRegistry(alias_resolver=resolver)
-    for element in load_pack_elements(
-        project_root=project_root,
-        extra_pack_roots=extra_pack_roots,
-        include_installed=include_installed,
+    pack_defs = tuple(
+        discovered.pack
+        for discovered in discover_pack_metadata(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+            discover_packs_fn=discover_packs,
+        )
+    )
+    element_kind_registry = _element_kind_registry_for_packs(pack_defs)
+    registry = ElementRegistry(
+        alias_resolver=resolver,
+        element_kind_registry=element_kind_registry,
+    )
+    for element in _load_pack_elements_from_packs(
+        pack_defs,
+        element_kind_registry=element_kind_registry,
     ):
         registry.register(element)
     for source in default_sources(active_theme=active_theme, project_root=project_root):
@@ -169,7 +193,10 @@ def load_default_registry(
                 source.root.mkdir(parents=True, exist_ok=True)
             else:
                 continue
-        for element in load_source_elements(source):
+        for element in load_source_elements(
+            source,
+            element_kind_registry=element_kind_registry,
+        ):
             registry.register(element)
     return registry
 
@@ -192,38 +219,22 @@ def load_pack_elements(
     project_root: str | Path = REPO_ROOT,
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
+    element_kind_registry: ElementKindRegistry | None = None,
 ) -> tuple[ElementDefinition, ...]:
-    from .schema import ELEMENT_MANIFEST_NAMES
-
-    # Shared discovery owns the source/local/extra/installed walk and ordering;
-    # this function wraps only the element-specific layering (manifest checks,
-    # priority, and element loading) on top of the discovered packs.
-    packs = [
-        dp.pack
-        for dp in discover_pack_metadata(
+    packs = tuple(
+        discovered.pack
+        for discovered in discover_pack_metadata(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,
             include_installed=include_installed,
             discover_packs_fn=discover_packs,
         )
-    ]
-
-    elements: list[ElementDefinition] = []
-    for pack in packs:
-        priority = 10 if pack.id == "local" else 30
-        for kind, root in iter_element_roots(pack):
-            if not any((root / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
-                continue
-            element = load_element_definition(
-                root,
-                kind=kind,
-                source=f"pack:{pack.id}",
-                editable=pack.id == "local",
-                priority=priority,
-            )
-            validate_element_pack_id(element.metadata.get("pack_id"), pack, element_root=root)
-            elements.append(element)
-    return tuple(elements)
+    )
+    registry = element_kind_registry or _element_kind_registry_for_packs(packs)
+    return _load_pack_elements_from_packs(
+        packs,
+        element_kind_registry=registry,
+    )
 
 
 def _rewrite_pack_id(element_root: Path, new_pack_id: str) -> None:
@@ -239,11 +250,16 @@ def _rewrite_pack_id(element_root: Path, new_pack_id: str) -> None:
         return
 
 
-def load_source_elements(source: ElementSource) -> tuple[ElementDefinition, ...]:
+def load_source_elements(
+    source: ElementSource,
+    *,
+    element_kind_registry: ElementKindRegistry | None = None,
+) -> tuple[ElementDefinition, ...]:
     from .schema import ELEMENT_MANIFEST_NAMES
 
     elements: list[ElementDefinition] = []
-    for kind in ELEMENT_KINDS:
+    registry = element_kind_registry or ELEMENT_KIND_REGISTRY
+    for kind in registry.canonical_kinds():
         kind_root = source.root / kind
         if not kind_root.is_dir():
             continue
@@ -260,10 +276,54 @@ def load_source_elements(source: ElementSource) -> tuple[ElementDefinition, ...]
                         source=source.name,
                         editable=source.editable,
                         priority=source.priority,
+                        element_kind_registry=registry,
                     )
                 )
             except ElementValidationError as exc:
                 print(f"WARN skipping {child}: {exc}", file=sys.stderr)
+    return tuple(elements)
+
+
+def _element_kind_registry_for_packs(
+    packs: Iterable[PackDefinition],
+) -> ElementKindRegistry:
+    descriptors = []
+    for pack in packs:
+        descriptors.extend(pack_element_kind_descriptors(pack))
+    if not descriptors:
+        return ELEMENT_KIND_REGISTRY
+    try:
+        return ElementKindRegistry(descriptors=descriptors)
+    except ValueError as exc:
+        raise PackValidationError(f"pack.extensions.elements.kinds is invalid: {exc}") from exc
+
+
+def _load_pack_elements_from_packs(
+    packs: Iterable[PackDefinition],
+    *,
+    element_kind_registry: ElementKindRegistry,
+) -> tuple[ElementDefinition, ...]:
+    from .schema import ELEMENT_MANIFEST_NAMES
+
+    elements: list[ElementDefinition] = []
+    for pack in packs:
+        priority = 10 if pack.id == "local" else 30
+        for kind, root in iter_element_roots(
+            pack,
+            element_kind_registry=element_kind_registry,
+        ):
+            if not any((root / name).is_file() for name in ELEMENT_MANIFEST_NAMES):
+                continue
+            element = load_element_definition(
+                root,
+                kind=kind,
+                source=f"pack:{pack.id}",
+                editable=pack.id == "local",
+                priority=priority,
+                element_kind_registry=element_kind_registry,
+            )
+            validate_element_pack_id(element.metadata.get("pack_id"), pack, element_root=root)
+            elements.append(element)
     return tuple(elements)
 
 

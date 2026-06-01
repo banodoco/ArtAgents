@@ -275,6 +275,11 @@ class DiscoveryResult:
     orchestrators: tuple[Capability, ...] = ()
     elements: tuple[Capability, ...] = ()
     capabilities: tuple[Capability, ...] = ()
+    packs: tuple[Mapping[str, Any], ...] = ()
+    generation_backends: tuple[Mapping[str, Any], ...] = ()
+    element_kinds: tuple[Mapping[str, Any], ...] = ()
+    generation_features: tuple[Mapping[str, Any], ...] = ()
+    generation_modes: tuple[Mapping[str, Any], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return _json_safe_mapping(
@@ -283,6 +288,11 @@ class DiscoveryResult:
                 "orchestrators": self.orchestrators,
                 "elements": self.elements,
                 "capabilities": self.capabilities,
+                "packs": self.packs,
+                "generation_backends": self.generation_backends,
+                "element_kinds": self.element_kinds,
+                "generation_features": self.generation_features,
+                "generation_modes": self.generation_modes,
             }
         )
 
@@ -512,6 +522,148 @@ def _load_registries(
     return executor_registry, orchestrator_registry, element_registry
 
 
+def _discover_pack_inventory(
+    *,
+    project_root: str | Path | None = None,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = True,
+) -> tuple[Any, ...]:
+    from astrid.core.pack_discovery import discover_pack_metadata
+
+    return discover_pack_metadata(
+        **_registry_load_kwargs(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        ),
+    )
+
+
+def _pack_record(discovered_pack: Any) -> dict[str, Any]:
+    payload = discovered_pack.pack.to_dict()
+    payload["source_kind"] = discovered_pack.source_kind
+    payload["priority_index"] = discovered_pack.priority_index
+    return _json_safe_mapping(payload)
+
+
+def _generation_backend_record(descriptor: Any) -> dict[str, Any]:
+    return _json_safe_mapping(
+        {
+            "id": descriptor.backend_id,
+            "label": descriptor.label,
+            "module": descriptor.module,
+            "class": descriptor.class_name,
+            "init_kwargs": descriptor.init_kwargs,
+        }
+    )
+
+
+def _element_kind_record(descriptor: Any) -> dict[str, Any]:
+    return _json_safe_mapping(
+        {
+            "id": descriptor.id,
+            "singular": descriptor.singular,
+            "plural": descriptor.plural,
+            "canonical_kind": descriptor.canonical_kind,
+            "aliases": descriptor.aliases,
+            "label": descriptor.label,
+            "description": descriptor.description,
+        }
+    )
+
+
+def _generation_feature_record(descriptor: Any) -> dict[str, Any]:
+    return _json_safe_mapping(
+        {
+            "id": descriptor.id,
+            "label": descriptor.label,
+            "description": descriptor.description,
+        }
+    )
+
+
+def _generation_mode_record(descriptor: Any) -> dict[str, Any]:
+    return _json_safe_mapping(
+        {
+            "id": descriptor.id,
+            "modalities": descriptor.modalities,
+            "label": descriptor.label,
+            "description": descriptor.description,
+        }
+    )
+
+
+def _build_discovery_metadata(
+    discovered_packs: tuple[Any, ...],
+    *,
+    element_registry: Any,
+) -> tuple[
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+    tuple[dict[str, Any], ...],
+]:
+    from astrid.core.generation.backends.registry import GenerationBackendRegistry, descriptors_from_pack
+    from astrid.core.generation.features import (
+        GenerationTaxonomyRegistry,
+        backend_descriptors_from_pack,
+        feature_descriptors_from_pack,
+        mode_descriptors_from_pack,
+    )
+
+    packs = tuple(_pack_record(discovered_pack) for discovered_pack in discovered_packs)
+
+    backend_registry = GenerationBackendRegistry(
+        descriptors=tuple(
+            descriptor
+            for discovered_pack in discovered_packs
+            for descriptor in descriptors_from_pack(discovered_pack.pack)
+        )
+    )
+    taxonomy_registry = GenerationTaxonomyRegistry(
+        feature_descriptors=tuple(
+            descriptor
+            for discovered_pack in discovered_packs
+            for descriptor in feature_descriptors_from_pack(discovered_pack.pack)
+        ),
+        mode_descriptors=tuple(
+            descriptor
+            for discovered_pack in discovered_packs
+            for descriptor in mode_descriptors_from_pack(discovered_pack.pack)
+        ),
+        backend_descriptors=tuple(
+            descriptor
+            for discovered_pack in discovered_packs
+            for descriptor in backend_descriptors_from_pack(discovered_pack.pack)
+        ),
+    )
+
+    generation_backends = tuple(
+        _generation_backend_record(descriptor)
+        for descriptor in backend_registry.descriptors()
+    )
+    element_kinds = tuple(
+        _element_kind_record(descriptor)
+        for descriptor in element_registry.element_kind_registry.descriptors()
+    )
+    generation_features = tuple(
+        _generation_feature_record(descriptor)
+        for descriptor in taxonomy_registry.feature_descriptors()
+    )
+    generation_modes = tuple(
+        _generation_mode_record(descriptor)
+        for descriptor in taxonomy_registry.mode_descriptors()
+    )
+    return (
+        packs,
+        generation_backends,
+        element_kinds,
+        generation_features,
+        generation_modes,
+    )
+
+
 def _capability_from_executor(
     definition: Any,
     registry: Any,
@@ -610,11 +762,22 @@ def _is_qualified_capability_id(capability_id: str) -> bool:
     return "." in capability_id
 
 
-def _is_canonical_element_id(capability_id: str) -> bool:
-    from astrid.core.element.schema import ELEMENT_KINDS
-
+def _split_canonical_element_id(
+    capability_id: str,
+    *,
+    registry: Any,
+    strict: bool = False,
+) -> tuple[str, str] | None:
     kind, sep, local_id = capability_id.partition("/")
-    return bool(sep and local_id and kind in ELEMENT_KINDS)
+    if not (sep and local_id):
+        return None
+    try:
+        canonical_kind = registry.element_kind_registry.normalize(kind)
+    except ValueError as exc:
+        if strict:
+            raise CapabilityValidationError(str(exc)) from exc
+        return None
+    return canonical_kind, local_id
 
 
 def _candidate_label(kind: str, capability_id: str) -> str:
@@ -683,23 +846,37 @@ def _resolve_element_capability(
 ) -> Capability:
     lookup_id = capability_id
     if element_kind is not None:
-        if _is_canonical_element_id(capability_id):
-            requested_kind, _, requested_local_id = capability_id.partition("/")
-            if requested_kind != element_kind:
+        try:
+            normalized_kind = registry.element_kind_registry.normalize(element_kind)
+        except ValueError as exc:
+            raise CapabilityValidationError(str(exc)) from exc
+        canonical = _split_canonical_element_id(
+            capability_id,
+            registry=registry,
+            strict=True,
+        )
+        if canonical is not None:
+            requested_kind, requested_local_id = canonical
+            if requested_kind != normalized_kind:
                 raise CapabilityNotFoundError(
-                    f"unknown element {capability_id!r} for explicit element_kind={element_kind!r}"
+                    f"unknown element {capability_id!r} for explicit element_kind={normalized_kind!r}"
                 )
             lookup_id = requested_local_id
         try:
-            definition = registry.get(element_kind, lookup_id)
+            definition = registry.get(normalized_kind, lookup_id)
         except KeyError as exc:
             raise CapabilityNotFoundError(
-                f"unknown element {capability_id!r} for explicit element_kind={element_kind!r}"
+                f"unknown element {capability_id!r} for explicit element_kind={normalized_kind!r}"
             ) from exc
         return _capability_from_element(definition)
 
-    if _is_canonical_element_id(capability_id):
-        requested_kind, _, requested_local_id = capability_id.partition("/")
+    canonical = _split_canonical_element_id(
+        capability_id,
+        registry=registry,
+        strict=True,
+    )
+    if canonical is not None:
+        requested_kind, requested_local_id = canonical
         try:
             definition = registry.get(requested_kind, requested_local_id)
         except KeyError as exc:
@@ -803,6 +980,11 @@ def discover(
     active_theme: str | Path | None = None,
     include_missing_roots: bool = False,
 ) -> DiscoveryResult:
+    discovered_packs = _discover_pack_inventory(
+        project_root=project_root,
+        extra_pack_roots=extra_pack_roots,
+        include_installed=include_installed,
+    )
     executor_registry, orchestrator_registry, element_registry = _load_registries(
         project_root=project_root,
         extra_pack_roots=extra_pack_roots,
@@ -814,6 +996,16 @@ def discover(
     )
     if element_registry is None:
         raise CapabilityInvocationError("element registry was not loaded")
+    (
+        packs,
+        generation_backends,
+        element_kinds,
+        generation_features,
+        generation_modes,
+    ) = _build_discovery_metadata(
+        discovered_packs,
+        element_registry=element_registry,
+    )
 
     executors = tuple(
         _capability_from_executor(definition, executor_registry)
@@ -832,6 +1024,11 @@ def discover(
         orchestrators=orchestrators,
         elements=elements,
         capabilities=executors + orchestrators + elements,
+        packs=packs,
+        generation_backends=generation_backends,
+        element_kinds=element_kinds,
+        generation_features=generation_features,
+        generation_modes=generation_modes,
     )
 
 

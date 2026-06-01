@@ -2,7 +2,8 @@
 
 Covers:
   (a) Manifest validation — executor.yaml passes load_executor_manifest.
-  (b) Invalid execution value — rejected with both legal values named.
+  (b) Invalid execution value — rejected after model/mode lookup with
+      pair-specific available backends named.
   (c) Requires violation — i2i without image_ref fails BEFORE HTTP.
   (d) V1 rejection — passing a v1 model-id raises KeyError.
   (e) Edit mode drops negative_prompt with warning (SD-003).
@@ -13,6 +14,7 @@ Covers:
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +22,7 @@ from unittest.mock import patch
 import pytest
 
 from astrid.core.executor.schema import load_executor_manifest
+from astrid.core.model_catalog.schema import ModeSpec
 from astrid.core.util.http import Transport
 
 
@@ -107,22 +110,77 @@ def test_manifest_loads() -> None:
 
 
 def test_execution_invalid_value(tmp_path: Path) -> None:
-    """Invoking run with --execution both exits non-zero with message naming legal values."""
+    """Invalid --execution is rejected after model/mode lookup with available ids."""
     from astrid.packs.generation.executors.generate_image.run import main
 
     out = tmp_path / "out"
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                "--model", "flux-dev",
-                "--mode", "t2i",
-                "--execution", "both",
-                "--prompt", "x",
-                "--out", str(out),
-            ]
-        )
-    # argparse exits with code 2 for invalid choice
-    assert exc.value.code == 2
+    code = main(
+        [
+            "--model", "flux-dev",
+            "--mode", "t2i",
+            "--execution", "both",
+            "--prompt", "x",
+            "--out", str(out),
+        ]
+    )
+    assert code == 1
+
+
+def test_execution_invalid_value_lists_pair_specific_backends(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The error names only the backend ids available for the selected pair."""
+    from astrid.packs.generation.executors.generate_image.run import main
+
+    out = tmp_path / "out"
+    code = main(
+        [
+            "--model", "flux-dev",
+            "--mode", "t2i",
+            "--execution", "local",
+            "--prompt", "x",
+            "--out", str(out),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "Available backends: cloud" in captured.err
+    assert "local" in captured.err
+
+
+def test_registry_lookup_failure_is_reported_as_cli_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Missing registry entries surface as clear CLI errors, not raw exceptions."""
+    from astrid.packs.generation.executors.generate_image import run as run_mod
+    from astrid.core.generation.backends.registry import GenerationBackendRegistry
+
+    class EmptyBackendRegistry(GenerationBackendRegistry):
+        def __init__(self) -> None:
+            self._descriptors = {}
+
+    monkeypatch.setattr(
+        run_mod,
+        "load_default_generation_backend_registry",
+        lambda: EmptyBackendRegistry(),
+    )
+
+    out = tmp_path / "out"
+    code = run_mod.main(
+        [
+            "--model", "flux-dev",
+            "--mode", "t2i",
+            "--execution", "cloud",
+            "--prompt", "x",
+            "--out", str(out),
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "generation backend 'cloud' is not registered" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -363,3 +421,53 @@ def test_per_entry_model_override_mode_mismatch_rejected(tmp_path: Path) -> None
             ]
         )
     assert exc.value.code, f"Expected non-zero exit, got {exc.value.code!r}"
+
+
+def test_prompt_file_required_and_supported_custom_features_are_merged() -> None:
+    """Row-scoped/custom features survive merged validation for prompts-file runs."""
+    from astrid.packs.generation.executors.generate_image.run import (
+        _build_requested_params,
+        _check_required,
+        _drop_unsupported,
+    )
+
+    args = argparse.Namespace(
+        prompt=None,
+        negative_prompt=None,
+        seed=None,
+        count=1,
+        size=None,
+        image_ref=None,
+        strength=None,
+        guidance_scale=None,
+        steps=None,
+    )
+    mode_spec = ModeSpec(
+        supports=("prompt", "image_ref", "mask_ref"),
+        requires=("prompt", "image_ref", "mask_ref"),
+        backends={},
+    )
+
+    requested = _build_requested_params(
+        args,
+        prompt_text="row prompt",
+        prompt_entry={
+            "prompt": "row prompt",
+            "image_ref": "row.png",
+            "mask_ref": "mask.png",
+            "rogue_feature": "ignore-me",
+        },
+    )
+    _check_required(mode_spec, "i2i", "custom-image", requested)
+    filtered, warnings, dropped = _drop_unsupported(
+        mode_spec,
+        "i2i",
+        "custom-image",
+        requested,
+    )
+
+    assert filtered["image_ref"] == "row.png"
+    assert filtered["mask_ref"] == "mask.png"
+    assert "rogue_feature" not in filtered
+    assert set(dropped) == {"count", "rogue_feature"}
+    assert {warning["feature"] for warning in warnings} == {"count", "rogue_feature"}

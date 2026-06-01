@@ -22,7 +22,7 @@ from astrid.core.update import update_apply, update_check
 
 from .install import install_element
 from .registry import ElementRegistryError, load_default_registry
-from .schema import ELEMENT_KINDS, ElementDefinition, ElementValidationError, to_capability_handle
+from .schema import ElementDefinition, ElementValidationError, to_capability_handle
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
             project_root=project_root,
             extra_pack_roots=tuple(args.pack_root),
         )
+        _normalize_kind_args(args, registry)
         registry.override_store = override_store
         return int(args.handler(args, registry))
     except (KeyError, ElementRegistryError, ElementValidationError, ValueError, OverrideStoreError) as exc:
@@ -53,10 +54,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
     parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover elements from; may be repeated.")
     subparsers = parser.add_subparsers(dest="command", required=True)
-
     list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available elements.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    list_parser.add_argument("--kind", choices=ELEMENT_KINDS, help="Filter by element kind.")
+    list_parser.add_argument("--kind", help="Filter by element kind.")
     list_parser.add_argument("--pack", help="Filter elements by pack id.")
     list_parser.add_argument("--no-describe", action="store_true", help="Omit the short_description column for legacy parsers.")
     list_parser.add_argument("--show-overrides", action="store_true", help="Annotate capabilities with active overrides.")
@@ -70,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.set_defaults(handler=_cmd_search)
 
     inspect_parser = subparsers.add_parser("inspect", help="Inspect one element.")
-    inspect_parser.add_argument("kind", choices=ELEMENT_KINDS)
+    inspect_parser.add_argument("kind")
     inspect_parser.add_argument("element_id")
     inspect_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     inspect_parser.add_argument("--pack", help="Require the resolved element to belong to this pack id.")
@@ -78,18 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
     inspect_parser.set_defaults(handler=_cmd_inspect)
 
     validate_parser = subparsers.add_parser("validate", help="Validate element metadata.")
-    validate_parser.add_argument("kind", choices=ELEMENT_KINDS, nargs="?")
+    validate_parser.add_argument("kind", nargs="?")
     validate_parser.add_argument("element_id", nargs="?")
     validate_parser.set_defaults(handler=_cmd_validate)
 
     fork_parser = subparsers.add_parser("fork", help="Fork an element into the local pack (astrid/packs/local).")
-    fork_parser.add_argument("kind", choices=ELEMENT_KINDS)
+    fork_parser.add_argument("kind")
     fork_parser.add_argument("element_id")
     fork_parser.add_argument("--overwrite", action="store_true", help="Replace an existing local fork.")
     fork_parser.set_defaults(handler=_cmd_fork)
 
     install_parser = subparsers.add_parser("install", help="Plan or apply local dependency install for one element.")
-    install_parser.add_argument("kind", choices=ELEMENT_KINDS)
+    install_parser.add_argument("kind")
     install_parser.add_argument("element_id")
     install_parser.add_argument("--apply", action="store_true", help="Run the local install commands. Default is dry-run.")
     install_parser.set_defaults(handler=_cmd_install)
@@ -99,13 +99,13 @@ def build_parser() -> argparse.ArgumentParser:
     override_sub = override_parser.add_subparsers(dest="override_action", required=True)
 
     override_set = override_sub.add_parser("set", help="Set an override: route a capability to a replacement.")
-    override_set.add_argument("kind", choices=ELEMENT_KINDS)
+    override_set.add_argument("kind")
     override_set.add_argument("element_id")
     override_set.add_argument("target_id", help="Fully-qualified id of the replacement capability.")
     override_set.set_defaults(handler=_cmd_override)
 
     override_remove = override_sub.add_parser("remove", help="Remove an override.")
-    override_remove.add_argument("kind", choices=ELEMENT_KINDS)
+    override_remove.add_argument("kind")
     override_remove.add_argument("element_id")
     override_remove.set_defaults(handler=_cmd_override)
 
@@ -117,7 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     dirty_sub = dirty_parser.add_subparsers(dest="dirty_action", required=True)
 
     dirty_check = dirty_sub.add_parser("check", help="Check dirty state for one element.")
-    dirty_check.add_argument("kind", choices=ELEMENT_KINDS)
+    dirty_check.add_argument("kind")
     dirty_check.add_argument("element_id")
     dirty_check.set_defaults(handler=_cmd_dirty)
 
@@ -129,18 +129,30 @@ def build_parser() -> argparse.ArgumentParser:
     update_sub = update_parser.add_subparsers(dest="update_action", required=True)
 
     update_check_parser = update_sub.add_parser("check", help="Compare local fork against upstream.")
-    update_check_parser.add_argument("kind", choices=ELEMENT_KINDS)
+    update_check_parser.add_argument("kind")
     update_check_parser.add_argument("element_id")
     update_check_parser.set_defaults(handler=_cmd_update)
 
     update_apply_parser = update_sub.add_parser("apply", help="Apply upstream update to a local fork.")
-    update_apply_parser.add_argument("kind", choices=ELEMENT_KINDS)
+    update_apply_parser.add_argument("kind")
     update_apply_parser.add_argument("element_id")
     update_apply_parser.add_argument("--force", action="store_true", help="Apply even if safety escalations are detected.")
     update_apply_parser.add_argument("--skip-safety", action="store_true", help="Skip safety escalation checks.")
     update_apply_parser.set_defaults(handler=_cmd_update)
 
     return parser
+
+
+def _normalize_kind_args(args: argparse.Namespace, registry: Any) -> None:
+    kind_attrs = (
+        "kind",
+    )
+    kind_registry = registry.element_kind_registry
+    for attr in kind_attrs:
+        value = getattr(args, attr, None)
+        if value is None:
+            continue
+        setattr(args, attr, kind_registry.normalize(value, error_cls=ElementRegistryError))
 
 
 def _project_root_from_args(args: argparse.Namespace) -> Path:

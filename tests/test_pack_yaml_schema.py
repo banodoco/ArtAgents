@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
+
+import jsonschema
 
 from astrid.core.pack import (
+    PackDefinition,
     PackValidationError,
     load_pack_manifest,
     pack_manifest_path,
@@ -53,6 +59,594 @@ class PackYamlSchemaTest(unittest.TestCase):
             self.assertEqual(pack.name, "External Tools")
             self.assertEqual(pack.version, "1.2.3")
             self.assertEqual(pack.metadata, {})
+
+    def test_extensions_round_trip_with_normalized_shorthand_and_json_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: cloud_plus
+        label: Cloud Plus
+        module: vendor.backend
+        class: CloudBackend
+        init_kwargs:
+          timeout: 30
+          flags:
+            - fast
+    features:
+      - t2i
+      - id: img2img
+        label: Image to Image
+        description: Requires image input
+    modes:
+      - edit
+  elements:
+    kinds:
+      - id: overlays
+        singular: overlay
+        plural: overlays
+        label: Overlays
+        description: Overlay elements
+  schemas:
+    manifest:
+      version: 1
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(
+                pack.extensions,
+                {
+                    "generation": {
+                        "backends": [
+                            {
+                                "id": "cloud_plus",
+                                "label": "Cloud Plus",
+                                "module": "vendor.backend",
+                                "class": "CloudBackend",
+                                "init_kwargs": {
+                                    "timeout": 30,
+                                    "flags": ["fast"],
+                                },
+                            }
+                        ],
+                        "features": [
+                            {"id": "t2i"},
+                            {
+                                "id": "img2img",
+                                "label": "Image to Image",
+                                "description": "Requires image input",
+                            },
+                        ],
+                        "modes": [{"id": "edit"}],
+                    },
+                    "elements": {
+                        "kinds": [
+                            {
+                                "id": "overlays",
+                                "singular": "overlay",
+                                "plural": "overlays",
+                                "label": "Overlays",
+                                "description": "Overlay elements",
+                            }
+                        ]
+                    },
+                    "schemas": {"manifest": {"version": 1}},
+                },
+            )
+            self.assertEqual(pack.to_dict()["extensions"], pack.extensions)
+
+    def test_extensions_default_to_empty_and_are_omitted_from_to_dict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(Path(tmp), "schema_version: 1\nid: builtin\n")
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.extensions, {})
+            self.assertNotIn("extensions", pack.to_dict())
+
+    def test_extensions_reject_invalid_runtime_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: cloud_plus
+        module: vendor.backend
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack\.extensions\.generation\.backends\[0\]\.class",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Invalid extension shapes — additional rejection cases
+    # ------------------------------------------------------------------
+
+    def test_extensions_reject_unknown_root_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  unknown_section:
+    foo: bar
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions has unknown field",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_non_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions: "not_an_object"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions must be an object",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_generation_non_object(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation: "not_an_object"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.generation must be an object",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_backends_not_array(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends: "not_an_array"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.generation\.backends must be an array",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_backend_missing_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - module: vendor.backend
+        class: CloudBackend
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack\.extensions\.generation\.backends\[0\]\.id",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_backend_missing_module(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: cloud_plus
+        class: CloudBackend
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack\.extensions\.generation\.backends\[0\]\.module",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_backend_unknown_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: cloud_plus
+        module: vendor.backend
+        class: CloudBackend
+        extra_field: true
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.generation\.backends\[0\] has unknown field",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_feature_empty_string(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    features:
+      - ""
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"must be a non-empty string",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_feature_object_missing_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    features:
+      - label: "No ID"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack\.extensions\.generation\.features\[0\]\.id",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_feature_object_unknown_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    features:
+      - id: t2i
+        extra: true
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.generation\.features\[0\] has unknown field",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_features_not_array(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    features: "not_an_array"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.generation\.features must be an array",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_modes_not_array(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    modes: "not_an_array"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.generation\.modes must be an array",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_element_kind_missing_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  elements:
+    kinds:
+      - singular: overlay
+        plural: overlays
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack\.extensions\.elements\.kinds\[0\]\.id",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_element_kind_unknown_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  elements:
+    kinds:
+      - id: overlays
+        extra: true
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.elements\.kinds\[0\] has unknown field",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_elements_unknown_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  elements:
+    unknown_key: true
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.elements has unknown field",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_kinds_not_array(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  elements:
+    kinds: "not_an_array"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.elements\.kinds must be an array",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    # ------------------------------------------------------------------
+    # Valid extensions — additional shapes
+    # ------------------------------------------------------------------
+
+    def test_extensions_minimal_generation_section(self) -> None:
+        """A pack with only a minimal generation.backends entry."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: local
+        module: astrid.backend
+        class: LocalBackend
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(
+                pack.extensions,
+                {
+                    "generation": {
+                        "backends": [
+                            {
+                                "id": "local",
+                                "module": "astrid.backend",
+                                "class": "LocalBackend",
+                            }
+                        ]
+                    }
+                },
+            )
+
+    def test_extensions_multiple_backends(self) -> None:
+        """A pack with generation extensions declaring multiple backends."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: backend_a
+        module: mod.a
+        class: BackendA
+      - id: backend_b
+        module: mod.b
+        class: BackendB
+        label: Backend B
+        init_kwargs:
+          threads: 4
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(len(pack.extensions["generation"]["backends"]), 2)
+            self.assertEqual(
+                pack.extensions["generation"]["backends"][0],
+                {"id": "backend_a", "module": "mod.a", "class": "BackendA"},
+            )
+            self.assertEqual(
+                pack.extensions["generation"]["backends"][1],
+                {
+                    "id": "backend_b",
+                    "module": "mod.b",
+                    "class": "BackendB",
+                    "label": "Backend B",
+                    "init_kwargs": {"threads": 4},
+                },
+            )
+
+    # ------------------------------------------------------------------
+    # JSON serialization / to_dict() round-trip
+    # ------------------------------------------------------------------
+
+    def test_extensions_to_dict_is_json_serializable(self) -> None:
+        """pack.to_dict() must produce a value accepted by json.dumps."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: cloud_plus
+        label: Cloud Plus
+        module: vendor.backend
+        class: CloudBackend
+        init_kwargs:
+          timeout: 30
+          flags:
+            - fast
+    features:
+      - t2i
+      - id: img2img
+        label: Image to Image
+        description: Requires image input
+    modes:
+      - edit
+  elements:
+    kinds:
+      - id: overlays
+        singular: overlay
+        plural: overlays
+        label: Overlays
+        description: Overlay elements
+  schemas:
+    manifest:
+      version: 1
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            payload = pack.to_dict()
+            # Smoke test: must not raise TypeError
+            serialized = json.dumps(payload)
+            self.assertIsInstance(serialized, str)
+            # Round-trip: json.loads should recover the same structure
+            restored = json.loads(serialized)
+            self.assertEqual(restored["extensions"], payload["extensions"])
+
+    def test_extensions_to_dict_round_trip_through_json(self) -> None:
+        """Full JSON round-trip: pack -> to_dict -> json.dumps -> json.loads -> check."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    features:
+      - t2i
+  schemas:
+    manifest:
+      version: 1
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            original = pack.to_dict()
+            reloaded = json.loads(json.dumps(original))
+            self.assertEqual(reloaded, original)
+
+    # ------------------------------------------------------------------
+    # Proof: static validation does not import backend adapter modules
+    # ------------------------------------------------------------------
+
+    def test_extensions_backend_modules_not_imported(self) -> None:
+        """Loading a manifest with backend module/class references must NOT
+        import those modules. The parser treats them as inert strings."""
+        with tempfile.TemporaryDirectory() as tmp:
+            # Record sys.modules keys before loading
+            import sys
+            modules_before = set(sys.modules.keys())
+
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  generation:
+    backends:
+      - id: fake_backend
+        module: nonexistent.module.path
+        class: FakeBackendClass
+      - id: another_backend
+        module: also.nonexistent.vendor
+        class: AnotherClass
+        init_kwargs:
+          key: value
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+
+            # sys.modules must NOT have gained any new entries
+            modules_after = set(sys.modules.keys())
+            new_modules = modules_after - modules_before
+            self.assertEqual(
+                new_modules,
+                set(),
+                f"Loading extensions backends imported modules: {new_modules}",
+            )
+
+            # The module and class fields are preserved as inert strings
+            self.assertEqual(
+                pack.extensions["generation"]["backends"][0]["module"],
+                "nonexistent.module.path",
+            )
+            self.assertEqual(
+                pack.extensions["generation"]["backends"][0]["class"],
+                "FakeBackendClass",
+            )
 
     def test_taxonomy_fields_round_trip_and_emit_taxonomy_object(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -230,6 +824,30 @@ support: core
             pack = load_pack_manifest(pack_manifest_path(pack_root))
             self.assertEqual(pack.origin, "vendor-x")
             self.assertEqual(pack.domain, "finance")
+
+    def test_taxonomy_whitespace_only_string_is_rejected(self) -> None:
+        for field in ("origin", "install_tier", "pack_type", "domain", "stability", "support"):
+            with self.subTest(field=field):
+                with tempfile.TemporaryDirectory() as tmp:
+                    pack_root = self._write_pack(
+                        Path(tmp),
+                        f"id: builtin\n{field}: \" \"\n",
+                    )
+                    with self.assertRaisesRegex(
+                        PackValidationError,
+                        rf"pack\.{field} must be a non-empty string",
+                    ):
+                        load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_taxonomy_empty_string_defaults_to_builtin_value(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                'id: builtin\norigin: ""\nstability: ""\n',
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(pack.origin, "unknown")
+            self.assertEqual(pack.stability, "stable")
 
 
 class PackAliasSchemaTest(unittest.TestCase):
@@ -755,6 +1373,497 @@ aliases:
                 pack_direct.to_dict()["aliases"],
                 pack_discovery.to_dict()["aliases"],
             )
+
+
+# ------------------------------------------------------------------
+# Parity suite — JSON Schema vs runtime parser agreement
+# ------------------------------------------------------------------
+
+
+class PackSchemaRuntimeParityTest(unittest.TestCase):
+    """Every payload is validated through JSON Schema AND `load_pack_manifest()`.
+
+    Both paths MUST agree on accept/reject and runtime defaults.
+    """
+
+    _pack_schema: dict[str, Any] | None = None
+    _pack_registry: Any | None = None
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        from referencing import Registry, Resource
+
+        schemas_root = Path(__file__).resolve().parents[1] / "astrid" / "packs" / "schemas" / "v1"
+        defs_path = schemas_root / "_defs.json"
+        pack_path = schemas_root / "pack.json"
+
+        registry = Registry()
+        if defs_path.is_file():
+            defs_schema = json.loads(defs_path.read_text(encoding="utf-8"))
+            registry = registry.with_resource("_defs.json", Resource.from_contents(defs_schema))
+
+        pack_schema = json.loads(pack_path.read_text(encoding="utf-8"))
+        schema_id = pack_schema.get("$id")
+        if schema_id:
+            registry = registry.with_resource(schema_id, Resource.from_contents(pack_schema))
+
+        cls._pack_schema = pack_schema
+        cls._pack_registry = registry
+
+    # -- helpers -----------------------------------------------------------
+
+    @staticmethod
+    def _json_schema_errors(yaml_body: str) -> list[str]:
+        """Validate *yaml_body* against pack.json schema; return error messages."""
+        import yaml as _yaml
+        data = _yaml.safe_load(yaml_body)
+        if not isinstance(data, dict):
+            return ["root must be an object"]
+        validator = jsonschema.Draft7Validator(
+            PackSchemaRuntimeParityTest._pack_schema,
+            registry=PackSchemaRuntimeParityTest._pack_registry,
+        )
+        return sorted(err.message for err in validator.iter_errors(data))
+
+    @staticmethod
+    def _runtime_error(yaml_body: str, pack_id: str) -> str | None:
+        """Try to load *yaml_body* through `load_pack_manifest`; return error or None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = Path(tmp) / pack_id
+            pack_root.mkdir()
+            (pack_root / "pack.yaml").write_text(yaml_body, encoding="utf-8")
+            try:
+                load_pack_manifest(pack_root / "pack.yaml")
+                return None
+            except PackValidationError as e:
+                return str(e)
+
+    @staticmethod
+    def _runtime_pack(yaml_body: str, pack_id: str) -> PackDefinition | None:
+        """Load *yaml_body* through `load_pack_manifest`; return pack or None."""
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = Path(tmp) / pack_id
+            pack_root.mkdir()
+            (pack_root / "pack.yaml").write_text(yaml_body, encoding="utf-8")
+            try:
+                return load_pack_manifest(pack_root / "pack.yaml")
+            except PackValidationError:
+                return None
+
+    # -- parity: valid payloads (both paths accept) -----------------------
+
+    def test_parity_minimal_manifest_with_name_version_both_accept(self) -> None:
+        """JSON Schema requires name+version; runtime also accepts them explicitly."""
+        yaml_body = "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_runtime_defaults_name_version_when_absent(self) -> None:
+        """Runtime defaults name→id and version→0.1.0; JSON Schema requires them."""
+        yaml_body = "schema_version: 1\nid: builtin\n"
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(pack.name, "builtin")
+        self.assertEqual(pack.version, "0.1.0")
+        self.assertEqual(pack.status, "active")
+        self.assertEqual(pack.visibility, "visible")
+        self.assertEqual(pack.origin, "unknown")
+        self.assertEqual(pack.install_tier, "default")
+        self.assertEqual(pack.pack_type, "capability")
+        self.assertEqual(pack.domain, "general")
+        self.assertEqual(pack.stability, "stable")
+        self.assertEqual(pack.support, "project")
+        self.assertEqual(pack.description, "")
+        self.assertEqual(pack.metadata, {})
+        self.assertEqual(pack.content, {})
+        self.assertEqual(pack.agent, {})
+        self.assertEqual(pack.extensions, {})
+
+    def test_parity_full_manifest_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: external\nname: Ext\nversion: 2.0.0\n"
+            "description: Test pack\nstatus: experimental\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "external")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_full_manifest_defaults_determined_by_status(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: external\nname: Ext\nversion: 1.0.0\n"
+            "status: experimental\n"
+        )
+        pack = self._runtime_pack(yaml_body, "external")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(pack.status, "experimental")
+        # stability defaults from status: experimental → "experimental"
+        self.assertEqual(pack.stability, "experimental")
+
+    def test_parity_full_manifest_defaults_deprecated_status(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: external\nname: Ext\nversion: 1.0.0\n"
+            "status: deprecated\n"
+        )
+        pack = self._runtime_pack(yaml_body, "external")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(pack.status, "deprecated")
+        self.assertEqual(pack.stability, "deprecated")
+
+    def test_parity_extensions_valid_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n"
+            "  generation:\n    backends:\n"
+            "      - id: cloud_plus\n        module: vendor.backend\n"
+            "        class: CloudBackend\n    features:\n      - t2i\n"
+            "    modes:\n      - edit\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_extensions_minimal_generation_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation: {}\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_extensions_full_element_kinds_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n"
+            "  elements:\n    kinds:\n"
+            "      - id: overlays\n        singular: overlay\n"
+            "        plural: overlays\n        label: Overlays\n"
+            "        description: Overlay elements\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_taxonomy_explicit_values_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "origin: builtin\ninstall_tier: core\npack_type: capability\n"
+            "domain: media\nstability: stable\nsupport: core\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_taxonomy_explicit_values_preserved(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "origin: external\ninstall_tier: core\npack_type: capability\n"
+            "domain: generation\nstability: experimental\nsupport: core\n"
+        )
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(pack.origin, "external")
+        self.assertEqual(pack.install_tier, "core")
+        self.assertEqual(pack.pack_type, "capability")
+        self.assertEqual(pack.domain, "generation")
+        self.assertEqual(pack.stability, "experimental")
+        self.assertEqual(pack.support, "core")
+
+    def test_parity_taxonomy_non_standard_values_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "origin: vendor-x\ninstall_tier: optional-plus\npack_type: adapter\n"
+            "domain: finance\nstability: beta\nsupport: community\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(pack.origin, "vendor-x")
+        self.assertEqual(pack.install_tier, "optional-plus")
+        self.assertEqual(pack.pack_type, "adapter")
+        self.assertEqual(pack.domain, "finance")
+        self.assertEqual(pack.stability, "beta")
+        self.assertEqual(pack.support, "community")
+
+    def test_parity_taxonomy_whitespace_only_string_both_reject(self) -> None:
+        for field in ("origin", "install_tier", "pack_type", "domain", "stability", "support"):
+            with self.subTest(field=field):
+                yaml_body = (
+                    "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+                    f'{field}: " "\n'
+                )
+                js_errors = self._json_schema_errors(yaml_body)
+                self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+                rt_error = self._runtime_error(yaml_body, "builtin")
+                self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_taxonomy_empty_string_uses_defaults(self) -> None:
+        yaml_body = (
+            'schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n'
+            'origin: ""\nstability: ""\n'
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(pack.origin, "unknown")
+        self.assertEqual(pack.stability, "stable")
+
+    # -- parity: invalid payloads — both MUST reject -----------------------
+
+    def test_parity_missing_id_both_reject(self) -> None:
+        yaml_body = "schema_version: 1\nname: builtin\nversion: 0.1.0\n"
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_non_object_extensions_both_reject(self) -> None:
+        yaml_body = (
+            'schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n'
+            'extensions: "not_an_object"\n'
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_unknown_extension_root_key_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  unknown_section:\n    foo: bar\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_backend_missing_required_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation:\n    backends:\n"
+            "      - id: cloud_plus\n        module: vendor.backend\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_backend_unknown_field_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation:\n    backends:\n"
+            "      - id: cloud_plus\n        module: vendor.backend\n"
+            "        class: CloudBackend\n        unknown: true\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_element_kind_missing_id_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  elements:\n    kinds:\n"
+            "      - singular: overlay\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_element_kind_unknown_field_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  elements:\n    kinds:\n"
+            "      - id: overlays\n        unknown: true\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_non_array_kinds_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  elements:\n    kinds: not_an_array\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_non_array_backends_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation:\n    backends: not_an_array\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_non_object_generation_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            'extensions:\n  generation: "not_an_object"\n'
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_non_object_elements_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            'extensions:\n  elements: "not_an_object"\n'
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_wrong_type_for_status_both_reject(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "status: 123\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_wrong_type_for_status_both_reject(self) -> None:
+        yaml_body = "schema_version: 1\nid: builtin\nstatus: 123\n"
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    # -- parity: valid features/modes shorthand ----------------------------
+
+    def test_parity_features_string_shorthand_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation:\n    features:\n      - t2i\n      - i2i\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_features_object_form_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation:\n    features:\n"
+            "      - id: t2i\n        label: Text to Image\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    def test_parity_modes_string_shorthand_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n  generation:\n    modes:\n      - edit\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
+    # -- parity: extensions round-trip defaults ----------------------------
+
+    def test_parity_extensions_round_trip_normalized_shape(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n"
+            "  generation:\n    backends:\n"
+            "      - id: cloud_plus\n        module: vendor.backend\n"
+            "        class: CloudBackend\n        init_kwargs:\n"
+            "          timeout: 30\n"
+            "    features:\n      - t2i\n"
+            "      - id: img2img\n        label: Image to Image\n"
+            "        description: Requires image input\n"
+            "    modes:\n      - edit\n"
+        )
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(
+            pack.extensions,
+            {
+                "generation": {
+                    "backends": [
+                        {
+                            "id": "cloud_plus",
+                            "module": "vendor.backend",
+                            "class": "CloudBackend",
+                            "init_kwargs": {"timeout": 30},
+                        }
+                    ],
+                    "features": [
+                        {"id": "t2i"},
+                        {
+                            "id": "img2img",
+                            "label": "Image to Image",
+                            "description": "Requires image input",
+                        },
+                    ],
+                    "modes": [{"id": "edit"}],
+                }
+            },
+        )
+
+    # -- parity: JSON serialization agreement --------------------------------
+
+    def test_parity_to_dict_is_json_serializable(self) -> None:
+        yaml_body = "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        payload = pack.to_dict()
+        json_str = json.dumps(payload)
+        self.assertIsInstance(json_str, str)
+        round_tripped = json.loads(json_str)
+        self.assertEqual(round_tripped["id"], "builtin")
+
+    # -- parity: no import during static validation --------------------------
+
+    def test_parity_no_import_during_static_validation(self) -> None:
+        """Prove static validation does not import backend adapter modules."""
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "extensions:\n"
+            "  generation:\n    backends:\n"
+            "      - id: cloud_plus\n        module: nonexistent.module\n"
+            "        class: FakeBackend\n"
+        )
+        before = set(sys.modules.keys())
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema should accept: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime should accept: {rt_error}")
+        after = set(sys.modules.keys())
+        new_modules = after - before
+        # loading yaml may add modules, but the fake module should never appear
+        self.assertNotIn("nonexistent.module", new_modules)
+        self.assertNotIn("nonexistent", new_modules)
 
 
 if __name__ == "__main__":

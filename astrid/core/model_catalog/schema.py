@@ -11,30 +11,20 @@ for the image modality).  Each :class:`ModeSpec` carries per-mode
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
 
-from astrid.core.generation.features import Feature
-
-# ---------------------------------------------------------------------------
-# Canonical mode names (SD-002)
-# ---------------------------------------------------------------------------
-
-CANONICAL_IMAGE_MODES: tuple[str, ...] = (
-    "t2i",
-    "i2i",
-    "edit",
-    "inpaint",
-    "outpaint",
-    "upscale",
-)
-
-CANONICAL_VIDEO_MODES: tuple[str, ...] = (
-    "t2v",
-    "i2v",
-    "flf",
-    "v2v",
-    "video-edit",
+from astrid.core.generation.features import (
+    CANONICAL_IMAGE_MODES,
+    CANONICAL_VIDEO_MODES,
+    CLOUD_BACKEND_ID,
+    Feature,
+    GENERATION_TAXONOMY,
+    GenerationTaxonomyRegistry,
+    IMAGE_MODALITY,
+    LOCAL_BACKEND_ID,
+    VIDEO_MODALITY,
 )
 
 # ---------------------------------------------------------------------------
@@ -161,9 +151,12 @@ def validate_registry(raw: dict[str, Any]) -> list[ModelEntry]:
     * ``requires`` MUST be a subset of ``supports``.
     * ``backends`` must be a non-empty dict (at least one of ``local`` or
       ``cloud`` must be present).
-    * Every backend key must be ``"local"`` or ``"cloud"``.
-    * For ``"local"`` backends: ``template`` must be a non-empty string.
-    * For ``"cloud"`` backends: ``endpoint`` must be a non-empty string.
+    * Every backend key must be a built-in backend id or one declared by a
+      loaded pack extension.
+    * For the built-in ``"local"`` backend: ``template`` must be a non-empty
+      string.
+    * For the built-in ``"cloud"`` backend: ``endpoint`` must be a non-empty
+      string.
     * Every key in ``param_map`` must be a valid ``Feature`` literal AND
       must be present in the mode's ``supports``.
     * Every feature in ``supports`` that appears in a backend's
@@ -175,8 +168,23 @@ def validate_registry(raw: dict[str, Any]) -> list[ModelEntry]:
     Raises:
         ValueError: If any validation rule is violated.
     """
+    return validate_registry_with_backends(raw)
+
+
+def validate_registry_with_backends(
+    raw: dict[str, Any],
+    *,
+    allowed_backend_ids: Collection[str] | None = None,
+    taxonomy_registry: GenerationTaxonomyRegistry | None = None,
+) -> list[ModelEntry]:
+    """Validate a raw registry dict against the currently known backend ids."""
     if not isinstance(raw, dict):
         raise ValueError(f"registry must be a dict, got {type(raw).__name__}")
+
+    registry = taxonomy_registry or GENERATION_TAXONOMY
+    backend_ids = frozenset(allowed_backend_ids or registry.backend_ids())
+    if not backend_ids:
+        raise ValueError("allowed backend ids must not be empty")
 
     schema_version = raw.get("schema_version")
 
@@ -243,7 +251,12 @@ def validate_registry(raw: dict[str, Any]) -> list[ModelEntry]:
         for mode_name, mode_raw in modes_raw.items():
             mode_prefix = f"{prefix}.modes[{mode_name!r}]"
             modes[mode_name] = _validate_mode_spec(
-                mode_raw, mode_name, mode_prefix, modality
+                mode_raw,
+                mode_name,
+                mode_prefix,
+                modality,
+                allowed_backend_ids=backend_ids,
+                taxonomy_registry=registry,
             )
 
         entries.append(
@@ -268,6 +281,9 @@ def _validate_mode_spec(
     mode_name: str,
     prefix: str,
     modality: str,
+    *,
+    allowed_backend_ids: Collection[str],
+    taxonomy_registry: GenerationTaxonomyRegistry,
 ) -> ModeSpec:
     """Validate a single mode entry and return a :class:`ModeSpec`."""
 
@@ -275,32 +291,25 @@ def _validate_mode_spec(
         raise ValueError(f"{prefix}: must be a dict, got {type(raw).__name__}")
 
     # -- validate mode name is canonical (modality-dispatch) --------------
-    if modality == "image":
-        if mode_name not in CANONICAL_IMAGE_MODES:
-            raise ValueError(
-                f"{prefix}: unknown image mode {mode_name!r}; "
-                f"canonical image modes are: "
-                f"{', '.join(CANONICAL_IMAGE_MODES)}"
-            )
-    elif modality == "video":
-        if mode_name not in CANONICAL_VIDEO_MODES:
-            raise ValueError(
-                f"{prefix}: unknown video mode {mode_name!r}; "
-                f"canonical video modes are: "
-                f"{', '.join(CANONICAL_VIDEO_MODES)}"
-            )
-    else:
+    if modality not in {IMAGE_MODALITY, VIDEO_MODALITY}:
         raise ValueError(
             f"{prefix}: unknown modality {modality!r}; "
             f"expected 'image' or 'video'"
         )
+    try:
+        taxonomy_registry.require_mode(modality, mode_name, path=prefix)
+    except ValueError as exc:
+        message = str(exc)
+        if message.startswith(f"{prefix}:"):
+            raise
+        raise ValueError(f"{prefix}: {message}") from exc
 
     # -- supports --------------------------------------------------------
     supports_raw = raw.get("supports", [])
     if not isinstance(supports_raw, list):
         raise ValueError(f"{prefix}.supports: must be a list")
     supports: tuple[Feature, ...] = tuple(
-        _require_feature(s, f"{prefix}.supports[{i}]")
+        _require_feature(s, f"{prefix}.supports[{i}]", taxonomy_registry=taxonomy_registry)
         for i, s in enumerate(supports_raw)
     )
 
@@ -309,7 +318,7 @@ def _validate_mode_spec(
     if not isinstance(requires_raw, list):
         raise ValueError(f"{prefix}.requires: must be a list")
     requires: tuple[Feature, ...] = tuple(
-        _require_feature(r, f"{prefix}.requires[{i}]")
+        _require_feature(r, f"{prefix}.requires[{i}]", taxonomy_registry=taxonomy_registry)
         for i, r in enumerate(requires_raw)
     )
 
@@ -333,16 +342,18 @@ def _validate_mode_spec(
 
     backends: dict[str, BackendSpec] = {}
     for backend_key, backend_raw in backends_raw.items():
-        if backend_key not in ("local", "cloud"):
+        if backend_key not in allowed_backend_ids:
+            available = ", ".join(sorted(allowed_backend_ids))
             raise ValueError(
                 f"{prefix}.backends[{backend_key!r}]: "
-                f"unknown backend key; must be 'local' or 'cloud'"
+                f"unknown backend key; available backend ids: {available}"
             )
         backends[backend_key] = _validate_backend_spec(
             backend_raw,
             f"{prefix}.backends[{backend_key!r}]",
-            is_local=(backend_key == "local"),
+            backend_id=backend_key,
             supports=supports,
+            taxonomy_registry=taxonomy_registry,
         )
 
     return ModeSpec(
@@ -356,8 +367,9 @@ def _validate_backend_spec(
     raw: Any,
     path: str,
     *,
-    is_local: bool,
+    backend_id: str,
     supports: tuple[Feature, ...],
+    taxonomy_registry: GenerationTaxonomyRegistry,
 ) -> BackendSpec:
     """Validate a single backend specification, cross-checking param_map
     against the mode's *supports*."""
@@ -369,9 +381,9 @@ def _validate_backend_spec(
     template_hash = raw.get("template_hash", "")
     endpoint = raw.get("endpoint", "")
 
-    if is_local and not template:
+    if backend_id == LOCAL_BACKEND_ID and not template:
         raise ValueError(f"{path}.template: must be a non-empty string for local backend")
-    if not is_local and not endpoint:
+    if backend_id == CLOUD_BACKEND_ID and not endpoint:
         raise ValueError(f"{path}.endpoint: must be a non-empty string for cloud backend")
 
     # -- param_map -------------------------------------------------------
@@ -389,7 +401,11 @@ def _validate_backend_spec(
         val = v.strip()
 
         # Every param_map key must be a valid Feature
-        _require_feature(key, f"{path}.param_map[{k!r}]")
+        _require_feature(
+            key,
+            f"{path}.param_map[{k!r}]",
+            taxonomy_registry=taxonomy_registry,
+        )
 
         # Every param_map key must be in the mode's supports
         if key not in supports:
@@ -424,18 +440,11 @@ def _require_str(data: dict[str, Any], key: str, path: str) -> str:
     return value.strip()
 
 
-def _require_feature(value: Any, path: str) -> Feature:
+def _require_feature(
+    value: Any,
+    path: str,
+    *,
+    taxonomy_registry: GenerationTaxonomyRegistry = GENERATION_TAXONOMY,
+) -> Feature:
     """Validate that *value* is a recognised ``Feature`` literal."""
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{path}: must be a non-empty string")
-    feature = value.strip()
-    # _get_args on a Literal returns the allowed values directly
-    from typing import get_args as _get_args
-
-    allowed = set(_get_args(Feature))
-    if feature not in allowed:
-        raise ValueError(
-            f"{path}: {feature!r} is not a recognised Feature; "
-            f"allowed: {sorted(allowed)}"
-        )
-    return feature  # type: ignore[return-value]
+    return taxonomy_registry.require_feature(value, path=path)

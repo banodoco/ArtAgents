@@ -10,7 +10,7 @@ from typing import Any
 
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.element.registry import ElementRegistry, ElementSource, load_default_registry, load_source_elements
-from astrid.core.element.schema import ELEMENT_KINDS, REQUIRED_ELEMENT_FILES, ElementKind
+from astrid.core.element.schema import REQUIRED_ELEMENT_FILES, ElementKind
 
 TOOLS_DIR = REPO_ROOT
 THEMES_ROOT = WORKSPACE_ROOT / "themes"
@@ -39,17 +39,11 @@ def transitions_root() -> Path:
 
 
 def element_root(kind: ElementKind) -> Path:
-    _validate_kind(kind)
-    return WORKSPACE_ROOT / kind
+    return WORKSPACE_ROOT / _validate_kind(kind)
 
 
-def _validate_kind(kind: str) -> None:
-    if kind not in ELEMENT_KINDS:
-        raise ValueError(f"Invalid element kind {kind!r}")
-
-
-def _singular(kind: ElementKind) -> str:
-    return kind[:-1]
+def _validate_kind(kind: str) -> ElementKind:
+    return _registry().element_kind_registry.normalize(kind)
 
 
 def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
@@ -81,13 +75,16 @@ def _registry(theme: str | Path | None = None) -> ElementRegistry:
     legacy_root = WORKSPACE_ROOT
     if legacy_root.exists():
         legacy_source = ElementSource("legacy_workspace", legacy_root, 15, True)
-        for element in load_source_elements(legacy_source):
+        for element in load_source_elements(
+            legacy_source,
+            element_kind_registry=registry.element_kind_registry,
+        ):
             registry.register(element)
     return registry
 
 
 def _warn_conflicts(registry: ElementRegistry, *, kind: ElementKind) -> None:
-    singular = _singular(kind)
+    singular = registry.element_kind_registry.singular(kind)
     for conflict in registry.conflicts():
         if conflict.kind != kind:
             continue
@@ -108,14 +105,13 @@ def _theme_name_for_element(element: Any) -> str:
 
 
 def list_element_ids(kind: ElementKind, theme: str | Path | None = None) -> list[str]:
-    _validate_kind(kind)
     registry = _registry(theme)
-    _warn_conflicts(registry, kind=kind)
-    return [element.id for element in registry.list(kind=kind)]
+    normalized_kind = registry.element_kind_registry.normalize(kind)
+    _warn_conflicts(registry, kind=normalized_kind)
+    return [element.id for element in registry.list(kind=normalized_kind)]
 
 
 def _element(element_id: str, *, kind: ElementKind, theme: str | Path | None = None):
-    _validate_kind(kind)
     return _registry(theme).get(kind, element_id)
 
 

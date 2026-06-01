@@ -7,6 +7,12 @@ from .install import (
     build_element_install_plan,
     install_element,
 )
+from ..pack import (
+    ELEMENT_KIND_REGISTRY,
+    ElementKind,
+    ElementKindDescriptor,
+    ElementKindRegistry,
+)
 from .registry import (
     ElementConflict,
     ElementRegistry,
@@ -14,6 +20,7 @@ from .registry import (
     ElementSource,
     load_default_registry,
     load_pack_elements,
+    load_source_elements,
 )
 from .schema import (
     ELEMENT_KINDS,
@@ -28,6 +35,7 @@ from .schema import (
 
 __all__ = [
     "ELEMENT_KINDS",
+    "ELEMENT_KIND_REGISTRY",
     "REQUIRED_ELEMENT_FILES",
     "ElementConflict",
     "ElementDefinition",
@@ -35,6 +43,9 @@ __all__ = [
     "ElementInstallError",
     "ElementInstallPlan",
     "ElementInstallResult",
+    "ElementKind",
+    "ElementKindDescriptor",
+    "ElementKindRegistry",
     "ElementRegistry",
     "ElementRegistryError",
     "ElementSource",
@@ -43,6 +54,7 @@ __all__ = [
     "install_element",
     "load_default_registry",
     "load_pack_elements",
+    "load_source_elements",
     "load_element_definition",
     "to_capability_handle",
     "validate_element_definition",
