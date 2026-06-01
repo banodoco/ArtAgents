@@ -13,7 +13,7 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from astrid.contracts.capability_runner import CapabilityRunner
 from astrid.contracts.exec_error import (
@@ -23,6 +23,11 @@ from astrid.contracts.exec_error import (
 )
 from astrid.contracts.run_status import RunStatus
 from astrid.core.pack_resolver import resolve_callable_from_metadata
+from astrid.core.runtime import (
+    InProcessExecutionPreconditionError,
+    InProcessInvocationError,
+    invoke_in_process_command,
+)
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
@@ -82,6 +87,7 @@ class ExecutorRunRequest:
     python_exec: str | None = None
     verbose: bool = False
     argv: tuple[str, ...] = ()
+    execution_mode: Literal["subprocess", "in_process"] = "subprocess"
 
 
 @dataclass(frozen=True)
@@ -424,6 +430,14 @@ def _run_explicit_command_executor(
             payload={"executor_id": executor.id, "missing_binaries": [], "returncode": None, "skipped": False, "skipped_reason": ""},
             dry_run=True,
         )
+    if request.execution_mode == "in_process":
+        return _run_in_process_executor_command(
+            executor,
+            request,
+            command=command,
+            cwd=cwd,
+            env=env,
+        )
     completed = subprocess.run(
         list(command),
         cwd=cwd,
@@ -444,6 +458,92 @@ def _run_explicit_command_executor(
             "skipped_reason": "",
         },
         returncode=completed.returncode,
+    )
+
+
+def _run_in_process_executor_command(
+    executor: ExecutorDefinition,
+    request: ExecutorRunRequest,
+    *,
+    command: tuple[str, ...],
+    cwd: str | None,
+    env: Mapping[str, str],
+) -> ExecutorRunResult:
+    try:
+        result = invoke_in_process_command(
+            command,
+            metadata=executor.metadata,
+            owner_id=executor.id,
+            cwd=cwd,
+            env=env,
+            parent_env=os.environ,
+        )
+    except InProcessExecutionPreconditionError as exc:
+        return _in_process_executor_error_result(
+            executor,
+            command=command,
+            cwd=cwd,
+            env=env,
+            error=ExecError(
+                code="in_process_precondition",
+                type="precondition",
+                message=str(exc),
+                recovery="use subprocess mode or make the executor command match the current interpreter/runtime module",
+            ),
+        )
+    except InProcessInvocationError as exc:
+        return _in_process_executor_error_result(
+            executor,
+            command=command,
+            cwd=cwd,
+            env=env,
+            error=ExecError(
+                code="in_process_runtime",
+                type="process",
+                message=str(exc),
+                recovery="fix the executor runtime import/entrypoint or run it in subprocess mode",
+            ),
+        )
+    return ExecutorRunResult(
+        executor_id=executor.id,
+        kind=executor.kind,
+        command=command,
+        cwd=cwd,
+        env=dict(env),
+        payload={
+            "executor_id": executor.id,
+            "missing_binaries": [],
+            "returncode": result.returncode,
+            "skipped": False,
+            "skipped_reason": "",
+        },
+        returncode=result.returncode,
+    )
+
+
+def _in_process_executor_error_result(
+    executor: ExecutorDefinition,
+    *,
+    command: tuple[str, ...],
+    cwd: str | None,
+    env: Mapping[str, str],
+    error: ExecError,
+) -> ExecutorRunResult:
+    return ExecutorRunResult(
+        executor_id=executor.id,
+        kind=executor.kind,
+        command=command,
+        cwd=cwd,
+        env=dict(env),
+        payload={
+            "executor_id": executor.id,
+            "missing_binaries": [],
+            "returncode": 1,
+            "skipped": False,
+            "skipped_reason": "",
+        },
+        returncode=1,
+        error=error,
     )
 
 

@@ -3,6 +3,20 @@
 This module is intentionally lightweight. Registry and runner imports belong in
 call sites so ``import astrid`` can expose the SDK surface without eagerly
 loading execution machinery.
+
+Public exception taxonomy:
+
+* validation failures: malformed capability definitions or invalid request
+  shape.
+* missing input failures: required user-supplied invocation inputs are absent.
+* precondition failures: the capability cannot run in the requested execution
+  mode or environment.
+* process/runtime failures: the capability ran and failed, or its runtime entry
+  could not complete.
+* lease failures: the caller is not the active task-run writer or the canonical
+  lease is unreadable/inconsistent.
+* event-log failures: task/timeline append or verification transport errors
+  outside the lease-specific writer boundary.
 """
 
 from __future__ import annotations
@@ -13,6 +27,13 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 from astrid.contracts.exec_error import ExecError
+from astrid.core.project.paths import ProjectPathError, run_dir as project_run_dir, validate_project_slug
+from astrid.core.task.event_stream import (
+    EventStreamRecord,
+    read_event_stream as _read_task_event_stream,
+    subscribe_event_stream as _subscribe_task_event_stream,
+)
+from astrid.core.task.events import EVENTS_FILENAME
 from astrid.contracts.schema import (
     AliasRecord,
     CapabilityHandle,
@@ -45,6 +66,42 @@ class CapabilityInvocationError(AstridSDKError):
     """Raised when the SDK cannot construct or execute an invocation."""
 
 
+class CapabilityValidationError(AstridSDKError):
+    """Raised when capability metadata or invocation arguments are invalid."""
+
+    category = "validation"
+
+
+class CapabilityMissingInputError(CapabilityValidationError):
+    """Raised when a required invocation input is missing."""
+
+    category = "missing_input"
+
+
+class CapabilityPreconditionError(AstridSDKError):
+    """Raised when capability execution preconditions are not satisfied."""
+
+    category = "precondition"
+
+
+class CapabilityRuntimeError(AstridSDKError):
+    """Raised when capability execution fails at process/runtime time."""
+
+    category = "runtime"
+
+
+class CapabilityLeaseError(AstridSDKError):
+    """Raised when task-run lease ownership or lease state rejects the call."""
+
+    category = "lease"
+
+
+class CapabilityEventLogError(AstridSDKError):
+    """Raised when an event-log transport or verification operation fails."""
+
+    category = "event_log"
+
+
 def _json_safe(value: Any) -> Any:
     """Return a recursively JSON-safe copy of *value*."""
     if value is None or isinstance(value, (str, int, float, bool)):
@@ -75,6 +132,109 @@ def _json_safe_mapping(value: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise TypeError(f"expected mapping payload, got {type(payload).__name__}")
     return payload
+
+
+def _looks_like_missing_input(message: str) -> bool:
+    lowered = message.lower()
+    return (
+        "missing required input" in lowered
+        or "missing mapped input" in lowered
+        or "missing value for placeholder" in lowered
+        or "--out is required" in lowered
+    )
+
+
+def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
+    if isinstance(exc, AstridSDKError):
+        return exc
+
+    from astrid.contracts.event_log_error import EventLogError
+    from astrid.core.executor.runner import ExecutorRunnerError
+    from astrid.core.executor.schema import ExecutorValidationError
+    from astrid.core.orchestrator.runner import OrchestratorRunError, OrchestratorRunnerError
+    from astrid.core.orchestrator.schema import OrchestratorValidationError
+    from astrid.core.session.lease import LeaseError
+    from astrid.core.task.events import NotWriterError, StaleEpochError, StaleTailError
+
+    if isinstance(exc, (ExecutorRunnerError, OrchestratorRunnerError)):
+        if _looks_like_missing_input(str(exc)):
+            return CapabilityMissingInputError(str(exc))
+        return CapabilityValidationError(str(exc))
+    if isinstance(exc, (ExecutorValidationError, OrchestratorValidationError)):
+        return CapabilityValidationError(str(exc))
+    if isinstance(exc, ExecError):
+        if exc.type == "precondition":
+            return CapabilityPreconditionError(exc.message)
+        if exc.type == "process":
+            return CapabilityRuntimeError(exc.message)
+        return CapabilityInvocationError(exc.message)
+    if isinstance(exc, OrchestratorRunError):
+        if exc.kind == "precondition":
+            return CapabilityPreconditionError(exc.message)
+        return CapabilityRuntimeError(exc.message)
+    if isinstance(exc, (LeaseError, NotWriterError, StaleEpochError)):
+        return CapabilityLeaseError(str(exc))
+    if isinstance(exc, StaleTailError):
+        return CapabilityEventLogError(str(exc))
+    if isinstance(exc, EventLogError):
+        return CapabilityEventLogError(str(exc))
+    return None
+
+
+def _error_payload_from_internal_error(error: Any) -> dict[str, Any]:
+    payload = _json_safe(error)
+    if isinstance(payload, dict):
+        result = dict(payload)
+    else:
+        result = {"message": str(error)}
+
+    mapped = _sdk_error_from_exception(error)
+    if mapped is not None:
+        result.setdefault("message", str(error))
+        result["sdk_error"] = mapped.__class__.__name__
+        result["sdk_category"] = getattr(mapped, "category", "invocation")
+    return result
+
+
+def _internal_error_from_result(result: Any) -> Any:
+    direct = getattr(result, "error", None)
+    if direct is not None:
+        return direct
+    errors = getattr(result, "errors", ())
+    if isinstance(errors, tuple) and errors:
+        return errors[0]
+    if isinstance(errors, list) and errors:
+        return errors[0]
+    return None
+
+
+def _sdk_error_from_event_exception(exc: Any) -> AstridSDKError | None:
+    mapped = _sdk_error_from_exception(exc)
+    if mapped is not None:
+        return mapped
+    if isinstance(exc, ProjectPathError):
+        return CapabilityValidationError(str(exc))
+    if isinstance(exc, FileNotFoundError):
+        return CapabilityPreconditionError(str(exc))
+    return None
+
+
+def _resolve_event_stream_run_dir(
+    project: str,
+    run_id: str,
+    *,
+    projects_root: str | Path | None = None,
+) -> Path:
+    slug = validate_project_slug(project)
+    run_path = project_run_dir(slug, run_id, root=projects_root)
+    if not run_path.is_dir():
+        raise FileNotFoundError(f"run {run_id!r} not found in project {slug!r}")
+    events_path = run_path / EVENTS_FILENAME
+    if not events_path.is_file():
+        raise FileNotFoundError(
+            f"run {run_id!r} in project {slug!r} has no {EVENTS_FILENAME}"
+        )
+    return run_path
 
 
 @dataclass(frozen=True)
@@ -149,6 +309,84 @@ class InvocationResult:
                 "raw_result": self.raw_result,
             }
         )
+
+
+def read_events(
+    project: str,
+    run_id: str,
+    *,
+    projects_root: str | Path | None = None,
+    include_audit: bool = True,
+    verify: bool = True,
+) -> tuple[EventStreamRecord, ...]:
+    """Return a verified read-only task/audit event snapshot for one run."""
+
+    try:
+        run_path = _resolve_event_stream_run_dir(project, run_id, projects_root=projects_root)
+        return tuple(
+            _read_task_event_stream(
+                run_path,
+                include_audit=include_audit,
+                verify=verify,
+            )
+        )
+    except AstridSDKError:
+        raise
+    except Exception as exc:
+        mapped = _sdk_error_from_event_exception(exc)
+        if mapped is not None:
+            raise mapped from exc
+        raise CapabilityInvocationError(
+            f"failed to read events for project {project!r} run {run_id!r}"
+        ) from exc
+
+
+def subscribe_events(
+    project: str,
+    run_id: str,
+    *,
+    projects_root: str | Path | None = None,
+    include_audit: bool = True,
+    verify: bool = True,
+    follow: bool = False,
+    poll_interval: float = 0.1,
+    idle_polls: int | None = None,
+):
+    """Yield a verified read-only task/audit event stream for one run."""
+
+    try:
+        run_path = _resolve_event_stream_run_dir(project, run_id, projects_root=projects_root)
+    except AstridSDKError:
+        raise
+    except Exception as exc:
+        mapped = _sdk_error_from_event_exception(exc)
+        if mapped is not None:
+            raise mapped from exc
+        raise CapabilityInvocationError(
+            f"failed to subscribe to events for project {project!r} run {run_id!r}"
+        ) from exc
+
+    def _iter():
+        try:
+            yield from _subscribe_task_event_stream(
+                run_path,
+                include_audit=include_audit,
+                verify=verify,
+                follow=follow,
+                poll_interval=poll_interval,
+                idle_polls=idle_polls,
+            )
+        except AstridSDKError:
+            raise
+        except Exception as exc:
+            mapped = _sdk_error_from_event_exception(exc)
+            if mapped is not None:
+                raise mapped from exc
+            raise CapabilityInvocationError(
+                f"failed to subscribe to events for project {project!r} run {run_id!r}"
+            ) from exc
+
+    return _iter()
 
 
 def run_executor(request: Any, registry: Any) -> Any:
@@ -676,6 +914,7 @@ def invoke(
     check_binaries: bool = False,
     python_exec: str | None = None,
     verbose: bool = False,
+    execution_mode: Literal["subprocess", "in_process"] = "subprocess",
     argv: tuple[str, ...] = (),
     orchestrator_args: tuple[str, ...] = (),
 ) -> InvocationResult:
@@ -721,6 +960,7 @@ def invoke(
                 check_binaries=check_binaries,
                 python_exec=python_exec,
                 verbose=verbose,
+                execution_mode=execution_mode,
                 argv=tuple(argv),
             )
             result = run_executor(request, executor_registry)
@@ -740,17 +980,22 @@ def invoke(
                 dry_run=dry_run,
                 python_exec=python_exec,
                 verbose=verbose,
+                execution_mode=execution_mode,
             )
             result = run_orchestrator(request, orchestrator_registry)
             raw_result = _normalize_orchestrator_result(result)
     except AstridSDKError:
         raise
     except Exception as exc:
+        mapped = _sdk_error_from_exception(exc)
+        if mapped is not None:
+            raise mapped from exc
         raise CapabilityInvocationError(
             f"failed to invoke {capability.capability_type} {capability.id!r}"
         ) from exc
 
-    error = _json_safe(result.error) if getattr(result, "error", None) is not None else None
+    internal_error = _internal_error_from_result(result)
+    error = _error_payload_from_internal_error(internal_error) if internal_error is not None else None
     return InvocationResult(
         capability_id=capability.id,
         capability_type=capability.capability_type,
@@ -770,7 +1015,14 @@ __all__ = [
     "CapabilityInvocationError",
     "CapabilityNotFoundError",
     "CapabilityType",
+    "CapabilityValidationError",
+    "CapabilityMissingInputError",
+    "CapabilityPreconditionError",
+    "CapabilityRuntimeError",
+    "CapabilityLeaseError",
+    "CapabilityEventLogError",
     "DiscoveryResult",
+    "EventStreamRecord",
     "ExecError",
     "InvocationResult",
     "Output",
@@ -781,6 +1033,8 @@ __all__ = [
     "discover",
     "get_capability",
     "invoke",
+    "read_events",
     "run_executor",
     "run_orchestrator",
+    "subscribe_events",
 ]

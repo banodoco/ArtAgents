@@ -9,6 +9,7 @@ in ``astrid/core/orchestrator/runner.py`` with a minimal direct call.
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -209,6 +210,226 @@ def test_command_orchestrator_explicit_env_overrides_passthrough(
 
     assert result.returncode == 0
     assert out_file.read_text(encoding="utf-8") == "from-orchestrator"
+
+
+def test_command_orchestrator_in_process_mode_avoids_subprocess_and_returns_result_shape(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _command_orchestrator(
+        orchestrator_id="test.in_process_help",
+        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(orch)
+
+    def _fail_subprocess(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("subprocess.run should not be used in in_process mode")
+
+    import astrid.core.orchestrator.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod.subprocess, "run", _fail_subprocess)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id=orch.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    assert result.command == orch.runtime.command.argv
+    assert result.cwd is None
+    assert result.env == {}
+    assert result.returncode == 0
+    assert result.ok is True
+    assert result.errors == ()
+
+
+def test_command_orchestrator_default_mode_remains_subprocess_first(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    orch = _command_orchestrator(
+        orchestrator_id="test.subprocess_default",
+        argv=(sys.executable, "-c", "pass"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(orch)
+    seen: dict[str, Any] = {}
+
+    def _fake_subprocess_run(
+        argv: list[str],
+        *,
+        cwd: str | None,
+        env: dict[str, str],
+        check: bool,
+    ) -> types.SimpleNamespace:
+        seen["argv"] = tuple(argv)
+        seen["cwd"] = cwd
+        seen["env"] = env
+        seen["check"] = check
+        return types.SimpleNamespace(returncode=0)
+
+    def _fail_in_process(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("invoke_in_process_command should not be used by default")
+
+    import astrid.core.orchestrator.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod.subprocess, "run", _fake_subprocess_run)
+    monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fail_in_process)
+
+    result = run_orchestrator(OrchestratorRunRequest(orchestrator_id=orch.id, out=tmp_path), registry)
+
+    assert seen["argv"] == orch.runtime.command.argv
+    assert seen["cwd"] is None
+    assert seen["check"] is False
+    assert result.returncode == 0
+    assert result.ok is True
+
+
+def test_command_orchestrator_in_process_mode_rejects_different_python_interpreter(
+    tmp_path: Path,
+) -> None:
+    foreign_python = tmp_path / "venv" / "bin" / "python"
+    orch = _command_orchestrator(
+        orchestrator_id="test.in_process_wrong_python",
+        argv=(
+            str(foreign_python),
+            "-m",
+            "astrid.packs.youtube.executors.upload.run",
+            "--help",
+        ),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(orch)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id=orch.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    assert result.returncode == 1
+    assert result.ok is False
+    assert len(result.errors) == 1
+    assert result.errors[0].kind == "precondition"
+    assert "requires interpreter" in result.errors[0].message
+
+
+def test_python_orchestrator_in_process_mode_keeps_direct_python_runtime_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _returns_zero(request, orchestrator):  # noqa: ANN001
+        return 0
+
+    import astrid.core.orchestrator.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "_test_python_target", _returns_zero, raising=False)
+
+    def _fail_in_process(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("invoke_in_process_command should not be used for runtime.kind='python'")
+
+    monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fail_in_process)
+    orch = _python_orchestrator(function="_test_python_target")
+    registry = _registry(orch)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id=orch.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    assert result.returncode == 0
+    assert result.ok is True
+
+
+def test_project_command_orchestrator_in_process_mode_preserves_project_run_finalization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from astrid.core.project import paths as project_paths
+    from astrid.core.project.project import create_project
+    from astrid.core.timeline.crud import create_timeline
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    orch = _command_orchestrator(
+        orchestrator_id="video_editing.hype",
+        argv=(
+            sys.executable,
+            "-m",
+            "astrid.packs.video_editing.orchestrators.hype.run",
+            "{orchestrator_args}",
+        ),
+        metadata={
+            "requires_output_path": True,
+            "runtime_module": "astrid.packs.video_editing.orchestrators.hype.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(orch)
+    seen: dict[str, Any] = {}
+
+    def _fake_in_process(
+        argv: tuple[str, ...],
+        *,
+        metadata: dict[str, Any],
+        owner_id: str,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+        parent_env: dict[str, str] | None = None,
+        **_: Any,
+    ) -> types.SimpleNamespace:
+        seen["argv"] = argv
+        seen["cwd"] = cwd
+        seen["env"] = dict(env or {})
+        seen["owner_id"] = owner_id
+        return types.SimpleNamespace(returncode=0)
+
+    import astrid.core.orchestrator.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fake_in_process)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id=orch.id,
+            project="demo",
+            execution_mode="in_process",
+            orchestrator_args=("--brief", str(tmp_path / "brief.txt"), "--target-duration", "1"),
+        ),
+        registry,
+    )
+
+    records = sorted((projects_root / "demo" / "runs").glob("*/run.json"))
+
+    assert result.returncode == 0
+    assert seen["owner_id"] == orch.id
+    assert "--out" in seen["argv"]
+    assert seen["env"]["ASTRID_PROJECT_RUN"] == "1"
+    assert seen["env"]["ASTRID_INTERNAL_INVOCATION"] == "1"
+    assert len(records) == 1
+    assert '"status": "completed"' in records[0].read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
