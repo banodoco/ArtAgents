@@ -10,7 +10,7 @@ from pathlib import Path
 from astrid._paths import REPO_ROOT
 from astrid.core.executor.folder import load_folder_executors
 from astrid.core.orchestrator.folder import load_folder_orchestrators
-from astrid.core.pack import ELEMENT_KINDS as _ELEMENT_KINDS
+from astrid.core.pack import ELEMENT_KIND_REGISTRY, element_kind_registry_for_pack, load_pack_manifest, pack_manifest_path
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
@@ -288,10 +288,21 @@ def _validate_pack_element_folders(packs_root: Path) -> list[str]:
         elements_root = pack_dir / "elements"
         if not elements_root.is_dir():
             continue
+        manifest_path = pack_manifest_path(pack_dir)
+        kind_registry = ELEMENT_KIND_REGISTRY
+        if manifest_path is not None:
+            try:
+                kind_registry = element_kind_registry_for_pack(load_pack_manifest(manifest_path))
+            except Exception as exc:
+                errors.append(f"invalid pack manifest {pack_dir.relative_to(repo_root)}: {exc}")
+                continue
         for kind_dir in _public_child_dirs(elements_root, INTERNAL_PACK_DIRS):
-            if kind_dir.name not in _ELEMENT_KINDS:
+            try:
+                kind_registry.normalize(kind_dir.name)
+            except ValueError:
                 errors.append(
-                    f"unexpected element kind folder {kind_dir.relative_to(repo_root)}: must be one of {list(_ELEMENT_KINDS)}"
+                    "unexpected element kind folder "
+                    f"{kind_dir.relative_to(repo_root)}: valid kinds are {list(kind_registry.canonical_kinds())}"
                 )
                 continue
             for element_dir in _public_child_dirs(kind_dir, INTERNAL_PACK_DIRS):

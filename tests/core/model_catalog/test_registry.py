@@ -6,12 +6,22 @@ SD-001 identity assertions, get_by_mode, backend_available, and edge cases.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
+from astrid.core.generation.features import (
+    GenerationBackendIdDescriptor,
+    GenerationFeatureDescriptor,
+    GenerationModeDescriptor,
+    GenerationTaxonomyRegistry,
+)
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.model_catalog.schema import (
     CANONICAL_IMAGE_MODES,
     validate_registry,
+    validate_registry_with_backends,
 )
 
 # ---------------------------------------------------------------------------
@@ -993,3 +1003,574 @@ class TestModelGetBackwardCompat:
         entry = reg.get("z-image")
         # z-image is open-weight
         assert not entry.closed
+
+
+# ---------------------------------------------------------------------------
+# T21: Pack-declared backend ids flow into load_default validation
+# ---------------------------------------------------------------------------
+
+
+def _write_extension_pack(root: Path, *, backend_id: str) -> None:
+    pack_dir = root / "extension_pack"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "pack.json").write_text(
+        json.dumps(
+            {
+                "id": "extension_pack",
+                "name": "Extension Pack",
+                "version": "0.1.0",
+                "extensions": {
+                    "generation": {
+                        "backends": [
+                            {
+                                "id": backend_id,
+                                "module": "extension.backend",
+                                "class": "ExtensionBackend",
+                            }
+                        ]
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+class TestPackDeclaredBackendIds:
+    def test_load_default_accepts_pack_declared_backend_id(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        extra_root = tmp_path / "extra-packs"
+        _write_extension_pack(extra_root, backend_id="studio")
+        raw = _make_v2_payload(
+            model_id="ext-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+
+        monkeypatch.setattr(
+            "astrid.core.model_catalog.registry._load_yaml",
+            lambda path: raw,
+        )
+
+        registry = ModelRegistry.load_default(
+            project_root=tmp_path,
+            extra_pack_roots=(str(extra_root),),
+            include_installed=False,
+        )
+
+        assert registry.backend_available("ext-model", "t2i", "studio") is True
+
+    def test_load_default_rejects_undeclared_backend_id(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        extra_root = tmp_path / "extra-packs"
+        _write_extension_pack(extra_root, backend_id="studio")
+        raw = _make_v2_payload(
+            model_id="ext-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "rogue": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+
+        monkeypatch.setattr(
+            "astrid.core.model_catalog.registry._load_yaml",
+            lambda path: raw,
+        )
+
+        with pytest.raises(ValueError, match="unknown backend key; available backend ids:"):
+            ModelRegistry.load_default(
+                project_root=tmp_path,
+                extra_pack_roots=(str(extra_root),),
+                include_installed=False,
+            )
+
+    def test_load_default_rejects_synthetic_backend_when_declaring_pack_not_loaded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A synthetic backend id is rejected when no pack declaring it is loaded.
+
+        Even though the backend id *could* be valid if a pack declared it,
+        if we do NOT pass the declaring pack as an extra root (and installed
+        packs are excluded), the validation must reject it.
+        """
+        # Write a pack that declares "studio", but we will NOT load it.
+        extra_root = tmp_path / "unloaded-packs"
+        _write_extension_pack(extra_root, backend_id="studio")
+
+        raw = _make_v2_payload(
+            model_id="ext-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+
+        monkeypatch.setattr(
+            "astrid.core.model_catalog.registry._load_yaml",
+            lambda path: raw,
+        )
+
+        # Deliberately do NOT pass extra_pack_roots — "studio" is undeclared.
+        with pytest.raises(ValueError, match="unknown backend key; available backend ids:"):
+            ModelRegistry.load_default(
+                project_root=tmp_path,
+                include_installed=False,
+            )
+
+
+# ---------------------------------------------------------------------------
+# T22: validate_registry_with_backends — pure unit tests (no pack discovery)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateRegistryWithBackends:
+    """Direct ``validate_registry_with_backends()`` tests that are completely
+    independent of ``ASTRID_PACKS_PATH`` and pack discovery.
+
+    These prove that a synthetic backend id is rejected when it is not present
+    in *allowed_backend_ids* and accepted when it is, with zero dependency on
+    environment variables or filesystem pack layout.
+    """
+
+    SYNTHETIC_BACKEND_ID = "studio"
+
+    def _raw_with_backend(self, backend_id: str) -> dict:
+        """Return a minimal valid v2 payload referencing *backend_id*."""
+        return _make_v2_payload(
+            model_id="test-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        backend_id: {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+
+    # -- synthetic backend rejected when undeclared -----------------------
+
+    def test_synthetic_backend_rejected_when_not_in_allowed_ids(self) -> None:
+        """A backend id not in *allowed_backend_ids* is rejected."""
+        raw = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
+        with pytest.raises(ValueError, match="unknown backend key; available backend ids:"):
+            validate_registry_with_backends(
+                raw,
+                allowed_backend_ids=("local", "cloud"),
+            )
+
+    def test_synthetic_backend_rejected_when_allowed_ids_is_none(self) -> None:
+        """When *allowed_backend_ids* is ``None``, only built-in ids are allowed."""
+        raw = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
+        with pytest.raises(ValueError, match="unknown backend key; available backend ids:"):
+            validate_registry_with_backends(raw)
+
+    def test_empty_allowed_ids_falls_back_to_builtins(self) -> None:
+        """An empty tuple ``()`` is falsy and falls back to ``("local", "cloud")``.
+
+        This means ``"local"`` is accepted (it's in the fallback set) but
+        a synthetic id like ``"studio"`` is still rejected.
+        """
+        # "local" passes because the fallback includes built-ins.
+        raw_local = self._raw_with_backend("local")
+        # But "local" needs a template for validation...
+        raw_local["models"][0]["modes"]["t2i"]["backends"]["local"]["template"] = "image/test"
+        entries = validate_registry_with_backends(raw_local, allowed_backend_ids=())
+        assert entries[0].id == "test-model"
+
+        # "studio" fails because it's not in the fallback set.
+        raw_studio = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
+        with pytest.raises(
+            ValueError,
+            match="unknown backend key; available backend ids: cloud, local",
+        ):
+            validate_registry_with_backends(raw_studio, allowed_backend_ids=())
+
+    # -- synthetic backend accepted when declared -------------------------
+
+    def test_synthetic_backend_accepted_when_in_allowed_ids(self) -> None:
+        """A backend id present in *allowed_backend_ids* passes validation."""
+        raw = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
+        entries = validate_registry_with_backends(
+            raw,
+            allowed_backend_ids=("local", "cloud", self.SYNTHETIC_BACKEND_ID),
+        )
+        assert len(entries) == 1
+        assert entries[0].id == "test-model"
+        assert self.SYNTHETIC_BACKEND_ID in entries[0].modes["t2i"].backends
+
+    def test_synthetic_backend_accepted_with_augmented_frozenset(self) -> None:
+        """A ``frozenset`` containing the synthetic id also works."""
+        raw = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
+        entries = validate_registry_with_backends(
+            raw,
+            allowed_backend_ids=frozenset(
+                ["local", "cloud", self.SYNTHETIC_BACKEND_ID]
+            ),
+        )
+        assert len(entries) == 1
+
+    # -- built-in backends always work ------------------------------------
+
+    def test_local_backend_accepted_in_default_allowed_ids(self) -> None:
+        raw = _make_v2_payload(
+            model_id="local-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "local": {
+                            "template": "image/local",
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        entries = validate_registry_with_backends(raw)
+        assert entries[0].id == "local-model"
+
+    def test_cloud_backend_accepted_in_default_allowed_ids(self) -> None:
+        raw = _make_v2_payload(
+            model_id="cloud-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "cloud": {
+                            "endpoint": "fal-ai/cloud",
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        entries = validate_registry_with_backends(raw)
+        assert entries[0].id == "cloud-model"
+
+    # -- error message lists available ids --------------------------------
+
+    def test_error_message_lists_available_backend_ids(self) -> None:
+        """The rejection error message includes the sorted list of available ids."""
+        raw = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
+        with pytest.raises(
+            ValueError,
+            match="unknown backend key; available backend ids: cloud, local",
+        ):
+            validate_registry_with_backends(raw)
+
+    def test_error_message_reflects_augmented_allowed_ids(self) -> None:
+        """When extra backend ids are allowed, the error message includes them."""
+        raw = self._raw_with_backend("rogue")
+        with pytest.raises(
+            ValueError,
+            match="unknown backend key; available backend ids: cloud, local, studio",
+        ):
+            validate_registry_with_backends(
+                raw,
+                allowed_backend_ids=("local", "cloud", "studio"),
+            )
+
+
+class TestValidateRegistryWithGenerationTaxonomy:
+    def test_synthetic_feature_rejected_without_taxonomy_registry(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt", "mask_ref"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "local": {
+                            "template": "image/test",
+                            "param_map": {"prompt": "prompt", "mask_ref": "mask"},
+                        }
+                    },
+                }
+            },
+        )
+
+        with pytest.raises(ValueError, match="not a recognised Feature"):
+            validate_registry(raw)
+
+    def test_synthetic_feature_accepted_with_taxonomy_registry(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt", "mask_ref"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "local": {
+                            "template": "image/test",
+                            "param_map": {"prompt": "prompt", "mask_ref": "mask"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            feature_descriptors=(GenerationFeatureDescriptor(id="mask_ref"),)
+        )
+
+        entries = validate_registry_with_backends(raw, taxonomy_registry=registry)
+        assert entries[0].modes["t2i"].supports == ("prompt", "mask_ref")
+
+    def test_synthetic_mode_rejected_without_taxonomy_registry(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "storyboard": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "local": {
+                            "template": "image/test",
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+
+        with pytest.raises(ValueError, match="unknown image mode"):
+            validate_registry(raw)
+
+    def test_synthetic_mode_accepted_with_taxonomy_registry(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "storyboard": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "local": {
+                            "template": "image/test",
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            mode_descriptors=(GenerationModeDescriptor(id="storyboard"),)
+        )
+
+        entries = validate_registry_with_backends(raw, taxonomy_registry=registry)
+        assert "storyboard" in entries[0].modes
+
+    # -- undeclared backend fails via taxonomy registry ------------------
+
+    def test_undeclared_backend_fails_via_taxonomy_registry(self) -> None:
+        """Backend id not in taxonomy_registry.backend_ids() is rejected."""
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        # taxonomy_registry with only built-in backends — "studio" is undeclared
+        registry = GenerationTaxonomyRegistry()
+        with pytest.raises(ValueError, match="unknown backend key; available backend ids: cloud, local"):
+            validate_registry_with_backends(raw, taxonomy_registry=registry)
+
+    def test_declared_backend_passes_via_taxonomy_registry(self) -> None:
+        """Backend id present in taxonomy_registry.backend_ids() is accepted."""
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            backend_descriptors=(GenerationBackendIdDescriptor(id="studio"),)
+        )
+        # `allowed_backend_ids` defaults to registry.backend_ids()
+        entries = validate_registry_with_backends(raw, taxonomy_registry=registry)
+        assert entries[0].id == "test-model"
+        assert "studio" in entries[0].modes["t2i"].backends
+
+    # -- all three declared axes pass together ---------------------------
+
+    def test_all_three_declared_pass_together(self) -> None:
+        """Feature, mode, and backend all declared in the taxonomy → all accepted."""
+        raw = _make_v2_payload(
+            modes={
+                "storyboard": {
+                    "supports": ["prompt", "mask_ref"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt", "mask_ref": "mask"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            feature_descriptors=(GenerationFeatureDescriptor(id="mask_ref"),),
+            mode_descriptors=(GenerationModeDescriptor(id="storyboard"),),
+            backend_descriptors=(GenerationBackendIdDescriptor(id="studio"),),
+        )
+        entries = validate_registry_with_backends(raw, taxonomy_registry=registry)
+        assert entries[0].id == "test-model"
+        assert "storyboard" in entries[0].modes
+        mode_spec = entries[0].modes["storyboard"]
+        assert "mask_ref" in mode_spec.supports
+        assert "studio" in mode_spec.backends
+
+    # -- built-in validation unchanged -----------------------------------
+
+    def test_builtin_validation_unchanged_with_defaults(self) -> None:
+        """validate_registry() with default taxonomy still accepts standard payloads."""
+        raw = _make_v2_payload(
+            model_id="unchanged-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt", "seed", "count", "size"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "local": {
+                            "template": "image/unchanged",
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        entries = validate_registry(raw)
+        assert entries[0].id == "unchanged-model"
+        assert set(entries[0].modes["t2i"].supports) == {"prompt", "seed", "count", "size"}
+
+    def test_declared_names_do_not_break_builtin_validation(self) -> None:
+        """Custom taxonomy with extras still accepts built-in names."""
+        raw = _make_v2_payload(
+            model_id="both-model",
+            modes={
+                "t2i": {
+                    "supports": ["prompt", "seed"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "cloud": {
+                            "endpoint": "fal-ai/both",
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        # Custom taxonomy adds extra names — built-in names should still work
+        registry = GenerationTaxonomyRegistry(
+            feature_descriptors=(GenerationFeatureDescriptor(id="mask_ref"),),
+            mode_descriptors=(GenerationModeDescriptor(id="storyboard"),),
+            backend_descriptors=(GenerationBackendIdDescriptor(id="studio"),),
+        )
+        entries = validate_registry_with_backends(raw, taxonomy_registry=registry)
+        assert entries[0].id == "both-model"
+        assert "t2i" in entries[0].modes
+        assert "prompt" in entries[0].modes["t2i"].supports
+        assert "cloud" in entries[0].modes["t2i"].backends
+
+    # -- undeclared names fail even with partially declared taxonomy ------
+
+    def test_undeclared_feature_fails_with_partial_custom_taxonomy(self) -> None:
+        """Even when mode+backend are custom-declared, an undeclared feature still fails."""
+        raw = _make_v2_payload(
+            modes={
+                "storyboard": {
+                    "supports": ["prompt", "bogus_feature"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt", "bogus_feature": "bogus"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            mode_descriptors=(GenerationModeDescriptor(id="storyboard"),),
+            backend_descriptors=(GenerationBackendIdDescriptor(id="studio"),),
+        )
+        with pytest.raises(ValueError, match="not a recognised Feature"):
+            validate_registry_with_backends(raw, taxonomy_registry=registry)
+
+    def test_undeclared_mode_fails_with_partial_custom_taxonomy(self) -> None:
+        """Even when feature+backend are custom-declared, an undeclared mode still fails."""
+        raw = _make_v2_payload(
+            modes={
+                "bogus_mode": {
+                    "supports": ["prompt", "mask_ref"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "studio": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            feature_descriptors=(GenerationFeatureDescriptor(id="mask_ref"),),
+            backend_descriptors=(GenerationBackendIdDescriptor(id="studio"),),
+        )
+        with pytest.raises(ValueError, match="unknown image mode"):
+            validate_registry_with_backends(raw, taxonomy_registry=registry)
+
+    def test_undeclared_backend_fails_with_partial_custom_taxonomy(self) -> None:
+        """Even when feature+mode are custom-declared, an undeclared backend still fails."""
+        raw = _make_v2_payload(
+            modes={
+                "storyboard": {
+                    "supports": ["prompt", "mask_ref"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "bogus_backend": {
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        registry = GenerationTaxonomyRegistry(
+            feature_descriptors=(GenerationFeatureDescriptor(id="mask_ref"),),
+            mode_descriptors=(GenerationModeDescriptor(id="storyboard"),),
+        )
+        with pytest.raises(ValueError, match="unknown backend key"):
+            validate_registry_with_backends(raw, taxonomy_registry=registry)

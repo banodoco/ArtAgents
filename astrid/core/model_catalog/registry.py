@@ -13,7 +13,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from astrid.core.model_catalog.schema import ModelEntry, ModeSpec, validate_registry
+from astrid._paths import REPO_ROOT
+from astrid.core.generation.features import load_default_generation_taxonomy_registry
+from astrid.core.generation.backends.registry import (
+    load_default_generation_backend_registry,
+)
+from astrid.core.model_catalog.schema import (
+    ModelEntry,
+    ModeSpec,
+    validate_registry_with_backends,
+)
 
 
 class ModelRegistry:
@@ -62,7 +71,8 @@ class ModelRegistry:
     def backend_available(self, model_id: str, mode: str, execution: str) -> bool:
         """Return ``True`` if *execution* backend is available for *(model_id, mode)*.
 
-        *execution* must be ``"local"`` or ``"cloud"``.
+        The method remains a pure membership check against the validated
+        backend ids declared for the selected mode.
         """
         _, mode_spec = self.get_by_mode(model_id, mode)
         return execution in mode_spec.backends
@@ -94,13 +104,36 @@ class ModelRegistry:
     # -- loading ---------------------------------------------------------
 
     @classmethod
-    def load_default(cls) -> ModelRegistry:
+    def load_default(
+        cls,
+        *,
+        project_root: str | Path = REPO_ROOT,
+        extra_pack_roots: tuple[str, ...] = (),
+        include_installed: bool = True,
+    ) -> ModelRegistry:
         """Load the shipped ``models.yaml`` from the catalog directory."""
         yaml_path = Path(__file__).resolve().parent / "models.yaml"
         if not yaml_path.is_file():
             raise FileNotFoundError(f"model registry not found: {yaml_path}")
         raw = _load_yaml(yaml_path)
-        entries = validate_registry(raw)
+        taxonomy_registry = load_default_generation_taxonomy_registry(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+        backend_registry = load_default_generation_backend_registry(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+        entries = validate_registry_with_backends(
+            raw,
+            allowed_backend_ids=tuple(
+                descriptor.backend_id
+                for descriptor in backend_registry.descriptors()
+            ),
+            taxonomy_registry=taxonomy_registry,
+        )
         return cls(entries)
 
 

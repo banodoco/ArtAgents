@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 # Single source of truth for element kinds lives in astrid.core.pack to avoid a
 # circular import (element.__init__ would import pack.py during schema load).
@@ -15,11 +15,10 @@ from astrid.contracts.capability_schema import (
 )
 from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
 from astrid.core.manifest import ManifestParseError, load_manifest_mapping
-from astrid.core.pack import ELEMENT_KINDS, ElementKind
+from astrid.core.pack import ELEMENT_KINDS, ELEMENT_KIND_REGISTRY, ElementKind, ElementKindRegistry
 
 REQUIRED_ELEMENT_FILES = ("component.tsx", "element.yaml")
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
-_KIND_SINGULAR_TO_PLURAL = {"effect": "effects", "animation": "animations", "transition": "transitions"}
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
@@ -126,9 +125,10 @@ def load_element_definition(
     source: str,
     editable: bool,
     priority: int,
+    element_kind_registry: ElementKindRegistry | None = None,
 ) -> ElementDefinition:
     element_root = Path(root)
-    folder_kind = _normalize_kind(kind)
+    folder_kind = _normalize_kind(kind, element_kind_registry=element_kind_registry)
     manifest_path = _element_manifest_path(element_root)
     if manifest_path is None:
         raise ElementValidationError(f"missing element manifest in {element_root}")
@@ -136,7 +136,10 @@ def load_element_definition(
     element_id = str(payload.get("id") or element_root.name)
     declared_kind = payload.get("kind")
     if declared_kind is not None:
-        normalized = _normalize_kind(str(declared_kind))
+        normalized = _normalize_kind(
+            str(declared_kind),
+            element_kind_registry=element_kind_registry,
+        )
         if normalized != folder_kind:
             raise ElementValidationError(
                 f"element {element_id!r} declared kind {declared_kind!r} does not match folder kind {folder_kind!r}"
@@ -178,16 +181,26 @@ def load_element_definition(
         short_description=short_description,
         keywords=keywords,
     )
-    return validate_element_definition(definition)
+    return validate_element_definition(
+        definition,
+        element_kind_registry=element_kind_registry,
+    )
 
 
-def validate_element_definition(raw: ElementDefinition | dict[str, Any]) -> ElementDefinition:
+def validate_element_definition(
+    raw: ElementDefinition | dict[str, Any],
+    *,
+    element_kind_registry: ElementKindRegistry | None = None,
+) -> ElementDefinition:
     if isinstance(raw, ElementDefinition):
         definition = raw
     else:
         definition = _parse_definition(raw)
     _validate_id(definition.id, "element.id")
-    _validate_kind(definition.kind)
+    _validate_kind(
+        definition.kind,
+        element_kind_registry=element_kind_registry,
+    )
     if not definition.root.is_dir():
         raise ElementValidationError(f"element root is not a directory: {definition.root}")
     if not (definition.root / "component.tsx").is_file():
@@ -265,19 +278,25 @@ def _string_list(raw: Any, *, path: str) -> list[str]:
     return list(raw)
 
 
-def _normalize_kind(kind: str) -> ElementKind:
-    if kind in ELEMENT_KINDS:
-        return cast(ElementKind, kind)
-    plural = _KIND_SINGULAR_TO_PLURAL.get(kind)
-    if plural is not None:
-        return cast(ElementKind, plural)
-    raise ElementValidationError(f"element.kind must be one of {list(ELEMENT_KINDS)} (or singular variants)")
+def _normalize_kind(
+    kind: str,
+    *,
+    element_kind_registry: ElementKindRegistry | None = None,
+) -> ElementKind:
+    registry = element_kind_registry or ELEMENT_KIND_REGISTRY
+    try:
+        return registry.normalize(kind, error_cls=ElementValidationError)
+    except ElementValidationError as exc:
+        raise ElementValidationError(f"{exc} (or singular variants)") from exc
 
 
-def _validate_kind(kind: str) -> ElementKind:
-    if kind not in ELEMENT_KINDS:
-        raise ElementValidationError(f"element.kind must be one of {list(ELEMENT_KINDS)}")
-    return cast(ElementKind, kind)
+def _validate_kind(
+    kind: str,
+    *,
+    element_kind_registry: ElementKindRegistry | None = None,
+) -> ElementKind:
+    registry = element_kind_registry or ELEMENT_KIND_REGISTRY
+    return registry.normalize(kind, error_cls=ElementValidationError)
 
 
 def _optional_capability_string(payload: dict[str, Any], key: str, manifest_path: Path) -> str:

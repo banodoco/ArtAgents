@@ -7,6 +7,12 @@ backend-specific branching.
 
 from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
 from astrid.core.generation.backends.fal import FalBackend
+from astrid.core.generation.backends.registry import (
+    GenerationBackendDescriptor,
+    GenerationBackendRegistry,
+    discover_generation_backend_descriptors,
+    load_default_generation_backend_registry,
+)
 
 # VibeComfyBackend is lazy-imported via module __getattr__ (SD-009) so
 # that ``import astrid`` never pulls in the vibecomfy module tree.
@@ -15,8 +21,12 @@ from astrid.core.generation.backends.fal import FalBackend
 
 __all__ = [
     "BackendAdapter",
+    "discover_generation_backend_descriptors",
     "FalBackend",
+    "GenerationBackendDescriptor",
+    "GenerationBackendRegistry",
     "GenerationResult",
+    "load_default_generation_backend_registry",
     "VibeComfyBackend",
 ]
 

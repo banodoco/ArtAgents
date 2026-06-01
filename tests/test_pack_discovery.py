@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,6 +11,7 @@ from astrid.core.element.registry import load_pack_elements
 from astrid.core.executor.registry import ExecutorRegistry, load_default_registry as load_executor_registry, load_pack_executors
 from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry, load_pack_orchestrators
 from astrid.core.pack import PackValidationError, discover_packs, qualified_id_pack_id
+from astrid.core.pack_discovery import ASTRID_PACKS_PATH_ENV, discover_packs_ordered
 
 
 def write_pack(root: Path, pack_id: str, *, folder: str | None = None) -> Path:
@@ -258,6 +260,201 @@ class PackDiscoveryTest(unittest.TestCase):
         self.assertEqual(qualified_id_pack_id("video_editing.cut"), "video_editing")
         with self.assertRaisesRegex(PackValidationError, "must be qualified"):
             qualified_id_pack_id("cut")
+
+    # ------------------------------------------------------------------
+    # T2: env-only packs discovered through registry default loaders
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_multi_layer_scan(source_packs, **layer_packs):
+        """Return a callable that returns the appropriate pack tuple for each
+        layer root.  ``layer_packs`` keys are resolved Paths and values are
+        the pack tuples returned when ``scan(key)`` is called.
+        """
+        layer_map: dict[Path, tuple] = {}
+        for raw_root, packs in layer_packs.items():
+            layer_map[Path(raw_root).resolve()] = packs
+
+        def scan(arg=None):
+            if arg is None:
+                return source_packs
+            resolved = Path(arg).resolve()
+            return layer_map.get(resolved, ())
+
+        return scan
+
+    def test_env_only_pack_discovered_through_executor_registry(self) -> None:
+        """Env-sourced packs with executor content are discovered through
+        ``load_pack_executors``, even when no source-tree packs exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            # Create an env-only pack with executor content.
+            env_root = tmp_root / "env_packs"
+            env_root.mkdir()
+            pack_root = write_pack(env_root, "env_test")
+            write_executor(pack_root, "env_exec", "env_test.env_exec")
+
+            env_packs = discover_packs(env_root)
+            scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
+                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan):
+                    executors = load_pack_executors(include_installed=False)
+
+            self.assertEqual([e.id for e in executors], ["env_test.env_exec"])
+            self.assertEqual(executors[0].metadata["source_pack"], "env_test")
+            self.assertEqual(executors[0].metadata["source"], "pack")
+
+    def test_env_only_pack_discovered_through_orchestrator_registry(self) -> None:
+        """Env-sourced packs with orchestrator content are discovered through
+        ``load_pack_orchestrators``, even when no source-tree packs exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            env_root = tmp_root / "env_packs"
+            env_root.mkdir()
+            pack_root = write_pack(env_root, "env_orch")
+            write_orchestrator(pack_root, "env_orch", "env_orch.env_orch")
+
+            env_packs = discover_packs(env_root)
+            scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
+                with mock.patch("astrid.core.orchestrator.registry.discover_packs", side_effect=scan):
+                    orchestrators = load_pack_orchestrators(include_installed=False)
+
+            self.assertEqual([o.id for o in orchestrators], ["env_orch.env_orch"])
+            self.assertEqual(orchestrators[0].metadata["source_pack"], "env_orch")
+            self.assertEqual(orchestrators[0].metadata["source"], "pack")
+
+    def test_env_only_pack_discovered_through_element_registry(self) -> None:
+        """Env-sourced packs with element content are discovered through
+        ``load_pack_elements``, even when no source-tree packs exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            env_root = tmp_root / "env_packs"
+            env_root.mkdir()
+            pack_root = write_pack(env_root, "env_elem")
+            write_element(pack_root, "effects", "env_stamp", pack_id="env_elem")
+
+            env_packs = discover_packs(env_root)
+            scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
+                with mock.patch("astrid.core.element.registry.discover_packs", side_effect=scan):
+                    elements = load_pack_elements(include_installed=False)
+
+            self.assertEqual([(e.kind, e.id, e.source) for e in elements],
+                             [("effects", "env_stamp", "pack:env_elem")])
+
+    def test_env_pack_discovers_all_content_kinds(self) -> None:
+        """A single env-sourced pack with executor, orchestrator, and element
+        content is discovered through all three registries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            env_root = tmp_root / "env_packs"
+            env_root.mkdir()
+            pack_root = write_pack(env_root, "env_full")
+            write_executor(pack_root, "exec1", "env_full.exec1")
+            write_orchestrator(pack_root, "orch1", "env_full.orch1")
+            write_element(pack_root, "animations", "slide", pack_id="env_full")
+
+            env_packs = discover_packs(env_root)
+            scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
+                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan), \
+                     mock.patch("astrid.core.orchestrator.registry.discover_packs", side_effect=scan), \
+                     mock.patch("astrid.core.element.registry.discover_packs", side_effect=scan):
+                    executors = load_pack_executors(include_installed=False)
+                    orchestrators = load_pack_orchestrators(include_installed=False)
+                    elements = load_pack_elements(include_installed=False)
+
+            self.assertEqual([e.id for e in executors], ["env_full.exec1"])
+            self.assertEqual([o.id for o in orchestrators], ["env_full.orch1"])
+            self.assertEqual([(e.kind, e.id) for e in elements], [("animations", "slide")])
+
+    def test_env_layer_ordered_after_extra_before_installed(self) -> None:
+        """Precedence across source/extra/env/installed is observable through
+        executor discovery.  The test uses distinct executor ids per layer so
+        layer provenance is unambiguous; it also asserts that the executor
+        registry prefers the first-seen (source) entry when duplicates exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+
+            # Source pack.
+            src_root = tmp_root / "src_packs"
+            src_root.mkdir()
+            src_pack_root = write_pack(src_root, "alpha")
+            write_executor(src_pack_root, "exec1", "alpha.exec1")
+            src_packs = discover_packs(src_root)
+
+            # Extra pack.
+            extra_root = tmp_root / "extra_packs"
+            extra_root.mkdir()
+            extra_pack_root = write_pack(extra_root, "beta")
+            write_executor(extra_pack_root, "exec1", "beta.exec1")
+            extra_packs = discover_packs(extra_root)
+
+            # Env pack.
+            env_root = tmp_root / "env_packs"
+            env_root.mkdir()
+            env_pack_root = write_pack(env_root, "gamma")
+            write_executor(env_pack_root, "exec1", "gamma.exec1")
+            env_packs = discover_packs(env_root)
+
+            # Installed pack.
+            installed_root = write_pack(tmp_root / "installed", "delta")
+            write_executor(installed_root, "exec1", "delta.exec1")
+
+            scan = self._make_multi_layer_scan(
+                src_packs,
+                **{
+                    str(extra_root): extra_packs,
+                    str(env_root): env_packs,
+                },
+            )
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
+                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan):
+                    with mock.patch(
+                        "astrid.core.pack_store.installed_pack_roots",
+                        return_value=[installed_root],
+                    ):
+                        executors = load_pack_executors(
+                            extra_pack_roots=(str(extra_root),),
+                            include_installed=True,
+                        )
+
+            ids = [e.id for e in executors]
+            # source (alpha), extra (beta), env (gamma), installed (delta).
+            self.assertEqual(ids, ["alpha.exec1", "beta.exec1", "gamma.exec1", "delta.exec1"])
+
+            registry = ExecutorRegistry(executors)
+            winner = registry.get("alpha.exec1")
+            self.assertIsNotNone(winner)
+            self.assertEqual(winner.id, "alpha.exec1")
+
+    def test_no_env_var_falls_through_gracefully(self) -> None:
+        """When ASTRID_PACKS_PATH is empty, registry discovery proceeds
+        through source/extra/installed without error."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            src_root = tmp_root / "src_packs"
+            src_root.mkdir()
+            pack_root = write_pack(src_root, "alpha")
+            write_executor(pack_root, "exec1", "alpha.exec1")
+            src_packs = discover_packs(src_root)
+
+            def scan(arg=None):
+                if arg is None:
+                    return src_packs
+                return ()
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: ""}, clear=False):
+                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan):
+                    executors = load_pack_executors(include_installed=False)
+
+            self.assertEqual([e.id for e in executors], ["alpha.exec1"])
 
 
 if __name__ == "__main__":

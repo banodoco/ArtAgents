@@ -10,6 +10,7 @@ the same metadata.
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,7 +19,9 @@ from unittest import mock
 from astrid._paths import REPO_ROOT
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack_discovery import (
+    ASTRID_PACKS_PATH_ENV,
     DiscoveredPack,
+    SOURCE_KINDS,
     discover_pack_metadata,
     discover_packs_ordered,
 )
@@ -155,6 +158,86 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
 
         self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
         self.assertEqual([dp.source_kind for dp in discovered], ["source", "extra"])
+
+    def test_source_kinds_include_env_in_priority_order(self) -> None:
+        self.assertEqual(SOURCE_KINDS, ("source", "local", "extra", "env", "installed"))
+
+    def test_env_layer_uses_pathsep_and_skips_empty_or_missing_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            source_pack = _make_pack(tmp_root / "src", "alpha")
+            env_root = tmp_root / "env-root"
+            env_root.mkdir()
+            env_pack = _make_pack(env_root, "gamma")
+            env_local = _make_pack(env_root, "local")
+            missing_root = tmp_root / "missing-root"
+
+            env_value = os.pathsep.join(["", str(missing_root), str(env_root), ""])
+
+            def scan(arg=None):
+                if arg is None:
+                    return (source_pack,)
+                if Path(arg).resolve() == env_root.resolve():
+                    return (env_pack, env_local)
+                return ()
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: env_value}, clear=False):
+                discovered = discover_pack_metadata(
+                    discover_packs_fn=scan,
+                    include_installed=False,
+                )
+
+        self.assertEqual([dp.id for dp in discovered], ["alpha", "gamma"])
+        self.assertEqual([dp.source_kind for dp in discovered], ["source", "env"])
+
+    def test_env_layer_expands_and_resolves_after_extra_before_installed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            project_root = tmp_root / "project"
+            project_root.mkdir()
+            source_pack = _make_pack(tmp_root / "src", "alpha")
+
+            extra_root = tmp_root / "extra"
+            extra_root.mkdir()
+            extra_pack = _make_pack(extra_root, "beta")
+
+            env_parent = tmp_root / "env-parent"
+            env_parent.mkdir()
+            env_root = env_parent / "packs"
+            env_root.mkdir()
+            env_pack = _make_pack(env_root, "gamma")
+
+            installed_root = write_pack(tmp_root / "installed", "delta")
+
+            relative_env_root = os.path.relpath(env_root, project_root)
+
+            def scan(arg=None):
+                if arg is None:
+                    return (source_pack,)
+                resolved = Path(arg).resolve()
+                if resolved == extra_root.resolve():
+                    return (extra_pack,)
+                if resolved == env_root.resolve():
+                    return (env_pack,)
+                return ()
+
+            with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: relative_env_root}, clear=False):
+                with mock.patch(
+                    "astrid.core.pack_store.installed_pack_roots",
+                    return_value=[installed_root],
+                ):
+                    discovered = discover_pack_metadata(
+                        project_root=project_root,
+                        discover_packs_fn=scan,
+                        extra_pack_roots=(str(extra_root),),
+                        include_installed=True,
+                    )
+
+        self.assertEqual([dp.id for dp in discovered], ["alpha", "beta", "gamma", "delta"])
+        self.assertEqual(
+            [dp.source_kind for dp in discovered],
+            ["source", "extra", "env", "installed"],
+        )
 
     def test_installed_layer_excludes_local_and_orders_last(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

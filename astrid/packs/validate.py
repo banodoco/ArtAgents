@@ -23,10 +23,11 @@ from referencing import Registry, Resource
 from astrid.core.alias_resolver import AliasResolutionError, AliasResolver
 from astrid.core.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
-    ELEMENT_KINDS,
     EXECUTOR_MANIFEST_NAMES,
     ORCHESTRATOR_MANIFEST_NAMES,
     PackDefinition,
+    _optional_pack_extensions,
+    element_kind_registry_for_pack,
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
@@ -302,6 +303,11 @@ class PackValidator:
 
         validator = jsonschema.Draft7Validator(schema, registry=registry)
         raw_errors = list(validator.iter_errors(data))
+        raw_errors = self._filter_dynamic_element_kind_errors(
+            raw_errors,
+            data=data,
+            manifest_kind=manifest_kind,
+        )
 
         if raw_errors:
             # Take the first few errors to avoid overwhelming output
@@ -316,6 +322,29 @@ class PackValidator:
             return None
 
         return version
+
+    def _filter_dynamic_element_kind_errors(
+        self,
+        errors: list[jsonschema.ValidationError],
+        *,
+        data: dict[str, Any],
+        manifest_kind: str,
+    ) -> list[jsonschema.ValidationError]:
+        if manifest_kind != "element" or self._pack_data is None:
+            return errors
+        kind_value = data.get("kind")
+        if not isinstance(kind_value, str):
+            return errors
+        try:
+            pack = self._pack_definition_for_discovery({})
+            element_kind_registry_for_pack(pack).normalize(kind_value)
+        except Exception:
+            return errors
+        return [
+            error
+            for error in errors
+            if not (error.validator == "enum" and list(error.absolute_path) == ["kind"])
+        ]
 
     def _load_schema(
         self, schema_path: Path, manifest_kind: str, version: int
@@ -454,6 +483,7 @@ class PackValidator:
             metadata=dict(data.get("metadata", {})) if isinstance(data.get("metadata", {}), dict) else {},
             agent=dict(data.get("agent", {})) if isinstance(data.get("agent", {}), dict) else {},
             aliases=_optional_pack_aliases(data.get("aliases"), path="pack.aliases"),
+            extensions=_optional_pack_extensions(data.get("extensions"), path="pack.extensions"),
             **taxonomy,
         )
 
@@ -580,10 +610,7 @@ class PackValidator:
             return
         element_id = data.get("id")
         if isinstance(element_id, str):
-            if kind in ELEMENT_KINDS:
-                self._register_capability_id(f"{kind}/{element_id}", rel)
-            else:
-                self._register_capability_id(element_id, rel)
+            self._register_capability_id(f"{kind}/{element_id}", rel)
             self._register_aliases(data, rel)
         try:
             validate_element_pack_id(

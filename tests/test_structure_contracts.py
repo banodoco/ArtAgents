@@ -42,6 +42,41 @@ def test_validate_import_layering_flags_absolute_and_relative_core_pack_imports(
     assert not any("dynamic_ok.py" in violation for violation in violations)
 
 
+def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/demo/pack.json",
+        '{'
+        '"schema_version":"1",'
+        '"id":"demo",'
+        '"name":"Demo Pack",'
+        '"version":"0.1.0",'
+        '"extensions":{"elements":{"kinds":[{"id":"widgets","singular":"widget"}]}}'
+        '}\n',
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/demo/elements/widgets/glow/component.tsx",
+        "export default function Glow() { return null; }\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/packs/demo/elements/widgets/glow/element.yaml",
+        "schema_version: 1\n"
+        "id: glow\n"
+        "kind: widget\n"
+        "pack_id: demo\n"
+        "schema: {}\n"
+        "defaults: {}\n"
+        "dependencies: {}\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.errors == ()
+
+
 def test_validate_import_layering_flags_deferred_lifecycle_split_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,

@@ -69,6 +69,93 @@
         "additionalProperties": false
       }
     },
+    "extensions": {
+      "type": "object",
+      "properties": {
+        "generation": {
+          "type": "object",
+          "properties": {
+            "backends": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id", "module", "class"],
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "label": {"type": "string", "minLength": 1},
+                  "module": {"type": "string", "minLength": 1},
+                  "class": {"type": "string", "minLength": 1},
+                  "init_kwargs": {"type": "object"}
+                },
+                "additionalProperties": false
+              }
+            },
+            "features": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {"type": "string", "minLength": 1},
+                  {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                      "id": {"type": "string", "minLength": 1},
+                      "label": {"type": "string", "minLength": 1},
+                      "description": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "modes": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {"type": "string", "minLength": 1},
+                  {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": {
+                      "id": {"type": "string", "minLength": 1},
+                      "label": {"type": "string", "minLength": 1},
+                      "description": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "elements": {
+          "type": "object",
+          "properties": {
+            "kinds": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "singular": {"type": "string", "minLength": 1},
+                  "plural": {"type": "string", "minLength": 1},
+                  "label": {"type": "string", "minLength": 1},
+                  "description": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "schemas": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
     "secrets": {
       "type": "array",
       "items": {
@@ -114,32 +201,32 @@
     "origin": {
       "type": "string",
       "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "enum": ["builtin", "external"]
+      "pattern": "^$|.*\\S.*$"
     },
     "install_tier": {
       "type": "string",
       "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "enum": ["core"]
+      "pattern": "^$|.*\\S.*$"
     },
     "pack_type": {
       "type": "string",
       "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "enum": ["capability"]
+      "pattern": "^$|.*\\S.*$"
     },
     "domain": {
       "type": "string",
       "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "enum": ["development", "editorial", "generation", "infrastructure", "integration", "media", "system"]
+      "pattern": "^$|.*\\S.*$"
     },
     "stability": {
       "type": "string",
       "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "enum": ["stable"]
+      "pattern": "^$|.*\\S.*$"
     },
     "support": {
       "type": "string",
       "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "enum": ["core"]
+      "pattern": "^$|.*\\S.*$"
     },
     "visibility": {
       "type": "string",

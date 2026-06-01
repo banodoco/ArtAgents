@@ -18,6 +18,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.core.pack import PackValidationError
 from astrid.packs.validate import PackValidator, ValidationError, validate_pack
 
 
@@ -422,6 +423,113 @@ agent:
 
         errors, _warnings = validate_pack(root)
         self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_pack_declared_custom_element_kind_registers_canonical_capability_id(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  elements: elements
+extensions:
+  elements:
+    kinds:
+      - id: widgets
+        singular: widget
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Test Pack\n")
+        _write(root / "README.md", "# Test Pack\n")
+        _write(
+            root / "elements" / "widgets" / "glow" / "element.yaml",
+            """schema_version: 1
+id: glow
+kind: widget
+pack_id: test_pack
+metadata:
+  name: Glow
+schema: {}
+defaults: {}
+dependencies: {}
+""",
+        )
+        _write(
+            root / "elements" / "widgets" / "glow" / "component.tsx",
+            "export default function Glow() { return null; }\n",
+        )
+
+        validator = PackValidator(root)
+        errors = validator.validate()
+
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertEqual(
+            validator._capability_locations["widgets/glow"],
+            "elements/widgets/glow/element.yaml",
+        )
+
+    def test_pack_declared_custom_element_kind_rejects_undeclared_typo_root(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  elements: elements
+extensions:
+  elements:
+    kinds:
+      - id: widgets
+        singular: widget
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "AGENTS.md", "# Test Pack\n")
+        _write(root / "README.md", "# Test Pack\n")
+        _write(
+            root / "elements" / "widgets" / "glow" / "element.yaml",
+            """schema_version: 1
+id: glow
+kind: widget
+pack_id: test_pack
+metadata:
+  name: Glow
+schema: {}
+defaults: {}
+dependencies: {}
+""",
+        )
+        _write(
+            root / "elements" / "widgets" / "glow" / "component.tsx",
+            "export default function Glow() { return null; }\n",
+        )
+        _write(
+            root / "elements" / "widgtes" / "typo" / "element.yaml",
+            """schema_version: 1
+id: typo
+kind: widget
+pack_id: test_pack
+metadata:
+  name: Typo
+schema: {}
+defaults: {}
+dependencies: {}
+""",
+        )
+        _write(
+            root / "elements" / "widgtes" / "typo" / "component.tsx",
+            "export default function Typo() { return null; }\n",
+        )
+
+        with self.assertRaisesRegex(PackValidationError, "element kind must be one of .*widgets"):
+            validate_pack(root)
 
     def test_non_builtin_pack_with_aliases_and_standard_roots_validates(self) -> None:
         """A non-builtin pack with standard content roots and pack-level aliases
@@ -1298,6 +1406,127 @@ aliases:
         self.assertEqual(pack.aliases[0]["canonical_id"], "test_pack.new_name")
         self.assertEqual(pack.aliases[0]["deprecated"], True)
         self.assertEqual(pack.aliases[0]["deprecation_message"], "Moved")
+
+    def test_valid_pack_with_extensions_passes_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+agent:
+  purpose: Testing
+extensions:
+  generation:
+    backends:
+      - id: synthetic_cloud
+        module: vendor.synthetic
+        class: SyntheticBackend
+        init_kwargs:
+          retries: 2
+    features:
+      - t2i
+      - id: img2img
+        label: Image to Image
+    modes:
+      - edit
+  elements:
+    kinds:
+      - id: overlays
+        singular: overlay
+        plural: overlays
+  schemas:
+    manifest:
+      kind: pack
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_pack_extensions_unknown_root_key_fails_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+agent:
+  purpose: Testing
+extensions:
+  unknown_root: true
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        self.assertTrue(
+            any("unknown field" in error.lower() or "additionalproperties" in error.lower() for error in errors),
+            f"Expected extensions schema error, got: {errors}",
+        )
+
+    def test_pack_extensions_invalid_backend_shape_fails_validation(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+agent:
+  purpose: Testing
+extensions:
+  generation:
+    backends:
+      - id: synthetic_cloud
+        module: vendor.synthetic
+""",
+        )
+        errors, warnings = validate_pack(root)
+        self.assertGreater(len(errors), 0)
+        self.assertTrue(
+            any("class" in error.lower() and "required" in error.lower() for error in errors),
+            f"Expected backend class required error, got: {errors}",
+        )
+
+    def test_discovery_preserves_pack_extensions(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+description: A test pack.
+agent:
+  purpose: Testing
+extensions:
+  generation:
+    features:
+      - t2i
+  schemas:
+    manifest:
+      version: 1
+""",
+        )
+        _write(root / "AGENTS.md", "# Test")
+        _write(root / "README.md", "# Test")
+        validator = PackValidator(root)
+        validator._pack_data = validator._load_yaml(root / "pack.yaml")
+        pack = validator._pack_definition_for_discovery({"executors": "executors"})
+        self.assertEqual(
+            pack.extensions,
+            {
+                "generation": {"features": [{"id": "t2i"}]},
+                "schemas": {"manifest": {"version": 1}},
+            },
+        )
 
     def test_pack_alias_duplicate_alias_same_kind_fails_validation(self) -> None:
         root = self.make_pack_root()

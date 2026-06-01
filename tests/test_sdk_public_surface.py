@@ -6,6 +6,7 @@ import json
 import pkgutil
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -166,7 +167,20 @@ def test_discover_and_get_capability_expose_public_dtos() -> None:
     assert inventory.orchestrators
     assert inventory.elements
     assert inventory.capabilities
+    assert inventory.packs
+    assert inventory.generation_backends
+    assert inventory.element_kinds
+    assert inventory.generation_features
+    assert inventory.generation_modes
     json.dumps(inventory.to_dict())
+
+    assert any(pack["id"] == "builtin" for pack in inventory.packs)
+    assert all("source_kind" in pack for pack in inventory.packs)
+    assert any(backend["id"] == "local" for backend in inventory.generation_backends)
+    assert any(backend["id"] == "cloud" for backend in inventory.generation_backends)
+    assert any(kind["canonical_kind"] == "effects" for kind in inventory.element_kinds)
+    assert any(feature["id"] == "prompt" for feature in inventory.generation_features)
+    assert any(mode["id"] == "t2i" for mode in inventory.generation_modes)
 
     aliased_executor = astrid.get_capability(
         "editorial.inspect_cut",
@@ -295,6 +309,18 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
     monkeypatch.setattr(sdk, "_load_executor_registry", fake_load_executor_registry)
     monkeypatch.setattr(sdk, "_load_orchestrator_registry", fake_load_orchestrator_registry)
     monkeypatch.setattr(sdk, "_load_element_registry", fake_load_element_registry)
+    monkeypatch.setattr(sdk, "_discover_pack_inventory", lambda **kwargs: ("discovered-pack",))
+    monkeypatch.setattr(
+        sdk,
+        "_build_discovery_metadata",
+        lambda discovered_packs, *, element_registry: (
+            ({"id": "builtin", "source_kind": "source", "priority_index": 0},),
+            ({"id": "local"},),
+            ({"canonical_kind": "effects"},),
+            ({"id": "prompt"},),
+            ({"id": "t2i"},),
+        ),
+    )
     monkeypatch.setattr(
         sdk,
         "_capability_from_executor",
@@ -349,6 +375,11 @@ def test_discover_loads_registries_in_dependency_order_and_flattens_results(
         "video_editing.hype",
         "effects/text-card",
     )
+    assert inventory.packs == ({"id": "builtin", "source_kind": "source", "priority_index": 0},)
+    assert inventory.generation_backends == ({"id": "local"},)
+    assert inventory.element_kinds == ({"canonical_kind": "effects"},)
+    assert inventory.generation_features == ({"id": "prompt"},)
+    assert inventory.generation_modes == ({"id": "t2i"},)
 
 
 def test_get_capability_raises_typed_lookup_errors() -> None:
@@ -375,6 +406,86 @@ def test_get_capability_raises_typed_lookup_errors() -> None:
         )
 
 
+def test_get_capability_supports_pack_declared_element_kinds_and_invalid_kind_errors() -> None:
+    astrid = _import_public_module()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        packs_root = Path(tmp) / "packs"
+        pack_root = packs_root / "demo"
+        pack_root.mkdir(parents=True)
+        (pack_root / "pack.json").write_text(
+            json.dumps(
+                {
+                    "id": "demo",
+                    "name": "Demo Pack",
+                    "version": "0.1.0",
+                    "schema_version": "1",
+                    "extensions": {
+                        "elements": {
+                            "kinds": [
+                                {"id": "widgets", "singular": "widget"},
+                            ]
+                        }
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        element_root = pack_root / "elements" / "widgets" / "glow"
+        element_root.mkdir(parents=True)
+        (element_root / "component.tsx").write_text(
+            "export default function Glow() { return null; }\n",
+            encoding="utf-8",
+        )
+        (element_root / "element.yaml").write_text(
+            json.dumps(
+                {
+                    "id": "glow",
+                    "kind": "widget",
+                    "pack_id": "demo",
+                    "metadata": {"label": "Glow"},
+                    "schema": {"type": "object"},
+                    "defaults": {"enabled": True},
+                    "dependencies": {"js_packages": [], "python_requirements": []},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        capability = astrid.get_capability(
+            "widget/glow",
+            kind="element",
+            include_installed=False,
+            extra_pack_roots=(str(packs_root),),
+        )
+
+        explicit_kind_capability = astrid.get_capability(
+            "glow",
+            kind="element",
+            element_kind="widget",
+            include_installed=False,
+            extra_pack_roots=(str(packs_root),),
+        )
+
+        assert capability.id == "widgets/glow"
+        assert capability.handle.kind == "widgets"
+        assert explicit_kind_capability.id == "widgets/glow"
+        assert explicit_kind_capability.handle.kind == "widgets"
+
+        with pytest.raises(
+            astrid.CapabilityValidationError,
+            match=r"element kind must be one of \[effects, animations, transitions, widgets\]",
+        ):
+            astrid.get_capability(
+                "wigdet/glow",
+                kind="element",
+                include_installed=False,
+                extra_pack_roots=(str(packs_root),),
+            )
+
+
 def test_invoke_rejects_elements_and_missing_executor_out() -> None:
     astrid = _import_public_module()
 
@@ -390,7 +501,131 @@ def test_invoke_rejects_elements_and_missing_executor_out() -> None:
             "editorial.arrange",
             kind="executor",
             include_installed=False,
+            )
+
+
+def test_discover_exposes_pack_declared_extension_metadata() -> None:
+    astrid = _import_public_module()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        packs_root = Path(tmp) / "packs"
+        pack_root = packs_root / "demo"
+        pack_root.mkdir(parents=True)
+        (pack_root / "pack.json").write_text(
+            json.dumps(
+                {
+                    "id": "demo",
+                    "name": "Demo Pack",
+                    "version": "0.1.0",
+                    "schema_version": "1",
+                    "extensions": {
+                        "generation": {
+                            "backends": [
+                                {
+                                    "id": "studio",
+                                    "module": "demo_backend.module",
+                                    "class": "StudioBackend",
+                                    "label": "Studio Backend",
+                                    "init_kwargs": {"region": "eu"},
+                                }
+                            ],
+                            "features": [
+                                {
+                                    "id": "mask_ref",
+                                    "label": "Mask Ref",
+                                    "description": "Mask input.",
+                                }
+                            ],
+                            "modes": [
+                                {
+                                    "id": "style-transfer",
+                                    "label": "Style Transfer",
+                                    "description": "Apply a style reference.",
+                                }
+                            ],
+                        },
+                        "elements": {
+                            "kinds": [
+                                {
+                                    "id": "widgets",
+                                    "singular": "widget",
+                                    "label": "Widgets",
+                                    "description": "Custom widget elements.",
+                                }
+                            ]
+                        },
+                    },
+                }
+            )
+            + "\n",
+            encoding="utf-8",
         )
+        element_root = pack_root / "elements" / "widgets" / "glow"
+        element_root.mkdir(parents=True)
+        (element_root / "component.tsx").write_text(
+            "export default function Glow() { return null; }\n",
+            encoding="utf-8",
+        )
+        (element_root / "element.yaml").write_text(
+            json.dumps(
+                {
+                    "id": "glow",
+                    "kind": "widget",
+                    "pack_id": "demo",
+                    "metadata": {"label": "Glow"},
+                    "schema": {"type": "object"},
+                    "defaults": {"enabled": True},
+                    "dependencies": {"js_packages": [], "python_requirements": []},
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        inventory = astrid.discover(
+            include_installed=False,
+            extra_pack_roots=(str(packs_root),),
+        )
+
+        demo_pack = next(pack for pack in inventory.packs if pack["id"] == "demo")
+        studio_backend = next(
+            backend for backend in inventory.generation_backends if backend["id"] == "studio"
+        )
+        widget_kind = next(
+            kind for kind in inventory.element_kinds if kind["canonical_kind"] == "widgets"
+        )
+        mask_ref_feature = next(
+            feature for feature in inventory.generation_features if feature["id"] == "mask_ref"
+        )
+        style_transfer_mode = next(
+            mode for mode in inventory.generation_modes if mode["id"] == "style-transfer"
+        )
+
+        assert demo_pack["source_kind"] == "extra"
+        assert demo_pack["priority_index"] >= 0
+        assert demo_pack["extensions"]["generation"]["backends"][0]["id"] == "studio"
+        assert studio_backend == {
+            "id": "studio",
+            "label": "Studio Backend",
+            "module": "demo_backend.module",
+            "class": "StudioBackend",
+            "init_kwargs": {"region": "eu"},
+        }
+        assert widget_kind["id"] == "widgets"
+        assert widget_kind["canonical_kind"] == "widgets"
+        assert widget_kind["aliases"] == ["widgets", "widget"]
+        assert mask_ref_feature == {
+            "id": "mask_ref",
+            "label": "Mask Ref",
+            "description": "Mask input.",
+        }
+        assert style_transfer_mode == {
+            "id": "style-transfer",
+            "modalities": [],
+            "label": "Style Transfer",
+            "description": "Apply a style reference.",
+        }
+        json.dumps(inventory.to_dict())
 
 
 @dataclass(frozen=True)

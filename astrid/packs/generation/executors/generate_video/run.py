@@ -33,13 +33,34 @@ from typing import Any
 
 from astrid.core.generation.backends import (
     BackendAdapter,
-    FalBackend,
     GenerationResult,
-    VibeComfyBackend,
+    GenerationBackendRegistry,
+    load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry
 
 logger = logging.getLogger(__name__)
+
+_VIDEO_CLI_FEATURES: tuple[str, ...] = (
+    "prompt",
+    "negative_prompt",
+    "seed",
+    "count",
+    "resolution",
+    "image_ref",
+    "image_end_ref",
+    "frames",
+    "fps",
+    "duration",
+    "guidance_scale",
+    "steps",
+    "shift",
+    "loras",
+    "enable_safety_checker",
+    "enable_prompt_expansion",
+    "acceleration",
+)
+_PROMPT_ENTRY_CONTROL_KEYS = frozenset({"model", "mode"})
 
 
 def _parse_loras_arg(value: Any) -> list[dict[str, Any]] | None:
@@ -174,54 +195,65 @@ def _normalise_prompts(
 # ---------------------------------------------------------------------------
 
 
+def _feature_is_missing(feature: str, value: Any) -> bool:
+    """Return ``True`` when a supplied feature value should count as missing."""
+    if value is None:
+        return True
+    if feature == "count":
+        return not bool(value)
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _build_requested_params(
+    args: argparse.Namespace,
+    *,
+    prompt_text: str | None,
+    prompt_entry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Merge prompt-entry and CLI feature values into canonical params."""
+    params: dict[str, Any] = {}
+    if prompt_entry:
+        for key, value in prompt_entry.items():
+            if key in _PROMPT_ENTRY_CONTROL_KEYS:
+                continue
+            params[key] = value
+
+    if prompt_text is not None:
+        params["prompt"] = prompt_text
+    elif "prompt" not in params:
+        params["prompt"] = getattr(args, "prompt", None)
+
+    for feature in _VIDEO_CLI_FEATURES:
+        if feature == "prompt":
+            continue
+        if feature not in params:
+            value = getattr(args, feature, None)
+            if feature == "loras":
+                value = _parse_loras_arg(value)
+            elif feature in {"enable_safety_checker", "enable_prompt_expansion"}:
+                value = _parse_bool_str(value)
+            params[feature] = value
+
+    return {
+        feature: value
+        for feature, value in params.items()
+        if value is not None
+    }
+
+
 def _check_required(
     mode_spec: Any,
     mode_name: str,
     model_id: str,
-    args: argparse.Namespace,
+    requested_params: dict[str, Any],
 ) -> None:
-    """Hard-fail if any feature in *mode_spec.requires* is missing from *args*."""
+    """Hard-fail if any feature in *mode_spec.requires* is missing."""
     missing: list[str] = []
     for req in mode_spec.requires:
-        if req == "prompt":
-            if not (
-                getattr(args, "prompt", None)
-                or getattr(args, "prompts_file", None)
-            ):
-                missing.append("prompt")
-        elif req == "image_ref":
-            if not getattr(args, "image_ref", None):
-                missing.append("image_ref")
-        elif req == "image_end_ref":
-            if not getattr(args, "image_end_ref", None):
-                missing.append("image_end_ref")
-        elif req == "guidance_scale":
-            if getattr(args, "guidance_scale", None) is None:
-                missing.append("guidance_scale")
-        elif req == "steps":
-            if getattr(args, "steps", None) is None:
-                missing.append("steps")
-        elif req == "seed":
-            if getattr(args, "seed", None) is None:
-                missing.append("seed")
-        elif req == "resolution":
-            if not getattr(args, "resolution", None):
-                missing.append("resolution")
-        elif req == "negative_prompt":
-            if not getattr(args, "negative_prompt", None):
-                missing.append("negative_prompt")
-        elif req == "count":
-            if not getattr(args, "count", None):
-                missing.append("count")
-        elif req == "frames":
-            if getattr(args, "frames", None) is None:
-                missing.append("frames")
-        elif req == "fps":
-            if getattr(args, "fps", None) is None:
-                missing.append("fps")
-        elif req == "duration":
-            if getattr(args, "duration", None) is None:
-                missing.append("duration")
+        if _feature_is_missing(req, requested_params.get(req)):
+            missing.append(req)
 
     if missing:
         raise SystemExit(
@@ -236,51 +268,32 @@ def _drop_unsupported(
     mode_spec: Any,
     mode_name: str,
     model_id: str,
-    args: argparse.Namespace,
-) -> tuple[list[dict[str, str]], list[str]]:
+    requested_params: dict[str, Any],
+) -> tuple[dict[str, Any], list[dict[str, str]], list[str]]:
     """Drop caller-supplied features absent from *mode_spec.supports*.
 
-    Returns ``(warnings, dropped_features)`` — both lists of canonical
-    feature names.  The caller's *args* are mutated in-place (the dropped
-    feature is set to ``None``).
+    Returns ``(filtered_params, warnings, dropped_features)``.
     """
-    checks: list[tuple[str, str]] = [
-        ("negative_prompt", "negative_prompt"),
-        ("image_ref", "image_ref"),
-        ("image_end_ref", "image_end_ref"),
-        ("guidance_scale", "guidance_scale"),
-        ("steps", "steps"),
-        ("count", "count"),
-        ("resolution", "resolution"),
-        ("seed", "seed"),
-        ("frames", "frames"),
-        ("fps", "fps"),
-        ("duration", "duration"),
-        ("shift", "shift"),
-        ("loras", "loras"),
-        ("enable_safety_checker", "enable_safety_checker"),
-        ("enable_prompt_expansion", "enable_prompt_expansion"),
-        ("acceleration", "acceleration"),
-    ]
+    filtered_params: dict[str, Any] = {}
     warnings: list[dict[str, str]] = []
     dropped: list[str] = []
-    for attr, feat in checks:
-        val = getattr(args, attr, None)
-        if val is None:
+    for feature, value in requested_params.items():
+        if _feature_is_missing(feature, value):
             continue
-        if feat not in mode_spec.supports:
+        if feature not in mode_spec.supports:
             warnings.append(
                 {
-                    "feature": feat,
+                    "feature": feature,
                     "reason": (
                         f"not supported by model {model_id!r} "
                         f"mode {mode_name!r}"
                     ),
                 }
             )
-            setattr(args, attr, None)
-            dropped.append(feat)
-    return warnings, dropped
+            dropped.append(feature)
+            continue
+        filtered_params[feature] = value
+    return filtered_params, warnings, dropped
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +444,30 @@ def _build_manifest(
     return manifest
 
 
+def _available_backend_ids(mode_spec: Any) -> tuple[str, ...]:
+    """Return the backend ids available for one resolved mode."""
+    return tuple(sorted(mode_spec.backends))
+
+
+def _create_backend_adapter(
+    backend_registry: GenerationBackendRegistry,
+    execution: str,
+    *,
+    env_file: Path | None,
+) -> BackendAdapter:
+    """Instantiate the selected backend with CLI-friendly errors."""
+    try:
+        return backend_registry.create(execution, env_file=env_file)
+    except KeyError as exc:
+        raise RuntimeError(
+            f"generation backend {execution!r} is not registered: {exc}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"failed to initialize generation backend {execution!r}: {exc}"
+        ) from exc
+
+
 # ---------------------------------------------------------------------------
 # Mode validation (reject unsupported modes early)
 # ---------------------------------------------------------------------------
@@ -497,7 +534,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--execution",
         required=True,
-        choices=["local", "cloud"],
         help="Backend: 'local' (vibecomfy) or 'cloud' (fal).",
     )
     p.add_argument(
@@ -612,6 +648,13 @@ def main(argv: list[str] | None = None) -> int:
     # --- validate mode (hard-reject v2v/video-edit before anything) ----------
     mode_name: str = _validate_mode(args.mode)
 
+    # --- load backend registry ----------------------------------------------
+    try:
+        backend_registry = load_default_generation_backend_registry()
+    except Exception as exc:
+        print(f"Failed to load generation backend registry: {exc}", file=sys.stderr)
+        return 1
+
     # --- load registry -------------------------------------------------------
     try:
         registry = ModelRegistry.load_default()
@@ -628,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- check backend availability for --execution --------------------------
     if not registry.backend_available(args.model, mode_name, args.execution):
-        available = ", ".join(sorted(mode_spec.backends))
+        available = ", ".join(_available_backend_ids(mode_spec))
         print(
             f"Error: model {args.model!r} mode {mode_name!r} has no "
             f"{args.execution!r} backend. Available backends: {available}",
@@ -636,13 +679,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    # --- validate required mode features (hard-fail BEFORE loop) -------------
-    _check_required(mode_spec, mode_name, args.model, args)
-
-    # --- drop unsupported features (warn, never fail) ------------------------
-    warnings, dropped_features = _drop_unsupported(
-        mode_spec, mode_name, args.model, args
-    )
+    warnings: list[dict[str, str]] = []
+    dropped_features: list[str] = []
 
     # --- compute duration→frames shim (if duration provided without frames) ---
     if args.duration is not None and args.frames is None and args.fps is not None:
@@ -666,11 +704,15 @@ def main(argv: list[str] | None = None) -> int:
         prompts = [{"prompt": args.prompt, "model": args.model}]
 
     # --- build adapter (SD-004: dispatch through BackendAdapter) -------------
-    adapter: BackendAdapter
-    if args.execution == "cloud":
-        adapter = FalBackend(env_file=args.env_file)
-    else:
-        adapter = VibeComfyBackend()
+    try:
+        adapter = _create_backend_adapter(
+            backend_registry,
+            args.execution,
+            env_file=args.env_file,
+        )
+    except RuntimeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     # --- resolve image_ref path (for manifest tracking) ----------------------
     image_ref_resolved: str | None = None
@@ -738,119 +780,49 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     continue
 
-                # Re-validate features for the overridden model's mode.
-                row_missing: list[str] = []
-                for req in mode_spec.requires:
-                    if req == "prompt":
-                        if not prompt_text:
-                            row_missing.append("prompt")
-                    elif req == "image_ref":
-                        row_ref = prompt_entry.get("image_ref", args.image_ref)
-                        if not row_ref:
-                            row_missing.append("image_ref")
-                    elif req == "image_end_ref":
-                        row_ref = prompt_entry.get(
-                            "image_end_ref", args.image_end_ref
-                        )
-                        if not row_ref:
-                            row_missing.append("image_end_ref")
-                    elif req == "resolution":
-                        row_res = prompt_entry.get("resolution", args.resolution)
-                        if not row_res:
-                            row_missing.append("resolution")
-                if row_missing:
-                    print(
-                        f"Warning: skipping row {i} ({prompt_text!r}): "
-                        f"override model {entry_override_model!r} mode "
-                        f"{mode_name!r} requires "
-                        f"{', '.join(sorted(row_missing))}",
-                        file=sys.stderr,
-                    )
-                    continue
-
-                # Drop unsupported features for the override model
-                extra_warns, extra_drops = _drop_unsupported(
-                    mode_spec, mode_name, entry_override_model, args
+            requested_params = _build_requested_params(
+                args,
+                prompt_text=prompt_text,
+                prompt_entry=prompt_entry,
+            )
+            try:
+                _check_required(
+                    mode_spec,
+                    mode_name,
+                    entry.id,
+                    requested_params,
                 )
-                warnings.extend(extra_warns)
-                dropped_features.extend(extra_drops)
-
-            seed = _resolve_seed(prompt_entry.get("seed", args.seed), i)
-            neg = prompt_entry.get("negative_prompt", args.negative_prompt)
-            res = prompt_entry.get("resolution", args.resolution)
-            ref = prompt_entry.get("image_ref", args.image_ref)
-            end_ref = prompt_entry.get("image_end_ref", args.image_end_ref)
-            frames = prompt_entry.get("frames", args.frames)
-            fps = prompt_entry.get("fps", args.fps)
-            duration = prompt_entry.get("duration", args.duration)
-            guidance_scale = prompt_entry.get(
-                "guidance_scale", args.guidance_scale
+            except SystemExit as exc:
+                print(
+                    f"Warning: skipping row {i} ({prompt_text!r}): {exc.code}",
+                    file=sys.stderr,
+                )
+                continue
+            params, extra_warns, extra_drops = _drop_unsupported(
+                mode_spec,
+                mode_name,
+                entry.id,
+                requested_params,
             )
-            steps = prompt_entry.get("steps", args.steps)
-            shift = prompt_entry.get("shift", args.shift)
-            loras = prompt_entry.get("loras", _parse_loras_arg(args.loras))
-            enable_safety_checker = prompt_entry.get(
-                "enable_safety_checker",
-                _parse_bool_str(args.enable_safety_checker),
-            )
-            enable_prompt_expansion = prompt_entry.get(
-                "enable_prompt_expansion",
-                _parse_bool_str(args.enable_prompt_expansion),
-            )
-            acceleration = prompt_entry.get("acceleration", args.acceleration)
+            warnings.extend(extra_warns)
+            dropped_features.extend(extra_drops)
+            seed = _resolve_seed(params.get("seed", args.seed), i)
         else:
             prompt_text = args.prompt
-            seed = _resolve_seed(args.seed, i)
-            neg = args.negative_prompt
-            res = args.resolution
-            ref = args.image_ref
-            end_ref = args.image_end_ref
-            frames = args.frames
-            fps = args.fps
-            duration = args.duration
-            guidance_scale = args.guidance_scale
-            steps = args.steps
-            shift = args.shift
-            loras = _parse_loras_arg(args.loras)
-            enable_safety_checker = _parse_bool_str(args.enable_safety_checker)
-            enable_prompt_expansion = _parse_bool_str(
-                args.enable_prompt_expansion
+            requested_params = _build_requested_params(args, prompt_text=prompt_text)
+            _check_required(mode_spec, mode_name, entry.id, requested_params)
+            params, extra_warns, extra_drops = _drop_unsupported(
+                mode_spec,
+                mode_name,
+                entry.id,
+                requested_params,
             )
-            acceleration = args.acceleration
+            warnings.extend(extra_warns)
+            dropped_features.extend(extra_drops)
+            seed = _resolve_seed(args.seed, i)
 
         # --- build canonical params dict for adapter -------------------------
-        params: dict[str, Any] = {}
-        if prompt_text:
-            params["prompt"] = prompt_text
-        if neg:
-            params["negative_prompt"] = neg
         params["seed"] = seed
-        if res:
-            params["resolution"] = res
-        if ref:
-            params["image_ref"] = ref
-        if end_ref:
-            params["image_end_ref"] = end_ref
-        if frames is not None:
-            params["frames"] = frames
-        if fps is not None:
-            params["fps"] = fps
-        if duration is not None:
-            params["duration"] = duration
-        if guidance_scale is not None:
-            params["guidance_scale"] = guidance_scale
-        if steps is not None:
-            params["steps"] = steps
-        if shift is not None:
-            params["shift"] = shift
-        if loras:
-            params["loras"] = loras
-        if enable_safety_checker is not None:
-            params["enable_safety_checker"] = enable_safety_checker
-        if enable_prompt_expansion is not None:
-            params["enable_prompt_expansion"] = enable_prompt_expansion
-        if acceleration is not None:
-            params["acceleration"] = acceleration
         params["count"] = 1  # N=1 per loop iteration
 
         # --- dispatch to adapter (SD-004) ------------------------------------
