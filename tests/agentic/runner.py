@@ -171,10 +171,21 @@ def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
     attached up-front so subsequent verbs (start, ack) can pass the CLI
     session gate.
     """
-    # Always create.
-    result = _astrid("projects", "create", slug)
-    if result.returncode != 0 and "already exists" not in result.stderr:
-        raise RuntimeError(f"create_project {slug}: {result.stderr}")
+    priming = scenario.get("priming") or []
+    # `empty_projects_root` opts out of implicit project creation so a
+    # scenario can probe the genuine "no project exists yet" first wall —
+    # every other scenario primes the project away. Gated here (not in the
+    # verb loop below) because priming verbs run AFTER creation; suppressing
+    # creation has to happen before the create call itself.
+    skip_create = any(
+        isinstance(s, dict) and bool(s.get("empty_projects_root"))
+        for s in priming
+    )
+    if not skip_create:
+        # Always create.
+        result = _astrid("projects", "create", slug)
+        if result.returncode != 0 and "already exists" not in result.stderr:
+            raise RuntimeError(f"create_project {slug}: {result.stderr}")
 
     # Attach a primer session so `start` / `ack` can pass the CLI gate.
     # We parse the `export ASTRID_SESSION_ID=…` line and thread it into
@@ -205,6 +216,9 @@ def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
         verb, payload = next(iter(step.items()))
         if verb == "create_project":
             # Already done; allow as explicit no-op.
+            continue
+        elif verb == "empty_projects_root":
+            # Handled before creation (see skip_create above); no-op here.
             continue
         elif verb == "start":
             # payload is the orchestrator id
@@ -290,6 +304,19 @@ def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
             # a directory before the agent runs.
             target = Path(str(payload)).expanduser()
             target.mkdir(parents=True, exist_ok=True)
+        elif verb == "abort":
+            # payload: optional reason string. Aborts the active run so a
+            # scenario can stage a genuinely aborted/failed run for the
+            # agent to investigate (forensics tier). Requires a prior
+            # `start` / `start_with_plan`. `astrid abort` is idempotent
+            # (returns 0 with no active run), so this is safe to call once.
+            abort_args = ["abort", "--project", slug]
+            reason = str(payload).strip() if payload else ""
+            if reason:
+                abort_args += ["--reason", reason]
+            res = _astrid(*abort_args, env=primer_env)
+            if res.returncode != 0:
+                raise RuntimeError(f"prime abort {slug}: {res.stderr}")
         else:
             raise ValueError(f"unknown priming verb: {verb}")
 

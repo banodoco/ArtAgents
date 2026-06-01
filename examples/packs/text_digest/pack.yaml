@@ -10,3 +10,8 @@ content:
   elements: elements
 agent:
   purpose: "Use when you want an agent to read and attest a structured JSON summary of a text file (line count, word count, notes) before returning a final verdict."
+permissions:
+  - id: subprocess
+    reason: Runs text digest pipeline executors as subprocesses.
+  - id: project_files
+    reason: Reads text files and writes digest outputs.

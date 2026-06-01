@@ -613,7 +613,7 @@ def _build_agent_view(manifest: dict, trust_summary: dict) -> dict:
     # Secrets — handle both new and old formats
     if isinstance(secrets_section, list):
         # New format: list of {name, required, description}
-        structured_secrets = []
+        structured_secrets: list[dict[str, Any]] = []
         for s_obj in secrets_section:
             if isinstance(s_obj, dict) and s_obj.get("name"):
                 structured_secrets.append({
@@ -624,7 +624,7 @@ def _build_agent_view(manifest: dict, trust_summary: dict) -> dict:
         view["secrets"] = structured_secrets
     elif isinstance(secrets_section, dict):
         # Old format: dict with 'required' list
-        secrets_list = trust_summary.get("declared_secrets", [])
+        secrets_list: list[str] = trust_summary.get("declared_secrets", [])
         if not secrets_list and isinstance(secrets_section.get("required"), list):
             secrets_list = [str(s) for s in secrets_section["required"] if s]
         if secrets_list:
@@ -638,6 +638,17 @@ def _build_agent_view(manifest: dict, trust_summary: dict) -> dict:
     capabilities_raw = manifest.get("capabilities")
     if isinstance(capabilities_raw, list):
         view["capabilities"] = [str(c) for c in capabilities_raw if c]
+
+    # Permissions and trust metadata — sourced from extract_trust_summary()
+    permissions = trust_summary.get("permissions")
+    if permissions:
+        view["permissions"] = permissions
+    permission_ids = trust_summary.get("permission_ids")
+    if permission_ids:
+        view["permission_ids"] = permission_ids
+    trust_block = trust_summary.get("trust")
+    if trust_block:
+        view["trust"] = trust_block
 
     return view
 
@@ -673,6 +684,33 @@ def _print_agent_view(view: dict) -> None:
         print(f"Keywords:       {', '.join(view['keywords'])}")
     if "capabilities" in view:
         print(f"Capabilities:   {', '.join(view['capabilities'])}")
+
+    # Permissions — sourced from extract_trust_summary()
+    permissions = view.get("permissions")
+    if permissions:
+        print("Permissions:")
+        for p in permissions:
+            if isinstance(p, dict):
+                reason = p.get("reason", "")
+                services = p.get("services")
+                svc_str = f" (services: {', '.join(services)})" if services else ""
+                print(f"  • {p.get('id', '?')}: {reason}{svc_str}")
+
+    permission_ids = view.get("permission_ids")
+    if permission_ids:
+        print(f"Permission IDs: {', '.join(permission_ids)}")
+
+    # Trust block — sourced from extract_trust_summary()
+    trust_block = view.get("trust")
+    if trust_block and isinstance(trust_block, dict):
+        print("Trust:")
+        sandbox = trust_block.get("sandbox", "")
+        runs_with = trust_block.get("runs_with_user_process_permissions")
+        enforcement = trust_block.get("permission_enforcement", "")
+        print(f"  sandbox: {sandbox}")
+        print(f"  runs_with_user_process_permissions: {runs_with}")
+        print(f"  permission_enforcement: {enforcement}")
+        print(f"  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
 # ---------------------------------------------------------------------------
@@ -956,6 +994,10 @@ def _build_full_inspect(
         "required_context": trust_summary.get("required_context", []),
         "keywords": trust_summary.get("keywords", []),
         "capabilities": trust_summary.get("capabilities", []),
+        # Permissions and trust metadata — sourced from extract_trust_summary()
+        "permissions": trust_summary.get("permissions", []),
+        "permission_ids": trust_summary.get("permission_ids", []),
+        "trust": trust_summary.get("trust", {}),
         **taxonomy,
         "taxonomy": taxonomy,
         # Component details (scanned from disk)
@@ -1120,6 +1162,33 @@ def _print_full_inspect(data: dict) -> None:
         for w in warnings:
             print(f"    • {w}")
 
+    # Permissions — sourced from extract_trust_summary()
+    permissions = data.get("permissions")
+    if permissions:
+        print("  Permissions:")
+        for p in permissions:
+            if isinstance(p, dict):
+                reason = p.get("reason", "")
+                services = p.get("services")
+                svc_str = f" (services: {', '.join(services)})" if services else ""
+                print(f"    • {p.get('id', '?')}: {reason}{svc_str}")
+
+    permission_ids = data.get("permission_ids")
+    if permission_ids:
+        print(f"  Permission IDs: {', '.join(permission_ids)}")
+
+    # Trust block — sourced from extract_trust_summary()
+    trust_block = data.get("trust")
+    if trust_block and isinstance(trust_block, dict):
+        print("  Trust:")
+        sandbox = trust_block.get("sandbox", "")
+        runs_with = trust_block.get("runs_with_user_process_permissions")
+        enforcement = trust_block.get("permission_enforcement", "")
+        print(f"    sandbox: {sandbox}")
+        print(f"    runs_with_user_process_permissions: {runs_with}")
+        print(f"    permission_enforcement: {enforcement}")
+        print(f"    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+
 
 def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
     """Render discovery-backed inspect output for non-installed packs."""
@@ -1228,6 +1297,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip confirmation prompt."
     )
     install_parser.add_argument(
+        "--trust", action="store_true",
+        help="Acknowledge the pack trust summary for noninteractive installs."
+    )
+    install_parser.add_argument(
         "--force", action="store_true",
         help="Overwrite existing install (preserve old revision)."
     )
@@ -1247,6 +1320,10 @@ def build_parser() -> argparse.ArgumentParser:
     update_parser.add_argument(
         "--yes", "-y", action="store_true",
         help="Skip confirmation prompt."
+    )
+    update_parser.add_argument(
+        "--trust", action="store_true",
+        help="Acknowledge the pack trust summary for noninteractive updates."
     )
     update_parser.set_defaults(handler=_handle_update)
 

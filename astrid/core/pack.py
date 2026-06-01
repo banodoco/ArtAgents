@@ -15,6 +15,14 @@ EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
 ORCHESTRATOR_MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
 PACK_ALIAS_KINDS: tuple[Literal["executor", "orchestrator"], ...] = ("executor", "orchestrator")
 PackAliasKind = Literal["executor", "orchestrator"]
+PACK_PERMISSION_IDS: tuple[str, ...] = (
+    "project_files",
+    "network",
+    "subprocess",
+    "environment",
+    "accelerator",
+    "external_services",
+)
 # Built-in element-kind constants remain stable for compatibility even though
 # runtime validation now flows through ElementKindRegistry.
 ELEMENT_KINDS: tuple[str, ...] = ("effects", "animations", "transitions")
@@ -197,6 +205,25 @@ def _extension_element_kind_descriptors(
 
 
 @dataclass(frozen=True)
+class PackPermission:
+    id: str
+    reason: str
+    access: str = ""
+    services: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "reason": self.reason,
+        }
+        if self.access:
+            payload["access"] = self.access
+        if self.services:
+            payload["services"] = list(self.services)
+        return payload
+
+
+@dataclass(frozen=True)
 class PackDefinition:
     id: str
     name: str
@@ -211,6 +238,7 @@ class PackDefinition:
     visibility: str = field(default="visible")
     schema_version: str = field(default="")
     aliases: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+    permissions: tuple[PackPermission, ...] = field(default_factory=tuple)
     extensions: dict[str, Any] = field(default_factory=dict)
     origin: str = field(default="unknown")
     install_tier: str = field(default="default")
@@ -246,6 +274,8 @@ class PackDefinition:
         }
         if self.aliases:
             payload["aliases"] = [dict(alias) for alias in self.aliases]
+        if self.permissions:
+            payload["permissions"] = [permission.to_dict() for permission in self.permissions]
         if self.extensions:
             payload["extensions"] = _normalize_json_value(
                 self.extensions,
@@ -327,6 +357,7 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
     visibility = _optional_string(data, "visibility", "pack.visibility", default="visible")
     schema_version = str(data.get("schema_version", "")) if "schema_version" in data else ""
     aliases = _optional_pack_aliases(data.get("aliases"), path="pack.aliases")
+    permissions = _normalize_pack_permissions(data.get("permissions"))
     extensions = _optional_pack_extensions(data.get("extensions"), path="pack.extensions")
     taxonomy = pack_taxonomy_from_manifest(data, status=status)
     return PackDefinition(
@@ -343,6 +374,7 @@ def load_pack_manifest(path: str | Path) -> PackDefinition:
         visibility=visibility,
         schema_version=schema_version,
         aliases=aliases,
+        permissions=permissions,
         extensions=extensions,
         **taxonomy,
     )
@@ -423,6 +455,59 @@ def _optional_pack_aliases(value: Any, *, path: str) -> tuple[dict[str, Any], ..
             normalized_alias["deprecation_message"] = deprecation_message
         normalized.append(normalized_alias)
 
+    return tuple(normalized)
+
+
+def _normalize_pack_permissions(raw: Any, field: str = "permissions") -> tuple[PackPermission, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise PackValidationError(f"{field} must be an array")
+
+    normalized: list[PackPermission] = []
+    allowed_keys = {"id", "reason", "access", "services"}
+    for index, raw_permission in enumerate(raw):
+        permission_path = f"{field}[{index}]"
+        permission = _require_mapping(raw_permission, permission_path)
+        unknown_keys = sorted(set(permission) - allowed_keys)
+        if unknown_keys:
+            raise PackValidationError(
+                f"{permission_path} has unknown field(s): {', '.join(unknown_keys)}"
+            )
+
+        permission_id = _require_string(permission, "id", f"{permission_path}.id")
+        if permission_id not in PACK_PERMISSION_IDS:
+            raise PackValidationError(
+                f"{permission_path}.id must be one of {list(PACK_PERMISSION_IDS)}"
+            )
+
+        normalized.append(
+            PackPermission(
+                id=permission_id,
+                reason=_require_string(permission, "reason", f"{permission_path}.reason"),
+                access=_optional_string(permission, "access", f"{permission_path}.access", default=""),
+                services=_normalize_pack_permission_services(
+                    permission.get("services"),
+                    path=f"{permission_path}.services",
+                ),
+            )
+        )
+
+    return tuple(normalized)
+
+
+def _normalize_pack_permission_services(value: Any, *, path: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise PackValidationError(f"{path} must be an array")
+
+    normalized: list[str] = []
+    for index, raw_service in enumerate(value):
+        service_path = f"{path}[{index}]"
+        if not isinstance(raw_service, str) or not raw_service.strip():
+            raise PackValidationError(f"{service_path} must be a non-empty string")
+        normalized.append(raw_service.strip())
     return tuple(normalized)
 
 

@@ -9,6 +9,11 @@ domain: editorial
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs editorial executors as subprocesses for transcription, review, and arrangement.
+  - id: project_files
+    reason: Reads and writes transcripts, scenes, arrangements, and review artifacts.
 description: Editorial review, arrangement, and validation executors.
 content:
   executors: executors

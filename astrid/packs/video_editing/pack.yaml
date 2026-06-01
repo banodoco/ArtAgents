@@ -9,6 +9,11 @@ domain: media
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs ffmpeg-based cut and foley executors plus orchestrator child processes.
+  - id: project_files
+    reason: Reads and writes timelines, assets, and editorial artifacts.
 description: Timeline editing executors and video production orchestrators.
 content:
   executors: executors

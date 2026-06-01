@@ -9,6 +9,15 @@ domain: integration
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs fal.ai Foley generation executor.
+  - id: network
+    reason: Calls fal.ai hunyuan-video-foley API for audio generation.
+  - id: project_files
+    reason: Reads input video clips and writes generated audio files.
+  - id: environment
+    reason: Reads FAL_KEY for fal.ai API authentication.
 description: fal.ai integration executors.
 content:
   executors: executors

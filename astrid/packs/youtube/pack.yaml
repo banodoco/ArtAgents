@@ -9,6 +9,15 @@ domain: integration
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs yt-dlp for audio acquisition and upload scripts.
+  - id: network
+    reason: Downloads YouTube audio and uploads via Zapier social integration.
+  - id: project_files
+    reason: Reads video files for upload and writes downloaded audio.
+  - id: environment
+    reason: Reads YouTube and social API credentials.
 description: YouTube source acquisition and publishing executors.
 content:
   executors: executors

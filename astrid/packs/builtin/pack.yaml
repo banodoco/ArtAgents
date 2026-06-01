@@ -9,3 +9,4 @@ pack_type: capability
 domain: system
 stability: stable
 support: core
+permissions: []

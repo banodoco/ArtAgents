@@ -9,6 +9,15 @@ domain: development
 stability: stable
 support: core
 visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs training dataset and pool executors as subprocesses.
+  - id: project_files
+    reason: Reads and writes candidate pools, datasets, and training artifacts.
+  - id: network
+    reason: Training run orchestrator provisions RunPod GPUs and downloads checkpoints.
+  - id: environment
+    reason: Reads RunPod API credentials for GPU provisioning.
 description: Dataset and training executors plus training orchestrators.
 content:
   executors: executors

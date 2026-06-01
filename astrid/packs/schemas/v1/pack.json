@@ -69,6 +69,42 @@
         "additionalProperties": false
       }
     },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "reason"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "project_files",
+              "network",
+              "subprocess",
+              "environment",
+              "accelerator",
+              "external_services"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "pattern": "^.*\\S.*$"
+          },
+          "access": {
+            "type": "string",
+            "pattern": "^.*\\S.*$"
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^.*\\S.*$"
+            }
+          }
+        },
+        "additionalProperties": false
+      }
+    },
     "extensions": {
       "type": "object",
       "properties": {

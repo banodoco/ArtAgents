@@ -139,6 +139,112 @@ The pack manifest declares:
 
 Refer to `pack.json` for the full field list and constraints.
 
+### Permissions (`pack.yaml`)
+
+The pack manifest may declare a `permissions` array. Each permission object
+describes a capability domain the pack needs. Permissions are **disclosure
+metadata only** in v1 — they are not enforced at runtime, do not configure
+sandboxing, and do not restrict what the pack can do.
+
+#### Permission Fields
+
+Each permission object requires:
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `id` | Yes | string | One of six approved permission IDs (see below) |
+| `reason` | Yes | string (non-blank) | Human explanation of why the pack needs this permission |
+| `access` | No | string (non-blank) | Optional detail about what is accessed (e.g., "reads input videos") |
+| `services` | No | array of non-blank strings | Optional list of external services contacted (e.g., `api.openai.com`) |
+
+Unknown keys are rejected at validation time.
+
+#### Approved Permission IDs
+
+| ID | Meaning | Example reason |
+|---|---|---|
+| `project_files` | Reads or writes files in the project directory | "Reads input videos and writes rendered output" |
+| `network` | Makes outbound network connections | "Calls OpenAI and fal.ai APIs for AI generation" |
+| `subprocess` | Spawns child processes | "Runs ffmpeg for video encoding and audio extraction" |
+| `environment` | Reads environment variables | "Reads OPENAI_API_KEY and FAL_KEY from environment" |
+| `accelerator` | Uses GPU or specialized hardware | "Runs ComfyUI inference on local GPU" |
+| `external_services` | Calls paid or third-party cloud services | "Provisions and manages RunPod GPU pods" |
+
+#### Example
+
+```yaml
+permissions:
+  - id: network
+    reason: Calls OpenAI and fal.ai APIs for AI generation
+    services:
+      - api.openai.com
+      - api.fal.ai
+  - id: environment
+    reason: Reads OPENAI_API_KEY from environment for API authentication
+  - id: subprocess
+    reason: Runs ffmpeg for video encoding
+  - id: project_files
+    reason: Reads input images and writes generated output
+    access: Reads from project input directory, writes to output directory
+```
+
+An empty `permissions` array is valid and means the pack declares no
+capability-domain needs:
+
+```yaml
+permissions: []
+```
+
+#### Secrets vs Permissions
+
+Permissions and secrets are different things:
+
+- **Permissions** are pack-level capability-domain declarations. They say
+  *what kind of thing* the pack does (network access, file access,
+  subprocess spawning). Every capability in the pack shares the same
+  permission set.
+- **Secrets** are executor-level environment-variable declarations. They
+  say *which specific environment variables* an executor reads. Secrets
+  are declared on individual executor/orchestrator manifests, not on the
+  pack manifest.
+
+A pack that calls an external API typically needs both:
+
+1. `permissions: [{id: network, ...}, {id: environment, ...}]` in `pack.yaml`
+2. `secrets: [{name: API_KEY, required: true}]` in `executor.yaml`
+
+The `environment` permission tells users "this pack reads environment
+variables." The `secrets` block tells users "specifically, it reads this
+variable." Neither is enforced — Astrid v1 does not intercept, filter, or
+audit environment reads at runtime.
+
+#### Permissions in the Trust Summary
+
+When a user installs or inspects a pack, the declared permissions appear in
+the trust summary alongside the v1 trust block:
+
+```
+━━━ Trust Summary ━━━
+  Pack ID:       generation
+  ...
+  Permissions:
+    - network: Calls OpenAI and fal.ai APIs for AI generation; services=api.openai.com, api.fal.ai
+    - environment: Reads OPENAI_API_KEY from environment for API authentication
+    - subprocess: Runs ffmpeg for video encoding
+    - project_files: Reads input images and writes generated output; access=Reads from project input directory, writes to output directory
+  Trust (v1):
+    - sandbox=none
+    - runs_with_user_process_permissions=true
+    - permission_enforcement=disclosure_only
+  Disclosure:
+    - Astrid v1 does not sandbox installed packs.
+    - Permission declarations are disclosure-only and not enforced.
+    - Installed pack code runs with your user's process permissions.
+```
+
+This is the information users see before they type `trust <pack_id>` to
+acknowledge the trust summary and proceed with installation.
+
 ### Pack-Level Aliases
 
 A pack can declare aliases for its capabilities — old or alternate ids that

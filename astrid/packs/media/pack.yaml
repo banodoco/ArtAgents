@@ -8,6 +8,11 @@ pack_type: capability
 domain: media
 stability: stable
 support: core
+permissions:
+  - id: subprocess
+    reason: Runs ffmpeg for lossless video clip extraction.
+  - id: project_files
+    reason: Reads source video files and writes output clips.
 description: Media processing tools, currently providing lossless video clip extraction via ffmpeg stream copy.
 content:
   executors: executors

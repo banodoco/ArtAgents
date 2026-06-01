@@ -45,6 +45,7 @@ class PackYamlSchemaTest(unittest.TestCase):
             self.assertEqual(pack.domain, "general")
             self.assertEqual(pack.stability, "stable")
             self.assertEqual(pack.support, "project")
+            self.assertEqual(pack.permissions, ())
             self.assertEqual(pack.root, pack_root.resolve())
 
     def test_full_manifest_round_trips_name_version_and_metadata(self) -> None:
@@ -59,6 +60,60 @@ class PackYamlSchemaTest(unittest.TestCase):
             self.assertEqual(pack.name, "External Tools")
             self.assertEqual(pack.version, "1.2.3")
             self.assertEqual(pack.metadata, {})
+
+    def test_permissions_round_trip_with_normalized_optional_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+name: Builtin
+version: 0.1.0
+permissions:
+  - id: project_files
+    reason: Needs project artifacts.
+    access: read/write project files
+  - id: external_services
+    reason: Calls hosted APIs.
+    services:
+      - OpenAI
+      - Replicate
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(
+                tuple(permission.to_dict() for permission in pack.permissions),
+                (
+                    {
+                        "id": "project_files",
+                        "reason": "Needs project artifacts.",
+                        "access": "read/write project files",
+                    },
+                    {
+                        "id": "external_services",
+                        "reason": "Calls hosted APIs.",
+                        "services": ["OpenAI", "Replicate"],
+                    },
+                ),
+            )
+            self.assertEqual(pack.to_dict()["permissions"], [permission.to_dict() for permission in pack.permissions])
+
+    def test_permissions_reject_invalid_runtime_shapes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+permissions:
+  - id: nope
+    reason: bad
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"permissions\[0\]\.id must be one of",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_extensions_round_trip_with_normalized_shorthand_and_json_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1374,6 +1429,31 @@ aliases:
                 pack_discovery.to_dict()["aliases"],
             )
 
+    def test_permissions_preserved_through_discovery_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            from astrid.packs.validate import PackValidator
+
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+permissions:
+  - id: network
+    reason: Talks to remote APIs.
+    services:
+      - github
+""",
+            )
+            pack_direct = load_pack_manifest(pack_manifest_path(pack_root))
+            validator = PackValidator(pack_root)
+            validator._pack_data = validator._load_yaml(pack_root / "pack.yaml")
+            pack_discovery = validator._pack_definition_for_discovery({})
+            self.assertEqual(pack_direct.permissions, pack_discovery.permissions)
+            self.assertEqual(
+                pack_direct.to_dict()["permissions"],
+                pack_discovery.to_dict()["permissions"],
+            )
+
 
 # ------------------------------------------------------------------
 # Parity suite — JSON Schema vs runtime parser agreement
@@ -1623,6 +1703,39 @@ class PackSchemaRuntimeParityTest(unittest.TestCase):
         self.assertEqual(pack.origin, "unknown")
         self.assertEqual(pack.stability, "stable")
 
+    def test_parity_permissions_valid_both_accept(self) -> None:
+        yaml_body = (
+            "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+            "permissions:\n"
+            "  - id: project_files\n"
+            "    reason: Reads and writes project assets.\n"
+            "    access: read/write project files\n"
+            "  - id: external_services\n"
+            "    reason: Calls remote APIs.\n"
+            "    services:\n"
+            "      - openai\n"
+        )
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        pack = self._runtime_pack(yaml_body, "builtin")
+        self.assertIsNotNone(pack)
+        assert pack is not None
+        self.assertEqual(
+            pack.to_dict()["permissions"],
+            [
+                {
+                    "id": "project_files",
+                    "reason": "Reads and writes project assets.",
+                    "access": "read/write project files",
+                },
+                {
+                    "id": "external_services",
+                    "reason": "Calls remote APIs.",
+                    "services": ["openai"],
+                },
+            ],
+        )
+
     # -- parity: invalid payloads — both MUST reject -----------------------
 
     def test_parity_missing_id_both_reject(self) -> None:
@@ -1641,6 +1754,46 @@ class PackSchemaRuntimeParityTest(unittest.TestCase):
         self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
         rt_error = self._runtime_error(yaml_body, "builtin")
         self.assertIsNotNone(rt_error, "Runtime should have rejected")
+
+    def test_parity_permissions_invalid_shapes_both_reject(self) -> None:
+        cases = (
+            (
+                "permissions:\n  - id: nope\n    reason: bad\n",
+                r"permissions\[0\]\.id",
+            ),
+            (
+                "permissions:\n  - id: network\n",
+                r"permissions\[0\].*reason",
+            ),
+            (
+                'permissions:\n  - id: network\n    reason: " "\n',
+                r"permissions\[0\]\.reason",
+            ),
+            (
+                "permissions:\n  - id: network\n    reason: ok\n    services: not-an-array\n",
+                r"permissions\[0\]\.services",
+            ),
+            (
+                "permissions:\n  - id: network\n    reason: ok\n    services:\n      - \"\"\n",
+                r"permissions\[0\]\.services",
+            ),
+            (
+                "permissions:\n  - id: network\n    reason: ok\n    unknown: true\n",
+                r"Additional properties are not allowed|has unknown field",
+            ),
+        )
+        for body, error_pattern in cases:
+            with self.subTest(body=body):
+                yaml_body = (
+                    "schema_version: 1\nid: builtin\nname: builtin\nversion: 0.1.0\n"
+                    f"{body}"
+                )
+                js_errors = self._json_schema_errors(yaml_body)
+                self.assertNotEqual(js_errors, [], "JSON Schema should have rejected")
+                rt_error = self._runtime_error(yaml_body, "builtin")
+                self.assertIsNotNone(rt_error, "Runtime should have rejected")
+                assert rt_error is not None
+                self.assertRegex(rt_error, error_pattern)
 
     def test_parity_unknown_extension_root_key_both_reject(self) -> None:
         yaml_body = (

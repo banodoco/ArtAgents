@@ -74,6 +74,11 @@ class InstallRecord:
     trust_tier: str = ""  # "local" or "git"
     last_validation_time: str = ""  # ISO-8601 UTC of last validation
     previous_active_revision: str = ""  # revision dir name replaced during force-install
+    trust_acknowledged_at: str = ""  # ISO-8601 UTC when trust was accepted
+    trust_method: str = ""  # "interactive", "cli_flag", "api", or "test"
+    trust_actor: str = ""  # "cli", "api", "test", or another caller label
+    no_sandbox_warning_version: int | None = None
+    permissions_accepted: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

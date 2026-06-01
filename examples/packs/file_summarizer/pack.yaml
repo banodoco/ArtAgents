@@ -10,3 +10,8 @@ content:
   elements: elements
 agent:
   purpose: "Use when you need to ingest a text file and produce a structured, agent-attested summary with counts and a final verdict through a multi-step pipeline."
+permissions:
+  - id: subprocess
+    reason: Runs file summarizer pipeline executors as subprocesses.
+  - id: project_files
+    reason: Reads text files and writes JSON summary outputs.
