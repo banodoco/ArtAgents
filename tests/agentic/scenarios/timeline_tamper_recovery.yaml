@@ -10,84 +10,100 @@ description: |
 brief: timeline_tamper_recovery.md
 
 priming:
-  - create_project: $SLUG
+- create_project: ${SLUG}
 
 target_orchestrator: video_editing.hype
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
-  - no_aborts
-  - events_contain: timeline.erased
-  - events_contain: timeline.recovered
-  - no_cross_project_binding
-  - subjective:
-      - detected_tamper_via_verify
-      - erased_tampered_events
-      - recovered_to_good_anchor
-      - confirmed_chain_integrity_after_recovery
+- no_aborts
+- events_contain: timeline.erased
+- events_contain: timeline.recovered
+- no_cross_project_binding
+- subjective:
+  - detected_tamper_via_verify
+  - erased_tampered_events
+  - recovered_to_good_anchor
+  - confirmed_chain_integrity_after_recovery
 
 budget:
   max_tokens_per_agent: 32768
   max_wall_clock_min: 15
 
 tags:
-  - timeline
-  - recovery
-  - tamper
-  - erasure
+- timeline
+- recovery
+- tamper
+- erasure
 
 assessment:
-  universal_checks: true
   enforced:
-    - id: invoked_via_canonical_cli
-      question: |
-        Did the agent invoke timeline commands via `astrid timelines ...`
-        rather than `python -m astrid.packs.*` or direct imports?
-      evidence: [stderr]
-      grading: pass_fail
-      weight: 2
-      failure_mode: |
-        Stderr shows direct `python -m astrid.packs.*` invocation instead
-        of `astrid timelines` CLI.
-    - id: erase_before_recover
-      question: |
-        Did the agent erase tampered events BEFORE attempting recovery?
-      evidence: [stderr, report]
-      grading: pass_fail
-      weight: 2
-      failure_mode: |
-        Agent attempted recovery without erasing tampered events first.
-    - id: event_log_contains_erased_and_recovered
-      question: |
-        Does the event log contain timeline.erased and timeline.recovered
-        events after the agent's operations?
-      evidence: [project_tree, report]
-      grading: pass_fail
-      weight: 2
-      failure_mode: |
-        Event log is missing lifecycle events; erasure/recovery may have failed.
+  - id: invoked_via_canonical_cli
+    question: |
+      Did the agent invoke timeline commands via `astrid timelines ...`
+      rather than `python -m astrid.packs.*` or direct imports?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows direct `python -m astrid.packs.*` invocation instead
+      of `astrid timelines` CLI.
+  - id: erase_before_recover
+    question: |
+      Did the agent erase tampered events BEFORE attempting recovery?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Agent attempted recovery without erasing tampered events first.
+  - id: event_log_contains_erased_and_recovered
+    question: |
+      Does the event log contain timeline.erased and timeline.recovered
+      events after the agent's operations?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Event log is missing lifecycle events; erasure/recovery may have failed.
   graded:
-    - id: chain_passes_after_recovery
-      question: |
-        Does `astrid timelines show --verify` pass chain verification
-        after the full detect-erase-recover loop?
-      evidence: [stderr, report]
-      grading: pass_fail
-      weight: 2
-    - id: report_shape_intact
-      question: |
-        Does the report contain sections on tamper detection, erasure,
-        recovery, and final verification?
-      evidence: [report]
-      grading: pass_fail
-      weight: 1
+  - id: chain_passes_after_recovery
+    question: |
+      Does `astrid timelines show --verify` pass chain verification
+      after the full detect-erase-recover loop?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 2
+  - id: report_shape_intact
+    question: |
+      Does the report contain sections on tamper detection, erasure,
+      recovery, and final verification?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make?"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make?"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  - no_aborts
+  - events_contain: timeline.erased
+  - events_contain: timeline.recovered
+  - no_cross_project_binding
+  - subjective:
+    - detected_tamper_via_verify
+    - erased_tampered_events
+    - recovered_to_good_anchor
+    - confirmed_chain_integrity_after_recovery
+
+  universal_checks: true
+  m2_checks:
+    s1_append_not_rewrite:
+      enabled: true

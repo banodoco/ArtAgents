@@ -1,6 +1,6 @@
 # Brief: vague video request
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
@@ -15,7 +15,7 @@ That's it. No tool names. No pipeline hints. You decide.
 
 - You are working inside the Astrid repo. Everything you need is reachable
   through `python3 -m astrid`.
-- Attach to project `$SLUG` first.
+- Attach to project `${SLUG}` first.
 - Do NOT freelance a video pipeline with ad-hoc ffmpeg / moviepy / python.
   If an existing tool fits, use it.
 - If no source video is staged, fall back to any small placeholder media
@@ -29,7 +29,7 @@ That's it. No tool names. No pipeline hints. You decide.
 ## What success looks like
 
 You discovered the canonical Astrid orchestrator for this kind of work,
-read its skill / STAGE doc, and started it (target: `$TARGET_ORCH`). You
+read its skill / STAGE doc, and started it (target: `${TARGET_ORCH}`). You
 did not roll your own pipeline.
 
 ## Report back

@@ -1,6 +1,6 @@
 # Brief: exercise timeline mass-undo (runaway-agent scenario)
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
@@ -29,7 +29,7 @@ to a timeline, and now you must undo them all via mass-undo.
 ## Constraints
 
 - Use only `python3 -m astrid timelines ...` CLI commands.
-- Attach to project `$SLUG` first (`astrid attach $SLUG`).
+- Attach to project `${SLUG}` first (`astrid attach ${SLUG}`).
 - Preview mass-undo BEFORE running with --yes.
 - The event log is at `<project>/timelines/<ulid>/assembly.jsonl`.
 

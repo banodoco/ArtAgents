@@ -1,6 +1,6 @@
 # Brief: verify arrangement replacement is retired
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
@@ -8,7 +8,7 @@ Verify that arrangement replacement is no longer a public timeline container
 write path. Canonical full-timeline writes use `timeline.config_replaced` with
 a raw `TimelineConfig`; `arrangement.replaced` is migration-only legacy.
 
-1. Attach to project `$SLUG`.
+1. Attach to project `${SLUG}`.
 2. Create a timeline and add at least one labeled track.
 3. Confirm read-only arrangement inspection works, if available:
    `python3 -m astrid timelines arrangement show <timeline> --json`.

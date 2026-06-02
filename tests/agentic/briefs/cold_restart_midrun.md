@@ -1,4 +1,4 @@
-You're a fresh agent walking into a task that was started by someone else. There's an in-flight run on project `$SLUG` in `/Users/peteromalley/Documents/reigh-workspace/Astrid` — 3 of 6 steps were already attested by a prior actor (`agentic-primer`), and the task is parked mid-flight. **Your job: figure out what's going on and finish it.**
+You're a fresh agent walking into a task that was started by someone else. There's an in-flight run on project `${SLUG}` in `/Users/peteromalley/Documents/reigh-workspace/Astrid` — 3 of 6 steps were already attested by a prior actor (`agentic-primer`), and the task is parked mid-flight. **Your job: figure out what's going on and finish it.**
 
 You have no prior context. Don't trust this brief for state details — discover everything via the CLI.
 
@@ -9,7 +9,7 @@ You have no prior context. Don't trust this brief for state details — discover
 ## Setup
 
 - Working directory: `/Users/peteromalley/Documents/reigh-workspace/Astrid` (already chdir'd).
-- Use `--agent $AGENT_ID` for any `--agent` flag.
+- Use `--agent ${AGENT_ID}` for any `--agent` flag.
 - For attested steps: write artifacts at the printed path, then run the printed `astrid ack` command verbatim.
 - If you get a verifier rejection, READ the rejection and revise. Don't abort.
 
@@ -31,4 +31,4 @@ Each numbered section MUST have at least 2 substantive sentences.
 4. **Friction points.** Where did you have to guess? Where did `astrid next` not tell you enough? Specifically — did the partial-progress state confuse you?
 5. **Single biggest UX surprise** (good or bad).
 
-Honest reporting. Confusion is data. Run tag: `$RUN_TAG`.
+Honest reporting. Confusion is data. Run tag: `${RUN_TAG}`.

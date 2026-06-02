@@ -1,0 +1,42 @@
+name: artifact_pipeline
+tier: core
+description: |
+  Structural M4 scenario verifying A-to-B artifact provenance handoff.
+  The fixture writes upstream artifact bytes, computes their CAS hash,
+  and writes a downstream consumer diagnostic asserting that the
+  downstream input hash matches the upstream artifact hash.  Evidence
+  lives under m4/artifact_pipeline.json.
+mode: structural
+
+brief: artifact_pipeline.md
+
+priming:
+  - create_project: ${SLUG}
+
+agents:
+  - model: ""
+    dispatcher: fake
+    count: 1
+
+budget:
+  max_tokens_per_agent: 0
+  max_wall_clock_min: 1
+
+tags:
+  - m4
+  - artifact
+  - provenance
+  - structural
+
+extras:
+  m4_fixture:
+    name: artifact_pipeline
+  m4_checks:
+    artifact_pipeline:
+      enabled: true
+
+assessment:
+  universal_checks: false
+  enforced: []
+  graded: []
+  observed: []

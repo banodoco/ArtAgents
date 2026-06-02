@@ -1,13 +1,13 @@
 # Brief: exercise timeline history (read-only)
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
 Verify that `astrid timelines history` is read-only — it reads the event log
 without appending new events.
 
-1. Create a timeline in `$SLUG` and add a few clips and tracks
+1. Create a timeline in `${SLUG}` and add a few clips and tracks
 2. Capture the event log content before history
 3. Run: `astrid timelines history <timeline>`
 4. Capture the event log content after history
@@ -17,7 +17,7 @@ without appending new events.
 ## Constraints
 
 - Use only `python3 -m astrid timelines ...` CLI commands.
-- Attach to project `$SLUG` first.
+- Attach to project `${SLUG}` first.
 
 ## Report back
 

@@ -1,0 +1,36 @@
+name: _smoke
+tier: 0
+description: |
+  Fake structural smoke scenario.  Exercises the full Sisypy adapter prime →
+  capture round-trip with a real Astrid project and a single orchestrator
+  start.  Produces mandatory evidence (events.jsonl + tree.txt) without
+  dispatching a real actor.  Local-only — never run in live mode.
+mode: structural
+
+priming:
+  - create_project: $SLUG
+  - start: video_editing.hype
+
+agents:
+  - model: ""
+    dispatcher: fake
+
+budget:
+  max_tokens_per_agent: 0
+  max_wall_clock_min: 1
+
+tags:
+  - smoke
+  - local-only
+  - structural
+
+extras:
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
+
+assessment:
+  universal_checks: false
+  enforced: []
+  graded: []
+  observed: []

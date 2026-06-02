@@ -10,78 +10,96 @@ description: |
 brief: timeline_mass_undo.md
 
 priming:
-  - create_project: $SLUG
+- create_project: ${SLUG}
 
 target_orchestrator: video_editing.hype
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
-  - no_aborts
-  - events_contain: clip.added
-  - events_contain: clip.removed
-  - no_cross_project_binding
-  - subjective:
-      - exercised_mass_undo_preview
-      - exercised_mass_undo_yes
-      - verified_idempotent_inverses
-      - reported_scanned_appended_skipped_counts
+- no_aborts
+- events_contain: clip.added
+- events_contain: clip.removed
+- no_cross_project_binding
+- subjective:
+  - exercised_mass_undo_preview
+  - exercised_mass_undo_yes
+  - verified_idempotent_inverses
+  - reported_scanned_appended_skipped_counts
 
 budget:
   max_tokens_per_agent: 32768
   max_wall_clock_min: 15
 
 tags:
-  - timeline
-  - mass_undo
-  - recovery
-  - runaway_agent
+- timeline
+- mass_undo
+- recovery
+- runaway_agent
 
 assessment:
-  universal_checks: true
   enforced:
-    - id: invoked_via_canonical_cli
-      question: |
-        Did the agent invoke timeline commands via `astrid timelines ...`
-        rather than `python -m astrid.packs.*` or direct imports?
-      evidence: [stderr]
-      grading: pass_fail
-      weight: 2
-      failure_mode: |
-        Stderr shows direct `python -m astrid.packs.*` invocation instead
-        of `astrid timelines` CLI.
-    - id: mass_undo_preview_before_write
-      question: |
-        Did the agent run mass-undo in preview mode first (without --yes)
-        before committing with --yes?
-      evidence: [stderr, report]
-      grading: pass_fail
-      weight: 2
-      failure_mode: |
-        Agent ran mass-undo with --yes without previewing first.
-    - id: event_log_contains_inverse_events
-      question: |
-        Does the event log contain both the original clip.added events
-        AND their clip.removed inverses after undo?
-      evidence: [project_tree, report]
-      grading: pass_fail
-      weight: 2
-      failure_mode: |
-        Event log is missing inverse events; undo may have silently failed.
+  - id: invoked_via_canonical_cli
+    question: |
+      Did the agent invoke timeline commands via `astrid timelines ...`
+      rather than `python -m astrid.packs.*` or direct imports?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows direct `python -m astrid.packs.*` invocation instead
+      of `astrid timelines` CLI.
+  - id: mass_undo_preview_before_write
+    question: |
+      Did the agent run mass-undo in preview mode first (without --yes)
+      before committing with --yes?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Agent ran mass-undo with --yes without previewing first.
+  - id: event_log_contains_inverse_events
+    question: |
+      Does the event log contain both the original clip.added events
+      AND their clip.removed inverses after undo?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Event log is missing inverse events; undo may have silently failed.
   graded:
-    - id: report_shape_intact
-      question: |
-        Does the report contain sections on what was done, preview results,
-        undo execution, and event log verification?
-      evidence: [report]
-      grading: pass_fail
-      weight: 1
+  - id: report_shape_intact
+    question: |
+      Does the report contain sections on what was done, preview results,
+      undo execution, and event log verification?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make?"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make?"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  - no_aborts
+  - events_contain: clip.added
+  - events_contain: clip.removed
+  - no_cross_project_binding
+  - subjective:
+    - exercised_mass_undo_preview
+    - exercised_mass_undo_yes
+    - verified_idempotent_inverses
+    - reported_scanned_appended_skipped_counts
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
+    c4_projection_fidelity:
+      enabled: true

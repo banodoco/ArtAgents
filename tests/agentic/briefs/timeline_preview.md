@@ -1,13 +1,13 @@
 # Brief: exercise timeline preview (read-only)
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
 Verify that the `astrid timelines preview` command is read-only — it reads the
 current timeline state without appending any events to the event log.
 
-1. Create a timeline in `$SLUG` with at least one clip
+1. Create a timeline in `${SLUG}` with at least one clip
 2. Capture the event log content (assembly.jsonl) before preview
 3. Run: `astrid timelines preview <timeline>`
 4. Capture the event log content after preview
@@ -17,7 +17,7 @@ current timeline state without appending any events to the event log.
 ## Constraints
 
 - Use only `python3 -m astrid timelines ...` CLI commands.
-- Attach to project `$SLUG` first.
+- Attach to project `${SLUG}` first.
 
 ## Report back
 

@@ -1,0 +1,42 @@
+name: timeline_large_audit
+tier: core
+description: |
+  Structural M4 scenario verifying large-scale timeline chain integrity.
+  The fixture appends and verifies at least 500 valid timeline events via
+  the production CRUD/edit APIs, then confirms verify_chain_ok and
+  within_budget.  Evidence lives under m4/timeline_large_audit.json.
+mode: structural
+
+brief: timeline_large_audit.md
+
+priming:
+  - create_project: ${SLUG}
+
+agents:
+  - model: ""
+    dispatcher: fake
+    count: 1
+
+budget:
+  max_tokens_per_agent: 0
+  max_wall_clock_min: 1
+
+tags:
+  - m4
+  - timeline
+  - audit
+  - large-scale
+  - structural
+
+extras:
+  m4_fixture:
+    name: timeline_large_audit
+  m4_checks:
+    timeline_large_audit:
+      enabled: true
+
+assessment:
+  universal_checks: false
+  enforced: []
+  graded: []
+  observed: []

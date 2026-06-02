@@ -1,0 +1,129 @@
+name: author_run_revise_loop
+tier: authoring
+description: |
+  Agent is asked to author an orchestrator that produces a specific output,
+  run it, observe that the output is wrong or incomplete, revise the DSL,
+  and rerun successfully. This probes the full author→run→observe→revise→
+  rerun loop: can the agent close the feedback loop between what it built
+  and what actually ran?
+
+  In structural mode, a frozen diagnostic fixture (m5/author_run_revise_loop.json)
+  simulates the wrong-then-fixed loop. In live mode, the agent's own
+  observation of the first run's output provides the revise trigger.
+
+brief: author_run_revise_loop.md
+
+priming:
+- create_project: ${SLUG}
+
+agents:
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
+
+acceptance:
+  # Machine-graded
+- no_aborts
+  # Subjective
+- subjective:
+  - authored_orchestrator
+  - ran_first_time
+  - observed_wrong_output
+  - revised_dsl
+  - reran_successfully
+
+budget:
+  max_tokens_per_agent: 65536
+  max_wall_clock_min: 30
+
+tags:
+- authoring
+- execute
+- revise
+- loop
+
+assessment:
+  enforced:
+  - id: authored_orchestrator
+    question: |
+      Did the agent create a new DSL orchestrator (not hand-written YAML,
+      not modifying an existing one)?
+    evidence: [project_tree, stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      tree.txt shows no new `.py` DSL file was created, or the agent
+      only edited an existing orchestrator without authoring a new one.
+  - id: revised_after_wrong_output
+    question: |
+      Did the agent revise the DSL after the first run produced wrong
+      or incomplete output (rather than declaring success after the
+      first wrong run)?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Agent ran the orchestrator once, got wrong output, and declared
+      done without revising. Or agent never ran the orchestrator at all.
+  graded:
+  - id: ran_first_time
+    question: |
+      Did the agent run the orchestrator (via `astrid orchestrators run`)
+      after authoring it?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+  - id: observed_wrong_output
+    question: |
+      Did the agent explicitly observe that the first run's output was
+      wrong or incomplete (in the report or stderr)?
+    evidence: [report, stderr]
+    grading: pass_fail
+    weight: 1
+  - id: reran_successfully
+    question: |
+      Did the agent rerun the orchestrator after revising, and did the
+      second run produce the correct output?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 1
+  - id: used_author_check
+    question: |
+      Did the agent run `astrid author check` on the revised
+      orchestrator before the second run?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+  observed:
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+  - id: revision_count
+    question: "How many DSL revisions did the agent make? (integer, metadata only)"
+    evidence: [report, stderr]
+    grading: numeric
+    weight: 0
+
+extras:
+  legacy_acceptance:
+  # Machine-graded
+  - no_aborts
+  # Subjective
+  - subjective:
+    - authored_orchestrator
+    - ran_first_time
+    - observed_wrong_output
+    - revised_dsl
+    - reran_successfully
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
+    s1_append_not_rewrite:
+      enabled: true
+  m5_checks:
+    author_run_revise_loop:
+      enabled: true

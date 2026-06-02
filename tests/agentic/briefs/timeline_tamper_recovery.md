@@ -1,6 +1,6 @@
 # Brief: exercise timeline tamper/bad-edit recovery
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
@@ -35,7 +35,7 @@ erase, and recover.
 ## Constraints
 
 - Use only `python3 -m astrid timelines ...` CLI commands.
-- Attach to project `$SLUG` first (`astrid attach $SLUG`).
+- Attach to project `${SLUG}` first (`astrid attach ${SLUG}`).
 - Do NOT skip the tamper step — actually modify the JSONL file.
 - Erase BEFORE recovering — use the erase command with event IDs.
 - The event log is at `<project>/timelines/<ulid>/assembly.jsonl`.

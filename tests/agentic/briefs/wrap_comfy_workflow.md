@@ -1,4 +1,4 @@
-You're in `/Users/peteromalley/Documents/reigh-workspace/Astrid`. Your project is `$SLUG`. Use `--agent $AGENT_ID` for any `--agent` flag.
+You're in `/Users/peteromalley/Documents/reigh-workspace/Astrid`. Your project is `${SLUG}`. Use `--agent ${AGENT_ID}` for any `--agent` flag.
 
 **Your job:** at `/tmp/example_comfy.json` you'll find a ComfyUI workflow JSON. It takes a positive prompt (currently `"a serene mountain lake at dawn"`) and produces an image. Wrap this workflow as a new Astrid executor so an agent can later say "give me an image of X" and have it route through this workflow.
 

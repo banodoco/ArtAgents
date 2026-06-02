@@ -1,0 +1,115 @@
+name: discover_projects_runs_sessions
+tier: discovery
+description: |
+  Agent receives a vague request to "check on things" and must discover
+  existing projects, runs, and sessions before taking any action. The
+  agent should run `astrid projects ls`, `astrid runs ls`, and
+  `astrid sessions ls` (or equivalent discovery commands) to understand
+  the current state of the Astrid workspace before deciding what to do.
+
+  This probes the infrastructure discovery path: can the agent orient
+  itself in the Astrid workspace by reading project/run/session state
+  rather than jumping straight to action?
+
+  Distinction from `search_before_authoring`: that scenario tests
+  *pack/orchestrator* discovery (finding the right tool). This scenario
+  tests *infrastructure* discovery (reading project/run/session state).
+
+brief: discover_projects_runs_sessions.md
+
+priming:
+- create_project: ${SLUG}
+
+agents:
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
+
+acceptance:
+  # Subjective
+- subjective:
+  - listed_projects
+  - listed_runs
+  - listed_sessions
+  - oriented_before_acting
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 12
+
+tags:
+- discovery
+- infrastructure
+- orientation
+
+assessment:
+  enforced:
+  - id: listed_projects
+    question: |
+      Did the agent run `astrid projects ls` (or an equivalent project
+      discovery command) before taking any mutating action?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows no `astrid projects ls` or equivalent before the
+      agent ran an executor/orchestrator or edited files.
+  - id: listed_runs
+    question: |
+      Did the agent run `astrid runs ls` (or an equivalent run discovery
+      command) before taking any mutating action?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows no `astrid runs ls` or equivalent before the agent
+      took action.
+  graded:
+  - id: listed_sessions
+    question: |
+      Did the agent run `astrid sessions ls` (or an equivalent session
+      discovery command) before taking any mutating action?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+  - id: oriented_before_acting
+    question: |
+      Did the agent use the discovered state to decide what action to
+      take (rather than listing projects/runs/sessions and then
+      ignoring the output)?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      Report shows the agent listed state but then took an unrelated
+      action without referencing any of the discovered data.
+  - id: report_shape_intact
+    question: |
+      Does the report describe what was discovered and how that
+      informed the agent's next step?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
+  observed:
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+
+extras:
+  legacy_acceptance:
+  # Subjective
+  - subjective:
+    - listed_projects
+    - listed_runs
+    - listed_sessions
+    - oriented_before_acting
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
+  m5_checks:
+    projects_runs_sessions_discovered:
+      enabled: true

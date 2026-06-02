@@ -1,6 +1,6 @@
 # Brief: transcribe and edit into a hype reel
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
@@ -14,7 +14,7 @@ not be two separate tool invocations.
 
 - You are working inside the Astrid repo. Everything goes through
   `python3 -m astrid`.
-- Attach to project `$SLUG` first.
+- Attach to project `${SLUG}` first.
 - Use the existing tool surface. Search before composing. Read the skill
   / STAGE doc of every tool you plan to invoke *before* invoking it.
 - If no source video is staged, synthesize a tiny placeholder (a 1-2
@@ -28,7 +28,7 @@ not be two separate tool invocations.
 
 You discovered both `editorial.transcribe` and `video_editing.hype`, read the
 hype skill / STAGE doc, realized hype already includes the transcribe
-stage, and ran a single `$TARGET_ORCH` invocation rather than two
+stage, and ran a single `${TARGET_ORCH}` invocation rather than two
 redundant ones. (If the docs do *not* make the inclusion obvious, that
 is itself a finding — report it.)
 

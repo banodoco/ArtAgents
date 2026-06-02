@@ -7,55 +7,68 @@ description: |
 brief: timeline_diff.md
 
 priming:
-  - create_project: $SLUG
+- create_project: ${SLUG}
 
 target_orchestrator: video_editing.hype
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
-  - no_aborts
-  - no_cross_project_binding
-  - subjective:
-      - verified_diff_read_only
-      - event_log_unchanged
-      - diff_output_describes_changes
+- no_aborts
+- no_cross_project_binding
+- subjective:
+  - verified_diff_read_only
+  - event_log_unchanged
+  - diff_output_describes_changes
 
 budget:
   max_tokens_per_agent: 32768
   max_wall_clock_min: 10
 
 tags:
-  - timeline
-  - diff
-  - read_only
+- timeline
+- diff
+- read_only
 
 assessment:
-  universal_checks: true
   enforced:
-    - id: invoked_via_canonical_cli
-      question: "Did the agent use canonical CLI surface?"
-      evidence: [stderr]
-      grading: pass_fail
-      weight: 2
-    - id: read_only_no_mutation
-      question: "Is the event log unchanged after `astrid timelines diff`?"
-      evidence: [stderr, project_tree, report]
-      grading: pass_fail
-      weight: 2
-      failure_mode: "Event log grew after a read-only diff command."
+  - id: invoked_via_canonical_cli
+    question: "Did the agent use canonical CLI surface?"
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+  - id: read_only_no_mutation
+    question: "Is the event log unchanged after `astrid timelines diff`?"
+    evidence: [stderr, project_tree, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: "Event log grew after a read-only diff command."
   graded:
-    - id: report_shape_intact
-      question: "Does the report contain the required sections?"
-      evidence: [report]
-      grading: pass_fail
-      weight: 1
+  - id: report_shape_intact
+    question: "Does the report contain the required sections?"
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make?"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make?"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  - no_aborts
+  - no_cross_project_binding
+  - subjective:
+    - verified_diff_read_only
+    - event_log_unchanged
+    - diff_output_describes_changes
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true

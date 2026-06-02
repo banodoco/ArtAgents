@@ -1,13 +1,13 @@
 # Brief: exercise timeline audit (read-only)
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
 Verify that `astrid timelines audit` is read-only — it verifies the event log
 integrity without appending new events.
 
-1. Create a timeline in `$SLUG` and add several events (clips, tracks, effects)
+1. Create a timeline in `${SLUG}` and add several events (clips, tracks, effects)
 2. Capture the event log content before audit
 3. Run: `astrid timelines audit <timeline>`
 4. Capture the event log content after audit
@@ -17,7 +17,7 @@ integrity without appending new events.
 ## Constraints
 
 - Use only `python3 -m astrid timelines ...` CLI commands.
-- Attach to project `$SLUG` first.
+- Attach to project `${SLUG}` first.
 
 ## Report back
 

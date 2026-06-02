@@ -1,0 +1,126 @@
+name: broken_authoring_fix
+tier: authoring
+description: |
+  Agent is told that an existing orchestrator has a compile-breaking DSL
+  bug and must fix it. The orchestrator `video_editing.hype` has been
+  deliberately broken (a syntax error in the DSL file). The agent must
+  run `astrid author check video_editing.hype`, read the error output,
+  identify the bug, fix the DSL, rerun `astrid author check`, and confirm
+  it compiles cleanly.
+
+  This probes the repair sub-path of authoring: can the agent read a
+  compiler error, locate the fault in a DSL file they didn't write, and
+  apply a minimal fix without rewriting the whole orchestrator?
+
+brief: broken_authoring_fix.md
+
+priming:
+- create_project: ${SLUG}
+
+target_orchestrator: video_editing.hype
+
+agents:
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
+
+acceptance:
+  # Machine-graded
+- no_aborts
+  # Subjective
+- subjective:
+  - ran_author_check_first
+  - identified_bug_from_error
+  - applied_minimal_fix
+  - author_check_passed_after_fix
+
+budget:
+  max_tokens_per_agent: 65536
+  max_wall_clock_min: 25
+
+tags:
+- authoring
+- repair
+- dsl
+- adversarial
+
+assessment:
+  enforced:
+  - id: author_check_passed_after_fix
+    question: |
+      Did `astrid author check video_editing.hype` exit 0 after the
+      agent's fix was applied?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows the final `astrid author check ...` exiting non-zero,
+      or the agent declared done without a passing check.
+  - id: applied_minimal_fix
+    question: |
+      Did the agent apply a minimal, targeted fix rather than rewriting
+      the entire orchestrator or replacing the DSL file wholesale?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      The DSL file was completely rewritten with a different structure,
+      or the agent deleted and re-scaffolded the orchestrator from
+      scratch instead of fixing the bug.
+  graded:
+  - id: ran_author_check_first
+    question: |
+      Did the agent run `astrid author check` BEFORE attempting any
+      edits, to observe the failure?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Agent edited the file before running any check, or never ran
+      `astrid author check` at all.
+  - id: identified_bug_from_error
+    question: |
+      Did the agent correctly identify the bug from the `author check`
+      error output (rather than guessing or rewriting blindly)?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      Report describes hunting for the bug via grep/browsing rather
+      than reading the `author check` error, or the agent's diagnosis
+      was incorrect.
+  - id: used_author_check_loop
+    question: |
+      Did the agent iterate via `astrid author check` (at least one
+      failing check followed by one passing check)?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+  observed:
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  # Machine-graded
+  - no_aborts
+  # Subjective
+  - subjective:
+    - ran_author_check_first
+    - identified_bug_from_error
+    - applied_minimal_fix
+    - author_check_passed_after_fix
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
+    s1_append_not_rewrite:
+      enabled: true
+  m5_checks:
+    broken_authoring_fix_loop:
+      enabled: true

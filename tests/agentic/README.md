@@ -20,49 +20,28 @@ Don't run on every commit — these are expensive.
 
 ## How to run
 
+The **Sisypy-backed runner** is the primary entry point. It delegates to
+[Sisypy](https://pypi.org/project/sisypy/) for execution, assessment, and
+reporting while using the Astrid adapter for project lifecycle management.
+
 ```bash
-# Single scenario
+# Single scenario (skip name to run all 36 production scenarios)
 python -m tests.agentic.runner cold_restart
 
-# All scenarios in a tier
-python -m tests.agentic.runner --tier discovery
+# Structural smoke test (no real actor dispatch)
+python -m tests.agentic.runner _smoke --actor fake --mode structural
 
-# Full sweep (warning: $$, ~30 min wall-clock)
-python -m tests.agentic.runner --all
+# With a specific actor and report tag
+python -m tests.agentic.runner vague_video_request --actor hermes --tag v9
+
+# Sisypy help (all supported flags)
+python -m tests.agentic.runner --help
 ```
 
-### Parallel runner (process-per-scenario)
-
-A separate CLI that runs multiple scenarios concurrently, each in its own
-subprocess with filesystem isolation. Cuts wall-clock time for a full
-sweep from ~80-90 min to ~12-15 min while keeping each scenario's
-stdout, stderr, and project state in separate directories.
-
-```bash
-# Full sweep, 3 scenarios at a time (default)
-python -m tests.agentic.parallel_runner --all --run-tag v8
-
-# Specific scenarios, 2 at a time
-python -m tests.agentic.parallel_runner specific_transcribe cold_restart_midrun --parallel 2 --run-tag v8
-
-# Custom timeout (default: 1800s / 30 min per scenario)
-python -m tests.agentic.parallel_runner --all --run-tag v8 --timeout 1200
-
-# Clean up isolated dirs (dry-run; add --apply to actually delete)
-python -m tests.agentic.parallel_runner --cleanup --run-tag v8
-python -m tests.agentic.parallel_runner --cleanup --all --apply
-```
-
-Each scenario gets its own isolated `ASTRID_HOME` and
-`ASTRID_PROJECTS_ROOT` under `/tmp/astrid-parallel-<tag>/<scenario>/`,
-with per-scenario `logs/{stdout,stderr}.log`. Reports still land in the
-shared `tests/agentic/reports/<tag>-<scenario>/` directory (no collision
-risk because each child writes to its own scenario subdirectory). After
-all children finish, `pattern_finder` is invoked automatically to
-produce the cross-scenario synthesis.
-
-The original sequential runner (`python -m tests.agentic.runner --all`)
-is unchanged and still works.
+Legacy flags (`--all`, `--tier`, `--agent`, `--only`, `--timeout`,
+`--budget`, `--run-tag`) are rejected with a migration message directing
+you to the Sisypy equivalents. The legacy runner (`runner_legacy.py`)
+and parallel runner (`parallel_runner.py`) were decommissioned in M5.
 
 Results land in `tests/agentic/reports/<date>-<tag>/` with one markdown
 per agent + a `summary.json` aggregating pass/fail by acceptance criterion.</
@@ -80,47 +59,90 @@ description: |
   Agent receives an open-ended request ("make a video from this footage")
   and must discover `video_editing.hype` rather than rolling their own pipeline.
 priming:
-  - create_project: ${slug}
+  - create_project: ${SLUG}
 brief: vague_video_request.md
 agents:
-  - model: claude         # or deepseek-v4-pro
-    count: 3              # parallel runs for variance
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+target_orchestrator: video_editing.hype
 acceptance:
-  - events_contain: run_completed
   - tool_used: video_editing.hype
-  - shell_calls_under: 40
-  - no_aborts
-  - subjective:                       # graded from the agent's narrative report
-      - did_search_before_authoring
-      - found_existing_pack
+  - subjective:
+      - discovered_via_orchestrators_list_or_search
+      - read_pack_skill_before_running
+      - did_not_reinvent_pipeline_from_scratch
 budget:
   max_tokens_per_agent: 32768
   max_wall_clock_min: 15
+assessment:
+  enforced:
+    - id: invoked_via_canonical_cli
+      question: |
+        Did the agent invoke via `astrid orchestrators run`?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+  graded:
+    - id: discovered_via_orchestrators_list_or_search
+      question: |
+        Did the agent discover `video_editing.hype` via `astrid orchestrators search`?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+    - id: did_not_reinvent_pipeline_from_scratch
+      question: |
+        Did the agent avoid building their own ffmpeg pipeline?
+      evidence: [stderr, report]
+      grading: pass_fail
+      weight: 2
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make?"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+    - tool_used: video_editing.hype
+    - subjective:
+        - discovered_via_orchestrators_list_or_search
+        - read_pack_skill_before_running
+        - did_not_reinvent_pipeline_from_scratch
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
 ```
 
-Each acceptance criterion is either **machine-graded** (parsed from
-`events.jsonl` by the auditor) or **subjective**. The `subjective:`
-block is **informational-only** as of the v6 pipeline — the
-**executable** rubric lives under the scenario's `assessment:` block
-(see "Assessment pipeline" below). The superset validator
-(`tests/agentic/_validate_rubrics.py`) enforces that every subjective
-key has a corresponding rubric question.
+The `acceptance:` block carries legacy criteria. The **executable**
+rubric lives under the scenario's `assessment:` block (consumed by
+Sisypy). The `extras:` block carries mirrored copies
+(`legacy_acceptance`, `target_orchestrator`, `universal_checks`) for
+backward compatibility. See
+[SCENARIO_MIGRATION.md](SCENARIO_MIGRATION.md) for the full per-scenario
+mapping.
 
-## Assessment pipeline (v6)
+## Assessment pipeline (Sisypy, v6+)
 
-The auditor now runs three additional layers beyond the legacy
-machine-criteria pass. All three read from a frozen evidence pack at
-`reports/<date>-<tag>-<scenario>/evidence/<slug>/`, snapshotted by
-`capture.py` post-actor and containing `report.md`, `stderr.log`,
+Sisypy handles enforcement assessment directly via the `assessment:`
+block in each scenario YAML. The deterministic check layers (universal
+enforcement, M2 integrity, M5 behavior) run via the adapter's
+`project_universal_checks()` against a frozen evidence pack at
+`reports/<date>-<tag>-<scenario>/evidence/<slug>/`, captured by the
+adapter post-actor and containing `report.md`, `stderr.log`,
 `runs/*/events.jsonl`, `tree.txt`, `plan.json` (when present), and
 `.astrid-session` (when present).
 
-1. **Universal checks** (`tests/agentic/universal_checks.py`,
-   deterministic Python):
-   - `detect_contradictions` — extracts concrete narrative claims
-     and flags any with no supporting trace in stderr / events /
-     tree / plan.
-   - `canonical_path_bypass` — flags reaching a pack via
+1. **Sisypy assessment** (primary): `assessment.enforced` (hard
+   pass/fail), `assessment.graded` (LLM-evaluated rubric), and
+   `assessment.observed` (telemetry, weight 0). Sisypy's internal
+   evaluator runs these automatically during the run.
+
+2. **Universal enforcement** (`tests/agentic/enforcement.py`,
+   deterministic Python, enabled via `extras.universal_checks: true`):
+   - `_check_canonical_bypass` — flags reaching a pack via
      `python -m astrid.packs.X.run`, `from astrid.packs.X import`,
      `import astrid.packs.X`, or a direct `astrid/packs/X/run.py`
      path. Scenarios that legitimately create new packs can set
@@ -129,22 +151,21 @@ machine-criteria pass. All three read from a frozen evidence pack at
      non-blank lines, and contains each numbered section the brief
      asked for (heading-, bold-, or bullet-numbered).
 
-2. **Per-scenario rubric** (`tests/agentic/assessor.py`, DeepSeek
-   V4 Pro via the OpenAI-compatible API at
-   `https://api.deepseek.com/v1`). Each scenario YAML declares an
-   `assessment:` block with `universal_checks: true` and a
-   `rubric:` list of ≥5 questions. The assessor reads the evidence
-   pack and returns `{verdicts, contradictions, overall_passed,
-   summary, model, elapsed_sec}`. Missing
-   `DEEPSEEK_API_KEY` → soft-skip with `ungraded: true`; key is
-   read from `~/.hermes/.env` as a fallback.
+3. **M2 integrity checks** (`tests/agentic/checks/`): deterministic
+   evidence-level checks (no_mutation_on_read, projection_fidelity,
+   append_not_rewrite, idempotent_reattach) dispatched via
+   `extras.m2_checks`.
 
-3. **Cross-scenario synthesis** (`tests/agentic/pattern_finder.py`):
-   human-invoked CLI that reads every `summary.json` under a
-   dogfood run and dispatches a single DeepSeek call to surface
-   recurring friction patterns. Writes `run.md` + `run.json` to
-   `reports/<date>-<tag>-synthesis/`. Not auto-invoked by the
-   runner — read-only synthesis the human triggers post-run.
+4. **M5 behavior checks** (`tests/agentic/checks/m5_scenarios.py`):
+   deterministic textual-analysis checks (refusal, search fallback,
+   infrastructure discovery, author-check looping, cross-pack
+   discovery, author-run-revise fallback) dispatched via
+   `extras.m5_checks`.
+
+5. **Cross-scenario synthesis** (`tests/agentic/synthesis.py`):
+   read-only deterministic CLI that scans Sisypy evidence packs and
+   aggregates outcomes. Emits `synthesis.md` + `synthesis.json`.
+   Not auto-invoked by the runner — human triggers post-run.
 
 ## Tiers
 
@@ -213,9 +234,10 @@ round of fixes.
 ## When you add a new scenario
 
 1. Drop a YAML under `scenarios/` matching the schema in
-   `scenarios/_schema.yaml`.
-2. Drop the brief template under `briefs/` (variables: `$SLUG`,
-   `$AGENT_ID`, `$ORCH`).
+   `scenarios/_schema.yaml` and the conventions in
+   [SCENARIO_MIGRATION.md](SCENARIO_MIGRATION.md).
+2. Drop the brief template under `briefs/` (variables: `${SLUG}`,
+   `${AGENT_ID}`, `${RUN_TAG}`, `${TARGET_ORCH}`).
 3. Add the orchestrator(s) under `astrid/packs/builtin/` if it's new
    (or reference an existing one).
 4. Run it: `python -m tests.agentic.runner <name>`.

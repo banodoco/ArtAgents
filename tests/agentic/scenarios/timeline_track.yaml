@@ -8,61 +8,78 @@ description: |
 brief: timeline_track.md
 
 priming:
-  - create_project: $SLUG
+- create_project: ${SLUG}
 
 target_orchestrator: video_editing.hype
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
-  - no_aborts
-  - events_contain: track.added
-  - events_contain: track.removed
-  - no_cross_project_binding
-  - subjective:
-      - exercised_track_verbs
-      - verified_event_log
-      - confirmed_read_only_no_mutation
+- no_aborts
+- events_contain: track.added
+- events_contain: track.removed
+- no_cross_project_binding
+- subjective:
+  - exercised_track_verbs
+  - verified_event_log
+  - confirmed_read_only_no_mutation
 
 budget:
   max_tokens_per_agent: 32768
   max_wall_clock_min: 10
 
 tags:
-  - timeline
-  - track
-  - edit_verb
+- timeline
+- track
+- edit_verb
 
 assessment:
-  universal_checks: true
   enforced:
-    - id: invoked_via_canonical_cli
-      question: "Did the agent use canonical CLI surface?"
-      evidence: [stderr]
-      grading: pass_fail
-      weight: 2
-    - id: event_log_contains_edit_verbs
-      question: "Does assembly.jsonl contain track.added (×2) and track.removed events?"
-      evidence: [project_tree, report]
-      grading: pass_fail
-      weight: 2
-    - id: read_only_no_mutation
-      question: "Did read-only commands leave the event log unchanged?"
-      evidence: [stderr, project_tree, report]
-      grading: pass_fail
-      weight: 1
+  - id: invoked_via_canonical_cli
+    question: "Did the agent use canonical CLI surface?"
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+  - id: event_log_contains_edit_verbs
+    question: "Does assembly.jsonl contain track.added (×2) and track.removed events?"
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+  - id: read_only_no_mutation
+    question: "Did read-only commands leave the event log unchanged?"
+    evidence: [stderr, project_tree, report]
+    grading: pass_fail
+    weight: 1
   graded:
-    - id: report_shape_intact
-      question: "Does the report contain the required sections?"
-      evidence: [report]
-      grading: pass_fail
-      weight: 1
+  - id: report_shape_intact
+    question: "Does the report contain the required sections?"
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make?"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make?"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  - no_aborts
+  - events_contain: track.added
+  - events_contain: track.removed
+  - no_cross_project_binding
+  - subjective:
+    - exercised_track_verbs
+    - verified_event_log
+    - confirmed_read_only_no_mutation
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
+    c4_projection_fidelity:
+      enabled: true

@@ -1,0 +1,42 @@
+name: timeline_compose_edit
+tier: core
+description: |
+  Structural M4 scenario verifying composite timeline edits across all
+  six feature axes (track, clip, audio_bind, transition, effect, theme).
+  The fixture creates a timeline, appends one edit event per axis via
+  the production CRUD/edit APIs, and verifies chain integrity, head
+  consistency, and projection fidelity.
+mode: structural
+
+brief: timeline_compose_edit.md
+
+priming:
+  - create_project: ${SLUG}
+
+agents:
+  - model: ""
+    dispatcher: fake
+    count: 1
+
+budget:
+  max_tokens_per_agent: 0
+  max_wall_clock_min: 1
+
+tags:
+  - m4
+  - timeline
+  - compose
+  - structural
+
+extras:
+  m4_fixture:
+    name: timeline_compose_edit
+  m4_checks:
+    timeline_compose_edit:
+      enabled: true
+
+assessment:
+  universal_checks: false
+  enforced: []
+  graded: []
+  observed: []

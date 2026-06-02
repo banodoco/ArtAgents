@@ -35,6 +35,9 @@ dev = [
     "pytest-cov==7.1.0",
     "ruff==0.12.0",
     "build",
+    # sisypy backs the migrated tests/agentic/ suite (agentic scenario testing).
+    # Private, not on PyPI — installed from its GitHub repo.
+    "sisypy @ git+https://github.com/peteromallet/sisypy.git",
 ]
 
 # Requires a configured private package index (e.g. local wheelhouse or git

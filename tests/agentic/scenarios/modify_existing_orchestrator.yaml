@@ -26,88 +26,103 @@ target_orchestrator: video_editing.hype
 brief: modify_existing_orchestrator.md
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
-  - no_aborts
+- no_aborts
 
-  - subjective:
-      - located_correct_file
-      - preserved_existing_steps
-      - recompiled_cleanly
-      - added_step_at_end
-      - used_author_check_loop
+- subjective:
+  - located_correct_file
+  - preserved_existing_steps
+  - recompiled_cleanly
+  - added_step_at_end
+  - used_author_check_loop
 
 budget:
   max_tokens_per_agent: 65536
   max_wall_clock_min: 25
 
 tags:
-  - authoring
-  - modify
-  - dsl
+- authoring
+- modify
+- dsl
 
 assessment:
-  universal_checks: true
   enforced:
-      - id: preserved_existing_steps
-        question: |
-          After the edit, do all of the orchestrator's original steps
-          still exist with their original ids/shape (no rewrites, no
-          renamed steps)?
-        evidence: [report, project_tree]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Report describes "I refactored / rewrote / renamed" existing
-          steps, OR the new file has fewer steps than the original.
-      - id: recompiled_cleanly
-        question: |
-          Did `astrid author check video_editing.hype` exit 0 after the edit?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 2
+  - id: preserved_existing_steps
+    question: |
+      After the edit, do all of the orchestrator's original steps
+      still exist with their original ids/shape (no rewrites, no
+      renamed steps)?
+    evidence: [report, project_tree]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Report describes "I refactored / rewrote / renamed" existing
+      steps, OR the new file has fewer steps than the original.
+  - id: recompiled_cleanly
+    question: |
+      Did `astrid author check video_editing.hype` exit 0 after the edit?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
   graded:
-      - id: located_correct_file
-        question: |
-          Did the agent identify and edit `astrid/packs/builtin/hype.py`
-          (the DSL file) rather than `astrid/packs/builtin/hype/` (the
-          legacy Stage-based folder)?
-        evidence: [project_tree, stderr, report]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Diffs / file writes appear under `astrid/packs/builtin/hype/`
-          (the folder) rather than `hype.py` (the DSL sibling).
-      - id: added_step_at_end
-        question: |
-          Is the new "review" step appended at the end of the step
-          sequence (not inserted in the middle or prepended)?
-        evidence: [report, project_tree]
-        grading: pass_fail
-        weight: 1
-      - id: used_author_check_loop
-        question: |
-          Did the agent invoke `astrid author check` at least once
-          BEFORE declaring done (iterative check, not just a final
-          validation)?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 1
-        failure_mode: |
-          Stderr shows only zero or one `astrid author check`
-          invocations, with the single one being a final validation
-          AFTER the edit was already declared complete in the report.
+  - id: located_correct_file
+    question: |
+      Did the agent identify and edit `astrid/packs/builtin/hype.py`
+      (the DSL file) rather than `astrid/packs/builtin/hype/` (the
+      legacy Stage-based folder)?
+    evidence: [project_tree, stderr, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Diffs / file writes appear under `astrid/packs/builtin/hype/`
+      (the folder) rather than `hype.py` (the DSL sibling).
+  - id: added_step_at_end
+    question: |
+      Is the new "review" step appended at the end of the step
+      sequence (not inserted in the middle or prepended)?
+    evidence: [report, project_tree]
+    grading: pass_fail
+    weight: 1
+  - id: used_author_check_loop
+    question: |
+      Did the agent invoke `astrid author check` at least once
+      BEFORE declaring done (iterative check, not just a final
+      validation)?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      Stderr shows only zero or one `astrid author check`
+      invocations, with the single one being a final validation
+      AFTER the edit was already declared complete in the report.
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make? (integer, metadata only)"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
-    - id: canonical_bypass_form
-      question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
-      evidence: [stderr]
-      grading: text
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+  - id: canonical_bypass_form
+    question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
+    evidence: [stderr]
+    grading: text
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  - no_aborts
+
+  - subjective:
+    - located_correct_file
+    - preserved_existing_steps
+    - recompiled_cleanly
+    - added_step_at_end
+    - used_author_check_loop
+
+  universal_checks: true
+  m2_checks:
+    s1_append_not_rewrite:
+      enabled: true

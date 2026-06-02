@@ -13,85 +13,98 @@ description: |
 brief: concurrent_disambiguation.md
 
 priming:
-  - create_project: $SLUG
+- create_project: ${SLUG}
 
 # DeepSeek for parallelism — 3 concurrent Claude subagents would saturate the harness.
 agents:
-  - model: deepseek-v4-pro
-    count: 3
+- model: deepseek-v4-pro
+  count: 3
 
 acceptance:
   # Machine-graded
-  - events_contain: run_completed
-  - no_cross_project_binding
+- events_contain: run_completed
+- no_cross_project_binding
 
   # Subjective (graded from the agent's narrative report)
-  - subjective:
-      - never_silently_bound_to_sibling
+- subjective:
+  - never_silently_bound_to_sibling
 
 budget:
   max_tokens_per_agent: 32768
   max_wall_clock_min: 20
 
 tags:
-  - concurrency
-  - session_resolution
-  - cross_project
+- concurrency
+- session_resolution
+- cross_project
 
 assessment:
-  universal_checks: true
   enforced:
-      - id: never_silently_bound_to_sibling
-        question: |
-          Did the agent's CLI calls always resolve to its own project
-          slug, with no events or stderr entries referencing a sibling
-          agent's slug as the bound project?
-        evidence: [stderr, events]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Events under this agent's runs/ reference a sibling slug as
-          their `project_slug`, or stderr shows `auto-resolved session for
-          project '<sibling-slug>'`.
-      - id: completed_run_on_own_project
-        question: |
-          Did the agent reach `run_completed` for an orchestrator on its
-          own project's run directory?
-        evidence: [events]
-        grading: pass_fail
-        weight: 2
-      - id: invoked_via_canonical_cli
-        question: |
-          Did the agent invoke the orchestrator via `astrid orchestrators
-          run` rather than `python -m astrid.packs.X.run` or a direct
-          import?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 2
+  - id: never_silently_bound_to_sibling
+    question: |
+      Did the agent's CLI calls always resolve to its own project
+      slug, with no events or stderr entries referencing a sibling
+      agent's slug as the bound project?
+    evidence: [stderr, events]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Events under this agent's runs/ reference a sibling slug as
+      their `project_slug`, or stderr shows `auto-resolved session for
+      project '<sibling-slug>'`.
+  - id: completed_run_on_own_project
+    question: |
+      Did the agent reach `run_completed` for an orchestrator on its
+      own project's run directory?
+    evidence: [events]
+    grading: pass_fail
+    weight: 2
+  - id: invoked_via_canonical_cli
+    question: |
+      Did the agent invoke the orchestrator via `astrid orchestrators
+      run` rather than `python -m astrid.packs.X.run` or a direct
+      import?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
   graded:
-      - id: saw_autoresolve_warning_or_used_explicit_project
-        question: |
-          Did the agent either receive the `auto-resolved session for
-          project '<slug>' ... pass --project explicitly to override`
-          stderr warning OR consistently pass `--project <slug>` on every
-          astrid call?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 1
-        failure_mode: |
-          Stderr shows astrid calls without --project AND without the
-          auto-resolve warning, implying silent global session binding.
-      - id: report_acknowledges_disambiguation
-        question: |
-          Does the agent's report acknowledge the concurrent / sibling
-          context (mentioning .astrid-session, --project, or the
-          cross-project guardrails)?
-        evidence: [report]
-        grading: pass_fail
-        weight: 1
+  - id: saw_autoresolve_warning_or_used_explicit_project
+    question: |
+      Did the agent either receive the `auto-resolved session for
+      project '<slug>' ... pass --project explicitly to override`
+      stderr warning OR consistently pass `--project <slug>` on every
+      astrid call?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      Stderr shows astrid calls without --project AND without the
+      auto-resolve warning, implying silent global session binding.
+  - id: report_acknowledges_disambiguation
+    question: |
+      Does the agent's report acknowledge the concurrent / sibling
+      context (mentioning .astrid-session, --project, or the
+      cross-project guardrails)?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make? (integer, metadata only)"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  legacy_acceptance:
+  # Machine-graded
+  - events_contain: run_completed
+  - no_cross_project_binding
+
+  # Subjective (graded from the agent's narrative report)
+  - subjective:
+    - never_silently_bound_to_sibling
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true
