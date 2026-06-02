@@ -12,7 +12,6 @@ Captions remain visual tracks with label convention; no separate caption kind.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from ._edit_helpers import (
     TimelineEditError,
@@ -27,7 +26,7 @@ from .events.schema import (
     TrackKind,
     TrackRemovedPayload,
 )
-
+from .kinds import normalize_track_kind
 
 # ---------------------------------------------------------------------------
 # track_add
@@ -64,8 +63,7 @@ def track_add(
 
     if not isinstance(track_id, str) or not track_id.strip():
         raise TimelineEditError("track_id must be a non-empty string")
-    if kind not in {"visual", "audio"}:
-        raise TimelineEditError(f"kind must be 'visual' or 'audio', got {kind!r}")
+    kind = normalize_track_kind(kind, error_cls=TimelineEditError)
     if not isinstance(label, str) or not label.strip():
         raise TimelineEditError("label must be a non-empty string")
 

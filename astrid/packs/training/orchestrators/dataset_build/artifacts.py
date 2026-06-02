@@ -9,7 +9,6 @@ from typing import Any
 
 from .items import sha256_file, stable_json_sha256
 
-
 HASHES_KEY = "hashes"
 _RUNTIME_CONFIG_KEYS = {
     "artifact_helpers",

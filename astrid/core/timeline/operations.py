@@ -26,7 +26,6 @@ from astrid.core.timeline.projection import (
     replay_projection,
 )
 
-
 # ============================================================================
 # Structured result
 # ============================================================================
@@ -100,8 +99,8 @@ def recover_to_event(
         ProjectionError: When chain verification fails or projection fails.
     """
     # Import locally to avoid circular imports at module level
-    from .observability import resolve_timeline_target
     from .eventlog import build_timeline_backend, select_timeline_stream
+    from .observability import resolve_timeline_target
     from .paths import timeline_dir as _timeline_dir
 
     # 1. Resolve the timeline target
@@ -226,8 +225,8 @@ def recover_to_snapshot(
         ValueError: When snapshot metadata mismatches the stream identity.
         ProjectionError: When chain verification fails or hash mismatch.
     """
-    from .observability import resolve_timeline_target
     from .eventlog import build_timeline_backend, select_timeline_stream
+    from .observability import resolve_timeline_target
     from .paths import timeline_dir as _timeline_dir
 
     # 1. Resolve the timeline target

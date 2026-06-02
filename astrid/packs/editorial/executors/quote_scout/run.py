@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('editorial.quote_scout')
 import argparse
 import json
@@ -127,21 +127,24 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    transcript = json.loads(args.transcript.read_text(encoding="utf-8"))
-    payload = build_quote_candidates(transcript, client=build_claude_client(args.env_file), model=args.model)
-    out_dir = args.out.resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "quote_candidates.json"
-    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    register_outputs(
-        stage="quote_scout",
-        outputs=[("quote_candidates", out_path, "Quote candidates")],
-        metadata={"model": args.model, "candidates": len(payload.get("candidates", []))},
-    )
-    print(out_path)
-    return 0
+    def _run() -> int:
+        parser = build_parser()
+        args = parser.parse_args(argv)
+        transcript = json.loads(args.transcript.read_text(encoding="utf-8"))
+        payload = build_quote_candidates(transcript, client=build_claude_client(args.env_file), model=args.model)
+        out_dir = args.out.resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "quote_candidates.json"
+        out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        register_outputs(
+            stage="quote_scout",
+            outputs=[("quote_candidates", out_path, "Quote candidates")],
+            metadata={"model": args.model, "candidates": len(payload.get("candidates", []))},
+        )
+        print(out_path)
+        return 0
+
+    return run_pack_main("editorial.quote_scout", _run, argv=list(argv) if argv is not None else None)
 
 
 if __name__ == "__main__":

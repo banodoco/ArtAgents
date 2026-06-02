@@ -49,12 +49,14 @@ never mutated.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
-import json
 from typing import Any, Literal, Sequence
 
 from astrid import timeline as timeline_contract
+from astrid.contracts.errors import AstridError
+from astrid.core.timeline.kinds import normalize_track_kind
 
 from .events.schema import (
     AudioBoundPayload,
@@ -64,8 +66,8 @@ from .events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
-    ClipRetrackedPayload,
     ClipRetimedPayload,
+    ClipRetrackedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
     EffectAddedPayload,
@@ -82,7 +84,6 @@ from .events.schema import (
     TransitionRemovedPayload,
     TransitionSetPayload,
 )
-
 
 # ============================================================================
 # ProjectionError
@@ -127,6 +128,10 @@ class ErasedPayloadProjectionError(ProjectionError):
         )
 
 
+class TimelineProjectionBoundaryError(AstridError, ValueError):
+    """Raised when a projected TimelineConfig fails the runtime boundary check."""
+
+
 _PROJECTED_TOP_ALLOWED = frozenset({
     "tracks",
     "clips",
@@ -139,39 +144,51 @@ _PROJECTED_FORBIDDEN_CLIP_KEYS = frozenset({"kind", "asset_id", "start", "durati
 def _validate_projected_timeline_boundary(state: dict[str, Any]) -> dict[str, Any]:
     """Validate the raw TimelineConfig projection boundary without registry lookups."""
     if not isinstance(state, dict):
-        raise ValueError("projected TimelineConfig must be an object")
+        raise TimelineProjectionBoundaryError("projected TimelineConfig must be an object")
     unknown = sorted(key for key in state if key not in _PROJECTED_TOP_ALLOWED)
     if unknown:
-        raise ValueError(f"projected TimelineConfig has unknown key(s): {unknown}")
+        raise TimelineProjectionBoundaryError(f"projected TimelineConfig has unknown key(s): {unknown}")
     for key in ("clips", "tracks"):
         if key not in state:
-            raise ValueError(f"projected TimelineConfig missing required key: {key}")
+            raise TimelineProjectionBoundaryError(f"projected TimelineConfig missing required key: {key}")
         if not isinstance(state[key], list):
-            raise ValueError(f"projected TimelineConfig.{key} must be a list")
+            raise TimelineProjectionBoundaryError(f"projected TimelineConfig.{key} must be a list")
     for index, track in enumerate(state["tracks"]):
         if not isinstance(track, dict):
-            raise ValueError(f"projected TimelineConfig.tracks[{index}] must be an object")
+            raise TimelineProjectionBoundaryError(f"projected TimelineConfig.tracks[{index}] must be an object")
         if not isinstance(track.get("id"), str) or not track.get("id"):
-            raise ValueError(f"projected TimelineConfig.tracks[{index}].id must be a non-empty string")
-        if track.get("kind") not in {"visual", "audio"}:
-            raise ValueError(f"projected TimelineConfig.tracks[{index}].kind must be visual or audio")
+            raise TimelineProjectionBoundaryError(
+                f"projected TimelineConfig.tracks[{index}].id must be a non-empty string"
+            )
+        try:
+            normalize_track_kind(track.get("kind"))
+        except ValueError as exc:
+            raise TimelineProjectionBoundaryError(
+                f"projected TimelineConfig.tracks[{index}].kind {exc}"
+            ) from exc
         if not isinstance(track.get("label"), str) or not track.get("label"):
-            raise ValueError(f"projected TimelineConfig.tracks[{index}].label must be a non-empty string")
+            raise TimelineProjectionBoundaryError(
+                f"projected TimelineConfig.tracks[{index}].label must be a non-empty string"
+            )
     for index, clip in enumerate(state["clips"]):
         if not isinstance(clip, dict):
-            raise ValueError(f"projected TimelineConfig.clips[{index}] must be an object")
+            raise TimelineProjectionBoundaryError(
+                f"projected TimelineConfig.clips[{index}] must be an object"
+            )
         legacy = sorted(key for key in clip if key in _PROJECTED_FORBIDDEN_CLIP_KEYS)
         if legacy:
-            raise ValueError(
+            raise TimelineProjectionBoundaryError(
                 f"projected TimelineConfig.clips[{index}] has legacy key(s): {legacy}"
             )
         for key in ("id", "track", "clipType"):
             if not isinstance(clip.get(key), str) or not clip.get(key):
-                raise ValueError(
+                raise TimelineProjectionBoundaryError(
                     f"projected TimelineConfig.clips[{index}].{key} must be a non-empty string"
                 )
         if not isinstance(clip.get("at"), (int, float)) or isinstance(clip.get("at"), bool):
-            raise ValueError(f"projected TimelineConfig.clips[{index}].at must be a number")
+            raise TimelineProjectionBoundaryError(
+                f"projected TimelineConfig.clips[{index}].at must be a number"
+            )
     return json.loads(json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False))
 
 

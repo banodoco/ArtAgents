@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('foley.foley_review')
 import argparse
 import html
@@ -13,7 +13,6 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">

@@ -12,9 +12,7 @@ Two FS effects per install:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
-
-from typing import Optional
+from typing import Iterable, Optional
 
 from ..discovery import SkillDescriptor
 from .base import Action, HarnessAdapter, InstallRecord, PlannedStep, ensure_symlink, remove_symlink

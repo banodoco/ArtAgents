@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('iteration.prepare')
 import argparse
 import concurrent.futures
@@ -18,8 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid import modalities
+from astrid._paths import REPO_ROOT
 from astrid.threads.ids import is_ulid
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.record import sha256_file
@@ -60,22 +61,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    try:
-        result = prepare_iteration(
-            repo_root=Path(args.repo_root),
-            out_path=Path(args.out),
-            target_run_id=args.target_run_id,
-            max_iterations=args.max_iterations,
-            summarizer_model_version=args.summarizer_model_version,
-            cost_per_call=args.cost_per_call,
-            summary_query=args.summary_query,
-        )
-    except PrepareError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    print(json.dumps({"manifest": result["manifest_path"], "quality": result["quality_path"]}, sort_keys=True))
-    return 0
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
+        try:
+            result = prepare_iteration(
+                repo_root=Path(args.repo_root),
+                out_path=Path(args.out),
+                target_run_id=args.target_run_id,
+                max_iterations=args.max_iterations,
+                summarizer_model_version=args.summarizer_model_version,
+                cost_per_call=args.cost_per_call,
+                summary_query=args.summary_query,
+            )
+        except PrepareError as exc:
+            raise AstridError(
+                str(exc),
+                recovery_command="verify the target run id is a valid 26-character Crockford ULID and exists, or raise --max-iterations for the summarization cap, then retry",
+            ) from exc
+        print(json.dumps({"manifest": result["manifest_path"], "quality": result["quality_path"]}, sort_keys=True))
+        return 0
+
+    return run_pack_main("iteration.prepare", _run, argv=argv)
 
 
 class PrepareError(RuntimeError):

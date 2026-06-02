@@ -9,7 +9,6 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('reigh.reigh_data')
 import argparse
 import json
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -27,6 +26,8 @@ from astrid.core.reigh.env import (
     resolve_supabase_url,
     resolve_task_status_update_url,
 )
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import run_pack_main
 
 
 def fetch_reigh_data(
@@ -86,30 +87,41 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    try:
-        data = fetch_reigh_data(
-            project_id=args.project_id,
-            shot_id=args.shot_id,
-            task_id=args.task_id,
-            timeline_id=args.timeline_id,
-            api_url=args.api_url,
-            pat=args.pat,
-            env_file=args.env_file,
-            timeout=args.timeout,
-        )
-    except RuntimeError as exc:
-        print(f"reigh-data: {exc}", file=sys.stderr)
-        return 2
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
+        try:
+            data = fetch_reigh_data(
+                project_id=args.project_id,
+                shot_id=args.shot_id,
+                task_id=args.task_id,
+                timeline_id=args.timeline_id,
+                api_url=args.api_url,
+                pat=args.pat,
+                env_file=args.env_file,
+                timeout=args.timeout,
+            )
+        except RuntimeError as exc:
+            raise AstridError(
+                str(exc),
+                recovery_command="check REIGH_PAT / --pat and the reigh-data Edge Function URL, then retry",
+                state_snapshot={
+                    "project_id": args.project_id,
+                    "shot_id": args.shot_id,
+                    "task_id": args.task_id,
+                    "timeline_id": args.timeline_id,
+                },
+            ) from exc
 
-    indent = None if args.compact else 2
-    text = json.dumps(data, indent=indent, sort_keys=False) + "\n"
-    if args.out:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(text, encoding="utf-8")
-    else:
-        print(text, end="")
-    return 0
+        indent = None if args.compact else 2
+        text = json.dumps(data, indent=indent, sort_keys=False) + "\n"
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(text, encoding="utf-8")
+        else:
+            print(text, end="")
+        return 0
+
+    return run_pack_main("reigh.reigh_data", _run, argv=argv)
 
 
 if __name__ == "__main__":

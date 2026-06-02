@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core._search import (
     SearchRecord,
     short_description_or_truncated,
@@ -23,6 +24,11 @@ from astrid.core.update import update_apply, update_check
 from .install import install_element
 from .registry import ElementRegistryError, load_default_registry
 from .schema import ElementDefinition, ElementValidationError, to_capability_handle
+
+
+# Shared stderr sink for override-management diagnostics.
+def _eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,8 +47,7 @@ def main(argv: list[str] | None = None) -> int:
         registry.override_store = override_store
         return int(args.handler(args, registry))
     except (KeyError, ElementRegistryError, ElementValidationError, ValueError, OverrideStoreError) as exc:
-        print(f"elements: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -315,7 +320,7 @@ def _cmd_install(args: argparse.Namespace, registry: Any) -> int:
 def _cmd_override(args: argparse.Namespace, registry: Any) -> int:
     store = registry.override_store
     if store is None:
-        print("elements: override store not available", file=sys.stderr)
+        _eprint("elements: override store not available")
         return 1
     action = getattr(args, "override_action", None)
     if action == "set":
@@ -333,7 +338,7 @@ def _cmd_override(args: argparse.Namespace, registry: Any) -> int:
             for override_id, target in sorted(mappings.items()):
                 print(f"{override_type}/{override_id} → {target}")
     else:
-        print(f"elements override: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"elements override: unknown action {action!r}")
         return 2
     return 0
 
@@ -362,7 +367,7 @@ def _cmd_dirty(args: argparse.Namespace, registry: Any) -> int:
         if dirty_found == 0:
             print("no dirty capabilities")
     else:
-        print(f"elements dirty: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"elements dirty: unknown action {action!r}")
         return 2
     return 0
 
@@ -387,7 +392,7 @@ def _cmd_update(args: argparse.Namespace, registry: Any) -> int:
         print(report["report"])
         return 0 if report.get("applied") else 1
     else:
-        print(f"elements update: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"elements update: unknown action {action!r}")
         return 2
 
 

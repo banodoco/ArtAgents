@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any, Mapping, Protocol
 
 from astrid.core.project.jsonio import write_json_atomic
-from astrid.packs.training.orchestrators.dataset_build.interfaces import ArtifactPullResult, ComputeHandle
+from astrid.packs.training.orchestrators.dataset_build.interfaces import (
+    ArtifactPullResult,
+    ComputeHandle,
+)
 
 
 class RegisterRemoteBackend(Protocol):

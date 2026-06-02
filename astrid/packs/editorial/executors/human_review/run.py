@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.human_review')
 import argparse
 import json
@@ -23,8 +24,10 @@ from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
 from astrid.core.util.log_and_swallow import log_and_swallow
-from astrid.packs.training.orchestrators.dataset_build.state import read_review_state, write_review_state
-
+from astrid.packs.training.orchestrators.dataset_build.state import (
+    read_review_state,
+    write_review_state,
+)
 
 _GEMINI_SCHEMA_KEYS = {
     "type", "properties", "required", "items", "enum", "description",
@@ -146,7 +149,10 @@ def _apply_dataset_diff_save(state_path: Path, body: dict[str, Any]) -> dict[str
 def _apply_dataset_batch_save(state_path: Path, data_path: Path, body: dict[str, Any]) -> dict[str, Any]:
     item_ids = _batch_item_ids(data_path, body)
     if not item_ids:
-        raise ValueError("batch save matched no item_ids")
+        raise AstridError(
+            "batch save matched no item_ids",
+            recovery_command="check filter criteria or provide explicit item_ids",
+        )
     decision = _normalize_decision(body.get("decision", body.get("review_status", "pending")))
     revisions = [
         {
@@ -174,7 +180,10 @@ def _batch_item_ids(data_path: Path, body: Mapping[str, Any]) -> list[str]:
         return [str(item_id) for item_id in item_ids if item_id is not None]
     scope = str(body.get("scope", ""))
     if scope != "filtered":
-        raise ValueError("batch save requires item_ids or scope='filtered'")
+        raise AstridError(
+            "batch save requires item_ids or scope='filtered'",
+            recovery_command="provide item_ids list or set scope='filtered' with optional status/sampled filters",
+        )
     status = body.get("status")
     filter_config = body.get("filter") if isinstance(body.get("filter"), Mapping) else {}
     if status is None:
@@ -478,11 +487,15 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if not args.html.exists():
-        print(f"Error: --html not found: {args.html}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"--html not found: {args.html}",
+            recovery_command="verify the --html path points to an existing file",
+        )
     if not args.data.is_file():
-        print(f"Error: --data not found: {args.data}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"--data not found: {args.data}",
+            recovery_command="verify the --data path points to an existing JSON file",
+        )
 
     args.state = _optional_path(args.state)
     args.response_schema = _optional_path(args.response_schema)
@@ -522,9 +535,11 @@ def main(argv: list[str] | None = None) -> int:
     start_t = time.time()
     while not shutdown_event.is_set():
         if args.timeout and (time.time() - start_t) >= args.timeout:
-            print(f"human_review: timeout after {args.timeout}s without /submit", file=sys.stderr)
             server.shutdown()
-            return 3
+            raise AstridError(
+                f"human_review: timeout after {args.timeout}s without /submit",
+                recovery_command="submit the review form or increase --timeout",
+            )
         time.sleep(0.25)
 
     server.shutdown()
@@ -533,4 +548,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except AstridError as exc:
+        sys.exit(render_astrid_error(exc))

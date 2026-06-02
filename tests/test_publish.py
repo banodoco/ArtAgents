@@ -20,6 +20,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.contracts.errors import AstridError
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -216,12 +218,12 @@ class CLIStartupRejectionTest(unittest.TestCase):
             "REIGH_USER_TOKEN": "pat_some_personal_access_token",
             "REIGH_SUPABASE_URL": "https://x.supabase.co",
         }, clear=False), mock.patch.object(publish, "_request") as request:
-            rc = publish.main([
-                "--project-id", "00000000-0000-0000-0000-000000000000",
-                "--timeline-id", "11111111-1111-1111-1111-111111111111",
-                "--timeline-file", "/nonexistent.json",
-            ])
-            self.assertEqual(rc, 1)
+            with self.assertRaisesRegex(AstridError, "JWT"):
+                publish.main([
+                    "--project-id", "00000000-0000-0000-0000-000000000000",
+                    "--timeline-id", "11111111-1111-1111-1111-111111111111",
+                    "--timeline-file", "/nonexistent.json",
+                ])
             request.assert_not_called()
 
 

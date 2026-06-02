@@ -15,7 +15,6 @@ from astrid.core.project.jsonio import read_json, write_json_atomic
 from .config import MISSING_SCHEMA_VERSION_SOURCE
 from .items import utc_now_iso
 
-
 SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
 RUN_STATE_SCHEMA = "run-state.schema.json"
 

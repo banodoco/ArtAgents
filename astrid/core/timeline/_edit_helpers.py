@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project.jsonio import read_json
 
 from .eventlog import EventLogBackend, select_timeline_backend
@@ -48,13 +49,12 @@ from .paths import (
 )
 from .projection import regenerate_projection
 
-
 # ---------------------------------------------------------------------------
 # Shared exception base
 # ---------------------------------------------------------------------------
 
 
-class TimelineEditError(RuntimeError):
+class TimelineEditError(AstridError):
     """Raised when a timeline edit cannot be completed.
 
     All domain edit modules (clip_edits, transition_edits, effect_edits,
@@ -62,6 +62,9 @@ class TimelineEditError(RuntimeError):
     raise this exception or a subclass.  The CLI entrypoint catches it
     via a single ``except TimelineEditError`` clause.
     """
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(cause)
 
 
 # Backward-compatible alias for clip_edits

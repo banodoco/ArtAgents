@@ -7,7 +7,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..interfaces import FilterResult
-from ._common import build_filter_stats, canonical_source_id, increment_reason, pass_item, record_warning, reject_item
+from ._common import (
+    build_filter_stats,
+    canonical_source_id,
+    increment_reason,
+    pass_item,
+    record_warning,
+    reject_item,
+)
 
 
 class SourceCapFilter:

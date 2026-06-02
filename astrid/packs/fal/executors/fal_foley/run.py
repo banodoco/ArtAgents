@@ -4,13 +4,13 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('fal.fal_foley')
 import argparse
 import base64
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +21,6 @@ from astrid.core.util.http import (
     fal_submit_and_poll,
 )
 from astrid.core.util.secrets import load_api_key
-
 
 FAL_MODEL_ID = "fal-ai/hunyuan-video-foley"
 
@@ -93,8 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     clip = args.clip.expanduser().resolve()
     if not clip.is_file():
-        print(f"Error: clip not found: {clip}", file=sys.stderr)
-        return 1
+        raise AstridError(f"clip not found: {clip}", recovery_command="verify the clip path exists and is a valid video file")
     out = args.out.expanduser().resolve()
 
     payload_preview = {

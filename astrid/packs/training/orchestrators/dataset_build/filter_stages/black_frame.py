@@ -22,7 +22,6 @@ from ._common import (
     resolve_media_path,
 )
 
-
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 BLACK_DURATION_RE = re.compile(r"black_duration:(?P<duration>[0-9.]+)")
 

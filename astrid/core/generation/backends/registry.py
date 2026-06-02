@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid._paths import REPO_ROOT
-
 from astrid.core.generation.backends.base import BackendAdapter
 from astrid.core.generation.features import CLOUD_BACKEND_ID, LOCAL_BACKEND_ID
 from astrid.core.pack import PackDefinition, discover_packs

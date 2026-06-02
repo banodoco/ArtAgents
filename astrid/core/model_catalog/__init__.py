@@ -7,8 +7,8 @@ from astrid.core.generation.features import (
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.model_catalog.schema import (
     BackendSpec,
-    ModeSpec,
     ModelEntry,
+    ModeSpec,
     validate_registry,
 )
 

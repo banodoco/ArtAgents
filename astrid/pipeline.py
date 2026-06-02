@@ -30,8 +30,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import (
+    AstridError,
+    coerce_astrid_error,
+    render_astrid_error,
+    wrap_degraded_error,
+)
 from astrid.core.util.log_and_swallow import log_and_swallow
-
 
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
 # of main(): for these verbs the --project flag identifies the run, NOT a
@@ -93,6 +98,19 @@ _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
 def main(argv: list[str] | None = None) -> int:
     raw = sys.argv[1:] if argv is None else list(argv)
+    try:
+        return _main_impl(raw)
+    except AstridError as exc:
+        return render_astrid_error(exc)
+    except Exception as exc:  # noqa: BLE001
+        bug = wrap_degraded_error(
+            exc,
+            state_snapshot={"argv": raw, "entrypoint": "astrid.pipeline.main"},
+        )
+        return render_astrid_error(bug)
+
+
+def _main_impl(raw: list[str]) -> int:
     first_arg = next(iter(raw), None)
     if first_arg in {"-h", "--help", "help"}:
         _print_entrypoint_help()
@@ -138,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(
                     f"(auto-resolved session for project {discovered_slug!r} "
                     f"via .astrid-session; pass --project to override)",
-                    file=sys.stderr,
+                    file=sys.__stderr__,
                 )
 
             from astrid.core.project.paths import resolve_projects_root
@@ -149,8 +167,11 @@ def main(argv: list[str] | None = None) -> int:
                 projects_root=resolve_projects_root(),
             )
         except SessionBindingError as exc:
-            _print_unbound_gate_recovery(f"session: {exc}")
-            return 2
+            raise AstridError(
+                f"session: {exc}",
+                recovery_command="astrid status",
+                state_snapshot={"argv": raw},
+            ) from exc
         if session is None:
             project_hint = _extract_project_slug(raw)
             attach_hint = (
@@ -158,11 +179,12 @@ def main(argv: list[str] | None = None) -> int:
                 if project_hint
                 else "`astrid attach <project>`"
             )
-            _print_unbound_gate_recovery(
+            raise AstridError(
                 f"no session bound — run `astrid status` to list projects, then {attach_hint} "
-                "(or `astrid attach` if a default project is configured)"
+                "(or `astrid attach` if a default project is configured)",
+                recovery_command="astrid status",
+                state_snapshot={"argv": raw, "project": project_hint},
             )
-            return 2
 
     if _verb_bypasses_task_gate(raw):
         return _dispatch(raw)
@@ -175,8 +197,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         decision = task_gate.gate_command(project_slug, task_gate.command_for_argv(raw), raw)
     except task_gate.TaskRunGateError as exc:
-        print(f"task-mode gate rejected: {exc.reason}\nrecovery: {exc.recovery}", file=sys.stderr)
-        return 1
+        raise coerce_astrid_error(
+            exc,
+            state_snapshot={"argv": raw, "project": project_slug, "gate": "task-mode"},
+        ) from exc
     if not decision.active:
         return _dispatch(raw)
 
@@ -221,11 +245,6 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
     return False
 
 
-def _print_unbound_gate_recovery(message: str) -> None:
-    print("first recovery action: astrid status", file=sys.stderr)
-    print(message, file=sys.stderr)
-
-
 def _dispatch(raw: list[str]) -> int:
     if not raw:
         _print_entrypoint_help()
@@ -235,8 +254,12 @@ def _dispatch(raw: list[str]) -> int:
     if first.startswith("-"):
         return _dispatch_default_brief(raw)
     if first not in _top_level_commands():
-        print(f"astrid: unknown command '{first}'", file=sys.stderr)
-        raise SystemExit(2)
+        raise AstridError(
+            f"unknown command '{first}'",
+            valid_options=sorted(_top_level_commands()),
+            recovery_command="astrid --help",
+            state_snapshot={"command": first},
+        )
 
     parser = _build_dispatch_parser()
     parsed, tail = parser.parse_known_args(raw)
@@ -581,7 +604,7 @@ def _dispatch_events(args: list[str]) -> int:
     """
     import argparse
 
-    from astrid.core.task.run_audit import cmd_events_verify, cmd_events_tail
+    from astrid.core.task.run_audit import cmd_events_tail, cmd_events_verify
 
     parser = argparse.ArgumentParser(prog="astrid events")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -637,8 +660,11 @@ def _dispatch_runpod_volumes(_parsed: Any, args: list[str]) -> int:
     except SystemExit:
         return 2
     if parsed.command != "ls":
-        print("usage: astrid runpod volumes ls", file=sys.stderr)
-        return 2
+        raise AstridError(
+            "usage: astrid runpod volumes ls",
+            recovery_command="astrid runpod volumes ls",
+            state_snapshot={"command": "runpod volumes"},
+        )
 
     from .core.runpod.storage import list_volumes
 
@@ -653,8 +679,11 @@ def _dispatch_runpod_volumes(_parsed: Any, args: list[str]) -> int:
         asyncio.run(_volumes_ls())
         return 0
     except Exception as exc:
-        print(f"runpod volumes ls: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"runpod volumes ls failed: {exc}",
+            recovery_command="astrid runpod volumes ls",
+            state_snapshot={"command": "runpod volumes ls"},
+        ) from exc
 
 
 def _dispatch_runpod_ensure_storage(_parsed: Any, args: list[str]) -> int:
@@ -687,8 +716,11 @@ def _dispatch_runpod_ensure_storage(_parsed: Any, args: list[str]) -> int:
         asyncio.run(_ensure())
         return 0
     except Exception as exc:
-        print(f"ensure-storage: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"ensure-storage failed: {exc}",
+            recovery_command="astrid runpod ensure-storage <name>",
+            state_snapshot={"command": "runpod ensure-storage"},
+        ) from exc
 
 
 def _wait_adapter(decision: Any) -> int:
@@ -766,7 +798,6 @@ def _make_run_ctx_for_poll(
 
 def _read_returncode_sidecar(decision: Any) -> int:
     """If the subprocess pid is gone, try to read the returncode sidecar file."""
-    from pathlib import Path
 
     project_root = getattr(decision, "project_root", None)
     run_id = getattr(decision, "run_id", None)
@@ -807,7 +838,11 @@ def _run_default_brief_orchestrator(argv: list[str]) -> int:
     runtime_module = orchestrator.metadata.get("runtime_module")
     runtime_entrypoint = orchestrator.metadata.get("runtime_entrypoint", "main")
     if not isinstance(runtime_module, str) or not runtime_module:
-        raise RuntimeError("video_editing.hype manifest is missing metadata.runtime_module")
+        raise AstridError(
+            "video_editing.hype manifest is missing metadata.runtime_module",
+            recovery_command="astrid orchestrators inspect video_editing.hype --json",
+            state_snapshot={"orchestrator_id": "video_editing.hype"},
+        )
     module = import_module(runtime_module)
     entrypoint = getattr(module, runtime_entrypoint)
     return int(entrypoint(argv))

@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from astrid.contracts.errors import AstridError
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -329,12 +331,12 @@ def test_provision_storage_required_fails_before_launch_with_ensure_storage_hint
 
     with patch("runpod_lifecycle.launch", mock_launch), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        exit_code = cmd_provision(Args(), produces_dir)
+        with pytest.raises(AstridError) as raised:
+            cmd_provision(Args(), produces_dir)
 
-    assert exit_code == 2
+    assert ENSURE_STORAGE_HINT in raised.value.cause
     mock_launch.assert_not_awaited()
     create_storage.assert_not_called()
-    assert ENSURE_STORAGE_HINT in capsys.readouterr().err
 
 
 def test_provision_named_storage_missing_fails_before_launch_without_creation(
@@ -364,14 +366,13 @@ def test_provision_named_storage_missing_fails_before_launch_without_creation(
     with patch("runpod_lifecycle.launch", mock_launch), \
          patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        exit_code = cmd_provision(Args(), produces_dir)
+        with pytest.raises(AstridError) as raised:
+            cmd_provision(Args(), produces_dir)
 
-    assert exit_code == 2
+    assert "missing-volume" in raised.value.cause
+    assert ENSURE_STORAGE_HINT in raised.value.cause
     mock_launch.assert_not_awaited()
     create_storage.assert_not_called()
-    err = capsys.readouterr().err
-    assert "missing-volume" in err
-    assert ENSURE_STORAGE_HINT in err
 
 
 def test_provision_configured_storage_name_is_recorded_in_canonical_handle(
@@ -445,12 +446,12 @@ def test_session_storage_required_fails_before_launch_with_ensure_storage_hint(
 
     with patch("runpod_lifecycle.launch", mock_launch), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        exit_code = cmd_session(Args(), produces_dir)
+        with pytest.raises(AstridError) as raised:
+            cmd_session(Args(), produces_dir)
 
-    assert exit_code == 2
+    assert ENSURE_STORAGE_HINT in raised.value.cause
     mock_launch.assert_not_awaited()
     create_storage.assert_not_called()
-    assert ENSURE_STORAGE_HINT in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -1066,9 +1067,8 @@ def test_session_breadcrumb_survives_on_crash(
                 excludes = None
                 produces_dir = produces_dir
 
-            exit_code = cmd_session(Args(), produces_dir)
-            # Session should return non-zero on crash
-            assert exit_code != 0
+            with pytest.raises(AstridError, match="simulated exec crash"):
+                cmd_session(Args(), produces_dir)
 
             # When a Python exception is raised and caught by except,
             # the finally block still runs → handle is deleted.

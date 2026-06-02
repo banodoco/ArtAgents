@@ -15,12 +15,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project.jsonio import write_json_atomic
 
 from .acquisition import build_acquisition_request
 from .budget import BudgetTracker
-from .caption_validation import validate_accepted_captions
 from .caption_providers import caption_candidate
+from .caption_validation import validate_accepted_captions
 from .config import (
     BudgetPreflightError,
     ConfigParseError,
@@ -31,14 +32,20 @@ from .config import (
     preflight_budget_and_secrets,
 )
 from .filter_stages import canonical_source_id, get_filter_stage
-from .items import config_hash, deterministic_id, make_review_item, repo_relative_path, sha256_file, utc_now_iso
+from .items import (
+    config_hash,
+    deterministic_id,
+    make_review_item,
+    repo_relative_path,
+    sha256_file,
+    utc_now_iso,
+)
 from .manifest import accepted_items, build_canonical_manifest, write_canonical_manifest
 from .manifest_adapters import get_manifest_adapter
-from .review import apply_review_decisions, write_human_review_final, write_review_data
 from .reports.quality_report import write_quality_report
+from .review import apply_review_decisions, write_human_review_final, write_review_data
 from .source_providers import get_source_provider
 from .state import make_initial_state, read_review_state, set_status, write_review_state
-
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REVIEW_UI_ROOT = PACKAGE_ROOT / "review_ui"
@@ -115,8 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         parsed_config = load_dataset_config(args.config)
         preflight_budget_and_secrets(parsed_config)
     except (ConfigParseError, BudgetPreflightError, SecretPreflightError) as exc:
-        print(f"training.dataset_build: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(str(exc)) from exc
 
     if args.dry_run:
         print(
@@ -150,8 +156,9 @@ def main(argv: list[str] | None = None) -> int:
             review_only=args.review_only,
         )
     except Exception as exc:  # noqa: BLE001 - CLI should record failed state and exit cleanly
-        print(f"training.dataset_build: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return 1
+        if isinstance(exc, AstridError):
+            raise
+        raise AstridError(str(exc)) from exc
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
 
@@ -967,7 +974,7 @@ def _load_candidates(path: Path) -> list[dict[str, Any]]:
     payload = _read_json(path)
     candidates = payload.get("candidates") if isinstance(payload, Mapping) else payload
     if not isinstance(candidates, list):
-        raise ValueError(f"{path.name} must contain a candidates list")
+        raise AstridError(f"{path.name} must contain a candidates list", recovery_command="check that the candidates JSON file contains a valid candidates array")
     return [dict(candidate) for candidate in candidates if isinstance(candidate, Mapping)]
 
 
@@ -978,11 +985,11 @@ def _write_filtered_items(path: Path, active: list[dict[str, Any]], rejected: li
 def _load_filtered_items(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     payload = _read_json(path)
     if not isinstance(payload, Mapping):
-        raise ValueError(f"{path.name} must contain filtered item groups")
+        raise AstridError(f"{path.name} must contain filtered item groups", recovery_command="verify the filtered items JSON file has the expected structure with active and rejected lists")
     active = payload.get("active")
     rejected = payload.get("rejected")
     if not isinstance(active, list) or not isinstance(rejected, list):
-        raise ValueError(f"{path.name} must contain active and rejected lists")
+        raise AstridError(f"{path.name} must contain active and rejected lists", recovery_command="verify the filtered items JSON file contains both active and rejected arrays")
     return [dict(item) for item in active if isinstance(item, Mapping)], [dict(item) for item in rejected if isinstance(item, Mapping)]
 
 
@@ -990,7 +997,7 @@ def _load_review_data(path: Path) -> list[dict[str, Any]]:
     payload = _read_json(path)
     items = payload.get("items") if isinstance(payload, Mapping) else payload
     if not isinstance(items, list):
-        raise ValueError(f"{path.name} must contain an items list")
+        raise AstridError(f"{path.name} must contain an items list", recovery_command="verify the review data JSON file contains an items array")
     return [dict(item) for item in items if isinstance(item, Mapping)]
 
 
@@ -1274,7 +1281,7 @@ def _load_review_decisions(path: str | Path, *, round_index: int = 0) -> dict[st
         raw = rounds[str(round_index)]
     elif round_index > 0:
         if not isinstance(rounds, Mapping) or str(round_index) not in rounds:
-            raise ValueError(f"non-interactive top-up round {round_index} requires review decisions JSON with rounds.{round_index}")
+            raise AstridError(f"non-interactive top-up round {round_index} requires review decisions JSON with rounds.{round_index}", recovery_command=f"add a rounds.{round_index} key to the review decisions JSON file")
     else:
         raw = payload.get("review_decisions", payload.get("decisions", payload.get("revisions", payload))) if isinstance(payload, Mapping) else payload
     decisions: dict[str, dict[str, Any]] = {}
@@ -1283,7 +1290,7 @@ def _load_review_decisions(path: str | Path, *, round_index: int = 0) -> dict[st
     elif isinstance(raw, list):
         iterable = ((entry.get("item_id"), entry) for entry in raw if isinstance(entry, Mapping))
     else:
-        raise ValueError("review decisions JSON must be an object or list")
+        raise AstridError("review decisions JSON must be an object or list", recovery_command="ensure the review decisions JSON file contains either a JSON object or a JSON array")
     for item_id, decision in iterable:
         if item_id is None or not isinstance(decision, Mapping):
             continue
@@ -1304,7 +1311,7 @@ def _load_review_decisions(path: str | Path, *, round_index: int = 0) -> dict[st
 def _require_review_decisions(decisions: Mapping[str, Any], required_item_ids: set[str], *, round_index: int) -> None:
     missing = sorted(item_id for item_id in required_item_ids if item_id not in decisions)
     if missing:
-        raise ValueError(f"round {round_index} review decisions missing required item_ids: {', '.join(missing)}")
+        raise AstridError(f"round {round_index} review decisions missing required item_ids: {', '.join(missing)}", recovery_command=f"add review decisions for the missing item_ids to the round {round_index} decisions")
 
 
 def _accept_all_decisions(items: list[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:

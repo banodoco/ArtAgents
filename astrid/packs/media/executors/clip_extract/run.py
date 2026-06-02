@@ -8,13 +8,12 @@ and shells out to ffmpeg.
 
 from __future__ import annotations
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint("media.clip_extract")
 import argparse
-import shlex
 import subprocess
-import sys
 from pathlib import Path
 from typing import Callable
 
@@ -69,38 +68,40 @@ def build_ffmpeg_cmd(src: Path, start: float, dur: float, out: Path) -> list[str
 
 
 def main(argv: list[str] | None = None, *, runner: Runner = subprocess.run) -> int:
-    args = build_parser().parse_args(argv)
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
 
-    # Resolve paths
-    src = args.input.expanduser().resolve()
-    out = args.output.expanduser().resolve()
+        # Resolve paths
+        src = args.input.expanduser().resolve()
+        out = args.output.expanduser().resolve()
 
-    # Guard against missing/invalid inputs
-    error = validate_args(
-        argparse.Namespace(input=src, start=args.start, dur=args.dur)
-    )
-    if error is not None:
-        print(f"Error: {error}", file=sys.stderr)
-        return 1
-
-    # Ensure the output directory exists before ffmpeg writes to it.
-    out.parent.mkdir(parents=True, exist_ok=True)
-
-    cmd = build_ffmpeg_cmd(src, args.start, args.dur, out)
-
-    print(f"  [clip_extract] {shlex.join(cmd)}", file=sys.stderr)
-
-    result = runner(cmd, check=False)
-
-    if result.returncode != 0:
-        print(
-            f"Error: ffmpeg exited with {result.returncode}", file=sys.stderr
+        # Guard against missing/invalid inputs
+        error = validate_args(
+            argparse.Namespace(input=src, start=args.start, dur=args.dur)
         )
-        if result.stderr:
-            sys.stderr.write(result.stderr)
-        return result.returncode
+        if error is not None:
+            raise AstridError(
+                error,
+                recovery_command="check the input file path, start time, and duration are correct, then rerun",
+            )
 
-    return 0
+        # Ensure the output directory exists before ffmpeg writes to it.
+        out.parent.mkdir(parents=True, exist_ok=True)
+
+        cmd = build_ffmpeg_cmd(src, args.start, args.dur, out)
+
+        result = runner(cmd, check=False)
+
+        if result.returncode != 0:
+            raise AstridError(
+                f"ffmpeg exited with {result.returncode}",
+                recovery_command="verify the input file is a valid video and ffmpeg is installed, then rerun",
+                state_snapshot={"ffmpeg_stderr": result.stderr} if result.stderr else None,
+            )
+
+        return 0
+
+    return run_pack_main("media.clip_extract", _run, argv=argv)
 
 
 if __name__ == "__main__":

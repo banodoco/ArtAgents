@@ -3,33 +3,33 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.thumbnail_maker')
 import argparse
 import datetime as dt
 import json
-import math
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from astrid.core.util.hash import sha256_file
-from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import build_plan_v2, emit_plan_json
-from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
+from astrid.core.cli_choices import add_choice_arg
+from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.project.run import (
-    ProjectRunError,
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.project.paths import project_dir, validate_project_slug
-
+from astrid.core.task import env as task_env
+from astrid.core.task import gate as task_gate
+from astrid.core.util.hash import sha256_file
+from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
+    build_plan_v2,
+    emit_plan_json,
+)
 
 # ---------------------------------------------------------------------------
 # Constants (kept from original)
@@ -244,10 +244,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--size", default=DEFAULT_SIZE, type=normalized_size)
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--quality", default=DEFAULT_QUALITY, choices=("low", "medium", "high", "auto"))
-    parser.add_argument("--output-format", default=DEFAULT_OUTPUT_FORMAT, choices=("png", "jpeg", "jpg", "webp"))
-    parser.add_argument("--visual-mode", default=DEFAULT_VISUAL_MODE, choices=("fast", "best"))
-    parser.add_argument("--reference-mode", default=DEFAULT_REFERENCE_MODE, choices=("auto", "always", "never"))
+    add_choice_arg(parser, "--quality", values=("low", "medium", "high", "auto"), default=DEFAULT_QUALITY)
+    add_choice_arg(parser, "--output-format", values=("png", "jpeg", "jpg", "webp"), default=DEFAULT_OUTPUT_FORMAT)
+    add_choice_arg(parser, "--visual-mode", values=("fast", "best"), default=DEFAULT_VISUAL_MODE)
+    add_choice_arg(parser, "--reference-mode", values=("auto", "always", "never"), default=DEFAULT_REFERENCE_MODE)
     parser.add_argument("--max-candidates", type=int, default=DEFAULT_MAX_CANDIDATES)
     parser.add_argument("--previous-manifest", type=Path)
     parser.add_argument("--feedback")
@@ -382,8 +382,10 @@ def run_orchestrator(args: argparse.Namespace) -> int:
         return 0
 
     if project_slug is None:
-        print("thumbnail_maker: --project required for task-gate execution", file=sys.stderr)
-        return 1
+        raise AstridError(
+            "thumbnail_maker: --project required for task-gate execution",
+            recovery_command="add --project <slug> to your command",
+        )
 
     slug = validate_project_slug(project_slug)
     return _execute_via_task_gate(slug, args)
@@ -403,8 +405,10 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            print(f"thumbnail_maker: gate error: {exc.reason}", file=sys.stderr)
-            return 1
+            raise AstridError(
+                f"thumbnail_maker: gate error: {exc.reason}",
+                recovery_command="check project status with 'astrid status' and retry",
+            ) from exc
 
         if not decision.active:
             return 0
@@ -415,8 +419,10 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
         print(f"thumbnail_maker: running step: {' '.join(decision.command)}", flush=True)
         result = sp.run(decision.command, check=False)
         if result.returncode != 0:
-            print(f"thumbnail_maker: step failed with returncode={result.returncode}", file=sys.stderr)
-            return result.returncode
+            raise AstridError(
+                f"thumbnail_maker: step failed with returncode={result.returncode}",
+                recovery_command="inspect the failed step output and rerun with --verbose",
+            )
 
     return 0
 
@@ -446,8 +452,10 @@ def _run_step_subcommand(
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            print(exc.recovery, file=sys.stderr)
-            return 1
+            raise AstridError(
+                str(exc),
+                recovery_command="check project status with 'astrid status' and retry",
+            ) from exc
 
     returncode = runner(args)
     if decision is not None:
@@ -497,8 +505,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args=args,
                 runner=_exec_generate_thumbnails,
             )
-        print(f"thumbnail_maker: unknown subcommand: {args.command}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"thumbnail_maker: unknown subcommand: {args.command}",
+            valid_options=sorted(step_commands),
+            recovery_command="choose one of the valid subcommands listed above",
+        )
 
     project_context = None
 
@@ -519,8 +530,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reentry=True,
                 )
             except task_gate.TaskRunGateError as exc:
-                print(exc.recovery, file=sys.stderr)
-                return 1
+                raise AstridError(
+                    str(exc),
+                    recovery_command="check project status with 'astrid status' and retry",
+                ) from exc
 
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)

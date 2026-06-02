@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
-from typing import Any
 
+from ..events.schema import TimelineActor, TimelineEvent
 from .protocol import SupabaseEventLogTransport
 from .types import (
     EventLogAuthRequiredError,
@@ -14,7 +14,6 @@ from .types import (
     EventLogUnsupportedRpcError,
     EventLogVerification,
 )
-from ..events.schema import TimelineActor, TimelineEvent
 
 
 class SupabaseBackend:

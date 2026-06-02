@@ -6,9 +6,9 @@ import json
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
+from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
-from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.util.time import utc_now_milliseconds
 
 

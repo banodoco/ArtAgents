@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from astrid._media import ffprobe_duration_seconds
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import add_choice_arg
 from astrid.utilities.llm_clients import build_gemini_client
 
 
@@ -69,8 +71,10 @@ RESPONSE_SCHEMA = {
 
 
 def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
+    raise AstridError(
+        message,
+        recovery_command="check the input arguments and retry; use --help for usage",
+    )
 
 
 def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -235,8 +239,10 @@ def run(args: argparse.Namespace) -> int:
     if getattr(args, "response_schema", None):
         schema_path = args.response_schema.expanduser()
         if not schema_path.is_file():
-            print(f"Error: --response-schema file not found: {schema_path}", file=sys.stderr)
-            return 2
+            raise AstridError(
+                f"--response-schema file not found: {schema_path}",
+                recovery_command="verify the --response-schema path points to an existing JSON schema file",
+            )
         loaded = json.loads(schema_path.read_text(encoding="utf-8"))
         # Accept either a raw schema or {name, schema, strict?} wrapper (parallels visual_understand).
         active_schema = loaded.get("schema", loaded) if isinstance(loaded, dict) else loaded
@@ -312,7 +318,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("--chunk-sec", type=float, default=30.0, help="Auto chunk length when --at/--start are omitted.")
     add("--max-chunks", type=int, default=8)
     add("--max-width", type=int, default=960, help="Downscale extracted clips to this width before upload. 0 keeps source width.")
-    add("--mode", choices=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="fast uses Gemini Flash; best uses Gemini Pro.")
+    add_choice_arg(parser, "--mode", values=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="fast uses Gemini Flash; best uses Gemini Pro.")
     add("--model", help="Explicit Gemini model override.")
     add("--compare-model", action="append", default=[], help="Additional Gemini model to query against the same windows.")
     add("--out-dir", type=Path, default=Path("runs/video-understanding"))

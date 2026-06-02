@@ -12,6 +12,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError, coerce_astrid_error
+from astrid.core.cli_choices import (
+    AstridArgumentError,
+    RecoverableArgumentParser,
+    add_choice_arg,
+    add_kind_arg,
+)
 from astrid.core.project.current_run import read_current_run
 from astrid.core.project.jsonio import read_json
 from astrid.core.project.paths import project_dir
@@ -36,6 +43,7 @@ from ._edit_helpers import TimelineEditError
 from .eventlog import EventLogError
 from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
+from .kinds import default_transition_kind
 from .paths import assembly_identity_path, find_timeline_by_slug
 from .projection import ErasedPayloadProjectionError, ProjectionError
 
@@ -50,22 +58,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
+    except AstridArgumentError as exc:
+        raise AstridError(str(exc)) from exc
     except (crud.TimelineCrudError, TimelineEditError, SessionBindingError, EventLogError) as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 2
+        raise coerce_astrid_error(exc) from exc
     except ErasedPayloadProjectionError as exc:
-        print(f"timelines: {exc} (erased payload)", file=sys.stderr)
-        return 2
-    except ProjectionError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 2
-    except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(f"{exc} (erased payload)") from exc
+    except (ProjectionError, ValueError) as exc:
+        raise AstridError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid timelines",
         description="Create, inspect, and manage project timelines.",
     )
@@ -287,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     # clip add
     clip_add = clip_subs.add_parser("add", help="Add a clip to a timeline.")
     clip_add.add_argument("slug", help="Timeline slug.")
-    clip_add.add_argument("--kind", required=True, choices=["visual", "audio", "text"], help="Clip kind.")
+    add_kind_arg(clip_add, "--kind", catalog="clip", required=True, help="Clip kind.")
     clip_add.add_argument("--asset", required=True, help="Asset identifier.")
     clip_add.add_argument(
         "--track",
@@ -382,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     trans_set.add_argument("slug", help="Timeline slug.")
     trans_set.add_argument("--between", required=True, metavar="LEFT,RIGHT",
                            help="Two clip ids separated by comma (left clip, right clip).")
-    trans_set.add_argument("--kind", default="cross-fade", help="Transition kind (default: cross-fade).")
+    add_kind_arg(trans_set, "--kind", catalog="transition", default=default_transition_kind(), help="Transition kind.")
     trans_set.add_argument("--duration", type=float, default=0.5, dest="duration_seconds",
                            help="Transition duration in seconds (default: 0.5).")
     _add_expected_version_arg(trans_set)
@@ -455,8 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     # track add
     track_add_p = track_subs.add_parser("add", help="Add a track.")
     track_add_p.add_argument("slug", help="Timeline slug.")
-    track_add_p.add_argument("--kind", required=True, choices=["visual", "audio"],
-                             help="Track kind: visual or audio.")
+    add_kind_arg(track_add_p, "--kind", catalog="track", required=True, help="Track kind.")
     track_add_p.add_argument("--label", default=None, help="Optional human-readable label.")
     track_add_p.add_argument("--track-id", default=None, dest="track_id",
                              help="Track identifier (auto-generated UUID if omitted).")
@@ -582,13 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     push_parser.add_argument(
         "slug_or_id", help="Local timeline slug, ULID, or event-stream UUID."
     )
-    push_parser.add_argument(
-        "--to",
-        required=True,
-        dest="to_backend",
-        choices=["supabase"],
-        help="Destination backend (only 'supabase' in v1).",
-    )
+    add_choice_arg(push_parser, "--to", values=("supabase",), dest="to_backend", required=True, help="Destination backend (only 'supabase' in v1).")
     push_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -602,13 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     pull_parser.add_argument(
         "slug_or_id", help="Remote timeline slug or event-stream UUID on Supabase."
     )
-    pull_parser.add_argument(
-        "--from",
-        required=True,
-        dest="from_backend",
-        choices=["supabase"],
-        help="Source backend (only 'supabase' in v1).",
-    )
+    add_choice_arg(pull_parser, "--from", values=("supabase",), dest="from_backend", required=True, help="Source backend (only 'supabase' in v1).")
     pull_parser.add_argument(
         "--project",
         required=True,
@@ -679,13 +670,7 @@ def build_parser() -> argparse.ArgumentParser:
     undo_parser.add_argument(
         "slug", help="Timeline slug."
     )
-    undo_parser.add_argument(
-        "--from",
-        dest="from_backend",
-        default=None,
-        choices=["supabase"],
-        help="Backend to undo on (default: local_fs).",
-    )
+    add_choice_arg(undo_parser, "--from", values=("supabase",), dest="from_backend", default=None, help="Backend to undo on (default: local_fs).")
     undo_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -723,13 +708,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Confirm mass undo (required to actually write).",
     )
-    mass_undo_parser.add_argument(
-        "--from",
-        dest="from_backend",
-        default=None,
-        choices=["supabase"],
-        help="Backend to undo on (default: local_fs).",
-    )
+    add_choice_arg(mass_undo_parser, "--from", values=("supabase",), dest="from_backend", default=None, help="Backend to undo on (default: local_fs).")
     mass_undo_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -816,13 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Human-readable reason for the recovery.",
     )
-    recover_parser.add_argument(
-        "--from",
-        dest="from_backend",
-        default=None,
-        choices=["supabase"],
-        help="Backend to recover on (default: local_fs).",
-    )
+    add_choice_arg(recover_parser, "--from", values=("supabase",), dest="from_backend", default=None, help="Backend to recover on (default: local_fs).")
     recover_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -854,11 +827,10 @@ def cmd_ls(args: argparse.Namespace) -> int:
     if session is not None:
         project_slug = project_slug or session.project
     if not project_slug:
-        print(
+        raise AstridError(
             "timelines: no project specified; use --project <slug> or bind a session with 'astrid attach'",
-            file=sys.stderr,
+            recovery_command="astrid attach <project>",
         )
-        return 2
 
     rows = crud.list_timelines(
         project_slug,
@@ -914,8 +886,11 @@ def cmd_show(args: argparse.Namespace) -> int:
         verify=bool(getattr(args, "verify", False)),
     )
     if data is None:
-        print(f"timeline '{args.slug}' not found", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timeline '{args.slug}' not found",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug},
+        )
 
     display = data["display"]
     manifest = data["manifest"]
@@ -1036,11 +1011,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if from_run is None:
         from_run = read_current_run(session.project) or ""
         if not from_run:
-            print(
+            raise AstridError(
                 "timelines: no current run bound; pass --from-run explicitly",
-                file=sys.stderr,
+                recovery_command=f"astrid timelines finalize {args.slug} <output> --from-run <run-id>",
+                state_snapshot={"timeline": args.slug},
             )
-            return 2
 
     fo = crud.finalize_output(
         session.project,
@@ -1080,11 +1055,11 @@ def cmd_purge(args: argparse.Namespace) -> int:
     session = _require_session()
 
     if not args.yes_really:
-        print(
+        raise AstridError(
             f"timelines: purge requires --yes-really to permanently delete timeline '{args.slug}'",
-            file=sys.stderr,
+            recovery_command=f"astrid timelines purge {args.slug} --yes-really",
+            state_snapshot={"timeline": args.slug},
         )
-        return 2
 
     # Double-confirmation for interactive terminals.
     if sys.stdin.isatty():
@@ -1093,12 +1068,15 @@ def cmd_purge(args: argparse.Namespace) -> int:
                 f"Permanently delete timeline '{args.slug}'? This cannot be undone. [y/N] "
             )
         except (EOFError, KeyboardInterrupt):
-            print("", file=sys.stderr)
-            print("timelines: purge cancelled", file=sys.stderr)
-            return 2
+            raise AstridError(
+                "timelines: purge cancelled",
+                recovery_command=f"astrid timelines purge {args.slug} --yes-really",
+            )
         if answer.strip().lower() not in ("y", "yes"):
-            print("timelines: purge cancelled", file=sys.stderr)
-            return 2
+            raise AstridError(
+                "timelines: purge cancelled",
+                recovery_command=f"astrid timelines purge {args.slug} --yes-really",
+            )
 
     crud.purge_timeline(session.project, args.slug)
     print(f"purged timeline '{args.slug}'")
@@ -1129,8 +1107,11 @@ def cmd_export(args: argparse.Namespace) -> int:
     session = _require_session()
     data = crud.show_timeline(session.project, args.slug)
     if data is None:
-        print(f"timeline '{args.slug}' not found", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timeline '{args.slug}' not found",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug},
+        )
 
     ulid = data["ulid"]
     manifest = data["manifest"]
@@ -1252,8 +1233,11 @@ def cmd_cost(args: argparse.Namespace) -> int:
     session = _require_session()
     data = crud.show_timeline(session.project, args.slug)
     if data is None:
-        print(f"timeline '{args.slug}' not found", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timeline '{args.slug}' not found",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug},
+        )
 
     manifest = data["manifest"]
     proj_root = project_dir(session.project)
@@ -1900,8 +1884,11 @@ def cmd_arrangement_show(args: argparse.Namespace) -> int:
     if arrangement is None:
         data = crud.show_timeline(session.project, args.slug)
         if data is None:
-            print(f"timeline '{args.slug}' not found", file=sys.stderr)
-            return 1
+            raise AstridError(
+                f"timeline '{args.slug}' not found",
+                recovery_command="astrid timelines ls",
+                state_snapshot={"timeline": args.slug},
+            )
     print(json.dumps(arrangement, indent=2, default=str))
     return 0
 
@@ -1941,11 +1928,14 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
     elif project_slug:
         slugs = [project_slug]
     else:
-        print("timelines migrate-events: must specify --project or --all-projects", file=sys.stderr)
-        return 2
+        raise AstridError(
+            "timelines migrate-events: must specify --project or --all-projects",
+            valid_options=["--project <slug>", "--all-projects"],
+            recovery_command="astrid timelines migrate-events --project <slug>",
+        )
 
     if not slugs:
-        print("(no projects discovered)", file=sys.stderr)
+        print("(no projects discovered)")
         return 0
 
     result = MigrationResult()
@@ -2116,8 +2106,11 @@ def cmd_history(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
     except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug_or_id},
+        ) from exc
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -2194,8 +2187,11 @@ def cmd_diff(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
     except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug_or_id},
+        ) from exc
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -2215,17 +2211,17 @@ def cmd_diff(args: argparse.Namespace) -> int:
             to_idx = i
 
     if from_idx is None:
-        print(
+        raise AstridError(
             f"timelines: event '{args.from_event_id}' not found in timeline '{target.slug}'",
-            file=sys.stderr,
+            recovery_command=f"astrid timelines history {args.slug_or_id}",
+            state_snapshot={"timeline": target.slug, "event_id": args.from_event_id},
         )
-        return 1
     if to_idx is None:
-        print(
+        raise AstridError(
             f"timelines: event '{args.to_event_id}' not found in timeline '{target.slug}'",
-            file=sys.stderr,
+            recovery_command=f"astrid timelines history {args.slug_or_id}",
+            state_snapshot={"timeline": target.slug, "event_id": args.to_event_id},
         )
-        return 1
 
     from_event = all_events[from_idx]
     to_event = all_events[to_idx]
@@ -2263,13 +2259,19 @@ def cmd_diff(args: argparse.Namespace) -> int:
         try:
             from_state = replay_projection(backend, stop_at_event_id=from_event.event_id)
         except Exception as exc:
-            print(f"timelines: failed to project state at from event: {exc}", file=sys.stderr)
-            return 2
+            raise AstridError(
+                f"timelines: failed to project state at from event: {exc}",
+                recovery_command=f"astrid timelines audit {args.slug_or_id}",
+                state_snapshot={"timeline": target.slug, "event_id": from_event.event_id},
+            ) from exc
         try:
             to_state = replay_projection(backend, stop_at_event_id=to_event.event_id)
         except Exception as exc:
-            print(f"timelines: failed to project state at to event: {exc}", file=sys.stderr)
-            return 2
+            raise AstridError(
+                f"timelines: failed to project state at to event: {exc}",
+                recovery_command=f"astrid timelines audit {args.slug_or_id}",
+                state_snapshot={"timeline": target.slug, "event_id": to_event.event_id},
+            ) from exc
 
         print("Projected state at FROM event:")
         print(json.dumps(from_state, indent=2, default=str))
@@ -2307,8 +2309,11 @@ def cmd_audit(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
     except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug_or_id},
+        ) from exc
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -2446,8 +2451,11 @@ def cmd_preview(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
     except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug_or_id},
+        ) from exc
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -2458,8 +2466,11 @@ def cmd_preview(args: argparse.Namespace) -> int:
     try:
         state = replay_projection(backend, stop_at_event_id=args.at_event_id)
     except Exception as exc:
-        print(f"timelines: failed to project state at '{args.at_event_id}': {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines: failed to project state at '{args.at_event_id}': {exc}",
+            recovery_command=f"astrid timelines audit {args.slug_or_id}",
+            state_snapshot={"timeline": args.slug_or_id, "event_id": args.at_event_id},
+        ) from exc
 
     out_path_raw = getattr(args, "out_path", None)
     if out_path_raw:
@@ -2472,12 +2483,12 @@ def cmd_preview(args: argparse.Namespace) -> int:
         except ValueError:
             pass  # not inside timeline home — ok
         else:
-            print(
+            raise AstridError(
                 f"timelines: --out path '{out_path_raw}' is inside the timeline home; "
                 f"refusing to overwrite canonical files",
-                file=sys.stderr,
+                recovery_command="choose an --out path outside the timeline home",
+                state_snapshot={"out": out_path_raw, "timeline_home": timeline_home_resolved},
             )
-            return 2
 
         from astrid.core.project.jsonio import write_json_atomic
 
@@ -2505,8 +2516,11 @@ def cmd_who_edited(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
     except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug_or_id},
+        ) from exc
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -2573,8 +2587,11 @@ def cmd_push(args: argparse.Namespace) -> int:
             destination_actor=_timeline_actor_from_session(session) if session else None,
         )
     except ValueError as exc:
-        print(f"timelines push: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines push: {exc}",
+            recovery_command="astrid timelines push <slug-or-id>",
+            state_snapshot={"timeline": args.slug_or_id},
+        ) from exc
 
     print(f"Push: {result.direction} {result.source_backend_name} → {result.destination_backend_name}")
     print(f"  source timeline: {result.source_timeline_id}")
@@ -2611,8 +2628,11 @@ def cmd_pull(args: argparse.Namespace) -> int:
             create=args.create,
         )
     except ValueError as exc:
-        print(f"timelines pull: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines pull: {exc}",
+            recovery_command="astrid timelines pull --project <slug> <slug-or-id>",
+            state_snapshot={"project": project_slug, "timeline": args.slug_or_id},
+        ) from exc
 
     print(f"Pull: {result.direction} {result.source_backend_name} → {result.destination_backend_name}")
     print(f"  source timeline: {result.source_timeline_id}")
@@ -2650,8 +2670,14 @@ def cmd_branch_create(args: argparse.Namespace) -> int:
             reason=args.reason,
         )
     except (ValueError, ProjectionError) as exc:
-        print(f"timelines branch create: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines branch create: {exc}",
+            recovery_command="astrid timelines branch create <source> <branch-slug>",
+            state_snapshot={
+                "source": args.source_slug_or_id,
+                "branch": args.branch_slug,
+            },
+        ) from exc
 
     print(f"Branch created: {result.branch_slug}")
     print(f"  branch timeline ID: {result.branch_timeline_id}")
@@ -2678,8 +2704,11 @@ def cmd_branch_list(args: argparse.Namespace) -> int:
     try:
         branches = list_branches(session.project, args.source_slug_or_id)
     except ValueError as exc:
-        print(f"timelines branch list: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines branch list: {exc}",
+            recovery_command="astrid timelines branch list <source>",
+            state_snapshot={"source": args.source_slug_or_id},
+        ) from exc
 
     if not branches:
         print(f"(no branches for timeline '{args.source_slug_or_id}')")
@@ -2714,8 +2743,11 @@ def cmd_undo(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug)
     except ValueError as exc:
-        print(f"timelines undo: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines undo: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     preferred_backend = getattr(args, "from_backend", None) or target.backend
 
@@ -2728,18 +2760,21 @@ def cmd_undo(args: argparse.Namespace) -> int:
     # Verify chain before undoing
     verification = backend.verify_chain()
     if not verification.ok:
-        print(
+        raise AstridError(
             f"timelines undo: chain verification failed: "
             f"{verification.error or 'unknown error'}; refusing to undo",
-            file=sys.stderr,
+            recovery_command=f"astrid timelines audit {args.slug}",
+            state_snapshot={"timeline": args.slug, "verification_error": verification.error},
         )
-        return 2
 
     # Get all events
     all_events = backend.read_events()
     if not all_events:
-        print("timelines undo: no events in timeline", file=sys.stderr)
-        return 1
+        raise AstridError(
+            "timelines undo: no events in timeline",
+            recovery_command=f"astrid timelines history {args.slug}",
+            state_snapshot={"timeline": args.slug},
+        )
 
     # Find the latest undoable event (skip lifecycle/ops by default)
     # Also skip erased events
@@ -2762,7 +2797,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
         break
 
     if target_event is None or target_idx is None:
-        print("timelines undo: no undoable events found (all are lifecycle/ops or erased)", file=sys.stderr)
+        print("timelines undo: no undoable events found (all are lifecycle/ops or erased)")
         return 0
 
     # Project before and after states
@@ -2772,20 +2807,26 @@ def cmd_undo(args: argparse.Namespace) -> int:
     try:
         before_projection = replay_projection(backend, stop_at_event_id=before_events[-1].event_id) if before_events else {}
     except Exception as exc:
-        print(f"timelines undo: failed to project before state: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines undo: failed to project before state: {exc}",
+            recovery_command=f"astrid timelines audit {args.slug}",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     try:
         after_projection = replay_projection(backend, stop_at_event_id=target_event.event_id)
     except Exception as exc:
-        print(f"timelines undo: failed to project after state: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines undo: failed to project after state: {exc}",
+            recovery_command=f"astrid timelines audit {args.slug}",
+            state_snapshot={"timeline": args.slug, "event_id": target_event.event_id},
+        ) from exc
 
     # Plan inverses for the target event
     inverses = plan_inverses([target_event], before_projection, after_projection)
 
     if not inverses:
-        print("timelines undo: no inverse planned for target event", file=sys.stderr)
+        print("timelines undo: no inverse planned for target event")
         return 0
 
     actor = _timeline_actor_from_session(session)
@@ -2826,7 +2867,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
             timeline_home=target.timeline_home,
         )
     except Exception as exc:
-        print(f"timelines undo: warning — projection regeneration failed: {exc}", file=sys.stderr)
+        print(f"timelines undo: warning — projection regeneration failed: {exc}")
 
     print(f"Undo: target event {target_event.event_id} (kind={target_event.kind})")
     print(f"  appended inverse events: {', '.join(appended_ids)}")
@@ -2852,18 +2893,21 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
 
     # Validate: at least one filter criterion
     if not (args.ts_since or args.actor_id or args.actor_id_prefix):
-        print(
+        raise AstridError(
             "timelines mass-undo: at least one of --since, --actor, or --actor-prefix must be specified",
-            file=sys.stderr,
+            valid_options=["--since", "--actor", "--actor-prefix"],
+            recovery_command=f"astrid timelines mass-undo {args.slug} --since <timestamp>",
         )
-        return 1
 
     # Resolve the timeline
     try:
         target = resolve_timeline_target(project_slug, args.slug)
     except ValueError as exc:
-        print(f"timelines mass-undo: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines mass-undo: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     preferred_backend = getattr(args, "from_backend", None) or target.backend
 
@@ -2883,12 +2927,12 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
     # Verify chain before any work
     verification = backend.verify_chain()
     if not verification.ok:
-        print(
+        raise AstridError(
             f"timelines mass-undo: chain verification failed: "
             f"{verification.error or 'unknown error'}; refusing to undo",
-            file=sys.stderr,
+            recovery_command=f"astrid timelines audit {args.slug}",
+            state_snapshot={"timeline": args.slug, "verification_error": verification.error},
         )
-        return 2
 
     actor = _timeline_actor_from_session(session)
 
@@ -2897,8 +2941,11 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
         try:
             preview = plan_mass_undo(backend, selector)
         except ValueError as exc:
-            print(f"timelines mass-undo: {exc}", file=sys.stderr)
-            return 1
+            raise AstridError(
+                f"timelines mass-undo: {exc}",
+                recovery_command=f"astrid timelines mass-undo {args.slug} --since <timestamp>",
+                state_snapshot={"timeline": args.slug},
+            ) from exc
 
         if preview.matched_count == 0:
             print("mass-undo: no matching events found (preview)")
@@ -2928,8 +2975,11 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
             timeline_home=target.timeline_home,
         )
     except ValueError as exc:
-        print(f"timelines mass-undo: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines mass-undo: {exc}",
+            recovery_command=f"astrid timelines mass-undo {args.slug} --since <timestamp>",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     print("mass-undo result:")
     print(f"  planned: {result.planned_count} inverses")
@@ -2939,8 +2989,11 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
     if result.appended_event_ids:
         print(f"  appended IDs: {', '.join(result.appended_event_ids)}")
     if not result.complete:
-        print(f"  ERROR (partial failure): {result.error}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines mass-undo: partial failure: {result.error}",
+            recovery_command=f"astrid timelines audit {args.slug}",
+            state_snapshot={"timeline": args.slug, "error": result.error},
+        )
     if result.error:
         print(f"  warning: {result.error}")
 
@@ -2968,8 +3021,11 @@ def cmd_erase(args: argparse.Namespace) -> int:
     try:
         target = resolve_timeline_target(project_slug, args.slug)
     except ValueError as exc:
-        print(f"timelines erase: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"timelines erase: {exc}",
+            recovery_command="astrid timelines ls",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -2999,8 +3055,11 @@ def cmd_erase(args: argparse.Namespace) -> int:
     try:
         preview = query_erasure(backend, selector)
     except ValueError as exc:
-        print(f"timelines erase: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines erase: {exc}",
+            recovery_command=f"astrid timelines erase {args.slug}",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     print(f"Erasure preview for timeline '{args.slug}':")
     print(f"  matched events: {preview.matched_count} of {preview.total_events_in_stream}")
@@ -3036,8 +3095,11 @@ def cmd_erase(args: argparse.Namespace) -> int:
             timeline_home=target.timeline_home,
         )
     except (ValueError, ProjectionError) as exc:
-        print(f"timelines erase: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines erase: {exc}",
+            recovery_command=f"astrid timelines erase {args.slug}",
+            state_snapshot={"timeline": args.slug},
+        ) from exc
 
     print("Erasure applied:")
     print(f"  audit event: {result.audit_event_id}")
@@ -3072,8 +3134,11 @@ def cmd_recover(args: argparse.Namespace) -> int:
             reason=args.reason,
         )
     except (ValueError, ProjectionError) as exc:
-        print(f"timelines recover: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"timelines recover: {exc}",
+            recovery_command=f"astrid timelines recover {args.slug} --at <event-id> --reason <reason>",
+            state_snapshot={"timeline": args.slug, "event_id": args.at_event_id},
+        ) from exc
 
     print("Recovery applied:")
     print(f"  anchor event: {result.anchor_event_id} (type={result.anchor_type})")
@@ -3109,8 +3174,9 @@ def _resolve_project_slug(args: argparse.Namespace, session: Any) -> str:
         return project_slug
     if session is not None:
         return session.project
-    raise ValueError(
-        "no project specified; use --project <slug> or bind a session with 'astrid attach'"
+    raise AstridError(
+        "no project specified; use --project <slug> or bind a session with 'astrid attach'",
+        recovery_command="astrid attach <project>",
     )
 
 

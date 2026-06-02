@@ -17,6 +17,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import AstridArgumentError, StaticChoices
 from astrid.core.timeline import cli as timeline_cli, clip_edits
 from astrid.core.timeline.events.schema import (
     AudioBoundPayload,
@@ -57,6 +59,26 @@ def test_subcommand_help_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
     captured = capsys.readouterr()
     assert "Timeline slug" in captured.out
     assert "--default" in captured.out
+
+
+def test_backend_flags_use_static_choices_wrappers() -> None:
+    parser = timeline_cli.build_parser()
+    subparsers = next(
+        action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+    )
+
+    expected = {
+        "push": "to_backend",
+        "pull": "from_backend",
+        "undo": "from_backend",
+        "mass-undo": "from_backend",
+        "recover": "from_backend",
+    }
+    for command, dest in expected.items():
+        subparser = subparsers.choices[command]
+        action = next(option for option in subparser._actions if option.dest == dest)
+        assert isinstance(action.choices, StaticChoices)
+        assert action.choices.valid_options == ("supabase",)
 
 
 # ---------------------------------------------------------------------------
@@ -252,12 +274,12 @@ def test_purge_yes_really_flag_parses(
 
 
 # ---------------------------------------------------------------------------
-# main() error envelope: domain exceptions become exit code 2 + stderr.
+# main() error envelope: domain exceptions become AstridError for pipeline.main().
 # ---------------------------------------------------------------------------
 
 
-def test_main_wraps_crud_error_as_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_main_raises_astrid_error_for_crud_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from astrid.core.timeline import crud as crud_module
 
@@ -266,28 +288,24 @@ def test_main_wraps_crud_error_as_exit_code_2(
 
     monkeypatch.setattr(timeline_cli, "cmd_ls", raising_ls)
 
-    rc = timeline_cli.main(["ls", "--project", "p"])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "timelines: boom" in captured.err
+    with pytest.raises(AstridError, match="boom"):
+        timeline_cli.main(["ls", "--project", "p"])
 
 
-def test_main_wraps_value_error_as_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_main_raises_astrid_error_for_value_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def raising_ls(args: argparse.Namespace) -> int:
         raise ValueError("bad value")
 
     monkeypatch.setattr(timeline_cli, "cmd_ls", raising_ls)
 
-    rc = timeline_cli.main(["ls", "--project", "p"])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "timelines: bad value" in captured.err
+    with pytest.raises(AstridError, match="bad value"):
+        timeline_cli.main(["ls", "--project", "p"])
 
 
-def test_main_wraps_erased_payload_projection_error_as_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_main_raises_astrid_error_for_erased_payload_projection_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from astrid.core.timeline.projection import ErasedPayloadProjectionError
 
@@ -300,15 +318,14 @@ def test_main_wraps_erased_payload_projection_error_as_exit_code_2(
 
     monkeypatch.setattr(timeline_cli, "cmd_ls", raising_ls)
 
-    rc = timeline_cli.main(["ls", "--project", "p"])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "erased payload" in captured.err
-    assert "01AAAAAAAAAAAAAAAAAAAAA100" in captured.err
+    with pytest.raises(AstridError) as excinfo:
+        timeline_cli.main(["ls", "--project", "p"])
+    assert "erased payload" in str(excinfo.value)
+    assert "01AAAAAAAAAAAAAAAAAAAAA100" in str(excinfo.value)
 
 
-def test_main_wraps_projection_error_as_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_main_raises_astrid_error_for_projection_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from astrid.core.timeline.projection import ProjectionError
 
@@ -321,11 +338,10 @@ def test_main_wraps_projection_error_as_exit_code_2(
 
     monkeypatch.setattr(timeline_cli, "cmd_ls", raising_ls)
 
-    rc = timeline_cli.main(["ls", "--project", "p"])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "timelines:" in captured.err
-    assert "01AAAAAAAAAAAAAAAAAAAAA200" in captured.err
+    with pytest.raises(AstridError) as excinfo:
+        timeline_cli.main(["ls", "--project", "p"])
+    assert "projection error" in str(excinfo.value).lower()
+    assert "01AAAAAAAAAAAAAAAAAAAAA200" in str(excinfo.value)
 
 
 def test_cmd_rename_passes_explicit_actor_from_session(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -424,12 +440,12 @@ def test_clip_add_parses_all_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
 
     rc = timeline_cli.main(
-        ["clip", "add", "my-slug", "--kind", "visual", "--asset", "img_001", "--track", "visual", "--at", "0"]
+        ["clip", "add", "my-slug", "--kind", "video", "--asset", "img_001", "--track", "visual", "--at", "0"]
     )
     assert rc == 0
     args = seen["args"]
     assert args.slug == "my-slug"
-    assert args.kind == "visual"
+    assert args.kind == "video"
     assert args.asset == "img_001"
     assert args.track_id == "visual"
     assert args.at_index == 0
@@ -472,7 +488,7 @@ def test_clip_add_mutually_exclusive_position_flags(capsys: pytest.CaptureFixtur
     """--at, --after, --before are in a mutually exclusive group."""
     with pytest.raises(SystemExit) as excinfo:
         timeline_cli.main(
-            ["clip", "add", "my-slug", "--kind", "visual", "--asset", "x", "--track", "visual", "--at", "0", "--after", "y"]
+            ["clip", "add", "my-slug", "--kind", "video", "--asset", "x", "--track", "visual", "--at", "0", "--after", "y"]
         )
     assert excinfo.value.code != 0
 
@@ -637,7 +653,7 @@ def test_clip_handler_calls_clip_edits_not_direct_file_writes(
     rc = timeline_cli.cmd_clip_add(
         argparse.Namespace(
             slug="primary",
-            kind="visual",
+            kind="video",
             asset="img_001",
             at_index=None,
             after_id=None,
@@ -647,24 +663,23 @@ def test_clip_handler_calls_clip_edits_not_direct_file_writes(
     )
     assert rc == 0
     assert seen.get("called") == "add_clip"
-    assert seen.get("kind") == "visual"
+    assert seen.get("kind") == "video"
+    assert seen.get("track_id") == "visual"
     assert seen.get("asset_id") == "img_001"
 
 
-def test_clip_edit_error_returns_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_clip_edit_error_raises_astrid_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def fake_add(args: argparse.Namespace) -> int:
         raise clip_edits.ClipEditError("test error")
 
     monkeypatch.setattr(timeline_cli, "cmd_clip_add", fake_add)
 
-    rc = timeline_cli.main(
-        ["clip", "add", "my-slug", "--kind", "visual", "--asset", "x", "--track", "visual"]
-    )
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "timelines: test error" in captured.err
+    with pytest.raises(AstridError, match="test error"):
+        timeline_cli.main(
+            ["clip", "add", "my-slug", "--kind", "video", "--asset", "x", "--track", "visual"]
+        )
 
 
 def test_clip_subcommand_help_shows_all_verbs(capsys: pytest.CaptureFixture[str]) -> None:
@@ -812,11 +827,11 @@ def test_pull_into_and_create_are_mutually_exclusive_in_handler(monkeypatch: pyt
 
     # --into and --create together should parse but the handler rejects
     # (we verify the args are set correctly)
-    rc = timeline_cli.main([
-        "pull", "remote-slug", "--from", "supabase", "--project", "demo",
-        "--into", "existing", "--create",
-    ])
-    assert rc == 2  # handler raises ValueError -> exit code 2
+    with pytest.raises(AstridError, match="mutually exclusive"):
+        timeline_cli.main([
+            "pull", "remote-slug", "--from", "supabase", "--project", "demo",
+            "--into", "existing", "--create",
+        ])
     assert seen["args"].into_slug == "existing"
     assert seen["args"].create is True
 
@@ -1210,11 +1225,60 @@ def test_secondary_subcommands_parse_and_dispatch(
 
 
 def test_track_add_rejects_caption_kind_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as excinfo:
+    with pytest.raises(AstridArgumentError) as excinfo:
         timeline_cli.main(["track", "add", "my-slug", "--kind", "caption"])
-    assert excinfo.value.code != 0
+    assert excinfo.value.argument_name == "--kind"
+    assert excinfo.value.invalid_value == "caption"
+    assert "visual" in excinfo.value.valid_options
+
+
+def test_transition_set_rejects_invalid_kind_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
+    """``transition set --kind dissolve`` must raise AstridArgumentError, not SystemExit(2)."""
+    with pytest.raises(AstridArgumentError) as excinfo:
+        timeline_cli.main(
+            ["transition", "set", "my-slug", "--between", "a,b", "--kind", "dissolve"]
+        )
+    exc = excinfo.value
+    assert exc.argument_name == "--kind"
+    assert exc.invalid_value == "dissolve"
+    assert exc.catalog == "transition"
+    assert "cross-fade" in exc.valid_options, (
+        f"valid_options must include cross-fade, got {exc.valid_options!r}"
+    )
+    assert "invalid choice" in str(exc)
+
+
+def test_transition_set_rejects_invalid_kind_produces_no_raw_argparse_stderr(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Stderr must NOT contain raw argparse text or ``timelines:`` prefix."""
+    try:
+        timeline_cli.main(
+            ["transition", "set", "my-slug", "--between", "a,b", "--kind", "wipe"]
+        )
+    except AstridArgumentError:
+        pass
     captured = capsys.readouterr()
-    assert "invalid choice" in captured.err.lower()
+    assert "timelines:" not in captured.err
+    # argparse usage blurb appears when parser.error() calls sys.exit(2);
+    # with RecoverableArgumentParser it must not leak.
+    assert "usage:" not in captured.err
+
+
+def test_clip_add_rejects_invalid_kind_at_parse_time(capsys: pytest.CaptureFixture[str]) -> None:
+    """``clip add --kind visual`` (a track kind) must raise AstridArgumentError."""
+    with pytest.raises(AstridArgumentError) as excinfo:
+        timeline_cli.main(
+            ["clip", "add", "my-slug", "--kind", "visual", "--asset", "x", "--track", "visual"]
+        )
+    exc = excinfo.value
+    assert exc.argument_name == "--kind"
+    assert exc.invalid_value == "visual"
+    assert exc.catalog == "clip"
+    assert "video" in exc.valid_options, (
+        f"valid_options must include video, got {exc.valid_options!r}"
+    )
+    assert "invalid choice" in str(exc)
 
 
 @pytest.mark.parametrize(
@@ -1450,53 +1514,45 @@ def test_arrangement_show_handler_reads_arrangement_via_crud(
     assert json.loads(captured.out) == arrangement
 
 
-def test_transition_set_bad_between_returns_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_transition_set_bad_between_raises_astrid_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
 
-    rc = timeline_cli.main(["transition", "set", "my-slug", "--between", "a", "--kind", "cross-fade", "--duration", "0.5"])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "--between must be LEFT,RIGHT" in captured.err
+    with pytest.raises(AstridError, match="--between must be LEFT,RIGHT"):
+        timeline_cli.main(["transition", "set", "my-slug", "--between", "a", "--kind", "cross-fade", "--duration", "0.5"])
 
 
-def test_pool_score_out_of_range_returns_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_pool_score_out_of_range_raises_astrid_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
 
-    rc = timeline_cli.main(["pool", "score", "my-slug", "--asset-id", "asset-1", "--score", "1.5"])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "score must be between 0 and 1" in captured.err
+    with pytest.raises(AstridError, match="score must be between 0 and 1"):
+        timeline_cli.main(["pool", "score", "my-slug", "--asset-id", "asset-1", "--score", "1.5"])
 
 
-def test_effect_tune_invalid_json_value_returns_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_effect_tune_invalid_json_value_raises_astrid_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
 
-    rc = timeline_cli.main(
-        ["effect", "tune", "my-slug", "--clip", "c1", "--effect-id", "glow", "--param", "opacity", "--value", "{bad"]
-    )
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "--value must be valid JSON" in captured.err
+    with pytest.raises(AstridError, match="--value must be valid JSON"):
+        timeline_cli.main(
+            ["effect", "tune", "my-slug", "--clip", "c1", "--effect-id", "glow", "--param", "opacity", "--value", "{bad"]
+        )
 
 
-def test_arrangement_set_retired_before_json_validation_returns_exit_code_2(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_arrangement_set_retired_before_json_validation_raises_astrid_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     arrangement_path = tmp_path / "bad.json"
     arrangement_path.write_text("{bad", encoding="utf-8")
     monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
 
-    rc = timeline_cli.main(["arrangement", "set", "my-slug", "--from-json", str(arrangement_path)])
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "arrangement set is retired" in captured.err
-    assert "timeline.config_replaced" in captured.err
+    with pytest.raises(AstridError, match="arrangement set is retired") as excinfo:
+        timeline_cli.main(["arrangement", "set", "my-slug", "--from-json", str(arrangement_path)])
+    assert "timeline.config_replaced" in str(excinfo.value)
 
 
 # ---------------------------------------------------------------------------
@@ -1840,12 +1896,10 @@ def test_preview_out_guard_rejects_paths_inside_timeline_home(
 
     # Attempt to write inside timeline home — should be rejected
     out_inside = timeline_home / "stale_assembly.json"
-    rc = timeline_cli.main(
-        ["preview", "test-tl", "--at", at_event_id, "--out", str(out_inside)]
-    )
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "inside the timeline home" in captured.err
+    with pytest.raises(AstridError, match="inside the timeline home"):
+        timeline_cli.main(
+            ["preview", "test-tl", "--at", at_event_id, "--out", str(out_inside)]
+        )
 
 
 def test_preview_out_guard_allows_paths_outside_timeline_home(

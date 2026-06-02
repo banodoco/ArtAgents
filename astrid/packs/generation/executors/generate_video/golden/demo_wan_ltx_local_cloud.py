@@ -33,7 +33,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Minimal valid MP4 (ISO base media file) — just enough for ffprobe to parse

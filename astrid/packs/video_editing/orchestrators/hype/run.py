@@ -13,13 +13,15 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.hype')
 import argparse
 import datetime as dt
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -32,11 +34,10 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
-from astrid.audit import AuditContext, PARENT_IDS_ENV
-from astrid.core.util.hash import sha256_file
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid import timeline
 from astrid._paths import WORKSPACE_ROOT, executor_argv
+from astrid.audit import PARENT_IDS_ENV, AuditContext
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_BINDING_MODE,
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
@@ -51,7 +52,8 @@ from astrid.core.project.run import (
 )
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-
+from astrid.core.util.hash import sha256_file
+from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 STEP_ORDER = (
     "transcribe",
@@ -102,8 +104,7 @@ class Step:
 
 
 def usage_error(message: str) -> None:
-    print(message, file=sys.stderr)
-    raise SystemExit(2)
+    raise AstridError(message, recovery_command="astrid hype --help")
 
 
 def _resolve_theme_arg(value: object) -> Path:
@@ -193,9 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Asset cache root directory. Defaults to HYPE_CACHE_DIR or ~/.cache/banodoco-hype.",
         default=argparse.SUPPRESS,
     )
-    parser.add_argument(
+    add_choice_arg(
+        parser,
         "--drift",
-        choices=("strict", "warn", "refetch"),
+        values=("strict", "warn", "refetch"),
         help="Content drift handling mode for cached URL assets.",
         default=argparse.SUPPRESS,
     )
@@ -1134,9 +1136,13 @@ def should_rerun(step: Step, args: argparse.Namespace, forced: bool) -> bool:
 def print_log_tail(step_name: str, log_path: Path) -> None:
     lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
     tail = lines[-40:]
-    print(f"{step_name}: failed; last {len(tail)} log lines from {log_path}:", file=sys.stderr)
-    for line in tail:
-        print(line, file=sys.stderr)
+    render_astrid_error(
+        AstridError(
+            f"{step_name}: failed; last {len(tail)} log lines from {log_path}",
+            recovery_command=f"Check the log at {log_path} for details and retry the {step_name} step",
+            state_snapshot={"step": step_name, "log_path": str(log_path), "log_tail": tail},
+        )
+    )
 
 
 def run_step(step: Step, cmd: list[str], args: argparse.Namespace) -> int:
@@ -1305,12 +1311,12 @@ def _apply_trim_deltas_to_arrangement(
         if isinstance(clip_uuid, str) and clip_uuid:
             clip = clips_by_uuid.get(clip_uuid)
             if clip is None:
-                print(
-                    f"pipeline: editor note clip_uuid={clip_uuid!r} not found; falling back to clip_order",
-                    file=sys.stderr,
+                logging.warning(
+                    "pipeline: editor note clip_uuid=%r not found; falling back to clip_order",
+                    clip_uuid,
                 )
         else:
-            print("pipeline: editor note missing clip_uuid; falling back to clip_order", file=sys.stderr)
+            logging.warning("pipeline: editor note missing clip_uuid; falling back to clip_order")
         if clip is None:
             clip_order = note.get("clip_order")
             clip = clips_by_order.get(clip_order) if isinstance(clip_order, int) else None
@@ -1482,7 +1488,7 @@ def pool_main(args: argparse.Namespace) -> int:
 
             _plan_hash = compute_plan_hash(plan_path)
         except Exception as exc:
-            print(f"hype: plan emission failed: {exc}", file=sys.stderr)
+            logging.warning("hype: plan emission failed: %s", exc)
             # Continue with empty plan_hash; the run can still proceed via
             # the legacy path, but plan-based dispatch won't be available.
     else:
@@ -1635,17 +1641,32 @@ def main(argv: list[str] | None = None) -> int:
                     reentry=True,
                 )
             except task_gate.TaskRunGateError as exc:
-                print(exc.recovery, file=sys.stderr)
-                return 1
+                raise AstridError(
+                    exc.recovery,
+                    recovery_command=exc.recovery or "astrid status",
+                ) from exc
         try:
             project_context, effective_argv = _prepare_project_main(effective_argv)
         except ProjectRunError as exc:
-            print(f"astrid: {exc}", file=sys.stderr)
-            return 2
+            raise AstridError(
+                str(exc),
+                recovery_command="Check project configuration and retry: astrid status",
+            ) from exc
         if project_context is not None:
             project_env = _set_project_env()
         try:
             args = resolve_args(effective_argv)
+        except AstridError as exc:
+            if project_context is not None:
+                finalize_project_run(
+                    project_context,
+                    status="error",
+                    returncode=2,
+                    error=exc,
+                )
+                render_astrid_error(exc)
+                return 2
+            raise
         except SystemExit as exc:
             if project_context is not None:
                 finalize_project_run(project_context, status="error", returncode=_system_exit_code(exc), error=exc)

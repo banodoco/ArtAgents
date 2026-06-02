@@ -9,8 +9,8 @@ import subprocess
 from pathlib import Path
 
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
-from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task.command_render import step_dir_for_context
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.util.time import utc_now_milliseconds

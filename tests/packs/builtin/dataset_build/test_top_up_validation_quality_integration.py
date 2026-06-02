@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.packs.training.orchestrators.dataset_build import run as dataset_run
 from astrid.packs.training.orchestrators.dataset_build.items import make_candidate_item
 from astrid.packs.training.orchestrators.dataset_build.state import read_review_state
@@ -131,7 +132,7 @@ def test_missing_round_aware_decisions_fail_without_silent_finalization_and_writ
     decisions_path = tmp_path / "decisions.json"
     decisions_path.write_text(json.dumps([{"item_id": "clip-0", "decision": "accept"}]), encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"round 1"):
+    with pytest.raises(AstridError, match=r"round 1"):
         dataset_run.run_pipeline(parsed, tmp_path / "run", review_decisions_path=decisions_path)
 
     out_dir = tmp_path / "run"

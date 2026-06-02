@@ -9,7 +9,6 @@ from types import ModuleType
 
 from . import audio_waveform, generic_card, image_grid
 
-
 _RENDERERS: tuple[ModuleType, ...] = (image_grid, audio_waveform, generic_card)
 
 

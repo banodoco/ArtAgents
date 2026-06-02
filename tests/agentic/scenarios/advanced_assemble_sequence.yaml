@@ -1,0 +1,117 @@
+name: advanced_assemble_sequence
+tier: recovery
+description: |
+  Agent is asked to assemble transitions across a 4-clip same-track timeline.
+  The scenario enforces that the agent MUST first attempt the wrong kind
+  ``crossfade`` (no hyphen), observe the structured recoverable error with
+  ``valid_options`` including ``cross-fade`` and a ``recovery_command``,
+  then recover by using the correct ``--kind cross-fade``. Final state must
+  have exactly 3 transition.set events (one per adjacent pair) and repeated
+  reconciliation must produce no over-apply.
+
+brief: advanced_assemble_sequence.md
+
+priming:
+  - create_project: $SLUG
+
+target_orchestrator: video_editing.hype
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  - no_aborts
+  - events_contain: track.added
+  - events_contain: clip.added
+  - events_contain: transition.set
+  - events_contain_count: { kind: transition.set, min: 3, max: 3 }
+  - no_cross_project_binding
+  - subjective:
+      - attempted_crossfade_first
+      - observed_valid_options_and_recovery
+      - recovered_with_cross_fade
+      - confirmed_no_over_apply
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 12
+
+tags:
+  - timeline
+  - transition
+  - recovery
+  - assemble
+  - structured_error
+
+assessment:
+  universal_checks: true
+  enforced:
+    - id: invoked_via_canonical_cli
+      question: |
+        Did the agent invoke timeline commands via `astrid timelines ...`
+        rather than `python -m astrid.packs.*` or direct imports?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Stderr shows direct `python -m astrid.packs.*` invocation instead
+        of `astrid timelines` CLI.
+    - id: attempted_crossfade_first
+      question: |
+        Did the agent first attempt `--kind crossfade` (no hyphen) and
+        observe the recoverable error with valid_options and recovery_command
+        before switching to `--kind cross-fade`?
+      evidence: [stderr, report]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Agent immediately used `--kind cross-fade` without first attempting
+        `crossfade` and observing the structured error recovery metadata, or
+        hit a raw argparse SystemExit(2) without valid_options.
+    - id: exactly_three_transitions
+      question: |
+        Does the event log contain exactly three transition.set events,
+        one for each adjacent same-track pair (4 clips → 3 transitions)?
+      evidence: [project_tree, events]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Event log has fewer or more than 3 transition.set events; arrangement
+        may be incomplete or duplicated.
+    - id: no_over_apply_on_repeat
+      question: |
+        Did the agent verify that repeating the same transition assembly
+        commands produces zero additional transition.set events?
+      evidence: [stderr, report, events]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Agent ran assembly more than once and event log accumulated extra
+        transition.set events beyond the initial 3.
+  graded:
+    - id: recovery_path_documented
+      question: |
+        Did the agent document the invalid crossfade attempt, the structured
+        error metadata (valid_options, recovery_command), and the recovery
+        path in its report?
+      evidence: [report]
+      grading: pass_fail
+      weight: 1
+    - id: report_shape_intact
+      question: "Does the report contain the required sections?"
+      evidence: [report]
+      grading: pass_fail
+      weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make?"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: crossfade_attempt_count
+      question: "How many times did the agent attempt `crossfade` before switching to `cross-fade`?"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0

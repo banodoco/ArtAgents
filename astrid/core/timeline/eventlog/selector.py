@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from .local_fs import LocalFsBackend
 from .protocol import EventLogBackend
@@ -29,7 +28,6 @@ from .types import (
     SupabaseEventLogOptions,
     TimelineStreamRef,
 )
-
 
 # ============================================================================
 # Low-level stream/backend construction
@@ -236,13 +234,12 @@ def resolve_pull_destination(
     Raises:
         ValueError: When destination is ambiguous or invalid.
     """
+
     from astrid.core.timeline.paths import (
         find_timeline_by_slug,
         timelines_dir,
         validate_timeline_slug,
     )
-    from astrid.core.project.jsonio import write_json_atomic
-    from uuid import uuid4
 
     td = timelines_dir(project_slug, root=root)
 
@@ -365,8 +362,8 @@ def _build_pull_destination_for_existing(
     created: bool = False,
 ) -> PullDestination:
     """Build a PullDestination for an existing timeline home."""
-    from astrid.core.timeline.paths import assembly_identity_path
     from astrid.core.project.jsonio import read_json
+    from astrid.core.timeline.paths import assembly_identity_path
 
     # Read identity to get timeline_id
     identity_path = assembly_identity_path(project_slug, timeline_ulid, root=root)
@@ -418,19 +415,20 @@ def _create_pull_destination(
     Writes ``assembly.identity.json`` with ``provenance: imported``.
     """
     from uuid import uuid4
+
     from astrid import timeline as timeline_contract
     from astrid.core.project.jsonio import write_json_atomic
-    from astrid.core.util.time import utc_now_seconds as utc_now_iso
-    from astrid.core.timeline.paths import (
-        timeline_dir,
-        validate_timeline_slug,
-    )
     from astrid.core.timeline.events.schema import EVENT_SCHEMA_VERSION
     from astrid.core.timeline.model import (
         TIMELINE_SCHEMA_VERSION,
         Display,
         Manifest,
     )
+    from astrid.core.timeline.paths import (
+        timeline_dir,
+        validate_timeline_slug,
+    )
+    from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
     slug = validate_timeline_slug(slug)
     timeline_id = str(uuid4())

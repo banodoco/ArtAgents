@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.task.plan import load_plan
 from astrid.orchestrate import OrchestrateDefinitionError
 from astrid.orchestrate import cli as author_cli
@@ -53,6 +54,15 @@ def packs_root(tmp_path: Path) -> Path:
     return root
 
 
+def _assert_astrid_error(call, *cause_parts: str) -> AstridError:
+    with pytest.raises(AstridError) as raised:
+        call()
+    error = raised.value
+    for part in cause_parts:
+        assert part in error.cause
+    return error
+
+
 class TestCompile:
     def test_compile_writes_build_json(self, packs_root: Path) -> None:
         rc = author_cli.main(["compile", "sample.foo"], packs_root=packs_root)
@@ -95,10 +105,10 @@ def bad():
     ]
 ''',
         )
-        rc = author_cli.main(["check", "sample.bad_attested"], packs_root=packs_root)
-        err = capsys.readouterr().err
-        assert rc == 1
-        assert "sentinel" in err.lower()
+        _assert_astrid_error(
+            lambda: author_cli.main(["check", "sample.bad_attested"], packs_root=packs_root),
+            "sentinel",
+        )
 
     def test_missing_for_each_from_rejected(self, packs_root: Path, capsys: pytest.CaptureFixture) -> None:
         _write(
@@ -117,10 +127,10 @@ def bad():
     ]
 ''',
         )
-        rc = author_cli.main(["check", "sample.bad_foreach"], packs_root=packs_root)
-        err = capsys.readouterr().err
-        assert rc == 1
-        assert "ghost" in err
+        _assert_astrid_error(
+            lambda: author_cli.main(["check", "sample.bad_foreach"], packs_root=packs_root),
+            "ghost",
+        )
 
     def test_missing_nested_module_rejected(self, packs_root: Path, capsys: pytest.CaptureFixture) -> None:
         _write(
@@ -133,11 +143,11 @@ def bad():
     return [nested("inner", plan="sample.does_not_exist")]
 ''',
         )
-        rc = author_cli.main(["check", "sample.bad_nested"], packs_root=packs_root)
-        err = capsys.readouterr().err
-        assert rc == 1
-        assert "does_not_exist" in err
-        assert "module file not found" in err.lower()
+        error = _assert_astrid_error(
+            lambda: author_cli.main(["check", "sample.bad_nested"], packs_root=packs_root),
+            "does_not_exist",
+        )
+        assert "module file not found" in error.cause.lower()
 
     def test_orchestrators_run_argv_rejected(self, packs_root: Path, capsys: pytest.CaptureFixture) -> None:
         _write(
@@ -155,10 +165,11 @@ def bad():
     ]
 ''',
         )
-        rc = author_cli.main(["check", "sample.bad_argv"], packs_root=packs_root)
-        err = capsys.readouterr().err
-        assert rc == 1
-        assert "orchestrators" in err.lower()
+        error = _assert_astrid_error(
+            lambda: author_cli.main(["check", "sample.bad_argv"], packs_root=packs_root),
+            "orchestrators",
+        )
+        assert "orchestrators" in error.cause.lower()
 
 
 class TestDescribeSnapshot:
@@ -198,10 +209,10 @@ class TestNewScaffold:
 
     def test_new_refuses_to_overwrite(self, packs_root: Path, capsys: pytest.CaptureFixture) -> None:
         # sample.foo already exists from the fixture.
-        rc = author_cli.main(["new", "sample.foo"], packs_root=packs_root)
-        err = capsys.readouterr().err
-        assert rc == 1
-        assert "refuse to overwrite" in err
+        _assert_astrid_error(
+            lambda: author_cli.main(["new", "sample.foo"], packs_root=packs_root),
+            "refuse to overwrite",
+        )
 
     def test_new_refuses_folder_collision_flag003(
         self, packs_root: Path, capsys: pytest.CaptureFixture
@@ -209,11 +220,11 @@ class TestNewScaffold:
         # Mimic a folder-orchestrator at <pack>/<name>/ — scaffolding <name>.py
         # next to it would let the package shadow the module on import.
         (packs_root / "sample" / "baz").mkdir()
-        rc = author_cli.main(["new", "sample.baz"], packs_root=packs_root)
-        err = capsys.readouterr().err
-        assert rc == 1
-        assert "folder" in err.lower()
-        assert str(packs_root / "sample" / "baz") in err
+        error = _assert_astrid_error(
+            lambda: author_cli.main(["new", "sample.baz"], packs_root=packs_root),
+            str(packs_root / "sample" / "baz"),
+        )
+        assert "folder" in error.cause.lower()
 
 
 class TestNestedCycle:

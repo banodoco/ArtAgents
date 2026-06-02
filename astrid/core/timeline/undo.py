@@ -11,31 +11,24 @@ Implements mass-undo with:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+from .eventlog.protocol import EventLogBackend
 from .events.schema import (
     ErasedPayload,
     TimelineActor,
-    TimelineEvent,
     TimelineRevertedPayload,
 )
-from .eventlog.protocol import EventLogBackend
-from .eventlog.types import BackendName, EventLogError, EventLogHead
 from .inverses import (
     _NON_REVERSIBLE_KINDS,
-    InverseRequest,
     plan_inverse,
-    plan_inverses,
 )
 from .projection import (
-    ProjectionError,
     apply_event_to_assembly,
     regenerate_projection,
-    replay_projection,
 )
-
 
 # ---------------------------------------------------------------------------
 # Chunk size for --yes writes

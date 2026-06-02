@@ -22,10 +22,10 @@ from typing import Any, Callable, Optional, Tuple, Union
 
 from astrid.core.task.plan import (
     TaskPlanError,
-    is_legacy_repeat_until_condition,
-    parse_repeat_until_expression,
     _strip_astrid_prefix,
+    is_legacy_repeat_until_condition,
     load_plan,
+    parse_repeat_until_expression,
 )
 from astrid.verify import Check, canonical_check_params
 

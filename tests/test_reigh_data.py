@@ -1,3 +1,4 @@
+import contextlib
 import io
 import json
 import urllib.error
@@ -107,3 +108,23 @@ def test_cli_writes_output(tmp_path, monkeypatch):
         "project_id": "project-1",
         "shot_count": 1,
     }
+
+
+def test_cli_renders_astrid_error_envelope_on_fetch_failure(monkeypatch):
+    stderr = io.StringIO()
+
+    def boom(**kwargs):
+        raise RuntimeError("Reigh data fetch failed: HTTP 403: denied")
+
+    monkeypatch.setattr(reigh_data, "fetch_reigh_data", boom)
+
+    with contextlib.redirect_stderr(stderr):
+        rc = reigh_data.main(["--project-id", "project-1"])
+
+    rendered = stderr.getvalue()
+    assert rc == 2
+    assert "Reigh data fetch failed: HTTP 403: denied" in rendered
+    assert "recovery:" in rendered
+    assert '"project_id": "project-1"' in rendered
+    assert "reigh-data:" not in rendered
+    assert "Traceback" not in rendered

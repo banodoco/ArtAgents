@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.registry import (
     GenerationBackendDescriptor,
@@ -82,6 +83,15 @@ def _broken_local_registry() -> GenerationBackendRegistry:
         )
     )
     return registry
+
+
+def _assert_astrid_error(call, *cause_parts: str) -> AstridError:
+    with pytest.raises(AstridError) as raised:
+        call()
+    error = raised.value
+    for part in cause_parts:
+        assert part in error.cause
+    return error
 
 
 # ---------------------------------------------------------------------------
@@ -272,20 +282,20 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "z-image",
-                "--mode", "t2i",
-                "--execution", "local",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        error = _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "z-image",
+                    "--mode", "t2i",
+                    "--execution", "local",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "generation backend 'local' is not registered",
         )
-        captured = capsys.readouterr()
-        assert code == 1
         # Error must name the missing backend and NOT contain raw KeyError
-        assert "generation backend 'local' is not registered" in captured.err
-        assert "KeyError" not in captured.err
+        assert "KeyError" not in error.cause
 
     def test_execution_unavailable_for_model_mode_lists_available_backends(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -303,18 +313,19 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "flux-dev",
-                "--mode", "t2i",
-                "--execution", "local",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        error = _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "flux-dev",
+                    "--mode", "t2i",
+                    "--execution", "local",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "model 'flux-dev' mode 't2i' has no 'local' backend",
         )
-        captured = capsys.readouterr()
-        assert code == 1
-        assert "Available backends: cloud" in captured.err
+        assert error.valid_options == ("cloud",)
 
     # -- No raw KeyError leakage -------------------------------------------
 
@@ -334,23 +345,23 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "z-image",
-                "--mode", "t2i",
-                "--execution", "local",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        error = _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "z-image",
+                    "--mode", "t2i",
+                    "--execution", "local",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "generation backend 'local' is not registered",
         )
-        captured = capsys.readouterr()
-        assert code == 1
         # The error should be the user-friendly wrapper message.
-        assert "generation backend 'local' is not registered" in captured.err
         # No raw KeyError traceback in stderr.
-        assert "KeyError" not in captured.err
+        assert "KeyError" not in error.cause
         # No traceback markers.
-        assert "Traceback" not in captured.err
+        assert "Traceback" not in error.cause
 
     # -- Dynamic execution validation --------------------------------------
 
@@ -367,16 +378,18 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "flux-dev",
-                "--mode", "t2i",
-                "--execution", "hybrid",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "flux-dev",
+                    "--mode", "t2i",
+                    "--execution", "hybrid",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "model 'flux-dev' mode 't2i' has no 'hybrid' backend",
         )
-        assert code == 1
 
     def test_dynamic_execution_validation_with_empty_string(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -390,16 +403,18 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "flux-dev",
-                "--mode", "t2i",
-                "--execution", "",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "flux-dev",
+                    "--mode", "t2i",
+                    "--execution", "",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "model 'flux-dev' mode 't2i' has no '' backend",
         )
-        assert code == 1
 
     # -- Registry creation errors wrapped cleanly --------------------------
 
@@ -425,21 +440,21 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "z-image",
-                "--mode", "t2i",
-                "--execution", "local",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        error = _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "z-image",
+                    "--mode", "t2i",
+                    "--execution", "local",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "failed to initialize generation backend 'local'",
         )
-        captured = capsys.readouterr()
-        assert code == 1
         # The error message wraps the failure clearly.
-        assert "failed to initialize generation backend 'local'" in captured.err
         # No raw traceback in stderr.
-        assert "Traceback" not in captured.err
+        assert "Traceback" not in error.cause
 
 
 # ---------------------------------------------------------------------------
@@ -506,19 +521,19 @@ class TestVideoExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "wan-2.2",
-                "--mode", "t2v",
-                "--execution", "cloud",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        error = _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "wan-2.2",
+                    "--mode", "t2v",
+                    "--execution", "cloud",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "generation backend 'cloud' is not registered",
         )
-        captured = capsys.readouterr()
-        assert code == 1
-        assert "generation backend 'cloud' is not registered" in captured.err
-        assert "KeyError" not in captured.err
+        assert "KeyError" not in error.cause
 
     def test_no_raw_keyerror_leakage_on_video_executor(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -534,16 +549,17 @@ class TestVideoExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        code = run_mod.main(
-            [
-                "--model", "wan-2.2",
-                "--mode", "t2v",
-                "--execution", "cloud",
-                "--prompt", "a test",
-                "--out", str(out),
-            ]
+        error = _assert_astrid_error(
+            lambda: run_mod.main(
+                [
+                    "--model", "wan-2.2",
+                    "--mode", "t2v",
+                    "--execution", "cloud",
+                    "--prompt", "a test",
+                    "--out", str(out),
+                ]
+            ),
+            "generation backend 'cloud' is not registered",
         )
-        captured = capsys.readouterr()
-        assert code == 1
-        assert "Traceback" not in captured.err
-        assert "KeyError" not in captured.err
+        assert "Traceback" not in error.cause
+        assert "KeyError" not in error.cause

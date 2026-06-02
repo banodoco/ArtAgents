@@ -10,7 +10,12 @@ from pathlib import Path
 from astrid._paths import REPO_ROOT
 from astrid.core.executor.folder import load_folder_executors
 from astrid.core.orchestrator.folder import load_folder_orchestrators
-from astrid.core.pack import ELEMENT_KIND_REGISTRY, element_kind_registry_for_pack, load_pack_manifest, pack_manifest_path
+from astrid.core.pack import (
+    ELEMENT_KIND_REGISTRY,
+    element_kind_registry_for_pack,
+    load_pack_manifest,
+    pack_manifest_path,
+)
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")

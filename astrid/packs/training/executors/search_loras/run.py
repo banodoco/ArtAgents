@@ -4,19 +4,20 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('training.search_loras')
 import argparse
 import json
 import os
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import add_choice_arg
 
 HUGGING_FACE_MODELS_API = "https://huggingface.co/api/models"
 DEFAULT_DISCOVERY_LIMIT = 1000
@@ -170,7 +171,11 @@ def _match_details(result: dict[str, Any], terms: list[str], mode: str) -> dict[
     elif mode == "any":
         matched = bool(matched_terms)
     else:
-        raise ValueError("match_mode must be all or any")
+        raise AstridError(
+            "match_mode must be all or any",
+            valid_options=["all", "any"],
+            recovery_command="set --match-mode to 'all' or 'any'",
+        )
     score = sum(len(fields) for fields in terms_by_field.values())
     return {
         "matched": matched,
@@ -398,12 +403,21 @@ def _fetch_models(
             raw_data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Hugging Face model search failed: HTTP {exc.code}: {detail}") from exc
+        raise AstridError(
+            f"Hugging Face model search failed: HTTP {exc.code}: {detail}",
+            recovery_command="verify the Hugging Face API is reachable and the base model id is correct, then retry",
+        ) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Hugging Face model search failed: {exc.reason}") from exc
+        raise AstridError(
+            f"Hugging Face model search failed: {exc.reason}",
+            recovery_command="check network connectivity and Hugging Face API availability, then retry",
+        ) from exc
 
     if not isinstance(raw_data, list):
-        raise RuntimeError("Hugging Face model search returned an unexpected payload")
+        raise AstridError(
+            "Hugging Face model search returned an unexpected payload",
+            recovery_command="verify the Hugging Face API is functioning correctly and retry",
+        )
     return [item for item in raw_data if isinstance(item, dict)]
 
 
@@ -445,16 +459,30 @@ def search_loras(
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     if limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise AstridError(
+            "limit must be at least 1",
+            recovery_command="set --limit to a value >= 1",
+        )
     if direction not in {"-1", "1"}:
-        raise ValueError("direction must be -1 or 1")
+        raise AstridError(
+            "direction must be -1 or 1",
+            valid_options=["-1", "1"],
+            recovery_command="set --direction to -1 or 1",
+        )
 
     if match_mode not in {"all", "any"}:
-        raise ValueError("match_mode must be all or any")
+        raise AstridError(
+            "match_mode must be all or any",
+            valid_options=["all", "any"],
+            recovery_command="set --match-mode to 'all' or 'any'",
+        )
     local_terms = _normalize_terms(match)
     effective_fetch_limit = fetch_limit if fetch_limit is not None else (max(limit, 100) if local_terms else limit)
     if effective_fetch_limit < limit:
-        raise ValueError("fetch_limit must be greater than or equal to limit")
+        raise AstridError(
+            "fetch_limit must be greater than or equal to limit",
+            recovery_command="set --fetch-limit to a value >= --limit and retry",
+        )
 
     raw_data = _fetch_models(
         base_model=base_model,
@@ -530,12 +558,23 @@ def discover_base_models(
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     if limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise AstridError(
+            "limit must be at least 1",
+            recovery_command="set --limit to a value >= 1",
+        )
     if direction not in {"-1", "1"}:
-        raise ValueError("direction must be -1 or 1")
+        raise AstridError(
+            "direction must be -1 or 1",
+            valid_options=["-1", "1"],
+            recovery_command="set --direction to -1 or 1",
+        )
 
     if match_mode not in {"all", "any"}:
-        raise ValueError("match_mode must be all or any")
+        raise AstridError(
+            "match_mode must be all or any",
+            valid_options=["all", "any"],
+            recovery_command="set --match-mode to 'all' or 'any'",
+        )
     local_terms = _normalize_terms(match)
     raw_data = _fetch_models(
         base_model=None,
@@ -591,16 +630,16 @@ def discover_base_models(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Search Hugging Face Hub for LoRA adapters by base model.")
-    parser.add_argument("--mode", choices=("search", "base-models"), default="search", help="Run a LoRA search or discover base-model names. Default search.")
+    add_choice_arg(parser, "--mode", values=("search", "base-models"), default="search", help="Run a LoRA search or discover base-model names. Default search.")
     parser.add_argument("--base-model", help="Base model repo id, for example stabilityai/stable-diffusion-xl-base-1.0.")
     parser.add_argument("--query", help="Optional Hugging Face API text search.")
     parser.add_argument("--match", action="append", default=[], help="Local substring filter across repo id, tags, and safetensors filenames. May be repeated.")
-    parser.add_argument("--match-mode", choices=("all", "any"), default="all", help="Whether all --match terms or any --match term must match. Default all.")
+    add_choice_arg(parser, "--match-mode", values=("all", "any"), default="all", help="Whether all --match terms or any --match term must match. Default all.")
     parser.add_argument("--base-model-match", action="append", default=[], help="With --list-base-models, filter extracted base model ids by substring. May be repeated.")
     parser.add_argument("--limit", type=int, help="Maximum result count. Default 25 for search, 1000 for --list-base-models.")
     parser.add_argument("--fetch-limit", type=int, help="How many API results to fetch before applying --match. Defaults to max(limit, 100) when matching.")
     parser.add_argument("--sort", default="downloads", help="Hub sort field. Default downloads.")
-    parser.add_argument("--direction", choices=("-1", "1"), default="-1", help="Sort direction: -1 desc, 1 asc.")
+    add_choice_arg(parser, "--direction", values=("-1", "1"), default="-1", help="Sort direction: -1 desc, 1 asc.")
     parser.add_argument("--list-base-models", action="store_true", help="Scan LoRA repos and list discovered base_model tags instead of searching one base model.")
     parser.add_argument("--token", help="Optional Hugging Face token. Prefer HF_TOKEN or HUGGING_FACE_HUB_TOKEN.")
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds.")
@@ -611,40 +650,39 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    try:
-        list_base_models = bool(args.list_base_models or args.mode == "base-models")
-        fetch_limit = args.fetch_limit if args.fetch_limit and args.fetch_limit > 0 else None
-        limit = args.limit if args.limit and args.limit > 0 else None
-        if list_base_models:
-            payload = discover_base_models(
-                query=args.query,
-                match=args.match,
-                match_mode=args.match_mode,
-                base_model_match=args.base_model_match,
-                limit=fetch_limit or limit or DEFAULT_DISCOVERY_LIMIT,
-                sort=args.sort,
-                direction=args.direction,
-                token=args.token,
-                timeout=args.timeout,
+    list_base_models = bool(args.list_base_models or args.mode == "base-models")
+    fetch_limit = args.fetch_limit if args.fetch_limit and args.fetch_limit > 0 else None
+    limit = args.limit if args.limit and args.limit > 0 else None
+    if list_base_models:
+        payload = discover_base_models(
+            query=args.query,
+            match=args.match,
+            match_mode=args.match_mode,
+            base_model_match=args.base_model_match,
+            limit=fetch_limit or limit or DEFAULT_DISCOVERY_LIMIT,
+            sort=args.sort,
+            direction=args.direction,
+            token=args.token,
+            timeout=args.timeout,
+        )
+    else:
+        if not args.base_model:
+            raise AstridError(
+                "--base-model is required unless --list-base-models is set",
+                recovery_command="provide --base-model <repo_id> or use --list-base-models",
             )
-        else:
-            if not args.base_model:
-                raise ValueError("--base-model is required unless --list-base-models is set")
-            payload = search_loras(
-                base_model=args.base_model,
-                query=args.query,
-                match=args.match,
-                match_mode=args.match_mode,
-                limit=limit or 25,
-                fetch_limit=fetch_limit,
-                sort=args.sort,
-                direction=args.direction,
-                token=args.token,
-                timeout=args.timeout,
-            )
-    except (RuntimeError, ValueError) as exc:
-        print(f"search-loras: {exc}", file=sys.stderr)
-        return 2
+        payload = search_loras(
+            base_model=args.base_model,
+            query=args.query,
+            match=args.match,
+            match_mode=args.match_mode,
+            limit=limit or 25,
+            fetch_limit=fetch_limit,
+            sort=args.sort,
+            direction=args.direction,
+            token=args.token,
+            timeout=args.timeout,
+        )
 
     indent = None if args.compact else 2
     text = json.dumps(payload, indent=indent, sort_keys=False) + "\n"

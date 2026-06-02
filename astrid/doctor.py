@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from astrid._paths import REPO_ROOT
+from astrid.core.timeline.kinds import default_transition_kind, transition_kind_options
 
 
 Status = str
@@ -353,15 +354,21 @@ def _check_timeline_catalog() -> str:
     effects = set(list_effect_ids())
     animations = set(list_animation_ids())
     transitions = set(list_transition_ids())
+    default_transition = default_transition_kind()
     expected = [
         ("effect", "text-card", effects),
         ("animation", "fade", animations),
-        ("transition", "cross-fade", transitions),
+        ("transition", default_transition, transitions),
     ]
     missing = [f"{kind}:{item}" for kind, item, values in expected if item not in values]
     if missing:
         raise RuntimeError(f"missing timeline catalog ids: {', '.join(missing)}")
-    return f"effects={len(effects)}, animations={len(animations)}, transitions={len(transitions)}"
+    canonical_transitions = ",".join(transition_kind_options())
+    return (
+        f"effects={len(effects)}, animations={len(animations)}, "
+        f"transitions={len(transitions)} default={default_transition} "
+        f"canonical=[{canonical_transitions}]"
+    )
 
 
 def _check_runpod_stale_handles() -> DoctorCheck:

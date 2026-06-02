@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('training.pool_build')
 import argparse
 import json
@@ -163,7 +164,12 @@ def build_pool(
     visual_survivors = [entry for entry in entries if entry["category"] == "visual" and not entry["excluded"]]
     dialogue_survivors = [entry for entry in entries if entry["category"] == "dialogue" and not entry["excluded"]]
     if not visual_survivors or not dialogue_survivors:
-        raise SystemExit("pool_build requires at least one surviving visual and one surviving dialogue entry")
+        raise AstridError(
+            "pool_build requires at least one surviving visual and one surviving dialogue entry",
+            recovery_command=(
+                "re-run triage/scene_describe/quote_scout so at least one visual and one dialogue entry survive"
+            ),
+        )
 
     payload: timeline.Pool = {
         "version": timeline.POOL_VERSION,
@@ -188,32 +194,35 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    triage = json.loads(args.triage.read_text(encoding="utf-8"))
-    scene_descriptions = json.loads(args.scene_descriptions.read_text(encoding="utf-8"))
-    quote_candidates = json.loads(args.quote_candidates.read_text(encoding="utf-8"))
-    transcript = json.loads(args.transcript.read_text(encoding="utf-8"))
-    scenes = json.loads(args.scenes.read_text(encoding="utf-8"))
-    payload = build_pool(
-        triage,
-        scene_descriptions,
-        quote_candidates,
-        transcript,
-        scenes,
-        source_slug=args.source_slug,
-    )
-    out_dir = args.out.resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "pool.json"
-    timeline.save_pool(payload, out_path)
-    register_outputs(
-        stage="pool_build",
-        outputs=[("pool", out_path, "Candidate pool")],
-        metadata={"entries": len(payload.get("entries", [])), "source_slug": args.source_slug},
-    )
-    print(out_path)
-    return 0
+    def _run() -> int:
+        parser = build_parser()
+        args = parser.parse_args(argv)
+        triage = json.loads(args.triage.read_text(encoding="utf-8"))
+        scene_descriptions = json.loads(args.scene_descriptions.read_text(encoding="utf-8"))
+        quote_candidates = json.loads(args.quote_candidates.read_text(encoding="utf-8"))
+        transcript = json.loads(args.transcript.read_text(encoding="utf-8"))
+        scenes = json.loads(args.scenes.read_text(encoding="utf-8"))
+        payload = build_pool(
+            triage,
+            scene_descriptions,
+            quote_candidates,
+            transcript,
+            scenes,
+            source_slug=args.source_slug,
+        )
+        out_dir = args.out.resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "pool.json"
+        timeline.save_pool(payload, out_path)
+        register_outputs(
+            stage="pool_build",
+            outputs=[("pool", out_path, "Candidate pool")],
+            metadata={"entries": len(payload.get("entries", [])), "source_slug": args.source_slug},
+        )
+        print(out_path)
+        return 0
+
+    return run_pack_main("training.pool_build", _run, argv=list(argv) if argv is not None else None)
 
 
 if __name__ == "__main__":

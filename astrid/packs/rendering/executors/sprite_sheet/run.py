@@ -4,25 +4,27 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('rendering.sprite_sheet')
 import argparse
 import base64
 import json
 import os
-from pathlib import Path
 import re
 import struct
 import subprocess
 import sys
 import time
+import uuid
+import zlib
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-import uuid
-import zlib
 
+from astrid.core.cli_choices import add_choice_arg
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
 from astrid.packs.generation.executors.generate_image_openai.run import (
     API_URL,
     DEFAULT_MODEL,
@@ -34,7 +36,6 @@ from astrid.packs.generation.executors.generate_image_openai.run import (
     _die,
     _validate_payload,
 )
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
 
 EDIT_API_URL = "https://api.openai.com/v1/images/edits"
 DEFAULT_KEY_COLOR = "#ff00ff"
@@ -1412,8 +1413,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("--normalize-frames", action="store_true", help="Crop each sliced frame to alpha content, scale down if needed, and recenter it in the frame.")
     add("--normalize-margin", type=int, default=16, help="Minimum transparent margin for --normalize-frames.")
     add("--upscale-factor", type=float, default=1.0, help="Scale transparent frames after slicing/normalization and before video/web exports.")
-    add("--upscale-filter", default="lanczos", choices=["lanczos", "bicubic", "spline", "neighbor"], help="ffmpeg scale filter for --upscale-factor.")
-    add("--ai-upscale-provider", default="none", choices=["none", "fal"], help="Run a proper AI upscaler after slicing/normalization. Use fal for FAL Clarity Upscaler.")
+    add_choice_arg(parser, "--upscale-filter", values=("lanczos", "bicubic", "spline", "neighbor"), default="lanczos", help="ffmpeg scale filter for --upscale-factor.")
+    add_choice_arg(parser, "--ai-upscale-provider", values=("none", "fal"), default="none", help="Run a proper AI upscaler after slicing/normalization. Use fal for FAL Clarity Upscaler.")
     add("--ai-upscale-model", default=DEFAULT_FAL_UPSCALER, help="FAL model id for --ai-upscale-provider fal.")
     add("--ai-upscale-factor", type=float, default=2.0, help="AI upscale multiplier passed to the provider.")
     add("--ai-upscale-prompt", help="Prompt for the AI upscaler. Defaults to a sprite-preserving prompt derived from --subject and --animation.")

@@ -3,6 +3,13 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_pack_recoverability_exhaustive:
+        description: "Run the opt-in exhaustive pack enum recoverability sweep"
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   python:
@@ -81,3 +88,30 @@ jobs:
           name: coverage-report
           path: coverage.xml
           if-no-files-found: ignore
+
+  pack-recoverability-exhaustive:
+    name: Pack recoverability exhaustive (opt-in)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_pack_recoverability_exhaustive }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+
+      - name: Run exhaustive pack recoverability sweep
+        run: |
+          python -m pytest tests/test_pack_enum_recoverability.py -m pack_recoverability_exhaustive -q

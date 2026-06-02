@@ -15,7 +15,12 @@ from astrid.contracts.capability_schema import (
 )
 from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
 from astrid.core.manifest import ManifestParseError, load_manifest_mapping
-from astrid.core.pack import ELEMENT_KINDS, ELEMENT_KIND_REGISTRY, ElementKind, ElementKindRegistry
+from astrid.core.pack import (
+    ELEMENT_KINDS as ELEMENT_KINDS,
+    ELEMENT_KIND_REGISTRY,
+    ElementKind,
+    ElementKindRegistry,
+)
 
 REQUIRED_ELEMENT_FILES = ("component.tsx", "element.yaml")
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")

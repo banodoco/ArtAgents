@@ -121,6 +121,175 @@ Every inspect response includes a `_capability` section with:
 - **Need a render building block?** Use an element. They're reusable visual
   components (effects, animations, transitions) assembled by render pipelines.
 
+## Recoverable CLI Choices
+
+Astrid CLI parsers use structured enum helpers so that invalid values produce
+machine-readable errors instead of raw argparse stderr with `SystemExit(2)`.
+Agents can read these errors to discover valid values without consulting
+`--help` or source code.
+
+### How It Works
+
+Every CLI argument that accepts a constrained set of values is wired through
+`add_kind_arg()` (for registry-backed timeline kinds) or `add_choice_arg()`
+(for static enum choices).  These helpers attach `RegistryChoices` or
+`StaticChoices` objects to the argparse action, and the parser itself is an
+instance of `RecoverableArgumentParser`.
+
+When an invalid value is passed:
+
+1. `RecoverableArgumentParser._check_value()` detects the failure.
+2. It raises `AstridArgumentError` (a `ValueError` subclass) instead of
+   calling `sys.exit(2)`.
+3. The `AstridArgumentError` carries:
+   - `message` — the argparse-style error text
+   - `argument_name` — the flag/dest name (e.g., `"--kind"`)
+   - `invalid_value` — the value the user typed
+   - `valid_options` — the tuple of allowed values
+   - `catalog` — the registry catalog name for kind args (e.g., `"clip"`,
+     `"track"`, `"transition"`), or `None` for static choices
+
+### The Agent Recovery Pattern
+
+When an agent invokes a command with an invalid enum value, the stderr output
+will contain the structured envelope markers described in
+[docs/error-model.md](error-model.md).  Specifically:
+
+```
+valid options: cross-fade, cut, fade
+recovery: retry the command with one of the listed valid options
+```
+
+The agent should:
+
+1. Parse the `valid options:` line to discover the accepted values.
+2. Retry the command with a value from that list.
+3. If the error includes a `recovery:` line, prefer that exact command.
+
+No `--help` scan or source grep is needed — the error itself carries the
+recovery metadata.
+
+### Authoring Rules for Pack Authors
+
+When you add a new CLI argument to a pack `run.py`:
+
+- **For registry-backed timeline kinds** (clip, track, transition catalogs):
+  use `add_kind_arg()`.  Do not pass a bare `choices=` list — the helper
+  derives choices from the live `ElementKindRegistry`.
+
+  ```python
+  from astrid.core.cli_choices import add_kind_arg, RecoverableArgumentParser
+
+  parser = RecoverableArgumentParser(prog="my-pack")
+  add_kind_arg(parser, "--kind", catalog="clip", default="video",
+               help="Clip kind")
+  ```
+
+- **For static enum choices** (model names, modes, formats): use
+  `add_choice_arg()`.
+
+  ```python
+  from astrid.core.cli_choices import add_choice_arg, RecoverableArgumentParser
+
+  parser = RecoverableArgumentParser(prog="my-pack")
+  add_choice_arg(parser, "--format", values=("mp4", "webm", "gif"),
+                 default="mp4", help="Output format")
+  ```
+
+- **Always use `RecoverableArgumentParser`** instead of plain
+  `argparse.ArgumentParser`.  It preserves normal argparse behavior for
+  `--help` and non-choice parse errors while routing invalid enum values
+  through `AstridArgumentError`.
+
+- **At the pack entrypoint**, catch `AstridArgumentError` and convert it to
+  an `AstridError` so the renderer produces the structured envelope:
+
+  ```python
+  from astrid.contracts.errors import AstridError
+
+  try:
+      args = parser.parse_args(argv)
+  except AstridArgumentError as exc:
+      raise AstridError(
+          exc.message,
+          valid_options=exc.valid_options,
+          recovery_command=f"retry with --{exc.argument_name.replace('--', '')} "
+                           f"<one of: {', '.join(exc.valid_options)}>",
+      ) from exc
+  ```
+
+  (If the pack entrypoint is wrapped by `_canonical_entrypoint`, the
+  `AstridArgumentError` will be caught and rendered automatically — the
+  explicit conversion is only needed for custom entrypoints.)
+
+## Extending Timeline Kinds via pack.yaml
+
+Packs can extend the built-in timeline kind catalogs (`transition`, `clip`,
+`track`) by declaring `extensions.timeline.kinds` in their `pack.yaml`
+manifest.
+
+### Schema
+
+Each entry in `extensions.timeline.kinds` is an object with:
+
+| Field | Required | Type | Description |
+|---|---|---|---|
+| `catalog` | yes | `"transition" \| "clip" \| "track"` | Which built-in catalog to extend. |
+| `id` | yes | `str` | Canonical kind identifier (e.g., `"cross-fade"`, `"video"`, `"caption"`). |
+| `aliases` | no | `list[str]` | Additional names accepted as input (canonicalized to `id`). |
+| `default` | no | `bool` | When `true`, this kind becomes the default for its catalog.  Only one entry per catalog may set `default: true`. |
+
+### Example
+
+```yaml
+# In a pack.yaml manifest
+extensions:
+  timeline:
+    kinds:
+      - catalog: transition
+        id: cross-fade
+        aliases: [crossfade, xfade, dissolve]
+        default: true
+      - catalog: transition
+        id: fade
+        aliases: [fade-out, fade-in]
+      - catalog: clip
+        id: video
+        aliases: [visual, vid]
+      - catalog: track
+        id: caption
+        aliases: [subtitle, subtitles]
+```
+
+This manifest declares:
+- A `cross-fade` transition kind with three aliases (`crossfade`, `xfade`,
+  `dissolve`) set as the default transition.
+- A `fade` transition kind with two aliases.
+- A `video` clip kind with two aliases.
+- A `caption` track kind with two aliases.
+
+### Validation
+
+At pack load time, `astrid.core.pack._normalize_timeline_kinds()` validates:
+
+- `catalog` must be one of `transition`, `clip`, or `track`.
+- `id` must be a non-empty string.
+- `aliases` (when present) must be a list of non-empty strings.
+- `default` (when present) must be a boolean.
+- No unknown fields are allowed.
+- Duplicate ids or aliases (including cross-catalog conflicts) are caught
+  with catalog-specific error messages.
+- At most one entry per catalog may set `default: true`.
+
+### Discovery
+
+Agents do not need to parse `pack.yaml` directly.  The extended kinds are
+loaded into the runtime `ElementKindRegistry` and are surfaced through the
+same CLI error-recovery path described in the Recoverable CLI Choices section
+above.  When an agent invokes a command with an invalid kind, the error
+output will include both the built-in and extension kinds in the
+`valid options:` line.
+
 ## Why Source Grep Is Wrong
 
 - Executor ids live in YAML/JSON manifests, not Python filenames.

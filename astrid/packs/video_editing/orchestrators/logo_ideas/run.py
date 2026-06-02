@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.logo_ideas')
 import argparse
 import hashlib
@@ -16,15 +16,14 @@ import re
 from pathlib import Path
 from typing import Any, Sequence
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.http import (
-    FAL_QUEUE_URL,
     HttpClient,
     default_client,
     fal_submit_and_poll,
 )
 from astrid.core.util.secrets import load_api_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
-
 
 FIREWORKS_CHAT_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
 
@@ -72,10 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ideas", required=True, help="Brief describing the logo: brand, vibe, motifs, constraints.")
     parser.add_argument("--out", type=Path, required=True, help="Output directory for concepts, prompts, images, and the grid.")
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT, help=f"Number of logos to generate (default {DEFAULT_COUNT}).")
-    parser.add_argument(
+    add_choice_arg(
+        parser,
         "--provider",
         default=DEFAULT_PROVIDER,
-        choices=sorted(PROVIDER_MODEL_IDS),
+        values=sorted(PROVIDER_MODEL_IDS),
         help=f"Image provider (default {DEFAULT_PROVIDER}).",
     )
     parser.add_argument(
@@ -89,10 +89,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_image_size,
         help=f"fal image size: preset or WIDTHxHEIGHT (default {DEFAULT_IMAGE_SIZE}).",
     )
-    parser.add_argument(
+    add_choice_arg(
+        parser,
         "--output-format",
         default=DEFAULT_OUTPUT_FORMAT,
-        choices=("png", "jpeg", "jpg", "webp"),
+        values=("png", "jpeg", "jpg", "webp"),
         help=f"Image format saved locally (default {DEFAULT_OUTPUT_FORMAT}).",
     )
     parser.add_argument("--env-file", type=Path, help="Env file holding FIREWORKS_API_KEY and FAL_KEY.")

@@ -10,10 +10,23 @@ from typing import Any
 
 from astrid._paths import REPO_ROOT
 
-from .attribute import archive_thread, backfill_runs, create_thread, enforce_lifecycle, reopen_thread, resolve_thread_ref
+from .attribute import (
+    archive_thread,
+    backfill_runs,
+    create_thread,
+    enforce_lifecycle,
+    reopen_thread,
+    resolve_thread_ref,
+)
 from .index import ThreadIndexStore
 from .schema import validate_run_record
-from .variants import SELECTION_SENTENCE, VariantState, keep_selection, read_current_keepers, selection_history
+from .variants import (
+    SELECTION_SENTENCE,
+    VariantState,
+    keep_selection,
+    read_current_keepers,
+    selection_history,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

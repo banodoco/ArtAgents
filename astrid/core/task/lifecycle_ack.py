@@ -57,9 +57,9 @@ from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatUntil,
     find_step_by_path,
-    is_legacy_repeat_until_condition,
     is_attested_kind,
     is_code_kind,
+    is_legacy_repeat_until_condition,
     load_plan,
     step_dir_for_path,
 )

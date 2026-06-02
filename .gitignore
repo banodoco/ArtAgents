@@ -101,3 +101,7 @@ plan_revision.json
 
 # Python build metadata (editable install)
 *.egg-info/
+
+# Python build / distribution artifacts (regenerated; never committed)
+build/
+dist/

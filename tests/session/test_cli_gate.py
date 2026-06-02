@@ -105,9 +105,9 @@ def test_every_gated_verb_errors_without_session(
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
     rc, _stdout, stderr = _run_pipeline(argv)
     assert rc == 2
-    assert stderr.splitlines()[0] == "first recovery action: astrid status"
+    assert stderr.splitlines()[0].startswith("no session bound")
     assert "no session bound" in stderr
-    assert "astrid status" in stderr
+    assert "recovery: astrid status" in stderr
     assert "astrid attach" in stderr
 
 
@@ -244,7 +244,7 @@ def test_allowlist_attach_runs_without_session(
 
     rc, stdout, stderr = _run_pipeline(["attach", "demo"])
     assert rc == 0
-    assert stderr == "Using default timeline: primary. Use --timeline to override.\n"
+    assert stderr == ""
     assert "export ASTRID_SESSION_ID=" in stdout
 
 
@@ -358,7 +358,7 @@ def test_author_test_with_project_is_blocked_without_session(
     rc, stdout, stderr = _run_pipeline(["author", "test", "pack.thing", "--project", "demo"])
     assert rc == 2
     assert stdout == ""
-    assert stderr.splitlines()[0] == "first recovery action: astrid status"
+    assert stderr.splitlines()[0].startswith("no session bound")
     assert "no session bound" in stderr
 
 

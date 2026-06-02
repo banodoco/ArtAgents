@@ -17,6 +17,8 @@ from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from astrid.contracts.errors import AstridError, render_astrid_error
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency
@@ -109,12 +111,18 @@ class DeepSeekClient:
                     payload = response.read().decode("utf-8")
                 data = json.loads(payload)
                 if "error" in data:
-                    raise RuntimeError(f"{self.provider.name} API error: {data['error']}")
+                    raise AstridError(
+                        f"{self.provider.name} API error: {data['error']}",
+                        recovery_command="check the provider API key and model name, then retry",
+                    )
                 return str(data["choices"][0]["message"]["content"])
             except HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")
                 if 400 <= exc.code < 500 and exc.code != 429:
-                    raise RuntimeError(f"{self.provider.name} HTTP {exc.code}: {detail}") from exc
+                    raise AstridError(
+                        f"{self.provider.name} HTTP {exc.code}: {detail}",
+                        recovery_command="fix the request payload or provider configuration",
+                    ) from exc
                 last_error = RuntimeError(f"{self.provider.name} HTTP {exc.code}: {detail}")
             except (URLError, TimeoutError) as exc:
                 last_error = RuntimeError(f"{self.provider.name} request failed: {exc}")
@@ -126,7 +134,10 @@ class DeepSeekClient:
                     file=sys.stderr,
                 )
                 time.sleep(wait_seconds)
-        raise RuntimeError(str(last_error))
+        raise AstridError(
+            str(last_error),
+            recovery_command="retry later or check network connectivity and provider status",
+        )
 
 
 class FakeScriptClient:
@@ -197,11 +208,18 @@ def build_chat_client(config: PipelineConfig, *, fake: bool, env: dict[str, str]
     if fake:
         return FakeScriptClient()
     if config.provider.name != "deepseek":
-        raise RuntimeError(f"unsupported script provider: {config.provider.name}")
+        raise AstridError(
+            f"unsupported script provider: {config.provider.name}",
+            valid_options=["deepseek"],
+            recovery_command="set provider.name to 'deepseek' in the preset config",
+        )
     active_env = env if env is not None else os.environ
     api_key = active_env.get(config.provider.api_key_env)
     if not api_key:
-        raise RuntimeError(f"{config.provider.api_key_env} is required")
+        raise AstridError(
+            f"{config.provider.api_key_env} is required",
+            recovery_command=f"set the {config.provider.api_key_env} environment variable and retry",
+        )
     return DeepSeekClient(config.provider, api_key)
 
 
@@ -335,9 +353,15 @@ def judge_best(config: PipelineConfig, client: ChatClient, candidates: list[Cand
         winner = int(payload["winner"])
         reason = str(payload["reason"])
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        raise RuntimeError(f"judge returned invalid JSON: {content}") from exc
+        raise AstridError(
+            f"judge returned invalid JSON: {content}",
+            recovery_command="retry with a different prompt or increase judge_max_tokens",
+        ) from exc
     if winner not in {candidate.index for candidate in candidates}:
-        raise RuntimeError(f"judge selected unknown candidate {winner}")
+        raise AstridError(
+            f"judge selected unknown candidate {winner}",
+            recovery_command="increase candidates count or fix the judge prompt",
+        )
     return winner, reason
 
 
@@ -520,25 +544,37 @@ def _load_mapping(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8")
     if path.suffix.lower() in {".yaml", ".yml"}:
         if yaml is None:
-            raise RuntimeError("PyYAML is required to parse script pipeline presets")
+            raise AstridError(
+                "PyYAML is required to parse script pipeline presets",
+                recovery_command="install PyYAML with: pip install pyyaml",
+            )
         loaded = yaml.safe_load(text)
     else:
         loaded = json.loads(text)
     if not isinstance(loaded, dict):
-        raise RuntimeError(f"script pipeline config must be an object: {path}")
+        raise AstridError(
+            f"script pipeline config must be an object: {path}",
+            recovery_command="ensure the preset file contains a JSON/YAML object (not a list or scalar)",
+        )
     return loaded
 
 
 def _mapping(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
-        raise RuntimeError(f"{path} must be an object")
+        raise AstridError(
+            f"{path} must be an object",
+            recovery_command="ensure the preset section is a JSON/YAML object",
+        )
     return value
 
 
 def _required_str(values: dict[str, Any], key: str, path: str) -> str:
     value = values.get(key)
     if not isinstance(value, str) or not value:
-        raise RuntimeError(f"{path} is required")
+        raise AstridError(
+            f"{path} is required",
+            recovery_command="add the missing required field to the preset config",
+        )
     return value
 
 
@@ -553,4 +589,7 @@ def _float_default(config: PipelineConfig, key: str, fallback: float) -> float:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except AstridError as exc:
+        raise SystemExit(render_astrid_error(exc))

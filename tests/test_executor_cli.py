@@ -11,16 +11,25 @@ Proves:
 
 from __future__ import annotations
 
+import argparse
 import json
-import os
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import StaticChoices
 from tests.helpers.cli_runner import run_cli
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices[name]
+    raise AssertionError(f"missing subparser {name!r}")
 
 
 class ExecutorUUIDHandoffTest(unittest.TestCase):
@@ -129,6 +138,25 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
             "12345678-1234-1234-1234-123456789abc",
         )
 
+    def test_main_raises_astrid_error_for_registry_load_failure(self):
+        from unittest.mock import patch
+        import astrid.core.executor.cli as executor_cli
+
+        with patch.object(executor_cli, "load_default_registry", side_effect=ValueError("boom")):
+            with self.assertRaises(AstridError) as excinfo:
+                executor_cli.main(["list"])
+        self.assertEqual(str(excinfo.exception), "boom")
+
+    def test_list_kind_uses_static_choices_wrapper(self):
+        import astrid.core.executor.cli as executor_cli
+
+        parser = executor_cli.build_parser()
+        list_parser = _subparser(parser, "list")
+        kind_action = next(action for action in list_parser._actions if action.dest == "kind")
+
+        self.assertIsInstance(kind_action.choices, StaticChoices)
+        self.assertEqual(kind_action.choices.valid_options, ("built_in", "external"))
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -138,21 +166,15 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
     """T1: executor run routes command echo to stderr; --json suppresses it."""
 
     def _make_run_parser(self):
-        from astrid.core.executor.cli import main as _main
-        import argparse, sys
-        # Import the module and build parser to inspect args
         import astrid.core.executor.cli as cli_mod
         return cli_mod
 
     def test_run_subparser_has_json_flag(self):
         """run subparser must accept --json flag."""
-        import argparse
-        from astrid.core.executor.cli import main as _main
         import astrid.core.executor.cli as cli_mod
-        # Check the flag is declared by looking at the source
         import inspect
         src = inspect.getsource(cli_mod)
-        self.assertIn('run_parser.add_argument("--json"', src)
+        self.assertIn('run_parser.add_argument(\"--json\"', src)
 
     def _run_cmd_run(self, command, payload, use_json):
         import io, sys

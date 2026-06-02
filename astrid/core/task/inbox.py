@@ -30,6 +30,7 @@ from astrid.core.task.events import (
     make_item_skipped_event,
     make_run_aborted_event,
     make_step_skipped_event,
+    read_events,
 )
 from astrid.core.task.gate import (
     AttestedArgs,
@@ -44,7 +45,6 @@ from astrid.core.task.plan import (
     is_code_kind,
     load_plan,
 )
-from astrid.core.task.events import read_events
 
 INBOX_DIR_NAME = "inbox"
 CONSUMED_DIR_NAME = ".consumed"

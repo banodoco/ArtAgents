@@ -18,7 +18,6 @@ from astrid.core.alias_resolver import (
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
-from astrid.core.pack_resolver import PackResolver
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,
@@ -26,6 +25,7 @@ from astrid.core.pack import (
     validate_content_id_in_pack,
 )
 from astrid.core.pack_discovery import discover_packs_ordered
+from astrid.core.pack_resolver import PackResolver
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors

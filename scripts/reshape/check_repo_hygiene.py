@@ -6,10 +6,10 @@ paths by their *names* and never reads or prints the contents of any file.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import fnmatch
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Approved top-level files. Anything else tracked at the repo root is flagged
 # as an unknown root entry.
 ROOT_FILE_ALLOWLIST = {
+    "AGENTS.md",
+    "SECURITY.md",
     ".env.example",
     ".gitignore",
     "LICENSE",

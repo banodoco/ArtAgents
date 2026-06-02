@@ -14,7 +14,6 @@ replacement surface.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from ._edit_helpers import (
     TimelineEditError,
@@ -28,7 +27,6 @@ from .events.schema import (
     TimelineActor,
     TimelineEvent,
 )
-
 
 # ---------------------------------------------------------------------------
 # audio_bind

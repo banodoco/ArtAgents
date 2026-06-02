@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
+from astrid.contracts.errors import AstridError
 from astrid.contracts.run_status import RunStatus
-from astrid.core.util.time import utc_now_seconds, utc_now_seconds as utc_now_iso
+from astrid.core.util.time import utc_now_seconds
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id
 
@@ -27,8 +28,11 @@ SOURCE_KINDS = {"audio", "image", "other", "video"}
 RUN_STATUSES = {status.value for status in RunStatus}
 
 
-class ProjectValidationError(ValueError):
+class ProjectValidationError(AstridError, ValueError):
     """Raised when project state fails validation."""
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(cause)
 def build_project(
     slug: str,
     *,

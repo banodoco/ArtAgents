@@ -20,6 +20,8 @@ from __future__ import annotations
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('generation.generate_video')
 import argparse
+
+from astrid.contracts.errors import AstridError
 import hashlib
 import json
 import logging
@@ -31,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationResult,
@@ -459,12 +462,14 @@ def _create_backend_adapter(
     try:
         return backend_registry.create(execution, env_file=env_file)
     except KeyError as exc:
-        raise RuntimeError(
-            f"generation backend {execution!r} is not registered: {exc}"
+        raise AstridError(
+            f"generation backend {execution!r} is not registered: {exc}",
+            recovery_command="check available backends with --help or use a registered execution backend",
         ) from exc
     except Exception as exc:
-        raise RuntimeError(
-            f"failed to initialize generation backend {execution!r}: {exc}"
+        raise AstridError(
+            f"failed to initialize generation backend {execution!r}: {exc}",
+            recovery_command="verify the backend is properly installed and configured, then retry",
         ) from exc
 
 
@@ -603,24 +608,27 @@ def build_parser() -> argparse.ArgumentParser:
             "or a comma-separated list of 'url:scale' entries."
         ),
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--enable-safety-checker",
+        values=("true", "false"),
         dest="enable_safety_checker",
         default=None,
-        choices=["true", "false"],
         help="Toggle the safety checker on/off (string-encoded bool).",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--enable-prompt-expansion",
+        values=("true", "false"),
         dest="enable_prompt_expansion",
         default=None,
-        choices=["true", "false"],
         help="Toggle prompt expansion on/off (wan-only).",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--acceleration",
+        values=("none", "regular", "high"),
         default=None,
-        choices=["none", "regular", "high"],
         help="Inference acceleration preset (wan-only).",
     )
     p.add_argument(
@@ -652,32 +660,39 @@ def main(argv: list[str] | None = None) -> int:
     try:
         backend_registry = load_default_generation_backend_registry()
     except Exception as exc:
-        print(f"Failed to load generation backend registry: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"Failed to load generation backend registry: {exc}",
+            recovery_command="verify the generation backend packages are installed and retry",
+        ) from exc
 
     # --- load registry -------------------------------------------------------
     try:
         registry = ModelRegistry.load_default()
     except Exception as exc:
-        print(f"Failed to load model registry: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"Failed to load model registry: {exc}",
+            recovery_command="verify the model catalog is installed and retry",
+        ) from exc
 
     # --- validate (model, mode) pair exists ----------------------------------
     try:
         entry, mode_spec = registry.get_by_mode(args.model, mode_name)
     except KeyError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"model {args.model!r} mode {mode_name!r} not found: {exc}",
+            recovery_command="check available models with 'astrid models list' and retry with a valid model:mode pair",
+        ) from exc
 
     # --- check backend availability for --execution --------------------------
     if not registry.backend_available(args.model, mode_name, args.execution):
-        available = ", ".join(_available_backend_ids(mode_spec))
-        print(
-            f"Error: model {args.model!r} mode {mode_name!r} has no "
+        available_ids = _available_backend_ids(mode_spec)
+        available = ", ".join(available_ids)
+        raise AstridError(
+            f"model {args.model!r} mode {mode_name!r} has no "
             f"{args.execution!r} backend. Available backends: {available}",
-            file=sys.stderr,
+            valid_options=list(available_ids),
+            recovery_command=f"retry with one of the available backends: {available}",
         )
-        return 1
 
     warnings: list[dict[str, str]] = []
     dropped_features: list[str] = []
@@ -696,23 +711,18 @@ def main(argv: list[str] | None = None) -> int:
         prompts = _load_prompts(args.prompts_file, args.model, mode_name)
     else:
         if not args.prompt:
-            print(
-                "Error: either --prompt or --prompts-file is required.",
-                file=sys.stderr,
+            raise AstridError(
+                "either --prompt or --prompts-file is required",
+                recovery_command="provide --prompt '<text>' or --prompts-file <path> and retry",
             )
-            return 1
         prompts = [{"prompt": args.prompt, "model": args.model}]
 
     # --- build adapter (SD-004: dispatch through BackendAdapter) -------------
-    try:
-        adapter = _create_backend_adapter(
-            backend_registry,
-            args.execution,
-            env_file=args.env_file,
-        )
-    except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+    adapter = _create_backend_adapter(
+        backend_registry,
+        args.execution,
+        env_file=args.env_file,
+    )
 
     # --- resolve image_ref path (for manifest tracking) ----------------------
     image_ref_resolved: str | None = None

@@ -9,6 +9,7 @@ Proves:
 
 from __future__ import annotations
 
+import argparse
 import contextlib
 import io
 import json
@@ -22,6 +23,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.core.cli_choices import StaticChoices
 from astrid.packs import cli as packs_cli
 from astrid.packs.validate import validate_pack, extract_trust_summary, V1_TRUST_BLOCK
 from astrid.packs.agent_index import _assemble_pack_entry
@@ -36,6 +38,13 @@ _EXAMPLE_PACKS = {
     "text_digest": _REPO_ROOT / "examples" / "packs" / "text_digest",
     "text_review": _REPO_ROOT / "examples" / "packs" / "text_review",
 }
+
+
+def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices[name]
+    raise AssertionError(f"missing subparser {name!r}")
 
 
 def _chdir_context(path: Path):
@@ -643,6 +652,16 @@ class TestCLIBackwardCompat(unittest.TestCase):
         args = parser.parse_args(["new", "test_pack"])
         self.assertEqual(args.command, "new")
         self.assertEqual(args.pack_id, "test_pack")
+
+    def test_packs_cli_filter_enum_args_use_static_choices_wrappers(self) -> None:
+        parser = packs_cli.build_parser()
+        list_parser = _subparser(parser, "list")
+        status_parser = _subparser(parser, "status")
+
+        for subparser in (list_parser, status_parser):
+            for dest in ("status", "visibility"):
+                action = next(option for option in subparser._actions if option.dest == dest)
+                self.assertIsInstance(action.choices, StaticChoices)
 
     def test_packs_cli_main_validate_returns_zero(self) -> None:
         exit_code = packs_cli.main(["validate", str(_EXAMPLES_MINIMAL)])

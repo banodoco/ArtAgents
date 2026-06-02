@@ -19,14 +19,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-from .events.schema import TimelineActor, TimelineEvent
-from .eventlog.local_fs import LocalFsBackend
 from .eventlog.protocol import EventLogBackend
-from .eventlog.selector import EventLogTarget, PullDestination, resolve_event_log_target, resolve_pull_destination
-from .projection import replay_projection, regenerate_projection
-
+from .eventlog.selector import (
+    EventLogTarget,
+    resolve_event_log_target,
+    resolve_pull_destination,
+)
+from .events.schema import TimelineActor
+from .projection import regenerate_projection
 
 # ============================================================================
 # Structured results

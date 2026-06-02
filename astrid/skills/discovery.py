@@ -15,7 +15,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable
 
 from astrid._paths import REPO_ROOT
 from astrid.core._search import short_description_or_truncated

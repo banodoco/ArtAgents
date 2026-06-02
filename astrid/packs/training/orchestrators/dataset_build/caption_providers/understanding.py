@@ -12,10 +12,14 @@ from typing import Any
 
 from astrid._paths import REPO_ROOT
 
-from ..artifacts import load_valid_cached_sidecar, sidecar_hashes, unlink_stale_sidecar, write_hashed_sidecar
+from ..artifacts import (
+    load_valid_cached_sidecar,
+    sidecar_hashes,
+    unlink_stale_sidecar,
+    write_hashed_sidecar,
+)
 from ..interfaces import CaptionResult
 from ..items import deterministic_id, repo_relative_path
-
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 

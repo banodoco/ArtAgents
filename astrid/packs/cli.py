@@ -18,6 +18,9 @@ from typing import Any, Optional
 
 import yaml
 
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
+from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -25,11 +28,15 @@ from astrid.core.pack import (
     pack_taxonomy_from_manifest,
     packs_root,
 )
-from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 from astrid.packs.validate import validate_pack
 
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
 _PACK_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+# Shared stderr sink for non-fatal warnings and diagnostics.
+def _eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
 
 _STAGE_MD_STUB = """# {pack_name}
 
@@ -90,11 +97,10 @@ def _validate_pack_path(path: Path, must_exist: bool = True) -> Path:
     """
     resolved = path.resolve()
     if must_exist and not resolved.is_dir():
-        print(
+        raise AstridError(
             f"packs validate: {path} is not a directory or does not exist",
-            file=sys.stderr,
+            recovery_command=f"ls -d {path}  # verify the path exists and is a directory",
         )
-        raise SystemExit(2)
     return resolved
 
 
@@ -125,13 +131,14 @@ def cmd_validate(argv: list[str]) -> int:
     errors, warnings = validate_pack(pack_root)
 
     if errors:
-        for err in errors:
-            print(err, file=sys.stderr)
-        return 1
+        raise AstridError(
+            "\n".join(errors),
+            recovery_command="Fix the validation errors listed above and re-run: python3 -m astrid packs validate",
+        )
 
     if args.warnings and warnings:
         for w in warnings:
-            print(f"warning: {w}", file=sys.stderr)
+            _eprint(f"warning: {w}")
 
     resolved = pack_root.resolve()
     print(f"valid: {resolved}")
@@ -280,28 +287,26 @@ def _filtered_packs(args: argparse.Namespace, *, include_hidden: bool | None = N
 def _create_pack_skeleton(pack_id: str) -> int:
     """Create and validate a new pack skeleton in the current directory."""
     if not _pack_id_is_valid(pack_id):
-        print(
+        raise AstridError(
             f"packs new: invalid pack id {pack_id!r}. "
             f"Must match pattern: ^[a-z][a-z0-9_]*$",
-            file=sys.stderr,
+            valid_options=[],
+            recovery_command="Pick a pack id using only lowercase letters, digits, and underscores (e.g., my_pack)",
         )
-        return 2
 
     target = Path.cwd() / pack_id
     if target.exists():
-        print(
+        raise AstridError(
             f"packs new: directory {target} already exists; "
             f"refusing to overwrite",
-            file=sys.stderr,
+            recovery_command=f"Remove the existing directory first: rm -rf {target}",
         )
-        return 1
 
     if not target.parent.is_dir():
-        print(
+        raise AstridError(
             f"packs new: parent directory {target.parent} does not exist",
-            file=sys.stderr,
+            recovery_command="Create the parent directory or run packs new from an existing directory",
         )
-        return 1
 
     pack_name = pack_id.replace("_", " ").title()
     description = f"A pack for {pack_name}."
@@ -373,17 +378,15 @@ agent:
 
     errors, warnings = validate_pack(target)
     if errors:
-        print(
-            f"packs new: scaffolded pack fails validation ({len(errors)} error(s))",
-            file=sys.stderr,
+        error_details = "\n".join(f"  {err}" for err in errors)
+        raise AstridError(
+            f"packs new: scaffolded pack fails validation ({len(errors)} error(s))\n{error_details}",
+            recovery_command="Fix the validation errors in the scaffolded pack files, then re-run: python3 -m astrid packs validate",
         )
-        for err in errors:
-            print(f"  {err}", file=sys.stderr)
-        return 1
 
     if warnings:
         for w in warnings:
-            print(f"warning: {w}", file=sys.stderr)
+            _eprint(f"warning: {w}")
 
     print(f"pack {pack_id!r} created and validated: {target}")
     return 0
@@ -473,27 +476,24 @@ def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> 
     record = store.get_active(pack_id)
 
     if record is None:
-        print(
+        raise AstridError(
             f"inspect: pack {pack_id!r} is not installed.",
-            file=sys.stderr,
+            recovery_command=f"Install the pack first: python3 -m astrid packs install {pack_id}",
         )
-        return 1
 
     rev_dir = store.active_revision_path(pack_id)
     if rev_dir is None:
-        print(
+        raise AstridError(
             f"inspect: cannot resolve active revision for {pack_id!r}.",
-            file=sys.stderr,
+            recovery_command=f"Try reinstalling the pack: python3 -m astrid packs install {pack_id}",
         )
-        return 1
 
     manifest_path = pack_manifest_path(rev_dir)
     if manifest_path is None:
-        print(
+        raise AstridError(
             f"inspect: no pack manifest found in installed revision {rev_dir}.",
-            file=sys.stderr,
+            recovery_command=f"The installed revision may be corrupt. Try reinstalling: python3 -m astrid packs install {pack_id}",
         )
-        return 1
 
     try:
         if manifest_path.suffix == ".json":
@@ -501,12 +501,16 @@ def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> 
         else:
             manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
     except Exception as e:
-        print(f"inspect: failed to parse pack manifest: {e}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"inspect: failed to parse pack manifest: {e}",
+            recovery_command=f"Check the manifest file for syntax errors: cat {manifest_path}",
+        ) from e
 
     if not isinstance(manifest, dict):
-        print("inspect: pack manifest is not a mapping", file=sys.stderr)
-        return 1
+        raise AstridError(
+            "inspect: pack manifest is not a mapping",
+            recovery_command=f"Check the manifest file structure: cat {manifest_path}",
+        )
 
     try:
         trust_summary = extract_trust_summary(rev_dir)
@@ -717,7 +721,7 @@ def _print_agent_view(view: dict) -> None:
         print(f"  sandbox: {sandbox}")
         print(f"  runs_with_user_process_permissions: {runs_with}")
         print(f"  permission_enforcement: {enforcement}")
-        print(f"  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+        print("  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
 # ---------------------------------------------------------------------------
@@ -1194,7 +1198,7 @@ def _print_full_inspect(data: dict) -> None:
         print(f"    sandbox: {sandbox}")
         print(f"    runs_with_user_process_permissions: {runs_with}")
         print(f"    permission_enforcement: {enforcement}")
-        print(f"    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+        print("    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
 def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
@@ -1202,8 +1206,10 @@ def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) ->
     packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
     pack = packs.get(pack_id)
     if pack is None:
-        print(f"packs inspect: unknown pack {pack_id!r}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"packs inspect: unknown pack {pack_id!r}",
+            recovery_command="List available packs: python3 -m astrid packs list",
+        )
 
     payload = pack.agent if agent else _pack_payload(pack)
     if json_output:
@@ -1231,7 +1237,7 @@ def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) ->
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``packs`` subcommand parser."""
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid packs",
         description="Manage and validate Astrid packs.",
     )
@@ -1260,8 +1266,8 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--category", help="Filter by metadata.category.")
     _add_taxonomy_filter_args(list_parser)
-    list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
-    list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
+    add_choice_arg(list_parser, "--status", values=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    add_choice_arg(list_parser, "--visibility", values=("visible", "hidden"), help="Filter by visibility.")
     list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     list_parser.set_defaults(handler=_handle_list)
 
@@ -1283,8 +1289,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     status_parser.add_argument("--category", help="Filter by metadata.category.")
     _add_taxonomy_filter_args(status_parser)
-    status_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
-    status_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
+    add_choice_arg(status_parser, "--status", values=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    add_choice_arg(status_parser, "--visibility", values=("visible", "hidden"), help="Filter by visibility.")
     status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     status_parser.set_defaults(handler=_handle_status)
 
@@ -1397,13 +1403,14 @@ def _handle_validate(args: argparse.Namespace) -> int:
     errors, warnings = validate_pack(pack_root)
 
     if errors:
-        for err in errors:
-            print(err, file=sys.stderr)
-        return 1
+        raise AstridError(
+            "\n".join(errors),
+            recovery_command="Fix the validation errors listed above and re-run: python3 -m astrid packs validate",
+        )
 
     if args.warnings and warnings:
         for warning in warnings:
-            print(f"warning: {warning}", file=sys.stderr)
+            _eprint(f"warning: {warning}")
 
     print(f"valid: {pack_root.resolve()}")
     return 0
@@ -1620,7 +1627,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         parser.print_usage(file=sys.stderr)
         return 2
 
-    return int(handler(args))
+    try:
+        return int(handler(args))
+    except AstridError as exc:
+        from astrid.contracts.errors import render_astrid_error
+
+        return render_astrid_error(exc)
 
 
 if __name__ == "__main__":

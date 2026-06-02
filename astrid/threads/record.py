@@ -16,7 +16,7 @@ import xxhash
 from astrid.contracts.run_status import RunStatus
 
 from . import variants
-from .ids import generate_run_id, is_ulid
+from .ids import generate_run_id
 from .provenance import enrich_run_provenance
 from .schema import SCHEMA_VERSION, utc_now, validate_run_record
 

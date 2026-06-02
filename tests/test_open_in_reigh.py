@@ -163,7 +163,7 @@ class OpenInReighTest(unittest.TestCase):
         )
 
         self.assertIsNone(error)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("missing required output file", stderr)
 
     # ----- default flow: SupabaseDataProvider.save_timeline -----

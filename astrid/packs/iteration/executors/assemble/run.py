@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('iteration.assemble')
 import argparse
 import html
@@ -14,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid import modalities, timeline
+from astrid._paths import REPO_ROOT
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.threads.schema import SCHEMA_VERSION
 
@@ -117,22 +118,26 @@ def _emit_assemble_managed_events(
 
 def main(argv: list[str] | None = None) -> int:
     global _managed_project, _managed_timeline_slug
-    args = build_parser().parse_args(argv)
-    # m3.5 managed binding seam: detect managed vs unmanaged mode.
-    managed = is_managed_mode(args)
-    if managed:
-        from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
 
-        print(f"assemble: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
-        _managed_project = args.project
-        _managed_timeline_slug = args.timeline_slug
-        actor_via_raw = getattr(args, "actor_via", None)
-        _managed_actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
-    else:
-        if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
-            print("--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode", file=sys.stderr)
-            return 2
-    try:
+    def _run() -> int:
+        global _managed_project, _managed_timeline_slug, _managed_actor_via
+        args = build_parser().parse_args(argv)
+        # m3.5 managed binding seam: detect managed vs unmanaged mode.
+        managed = is_managed_mode(args)
+        if managed:
+            from astrid.core.timeline.events.schema import TimelineActor as _TimelineActor
+
+            print(f"assemble: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
+            _managed_project = args.project
+            _managed_timeline_slug = args.timeline_slug
+            actor_via_raw = getattr(args, "actor_via", None)
+            _managed_actor_via = _TimelineActor(**actor_via_raw) if isinstance(actor_via_raw, dict) else None
+        else:
+            if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):
+                raise AstridError(
+                    "--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode",
+                    recovery_command="supply both --project and --timeline-slug together, or omit both for unmanaged mode",
+                )
         result = assemble_iteration(
             prepare_dir=Path(args.prepare_dir),
             out_path=Path(args.out),
@@ -144,13 +149,12 @@ def main(argv: list[str] | None = None) -> int:
             style_preset=args.style_preset,
             audio_bed=args.audio_bed,
         )
-    except AssembleError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    for diagnostic in result["diagnostics"]:
-        print(diagnostic)
-    print(json.dumps({"timeline": result["timeline_path"], "manifest": result["manifest_path"]}, sort_keys=True))
-    return 0
+        for diagnostic in result["diagnostics"]:
+            print(diagnostic)
+        print(json.dumps({"timeline": result["timeline_path"], "manifest": result["manifest_path"]}, sort_keys=True))
+        return 0
+
+    return run_pack_main("iteration.assemble", _run, argv=argv)
 
 
 def assemble_iteration(

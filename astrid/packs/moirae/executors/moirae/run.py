@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('moirae.moirae')
 import argparse
 import subprocess

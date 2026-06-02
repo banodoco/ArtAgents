@@ -7,11 +7,12 @@ import wave
 from pathlib import Path
 from unittest import mock
 
+from astrid import timeline
+from astrid.contracts.errors import AstridError
 from astrid.packs.editorial.executors.arrange import run as arrange
+from astrid.packs.training.executors.pool_merge import run as pool_merge
 from astrid.packs.video_editing.executors.cut import run as cut
 from astrid.packs.video_editing.orchestrators.hype import run as pipeline
-from astrid.packs.training.executors.pool_merge import run as pool_merge
-from astrid import timeline
 
 
 class PureGenerativePipelineTest(unittest.TestCase):
@@ -60,10 +61,10 @@ class PureGenerativePipelineTest(unittest.TestCase):
         brief = tmp / "brief.txt"
         brief.write_text("Make a visual-only explainer.\n", encoding="utf-8")
 
-        with self.assertRaises(SystemExit) as exc_info:
+        with self.assertRaises(AstridError) as exc_info:
             pipeline.resolve_args(["--brief", str(brief), "--out", str(tmp / "out")])
 
-        self.assertEqual(exc_info.exception.code, 2)
+        self.assertIn("--target-duration", exc_info.exception.cause)
 
     def test_no_audio_step_list_and_arrange_command(self) -> None:
         tmp = self.make_tempdir()

@@ -42,7 +42,11 @@ from astrid.core.timeline.paths import assembly_identity_path, timeline_dir
 from astrid.core.timeline.pool_edits import pool_asset_add, pool_asset_remove, pool_asset_score
 from astrid.core.timeline.theme_edits import theme_override, theme_set
 from astrid.core.timeline.track_edits import track_add, track_remove
-from astrid.core.timeline.transition_edits import transition_remove, transition_set
+from astrid.core.timeline.transition_edits import (
+    reconcile_adjacent_transitions,
+    transition_remove,
+    transition_set,
+)
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
 
@@ -197,6 +201,229 @@ def test_transition_set_on_nonexistent_clips_still_appends_event_and_keeps_assem
     assert event.kind == "transition.set"
     _assert_last_event(demo_timeline, event, kind="transition.set", payload_type=TransitionSetPayload)
     assert _read_assembly_json(_tdir(demo_timeline))["clips"] == []
+
+
+def test_transition_set_canonicalizes_registry_alias(
+    demo_timeline: dict[str, object],
+) -> None:
+    _seed_two_clips(demo_timeline)
+
+    event = transition_set(
+        "demo",
+        "primary",
+        left_clip_id="clip-a",
+        right_clip_id="clip-b",
+        kind="crossfade",
+        actor=_actor(),
+        root=demo_timeline["root"],
+    )
+
+    assert event.payload.kind == "cross-fade"
+    assembly = _read_assembly_json(_tdir(demo_timeline))
+    assert assembly["clips"][0]["transition"]["type"] == "cross-fade"
+
+
+# ---------------------------------------------------------------------------
+# reconcile_adjacent_transitions tests (T10)
+# ---------------------------------------------------------------------------
+
+
+def _seed_four_clips_same_track(demo_timeline: dict[str, object]) -> None:
+    """Add four visual clips (clip-a through clip-d) on the 'visual' track."""
+    for asset_id in ("clip-a", "clip-b", "clip-c", "clip-d"):
+        add_clip(
+            "demo", "primary",
+            kind="visual", asset_id=asset_id,
+            actor=_actor(), root=demo_timeline["root"],
+        )
+
+
+def test_reconcile_adjacent_transitions_four_clips_produces_three_transitions(
+    demo_timeline: dict[str, object],
+) -> None:
+    """A 4-clip same-track timeline produces exactly N-1 = 3 transitions."""
+    _seed_four_clips_same_track(demo_timeline)
+    tdir = _tdir(demo_timeline)
+
+    events = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+
+    assert len(events) == 3, (
+        f"expected 3 transition.set events for 4 same-track clips, got {len(events)}"
+    )
+    for event in events:
+        assert event.kind == "transition.set"
+        assert isinstance(event.payload, TransitionSetPayload)
+
+    assembly = _read_assembly_json(tdir)
+    clips = assembly["clips"]
+    assert len(clips) == 4
+
+    # Every clip except the last should carry a transition to the next clip.
+    for i in range(3):
+        left = clips[i]
+        right = clips[i + 1]
+        trans = left.get("transition")
+        assert isinstance(trans, dict), f"clip[{i}] missing transition"
+        assert trans.get("type") == "cross-fade"
+        assert trans["params"]["right_clip_id"] == right["id"]
+
+
+def test_reconcile_adjacent_transitions_is_idempotent(
+    demo_timeline: dict[str, object],
+) -> None:
+    """Repeated reconciliation on an already-reconciled timeline produces
+    zero new events (idempotent)."""
+    _seed_four_clips_same_track(demo_timeline)
+
+    first = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+    assert len(first) == 3
+
+    second = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+    assert len(second) == 0, (
+        f"second reconciliation should produce 0 events, got {len(second)}"
+    )
+
+
+def test_reconcile_adjacent_transitions_empty_timeline(
+    demo_timeline: dict[str, object],
+) -> None:
+    """No clips on a timeline produces zero events."""
+    events = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+    assert events == []
+
+
+def test_reconcile_adjacent_transitions_single_clip(
+    demo_timeline: dict[str, object],
+) -> None:
+    """A single-clip timeline has no adjacent pairs, produces zero events."""
+    add_clip("demo", "primary", kind="visual", asset_id="only-clip",
+             actor=_actor(), root=demo_timeline["root"])
+    events = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+    assert events == []
+
+
+def test_reconcile_adjacent_transitions_respects_existing_transitions(
+    demo_timeline: dict[str, object],
+) -> None:
+    """When some adjacent pairs already have transitions, only missing ones
+    are written."""
+    _seed_four_clips_same_track(demo_timeline)
+
+    # Manually set a transition on the first pair.
+    transition_set(
+        "demo", "primary",
+        left_clip_id="clip-a",
+        right_clip_id="clip-b",
+        kind="cross-fade",
+        actor=_actor(),
+        root=demo_timeline["root"],
+    )
+
+    events = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+    # Only the 2 remaining pairs should get transitions (clip-b→clip-c, clip-c→clip-d).
+    assert len(events) == 2
+
+    # Verify the first pair's transition is still the original.
+    assembly = _read_assembly_json(_tdir(demo_timeline))
+    clip_a = assembly["clips"][0]
+    assert clip_a["id"] == "clip-a"
+    assert clip_a["transition"]["params"]["right_clip_id"] == "clip-b"
+
+
+def test_reconcile_adjacent_transitions_multi_track(
+    demo_timeline: dict[str, object],
+) -> None:
+    """Clips on different tracks are reconciled independently."""
+    # Add two clips on the audio track.
+    add_clip("demo", "primary", kind="audio", asset_id="audio-1",
+             track_id="audio", actor=_actor(), root=demo_timeline["root"])
+    add_clip("demo", "primary", kind="audio", asset_id="audio-2",
+             track_id="audio", actor=_actor(), root=demo_timeline["root"])
+    # Add three clips on the visual track.
+    for asset_id in ("vis-1", "vis-2", "vis-3"):
+        add_clip("demo", "primary", kind="visual", asset_id=asset_id,
+                 actor=_actor(), root=demo_timeline["root"])
+
+    events = reconcile_adjacent_transitions(
+        "demo", "primary",
+        root=demo_timeline["root"],
+    )
+    # audio: 1 pair (audio-1→audio-2), visual: 2 pairs (vis-1→vis-2, vis-2→vis-3)
+    assert len(events) == 3
+
+    assembly = _read_assembly_json(_tdir(demo_timeline))
+
+    # Find clips by track.
+    audio_clips = [c for c in assembly["clips"] if c.get("track") == "audio"]
+    visual_clips = [c for c in assembly["clips"] if c.get("track") == "visual"]
+    assert len(audio_clips) == 2
+    assert len(visual_clips) == 3
+
+    # Audio: first clip has transition to second.
+    assert audio_clips[0]["transition"]["params"]["right_clip_id"] == audio_clips[1]["id"]
+    # Visual: first→second, second→third.
+    assert visual_clips[0]["transition"]["params"]["right_clip_id"] == visual_clips[1]["id"]
+    assert visual_clips[1]["transition"]["params"]["right_clip_id"] == visual_clips[2]["id"]
+    # Last clips on each track have no transition.
+    assert "transition" not in audio_clips[1]
+    assert "transition" not in visual_clips[2]
+
+
+def test_reconcile_adjacent_transitions_custom_kind_and_duration(
+    demo_timeline: dict[str, object],
+) -> None:
+    """Custom kind and duration are respected in emitted transitions."""
+    _seed_two_clips(demo_timeline)
+
+    events = reconcile_adjacent_transitions(
+        "demo", "primary",
+        kind="crossfade",  # alias, should canonicalize to cross-fade
+        duration_seconds=1.5,
+        root=demo_timeline["root"],
+    )
+    assert len(events) == 1
+    event = events[0]
+    assert event.payload.kind == "cross-fade"
+    assert event.payload.duration_seconds == 1.5
+
+    assembly = _read_assembly_json(_tdir(demo_timeline))
+    transition = assembly["clips"][0]["transition"]
+    assert transition["type"] == "cross-fade"
+    assert transition["duration"] == 1.5
+
+
+def test_reconcile_adjacent_transitions_is_kernel_helper_no_cli(
+    demo_timeline: dict[str, object],
+) -> None:
+    """Prove the helper is a kernel-level function with no CLI surface.
+    It does not touch argparse and is importable without the CLI module."""
+    import inspect
+
+    source = inspect.getsource(reconcile_adjacent_transitions)
+    # The helper must not reference argparse.
+    assert "argparse" not in source, (
+        "reconcile_adjacent_transitions must not be a CLI command"
+    )
+    # The helper must read from projected assembly (calls show_timeline or reads assembly).
+    assert "show_timeline" in source or "assembly" in source
 
 
 def test_effect_events_materialize_and_read_back(demo_timeline: dict[str, object]) -> None:

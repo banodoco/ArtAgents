@@ -10,8 +10,8 @@ that have not been accessed recently.
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('training.asset_cache')
 import argparse
 import contextlib

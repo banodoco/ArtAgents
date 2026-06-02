@@ -9,6 +9,8 @@ path for all four missing-field branches.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import subprocess
 import unittest
@@ -16,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from astrid.packs.foley.executors.tile_video.run import FoleyProbeError, _ffprobe
+from astrid.packs.foley.executors.tile_video import run as tile_video
 
 
 def _patch_ffprobe(payload: dict) -> patch:
@@ -64,6 +67,18 @@ class FoleyProbeErrorTest(unittest.TestCase):
             with self.assertRaises(FoleyProbeError) as ctx:
                 _ffprobe(self.VIDEO)
         self.assertIn(str(self.VIDEO), str(ctx.exception))
+
+    def test_main_renders_astrid_error_for_missing_video(self) -> None:
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            rc = tile_video.main(
+                ["--video", str(self.VIDEO), "--out", "/tmp/tiles-out"]
+            )
+        rendered = stderr.getvalue()
+        self.assertEqual(rc, 2)
+        self.assertIn(f"video not found: {self.VIDEO.resolve()}", rendered)
+        self.assertIn("recovery:", rendered)
+        self.assertNotIn("Error:", rendered)
 
 
 if __name__ == "__main__":

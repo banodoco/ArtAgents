@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.animate_image')
 import argparse
 import base64
@@ -19,14 +20,13 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value
-from astrid.packs.video_editing.orchestrators.logo_ideas.run import (
-    FAL_QUEUE_URL,
-    _http_get_bytes,
-    _http_post_json,
-    poll_fal_result,
+from astrid.core.cli_choices import (
+    AstridArgumentError,
+    RecoverableArgumentParser,
+    add_choice_arg,
 )
-
+from astrid.core.util.http import FAL_QUEUE_URL, default_client
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 
 FAL_EDIT_MODEL_ID = "openai/gpt-image-2/edit"
 FAL_ANIMATE_MODEL_ID = "fal-ai/wan/v2.2-14b/animate/move"
@@ -76,7 +76,10 @@ def _load_env_var(name: str, env_file: Path | None) -> str:
         tried.append(str(candidate))
         if value := _read_env_value(candidate, name):
             return value
-    raise SystemExit(f"{name} not found. Tried: {', '.join(tried)}")
+    raise AstridError(
+        f"{name} not found. Tried: {', '.join(tried)}",
+        recovery_command=f"export {name}=<value>",
+    )
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -92,7 +95,10 @@ def _data_uri_for(path: Path, *, override_mime: str | None = None) -> str:
 
 def _probe_video_dimensions(video: Path) -> tuple[int, int]:
     if not shutil.which("ffprobe"):
-        raise SystemExit("ffprobe not found on PATH (install ffmpeg).")
+        raise AstridError(
+            "ffprobe not found on PATH (install ffmpeg).",
+            recovery_command="install ffmpeg and retry animate_image",
+        )
     proc = subprocess.run(
         [
             "ffprobe", "-v", "error",
@@ -107,13 +113,20 @@ def _probe_video_dimensions(video: Path) -> tuple[int, int]:
     )
     streams = json.loads(proc.stdout).get("streams") or []
     if not streams:
-        raise SystemExit(f"ffprobe found no video stream in {video}")
+        raise AstridError(
+            f"ffprobe found no video stream in {video}",
+            recovery_command="pass a valid --ref-video file",
+            state_snapshot={"ref_video": video},
+        )
     return int(streams[0]["width"]), int(streams[0]["height"])
 
 
 def _extract_first_frame(video: Path, dest: Path) -> None:
     if not shutil.which("ffmpeg"):
-        raise SystemExit("ffmpeg not found on PATH.")
+        raise AstridError(
+            "ffmpeg not found on PATH.",
+            recovery_command="install ffmpeg and retry animate_image",
+        )
     dest.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [
@@ -126,7 +139,11 @@ def _extract_first_frame(video: Path, dest: Path) -> None:
         check=True,
     )
     if not dest.is_file() or dest.stat().st_size == 0:
-        raise SystemExit(f"first-frame extraction produced no output: {dest}")
+        raise AstridError(
+            f"first-frame extraction produced no output: {dest}",
+            recovery_command="pass a valid --ref-video file",
+            state_snapshot={"ref_video": video, "dest": dest},
+        )
 
 
 def _snap_to_gpt_image_2_size(width: int, height: int) -> tuple[int, int]:
@@ -160,23 +177,83 @@ def _submit_fal(model_id: str, payload: dict[str, Any], api_key: str) -> dict[st
     url = f"{FAL_QUEUE_URL}/{model_id}"
     headers = {"authorization": f"Key {api_key}"}
     try:
-        return _http_post_json(url, headers, payload, timeout=180)
+        return default_client().post_json(url, payload, headers=headers, timeout=180)
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
-        raise SystemExit(f"fal submit failed ({exc.code}) for {model_id}: {detail}") from exc
+        raise AstridError(
+            f"fal submit failed ({exc.code}) for {model_id}: {detail}",
+            recovery_command="check FAL_KEY and retry animate_image",
+            state_snapshot={"model_id": model_id},
+        ) from exc
     except URLError as exc:
-        raise SystemExit(f"fal submit failed for {model_id}: {exc}") from exc
+        raise AstridError(
+            f"fal submit failed for {model_id}: {exc}",
+            recovery_command="check network connectivity and retry animate_image",
+            state_snapshot={"model_id": model_id},
+        ) from exc
+    except SystemExit as exc:
+        raise AstridError(
+            f"fal submit failed for {model_id}: {exc}",
+            recovery_command="check FAL_KEY and retry animate_image",
+            state_snapshot={"model_id": model_id},
+        ) from exc
+
+
+def _poll_fal_result(
+    submission: dict[str, Any],
+    api_key: str,
+    *,
+    max_wait_sec: int,
+) -> dict[str, Any]:
+    status_url = submission.get("status_url")
+    response_url = submission.get("response_url")
+    if not status_url or not response_url:
+        raise AstridError(
+            f"fal submission missing status_url/response_url: {json.dumps(submission)}",
+            recovery_command="retry animate_image",
+            state_snapshot={"submission": submission},
+        )
+    headers = {"authorization": f"Key {api_key}"}
+    try:
+        result = default_client().poll_until(
+            status_url,
+            response_url,
+            headers=headers,
+            max_wait_sec=max_wait_sec,
+        )
+    except SystemExit as exc:
+        raise AstridError(
+            f"fal job failed: {exc}",
+            recovery_command="retry animate_image or inspect fal job status",
+            state_snapshot={"status_url": status_url, "response_url": response_url},
+        ) from exc
+    if "request_id" not in result and "request_id" in submission:
+        result["request_id"] = submission["request_id"]
+    return result
 
 
 def _save_first_image(result: dict[str, Any], dest: Path) -> dict[str, Any]:
     images = result.get("images") or []
     if not images:
-        raise SystemExit(f"fal result had no images: {str(result)[:300]}")
+        raise AstridError(
+            f"fal result had no images: {str(result)[:300]}",
+            recovery_command="retry animate_image",
+        )
     first = images[0]
     url = first.get("url")
     if not url:
-        raise SystemExit(f"fal image entry missing url: {first}")
-    raw = _http_get_bytes(url, timeout=180)
+        raise AstridError(
+            f"fal image entry missing url: {first}",
+            recovery_command="retry animate_image",
+        )
+    try:
+        raw = default_client().get_bytes(url, timeout=180)
+    except SystemExit as exc:
+        raise AstridError(
+            f"failed to download fal image: {exc}",
+            recovery_command="retry animate_image",
+            state_snapshot={"url": url},
+        ) from exc
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(raw)
     return {
@@ -193,8 +270,18 @@ def _save_video(result: dict[str, Any], dest: Path) -> dict[str, Any]:
     video = result.get("video") or {}
     url = video.get("url") if isinstance(video, dict) else None
     if not url:
-        raise SystemExit(f"fal result had no video url: {str(result)[:300]}")
-    raw = _http_get_bytes(url, timeout=600)
+        raise AstridError(
+            f"fal result had no video url: {str(result)[:300]}",
+            recovery_command="retry animate_image",
+        )
+    try:
+        raw = default_client().get_bytes(url, timeout=600)
+    except SystemExit as exc:
+        raise AstridError(
+            f"failed to download fal video: {exc}",
+            recovery_command="retry animate_image",
+            state_snapshot={"url": url},
+        ) from exc
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(raw)
     return {
@@ -244,7 +331,7 @@ def call_gpt_image_edit(
         "output_format": "jpeg" if output_format == "jpg" else output_format,
     }
     submission = _submit_fal(FAL_EDIT_MODEL_ID, payload, api_key)
-    result = poll_fal_result(submission, api_key, max_wait_sec=600)
+    result = _poll_fal_result(submission, api_key, max_wait_sec=600)
     return submission, result
 
 
@@ -274,12 +361,12 @@ def call_wan_animate_move(
     if seed is not None:
         payload["seed"] = seed
     submission = _submit_fal(FAL_ANIMATE_MODEL_ID, payload, api_key)
-    result = poll_fal_result(submission, api_key, max_wait_sec=1800)
+    result = _poll_fal_result(submission, api_key, max_wait_sec=1800)
     return submission, result
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = RecoverableArgumentParser(
         description=(
             "Restyle the first frame of a video to match a style reference image "
             "via openai/gpt-image-2/edit on fal, then animate that styled frame "
@@ -291,13 +378,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, required=True, help="Output directory.")
     p.add_argument("--prompt", default=None, help="Extra direction appended to the built-in style-transfer prompt. Use --replace-prompt to override the whole thing.")
     p.add_argument("--replace-prompt", default=None, help="Replace the entire gpt-image-2 prompt (skips the built-in identity/composition/scene rules).")
-    p.add_argument("--quality", default=DEFAULT_QUALITY, choices=("low", "medium", "high", "auto"), help=f"gpt-image-2 quality (default {DEFAULT_QUALITY}).")
-    p.add_argument("--output-format", default=DEFAULT_OUTPUT_FORMAT, choices=("png", "jpeg", "webp"), help="Generated image format.")
-    p.add_argument("--resolution", default=DEFAULT_RESOLUTION, choices=VALID_RESOLUTIONS, help=f"Wan Animate output resolution (default {DEFAULT_RESOLUTION}).")
+    add_choice_arg(p, "--quality", values=("low", "medium", "high", "auto"), default=DEFAULT_QUALITY, help=f"gpt-image-2 quality (default {DEFAULT_QUALITY}).")
+    add_choice_arg(p, "--output-format", values=("png", "jpeg", "webp"), default=DEFAULT_OUTPUT_FORMAT, help="Generated image format.")
+    add_choice_arg(p, "--resolution", values=VALID_RESOLUTIONS, default=DEFAULT_RESOLUTION, help=f"Wan Animate output resolution (default {DEFAULT_RESOLUTION}).")
     p.add_argument("--num-inference-steps", type=int, default=DEFAULT_STEPS, help=f"Wan Animate steps (default {DEFAULT_STEPS}).")
     p.add_argument("--guidance-scale", type=float, default=DEFAULT_GUIDANCE, help=f"Wan Animate guidance scale (default {DEFAULT_GUIDANCE}).")
     p.add_argument("--shift", type=float, default=DEFAULT_SHIFT, help=f"Wan Animate shift, 1.0..10.0 (default {DEFAULT_SHIFT}).")
-    p.add_argument("--video-quality", default=DEFAULT_VIDEO_QUALITY, choices=VALID_VIDEO_QUALITIES, help=f"Wan Animate write quality (default {DEFAULT_VIDEO_QUALITY}).")
+    add_choice_arg(p, "--video-quality", values=VALID_VIDEO_QUALITIES, default=DEFAULT_VIDEO_QUALITY, help=f"Wan Animate write quality (default {DEFAULT_VIDEO_QUALITY}).")
     p.add_argument("--use-turbo", action="store_true", help="Enable Wan Animate turbo path.")
     p.add_argument("--seed", type=int, default=None, help="Wan Animate seed.")
     p.add_argument("--env-file", type=Path, help="Env file with FAL_KEY.")
@@ -310,22 +397,58 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if not args.style_image.is_file():
-        parser.error(f"--style-image path does not exist: {args.style_image}")
+        raise AstridError(
+            f"--style-image path does not exist: {args.style_image}",
+            recovery_command="pass an existing image path to --style-image",
+            state_snapshot={"style_image": args.style_image},
+        )
     if not args.ref_video.is_file():
-        parser.error(f"--ref-video path does not exist: {args.ref_video}")
+        raise AstridError(
+            f"--ref-video path does not exist: {args.ref_video}",
+            recovery_command="pass an existing video path to --ref-video",
+            state_snapshot={"ref_video": args.ref_video},
+        )
     if args.skip_generate and not args.use_image:
-        parser.error("--skip-generate requires --use-image PATH")
+        raise AstridError(
+            "--skip-generate requires --use-image PATH",
+            recovery_command="add --use-image <path> or remove --skip-generate",
+        )
     if args.use_image and not args.use_image.is_file():
-        parser.error(f"--use-image path does not exist: {args.use_image}")
+        raise AstridError(
+            f"--use-image path does not exist: {args.use_image}",
+            recovery_command="pass an existing image path to --use-image",
+            state_snapshot={"use_image": args.use_image},
+        )
     if args.shift < 1.0 or args.shift > 10.0:
-        parser.error("--shift must be in 1.0..10.0")
+        raise AstridError(
+            "--shift must be in 1.0..10.0",
+            recovery_command="set --shift to a value from 1.0 to 10.0",
+            valid_options=["1.0..10.0"],
+        )
     if args.num_inference_steps < 1:
-        parser.error("--num-inference-steps must be >= 1")
+        raise AstridError(
+            "--num-inference-steps must be >= 1",
+            recovery_command="set --num-inference-steps to a positive integer",
+        )
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except AstridArgumentError as exc:
+        raise AstridError(
+            str(exc),
+            valid_options=exc.valid_options,
+            recovery_command="astrid orchestrators run video_editing.animate_image --help",
+        ) from exc
+    except SystemExit as exc:
+        if int(exc.code or 0) == 0:
+            return 0
+        raise AstridError(
+            "animate_image: invalid arguments",
+            recovery_command="astrid orchestrators run video_editing.animate_image --help",
+        ) from exc
     _validate_args(parser, args)
 
     out_root = args.out.expanduser().resolve()
@@ -474,4 +597,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from astrid.packs._canonical_entrypoint import run_pack_main
+
+    raise SystemExit(
+        run_pack_main(
+            "video_editing.animate_image",
+            lambda: main(),
+            argv=list(os.sys.argv[1:]),
+            recovery_command="astrid orchestrators run video_editing.animate_image --help",
+        )
+    )

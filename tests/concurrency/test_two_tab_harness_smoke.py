@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 
 from astrid.core.project.project import create_project
-from tests.helpers.current_run import seed_current_run
 from astrid.core.task.plan import compute_plan_hash
 from tests.concurrency.two_tab_harness import race_two_tabs
+from tests.helpers.current_run import seed_current_run
 
 
 def test_two_concurrent_status_reads_ok(tmp_projects_root: Path) -> None:

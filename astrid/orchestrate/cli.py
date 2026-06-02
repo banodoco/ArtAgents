@@ -20,18 +20,17 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from astrid.contracts.errors import AstridError
 from astrid.core.pack import DEFAULT_PACKS_ROOT
 from astrid.core.task.events import read_events
 from astrid.core.task.normalize import dump_events_jsonl, normalize_events
 from astrid.core.task.plan import (
     RepeatForEach,
-    Step,
-    is_attested_kind,
-    is_code_kind,
-    is_group_step,
     RepeatUntil,
     TaskPlan,
     TaskPlanError,
+    is_attested_kind,
+    is_group_step,
     iter_steps_with_path,
     load_plan,
     parse_from_ref,
@@ -46,10 +45,8 @@ from .compile import (
 from .dsl import (
     OrchestrateDefinitionError,
     _PlanBuilder,
-    _StepHandle,
 )
 from .test_runner import run_fixture
-
 
 _QID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 _NEW_TEMPLATE = '''"""Author-scaffolded orchestrator: {qualified_id}.
@@ -87,7 +84,7 @@ def _packs_root_arg(packs_root: Optional[Path]) -> Path:
 
 
 def _print_err(msg: str) -> None:
-    print(msg, file=sys.stderr)
+    raise AstridError(msg)
 
 
 def _resolved_plan(qid: str, packs_root: Optional[Path]) -> TaskPlan:
@@ -95,7 +92,6 @@ def _resolved_plan(qid: str, packs_root: Optional[Path]) -> TaskPlan:
     payload = builder.to_dict(_resolver=_resolver_for(packs_root))
     # to_dict already round-trips through load_plan; re-parse to get the typed
     # TaskPlan instance for traversal.
-    import json
     import os
     import tempfile
 
@@ -121,10 +117,9 @@ def _cmd_compile(qid: str, packs_root: Optional[Path]) -> int:
     try:
         out_path = compile_to_path(qid, packs_root=packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        _print_err(f"author compile {qid}: {exc}")
-        return 1
+        raise AstridError(f"author compile {qid}: {exc}") from exc
     print(f"wrote {out_path}")
-    print(f"recommended next: astrid author check {qid}", file=sys.stderr)
+    print(f"recommended next: astrid author check {qid}")
     return 0
 
 
@@ -133,8 +128,7 @@ def _cmd_check(qid: str, packs_root: Optional[Path]) -> int:
     try:
         plan = _resolved_plan(qid, packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        _print_err(f"author check {qid}: {exc}")
-        return 1
+        raise AstridError(f"author check {qid}: {exc}") from exc
     # The DSL/load_plan validators already enforce: schema, repeat.for_each.from
     # resolves to a prior-sibling produces, attested produces are non-sentinel,
     # nested plans validate, and `code` argv may not target
@@ -144,11 +138,10 @@ def _cmd_check(qid: str, packs_root: Optional[Path]) -> int:
         if is_attested_kind(step):
             for entry in step.produces:
                 if entry.check.sentinel:
-                    _print_err(
+                    raise AstridError(
                         f"author check {qid}: attested step {'/'.join(path)!r} "
                         f"produces[{entry.name!r}] uses sentinel-only check"
                     )
-                    return 1
         if (not is_group_step(step)) and step.repeat is not None:
             if isinstance(step.repeat, RepeatForEach) and step.repeat.from_ref:
                 # load_plan already validated this; emit nothing extra.
@@ -233,8 +226,7 @@ def _cmd_describe(qid: str, packs_root: Optional[Path]) -> int:
         builder = resolve_orchestrator(qid, packs_root=packs_root)
         plan = _resolved_plan(qid, packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        _print_err(f"author describe {qid}: {exc}")
-        return 1
+        raise AstridError(f"author describe {qid}: {exc}") from exc
     costs = _collect_costs(builder, packs_root)
     lines, total = _describe_plan(plan, costs)
     print(f"plan {plan.plan_id} (version {plan.version})")
@@ -247,32 +239,34 @@ def _cmd_describe(qid: str, packs_root: Optional[Path]) -> int:
 
 def _cmd_new(qid: str, packs_root: Optional[Path]) -> int:
     if not _QID_RE.fullmatch(qid):
-        _print_err(
+        raise AstridError(
             f"author new: qualified id {qid!r} must be '<pack>.<name>' "
-            "with letters/digits/underscore"
+            "with letters/digits/underscore",
+            recovery_command="astrid author new <pack>.<name>",
         )
-        return 1
     pack, name = _qualified_split(qid)
     root = _packs_root_arg(packs_root)
     pack_root = root / pack
     if not pack_root.is_dir():
-        _print_err(
+        raise AstridError(
             f"author new: pack directory not found at {pack_root}; "
-            "create the pack before scaffolding an orchestrator"
+            "create the pack before scaffolding an orchestrator",
+            recovery_command=f"mkdir -p {pack_root}",
         )
-        return 1
     module_path = pack_root / f"{name}.py"
     folder_collision = pack_root / name
     if module_path.exists():
-        _print_err(f"author new: refuse to overwrite existing {module_path}")
-        return 1
+        raise AstridError(
+            f"author new: refuse to overwrite existing {module_path}",
+            recovery_command=f"astrid author compile {qid}",
+        )
     if folder_collision.exists() and folder_collision.is_dir():
         # FLAG-003: a same-stem folder shadows the .py module on import.
-        _print_err(
+        raise AstridError(
             f"author new: cannot scaffold {module_path} because folder "
-            f"{folder_collision} exists; rename the folder-orchestrator first"
+            f"{folder_collision} exists; rename the folder-orchestrator first",
+            recovery_command=f"mv {folder_collision} {folder_collision}.bak",
         )
-        return 1
 
     fixtures_dir = pack_root / "fixtures" / name
     golden_dir = pack_root / "golden"
@@ -293,7 +287,7 @@ def _cmd_new(qid: str, packs_root: Optional[Path]) -> int:
         except ValueError:
             rel = created
         print(f"created {rel}")
-    print(f"recommended next: astrid author check {qid}", file=sys.stderr)
+    print(f"recommended next: astrid author check {qid}")
     return 0
 
 
@@ -335,8 +329,7 @@ def _cmd_test(
     try:
         pack, name = _qualified_split(qid)
     except OrchestrateDefinitionError as exc:
-        _print_err(f"author test {qid}: {exc}")
-        return 1
+        raise AstridError(f"author test {qid}: {exc}") from exc
 
     root = _packs_root_arg(packs_root)
     pack_root = root / pack
@@ -345,8 +338,7 @@ def _cmd_test(
         try:
             compile_to_path(qid, packs_root=root)
         except (OrchestrateDefinitionError, TaskPlanError) as exc:
-            _print_err(f"author test {qid}: compile failed: {exc}")
-            return 1
+            raise AstridError(f"author test {qid}: compile failed: {exc}") from exc
 
     candidate_roots = _author_test_roots(root, pack)
     golden_path = candidate_roots[0] / "golden" / f"{fixture_name}.events.jsonl"
@@ -372,8 +364,7 @@ def _cmd_test(
                 projects_root=projects_root,
             )
         except RuntimeError as exc:
-            _print_err(f"author test {qid} --fixture {fixture_name}: {exc}")
-            return 1
+            raise AstridError(f"author test {qid} --fixture {fixture_name}: {exc}") from exc
         run_dir = events_path.parent
         events = read_events(events_path)
         normalized = normalize_events(events, run_dir=run_dir)
@@ -384,11 +375,11 @@ def _cmd_test(
             return 0
 
         if not golden_path.is_file() or golden_path.stat().st_size == 0:
-            _print_err(
+            raise AstridError(
                 f"author test {qid} --fixture {fixture_name}: no committed "
-                f"golden at {golden_path}; rerun with --regenerate to create one"
+                f"golden at {golden_path}; rerun with --regenerate to create one",
+                recovery_command=f"astrid author test {qid} --fixture {fixture_name} --regenerate",
             )
-            return 1
 
         actual_path = run_dir / "normalized.events.jsonl"
         dump_events_jsonl(normalized, actual_path)
@@ -481,8 +472,7 @@ def _cmd_explain(qid: str, packs_root: Optional[Path]) -> int:
     try:
         plan = _resolved_plan(qid, packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        _print_err(f"author explain {qid}: {exc}")
-        return 1
+        raise AstridError(f"author explain {qid}: {exc}") from exc
     # Disambiguation (#38): `author explain` reads the DSL-authored file at
     # <pack>/<name>.py. Some packs also ship a folder-orchestrator at
     # <pack>/<name>/ with its own orchestrator.yaml + run.py (the production

@@ -4,25 +4,27 @@
 
 from __future__ import annotations
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('generation.generate_image_openai')
 import argparse
 import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
-import sys
 import time
+import warnings
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.audit import AuditContext
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key as _resolve_key
+from astrid.core.cli_choices import add_choice_arg
+from astrid.core.util.secrets import load_api_key as _resolve_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
 
 API_URL = "https://api.openai.com/v1/images/generations"
@@ -55,13 +57,12 @@ GPT_IMAGE_2_MAX_EDGE = 3840
 GPT_IMAGE_2_MAX_RATIO = 3.0
 
 
-def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
+def _die(message: str, *, recovery_command: str | None = None, valid_options=()) -> None:
+    raise AstridError(message, recovery_command=recovery_command, valid_options=valid_options)
 
 
 def _warn(message: str) -> None:
-    print(f"Warning: {message}", file=sys.stderr)
+    warnings.warn(message)
 
 
 # Secrets resolution delegated to astrid.core.util.secrets (Sprint 01 ecosystem reconciliation).
@@ -70,7 +71,7 @@ def _warn(message: str) -> None:
 def _normalize_format(value: str) -> str:
     fmt = value.lower()
     if fmt not in FORMATS:
-        _die("--output-format must be png, jpeg, jpg, or webp")
+        _die("--output-format must be png, jpeg, jpg, or webp", valid_options=sorted(FORMATS), recovery_command="use --output-format with one of: png, jpeg, jpg, webp")
     return "jpeg" if fmt == "jpg" else fmt
 
 
@@ -86,66 +87,66 @@ def _validate_size(size: str, model: str) -> None:
         return
     if model != "gpt-image-2":
         if size not in {"1024x1024", "1536x1024", "1024x1536"}:
-            _die("For models before gpt-image-2, size must be 1024x1024, 1536x1024, 1024x1536, or auto.")
+            _die("For models before gpt-image-2, size must be 1024x1024, 1536x1024, 1024x1536, or auto.", valid_options=["1024x1024", "1536x1024", "1024x1536", "auto"], recovery_command="use --size 1024x1024, 1536x1024, 1024x1536, or auto")
         return
     parsed = _parse_size(size)
     if parsed is None:
-        _die("size must be auto or WIDTHxHEIGHT, for example 1024x1024")
+        _die("size must be auto or WIDTHxHEIGHT, for example 1024x1024", recovery_command="use --size auto or WIDTHxHEIGHT format like 1024x1024")
     width, height = parsed
     if width % 16 or height % 16:
-        _die("gpt-image-2 size width and height must be multiples of 16px")
+        _die("gpt-image-2 size width and height must be multiples of 16px", recovery_command="use dimensions that are multiples of 16px")
     if max(width, height) > GPT_IMAGE_2_MAX_EDGE:
-        _die("gpt-image-2 size maximum edge length is 3840px")
+        _die("gpt-image-2 size maximum edge length is 3840px", recovery_command="use a size with max edge 3840px or less")
     if max(width, height) / min(width, height) > GPT_IMAGE_2_MAX_RATIO:
-        _die("gpt-image-2 size long edge to short edge ratio must not exceed 3:1")
+        _die("gpt-image-2 size long edge to short edge ratio must not exceed 3:1", recovery_command="use a size with aspect ratio 3:1 or less")
     pixels = width * height
     if pixels < GPT_IMAGE_2_MIN_PIXELS or pixels > GPT_IMAGE_2_MAX_PIXELS:
-        _die("gpt-image-2 size total pixels must be between 655,360 and 8,294,400")
+        _die("gpt-image-2 size total pixels must be between 655,360 and 8,294,400", recovery_command="use a size with total pixels between 655,360 and 8,294,400")
 
 
 def _validate_payload(payload: dict[str, Any]) -> None:
     model = str(payload["model"])
     if not model.startswith("gpt-image-"):
-        _die("--model must be a GPT Image model, for example gpt-image-2")
+        _die("--model must be a GPT Image model, for example gpt-image-2", recovery_command="use --model gpt-image-2 or another GPT Image model")
     n = int(payload["n"])
     if n < 1 or n > 10:
-        _die("--n must be between 1 and 10")
+        _die("--n must be between 1 and 10", recovery_command="use --n between 1 and 10")
     _validate_size(str(payload["size"]), model)
     if payload["quality"] not in QUALITIES:
-        _die("--quality must be low, medium, high, or auto")
+        _die("--quality must be low, medium, high, or auto", valid_options=sorted(QUALITIES), recovery_command="use --quality low, medium, high, or auto")
     if payload.get("background") and payload["background"] not in BACKGROUNDS:
-        _die("--background must be opaque, auto, or transparent")
+        _die("--background must be opaque, auto, or transparent", valid_options=sorted(BACKGROUNDS), recovery_command="use --background opaque, auto, or transparent")
     if model == "gpt-image-2" and payload.get("background") == "transparent":
-        _die("gpt-image-2 does not support transparent backgrounds; use opaque/auto or explicitly choose an older supported model")
+        _die("gpt-image-2 does not support transparent backgrounds; use opaque/auto or explicitly choose an older supported model", recovery_command="use --background opaque or auto, or switch to an older model that supports transparent")
     if payload.get("moderation") and payload["moderation"] not in MODERATION:
-        _die("--moderation must be auto or low")
+        _die("--moderation must be auto or low", valid_options=sorted(MODERATION), recovery_command="use --moderation auto or low")
     compression = payload.get("output_compression")
     if compression is not None and not (0 <= int(compression) <= 100):
-        _die("--output-compression must be between 0 and 100")
+        _die("--output-compression must be between 0 and 100", recovery_command="use --output-compression between 0 and 100")
 
 
 def _normalize_job(item: Any, index: int) -> dict[str, Any]:
     if isinstance(item, str):
         prompt = item.strip()
         if not prompt:
-            _die(f"Empty prompt at item {index}")
+            _die(f"Empty prompt at item {index}", recovery_command="provide a non-empty prompt string")
         return {"prompt": prompt}
     if isinstance(item, dict) and str(item.get("prompt", "")).strip():
         return dict(item)
-    _die(f"Invalid prompt item {index}; expected string or object with prompt")
+    _die(f"Invalid prompt item {index}; expected string or object with prompt", recovery_command="provide a valid prompt string or JSON object with a prompt field")
     return {}
 
 
 def _load_prompts(path: Path) -> list[dict[str, Any]]:
     if not path.is_file():
-        _die(f"Prompts file not found: {path}")
+        _die(f"Prompts file not found: {path}", recovery_command="verify the prompts file path exists and is readable")
     text = path.read_text(encoding="utf-8").strip()
     if not text:
-        _die(f"Prompts file is empty: {path}")
+        _die(f"Prompts file is empty: {path}", recovery_command="provide a non-empty prompts file with at least one prompt")
     if path.suffix.lower() == ".json":
         data = json.loads(text)
         if not isinstance(data, list):
-            _die("JSON prompts file must contain an array")
+            _die("JSON prompts file must contain an array", recovery_command="provide a JSON array of prompt objects in the prompts file")
         return [_normalize_job(item, index + 1) for index, item in enumerate(data)]
     jobs: list[dict[str, Any]] = []
     for line_no, raw in enumerate(text.splitlines(), start=1):
@@ -157,7 +158,7 @@ def _load_prompts(path: Path) -> list[dict[str, Any]]:
         else:
             jobs.append({"prompt": line})
     if not jobs:
-        _die("No prompts found")
+        _die("No prompts found", recovery_command="provide at least one prompt via --prompt, --prompts-file, or --preset")
     return jobs
 
 
@@ -193,9 +194,9 @@ def _call_image_api(payload: dict[str, Any], api_key: str, timeout: int) -> dict
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        _die(f"OpenAI API error {exc.code}: {detail}")
+        _die(f"OpenAI API error {exc.code}: {detail}", recovery_command="check your API key and prompt parameters; retry later")
     except URLError as exc:
-        _die(f"Network error: {exc}")
+        _die(f"Network error: {exc}", recovery_command="check your network connection and retry")
     return {}
 
 
@@ -207,7 +208,7 @@ def _write_images(response: dict[str, Any], paths: list[Path], force: bool) -> l
             _warn(f"No b64_json returned for {path}")
             continue
         if path.exists() and not force:
-            _die(f"Output exists: {path} (use --force to overwrite)")
+            _die(f"Output exists: {path} (use --force to overwrite)", recovery_command="use --force to overwrite existing output files")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(base64.b64decode(image_b64))
         print(f"Wrote {path}")
@@ -222,17 +223,17 @@ def _jobs_from_args(args: argparse.Namespace) -> list[dict[str, Any]]:
     if not jobs and args.preset:
         preset = PRESETS.get(args.preset)
         if preset is None:
-            _die(f"Unknown preset {args.preset!r}; available: {', '.join(sorted(PRESETS))}")
+            _die(f"Unknown preset {args.preset!r}; available: {', '.join(sorted(PRESETS))}", valid_options=sorted(PRESETS), recovery_command="use one of the available presets listed above")
         jobs.append({"prompt": preset["prompt"]})
     if not jobs:
-        _die("Provide --prompt, --prompts-file, or --preset")
+        _die("Provide --prompt, --prompts-file, or --preset", recovery_command="use --prompt, --prompts-file, or --preset to specify at least one prompt")
     return jobs
 
 
 def _open_first_rendered(out_dir: Path) -> None:
     rendered = sorted(out_dir.glob("*.png")) + sorted(out_dir.glob("*.jpeg")) + sorted(out_dir.glob("*.webp"))
     if not rendered:
-        print("No image was rendered; nothing to open.", file=sys.stderr)
+        print("No image was rendered; nothing to open.")
         return
     target = rendered[0]
     print(f"Opening {target}")
@@ -270,10 +271,10 @@ def generate(args: argparse.Namespace) -> int:
             print(json.dumps({"endpoint": API_URL, "outputs": [str(path) for path in paths], **payload}, indent=2))
             continue
 
-        print(f"[{index}/{len(jobs)}] Calling {payload['model']} for {payload['n']} image(s)", file=sys.stderr)
+        print(f"[{index}/{len(jobs)}] Calling {payload['model']} for {payload['n']} image(s)")
         started = time.time()
         response = _call_image_api(payload, api_key, args.timeout)
-        print(f"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s", file=sys.stderr)
+        print(f"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s")
         written = _write_images(response, paths, args.force)
         variant_artifacts.extend(
             _variant_artifacts_for_generated_images(
@@ -389,9 +390,10 @@ def build_parser() -> argparse.ArgumentParser:
     add = parser.add_argument
     add("--prompt", action="append", help="Prompt; repeat for multiple prompts.")
     add("--prompts-file", type=Path, help="Text, JSON, or JSONL prompt list.")
-    add(
+    add_choice_arg(
+        parser,
         "--preset",
-        choices=sorted(PRESETS),
+        values=sorted(PRESETS),
         help="Use a canned prompt + behaviour preset (e.g. saint-peter-of-banodoco). "
         "If no --prompt or --prompts-file is given, the preset's prompt is used.",
     )
@@ -402,8 +404,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("--quality", default=DEFAULT_QUALITY)
     add("--output-format", default=DEFAULT_FORMAT)
     add("--output-compression", type=int)
-    add("--background", choices=sorted(BACKGROUNDS))
-    add("--moderation", choices=sorted(MODERATION))
+    add_choice_arg(parser, "--background", values=sorted(BACKGROUNDS))
+    add_choice_arg(parser, "--moderation", values=sorted(MODERATION))
     add("--out-dir", type=Path, default=Path("output/gpt-image"))
     add("--manifest", type=Path, default=Path("output/gpt-image/manifest.json"))
     add("--env-file", type=Path)
@@ -414,8 +416,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    return generate(args)
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
+        return generate(args)
+
+    return run_pack_main("generation.generate_image_openai", _run, argv=argv)
 
 
 if __name__ == "__main__":

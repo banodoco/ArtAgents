@@ -6,10 +6,10 @@ Any callers outside ``astrid/core/`` should import from here.
 
 from __future__ import annotations
 
-from pathlib import Path
 import subprocess
-from typing import Callable
 from collections.abc import Mapping
+from pathlib import Path
+from typing import Callable
 
 from astrid.core.subprocess_env import build_child_subprocess_env
 

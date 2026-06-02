@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core.project.run import ProjectRunError
 
 from astrid.core._search import (
@@ -28,6 +30,11 @@ from astrid.core.update import update_check, update_apply
 from .banodoco_catalog import BanodocoCatalogConfig
 from .registry import ExecutorRegistry, load_default_registry
 from .schema import ExecutorDefinition, ExecutorValidationError, to_capability_handle
+
+
+# Shared stderr sink for command previews and legacy override diagnostics.
+def _eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -52,12 +59,11 @@ def main(argv: list[str] | None = None) -> int:
         registry.override_store = override_store
         return int(args.handler(args, registry))
     except (KeyError, ExecutorValidationError, ProjectRunError, ValueError, OverrideStoreError) as exc:
-        print(f"executors: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid executors",
         description="List, inspect, validate, install, and run Astrid executors.",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -75,7 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available executors.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    list_parser.add_argument("--kind", choices=("built_in", "external"), help="Filter executors by kind.")
+    add_choice_arg(
+        list_parser,
+        "--kind",
+        values=("built_in", "external"),
+        help="Filter executors by kind.",
+    )
     list_parser.add_argument("--pack", help="Filter executors by source pack id.")
     list_parser.add_argument("--no-describe", action="store_true", help="Omit the short_description column for legacy parsers.")
     list_parser.add_argument("--show-overrides", action="store_true", help="Annotate capabilities with active overrides.")
@@ -550,7 +561,7 @@ def _cmd_validate(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
                 missing_by_executor[executor.id] = missing
     if missing_by_executor:
         for executor_id, missing in missing_by_executor.items():
-            print(f"{executor_id}: missing binaries: {', '.join(missing)}", file=sys.stderr)
+            _eprint(f"{executor_id}: missing binaries: {', '.join(missing)}")
         return 1
     if args.executor_id:
         print(f"{args.executor_id}: ok")
@@ -574,7 +585,7 @@ def _cmd_install(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     if plan.python_path is not None:
         print(f"python: {plan.python_path}")
     for command in plan.commands:
-        print(shlex.join(command), file=sys.stderr)
+        _eprint(shlex.join(command))
     return result.returncode
 
 
@@ -613,20 +624,20 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     )
     result = run_executor(request, registry)
     if result.missing_binaries:
-        print(f"{args.executor_id}: missing binaries: {', '.join(result.missing_binaries)}", file=sys.stderr)
+        _eprint(f"{args.executor_id}: missing binaries: {', '.join(result.missing_binaries)}")
         return 1
     if result.skipped:
         print(f"{args.executor_id}: skipped: {result.skipped_reason}")
         return 0
     emit_json = bool(getattr(args, "json", False))
     if result.command and not emit_json:
-        print(shlex.join(result.command), file=sys.stderr)
+        _eprint(shlex.join(result.command))
     if result.payload:
         print(json.dumps(dict(result.payload), separators=(",", ":"), sort_keys=True))
     # Success/failure flows through ``ok``/``error`` (returncode is descriptive).
     if not result.ok:
         if result.error is not None:
-            print(f"{args.executor_id}: {result.error.message}", file=sys.stderr)
+            _eprint(f"{args.executor_id}: {result.error.message}")
         return int(result.returncode or 1)
     rc = int(result.returncode or 0)
     if rc == 0 and project_uuid is not None and not args.dry_run:
@@ -668,10 +679,9 @@ def _emit_uuid_handoff_metadata(
     """
     timeline_path = out_dir / "hype.timeline.json"
     if not timeline_path.is_file():
-        print(
+        _eprint(
             f"executors: --project {project_id} UUID mode: {timeline_path} not produced; "
-            f"handoff complete (no timeline to bridge)",
-            file=sys.stderr,
+            f"handoff complete (no timeline to bridge)"
         )
         return 0
 
@@ -825,7 +835,7 @@ def _print_outputs(executor: ExecutorDefinition) -> None:
 def _cmd_override(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     store = registry.override_store
     if store is None:
-        print("executors: override store not available", file=sys.stderr)
+        _eprint("executors: override store not available")
         return 1
     action = getattr(args, "override_action", None)
     if action == "set":
@@ -843,7 +853,7 @@ def _cmd_override(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
             for override_id, target in sorted(mappings.items()):
                 print(f"{override_type}/{override_id} → {target}")
     else:
-        print(f"executors override: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"executors override: unknown action {action!r}")
         return 2
     return 0
 
@@ -868,7 +878,7 @@ def _cmd_dirty(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         if dirty_found == 0:
             print("no dirty executors")
     else:
-        print(f"executors dirty: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"executors dirty: unknown action {action!r}")
         return 2
     return 0
 
@@ -893,7 +903,7 @@ def _cmd_update(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         print(report["report"])
         return 0 if report.get("applied") else 1
     else:
-        print(f"executors update: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"executors update: unknown action {action!r}")
         return 2
 
 

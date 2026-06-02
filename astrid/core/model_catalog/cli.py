@@ -15,6 +15,7 @@ import argparse
 import json
 import sys
 
+from astrid.contracts.errors import AstridError
 from astrid.core.model_catalog.registry import ModelRegistry
 
 
@@ -88,8 +89,11 @@ def _cmd_list(args: argparse.Namespace) -> int:
     try:
         registry = ModelRegistry.load_default()
     except Exception as exc:
-        print(f"models list: failed to load registry: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"failed to load model registry: {exc}",
+            recovery_command="astrid models list",
+            state_snapshot={"command": "models list"},
+        ) from exc
 
     entries = registry.list_all(include_closed=args.include_closed)
 
@@ -184,14 +188,20 @@ def _cmd_show(args: argparse.Namespace) -> int:
     try:
         registry = ModelRegistry.load_default()
     except Exception as exc:
-        print(f"models show: failed to load registry: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"failed to load model registry: {exc}",
+            recovery_command=f"astrid models show {args.model_id}",
+            state_snapshot={"command": "models show", "model_id": args.model_id},
+        ) from exc
 
     try:
         entry = registry.get(args.model_id)
     except KeyError as exc:
-        print(f"models show: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            str(exc),
+            recovery_command="astrid models list",
+            state_snapshot={"command": "models show", "model_id": args.model_id},
+        ) from exc
 
     if args.use_json:
         _show_json(entry)
@@ -239,7 +249,7 @@ def _show_text(entry) -> None:
         if mode_spec.requires:
             print(f"    Requires:  {', '.join(sorted(mode_spec.requires))}")
         else:
-            print(f"    Requires:  (none)")
+            print("    Requires:  (none)")
 
         for bk_name, bk_spec in sorted(mode_spec.backends.items()):
             print(f"    Backend: {bk_name}")
@@ -250,9 +260,9 @@ def _show_text(entry) -> None:
             if bk_spec.endpoint:
                 print(f"      Endpoint:      {bk_spec.endpoint}")
             if bk_spec.param_map:
-                print(f"      Param map:")
+                print("      Param map:")
                 for pk, pv in sorted(bk_spec.param_map.items()):
                     print(f"        {pk} → {pv}")
             else:
-                print(f"      Param map: (none)")
+                print("      Param map: (none)")
         print()

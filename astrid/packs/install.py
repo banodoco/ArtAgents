@@ -22,15 +22,13 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from textwrap import indent
-from typing import Optional
 
 import yaml
 
 from astrid.core.pack import _normalize_pack_permissions, pack_manifest_path
 from astrid.core.pack_store import (
-    InstallRecord,
     InstalledPackStore,
+    InstallRecord,
     _revision_timestamp,
 )
 from astrid.core.util.time import utc_now_seconds

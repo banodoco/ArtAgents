@@ -12,7 +12,6 @@ from referencing import Registry, Resource
 
 from .items import repo_relative_path, utc_now_iso
 
-
 SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
 
 

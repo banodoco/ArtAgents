@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project import paths as project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.session import cli
@@ -37,6 +38,17 @@ def _args(**kw: object) -> argparse.Namespace:
     }
     defaults.update(kw)
     return argparse.Namespace(**defaults)
+
+
+def _assert_astrid_error(call, *cause_parts: str, recovery: str | None = None) -> AstridError:
+    with pytest.raises(AstridError) as raised:
+        call()
+    error = raised.value
+    for part in cause_parts:
+        assert part in error.cause
+    if recovery is not None:
+        assert error.recovery_command == recovery
+    return error
 
 
 # ----- cmd_attach -------------------------------------------------------
@@ -73,10 +85,11 @@ def test_attach_noninteractive_identity_bootstrap_errors_cleanly(
         raise EOFError
 
     monkeypatch.setattr("builtins.input", eof_input)
-    rc = cli.cmd_attach(_args(), out=StringIO())
+    _assert_astrid_error(
+        lambda: cli.cmd_attach(_args(), out=StringIO()),
+        "attach: agent identity is not configured",
+    )
     captured = capsys.readouterr()
-    assert rc == 2
-    assert "attach: agent identity is not configured" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -114,11 +127,11 @@ def test_attach_without_project_rejects_missing_default(
     (workspace / ".astrid" / "config.json").write_text(
         json.dumps({"default_project": "missing"}), encoding="utf-8"
     )
-    rc = cli.cmd_attach(_args(project=None), out=StringIO())
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "configured default project 'missing' was not found" in captured.err
-    assert "astrid attach demo --default" in captured.err
+    error = _assert_astrid_error(
+        lambda: cli.cmd_attach(_args(project=None), out=StringIO()),
+        "configured default project 'missing' was not found",
+    )
+    assert error.recovery_command == "astrid projects default demo"
 
 
 def test_attach_requires_explicit_timeline_when_default_sentinel_is_none(
@@ -130,10 +143,10 @@ def test_attach_requires_explicit_timeline_when_default_sentinel_is_none(
     create_project("demo")
     create_timeline("demo", "main")
     buf = StringIO()
-    rc = cli.cmd_attach(_args(), out=buf)
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "no default timeline; pass --timeline <slug>" in captured.err
+    _assert_astrid_error(
+        lambda: cli.cmd_attach(_args(), out=buf),
+        "no default timeline; pass --timeline <slug>",
+    )
     assert not (env["projects"] / "demo" / cli.SESSION_FILE_NAME).exists()
 
 
@@ -265,8 +278,10 @@ def test_attach_resume_missing_id_errors(
 ) -> None:
     seed_project(env["projects"], "demo")
     buf = StringIO()
-    rc = cli.cmd_attach(_args(session="NONEXISTENT"), out=buf)
-    assert rc == 2
+    _assert_astrid_error(
+        lambda: cli.cmd_attach(_args(session="NONEXISTENT"), out=buf),
+        "no session file for id 'NONEXISTENT'",
+    )
 
 
 def test_attach_as_agent_overrides_identity(
@@ -286,8 +301,10 @@ def test_attach_as_agent_rejects_malformed(
 ) -> None:
     seed_project(env["projects"], "demo")
     buf = StringIO()
-    rc = cli.cmd_attach(_args(as_agent="codex-1"), out=buf)  # missing "agent:" prefix
-    assert rc == 2
+    _assert_astrid_error(
+        lambda: cli.cmd_attach(_args(as_agent="codex-1"), out=buf),  # missing "agent:" prefix
+        "--as must be of form 'agent:<slug>'",
+    )
 
 
 def test_status_honors_attach_as_override(
@@ -410,12 +427,17 @@ def test_detach_without_id_or_env_errors(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.delenv("ASTRID_SESSION_ID", raising=False)
-    rc = cli.cmd_sessions_detach(argparse.Namespace(session_id=None), out=StringIO())
-    assert rc == 2
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_detach(argparse.Namespace(session_id=None), out=StringIO()),
+        "no session bound",
+        "pass a session id",
+    )
 
 
 def test_detach_missing_session_errors(env: dict[str, Path]) -> None:
-    rc = cli.cmd_sessions_detach(
-        argparse.Namespace(session_id="NONEXISTENT"), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_detach(
+            argparse.Namespace(session_id="NONEXISTENT"), out=StringIO()
+        ),
+        "no session file for id 'NONEXISTENT'",
     )
-    assert rc == 2

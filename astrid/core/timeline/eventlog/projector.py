@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from astrid.core.timeline.events.schema import TimelineEvent
-from astrid.core.timeline.model import Display, TIMELINE_SCHEMA_VERSION
+from astrid.core.timeline.model import TIMELINE_SCHEMA_VERSION, Display
 
 
 @dataclass(frozen=True)

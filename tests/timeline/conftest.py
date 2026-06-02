@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 
-from astrid.core.project.schema import utc_now_iso
+from astrid.core.util.time import utc_now_iso
 from astrid.core.timeline.eventlog import LocalFsBackend, SupabaseBackend
 from astrid.core.timeline.eventlog.types import (
     EventLogError,

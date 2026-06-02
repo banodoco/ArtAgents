@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('youtube.upload')
 import argparse
 import json
-import sys
 
-from astrid.packs.youtube.executors.upload.src.social_publish import PublishError, publish_youtube_video
+from astrid.packs.youtube.executors.upload.src.social_publish import (
+    PublishError,
+    publish_youtube_video,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -62,25 +65,30 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        result = publish_youtube_video(
-            video_url=args.video_url,
-            title=args.title,
-            description=args.description,
-            tags=[*args.tag, *args.tags],
-            privacy_status=args.privacy_status,
-            playlist_id=args.playlist_id,
-            made_for_kids=args.made_for_kids,
-            webhook_url=args.webhook_url,
-        )
-    except PublishError as exc:
-        print(f"publish-youtube: {exc}", file=sys.stderr)
-        return 1
+    def _run() -> int:
+        parser = build_parser()
+        args = parser.parse_args(argv)
+        try:
+            result = publish_youtube_video(
+                video_url=args.video_url,
+                title=args.title,
+                description=args.description,
+                tags=[*args.tag, *args.tags],
+                privacy_status=args.privacy_status,
+                playlist_id=args.playlist_id,
+                made_for_kids=args.made_for_kids,
+                webhook_url=args.webhook_url,
+            )
+        except PublishError as exc:
+            raise AstridError(
+                str(exc),
+                recovery_command="verify the video URL is accessible, the webhook is configured correctly, and your Zapier integration is active, then retry",
+            ) from exc
 
-    print(json.dumps(result, separators=(",", ":")))
-    return 0
+        print(json.dumps(result, separators=(",", ":")))
+        return 0
+
+    return run_pack_main("youtube.upload", _run, argv=argv)
 
 
 if __name__ == "__main__":

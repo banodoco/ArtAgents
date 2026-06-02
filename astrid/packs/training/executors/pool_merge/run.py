@@ -5,18 +5,18 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('training.pool_merge')
 import argparse
 import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.element import catalog as effects_catalog
-from astrid.core.util.time import utc_now_seconds
 from astrid import timeline
 from astrid.audit import register_outputs
+from astrid.core.element import catalog as effects_catalog
+from astrid.core.util.time import utc_now_seconds
 
 
 def _utc_now() -> str:

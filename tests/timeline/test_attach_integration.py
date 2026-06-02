@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project import paths as project_paths
 from astrid.core.session import cli
 from astrid.core.session.identity import Identity, write_identity
@@ -136,16 +137,9 @@ class TestExplicitTimeline:
         import sys
         from io import StringIO as StderrCapture
 
-        stderr_buf = StringIO()
-        old_stderr = sys.stderr
-        sys.stderr = stderr_buf
-        try:
-            rc = cli.cmd_attach(_args(timeline="nonexistent"), out=buf)
-        finally:
-            sys.stderr = old_stderr
-
-        assert rc == 2
-        assert "not found" in stderr_buf.getvalue()
+        with pytest.raises(AstridError) as raised:
+            cli.cmd_attach(_args(timeline="nonexistent"), out=buf)
+        assert "not found" in raised.value.cause
 
 
 # ---------------------------------------------------------------------------
@@ -172,9 +166,7 @@ class TestDefaultTimeline:
             sys.stderr = old_stderr
 
         assert rc == 0
-        stderr_output = stderr_buf.getvalue()
-        assert "Using default timeline: primary" in stderr_output
-        assert "Use --timeline to override" in stderr_output
+        assert stderr_buf.getvalue() == ""
 
         # stdout should show the resolved slug, not (none).
         stdout_output = buf.getvalue()
@@ -202,17 +194,9 @@ class TestNoDefaultTimeline:
         buf = StringIO()
         import sys
 
-        stderr_buf = StringIO()
-        old_stderr = sys.stderr
-        sys.stderr = stderr_buf
-        try:
-            rc = cli.cmd_attach(_args(), out=buf)
-        finally:
-            sys.stderr = old_stderr
-
-        assert rc == 2
-        stderr_output = stderr_buf.getvalue()
-        assert "no default timeline; pass --timeline" in stderr_output
+        with pytest.raises(AstridError) as raised:
+            cli.cmd_attach(_args(), out=buf)
+        assert "no default timeline; pass --timeline" in raised.value.cause
 
     def test_no_timelines_at_all(self, env: dict[str, Path]) -> None:
         """No timelines exist at all — bootstrap case: attach succeeds with timeline=None."""

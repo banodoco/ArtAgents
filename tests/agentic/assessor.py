@@ -154,14 +154,29 @@ def _read_text(path: Path) -> str:
 
 
 def _head_tail_filter_stderr(stderr: str) -> str:
-    """Keep only `[tool]`, `[done]`, error, rejected, exit lines; head+tail cap."""
+    """Keep tool/done/error/rejected/exit lines and structured envelope markers; head+tail cap.
+
+    Structured envelope lines (from ``_render_astrid_error`` in ``astrid.pipeline``)
+    carry ``valid_options``, ``recovery_command``, ``state_snapshot``, and the
+    ``degraded`` bug-flag.  These must survive filtering so the assessor LLM can
+    see the recovery metadata alongside the raw error text.
+    """
     if not stderr:
         return ""
-    keep_keys = ("[tool]", "[done]", "error", "rejected", "exit ")
-    kept = [
-        ln for ln in stderr.splitlines()
-        if any(k in ln.lower() if k in ("error", "rejected", "exit ") else k in ln for k in keep_keys)
-    ]
+    # Case-insensitive substrings (lowercased before matching).
+    _ci_keys = ("error", "rejected", "exit ", "invalid", "cannot", "failed")
+    # Case-sensitive prefixes / substrings.
+    _cs_keys = (
+        "[tool]", "[done]",
+        "valid options:", "recovery:", "state snapshot:", "unstructured",
+    )
+    kept: list[str] = []
+    for ln in stderr.splitlines():
+        lower = ln.lower()
+        if any(k in lower for k in _ci_keys):
+            kept.append(ln)
+        elif any(k in ln for k in _cs_keys):
+            kept.append(ln)
     body = "\n".join(kept) if kept else stderr  # fallback: full stderr if no matches
     if len(body) <= CAP_STDERR_CHARS:
         return body
@@ -226,7 +241,7 @@ def _build_user_payload(evidence_pack: Path, rubric: dict, brief_text: str) -> s
         "## report.md",
         report or "(no report)",
         "",
-        "## stderr.log (filtered to [tool]/[done] + error/rejected/exit lines)",
+        "## stderr.log (filtered to [tool]/[done] + error/envelope/recovery lines)",
         stderr or "(no stderr)",
         "",
         "## events.jsonl (all runs concatenated)",

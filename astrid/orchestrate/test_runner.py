@@ -19,7 +19,6 @@ from typing import Optional
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import PROJECTS_ROOT_ENV
 from astrid.core.project.project import create_project
-from astrid.core.timeline.crud import create_timeline
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session
 from astrid.core.session.paths import ASTRID_HOME_ENV, session_path
@@ -49,6 +48,7 @@ from astrid.core.task.plan import (
     load_plan,
     step_dir_for_path,
 )
+from astrid.core.timeline.crud import create_timeline
 from astrid.orchestrate.compile import compile_to_path
 
 _MAX_ITERATIONS = 200

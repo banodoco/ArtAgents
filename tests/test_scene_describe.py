@@ -1,6 +1,10 @@
+import contextlib
+import io
 import json
 import shutil
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -128,6 +132,45 @@ class SceneDescribeTest(unittest.TestCase):
 
     def test_response_schema_has_no_forbidden_time_keys(self) -> None:
         self.assertFalse(has_forbidden_time_keys(scene_describe.RESPONSE_SCHEMA, scene_describe.FORBIDDEN_TIME_KEYS))
+
+    def test_main_renders_astrid_error_for_internal_validation_failure(self) -> None:
+        tmp_dir = self.make_tempdir()
+        scenes = tmp_dir / "scenes.json"
+        triage = tmp_dir / "triage.json"
+        video = tmp_dir / "main.mp4"
+        out_dir = tmp_dir / "out"
+        scenes.write_text(json.dumps([]), encoding="utf-8")
+        triage.write_text(json.dumps({"entries": []}), encoding="utf-8")
+        video.write_bytes(b"video")
+        stderr = io.StringIO()
+        fake_asset_cache = types.ModuleType("astrid.packs.understanding.executors.asset_cache")
+        fake_asset_cache.run = types.SimpleNamespace(resolve_input=lambda value, want: value)
+
+        with (
+            mock.patch.dict(sys.modules, {"astrid.packs.understanding.executors.asset_cache": fake_asset_cache}),
+            mock.patch.object(scene_describe, "build_gemini_client", return_value=object()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = scene_describe.main(
+                [
+                    "--scenes",
+                    str(scenes),
+                    "--triage",
+                    str(triage),
+                    "--video",
+                    str(video),
+                    "--out",
+                    str(out_dir),
+                    "--top-n",
+                    "0",
+                ]
+            )
+
+        rendered = stderr.getvalue()
+        self.assertEqual(rc, 2)
+        self.assertIn("top_n must be > 0", rendered)
+        self.assertIn("capability_id", rendered)
+        self.assertNotIn("Traceback", rendered)
 
 
 if __name__ == "__main__":

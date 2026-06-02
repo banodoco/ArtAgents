@@ -4,21 +4,25 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('foley.tile_video')
 import argparse
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.packs._canonical_entrypoint import run_pack_main
+
 
 def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
+    raise AstridError(
+        message,
+        recovery_command="fix the foley.tile_video inputs and rerun the command",
+    )
 
 
 def _parse_grid(value: str) -> tuple[int, int]:
@@ -172,62 +176,65 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if not 0.0 <= args.overlap < 1.0:
-        _die(f"--overlap must be in [0, 1), got {args.overlap}")
-    video = args.video.expanduser().resolve()
-    if not video.is_file():
-        _die(f"video not found: {video}")
-    out_root = args.out.expanduser().resolve()
-    out_root.mkdir(parents=True, exist_ok=True)
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
+        if not 0.0 <= args.overlap < 1.0:
+            _die(f"--overlap must be in [0, 1), got {args.overlap}")
+        video = args.video.expanduser().resolve()
+        if not video.is_file():
+            _die(f"video not found: {video}")
+        out_root = args.out.expanduser().resolve()
+        out_root.mkdir(parents=True, exist_ok=True)
 
-    probe = _ffprobe(video)
-    cols, rows = args.grid
-    rects = _tile_rects(probe["width"], probe["height"], cols, rows, args.overlap)
+        probe = _ffprobe(video)
+        cols, rows = args.grid
+        rects = _tile_rects(probe["width"], probe["height"], cols, rows, args.overlap)
 
-    duration = probe["duration"]
-    trimmed = min(args.trim, duration) if args.trim is not None else duration
+        duration = probe["duration"]
+        trimmed = min(args.trim, duration) if args.trim is not None else duration
 
-    tiles: list[dict[str, Any]] = []
-    for entry in rects:
-        r, c = entry["row"], entry["col"]
-        tile_id = f"tile_{r}_{c}"
-        clip_rel = Path("tiles") / f"{r}_{c}.mp4"
-        frame_rel = Path("frames") / f"{r}_{c}.png"
-        clip_abs = out_root / clip_rel
-        frame_abs = out_root / frame_rel
+        tiles: list[dict[str, Any]] = []
+        for entry in rects:
+            r, c = entry["row"], entry["col"]
+            tile_id = f"tile_{r}_{c}"
+            clip_rel = Path("tiles") / f"{r}_{c}.mp4"
+            frame_rel = Path("frames") / f"{r}_{c}.png"
+            clip_abs = out_root / clip_rel
+            frame_abs = out_root / frame_rel
+            if not args.dry_run:
+                _crop_tile(video, entry["rect"], clip_abs, trim=args.trim, force=args.force)
+                _first_frame(clip_abs, frame_abs, args.force)
+            tiles.append({
+                "id": tile_id,
+                "row": r,
+                "col": c,
+                "rect": entry["rect"],
+                "rect_norm": entry["rect_norm"],
+                "tile_clip": str(clip_rel),
+                "first_frame": str(frame_rel),
+            })
+
+        global_frame_rel = Path("frames") / "global.png"
         if not args.dry_run:
-            _crop_tile(video, entry["rect"], clip_abs, trim=args.trim, force=args.force)
-            _first_frame(clip_abs, frame_abs, args.force)
-        tiles.append({
-            "id": tile_id,
-            "row": r,
-            "col": c,
-            "rect": entry["rect"],
-            "rect_norm": entry["rect_norm"],
-            "tile_clip": str(clip_rel),
-            "first_frame": str(frame_rel),
-        })
+            _global_first_frame(video, out_root / global_frame_rel, args.force)
 
-    global_frame_rel = Path("frames") / "global.png"
-    if not args.dry_run:
-        _global_first_frame(video, out_root / global_frame_rel, args.force)
+        manifest = {
+            "video": str(video),
+            "video_size": [probe["width"], probe["height"]],
+            "duration": duration,
+            "trimmed_duration": trimmed,
+            "fps": probe["fps"],
+            "grid": {"cols": cols, "rows": rows, "overlap": args.overlap},
+            "global_first_frame": str(global_frame_rel),
+            "tiles": tiles,
+        }
+        manifest_path = out_root / "tiles.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        print(f"wrote_tiles_manifest={manifest_path}")
+        print(f"wrote_tiles={len(tiles)}")
+        return 0
 
-    manifest = {
-        "video": str(video),
-        "video_size": [probe["width"], probe["height"]],
-        "duration": duration,
-        "trimmed_duration": trimmed,
-        "fps": probe["fps"],
-        "grid": {"cols": cols, "rows": rows, "overlap": args.overlap},
-        "global_first_frame": str(global_frame_rel),
-        "tiles": tiles,
-    }
-    manifest_path = out_root / "tiles.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote_tiles_manifest={manifest_path}")
-    print(f"wrote_tiles={len(tiles)}")
-    return 0
+    return run_pack_main("foley.tile_video", _run, argv=argv)
 
 
 if __name__ == "__main__":

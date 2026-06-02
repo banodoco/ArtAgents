@@ -136,16 +136,16 @@ def _make_event(kind: str, payload: object) -> TimelineEvent:
         # transition.set → transition.removed
         (
             "transition.set",
-            TransitionSetPayload(left_clip_id="c1", right_clip_id="c2", kind="dissolve", duration_seconds=1.0),
+            TransitionSetPayload(left_clip_id="c1", right_clip_id="c2", kind="cross-fade", duration_seconds=1.0),
             {"clips": []},
-            {"clips": [{"id": "c1", "transition": {"kind": "dissolve", "right_clip_id": "c2", "duration_seconds": 1.0}}]},
+            {"clips": [{"id": "c1", "transition": {"kind": "cross-fade", "right_clip_id": "c2", "duration_seconds": 1.0}}]},
             "transition.removed",
         ),
         # transition.removed → transition.set (from prior state)
         (
             "transition.removed",
             TransitionRemovedPayload(left_clip_id="c1", right_clip_id="c2"),
-            {"clips": [{"id": "c1", "transition": {"kind": "dissolve", "right_clip_id": "c2", "duration_seconds": 1.0}}]},
+            {"clips": [{"id": "c1", "transition": {"kind": "cross-fade", "right_clip_id": "c2", "duration_seconds": 1.0}}]},
             {"clips": [{"id": "c1"}]},
             "transition.set",
         ),

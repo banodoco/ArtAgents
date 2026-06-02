@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import unittest
@@ -12,6 +13,8 @@ from unittest import mock
 import yaml
 
 from astrid import skills
+from astrid.core.cli_choices import StaticChoices
+from astrid.skills import cli as skills_cli
 from astrid.skills import discovery, state
 from astrid.skills.harnesses import (
     ClaudeAdapter,
@@ -54,6 +57,13 @@ def _descriptors():
     return discovery.list_skills()
 
 
+def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices[name]
+    raise AssertionError(f"missing subparser {name!r}")
+
+
 class AdapterPlanTest(unittest.TestCase):
     def test_claude_target_for_core_uses_astrid_path(self) -> None:
         fx = _Tmp()
@@ -81,6 +91,20 @@ class AdapterPlanTest(unittest.TestCase):
             self.assertEqual(adapter.target_for(descriptor), fx.home / ".hermes" / "skills" / "astrid")
         finally:
             fx.close()
+
+    def test_cli_enum_args_use_static_choices_wrappers(self) -> None:
+        parser = skills_cli.build_parser()
+        install_parser = _subparser(parser, "install")
+        uninstall_parser = _subparser(parser, "uninstall")
+        sync_parser = _subparser(parser, "sync")
+
+        install_harness = next(action for action in install_parser._actions if action.dest == "harness")
+        install_mechanism = next(action for action in install_parser._actions if action.dest == "mechanism")
+        uninstall_harness = next(action for action in uninstall_parser._actions if action.dest == "harness")
+        sync_mechanism = next(action for action in sync_parser._actions if action.dest == "mechanism")
+
+        for action in (install_harness, install_mechanism, uninstall_harness, sync_mechanism):
+            self.assertIsInstance(action.choices, StaticChoices)
 
 
 class ApplyTest(unittest.TestCase):

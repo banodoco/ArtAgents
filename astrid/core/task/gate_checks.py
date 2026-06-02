@@ -5,15 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.task.gate_base import GateDecision, InlineCheckResult
-from astrid.core.task.plan import ProducesEntry, step_dir_for_path
+from astrid.core.task.cas import intern, link_into_produces
 from astrid.core.task.events import (
     make_cursor_rewind_event,
     make_iteration_failed_event,
     make_produces_check_failed_event,
     make_produces_check_passed_event,
 )
-from astrid.core.task.cas import intern, link_into_produces
+from astrid.core.task.gate_base import GateDecision, InlineCheckResult
+from astrid.core.task.plan import ProducesEntry, step_dir_for_path
 
 
 # step_dir_for_path is the ONLY directory API used in this gate path (FLAG-P3-001).

@@ -12,8 +12,13 @@ from astrid._paths import REPO_ROOT
 
 from ..acquisition import string_set
 from ..interfaces import FilterResult
-from ._common import build_filter_stats, increment_reason, pass_item, reject_item, resolve_media_path
-
+from ._common import (
+    build_filter_stats,
+    increment_reason,
+    pass_item,
+    reject_item,
+    resolve_media_path,
+)
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 

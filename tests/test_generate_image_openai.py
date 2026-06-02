@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 from astrid.core.util.secrets import load_api_key
 from astrid.packs.generation.executors.generate_image_openai.run import main
 from astrid.packs.rendering.executors.sprite_sheet.run import load_fal_key
@@ -45,8 +43,7 @@ def test_generate_image_dry_run_multiple_variants(capsys, tmp_path):
 
 
 def test_generate_image_rejects_invalid_gpt_image_2_size():
-    with pytest.raises(SystemExit):
-        main(["--prompt", "bad size", "--size", "1000x1000", "--dry-run"])
+    assert main(["--prompt", "bad size", "--size", "1000x1000", "--dry-run"]) == 2
 
 
 def test_load_api_key_reads_env_by_default(monkeypatch, tmp_path):

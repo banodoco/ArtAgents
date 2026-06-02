@@ -16,7 +16,6 @@ from typing import Any, Protocol
 from astrid.core.util.secrets import candidate_env_files, read_env_value
 from astrid.core.util.time import utc_now_seconds
 
-
 _IMAGE_BLOCK_ALLOWED_KEYS = frozenset({"type", "source", "cache_control"})
 _LLM_DEBUG_LOCK = threading.Lock()
 

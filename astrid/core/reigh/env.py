@@ -7,7 +7,6 @@ from pathlib import Path
 
 from astrid.core.util.secrets import candidate_env_files, read_env_value
 
-
 DEFAULT_FUNCTION_NAME = "reigh-data-fetch"
 
 

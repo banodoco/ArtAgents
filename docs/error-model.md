@@ -53,6 +53,155 @@ say so in code review and the inventory:
 Discovery, provenance, session fallback, and task-helper catches should state
 which category they belong to.
 
+## The AstridError Envelope Contract
+
+Since m3, all operator- and agent-facing failures must travel through the
+canonical `AstridError` envelope defined in `astrid/contracts/errors.py`.  The
+envelope carries structured recoverability data that allows agents and the
+assessor to extract valid options and recovery commands without parsing ad-hoc
+error text.
+
+### Canonical Fields
+
+Every `AstridError` carries these attributes:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `cause` | `str` | Human-readable description of what went wrong. |
+| `valid_options` | `tuple[str, ...]` | Recovery-safe enumeration of allowed values (empty when not applicable). |
+| `recovery_command` | `str` | The next command the operator/agent should run (empty when not applicable). |
+| `state_snapshot` | `dict[str, Any]` | Compact JSON-safe state the renderer surfaces verbatim. |
+| `degraded` | `bool` | `True` when this envelope wraps an unhandled generic exception; `False` for expected domain errors. |
+
+### Legacy Compatibility Fields
+
+For backward compatibility with existing error-handling code, `AstridError` also
+exposes these aliases:
+
+- `message` — mirrors `cause`
+- `reason` — mirrors `cause`
+- `recovery` — mirrors `recovery_command`
+- `code` — optional machine-readable string (set to `None` when absent)
+- `source_type` — the original exception class name (set to `None` when absent)
+
+These legacy fields exist so old catch sites that read `.message` or `.reason`
+continue to work.  New code MUST use the canonical field names.
+
+### The Rendering Contract
+
+`render_astrid_error()` in `astrid/contracts/errors.py` prints the envelope to
+stderr in this order:
+
+1. **Bug flag** (only when `degraded=True`):
+   ```
+   unstructured - this is a bug.
+   ```
+2. **Cause**:
+   ```
+   <cause text>
+   ```
+3. **Valid options** (only when non-empty):
+   ```
+   valid options: <comma-separated list>
+   ```
+4. **Recovery command** (only when non-empty):
+   ```
+   recovery: <command text>
+   ```
+5. **State snapshot** (only when non-empty):
+   ```
+   state snapshot: <compact JSON>
+   ```
+
+The exit code is `1` for degraded errors and `2` for all other `AstridError`
+instances.  This distinction lets dry-run harnesses and agentic auditors
+distinguish expected recoverable failures from unexpected bugs.
+
+### The catch-all in pipeline.main()
+
+`pipeline.main()` wraps the entire CLI dispatch in two catch blocks:
+
+```python
+try:
+    return _main_impl(raw)
+except AstridError as exc:
+    return render_astrid_error(exc)
+except Exception as exc:
+    bug = wrap_degraded_error(
+        exc,
+        state_snapshot={"argv": raw, "entrypoint": "astrid.pipeline.main"},
+    )
+    return render_astrid_error(bug)
+```
+
+- **`AstridError`** — rendered directly.  The cause, valid options, recovery
+  command, and state snapshot reach stderr intact.  No Python traceback appears.
+- **Any other `Exception`** — wrapped by `wrap_degraded_error()` into a degraded
+  `AstridError` envelope with `degraded=True`.  The original exception type and
+  message are preserved as `cause`, and the stderr output begins with the
+  `unstructured - this is a bug.` flag.
+
+This means every single CLI invocation that raises will produce structured
+stderr.  Bare Python tracebacks should never reach the operator.
+
+### Authoring Rules
+
+When you are writing or migrating a CLI parser, a kernel helper, or a pack
+entrypoint, follow these rules:
+
+1. **Raise `AstridError` for known recoverable failures.**  Populate
+   `valid_options` when the failure is an invalid enum/choice so agents see the
+   allowed values.  Populate `recovery_command` with the exact next command the
+   caller should run.
+
+2. **Do not catch `AstridError` at internal boundaries** unless you are adding
+   context to the envelope.  If you re-wrap, use `coerce_astrid_error()` to
+   merge state snapshots and preserve the original `valid_options` and
+   `recovery_command`.
+
+3. **Internal validation helpers may still raise `ValueError` or domain-specific
+   exceptions** as long as the public CLI boundary (or pack entrypoint) catches
+   them and converts them to `AstridError` before the call unwinds past
+   `pipeline.main()`.
+
+4. **Use `AstridError` subclasses for typed domain errors.**  The pattern
+   established by `TaskRunGateError`, `SessionBindingError`,
+   `TimelineEditError`, `ProjectError`, `ProjectValidationError`, and
+   `ExecAstridError` is: inherit from `AstridError`, set `cause` in `__init__`,
+   and preserve any legacy attributes the existing call sites expect.
+
+5. **Use `wrap_degraded_error()` only at the outermost catch-all.**  Do not call
+   it inside pack entrypoints or kernel helpers — let those raise proper
+   `AstridError` instances so the degraded flag is reserved for genuinely
+   unexpected Python exceptions.
+
+6. **Non-exception result objects** (such as `ExecError` dataclasses) satisfy
+   the `AstridErrorEnvelope` protocol via properties.  Use `error_from_result()`
+   to convert an `ExecError`-bearing result into an `AstridError` for rendering.
+   Do not raise result dataclasses as exceptions — use `ExecAstridError` for
+   raised execution failures.
+
+### Structured Stderr for Agents
+
+The assessor in `tests/agentic/assessor.py` filters stderr through
+`_head_tail_filter_stderr()`, which preserves lines containing these markers:
+
+- `valid options:` — the allowed-values enumeration
+- `recovery:` — the recovery command
+- `state snapshot:` — compact JSON state
+- `unstructured` — the degraded bug flag
+- `error`, `rejected`, `exit `, `invalid`, `cannot`, `failed` — cause-keyword
+  patterns matched case-insensitively
+
+Agents reading Astrid stderr can therefore:
+
+- Parse `valid options:` to discover what values are accepted.
+- Parse `recovery:` to learn the exact next command.
+- Detect `unstructured - this is a bug.` to distinguish expected failures from
+  bugs.
+
+No source grep or ad-hoc text parsing is needed.
+
 ## Task Runtime Guidance
 
 - Task-run event transport is session-free and append-focused. Production task

@@ -10,7 +10,7 @@ from typing import Any
 from astrid.audit.graph import load_ledger
 from astrid.audit.transport import verify_ledger_path
 
-from .events import EventLogError, EVENTS_FILENAME, read_events, verify_chain
+from .events import EVENTS_FILENAME, EventLogError, read_events, verify_chain
 
 
 @dataclass(frozen=True)

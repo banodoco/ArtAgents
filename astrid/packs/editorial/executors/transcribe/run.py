@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.transcribe')
 import argparse
 import json
@@ -15,8 +15,9 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import AuditContext
 from astrid._media import ffprobe_duration_seconds
+from astrid.audit import AuditContext
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 
 SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")
@@ -63,7 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("--env-file", type=Path, help="Optional .env file checked before the repo-relative fallback.")
     add("--max-chunk-sec", type=float, default=600.0, help="Maximum chunk duration before a silence or hard cut.")
     add("--no-vad-gate", action="store_true", help="Disable the silent-chunk skip and denylist silence filter.")
-    add("--diarize", choices=["pyannote"], help="Optional diarization backend.")
+    add_choice_arg(parser, "--diarize", values=("pyannote",), help="Optional diarization backend.")
     return parser
 def resolve_dirs(audio_path: Path, out_dir: Path | None, cache_dir: Path | None) -> tuple[Path, Path]:
     out_path = out_dir.resolve() if out_dir else (audio_path.parent / audio_path.stem).resolve()

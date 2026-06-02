@@ -222,7 +222,7 @@ async def sweep_async(
     *,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    from runpod_lifecycle import discovery, Pod
+    from runpod_lifecycle import Pod, discovery
 
     handles = collect_handles(projects_root)
     now_utc = datetime.now(timezone.utc)

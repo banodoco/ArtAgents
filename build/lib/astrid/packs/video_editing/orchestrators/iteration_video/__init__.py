@@ -1,2 +1,0 @@
-"""Iteration video orchestrator package."""
-

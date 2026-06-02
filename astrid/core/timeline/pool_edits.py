@@ -19,7 +19,6 @@ from typing import NoReturn
 from ._edit_helpers import TimelineEditError
 from .events.schema import TimelineActor
 
-
 # ---------------------------------------------------------------------------
 # pool_asset_add
 # ---------------------------------------------------------------------------

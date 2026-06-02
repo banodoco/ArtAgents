@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
+
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.inspect_cut')
 
 
 import argparse
 import json
-from pathlib import Path
 import sys
 import textwrap
+from pathlib import Path
 
 from astrid.domains.hype import enriched_arrangement
 

@@ -4,6 +4,7 @@ import contextlib
 import io
 import unittest
 
+from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.schema import ExecutorValidationError, validate_executor_definition
 from astrid.core.orchestrator import cli as orchestrators_cli
@@ -14,7 +15,10 @@ def _capture(fn, argv: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        result = fn(argv)
+        try:
+            result = fn(argv)
+        except AstridError as exc:
+            result = render_astrid_error(exc)
     return result, stdout.getvalue(), stderr.getvalue()
 
 

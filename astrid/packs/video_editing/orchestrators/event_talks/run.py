@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.event_talks')
 import argparse
 import datetime as dt
@@ -15,17 +16,19 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid._media import ffprobe_duration_seconds
-from astrid.core.util.hash import sha256_file
-from astrid.packs.video_editing.orchestrators.event_talks.plan_template import build_plan_v2, emit_plan_json
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
+from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.project.run import (
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.project.paths import project_dir, validate_project_slug
-
+from astrid.core.task import env as task_env
+from astrid.core.task import gate as task_gate
+from astrid.core.util.hash import sha256_file
+from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
+    build_plan_v2,
+    emit_plan_json,
+)
 
 # ---------------------------------------------------------------------------
 # Constants — preserved from the legacy orchestrator
@@ -171,8 +174,10 @@ def resolve_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     if source is not None:
         args.source = Path(source).expanduser().resolve()
         if not args.source.exists():
-            print(f"event_talks: source not found: {args.source}", file=sys.stderr)
-            raise SystemExit(2)
+            raise AstridError(
+                f"source not found: {args.source}",
+                recovery_command="verify the source path and rerun with --source <path>",
+            )
 
     return args
 
@@ -465,11 +470,10 @@ def run_orchestrator(args: argparse.Namespace) -> int:
 
     # 5. Execute through task gate
     if project_slug is None:
-        print(
-            "event_talks: --project required for task-gate execution",
-            file=sys.stderr,
+        raise AstridError(
+            "task-gate execution requires --project",
+            recovery_command="rerun with --project <slug> to enable task-gate execution",
         )
-        return 1
 
     slug = validate_project_slug(project_slug)
     return _execute_via_task_gate(slug, args)
@@ -490,8 +494,10 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            print(f"event_talks: gate error: {exc.reason}", file=sys.stderr)
-            return 1
+            raise AstridError(
+                str(exc),
+                recovery_command=getattr(exc, "recovery", "check project state and retry"),
+            ) from exc
 
         if not decision.active:
             # Plan exhausted — run completed
@@ -505,11 +511,11 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
         print(f"event_talks: running step: {' '.join(decision.command)}", flush=True)
         result = subprocess.run(decision.command, check=False)
         if result.returncode != 0:
-            print(
-                f"event_talks: step failed with returncode={result.returncode}",
-                file=sys.stderr,
+            raise AstridError(
+                f"step failed with returncode={result.returncode}",
+                recovery_command="check the step output and project state, then retry",
+                code=result.returncode,
             )
-            return result.returncode
 
     return 0
 
@@ -539,8 +545,10 @@ def _run_step_subcommand(
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            print(exc.recovery, file=sys.stderr)
-            return 1
+            raise AstridError(
+                str(exc),
+                recovery_command=getattr(exc, "recovery", "check project state and retry"),
+            ) from exc
 
     returncode = runner(args)
     if decision is not None:
@@ -599,8 +607,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runner=_exec_render_manifest,
             )
         # Should not reach here — subparser dispatch guarantees `command`
-        print(f"event_talks: unknown subcommand: {cmd}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"unknown subcommand: {cmd}",
+            recovery_command="use one of: ados-sunday-template, search-transcript, find-holding-screens, render",
+        )
 
     # Orchestrator path — full project/gate setup
     project_context = None
@@ -623,8 +633,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reentry=True,
                 )
             except task_gate.TaskRunGateError as exc:
-                print(exc.recovery, file=sys.stderr)
-                return 1
+                raise AstridError(
+                    str(exc),
+                    recovery_command=getattr(exc, "recovery", "check project state and retry"),
+                ) from exc
 
         # Prepare project run if --project is set
         if parsed.project:

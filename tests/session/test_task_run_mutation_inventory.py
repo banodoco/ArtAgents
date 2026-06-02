@@ -44,13 +44,13 @@ class CallSite:
 
 EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
     CallSite(
-        "astrid/core/session/cli.py",
-        "cmd_sessions_takeover",
+        "astrid/core/session/lease.py",
+        "mutate_lease_for_takeover",
         "bump_epoch_and_swap_session",
     ): (1, "takeover_bootstrap_lease_rewriter"),
     CallSite(
-        "astrid/core/session/cli.py",
-        "cmd_sessions_takeover",
+        "astrid/core/session/lease.py",
+        "mutate_lease_for_takeover",
         "claim_orphan_lease",
     ): (1, "takeover_bootstrap_lease_rewriter"),
     CallSite(
@@ -90,7 +90,7 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "_finish_code_step",
         "record_dispatch_complete",
     ): (1, "author_fixture_dispatch_complete_caller"),
-    CallSite("astrid/pipeline.py", "main", "record_dispatch_complete"): (
+    CallSite("astrid/pipeline.py", "_main_impl", "record_dispatch_complete"): (
         1,
         "pipeline_dispatch_complete_caller",
     ),
@@ -324,7 +324,6 @@ def test_task_run_mutation_call_inventory_is_fully_classified() -> None:
     }
 
 
-@SPRINT1_STOP_LINE_XFAIL
 def test_stop_line_no_pending_task_run_mutation_categories_remain() -> None:
     pending = {
         site: category

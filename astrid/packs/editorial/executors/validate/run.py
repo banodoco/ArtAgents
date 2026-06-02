@@ -15,8 +15,8 @@ Exits non-zero when any non-skipped clip fails the similarity threshold.
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.validate')
 import argparse
 import json
@@ -25,12 +25,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.timeline import load_timeline
-
-from astrid.audit import register_outputs
-
-from astrid.domains.hype.text_match import TOKEN_RE, segments_in_range, token_set_similarity, tokenize
 from astrid._paths import executor_argv
+from astrid.audit import register_outputs
+from astrid.domains.hype.text_match import (
+    segments_in_range,
+    token_set_similarity,
+    tokenize,
+)
+from astrid.timeline import load_timeline
 
 
 def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:

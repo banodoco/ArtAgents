@@ -285,7 +285,7 @@ class TestApplyTransition:
         })
         result = apply_event_to_assembly(state, event)
         assert result["clips"][0]["transition"] == {
-            "type": "crossfade",
+            "type": "cross-fade",
             "duration": 1.5,
             "params": {"right_clip_id": "c2"},
         }
@@ -293,7 +293,7 @@ class TestApplyTransition:
     def test_removes_transition(self):
         state = {"clips": [{
             **_raw_clip("c1"),
-            "transition": {"type": "crossfade", "duration": 1.5},
+            "transition": {"type": "cross-fade", "duration": 1.5},
         }], "tracks": []}
         event = _make_event("transition.removed", {"left_clip_id": "c1", "right_clip_id": "c2"})
         result = apply_event_to_assembly(state, event)
@@ -1140,6 +1140,35 @@ class TestRepairPaths:
         clip_ids = [c["id"] for c in assembly_raw.get("clips", [])]
         assert "real" in clip_ids
         assert "stale" not in clip_ids
+
+    def test_load_assembly_json_with_repair_propagates_projection_errors(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path))
+
+        create_project("broken-proj")
+        result = create_timeline("broken-proj", "broken-tl")
+        ulid = result["ulid"]
+        tdir = tmp_path / "broken-proj" / "timelines" / ulid
+        (tdir / "assembly.jsonl").write_text("", encoding="utf-8")
+        write_json_atomic(
+            tdir / "assembly.identity.json",
+            {"timeline_id": "00000000-0000-0000-0000-000000000001"},
+        )
+
+        from astrid.core.timeline.paths import load_assembly_json_with_repair
+
+        def raising_regenerate(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            raise ProjectionError(
+                event_id="01AAAAAAAAAAAAAAAAAAAAA2ZZ",
+                kind="transition.set",
+                reason="projection failed",
+            )
+
+        monkeypatch.setattr("astrid.core.timeline.projection.regenerate_projection", raising_regenerate)
+
+        with pytest.raises(ProjectionError, match="projection failed"):
+            load_assembly_json_with_repair(tdir)
 
 
 # ── edge cases ────────────────────────────────────────────────────────────────

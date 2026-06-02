@@ -7,6 +7,8 @@ import dataclasses
 import io
 from typing import Callable, List, Optional
 
+from astrid.contracts.errors import AstridError, render_astrid_error
+
 
 @dataclasses.dataclass
 class CliResult:
@@ -20,7 +22,10 @@ def run_cli(main: Callable[[List[str]], Optional[int]], argv: List[str]) -> CliR
     stdout_buf = io.StringIO()
     stderr_buf = io.StringIO()
     with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
-        exit_code = main(argv)
+        try:
+            exit_code = main(argv)
+        except AstridError as exc:
+            exit_code = render_astrid_error(exc)
     return CliResult(
         exit_code=exit_code,
         stdout=stdout_buf.getvalue(),
