@@ -6,9 +6,9 @@ Three-step pipeline that:
   3. emits a one-line verdict (nested wrapper around a code step).
 
 Run:
-  astrid author check text_digest.summarize
-  astrid author compile text_digest.summarize
-  astrid author describe text_digest.summarize
+  astrid orchestrate check text_digest.summarize
+  astrid orchestrate compile text_digest.summarize
+  astrid orchestrate describe text_digest.summarize
 """
 
 from __future__ import annotations

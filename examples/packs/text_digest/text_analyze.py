@@ -1,9 +1,9 @@
 """Author-scaffolded orchestrator: text_digest.text_analyze.
 
 Edit the steps below to describe your task. Run:
-  astrid author check text_digest.text_analyze
-  astrid author compile text_digest.text_analyze
-  astrid author describe text_digest.text_analyze
+  astrid orchestrate check text_digest.text_analyze
+  astrid orchestrate compile text_digest.text_analyze
+  astrid orchestrate describe text_digest.text_analyze
 """
 
 from __future__ import annotations

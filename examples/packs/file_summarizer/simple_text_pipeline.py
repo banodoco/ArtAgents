@@ -6,9 +6,9 @@ Three-step pipeline that:
   3. Writes a one-line plain-text verdict (code step).
 
 Run:
-  astrid author check file_summarizer.simple_text_pipeline
-  astrid author compile file_summarizer.simple_text_pipeline
-  astrid author describe file_summarizer.simple_text_pipeline
+  astrid orchestrate check file_summarizer.simple_text_pipeline
+  astrid orchestrate compile file_summarizer.simple_text_pipeline
+  astrid orchestrate describe file_summarizer.simple_text_pipeline
 """
 
 from __future__ import annotations

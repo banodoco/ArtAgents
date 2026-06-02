@@ -1,5 +1,11 @@
 # Threads
 
+> ⚠️ **Threads are a retired user-facing concept.** The `astrid thread` CLI
+> surface no longer exists. Threads remain only as an internal lineage model
+> for legacy run records, variant sidecars, and iteration-video provenance.
+> They are not a runtime binding contract for any current `astrid` command.
+> See [docs/architecture.md](architecture.md) for the current public concepts.
+
 Threads are retained as an internal lineage model for legacy run records,
 variant sidecars, and iteration-video provenance. They are no longer a
 user-facing runtime binding contract for generic `astrid executors run` or

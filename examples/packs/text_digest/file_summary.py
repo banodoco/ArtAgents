@@ -8,9 +8,9 @@ Three-step pipeline that:
 Step kinds: code → attested → nested.
 
 Run:
-  astrid author check text_digest.file_summary
-  astrid author compile text_digest.file_summary
-  astrid author describe text_digest.file_summary
+  astrid orchestrate check text_digest.file_summary
+  astrid orchestrate compile text_digest.file_summary
+  astrid orchestrate describe text_digest.file_summary
 """
 
 from __future__ import annotations

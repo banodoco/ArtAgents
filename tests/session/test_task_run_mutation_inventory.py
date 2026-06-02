@@ -90,9 +90,9 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "_finish_code_step",
         "record_dispatch_complete",
     ): (1, "author_fixture_dispatch_complete_caller"),
-    CallSite("astrid/pipeline.py", "_main_impl", "record_dispatch_complete"): (
+    CallSite("astrid/gateway.py", "_main_impl", "record_dispatch_complete"): (
         1,
-        "pipeline_dispatch_complete_caller",
+        "gateway_dispatch_complete_caller",
     ),
     CallSite(
         "astrid/packs/video_editing/orchestrators/event_talks/run.py",
@@ -319,7 +319,7 @@ def test_task_run_mutation_call_inventory_is_fully_classified() -> None:
     )
     assert actual == expected
     assert {category for _, category in EXPECTED_TASK_RUN_CALLS.values()} >= {
-        "pipeline_dispatch_complete_caller",
+        "gateway_dispatch_complete_caller",
         "normal_writer_context_boundary",
     }
 

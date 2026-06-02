@@ -34,6 +34,9 @@ result = astrid.invoke(
 print(result.ok, result.raw_result)
 ```
 
+> **Tutorial**: For a step-by-step walkthrough building your first Astrid
+> agentic UX, see [docs/build-your-first-agentic-ux.md](build-your-first-agentic-ux.md).
+
 ## Quick Examples
 
 ### Discovery

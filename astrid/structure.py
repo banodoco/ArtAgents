@@ -26,6 +26,9 @@ TOP_LEVEL_ASTRID_FILES = {
     "_media.py",
     "_paths.py",
     "doctor.py",
+    "gateway.py",
+    "media.py",
+    "paths.py",
     "pipeline.py",
     "sdk.py",
     "setup_cli.py",
@@ -125,7 +128,19 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         "astrid/core/runtime/in_process.py",
     }
 )
-_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
+_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
+    {
+        # TODO(m13): revisit these explicit shim exemptions once the
+        # renamed public modules have enough caller migration history.
+        # M13 keeps these public import surfaces intentionally alive while
+        # canonical implementations move to clearer module names.
+        "astrid/_media.py",
+        "astrid/_paths.py",
+        "astrid/core/_search.py",
+        "astrid/pipeline.py",
+    }
+)
+_MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
     {
         # Approved thin public re-export surfaces for the canonical core
         # timeline API.  These are not stale migration shims; they are the
@@ -178,7 +193,9 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
 
 
 def _is_compatibility_shim_exempt(rel: str, text: str) -> bool:
-    return rel in _COMPATIBILITY_SHIM_EXEMPTIONS and "TODO(m5b)" in text
+    return rel in _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS or (
+        rel in _MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS and "TODO(m5b)" in text
+    )
 
 
 def _validate_legacy_dirs(repo_root: Path) -> list[str]:

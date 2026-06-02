@@ -32,7 +32,7 @@ pytestmark = pytest.mark.skipif(
 
 REPRESENTATIVE_SUBMODULES = (
     "astrid.timeline",
-    "astrid.pipeline",
+    "astrid.gateway",
     "astrid.doctor",
     "astrid.setup_cli",
 )

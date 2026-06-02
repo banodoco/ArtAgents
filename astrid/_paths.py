@@ -1,43 +1,18 @@
-from __future__ import annotations
+"""Backward-compatibility shim for ``astrid._paths``.
 
-from functools import lru_cache
-from pathlib import Path
+All public names now live in ``astrid.paths``.  This module re-exports
+everything so existing callers (e.g. ``from astrid._paths import REPO_ROOT``)
+continue to work without changes.
+"""
 
-PACKAGE_ROOT = Path(__file__).resolve().parent
-REPO_ROOT = PACKAGE_ROOT.parent
-WORKSPACE_ROOT = REPO_ROOT.parent
+from astrid.paths import *  # noqa: F401,F403
 
-
-@lru_cache(maxsize=None)
-def resolve_executor_runtime_module(script_name: str) -> str:
-    """Resolve an executor id or legacy pipeline step name to its runtime module.
-
-    Qualified ids resolve through the registry so aliases land on the canonical
-    executor definition. Bare names remain supported only for legacy pipeline
-    step dispatch via ``metadata.pipeline_step``.
-    """
-    stem = script_name[:-3] if script_name.endswith(".py") else script_name
-    from astrid.core.executor.registry import load_default_registry
-
-    registry = load_default_registry()
-    if "." in stem:
-        executor = registry.get(stem)
-    else:
-        candidates = [
-            executor
-            for executor in registry.list()
-            if executor.metadata.get("pipeline_step") == stem
-        ]
-        if len(candidates) != 1:
-            matches = ", ".join(executor.id for executor in candidates) or "none"
-            raise ValueError(f"could not resolve executor step {stem!r}; matches: {matches}")
-        executor = candidates[0]
-    runtime_module = executor.metadata.get("runtime_module")
-    if not isinstance(runtime_module, str) or not runtime_module:
-        raise ValueError(f"executor {executor.id!r} is missing metadata.runtime_module")
-    return runtime_module
-
-
-def executor_argv(script_name: str, python_exec: str) -> list[str]:
-    """Return argv tokens that invoke a pipeline executor's module entrypoint."""
-    return [python_exec, "-m", resolve_executor_runtime_module(script_name)]
+# Belt-and-suspenders explicit re-exports so static analysis and IDEs
+# that dislike star imports can still resolve the names.
+from astrid.paths import (  # noqa: E402,F401
+    PACKAGE_ROOT,
+    REPO_ROOT,
+    WORKSPACE_ROOT,
+    executor_argv,
+    resolve_executor_runtime_module,
+)

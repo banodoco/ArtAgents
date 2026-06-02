@@ -6,9 +6,9 @@ End-to-end text pipeline that:
   3. writes a one-line verdict (attested step).
 
 Run:
-  astrid author check file_summarizer.e2e_text_pipeline
-  astrid author compile file_summarizer.e2e_text_pipeline
-  astrid author describe file_summarizer.e2e_text_pipeline
+  astrid orchestrate check file_summarizer.e2e_text_pipeline
+  astrid orchestrate compile file_summarizer.e2e_text_pipeline
+  astrid orchestrate describe file_summarizer.e2e_text_pipeline
 """
 
 from __future__ import annotations

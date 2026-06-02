@@ -4,9 +4,9 @@ Reads a small text file from disk, writes a summary JSON describing the text,
 then writes a one-line verdict.
 
 Run:
-  astrid author check file_summarizer.text_summarizer
-  astrid author compile file_summarizer.text_summarizer
-  astrid author describe file_summarizer.text_summarizer
+  astrid orchestrate check file_summarizer.text_summarizer
+  astrid orchestrate compile file_summarizer.text_summarizer
+  astrid orchestrate describe file_summarizer.text_summarizer
 """
 
 from __future__ import annotations

@@ -8,9 +8,9 @@ Three-step pipeline that:
 Step kinds: code → attested → code (no nested sub-plans).
 
 Run:
-  astrid author check text_digest.smart_summarize
-  astrid author compile text_digest.smart_summarize
-  astrid author describe text_digest.smart_summarize
+  astrid orchestrate check text_digest.smart_summarize
+  astrid orchestrate compile text_digest.smart_summarize
+  astrid orchestrate describe text_digest.smart_summarize
 """
 
 from __future__ import annotations

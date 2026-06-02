@@ -1,6 +1,8 @@
 # Astrid
 
-Astrid is a harness toolkit for agents and humans to make art.
+Astrid is a Python SDK for building and running open-source agentic UXes — a harness toolkit for agents and humans to make art.
+
+New here? Start with **[Build your first agentic UX](docs/build-your-first-agentic-ux.md)**.
 
 ## How it works
 

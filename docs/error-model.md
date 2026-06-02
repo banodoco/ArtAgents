@@ -129,7 +129,7 @@ except AstridError as exc:
 except Exception as exc:
     bug = wrap_degraded_error(
         exc,
-        state_snapshot={"argv": raw, "entrypoint": "astrid.pipeline.main"},
+        state_snapshot={"argv": raw, "entrypoint": "astrid.gateway.main"},
     )
     return render_astrid_error(bug)
 ```
