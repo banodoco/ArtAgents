@@ -95,7 +95,7 @@ def test_runtime_inventory_reason_quality_and_deferred_tickets() -> None:
     text = _inventory_text()
     seed_section = text.split("## Seed-File Non-Fixed Reasons", 1)[1].split("## Deferred Tickets", 1)[0]
     for seed_file in [
-        "astrid/pipeline.py",
+        "astrid/gateway.py",
         "astrid/core/task/run_audit.py",
         "astrid/orchestrate/cli.py",
         "astrid/threads/provenance.py",
