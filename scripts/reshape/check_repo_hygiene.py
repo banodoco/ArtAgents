@@ -17,6 +17,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 # Approved top-level files. Anything else tracked at the repo root is flagged
 # as an unknown root entry.
 ROOT_FILE_ALLOWLIST = {
+    "AGENTS.md",
+    "SECURITY.md",
     ".env.example",
     ".gitignore",
     "LICENSE",
