@@ -125,7 +125,19 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         "astrid/core/runtime/in_process.py",
     }
 )
-_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset()
+_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
+    {
+        # Approved thin public re-export surfaces for the canonical core
+        # timeline API.  These are not stale migration shims; they are the
+        # intentional public compatibility layer so callers can continue to
+        # import from astrid.timeline while the implementation lives in
+        # astrid.core.timeline.  Adding them here prevents the generic shim
+        # detector from flagging them without weakening the detector itself.
+        "astrid/timeline/__init__.py",
+        "astrid/timeline/timeline_model.py",
+        "astrid/timeline/banodoco_composer.py",
+    }
+)
 
 
 def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:

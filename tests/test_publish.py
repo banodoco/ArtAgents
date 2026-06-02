@@ -433,11 +433,11 @@ class PublishLocalReadOnlyRegressionTest(unittest.TestCase):
         )
 
     def test_publish_never_calls_save_timeline(self):
-        """Publish must never call ``astrid.timeline.save_timeline`` — it is
+        """Publish must never call ``astrid.core.timeline.save_timeline`` — it is
         a read consumer of local canonical state."""
         with mock.patch.dict(os.environ, self._env(), clear=True), \
              mock.patch.object(publish, "_request") as request, \
-             mock.patch("astrid.timeline.save_timeline",
+             mock.patch("astrid.core.timeline.save_timeline",
                         side_effect=AssertionError(
                             "publish called save_timeline — write bypass!")) as _:
             request.return_value = self._success_response()

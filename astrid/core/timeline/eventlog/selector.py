@@ -416,8 +416,8 @@ def _create_pull_destination(
     """
     from uuid import uuid4
 
-    from astrid import timeline as timeline_contract
     from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
     from astrid.core.timeline.events.schema import EVENT_SCHEMA_VERSION
     from astrid.core.timeline.model import (
         TIMELINE_SCHEMA_VERSION,
@@ -456,7 +456,7 @@ def _create_pull_destination(
     write_json_atomic(identity_path, identity)
 
     # Write a raw empty TimelineConfig, not a legacy wrapper.
-    write_json_atomic(tdir / "assembly.json", timeline_contract.canonical_empty_timeline())
+    write_json_atomic(tdir / "assembly.json", canonical_empty_timeline())
 
     display = Display(
         schema_version=TIMELINE_SCHEMA_VERSION,

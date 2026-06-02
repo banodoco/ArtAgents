@@ -19,7 +19,7 @@ from typing import Any, Sequence
 from astrid._media import ffprobe_duration_seconds
 from astrid._paths import executor_argv
 from astrid.audit import AuditContext
-from astrid.timeline import load_arrangement, load_metadata, load_pool
+from astrid.core.timeline import load_arrangement, load_metadata, load_pool
 from astrid.utilities.llm_clients import build_claude_client
 
 from ..arrange.run import pool_digest

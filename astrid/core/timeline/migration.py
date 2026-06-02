@@ -371,7 +371,10 @@ def import_supabase_config(
         (str|None).  ``skipped_state`` is one of ``"already_imported"``,
         ``"already_event_sourced"``, ``"no_config"``, or ``None``.
     """
-    from astrid import timeline as timeline_contract
+    from astrid.core.timeline.banodoco_schema import (
+        canonical_timeline_config,
+        timeline_configs_equal,
+    )
 
     # ------------------------------------------------------------------
     # 0. Null config guard
@@ -387,7 +390,7 @@ def import_supabase_config(
         }
 
     try:
-        validated_config = timeline_contract.canonical_timeline_config(config)
+        validated_config = canonical_timeline_config(config)
     except Exception as exc:
         return {
             "ok": False,
@@ -415,7 +418,7 @@ def import_supabase_config(
             )
             parity_ok = (
                 isinstance(stored_config, dict)
-                and timeline_contract.timeline_configs_equal(
+                and timeline_configs_equal(
                     stored_config, validated_config
                 )
             )
@@ -487,7 +490,7 @@ def import_supabase_config(
         )
         parity_ok = (
             isinstance(stored_config, dict)
-            and timeline_contract.timeline_configs_equal(stored_config, validated_config)
+            and timeline_configs_equal(stored_config, validated_config)
         )
     else:
         parity_ok = False

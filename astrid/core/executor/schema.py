@@ -48,7 +48,7 @@ from astrid.contracts.schema import (
     Port as ExecutorPort,
 )
 from astrid.core.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
-from astrid.timeline import ClipClassifiedKind
+from astrid.core.timeline import ClipClassifiedKind
 
 ExecutorKind = _Literal["built_in", "external"]
 ExternalRuntimeMode = _Literal["api", "package"]

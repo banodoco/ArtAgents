@@ -286,6 +286,151 @@ def test_structure_report_ok_tracks_errors_only() -> None:
     assert StructureReport(errors=("error",), warnings=()).ok is False
 
 
+# ── m5b compatibility-shim exemption guards for thin re-export facade ─────
+
+
+def test_validate_repo_structure_exempts_timeline_facade_with_todo_m5b_marker(
+    tmp_path: Path,
+) -> None:
+    """An exempted timeline facade file with ``TODO(m5b)`` must NOT be flagged
+    as a compatibility shim, even when it looks like one and has live callers."""
+    _bootstrap_structure_root(tmp_path)
+    # The three approved facade files live at astrid/timeline/*
+    _write(
+        tmp_path,
+        "astrid/timeline/__init__.py",
+        '\"\"\"Compatibility shim TODO(m5b) — approved thin public re-export.\"\"\"\n'
+        "from astrid.core.timeline import Timeline\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/timeline/__init__.py",
+        "from astrid.core.timeline.banodoco_schema import Timeline\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/timeline/banodoco_schema.py",
+        "Timeline = object\n",
+    )
+    # A live caller in core ensures the shim detector sees real callers
+    _write(
+        tmp_path,
+        "astrid/core/shim_caller.py",
+        "from astrid.timeline import Timeline\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert not any(
+        "compatibility shim still has" in err for err in report.errors
+    ), f"Exempted facade was flagged: {report.errors}"
+
+
+def test_validate_repo_structure_flags_timeline_facade_without_todo_m5b_marker(
+    tmp_path: Path,
+) -> None:
+    """An exempted-*path* file that lacks ``TODO(m5b)`` must still be flagged.
+    The exemption requires both the path match *and* the marker string."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/timeline/timeline_model.py",
+        '\"\"\"Compatibility shim for older imports.\"\"\"\n'
+        "from astrid.core.timeline.banodoco_schema import Timeline\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/timeline/__init__.py",
+        "",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/timeline/banodoco_schema.py",
+        "Timeline = object\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/shim_caller.py",
+        "from astrid.timeline.timeline_model import Timeline\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert any(
+        "compatibility shim still has" in err for err in report.errors
+    ), f"Exempted-path shim without TODO(m5b) was NOT flagged: {report.errors}"
+
+
+def test_validate_repo_structure_still_flags_non_exempt_compatibility_shim(
+    tmp_path: Path,
+) -> None:
+    """Prove the broader generic shim detector is not weakened: a non-exempt
+    file that looks like a compatibility shim with live callers is still
+    flagged as an error."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/core/legacy_shim.py",
+        '\"\"\"Compatibility shim — should still be caught.\"\"\"\n'
+        "from astrid.core.real_target import value\n",
+    )
+    _write(tmp_path, "astrid/core/real_target.py", "value = 1\n")
+    _write(
+        tmp_path,
+        "astrid/core/shim_caller.py",
+        "from astrid.core.legacy_shim import value\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert any(
+        "compatibility shim still has" in err for err in report.errors
+    ), f"Non-exempt shim was NOT flagged: {report.errors}"
+
+
+def test_timeline_facade_files_are_strictly_thin_re_exports() -> None:
+    """The three real ``astrid/timeline/`` facade files must be thin
+    re-export modules: no runtime logic, no ``_sync_private_hooks``, and
+    no function/class definitions."""
+    import ast
+
+    from astrid._paths import REPO_ROOT
+
+    facade_files = (
+        REPO_ROOT / "astrid" / "timeline" / "__init__.py",
+        REPO_ROOT / "astrid" / "timeline" / "timeline_model.py",
+        REPO_ROOT / "astrid" / "timeline" / "banodoco_composer.py",
+    )
+
+    for path in facade_files:
+        assert path.is_file(), f"Facade file missing: {path}"
+        text = path.read_text(encoding="utf-8")
+
+        # No _sync_private_hooks anywhere in the file
+        assert "_sync_private_hooks" not in text, (
+            f"{path.name} contains _sync_private_hooks"
+        )
+
+        # Parse and verify only docstrings, __future__, and imports exist
+        tree = ast.parse(text, filename=str(path))
+        for node in ast.iter_child_nodes(tree):
+            # Module-level docstring (Expr -> Constant str)
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+                continue
+            # from __future__ import annotations
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                continue
+            # Regular imports and from-imports
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                continue
+            # Fail on any other top-level statement (function def, class def,
+            # assignment other than __all__, etc.)
+            assert False, (
+                f"{path.name}:{node.lineno} contains non-import statement: "
+                f"{ast.dump(node)}"
+            )
+
+
 # ── m5a thread wrapper removal regression guards ──────────────────────────
 
 _REMOVED_WRAPPER_SYMBOLS: frozenset[str] = frozenset(

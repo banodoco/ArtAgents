@@ -28,7 +28,7 @@ from uuid import uuid4
 
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
-from astrid.timeline.timeline_model import validate_timeline_config_for_container
+from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 
 from .eventlog.local_fs import LocalFsBackend
 from .events.schema import (

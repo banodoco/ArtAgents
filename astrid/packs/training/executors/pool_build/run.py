@@ -14,7 +14,7 @@ import re
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid import timeline
+from astrid.core import timeline
 from astrid.audit import register_outputs
 from astrid.core.util.time import utc_now_seconds
 

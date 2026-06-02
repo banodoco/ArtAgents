@@ -8,6 +8,7 @@ from unittest import mock
 from pathlib import Path
 
 from astrid import timeline
+from astrid.core.timeline import banodoco_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
@@ -260,8 +261,8 @@ class SchemaContractTest(unittest.TestCase):
             }[animation_id]
 
         with (
-            mock.patch.object(timeline, "_animation_ids", return_value={"fade-up", "type-on", "fade"}),
-            mock.patch.object(timeline, "_animation_meta", side_effect=meta),
+            mock.patch.object(banodoco_schema, "_animation_ids", return_value={"fade-up", "type-on", "fade"}),
+            mock.patch.object(banodoco_schema, "_animation_meta", side_effect=meta),
         ):
             timeline.validate_timeline(config)
 
@@ -280,7 +281,7 @@ class SchemaContractTest(unittest.TestCase):
             ],
         }
         with (
-            mock.patch.object(timeline, "_animation_ids", return_value={"fade-up"}),
+            mock.patch.object(banodoco_schema, "_animation_ids", return_value={"fade-up"}),
             self.assertRaisesRegex(ValueError, "animations catalog"),
         ):
             timeline.validate_timeline(config)
@@ -300,8 +301,8 @@ class SchemaContractTest(unittest.TestCase):
             ],
         }
         with (
-            mock.patch.object(timeline, "_animation_ids", return_value={"fade"}),
-            mock.patch.object(timeline, "_animation_meta", return_value={"kind": "wrapper", "phase": "exit"}),
+            mock.patch.object(banodoco_schema, "_animation_ids", return_value={"fade"}),
+            mock.patch.object(banodoco_schema, "_animation_meta", return_value={"kind": "wrapper", "phase": "exit"}),
             self.assertRaisesRegex(ValueError, "expected 'entrance'"),
         ):
             timeline.validate_timeline(config)
@@ -315,7 +316,7 @@ class SchemaContractTest(unittest.TestCase):
             ],
         }
         with (
-            mock.patch.object(timeline, "_transition_ids", return_value={"fade"}),
+            mock.patch.object(banodoco_schema, "_transition_ids", return_value={"fade"}),
             self.assertRaisesRegex(ValueError, "transitions catalog"),
         ):
             timeline.validate_timeline(config)
@@ -329,7 +330,7 @@ class SchemaContractTest(unittest.TestCase):
             ],
         }
         with (
-            mock.patch.object(timeline, "_transition_ids", return_value={"fade"}),
+            mock.patch.object(banodoco_schema, "_transition_ids", return_value={"fade"}),
             self.assertRaisesRegex(ValueError, "fit both adjacent"),
         ):
             timeline.validate_timeline(config)
@@ -343,7 +344,7 @@ class SchemaContractTest(unittest.TestCase):
                 {"id": "overlay", "at": 0.2, "track": "v2", "clipType": "media", "hold": 0.2, "transition": {"id": "fade", "durationFrames": 12}},
             ],
         }
-        with mock.patch.object(timeline, "_transition_ids", return_value={"fade"}):
+        with mock.patch.object(banodoco_schema, "_transition_ids", return_value={"fade"}):
             timeline.validate_timeline(config)
 
 

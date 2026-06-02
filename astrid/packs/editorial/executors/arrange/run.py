@@ -19,7 +19,7 @@ from astrid._paths import WORKSPACE_ROOT
 from astrid.audit import AuditContext
 from astrid.core.util.time import utc_now_seconds
 from astrid.theme_schema import load_theme
-from astrid.timeline import (
+from astrid.core.timeline import (
     ARRANGEMENT_VERSION,
     is_all_generative_arrangement,
     load_arrangement,
