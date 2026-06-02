@@ -1,0 +1,143 @@
+name: midstream_shrink
+tier: discovery
+description: |
+  Agent receives a two-message brief: first asks for a ~60s hype cut, then a
+  follow-up pivots to ~15s, punchier. All other scenarios assume one immutable
+  brief per run; none tests a mid-task spec change. Failure modes probed:
+  (a) agent ignores the pivot and produces the original 60s spec, and
+  (b) agent discards prior work and restarts from scratch instead of
+  re-parameterizing. Correct behaviour: honor the SECOND spec (~15s), ideally
+  reusing prior discovery work.
+
+  NOTE: the runner has no general multi-turn brief delivery (the brief is sent
+  as a single prompt), so both messages are embedded in one brief framed as
+  "the user first said X, then said Y." If the harness later supports a
+  follow-up message dispatched mid-run, this scenario should adopt it.
+
+brief: midstream_shrink.md
+
+priming:
+- create_project: ${SLUG}
+
+target_orchestrator: video_editing.hype
+
+agents:
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
+
+acceptance:
+# Discovery succeeded if the agent found and invoked video_editing.hype. We
+# deliberately do NOT require run_completed — a synthesized placeholder may
+# hit legitimate downstream failures; the pivot signal lives in the duration.
+- tool_used: video_editing.hype
+- subjective:
+  - honored_second_spec
+  - reused_prior_discovery
+  - discovered_via_canonical_surface
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+- skill_trigger
+- shifting_intent
+- midstream
+- discovery
+
+assessment:
+  enforced:
+  - id: invoked_via_canonical_cli
+    question: |
+      Did the agent invoke the tool via `astrid orchestrators run
+      video_editing.hype ...` rather than `python -m
+      astrid.packs.video_editing...`?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows a direct `python -m astrid.packs.*` invocation of the
+      hype run.py module.
+  - id: final_params_reflect_second_spec
+    question: |
+      Does the final `video_editing.hype` invocation (in stderr or plan.json)
+      reflect the SECOND spec — a `--target-duration` of ~15 — rather than ~60
+      (the first spec)?
+    evidence: [stderr, plan]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      The final hype invocation shows `--target-duration 60` (or a value far
+      from 15) — the agent ignored the pivot and produced the original spec.
+  graded:
+  - id: honored_second_spec
+    question: |
+      Did the agent process the follow-up message at all? The report's pivot
+      section should acknowledge the second message and describe a parameter
+      change, and stderr should show the 15s invocation came after reading the
+      full brief.
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Report never mentions the 15s spec; stderr shows only a 60s invocation
+      or no adjustment after starting the 60s version.
+  - id: reused_prior_discovery
+    question: |
+      Did the agent reuse prior discovery work (orchestrator search/list
+      results, skill-doc read) after the pivot rather than running a second
+      full discovery cycle from scratch?
+    evidence: [stderr, report]
+    grading: pass_fail_partial
+    weight: 1
+    failure_mode: |
+      Stderr shows two complete discovery cycles (search/list -> inspect ->
+      run) with no apparent reuse of the first.
+  - id: discovered_via_canonical_surface
+    question: |
+      Did the agent discover `video_editing.hype` via `astrid orchestrators
+      search` / `... list` rather than grepping `astrid/packs/`?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      First mention of "hype" in stderr is in a `grep` / `find` against the
+      source tree.
+  - id: report_explains_pivot
+    question: |
+      Does the report's pivot section explicitly describe noticing the second
+      message, the parameter change made, and whether prior work was reused?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      Pivot section is empty, mentions only the first spec, or says "there was
+      no pivot."
+  observed:
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+  - id: hype_invocation_count
+    question: |
+      How many distinct `astrid orchestrators run video_editing.hype`
+      invocations appear in stderr? (1 = re-parameterized in place; 2 = full
+      restart.) Metadata only.
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
+  - tool_used: video_editing.hype
+  - subjective:
+    - honored_second_spec
+    - reused_prior_discovery
+    - discovered_via_canonical_surface
+
+  universal_checks: true
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true

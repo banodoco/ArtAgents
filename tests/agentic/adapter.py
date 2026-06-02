@@ -125,6 +125,14 @@ def _render_priming_value(value: Any, *, slug: str, run: ActorRun) -> Any:
     return value
 
 
+def _coerce_bool(raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(raw)
+
+
 def _coerce_m4_fixture_config(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str) and raw.strip():
         return {"name": raw.strip()}
@@ -1290,6 +1298,13 @@ class AstridProjectAdapter(FakeProjectAdapter):
             and next(iter(step)) in {"start", "start_with_plan", "ack"}
             for step in priming_steps
         )
+        # Opt-in: timeline scenarios can prime a bound session + default live
+        # timeline so the project starts ready (matching `start_with_plan`,
+        # which needs a live timeline). The agent still binds its own session
+        # for edit verbs (build_env pops ASTRID_SESSION_ID by design), but a
+        # default timeline already existing keeps the project in a usable state.
+        if _coerce_bool(scenario.extras.get("prime_default_timeline")):
+            needs_session = True
         if needs_session:
             attach = self._astrid_runner("attach", slug, "--as", "agent:agentic-primer", env=primer_env)
             if attach.returncode != 0:
