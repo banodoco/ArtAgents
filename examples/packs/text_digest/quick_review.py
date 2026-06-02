@@ -8,9 +8,9 @@ Three-step pipeline that:
 Step kinds: code → attested → code (no nested sub-plans).
 
 Run:
-  astrid author check text_digest.quick_review
-  astrid author compile text_digest.quick_review
-  astrid author describe text_digest.quick_review
+  astrid orchestrate check text_digest.quick_review
+  astrid orchestrate compile text_digest.quick_review
+  astrid orchestrate describe text_digest.quick_review
 """
 
 from __future__ import annotations

@@ -68,12 +68,15 @@ a workflow, and an element for a reusable render primitive. Agents should avoid
 manual chains of low-level stage artifacts unless they are debugging a specific
 executor.
 
+For a step-by-step tutorial on building your first agentic UX, see
+[docs/build-your-first-agentic-ux.md](build-your-first-agentic-ux.md).
+
 ## Orchestrators
 
 | Module or entry point | Classification | Notes |
 | --- | --- | --- |
 | `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for all canonical commands. |
-| `astrid/pipeline.py` | System command and dispatcher | Subcommand router; falls through to `video_editing.hype` via the orchestrator registry's `runtime_module` metadata. |
+| `astrid/gateway.py` | System command and dispatcher | Subcommand router; falls through to `video_editing.hype` via the orchestrator registry's `runtime_module` metadata. |
 | `astrid/packs/video_editing/orchestrators/hype/` | Orchestrator | Canonical hype video editing orchestrator. |
 | `astrid/packs/video_editing/orchestrators/event_talks/` | Orchestrator | Canonical event-talk discovery and rendering workflow. |
 | `astrid/packs/video_editing/orchestrators/thumbnail_maker/` | Orchestrator | Canonical source-evidence thumbnail workflow. |
@@ -117,7 +120,7 @@ Executor-owned complexity stays in the executor folder, usually under optional l
 | `astrid/utilities/llm_clients.py` | Utility library | Generic LLM client construction and environment handling. |
 | `astrid/audit/*` | Shared library | Run-local provenance ledger, graph, and HTML report. |
 | `astrid/theme_schema.py` | Shared library | Theme schema validation helpers. |
-| `astrid/_paths.py` | Shared library | Repository and workspace path resolution. |
+| `astrid/paths.py` | Shared library | Repository and workspace path resolution. |
 | `astrid/packs/editorial/executors/refine/src/reviewers/*` | Executor-owned library | Focused review heuristics used only by `editorial.refine`. |
 | `astrid/packs/youtube/executors/upload/src/social_publish.py` | Executor-owned library | Social publishing client logic used by `youtube.upload`. |
 

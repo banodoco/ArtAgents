@@ -8,9 +8,9 @@ Three-step pipeline that:
 Step kinds: code -> code -> attested.
 
 Run:
-  astrid author check text_review.file_audit
-  astrid author compile text_review.file_audit
-  astrid author describe text_review.file_audit
+  astrid orchestrate check text_review.file_audit
+  astrid orchestrate compile text_review.file_audit
+  astrid orchestrate describe text_review.file_audit
 """
 
 from __future__ import annotations

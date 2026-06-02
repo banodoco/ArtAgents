@@ -6,9 +6,9 @@ Three-step pipeline that:
   3. Writes a one-line verdict (nested step wrapping a code step).
 
 Run:
-  astrid author check file_summarizer.document_pipeline
-  astrid author compile file_summarizer.document_pipeline
-  astrid author describe file_summarizer.document_pipeline
+  astrid orchestrate check file_summarizer.document_pipeline
+  astrid orchestrate compile file_summarizer.document_pipeline
+  astrid orchestrate describe file_summarizer.document_pipeline
 """
 
 from __future__ import annotations

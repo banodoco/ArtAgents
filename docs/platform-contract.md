@@ -67,8 +67,7 @@ they are importable today:
 - Everything under `astrid.packs.*`
 - Registry internals, resolver internals, and helper functions used to build
   DTOs
-- CLI implementation modules and verb routing modules (for example pipeline and
-  command-entry internals)
+- CLI implementation modules and verb routing modules (for example gateway and command-entry internals)
 - Internal tests, fixtures, and generated discovery payload shapes not exposed
   through the documented DTO contract
 

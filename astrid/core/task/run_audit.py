@@ -28,7 +28,7 @@ def cmd_run_show(
     projects_root: Optional[Path] = None,
 ) -> int:
     """Pretty-print a run summary; ``--json`` for structured output."""
-    parser = argparse.ArgumentParser(prog="astrid run show", add_help=True)
+    parser = argparse.ArgumentParser(prog="astrid runs show", add_help=True)
     parser.add_argument("run_id", help="run identifier")
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--json", dest="json_out", action="store_true", help="emit JSON instead of pretty-print")
@@ -170,7 +170,7 @@ def cmd_run_artifacts(
     projects_root: Optional[Path] = None,
 ) -> int:
     """Flat tabular list of artifacts produced by a run."""
-    parser = argparse.ArgumentParser(prog="astrid run artifacts", add_help=True)
+    parser = argparse.ArgumentParser(prog="astrid runs artifacts", add_help=True)
     parser.add_argument("run_id", help="run identifier")
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--step", dest="step_filter", default=None, help="filter by step id")
@@ -301,7 +301,7 @@ def cmd_run_trace(
     projects_root: Optional[Path] = None,
 ) -> int:
     """Chronological event dump for a step (including supersede/tombstone history)."""
-    parser = argparse.ArgumentParser(prog="astrid run trace", add_help=True)
+    parser = argparse.ArgumentParser(prog="astrid runs trace", add_help=True)
     parser.add_argument("run_id", help="run identifier")
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--step", required=True, dest="step_id", help="step id to trace")
@@ -367,7 +367,7 @@ def cmd_run_cost(
     projects_root: Optional[Path] = None,
 ) -> int:
     """Per-run cost aggregation grouped by source."""
-    parser = argparse.ArgumentParser(prog="astrid run cost", add_help=True)
+    parser = argparse.ArgumentParser(prog="astrid runs cost", add_help=True)
     parser.add_argument("run_id", help="run identifier")
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--json", dest="json_out", action="store_true", help="emit JSON instead of pretty-print")

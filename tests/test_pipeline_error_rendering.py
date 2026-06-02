@@ -49,7 +49,7 @@ def test_main_wraps_generic_exception_as_degraded_bug_envelope() -> None:
     assert rc == 1
     assert stderr.splitlines()[0] == "unstructured - this is a bug."
     assert "boom" in stderr
-    assert '"entrypoint": "astrid.pipeline.main"' in stderr
+    assert '"entrypoint": "astrid.gateway.main"' in stderr
     assert "Traceback" not in stderr
 
 
@@ -108,11 +108,11 @@ def test_task_gate_rejection_flows_through_universal_renderer() -> None:
 
 
 def test_module_entry_delegates_to_pipeline_main() -> None:
-    """``python -m astrid`` reaches the same ``pipeline.main()`` renderer."""
+    """``python -m astrid`` reaches the same ``gateway.main()`` renderer."""
     from astrid.__main__ import main as module_main
-    from astrid.pipeline import main as pipeline_main
+    from astrid.gateway import main as gateway_main
 
-    assert module_main is pipeline_main
+    assert module_main is gateway_main
 
 
 def test_renderer_degraded_minimal_no_valid_options_or_recovery() -> None:
@@ -194,7 +194,7 @@ def test_subprocess_degraded_bug_envelope_no_traceback() -> None:
     assert result.returncode == 1
     assert result.stderr.splitlines()[0] == "unstructured - this is a bug."
     assert "boom" in result.stderr
-    assert '"entrypoint": "astrid.pipeline.main"' in result.stderr
+    assert '"entrypoint": "astrid.gateway.main"' in result.stderr
     assert "Traceback" not in result.stderr
 
 

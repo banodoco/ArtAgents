@@ -1,7 +1,7 @@
-"""`astrid author` CLI: compile / check / describe / new (Phase 4) +
+"""`astrid orchestrate` CLI: compile / check / describe / new (Phase 4) +
 test / explain (Phase 5/9).
 
-Phase 9 ``author test`` actually replays a fixture through the gate via
+Phase 9 ``orchestrate test`` actually replays a fixture through the gate via
 ``orchestrate.test_runner.run_fixture`` inside a scratch projects root, then
 diffs the resulting events.jsonl against ``<pack>/golden/<fixture>.events.jsonl``
 after stripping volatile fields. ``--regenerate`` writes the current events
@@ -52,9 +52,9 @@ _QID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 _NEW_TEMPLATE = '''"""Author-scaffolded orchestrator: {qualified_id}.
 
 Edit the steps below to describe your task. Run:
-  astrid author check {qualified_id}
-  astrid author compile {qualified_id}
-  astrid author describe {qualified_id}
+  astrid orchestrate check {qualified_id}
+  astrid orchestrate compile {qualified_id}
+  astrid orchestrate describe {qualified_id}
 """
 
 from __future__ import annotations
@@ -117,9 +117,9 @@ def _cmd_compile(qid: str, packs_root: Optional[Path]) -> int:
     try:
         out_path = compile_to_path(qid, packs_root=packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        raise AstridError(f"author compile {qid}: {exc}") from exc
+        raise AstridError(f"orchestrate compile {qid}: {exc}") from exc
     print(f"wrote {out_path}")
-    print(f"recommended next: astrid author check {qid}")
+    print(f"recommended next: astrid orchestrate check {qid}")
     return 0
 
 
@@ -128,7 +128,7 @@ def _cmd_check(qid: str, packs_root: Optional[Path]) -> int:
     try:
         plan = _resolved_plan(qid, packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        raise AstridError(f"author check {qid}: {exc}") from exc
+        raise AstridError(f"orchestrate check {qid}: {exc}") from exc
     # The DSL/load_plan validators already enforce: schema, repeat.for_each.from
     # resolves to a prior-sibling produces, attested produces are non-sentinel,
     # nested plans validate, and `code` argv may not target
@@ -139,7 +139,7 @@ def _cmd_check(qid: str, packs_root: Optional[Path]) -> int:
             for entry in step.produces:
                 if entry.check.sentinel:
                     raise AstridError(
-                        f"author check {qid}: attested step {'/'.join(path)!r} "
+                        f"orchestrate check {qid}: attested step {'/'.join(path)!r} "
                         f"produces[{entry.name!r}] uses sentinel-only check"
                     )
         if (not is_group_step(step)) and step.repeat is not None:
@@ -226,7 +226,7 @@ def _cmd_describe(qid: str, packs_root: Optional[Path]) -> int:
         builder = resolve_orchestrator(qid, packs_root=packs_root)
         plan = _resolved_plan(qid, packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        raise AstridError(f"author describe {qid}: {exc}") from exc
+        raise AstridError(f"orchestrate describe {qid}: {exc}") from exc
     costs = _collect_costs(builder, packs_root)
     lines, total = _describe_plan(plan, costs)
     print(f"plan {plan.plan_id} (version {plan.version})")
@@ -240,16 +240,16 @@ def _cmd_describe(qid: str, packs_root: Optional[Path]) -> int:
 def _cmd_new(qid: str, packs_root: Optional[Path]) -> int:
     if not _QID_RE.fullmatch(qid):
         raise AstridError(
-            f"author new: qualified id {qid!r} must be '<pack>.<name>' "
+            f"orchestrate new: qualified id {qid!r} must be '<pack>.<name>' "
             "with letters/digits/underscore",
-            recovery_command="astrid author new <pack>.<name>",
+            recovery_command="astrid orchestrate new <pack>.<name>",
         )
     pack, name = _qualified_split(qid)
     root = _packs_root_arg(packs_root)
     pack_root = root / pack
     if not pack_root.is_dir():
         raise AstridError(
-            f"author new: pack directory not found at {pack_root}; "
+            f"orchestrate new: pack directory not found at {pack_root}; "
             "create the pack before scaffolding an orchestrator",
             recovery_command=f"mkdir -p {pack_root}",
         )
@@ -257,13 +257,13 @@ def _cmd_new(qid: str, packs_root: Optional[Path]) -> int:
     folder_collision = pack_root / name
     if module_path.exists():
         raise AstridError(
-            f"author new: refuse to overwrite existing {module_path}",
-            recovery_command=f"astrid author compile {qid}",
+            f"orchestrate new: refuse to overwrite existing {module_path}",
+            recovery_command=f"astrid orchestrate compile {qid}",
         )
     if folder_collision.exists() and folder_collision.is_dir():
         # FLAG-003: a same-stem folder shadows the .py module on import.
         raise AstridError(
-            f"author new: cannot scaffold {module_path} because folder "
+            f"orchestrate new: cannot scaffold {module_path} because folder "
             f"{folder_collision} exists; rename the folder-orchestrator first",
             recovery_command=f"mv {folder_collision} {folder_collision}.bak",
         )
@@ -287,7 +287,7 @@ def _cmd_new(qid: str, packs_root: Optional[Path]) -> int:
         except ValueError:
             rel = created
         print(f"created {rel}")
-    print(f"recommended next: astrid author check {qid}")
+    print(f"recommended next: astrid orchestrate check {qid}")
     return 0
 
 
@@ -329,7 +329,7 @@ def _cmd_test(
     try:
         pack, name = _qualified_split(qid)
     except OrchestrateDefinitionError as exc:
-        raise AstridError(f"author test {qid}: {exc}") from exc
+        raise AstridError(f"orchestrate test {qid}: {exc}") from exc
 
     root = _packs_root_arg(packs_root)
     pack_root = root / pack
@@ -338,7 +338,7 @@ def _cmd_test(
         try:
             compile_to_path(qid, packs_root=root)
         except (OrchestrateDefinitionError, TaskPlanError) as exc:
-            raise AstridError(f"author test {qid}: compile failed: {exc}") from exc
+            raise AstridError(f"orchestrate test {qid}: compile failed: {exc}") from exc
 
     candidate_roots = _author_test_roots(root, pack)
     golden_path = candidate_roots[0] / "golden" / f"{fixture_name}.events.jsonl"
@@ -364,7 +364,7 @@ def _cmd_test(
                 projects_root=projects_root,
             )
         except RuntimeError as exc:
-            raise AstridError(f"author test {qid} --fixture {fixture_name}: {exc}") from exc
+            raise AstridError(f"orchestrate test {qid} --fixture {fixture_name}: {exc}") from exc
         run_dir = events_path.parent
         events = read_events(events_path)
         normalized = normalize_events(events, run_dir=run_dir)
@@ -376,9 +376,9 @@ def _cmd_test(
 
         if not golden_path.is_file() or golden_path.stat().st_size == 0:
             raise AstridError(
-                f"author test {qid} --fixture {fixture_name}: no committed "
+                f"orchestrate test {qid} --fixture {fixture_name}: no committed "
                 f"golden at {golden_path}; rerun with --regenerate to create one",
-                recovery_command=f"astrid author test {qid} --fixture {fixture_name} --regenerate",
+                recovery_command=f"astrid orchestrate test {qid} --fixture {fixture_name} --regenerate",
             )
 
         actual_path = run_dir / "normalized.events.jsonl"
@@ -472,13 +472,13 @@ def _cmd_explain(qid: str, packs_root: Optional[Path]) -> int:
     try:
         plan = _resolved_plan(qid, packs_root)
     except (OrchestrateDefinitionError, TaskPlanError) as exc:
-        raise AstridError(f"author explain {qid}: {exc}") from exc
-    # Disambiguation (#38): `author explain` reads the DSL-authored file at
+        raise AstridError(f"orchestrate explain {qid}: {exc}") from exc
+    # Disambiguation (#38): `orchestrate explain` reads the DSL-authored file at
     # <pack>/<name>.py. Some packs also ship a folder-orchestrator at
     # <pack>/<name>/ with its own orchestrator.yaml + run.py (the production
     # runtime). When both exist the DSL file is typically a smoke-test
     # fixture, NOT the real pipeline. The cross_pack_composition agent
-    # flagged `astrid author explain video_editing.hype` as "actively misleading"
+    # flagged `astrid orchestrate explain video_editing.hype` as "actively misleading"
     # because it printed the trivial fixture instead of the real
     # transcribe → cut → render → validate pipeline.
     try:
@@ -555,15 +555,15 @@ _AUTHOR_HANDLERS: dict[str, Any] = {
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="astrid author", description="Phase 4-5 author CLI")
+    parser = argparse.ArgumentParser(prog="astrid orchestrate", description="Phase 4-5 orchestrate CLI")
     sub = parser.add_subparsers(dest="cmd", required=True)
     for verb, handler in _AUTHOR_HANDLERS.items():
         if verb == "test":
             continue  # test has extra args; handled below
-        sp = sub.add_parser(verb, help=f"author {verb} <pack>.<name>")
+        sp = sub.add_parser(verb, help=f"orchestrate {verb} <pack>.<name>")
         sp.add_argument("qualified_id", help="qualified id of the form <pack>.<name>")
         sp.set_defaults(handler=handler)
-    test_p = sub.add_parser("test", help="author test <pack>.<name> --fixture <name>")
+    test_p = sub.add_parser("test", help="orchestrate test <pack>.<name> --fixture <name>")
     test_p.add_argument("qualified_id", help="qualified id of the form <pack>.<name>")
     test_p.add_argument("--fixture", required=True, help="fixture name (under <pack>/fixtures/)")
     test_p.add_argument(
