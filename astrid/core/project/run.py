@@ -10,13 +10,12 @@ from typing import Any, Iterable, Mapping
 from astrid.contracts.run_status import RunStatus
 from astrid.core.task import env as task_env
 from astrid.core.task.plan import step_dir_for
+from astrid.core.util.time import utc_now_seconds
 from astrid.threads.ids import generate_run_id
 
 from . import paths
 from .jsonio import read_json, write_json_atomic
 from .project import require_project
-from astrid.core.util.time import utc_now_seconds
-
 from .schema import build_run_record, validate_run_record
 
 PROJECT_RUN_ENV = "ASTRID_PROJECT_RUN"
@@ -330,7 +329,7 @@ def bind_managed_timeline(
     event-stream UUID in ``metadata``.
     """
     from astrid.core.project.jsonio import read_json
-    from astrid.core.timeline.crud import create_timeline, TimelineCrudError
+    from astrid.core.timeline.crud import TimelineCrudError, create_timeline
     from astrid.core.timeline.paths import (
         assembly_identity_path,
         find_timeline_by_slug,

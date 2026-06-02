@@ -4,28 +4,27 @@
 
 from __future__ import annotations
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('generation.generate_image_openai')
 import argparse
 import base64
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
-import sys
 import time
-from typing import Any
 import warnings
+from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.audit import AuditContext
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key as _resolve_key
+from astrid.core.util.secrets import load_api_key as _resolve_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
 
 API_URL = "https://api.openai.com/v1/images/generations"
@@ -417,8 +416,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    return generate(args)
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
+        return generate(args)
+
+    return run_pack_main("generation.generate_image_openai", _run, argv=argv)
 
 
 if __name__ == "__main__":

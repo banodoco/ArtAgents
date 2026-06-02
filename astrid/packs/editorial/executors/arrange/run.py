@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.arrange')
 import argparse
 import hashlib
@@ -14,12 +15,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import AuditContext
-from astrid.contracts.errors import AstridError
-from astrid.core.util.time import utc_now_seconds
-from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
-from astrid.theme_schema import load_theme
 from astrid._paths import WORKSPACE_ROOT
+from astrid.audit import AuditContext
+from astrid.core.util.time import utc_now_seconds
+from astrid.theme_schema import load_theme
 from astrid.timeline import (
     ARRANGEMENT_VERSION,
     is_all_generative_arrangement,
@@ -29,6 +28,7 @@ from astrid.timeline import (
     validate_arrangement,
     validate_arrangement_duration_window,
 )
+from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 
 FORBIDDEN_TIME_KEYS = frozenset({"start", "end", "timestamp", "seconds", "time", "src_start", "src_end", "from", "to", "at"})
 RESPONSE_SCHEMA = {

@@ -4,10 +4,10 @@
 
 from __future__ import annotations
 
-
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
-guard_canonical_entrypoint('iteration.assemble')
 from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+
+guard_canonical_entrypoint('iteration.assemble')
 import argparse
 import html
 import json
@@ -15,8 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid import modalities, timeline
+from astrid._paths import REPO_ROOT
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.threads.schema import SCHEMA_VERSION
 

@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.logo_ideas')
 import argparse
 import hashlib
@@ -18,14 +18,12 @@ from typing import Any, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.http import (
-    FAL_QUEUE_URL,
     HttpClient,
     default_client,
     fal_submit_and_poll,
 )
 from astrid.core.util.secrets import load_api_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
-
 
 FIREWORKS_CHAT_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
 

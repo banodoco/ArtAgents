@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, Sequence
 
-from astrid.packs.training.orchestrators.dataset_build.interfaces import ArtifactPullResult, ComputeHandle, RemoteExecResult
+from astrid.packs.training.orchestrators.dataset_build.interfaces import (
+    ArtifactPullResult,
+    ComputeHandle,
+    RemoteExecResult,
+)
 from astrid.packs.training.orchestrators.training_run.ai_toolkit.train import Checkpoint
 
 

@@ -33,8 +33,8 @@ from astrid.core.pack import (
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
-    pack_taxonomy_from_manifest,
     pack_manifest_path,
+    pack_taxonomy_from_manifest,
     validate_content_id_in_pack,
     validate_element_pack_id,
 )

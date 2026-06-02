@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.human_notes')
 
 import argparse
@@ -14,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid._paths import executor_argv
 from astrid.packs.editorial.executors.arrange.run import pool_digest
 from astrid.packs.editorial.executors.editor_review.run import (
     DEFAULT_MODEL,
@@ -23,9 +24,9 @@ from astrid.packs.editorial.executors.editor_review.run import (
     _validate_review_payload_shape,
     arrangement_summary,
 )
-from astrid._paths import executor_argv
-from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
+from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.timeline import load_arrangement, load_pool
+from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 
 
 def build_parser() -> argparse.ArgumentParser:

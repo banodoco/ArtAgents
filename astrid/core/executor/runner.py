@@ -23,6 +23,13 @@ from astrid.contracts.exec_error import (
 )
 from astrid.contracts.run_status import RunStatus
 from astrid.core.pack_resolver import resolve_callable_from_metadata
+from astrid.core.project.run import (
+    ProjectRunContext,
+    finalize_project_run,
+    prepare_project_run,
+    project_run_env,
+    reject_project_with_out,
+)
 from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
     InProcessInvocationError,
@@ -31,18 +38,16 @@ from astrid.core.runtime import (
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.core.project.run import (
-    ProjectRunContext,
-    finalize_project_run,
-    prepare_project_run,
-    project_run_env,
-    reject_project_with_out,
-)
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry
-from .schema import ConditionSpec, ExecutorDefinition, ExecutorKind, ExecutorOutput, ExecutorValidationError
-
+from .schema import (
+    ConditionSpec,
+    ExecutorDefinition,
+    ExecutorKind,
+    ExecutorOutput,
+    ExecutorValidationError,
+)
 
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -53,7 +58,9 @@ class ExecutorRunnerError(ExecutorValidationError):
 
 @lru_cache(maxsize=1)
 def _pipeline_module():
-    from astrid.core.orchestrator.registry import load_default_registry as load_default_orchestrator_registry
+    from astrid.core.orchestrator.registry import (
+        load_default_registry as load_default_orchestrator_registry,
+    )
 
     registry = load_default_orchestrator_registry()
     orchestrator = registry.get("video_editing.hype")

@@ -26,16 +26,15 @@ Idempotency (SD-011):
 
 from __future__ import annotations
 
-
 from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('reigh.publish')
 import argparse
 import base64
 import json
 import mimetypes
 import os
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -45,7 +44,6 @@ from typing import Any
 
 from astrid import timeline
 from astrid.core.util.hash import sha256_file
-
 
 TIMELINE_ASSETS_BUCKET = "timeline-assets"
 DEFAULT_TIMEOUT = 60.0

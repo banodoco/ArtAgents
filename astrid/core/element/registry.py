@@ -18,11 +18,11 @@ from astrid.core.alias_resolver import (
 )
 from astrid.core.manifest import dump_manifest_payload, load_manifest_mapping
 from astrid.core.pack import (
-    discover_packs,
     ELEMENT_KIND_REGISTRY,
     ElementKindRegistry,
     PackDefinition,
     PackValidationError,
+    discover_packs,
     ensure_local_pack,
     iter_element_roots,
     pack_element_kind_descriptors,

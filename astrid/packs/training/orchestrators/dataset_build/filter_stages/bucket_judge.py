@@ -15,12 +15,22 @@ import jsonschema
 
 from astrid._paths import REPO_ROOT
 
-from ..artifacts import load_valid_cached_sidecar, sidecar_hashes, unlink_stale_sidecar, write_hashed_sidecar
+from ..artifacts import (
+    load_valid_cached_sidecar,
+    sidecar_hashes,
+    unlink_stale_sidecar,
+    write_hashed_sidecar,
+)
 from ..budget import BudgetTracker
 from ..interfaces import FilterResult
 from ..items import deterministic_id
-from ._common import build_filter_stats, increment_reason, pass_item, reject_item, resolve_media_path
-
+from ._common import (
+    build_filter_stats,
+    increment_reason,
+    pass_item,
+    reject_item,
+    resolve_media_path,
+)
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 

@@ -48,7 +48,6 @@ def resolve_timeline_target(
     Raises ``ValueError`` with a distinct message for each not-found case
     (never leaks filesystem paths).
     """
-    from astrid.core.project.jsonio import read_json
 
     # --- Strategy 1: ULID-direct ---
     if is_ulid(slug_or_id):

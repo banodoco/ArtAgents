@@ -18,7 +18,6 @@ from .schema import (
     validate_executor_definition,
 )
 
-
 _RESULT_PREFIX = "__ASTRID_EXECUTOR_METADATA__="
 
 

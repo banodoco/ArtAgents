@@ -14,11 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from astrid.contracts.errors import AstridError
+from astrid.core.util.time import utc_now_seconds
 
 from . import paths
 from .jsonio import read_json, write_json_atomic
-from astrid.core.util.time import utc_now_seconds
-
 from .schema import build_project, validate_project
 
 

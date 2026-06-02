@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Any
 
 from astrid._paths import REPO_ROOT
-from astrid.core.generation.features import load_default_generation_taxonomy_registry
 from astrid.core.generation.backends.registry import (
     load_default_generation_backend_registry,
 )
+from astrid.core.generation.features import load_default_generation_taxonomy_registry
 from astrid.core.model_catalog.schema import (
     ModelEntry,
     ModeSpec,

@@ -9,10 +9,14 @@ from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
-from ..acquisition import limit_hint_from_config, record_acquisition_result, request_from_config, string_set
+from ..acquisition import (
+    limit_hint_from_config,
+    record_acquisition_result,
+    request_from_config,
+    string_set,
+)
 from ..items import deterministic_id, make_candidate_item
 from ..media import extract_clip_ffmpeg, ffprobe_metadata
-
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 

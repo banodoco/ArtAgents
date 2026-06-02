@@ -6,7 +6,6 @@ import asyncio
 import os
 from typing import Any
 
-
 ENSURE_STORAGE_HINT = (
     "Run `python3 -m astrid runpod ensure-storage <storage-name> --size <GB> "
     "--datacenter <id>` first, then pass `--storage-name <storage-name>`."

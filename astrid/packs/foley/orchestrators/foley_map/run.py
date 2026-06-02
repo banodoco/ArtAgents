@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('foley.foley_map')
 import argparse
 import json
@@ -16,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 
 GLOBAL_QUERY = (
@@ -268,13 +268,13 @@ def main(argv: list[str] | None = None) -> int:
 
     retry_ids = _load_flagged(args.retry_flagged) if args.retry_flagged else None
 
-    print(f"[foley_map] step 1/5: tile_video")
+    print("[foley_map] step 1/5: tile_video")
     tiles_manifest_path = step_tile(args, out)
     if args.stop_after == "tile":
         return 0
     manifest = json.loads(tiles_manifest_path.read_text(encoding="utf-8"))
 
-    print(f"[foley_map] step 2/5: visual_understand (global + per-tile)")
+    print("[foley_map] step 2/5: visual_understand (global + per-tile)")
     prompts = step_prompts(args, out, manifest)
     if args.stop_after == "prompts":
         return 0
@@ -286,13 +286,13 @@ def main(argv: list[str] | None = None) -> int:
         (out / "tiles.json").write_text(json.dumps(enriched, indent=2) + "\n", encoding="utf-8")
         return 0
 
-    print(f"[foley_map] step 4/5: foley_review")
+    print("[foley_map] step 4/5: foley_review")
     review_path = step_review(out, enriched)
     print(f"open file://{review_path}")
     if args.stop_after == "review":
         return 0
 
-    print(f"[foley_map] step 5/5: spatial_audio_page")
+    print("[foley_map] step 5/5: spatial_audio_page")
     page_path = step_page(out)
     print(f"open file://{page_path}")
     return 0

@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+
 guard_canonical_entrypoint('editorial.quote_scout')
 import argparse
 import json

@@ -49,13 +49,13 @@ never mutated.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from dataclasses import dataclass
-import json
 from typing import Any, Literal, Sequence
 
-from astrid.contracts.errors import AstridError
 from astrid import timeline as timeline_contract
+from astrid.contracts.errors import AstridError
 from astrid.core.timeline.kinds import normalize_track_kind
 
 from .events.schema import (
@@ -66,8 +66,8 @@ from .events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
-    ClipRetrackedPayload,
     ClipRetimedPayload,
+    ClipRetrackedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
     EffectAddedPayload,
@@ -84,7 +84,6 @@ from .events.schema import (
     TransitionRemovedPayload,
     TransitionSetPayload,
 )
-
 
 # ============================================================================
 # ProjectionError

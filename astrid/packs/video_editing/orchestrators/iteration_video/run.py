@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.iteration_video')
 import argparse
 import json
@@ -14,8 +14,8 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid import modalities
+from astrid._paths import REPO_ROOT
 from astrid.packs.iteration.executors.assemble import run as assemble
 from astrid.packs.iteration.executors.prepare import run as prepare
 from astrid.packs.rendering.executors.render import run as render_executor

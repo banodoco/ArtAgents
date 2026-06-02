@@ -6,8 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from astrid.packs.editorial.executors.editor_review import run as editor_review
 from astrid import timeline
+from astrid.contracts.errors import AstridError
+from astrid.packs.editorial.executors.editor_review import run as editor_review
 
 
 class EditorReviewTest(unittest.TestCase):
@@ -90,9 +91,9 @@ class EditorReviewTest(unittest.TestCase):
 
     def test_note_schema_validation(self) -> None:
         arrangement = self.arrangement()
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             editor_review._validate_editor_notes({"notes": [self.valid_note(clip_order=99)]}, arrangement)
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             editor_review._validate_editor_notes(
                 {
                     "notes": [
@@ -105,7 +106,7 @@ class EditorReviewTest(unittest.TestCase):
                 },
                 arrangement,
             )
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             editor_review._validate_editor_notes(
                 {"notes": [self.valid_note(action="reorder", action_detail={})]},
                 arrangement,
@@ -158,7 +159,7 @@ class EditorReviewTest(unittest.TestCase):
 
     def test_review_rejects_uuid_order_mismatch(self) -> None:
         arrangement = self.arrangement()
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             editor_review._validate_editor_notes(
                 {"notes": [self.valid_note(clip_order=1, clip_uuid="00000002")]},
                 arrangement,

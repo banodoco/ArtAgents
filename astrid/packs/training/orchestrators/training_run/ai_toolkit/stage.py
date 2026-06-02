@@ -6,7 +6,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RemoteExecResult
+from astrid.packs.training.orchestrators.dataset_build.interfaces import (
+    ComputeHandle,
+    RemoteExecResult,
+)
 
 
 class StageRemoteBackend(Protocol):

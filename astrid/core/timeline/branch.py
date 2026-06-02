@@ -26,21 +26,19 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from astrid.timeline.timeline_model import validate_timeline_config_for_container
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
+from astrid.timeline.timeline_model import validate_timeline_config_for_container
 
+from .eventlog.local_fs import LocalFsBackend
 from .events.schema import (
     EVENT_SCHEMA_VERSION,
     TimelineActor,
     TimelineBranchedFromPayload,
     TimelineRecoveredPayload,
 )
-from .eventlog.local_fs import LocalFsBackend
-from .eventlog.types import BackendName
 from .observability import resolve_timeline_target
-from .projection import ProjectionError, replay_projection, regenerate_projection
-
+from .projection import ProjectionError, regenerate_projection, replay_projection
 
 # ============================================================================
 # Structured results
@@ -123,13 +121,14 @@ def create_branch_timeline(
             already exists.
         ProjectionError: When chain verification or projection fails.
     """
+    from astrid.threads.ids import generate_ulid
+
     from .paths import (
         find_timeline_by_event_stream_id,
         find_timeline_by_slug,
         timeline_dir,
         validate_timeline_slug,
     )
-    from astrid.threads.ids import generate_ulid
 
     # 1. Resolve source timeline
     source_target = resolve_timeline_target(project_slug, source_slug_or_id, root=root)

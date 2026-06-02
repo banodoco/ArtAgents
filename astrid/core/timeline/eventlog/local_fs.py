@@ -6,18 +6,17 @@ import errno
 import fcntl
 import json
 import os
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
-from astrid.core.util.time import utc_now_seconds as utc_now_iso
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineEvent,
     canonical_json_bytes,
     with_event_hash,
 )
+from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .types import (
     EventLogError,
@@ -233,7 +232,6 @@ class LocalFsBackend:
                     self._write_head_atomic(head)
 
                     # Write idempotency sentinel
-                    import json as _json
                     sentinel = {
                         "idempotency_key": idempotency_key,
                         "destination_event_id": event.event_id,

@@ -20,9 +20,13 @@ from ._edit_helpers import (
     _materialize,
     _resolve_backend,
 )
-from .events.schema import TimelineActor, TimelineEvent, TransitionRemovedPayload, TransitionSetPayload
+from .events.schema import (
+    TimelineActor,
+    TimelineEvent,
+    TransitionRemovedPayload,
+    TransitionSetPayload,
+)
 from .kinds import default_transition_kind, normalize_transition_kind
-
 
 # ---------------------------------------------------------------------------
 # Adjacent same-track transition reconciliation (kernel-level helper)

@@ -6,7 +6,6 @@ from typing import Any
 
 from .ai_toolkit_ltx import AiToolkitLtxAdapter
 
-
 ADAPTERS = {
     "ai-toolkit-ltx": AiToolkitLtxAdapter,
 }

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from .types import BackendName, EventLogHead, EventLogVerification
 from ..events.schema import TimelineActor, TimelineEvent
+from .types import BackendName, EventLogHead, EventLogVerification
 
 
 class SupabaseEventLogTransport(Protocol):

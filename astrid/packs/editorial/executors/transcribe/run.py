@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.transcribe')
 import argparse
 import json
@@ -15,8 +15,8 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import AuditContext
 from astrid._media import ffprobe_duration_seconds
+from astrid.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 

@@ -15,6 +15,7 @@ from astrid.core.orchestrator.plan_template import (
     file_output,
 )
 
+
 def build_plan_v2(
     *,
     python_exec: str,

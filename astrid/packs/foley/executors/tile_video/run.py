@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('foley.tile_video')
 import argparse
 import json
@@ -14,7 +15,6 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import run_pack_main
 
 

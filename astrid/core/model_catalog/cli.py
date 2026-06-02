@@ -249,7 +249,7 @@ def _show_text(entry) -> None:
         if mode_spec.requires:
             print(f"    Requires:  {', '.join(sorted(mode_spec.requires))}")
         else:
-            print(f"    Requires:  (none)")
+            print("    Requires:  (none)")
 
         for bk_name, bk_spec in sorted(mode_spec.backends.items()):
             print(f"    Backend: {bk_name}")
@@ -260,9 +260,9 @@ def _show_text(entry) -> None:
             if bk_spec.endpoint:
                 print(f"      Endpoint:      {bk_spec.endpoint}")
             if bk_spec.param_map:
-                print(f"      Param map:")
+                print("      Param map:")
                 for pk, pv in sorted(bk_spec.param_map.items()):
                     print(f"        {pk} → {pv}")
             else:
-                print(f"      Param map: (none)")
+                print("      Param map: (none)")
         print()

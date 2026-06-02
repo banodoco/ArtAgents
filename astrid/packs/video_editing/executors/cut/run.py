@@ -11,8 +11,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.cut')
 import argparse
 import csv
@@ -22,23 +23,23 @@ import subprocess
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid._paths import PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT
 from astrid.audit import AuditContext
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_seconds
 from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
+from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.theme_schema import load_theme, theme_root
-from astrid._paths import PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT
 from astrid.timeline import (
-    AssetRegistry,
     CARRY_FORWARD_SOURCE_FIELDS,
     METADATA_VERSION,
+    AssetRegistry,
     PipelineMetadata,
     TimelineConfig,
     canonical_timeline_config,
+    is_all_generative_arrangement,
     load_arrangement,
     load_metadata,
     load_pool,
@@ -48,7 +49,6 @@ from astrid.timeline import (
     save_metadata,
     save_registry,
     save_timeline,
-    is_all_generative_arrangement,
     validate_arrangement_duration_window,
 )
 

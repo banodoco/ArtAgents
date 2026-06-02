@@ -20,16 +20,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+from .eventlog.protocol import EventLogBackend
 from .events.schema import (
     TimelineActor,
     TimelineErasedPayload,
 )
-from .eventlog.protocol import EventLogBackend
-from .eventlog.types import BackendName
 from .projection import ProjectionError, regenerate_projection
-
 
 # ============================================================================
 # Erasure selector

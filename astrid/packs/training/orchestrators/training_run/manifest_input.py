@@ -10,7 +10,9 @@ from typing import Any, Mapping
 from astrid._paths import REPO_ROOT
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.manifest import validate_schema
-from astrid.packs.training.orchestrators.dataset_build.manifest_adapters.ai_toolkit_ltx import AiToolkitLtxAdapter
+from astrid.packs.training.orchestrators.dataset_build.manifest_adapters.ai_toolkit_ltx import (
+    AiToolkitLtxAdapter,
+)
 
 
 class TrainingManifestError(ValueError):

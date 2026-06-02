@@ -14,6 +14,9 @@ from astrid.core.project.project import load_project
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
 from astrid.threads.ids import generate_ulid
 
+from .eventlog import select_timeline_backend
+from .eventlog.types import SupabaseEventLogOptions
+from .events.schema import TimelineActor
 from .integrity import compute_sha256, file_size
 from .model import (
     TIMELINE_SCHEMA_VERSION,
@@ -25,9 +28,6 @@ from .model import (
     validate_timeline_config_json,
     write_timeline_config_json,
 )
-from .eventlog import select_timeline_backend
-from .eventlog.types import SupabaseEventLogOptions
-from .events.schema import TimelineActor
 from .paths import (
     assembly_identity_path,
     display_path,

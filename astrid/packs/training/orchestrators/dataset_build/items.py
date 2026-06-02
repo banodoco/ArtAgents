@@ -10,7 +10,6 @@ from typing import Any, Mapping
 from astrid._paths import REPO_ROOT
 from astrid.core.util.time import utc_now_iso as _utc_now_iso
 
-
 UNKNOWN_RIGHTS = {
     "license": "unknown",
     "attribution": "",

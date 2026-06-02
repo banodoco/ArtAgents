@@ -24,7 +24,6 @@ from .events.schema import (
     with_event_hash,
 )
 
-
 # ============================================================================
 # Erasure repair for LocalFsBackend
 # ============================================================================
@@ -250,6 +249,7 @@ def _rebuild_head(
 ) -> Any:
     """Rebuild and write the head from a list of events."""
     from astrid.core.project.jsonio import write_json_atomic
+
     from .eventlog.types import EventLogHead
 
     if not events:

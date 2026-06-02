@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.animate_image')
 import argparse
 import base64
@@ -19,7 +20,6 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import (
     AstridArgumentError,
     RecoverableArgumentParser,
@@ -27,7 +27,6 @@ from astrid.core.cli_choices import (
 )
 from astrid.core.util.http import FAL_QUEUE_URL, default_client
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value
-
 
 FAL_EDIT_MODEL_ID = "openai/gpt-image-2/edit"
 FAL_ANIMATE_MODEL_ID = "fal-ai/wan/v2.2-14b/animate/move"

@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('youtube.youtube_audio')
 import argparse
 import shutil
@@ -12,7 +13,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.packs._canonical_entrypoint import run_pack_main
 
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             out = out.with_suffix(f".{default_ext}")
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        output_template = str(out.with_suffix(f".%(ext)s"))
+        output_template = str(out.with_suffix(".%(ext)s"))
         if args.url:
             target = args.url
         elif args.query and args.query.startswith(("http://", "https://")):

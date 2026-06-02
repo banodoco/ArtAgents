@@ -4,20 +4,19 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('training.search_loras')
 import argparse
 import json
 import os
-import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 
 HUGGING_FACE_MODELS_API = "https://huggingface.co/api/models"

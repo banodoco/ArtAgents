@@ -38,15 +38,14 @@ from .events.schema import (
     ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
-    ClipRetrackedPayload,
     ClipRetimedPayload,
+    ClipRetrackedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
     TimelineActor,
     TimelineEvent,
 )
 from .kinds import normalize_event_clip_kind
-
 
 # ---------------------------------------------------------------------------
 # Internal helpers (clip-specific)

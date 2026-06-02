@@ -8,7 +8,6 @@ from typing import Any
 from .local_folder import LocalFolderSourceProvider
 from .youtube import YouTubeSourceProvider
 
-
 PROVIDERS = {
     "local_folder": LocalFolderSourceProvider,
     "youtube": YouTubeSourceProvider,

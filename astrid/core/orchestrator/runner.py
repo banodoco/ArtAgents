@@ -27,8 +27,8 @@ from astrid.core.runtime import (
     InProcessInvocationError,
     invoke_in_process_command,
 )
-from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.runtime._normalize import normalize_python_runtime_result
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 

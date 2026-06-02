@@ -11,7 +11,9 @@ from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 
 from . import doctor as doctor_fn
 from . import install as install_fn
-from . import list_state, sync as sync_fn, uninstall as uninstall_fn
+from . import list_state
+from . import sync as sync_fn
+from . import uninstall as uninstall_fn
 from .harnesses import ADAPTERS
 
 HARNESS_CHOICES = ("claude", "codex", "hermes", "all")

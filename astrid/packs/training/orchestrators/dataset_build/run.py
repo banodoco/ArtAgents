@@ -20,8 +20,8 @@ from astrid.core.project.jsonio import write_json_atomic
 
 from .acquisition import build_acquisition_request
 from .budget import BudgetTracker
-from .caption_validation import validate_accepted_captions
 from .caption_providers import caption_candidate
+from .caption_validation import validate_accepted_captions
 from .config import (
     BudgetPreflightError,
     ConfigParseError,
@@ -32,14 +32,20 @@ from .config import (
     preflight_budget_and_secrets,
 )
 from .filter_stages import canonical_source_id, get_filter_stage
-from .items import config_hash, deterministic_id, make_review_item, repo_relative_path, sha256_file, utc_now_iso
+from .items import (
+    config_hash,
+    deterministic_id,
+    make_review_item,
+    repo_relative_path,
+    sha256_file,
+    utc_now_iso,
+)
 from .manifest import accepted_items, build_canonical_manifest, write_canonical_manifest
 from .manifest_adapters import get_manifest_adapter
-from .review import apply_review_decisions, write_human_review_final, write_review_data
 from .reports.quality_report import write_quality_report
+from .review import apply_review_decisions, write_human_review_final, write_review_data
 from .source_providers import get_source_provider
 from .state import make_initial_state, read_review_state, set_status, write_review_state
-
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REVIEW_UI_ROOT = PACKAGE_ROOT / "review_ui"

@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.scenes')
 import argparse
 import csv
@@ -13,8 +13,8 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import register_outputs
 from astrid._media import ffprobe_duration_seconds
+from astrid.audit import register_outputs
 
 
 def build_parser() -> argparse.ArgumentParser:

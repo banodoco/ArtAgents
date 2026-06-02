@@ -13,7 +13,6 @@ from typing import Any, Literal, Protocol
 
 from astrid.core.task.plan import CostEntry, Step
 
-
 DispatchStatus = Literal["dispatched", "rejected"]
 PollStatus = Literal["pending", "running", "done", "failed"]
 CompleteStatus = Literal["completed", "failed", "awaiting_fetch"]

@@ -18,7 +18,6 @@ from .schema import (
     validate_orchestrator_definition,
 )
 
-
 _RESULT_PREFIX = "__ASTRID_ORCHESTRATOR_METADATA__="
 _MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
 

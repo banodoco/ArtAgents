@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.event_talks')
 import argparse
 import datetime as dt
@@ -15,18 +16,19 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid._media import ffprobe_duration_seconds
-from astrid.core.util.hash import sha256_file
-from astrid.contracts.errors import AstridError
-from astrid.packs.video_editing.orchestrators.event_talks.plan_template import build_plan_v2, emit_plan_json
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
+from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.project.run import (
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.project.paths import project_dir, validate_project_slug
-
+from astrid.core.task import env as task_env
+from astrid.core.task import gate as task_gate
+from astrid.core.util.hash import sha256_file
+from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
+    build_plan_v2,
+    emit_plan_json,
+)
 
 # ---------------------------------------------------------------------------
 # Constants — preserved from the legacy orchestrator

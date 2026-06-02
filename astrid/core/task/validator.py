@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Iterable, Literal
+from typing import Literal
 
 from astrid.core.task.plan import (
     ADAPTERS,
     Step,
     TaskPlan,
     TaskPlanError,
-    _assert_unique_paths,
     _assert_repeat_until_refs,
+    _assert_unique_paths,
     _validate_plan,
     iter_steps_with_path,
     parse_from_ref,
 )
-
 
 InvariantId = Literal[
     "I1_schema",

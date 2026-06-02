@@ -7,7 +7,12 @@ from typing import Any, Callable
 
 from astrid.contracts.schema import CachePolicy, CommandSpec, IsolationMetadata, Output, Port
 
-from .schema import OrchestratorDefinition, OrchestratorValidationError, RuntimeSpec, validate_orchestrator_definition
+from .schema import (
+    OrchestratorDefinition,
+    OrchestratorValidationError,
+    RuntimeSpec,
+    validate_orchestrator_definition,
+)
 
 
 class OrchestratorSpec:

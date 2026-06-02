@@ -13,8 +13,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.hype')
 import argparse
 import datetime as dt
@@ -28,19 +29,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.contracts.errors import AstridError
-
 try:
     import yaml
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
-from astrid.audit import AuditContext, PARENT_IDS_ENV
-from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.hash import sha256_file
-from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid import timeline
 from astrid._paths import WORKSPACE_ROOT, executor_argv
+from astrid.audit import PARENT_IDS_ENV, AuditContext
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_BINDING_MODE,
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
@@ -55,7 +52,8 @@ from astrid.core.project.run import (
 )
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-
+from astrid.core.util.hash import sha256_file
+from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 STEP_ORDER = (
     "transcribe",
@@ -1138,10 +1136,12 @@ def should_rerun(step: Step, args: argparse.Namespace, forced: bool) -> bool:
 def print_log_tail(step_name: str, log_path: Path) -> None:
     lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
     tail = lines[-40:]
-    raise AstridError(
-        f"{step_name}: failed; last {len(tail)} log lines from {log_path}",
-        recovery_command=f"Check the log at {log_path} for details and retry the {step_name} step",
-        state_snapshot={"step": step_name, "log_path": str(log_path), "log_tail": tail},
+    render_astrid_error(
+        AstridError(
+            f"{step_name}: failed; last {len(tail)} log lines from {log_path}",
+            recovery_command=f"Check the log at {log_path} for details and retry the {step_name} step",
+            state_snapshot={"step": step_name, "log_path": str(log_path), "log_tail": tail},
+        )
     )
 
 
@@ -1656,6 +1656,17 @@ def main(argv: list[str] | None = None) -> int:
             project_env = _set_project_env()
         try:
             args = resolve_args(effective_argv)
+        except AstridError as exc:
+            if project_context is not None:
+                finalize_project_run(
+                    project_context,
+                    status="error",
+                    returncode=2,
+                    error=exc,
+                )
+                render_astrid_error(exc)
+                return 2
+            raise
         except SystemExit as exc:
             if project_context is not None:
                 finalize_project_run(project_context, status="error", returncode=_system_exit_code(exc), error=exc)

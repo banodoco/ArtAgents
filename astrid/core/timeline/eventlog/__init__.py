@@ -1,8 +1,8 @@
 """Timeline eventlog public exports."""
 
-from .protocol import EventLogBackend
 from .local_fs import LocalFsBackend
 from .projector import DisplayProjection, project_display
+from .protocol import EventLogBackend
 from .selector import (
     EventLogTarget,
     PullDestination,
@@ -24,8 +24,8 @@ from .types import (
     EventLogStaleVersionError,
     EventLogVerification,
     ImportEventRequest,
-    TimelineVersionConflict,
     TimelineStreamRef,
+    TimelineVersionConflict,
 )
 
 __all__ = [

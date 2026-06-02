@@ -11,7 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping
 
-from astrid.core.pack_resolver import CallableNotFoundError, PackResolverError, resolve_callable_from_metadata
+from astrid.core.pack_resolver import (
+    CallableNotFoundError,
+    PackResolverError,
+    resolve_callable_from_metadata,
+)
 from astrid.core.subprocess_env import ASTRID_INTERNAL_INVOCATION, build_child_subprocess_env
 from astrid.packs._canonical_entrypoint import canonical_runtime_entrypoint
 

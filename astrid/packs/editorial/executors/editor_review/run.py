@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.editor_review')
 import argparse
 import json
@@ -15,14 +16,14 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-from ..arrange.run import pool_digest
-from astrid.audit import AuditContext
 from astrid._media import ffprobe_duration_seconds
-from astrid.contracts.errors import AstridError
-from astrid.utilities.llm_clients import build_claude_client
-from astrid.timeline import load_arrangement, load_metadata, load_pool
-from ..transcribe.run import load_api_key
 from astrid._paths import executor_argv
+from astrid.audit import AuditContext
+from astrid.timeline import load_arrangement, load_metadata, load_pool
+from astrid.utilities.llm_clients import build_claude_client
+
+from ..arrange.run import pool_digest
+from ..transcribe.run import load_api_key
 
 EDITOR_ACTIONS = (
     "accept",

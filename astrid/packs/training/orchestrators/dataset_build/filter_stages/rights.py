@@ -9,7 +9,6 @@ from typing import Any
 from ..interfaces import FilterResult
 from ._common import build_filter_stats, increment_reason, pass_item, record_warning, reject_item
 
-
 DEFAULT_REJECT_STATUSES = {"disallowed", "prohibited", "restricted"}
 DEFAULT_WARN_STATUSES = {"", "unknown", "needs_review"}
 

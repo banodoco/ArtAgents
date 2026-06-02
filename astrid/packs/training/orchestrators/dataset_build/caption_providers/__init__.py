@@ -12,7 +12,6 @@ from .understanding import (
     caption_sidecar_path,
 )
 
-
 PROVIDERS = {
     "visual_understand": VisualUnderstandCaptionProvider,
     "video_understand": VideoUnderstandCaptionProvider,

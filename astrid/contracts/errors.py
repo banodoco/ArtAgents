@@ -14,10 +14,10 @@ objects such as ``ExecError``-bearing dataclasses.
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
 import json
-from pathlib import Path
 import sys
+from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
 

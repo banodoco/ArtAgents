@@ -43,7 +43,7 @@ from astrid.core.pack import (
     pack_manifest_path,
     packs_root,
 )
-from astrid.core.pack_store import InstallRecord, InstalledPackStore
+from astrid.core.pack_store import InstalledPackStore
 
 # ---------------------------------------------------------------------------
 # STAGE.md excerpt helpers

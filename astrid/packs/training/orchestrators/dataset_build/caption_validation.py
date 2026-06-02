@@ -17,7 +17,6 @@ from astrid._paths import REPO_ROOT
 from .artifacts import HASHES_KEY
 from .items import utc_now_iso
 
-
 CAPTION_SIDECAR_SCHEMA: dict[str, Any] = {
     "type": "object",
     "required": ["text", "schema_version", "confidence", "model", HASHES_KEY],

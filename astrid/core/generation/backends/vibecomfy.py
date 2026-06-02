@@ -205,7 +205,6 @@ class VibeComfyBackend(BackendAdapter):
     ) -> GenerationResult:
         # Lazy-import vibecomfy (SD-009)
         import vibecomfy  # noqa: F401
-
         from vibecomfy.registry.ready import workflow_from_ready
         from vibecomfy.runtime.run import run_sync
 

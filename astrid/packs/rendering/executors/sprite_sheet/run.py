@@ -4,26 +4,27 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('rendering.sprite_sheet')
 import argparse
 import base64
 import json
 import os
-from pathlib import Path
 import re
 import struct
 import subprocess
 import sys
 import time
+import uuid
+import zlib
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
-import uuid
-import zlib
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
 from astrid.packs.generation.executors.generate_image_openai.run import (
     API_URL,
     DEFAULT_MODEL,
@@ -35,7 +36,6 @@ from astrid.packs.generation.executors.generate_image_openai.run import (
     _die,
     _validate_payload,
 )
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
 
 EDIT_API_URL = "https://api.openai.com/v1/images/edits"
 DEFAULT_KEY_COLOR = "#ff00ff"

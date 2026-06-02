@@ -38,7 +38,6 @@ from astrid.contracts.errors import (
 )
 from astrid.core.util.log_and_swallow import log_and_swallow
 
-
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
 # of main(): for these verbs the --project flag identifies the run, NOT a
 # command to dispatch through plan[cursor]. cmd_ack approve re-enters the gate
@@ -605,7 +604,7 @@ def _dispatch_events(args: list[str]) -> int:
     """
     import argparse
 
-    from astrid.core.task.run_audit import cmd_events_verify, cmd_events_tail
+    from astrid.core.task.run_audit import cmd_events_tail, cmd_events_verify
 
     parser = argparse.ArgumentParser(prog="astrid events")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -799,7 +798,6 @@ def _make_run_ctx_for_poll(
 
 def _read_returncode_sidecar(decision: Any) -> int:
     """If the subprocess pid is gone, try to read the returncode sidecar file."""
-    from pathlib import Path
 
     project_root = getattr(decision, "project_root", None)
     run_id = getattr(decision, "run_id", None)

@@ -4,29 +4,26 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.vary_grid')
 import argparse
 import base64
 import json
 import math
 import re
-import uuid
 from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.util.http import FAL_QUEUE_URL, default_client
 from astrid.core.util.secrets import load_api_key
-from astrid.core.util.http import FAL_QUEUE_URL, HttpClient, default_client
 from astrid.packs.video_editing.orchestrators.logo_ideas.run import (
     DEFAULT_FIREWORKS_MODEL,
     FIREWORKS_CHAT_URL,
     parse_concepts,
 )
-
 
 FAL_EDIT_MODEL_ID = "openai/gpt-image-2/edit"
 DEFAULT_COUNT = 9

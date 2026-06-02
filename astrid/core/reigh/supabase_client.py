@@ -16,7 +16,6 @@ import urllib.error
 import urllib.request
 from typing import Any, Literal, Mapping, Tuple
 
-
 AuthScheme = Literal["user_jwt", "pat", "service_role"]
 Auth = Tuple[AuthScheme, str]
 

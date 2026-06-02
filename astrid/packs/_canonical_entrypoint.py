@@ -16,7 +16,6 @@ from typing import Callable, Iterator
 
 from astrid.contracts.errors import AstridError, render_astrid_error, wrap_degraded_error
 
-
 _CANONICAL_RUNTIME_CAPABILITY: ContextVar[str | None] = ContextVar(
     "astrid_canonical_runtime_capability",
     default=None,

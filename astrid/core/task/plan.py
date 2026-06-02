@@ -14,7 +14,6 @@ from astrid.core.project.paths import project_dir, validate_project_slug, valida
 from astrid.core.task.events import canonical_event_json
 from astrid.verify import Check, canonical_check_params, file_nonempty
 
-
 STEP_PATH_SEP = "/"
 
 AdapterKind = Literal["local", "manual", "remote-artifact"]

@@ -9,8 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.element.registry import ElementRegistry, ElementSource, load_default_registry, load_source_elements
-from astrid.core.element.schema import REQUIRED_ELEMENT_FILES, ElementKind
+from astrid.core.element.registry import (
+    ElementRegistry,
+    ElementSource,
+    load_default_registry,
+    load_source_elements,
+)
+from astrid.core.element.schema import ElementKind
 
 TOOLS_DIR = REPO_ROOT
 THEMES_ROOT = WORKSPACE_ROOT / "themes"

@@ -21,19 +21,12 @@ Public exception taxonomy:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
-from collections.abc import Mapping
 from typing import Any, Literal
 
 from astrid.contracts.exec_error import ExecError
-from astrid.core.project.paths import ProjectPathError, run_dir as project_run_dir, validate_project_slug
-from astrid.core.task.event_stream import (
-    EventStreamRecord,
-    read_event_stream as _read_task_event_stream,
-    subscribe_event_stream as _subscribe_task_event_stream,
-)
-from astrid.core.task.events import EVENTS_FILENAME
 from astrid.contracts.schema import (
     AliasRecord,
     CapabilityHandle,
@@ -42,6 +35,18 @@ from astrid.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
+from astrid.core.project.paths import ProjectPathError, validate_project_slug
+from astrid.core.project.paths import run_dir as project_run_dir
+from astrid.core.task.event_stream import (
+    EventStreamRecord,
+)
+from astrid.core.task.event_stream import (
+    read_event_stream as _read_task_event_stream,
+)
+from astrid.core.task.event_stream import (
+    subscribe_event_stream as _subscribe_task_event_stream,
+)
+from astrid.core.task.events import EVENTS_FILENAME
 
 CapabilityType = Literal["executor", "orchestrator", "element"]
 
@@ -647,7 +652,10 @@ def _build_discovery_metadata(
     tuple[dict[str, Any], ...],
     tuple[dict[str, Any], ...],
 ]:
-    from astrid.core.generation.backends.registry import GenerationBackendRegistry, descriptors_from_pack
+    from astrid.core.generation.backends.registry import (
+        GenerationBackendRegistry,
+        descriptors_from_pack,
+    )
     from astrid.core.generation.features import (
         GenerationTaxonomyRegistry,
         backend_descriptors_from_pack,

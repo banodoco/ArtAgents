@@ -9,8 +9,9 @@ Features are validated per-mode (SD-003).
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('generation.generate_image')
 import argparse
 import hashlib
@@ -21,12 +22,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation.backends import (
     BackendAdapter,
-    GenerationResult,
     GenerationBackendRegistry,
+    GenerationResult,
     load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry

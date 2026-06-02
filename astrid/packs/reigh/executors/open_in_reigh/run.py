@@ -27,13 +27,11 @@ Escape hatches preserved from the pre-T7 helper:
 import argparse
 import json
 import shutil
-import sys
 from pathlib import Path
 
 from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import run_pack_main
 from astrid.timeline import Timeline
-
 
 DEFAULT_REIGH_APP = Path("/Users/peteromalley/Documents/reigh-workspace/reigh-app")
 PROBE_DIRS = ("public/timelines", "public/demos", "timelines", "demos")

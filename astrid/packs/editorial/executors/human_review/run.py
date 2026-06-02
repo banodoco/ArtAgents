@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.human_review')
 import argparse
 import json
@@ -22,10 +23,11 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qs, urlparse
 
-from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.core.util.log_and_swallow import log_and_swallow
-from astrid.packs.training.orchestrators.dataset_build.state import read_review_state, write_review_state
-
+from astrid.packs.training.orchestrators.dataset_build.state import (
+    read_review_state,
+    write_review_state,
+)
 
 _GEMINI_SCHEMA_KEYS = {
     "type", "properties", "required", "items", "enum", "description",

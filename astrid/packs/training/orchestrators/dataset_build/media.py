@@ -7,7 +7,6 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 

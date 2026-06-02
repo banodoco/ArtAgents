@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 BASELINE_PATH = Path("scripts/reshape/baselines/mypy_astrid.json")
 COMMAND = [
     sys.executable,

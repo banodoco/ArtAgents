@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+
 guard_canonical_entrypoint('iteration.prepare')
 import argparse
 import concurrent.futures
@@ -18,9 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid import modalities
-from astrid.contracts.errors import AstridError
+from astrid._paths import REPO_ROOT
 from astrid.threads.ids import is_ulid
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.record import sha256_file

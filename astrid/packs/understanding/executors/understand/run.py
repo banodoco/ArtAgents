@@ -10,13 +10,13 @@ one executor call with a switch.
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('understanding.understand')
 import argparse
+import sys
 from collections.abc import Callable
 from importlib import import_module
-import sys
 
 from astrid.core.cli_choices import add_choice_arg
 

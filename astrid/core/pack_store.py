@@ -21,13 +21,10 @@ manifest loading).
 from __future__ import annotations
 
 import json as _json
-import os
 import shutil
-import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 from astrid.core.session.paths import installed_packs_root
 from astrid.core.util.log_and_swallow import log_and_swallow

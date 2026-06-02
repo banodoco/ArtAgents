@@ -5,12 +5,12 @@ from __future__ import annotations
 import json
 import shlex
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
-from astrid.core.task.gate_base import GateDecision, ITERATE_FEEDBACK_PREFIX, _reject
-from astrid.core.task.plan import Step, step_dir_for_path
-from astrid.core.task.env import is_author_test_mode, task_actor_env
 from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.task.env import is_author_test_mode, task_actor_env
+from astrid.core.task.gate_base import ITERATE_FEEDBACK_PREFIX, GateDecision, _reject
+from astrid.core.task.plan import Step, step_dir_for_path
 
 
 @dataclass(frozen=True)

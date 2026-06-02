@@ -3,35 +3,33 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('video_editing.thumbnail_maker')
 import argparse
 import datetime as dt
 import json
-import math
-import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.hash import sha256_file
-from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import build_plan_v2, emit_plan_json
-from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.core.task import env as task_env
-from astrid.core.task import gate as task_gate
+from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.project.run import (
-    ProjectRunError,
     finalize_project_run,
     prepare_project_run,
     reject_project_with_out,
 )
-from astrid.core.project.paths import project_dir, validate_project_slug
-from astrid.contracts.errors import AstridError
-
+from astrid.core.task import env as task_env
+from astrid.core.task import gate as task_gate
+from astrid.core.util.hash import sha256_file
+from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import (
+    build_plan_v2,
+    emit_plan_json,
+)
 
 # ---------------------------------------------------------------------------
 # Constants (kept from original)

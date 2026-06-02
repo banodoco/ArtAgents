@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from enum import Enum
-import json
 from pathlib import Path
 from typing import Any
 
 from astrid import timeline
+
 from .text_match import segments_in_range
 
 

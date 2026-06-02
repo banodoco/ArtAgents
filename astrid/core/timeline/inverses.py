@@ -15,8 +15,8 @@ a ``timeline.reverted`` request instead of guessing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal, Sequence
+from dataclasses import dataclass
+from typing import Any, Sequence
 
 from astrid.timeline.timeline_model import validate_timeline_config_for_container
 
@@ -27,11 +27,10 @@ from .events.schema import (
     ClipAddedPayload,
     ClipAnnotatedPayload,
     ClipMovedPayload,
-    ClipPosition,
     ClipRemovedPayload,
     ClipReplacedPayload,
-    ClipRetrackedPayload,
     ClipRetimedPayload,
+    ClipRetrackedPayload,
     ClipSwappedPayload,
     ClipTextSetPayload,
     EffectAddedPayload,
@@ -50,7 +49,6 @@ from .events.schema import (
     TransitionRemovedPayload,
     TransitionSetPayload,
 )
-
 
 # ============================================================================
 # Inverse request shape

@@ -9,11 +9,15 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid.contracts.errors import AstridError
+from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.contracts.run_status import RunStatus
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RunPodHandle
 
+from .ai_toolkit import register as ai_toolkit_register
+from .ai_toolkit import review as ai_toolkit_review
+from .ai_toolkit import stage as ai_toolkit_stage
+from .ai_toolkit import train as ai_toolkit_train
 from .compute_backends import get_compute_backend, get_remote_execution_backend
 from .config import (
     TrainingRunBudgetError,
@@ -23,10 +27,6 @@ from .config import (
     load_training_run_config,
     preflight_training_run,
 )
-from .ai_toolkit import review as ai_toolkit_review
-from .ai_toolkit import register as ai_toolkit_register
-from .ai_toolkit import stage as ai_toolkit_stage
-from .ai_toolkit import train as ai_toolkit_train
 from .manifest_input import TrainingManifestError, normalize_ai_toolkit_manifest
 from .state import make_initial_state, read_last_run_state, write_last_run_state
 from .trainer_adapters import get_trainer_adapter
@@ -79,10 +79,12 @@ def main(argv: list[str] | None = None) -> int:
         TrainingManifestError,
         TrainingRunShellError,
     ) as exc:
-        raise AstridError(
-            str(exc),
-            recovery_command="python3 -m astrid.packs.training.orchestrators.training_run.run --config <config> --dry-run",
-        ) from exc
+        return render_astrid_error(
+            AstridError(
+                str(exc),
+                recovery_command="python3 -m astrid.packs.training.orchestrators.training_run.run --config <config> --dry-run",
+            )
+        )
 
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:

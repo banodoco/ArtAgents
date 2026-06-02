@@ -26,9 +26,6 @@ from astrid.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
 from astrid.core.project.paths import project_dir, resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
-from astrid.core.timeline import crud as timeline_crud
-from astrid.core.timeline.defaults import read_project_default
-from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
 from astrid.core.session.binding import (
     ASTRID_SESSION_ID_ENV,
     SESSION_FILE_NAME,
@@ -65,10 +62,13 @@ from astrid.core.session.paths import (
     session_path,
     sessions_dir,
 )
-from astrid.threads.ids import generate_ulid
 from astrid.core.task.events import EVENTS_FILENAME, read_events
+from astrid.core.timeline import crud as timeline_crud
+from astrid.core.timeline.defaults import read_project_default
+from astrid.core.timeline.paths import find_timeline_by_slug, find_timeline_slug_for_ulid
 from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.util.time import utc_now_iso
+from astrid.threads.ids import generate_ulid
 
 # ----- Templates --------------------------------------------------------
 #

@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('vibecomfy.validate')
 import argparse
 import subprocess
@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from astrid.core.cli_choices import add_choice_arg
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run VibeComfy workflow commands.")

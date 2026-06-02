@@ -20,6 +20,7 @@ import yaml
 
 from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
+from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -27,7 +28,6 @@ from astrid.core.pack import (
     pack_taxonomy_from_manifest,
     packs_root,
 )
-from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 from astrid.packs.validate import validate_pack
 
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
@@ -721,7 +721,7 @@ def _print_agent_view(view: dict) -> None:
         print(f"  sandbox: {sandbox}")
         print(f"  runs_with_user_process_permissions: {runs_with}")
         print(f"  permission_enforcement: {enforcement}")
-        print(f"  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+        print("  ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
 # ---------------------------------------------------------------------------
@@ -1198,7 +1198,7 @@ def _print_full_inspect(data: dict) -> None:
         print(f"    sandbox: {sandbox}")
         print(f"    runs_with_user_process_permissions: {runs_with}")
         print(f"    permission_enforcement: {enforcement}")
-        print(f"    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
+        print("    ℹ Permissions are disclosure-only. No sandboxing or runtime enforcement in v1.")
 
 
 def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
@@ -1208,7 +1208,7 @@ def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) ->
     if pack is None:
         raise AstridError(
             f"packs inspect: unknown pack {pack_id!r}",
-            recovery_command=f"List available packs: python3 -m astrid packs list",
+            recovery_command="List available packs: python3 -m astrid packs list",
         )
 
     payload = pack.agent if agent else _pack_payload(pack)

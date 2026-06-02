@@ -15,8 +15,8 @@ from ._common import (
     resolve_media_path,
     with_filter_result,
 )
-from .bucket_judge import BucketJudgeGate, judge_sidecar_path
 from .black_frame import BlackFrameFilter
+from .bucket_judge import BucketJudgeGate, judge_sidecar_path
 from .content_hash import ContentHashFilter
 from .duration import DurationFilter
 from .near_duplicate import NearDuplicateFilter
@@ -25,7 +25,6 @@ from .rights import RightsFilter
 from .semantic import SemanticVideoFilter, SemanticVisualFilter, semantic_sidecar_path
 from .source_cap import SourceCapFilter
 from .transcript_keyword import TranscriptKeywordFilter, transcript_sidecar_path
-
 
 STAGES = {
     "duration_filter": DurationFilter,

@@ -31,7 +31,6 @@ from astrid.core.task.validator import (
     validate_mutation,
 )
 
-
 PLAN_MUTATED_KIND = "plan_mutated"
 PLAN_INITIALIZED_KIND = "plan_initialized"
 STEP_TOMBSTONED_KIND = "plan_step_tombstoned"  # rendered inside plan_mutated.diff.op
@@ -92,7 +91,9 @@ def _apply_diff(plan: TaskPlan, diff: dict[str, Any]) -> TaskPlan:
 def _step_from_diff(payload: dict[str, Any]) -> Step:
     """Validate a single step dict from a diff payload via the plan validator."""
     # Reuse _validate_step indirectly: wrap into a one-step plan, validate, take steps[0].
-    from astrid.core.task.plan import _validate_step  # local import: keeps plan.py public surface clean
+    from astrid.core.task.plan import (
+        _validate_step,  # local import: keeps plan.py public surface clean
+    )
     return _validate_step(payload, 0, [])
 
 

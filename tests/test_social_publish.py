@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 import sys
 
@@ -72,7 +73,10 @@ def test_pipeline_publish_youtube_dispatch_reaches_wrapper(monkeypatch):
         captured["argv"] = argv
         return 17
 
-    monkeypatch.setattr(publish_youtube, "main", fake_main)
+    current_publish_youtube = importlib.import_module(
+        "astrid.packs.youtube.executors.upload.run"
+    )
+    monkeypatch.setattr(current_publish_youtube, "main", fake_main)
 
     result = pipeline.main(
         [

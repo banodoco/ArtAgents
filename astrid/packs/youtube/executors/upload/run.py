@@ -3,14 +3,17 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+
 guard_canonical_entrypoint('youtube.upload')
 import argparse
 import json
 
-from astrid.contracts.errors import AstridError
-from astrid.packs.youtube.executors.upload.src.social_publish import PublishError, publish_youtube_video
+from astrid.packs.youtube.executors.upload.src.social_publish import (
+    PublishError,
+    publish_youtube_video,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -4,8 +4,9 @@
 
 from __future__ import annotations
 
-
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('fal.fal_foley')
 import argparse
 import base64
@@ -13,7 +14,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
 from astrid.core.util.http import (
     FAL_QUEUE_URL,
     HttpClient,
@@ -21,7 +21,6 @@ from astrid.core.util.http import (
     fal_submit_and_poll,
 )
 from astrid.core.util.secrets import load_api_key
-
 
 FAL_MODEL_ID = "fal-ai/hunyuan-video-foley"
 

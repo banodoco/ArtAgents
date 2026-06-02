@@ -124,7 +124,7 @@ class TestRetryOnTransportError:
                 )
                 ret = worker.run()
             finally:
-                for p in patches:
+                for p in reversed(patches):
                     p.stop()
 
         assert ret == 0
@@ -152,7 +152,7 @@ class TestNoWorkAvailable:
             )
             ret = worker.run()
         finally:
-            for p in patches:
+            for p in reversed(patches):
                 p.stop()
 
         assert ret == 0
@@ -184,7 +184,7 @@ class TestLostClaim:
             )
             worker.run()
         finally:
-            for p in patches:
+            for p in reversed(patches):
                 p.stop()
 
         assert len(recorder.calls) == 1
@@ -220,7 +220,7 @@ class TestLostClaim:
                 # Must not raise — _fail swallows its own failures
                 ret = worker.run()
             finally:
-                for p in patches:
+                for p in reversed(patches):
                     p.stop()
 
         assert ret == 0
@@ -264,7 +264,7 @@ class TestBaselineSnapshotFailureRoutesToFail:
             )
             ret = worker.run()
         finally:
-            for p in patches:
+            for p in reversed(patches):
                 p.stop()
 
         assert ret == 0
@@ -313,7 +313,7 @@ class TestBaselineSnapshotFailureRoutesToFail:
 
             worker.run()
         finally:
-            for p in patches:
+            for p in reversed(patches):
                 p.stop()
 
         assert complete_calls == [], "_complete must not be called after snapshot failure"
@@ -345,7 +345,7 @@ class TestFullHappyPath:
             )
             ret = worker.run()
         finally:
-            for p in patches:
+            for p in reversed(patches):
                 p.stop()
 
         assert ret == 0

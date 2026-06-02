@@ -42,8 +42,9 @@ from typing import Any, Mapping
 from . import env as reigh_env
 from . import timeline_io
 from .errors import TimelineNotFoundError
-from .supabase_client import Auth, SupabaseHTTPError, post_json
-from .timeline_io import Mutator, RawTimelinePayload as TimelineConfig, SaveResult
+from .supabase_client import Auth, post_json
+from .timeline_io import Mutator, SaveResult
+from .timeline_io import RawTimelinePayload as TimelineConfig
 
 logger = logging.getLogger(__name__)
 

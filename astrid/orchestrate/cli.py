@@ -26,13 +26,11 @@ from astrid.core.task.events import read_events
 from astrid.core.task.normalize import dump_events_jsonl, normalize_events
 from astrid.core.task.plan import (
     RepeatForEach,
-    Step,
-    is_attested_kind,
-    is_code_kind,
-    is_group_step,
     RepeatUntil,
     TaskPlan,
     TaskPlanError,
+    is_attested_kind,
+    is_group_step,
     iter_steps_with_path,
     load_plan,
     parse_from_ref,
@@ -47,10 +45,8 @@ from .compile import (
 from .dsl import (
     OrchestrateDefinitionError,
     _PlanBuilder,
-    _StepHandle,
 )
 from .test_runner import run_fixture
-
 
 _QID_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$")
 _NEW_TEMPLATE = '''"""Author-scaffolded orchestrator: {qualified_id}.
@@ -96,7 +92,6 @@ def _resolved_plan(qid: str, packs_root: Optional[Path]) -> TaskPlan:
     payload = builder.to_dict(_resolver=_resolver_for(packs_root))
     # to_dict already round-trips through load_plan; re-parse to get the typed
     # TaskPlan instance for traversal.
-    import json
     import os
     import tempfile
 

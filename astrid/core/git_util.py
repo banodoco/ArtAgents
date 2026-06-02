@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 class GitUtilError(RuntimeError):
@@ -50,7 +49,7 @@ def git_root(path: str | Path) -> Path:
     except FileNotFoundError as exc:
         raise GitUtilError("git executable not found on PATH") from exc
     except subprocess.TimeoutExpired as exc:
-        raise GitUtilError(f"git rev-parse timed out after 10s") from exc
+        raise GitUtilError("git rev-parse timed out after 10s") from exc
 
     if result.returncode != 0 or not result.stdout.strip():
         raise GitUtilError(f"not a git repository (or no git available): {result.stderr.strip()}")
@@ -76,7 +75,7 @@ def git_status(path: str | Path) -> GitStatus:
     except FileNotFoundError as exc:
         raise GitUtilError("git executable not found on PATH") from exc
     except subprocess.TimeoutExpired as exc:
-        raise GitUtilError(f"git status timed out after 10s") from exc
+        raise GitUtilError("git status timed out after 10s") from exc
 
     if result.returncode != 0:
         raise GitUtilError(f"git status failed: {result.stderr.strip()}")
@@ -133,7 +132,7 @@ def git_diff_file(path: str | Path, against: str = "HEAD") -> str:
     except FileNotFoundError as exc:
         raise GitUtilError("git executable not found on PATH") from exc
     except subprocess.TimeoutExpired as exc:
-        raise GitUtilError(f"git diff timed out after 10s") from exc
+        raise GitUtilError("git diff timed out after 10s") from exc
 
     if result.returncode != 0:
         raise GitUtilError(f"git diff failed: {result.stderr.strip()}")

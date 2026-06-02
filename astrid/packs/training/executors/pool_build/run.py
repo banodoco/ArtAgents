@@ -4,9 +4,9 @@
 
 from __future__ import annotations
 
-
 from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+
 guard_canonical_entrypoint('training.pool_build')
 import argparse
 import json
