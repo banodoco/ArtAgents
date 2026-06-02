@@ -32,7 +32,7 @@ from astrid.core.util.time import utc_now_seconds
 from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.theme_schema import load_theme, theme_root
-from astrid.timeline import (
+from astrid.core.timeline import (
     CARRY_FORWARD_SOURCE_FIELDS,
     METADATA_VERSION,
     AssetRegistry,
@@ -1024,7 +1024,7 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     if "output" not in config:
         themes_root = WORKSPACE_ROOT / "themes"
         try:
-            from astrid.timeline import resolve_timeline_theme
+            from astrid.core.timeline import resolve_timeline_theme
             merged_theme = resolve_timeline_theme(config, themes_root)
             config["output"] = materialize_output(config, merged_theme)
         except (FileNotFoundError, ValueError):

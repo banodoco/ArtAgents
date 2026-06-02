@@ -28,7 +28,7 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
-from astrid import timeline as timeline_mod
+from astrid.core.timeline import Timeline
 
 from .errors import TimelineNotFoundError, TimelineVersionConflictError
 from .supabase_client import Auth, SupabaseHTTPError, get_json, post_json, rpc
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 
 # Local raw-payload alias for in-flight mutation. The rich TypedDict for
-# fully-validated timelines lives in astrid.timeline; this module operates on
+# fully-validated timelines lives in astrid.core.timeline; this module operates on
 # the unvalidated POST/PATCH body before it has been schema-checked.
 RawTimelinePayload = dict[str, Any]
 Mutator = Callable[[RawTimelinePayload, int], RawTimelinePayload]
@@ -51,16 +51,16 @@ class SaveResult:
 
 
 def _round_trip(payload: Mapping[str, Any]) -> RawTimelinePayload:
-    """Round-trip a fetched timeline through astrid.timeline so byte-equivalent
+    """Round-trip a fetched timeline through astrid.core.timeline so byte-equivalent
     allowlist parity stays intact."""
 
-    return timeline_mod.Timeline.from_json_data(dict(payload)).to_config()  # type: ignore[return-value]
+    return Timeline.from_json_data(dict(payload)).to_config()  # type: ignore[return-value]
 
 
 def _to_storage_payload(config: Mapping[str, Any]) -> dict[str, Any]:
     """Validate + emit the JSON shape the DB column expects."""
 
-    return timeline_mod.Timeline.from_config(dict(config)).to_json_data()
+    return Timeline.from_config(dict(config)).to_json_data()
 
 
 def _looks_like_version_conflict(exc: SupabaseHTTPError) -> bool:

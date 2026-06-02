@@ -6,9 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.paths import ProjectPathError, validate_run_id
+from astrid.core.timeline.banodoco_schema import canonical_timeline_config
 
 from .paths import validate_timeline_slug, validate_timeline_ulid
 
@@ -43,7 +43,7 @@ def _validate_run_ref(value: str) -> str:
 def validate_timeline_config_json(raw: Any) -> dict[str, Any]:
     """Return a canonical raw TimelineConfig suitable for ``assembly.json``."""
     try:
-        return timeline_contract.canonical_timeline_config(raw)
+        return canonical_timeline_config(raw)
     except ValueError as exc:
         raise TimelineValidationError(str(exc)) from exc
 

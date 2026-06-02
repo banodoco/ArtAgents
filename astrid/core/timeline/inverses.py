@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Sequence
 
-from astrid.timeline.timeline_model import validate_timeline_config_for_container
+from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 
 from .events.schema import (
     ArrangementReplacedPayload,

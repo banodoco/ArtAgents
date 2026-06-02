@@ -22,7 +22,7 @@ from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from astrid import timeline
+from astrid.core import timeline
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.audit import AuditContext
 from astrid.core.subprocess_env import build_child_subprocess_env

@@ -28,7 +28,7 @@ The element-catalog pack loader has a pre-existing bug (the
 ``packs/local/elements/effects/_shared`` folder has no manifest and the
 loader raises ``ElementValidationError`` while Astrid validates a clip's
 ``clipType`` against the effects catalog). We side-step that by stubbing
-``timeline._effect_ids`` / ``_animation_ids`` / ``_transition_ids`` to
+``banodoco_schema._effect_ids`` / ``_animation_ids`` / ``_transition_ids`` to
 empty sets, which is exactly the surface ``validate_timeline`` consults.
 This is flagged in the report, not silently fixed.
 """
@@ -59,6 +59,7 @@ from astrid.core.reigh.worker_jwt import (
     JwtVerificationError,
     verify_user_jwt,
 )
+from astrid.core.timeline import banodoco_schema as banodoco_schema_mod
 
 
 # ---------------------------------------------------------------------------
@@ -254,9 +255,9 @@ def _stub_element_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     runs (allowlist checks, required fields, transition rules, etc.) but
     no element catalog is loaded."""
 
-    monkeypatch.setattr(timeline_mod, "_effect_ids", lambda theme=None: set())
-    monkeypatch.setattr(timeline_mod, "_animation_ids", lambda: set())
-    monkeypatch.setattr(timeline_mod, "_transition_ids", lambda: set())
+    monkeypatch.setattr(banodoco_schema_mod, "_effect_ids", lambda theme=None: set())
+    monkeypatch.setattr(banodoco_schema_mod, "_animation_ids", lambda: set())
+    monkeypatch.setattr(banodoco_schema_mod, "_transition_ids", lambda: set())
 
 
 @pytest.fixture(autouse=True)

@@ -54,8 +54,12 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
-from astrid import timeline as timeline_contract
 from astrid.contracts.errors import AstridError
+from astrid.core.timeline.banodoco_schema import (
+    canonical_empty_timeline,
+    canonical_timeline_config,
+    validate_timeline_config_for_container,
+)
 from astrid.core.timeline.kinds import normalize_track_kind
 
 from .events.schema import (
@@ -658,7 +662,7 @@ def apply_event_to_assembly(
     if event.kind == "timeline.config_replaced":
         payload = event.payload
         if isinstance(payload, TimelineConfigReplacedPayload):
-            return timeline_contract.validate_timeline_config_for_container(payload.config)
+            return validate_timeline_config_for_container(payload.config)
         return state
 
     # timeline.recovered — replace projected assembly with anchor projection
@@ -666,7 +670,7 @@ def apply_event_to_assembly(
         payload = event.payload
         if isinstance(payload, TimelineRecoveredPayload):
             if payload.projected_state_summary is not None:
-                return timeline_contract.validate_timeline_config_for_container(
+                return validate_timeline_config_for_container(
                     payload.projected_state_summary
                 )
             # Fall through: if no projected state in payload, treat as no-op
@@ -763,9 +767,9 @@ def project_to_assembly(
         When any event cannot be projected.
     """
     state: dict[str, Any] = (
-        timeline_contract.canonical_timeline_config(initial_assembly)
+        canonical_timeline_config(initial_assembly)
         if initial_assembly is not None
-        else timeline_contract.canonical_empty_timeline()
+        else canonical_empty_timeline()
     )
     for event in events:
         state = apply_event_to_assembly(state, event, _copy_state=False)

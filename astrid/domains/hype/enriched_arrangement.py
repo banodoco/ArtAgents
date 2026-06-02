@@ -6,7 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from astrid import timeline
+from astrid.core import timeline
 
 from .text_match import segments_in_range
 

@@ -32,7 +32,7 @@ from astrid.domains.hype.text_match import (
     token_set_similarity,
     tokenize,
 )
-from astrid.timeline import load_timeline
+from astrid.core.timeline import load_timeline
 
 
 def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:

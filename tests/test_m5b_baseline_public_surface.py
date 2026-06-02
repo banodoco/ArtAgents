@@ -306,6 +306,415 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# astrid.timeline.timeline_model deep re-export surface
+# ---------------------------------------------------------------------------
+
+class TimelineModelReExportTest(unittest.TestCase):
+    """The legacy deep import ``astrid.timeline.timeline_model`` must keep
+    exposing the same Banodoco schema names, re-exported from canonical core.
+
+    After the split the module is a thin re-export over
+    ``astrid.core.timeline.banodoco_schema``.  Historical importers that use
+    the legacy module path must continue to resolve every name.
+    """
+
+    def test_schema_type_names_importable(self) -> None:
+        import astrid.timeline.timeline_model as tm
+
+        for name in (
+            "TimelineClip",
+            "TimelineConfig",
+            "ThemeOverrides",
+            "TimelineOutput",
+            "AssetEntry",
+            "Theme",
+            "AnimationReference",
+            "AnimationReferenceList",
+            "AnimationReferenceObject",
+            "ParameterDefinition",
+            "ParameterOption",
+            "ParameterType",
+            "TrackBlendMode",
+            "TrackDefinition",
+            "TrackFit",
+            "TrackKind",
+            "ClipContinuous",
+            "ClipEntrance",
+            "ClipExit",
+            "ClipTransition",
+            "ClipTransitionReference",
+            "TextAlignment",
+            "TextClipData",
+            "AssetRegistry",
+            "AssetRegistryEntry",
+            "Pool",
+            "PoolCategory",
+            "PoolEntry",
+            "PoolKind",
+            "PoolScores",
+            "Arrangement",
+            "ArrangementAudioSource",
+            "ArrangementClip",
+            "ArrangementTextOverlay",
+            "ArrangementVisualRole",
+            "ArrangementVisualSource",
+            "PipelineMetadata",
+            "PipelineMetadataClipEntry",
+            "PipelinePoolKind",
+            "SourceIds",
+            "AudioBindingSource",
+            "AudioBindingValue",
+            "ClipClassifiedKind",
+            "ClipType",
+            "TimelineEffect",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(tm, name), f"missing {name}")
+
+    def test_fallback_shared_types_importable(self) -> None:
+        import astrid.timeline.timeline_model as tm
+
+        for name in (
+            "SharedAssetEntry",
+            "SharedTheme",
+            "SharedThemeOverrides",
+            "SharedTimelineClip",
+            "SharedTimelineConfig",
+            "SharedTimelineOutput",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(tm, name), f"missing {name}")
+
+    def test_constants_importable(self) -> None:
+        import astrid.timeline.timeline_model as tm
+
+        for name in (
+            "ARRANGEMENT_VERSION",
+            "METADATA_VERSION",
+            "POOL_VERSION",
+            "CARRY_FORWARD_SOURCE_FIELDS",
+            "BUILTIN_CLIP_TYPES",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(tm, name), f"missing {name}")
+
+    def test_validation_functions_importable(self) -> None:
+        import astrid.timeline.timeline_model as tm
+
+        for name in (
+            "validate_arrangement",
+            "validate_arrangement_duration_window",
+            "validate_metadata",
+            "validate_pool",
+            "validate_registry",
+            "validate_timeline",
+            "validate_timeline_config_for_container",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(tm, name), f"missing {name}")
+                self.assertTrue(
+                    callable(getattr(tm, name)), f"{name} not callable"
+                )
+
+    def test_schema_functions_importable(self) -> None:
+        import astrid.timeline.timeline_model as tm
+
+        for name in (
+            "canonical_empty_timeline",
+            "canonical_timeline_config",
+            "materialize_output",
+            "timeline_config_digest",
+            "timeline_configs_equal",
+            "is_all_generative_arrangement",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(tm, name), f"missing {name}")
+                self.assertTrue(
+                    callable(getattr(tm, name)), f"{name} not callable"
+                )
+
+    def test_private_catalog_hooks_importable(self) -> None:
+        import astrid.timeline.timeline_model as tm
+
+        for name in (
+            "_animation_ids",
+            "_animation_meta",
+            "_effect_ids",
+            "_normalize_clip_for_validation",
+            "_transition_ids",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(tm, name), f"missing {name}")
+
+    def test_error_types_importable(self) -> None:
+        from astrid.timeline.timeline_model import ArrangementDurationError
+
+        self.assertIsNotNone(ArrangementDurationError)
+
+    def test_canonical_source_is_banodoco_schema(self) -> None:
+        """Sample names from ``astrid.timeline.timeline_model`` must resolve
+        to ``astrid.core.timeline.banodoco_schema`` as their implementation
+        module (or the external package for TypedDict types depending on
+        Python version), confirming the re-export is canonical core, not the
+        facade."""
+        import astrid.timeline.timeline_model as tm
+
+        # Functions and classes *defined* in banodoco_schema → strict check
+        strict_checks: list[tuple[str, str]] = [
+            ("validate_timeline", "astrid.core.timeline.banodoco_schema"),
+            ("canonical_timeline_config", "astrid.core.timeline.banodoco_schema"),
+            ("ArrangementDurationError", "astrid.core.timeline.banodoco_schema"),
+            ("_effect_ids", "astrid.core.timeline.banodoco_schema"),
+        ]
+        for name, expected_module in strict_checks:
+            with self.subTest(kind="strict", name=name):
+                obj = getattr(tm, name)
+                self.assertEqual(
+                    getattr(obj, "__module__", None),
+                    expected_module,
+                    f"{name}.__module__ is {getattr(obj, '__module__', None)!r}, "
+                    f"expected {expected_module!r}",
+                )
+
+        # TypedDict types may resolve to external banodoco_timeline_schema
+        # on Python < 3.12; verify they resolve to either canonical core or
+        # the external package (both are correct — the facade re-exports).
+        typed_dict_names = ("TimelineClip", "TimelineConfig")
+        for name in typed_dict_names:
+            with self.subTest(kind="typed-dict", name=name):
+                obj = getattr(tm, name)
+                actual_module = getattr(obj, "__module__", None)
+                self.assertIn(
+                    actual_module,
+                    (
+                        "astrid.core.timeline.banodoco_schema",
+                        "banodoco_timeline_schema.generated",
+                    ),
+                    f"{name}.__module__ is {actual_module!r}, expected one of "
+                    "('astrid.core.timeline.banodoco_schema', "
+                    "'banodoco_timeline_schema.generated')",
+                )
+
+
+# ---------------------------------------------------------------------------
+# astrid.timeline.banodoco_composer deep re-export surface
+# ---------------------------------------------------------------------------
+
+class BanodocoComposerReExportTest(unittest.TestCase):
+    """The legacy deep import ``astrid.timeline.banodoco_composer`` must keep
+    exposing the Banodoco composer class and its load/save helpers, re-exported
+    from canonical core.
+
+    After the split the module is a thin re-export over
+    ``astrid.core.timeline.banodoco_composer``.
+    """
+
+    def test_composer_class_importable(self) -> None:
+        from astrid.timeline.banodoco_composer import Timeline
+
+        self.assertIsNotNone(Timeline)
+
+    def test_composer_view_types_importable(self) -> None:
+        from astrid.timeline.banodoco_composer import (
+            TimelineClipView,
+            TimelineRenderView,
+        )
+
+        self.assertIsNotNone(TimelineClipView)
+        self.assertIsNotNone(TimelineRenderView)
+
+    def test_load_functions_importable(self) -> None:
+        import astrid.timeline.banodoco_composer as bc
+
+        for name in (
+            "load_arrangement",
+            "load_metadata",
+            "load_pool",
+            "load_registry",
+            "load_timeline",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(bc, name), f"missing {name}")
+                self.assertTrue(
+                    callable(getattr(bc, name)), f"{name} not callable"
+                )
+
+    def test_save_functions_importable(self) -> None:
+        import astrid.timeline.banodoco_composer as bc
+
+        for name in (
+            "save_arrangement",
+            "save_metadata",
+            "save_pool",
+            "save_registry",
+            "save_timeline",
+        ):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(bc, name), f"missing {name}")
+                self.assertTrue(
+                    callable(getattr(bc, name)), f"{name} not callable"
+                )
+
+    def test_composer_helpers_importable(self) -> None:
+        import astrid.timeline.banodoco_composer as bc
+
+        for name in ("merge_generation", "resolve_timeline_theme"):
+            with self.subTest(name=name):
+                self.assertTrue(hasattr(bc, name), f"missing {name}")
+                self.assertTrue(
+                    callable(getattr(bc, name)), f"{name} not callable"
+                )
+
+    def test_canonical_source_is_banodoco_composer(self) -> None:
+        """Sample names from ``astrid.timeline.banodoco_composer`` must
+        resolve to ``astrid.core.timeline.banodoco_composer`` as their
+        implementation module."""
+        import astrid.timeline.banodoco_composer as bc
+
+        checks: list[tuple[str, str]] = [
+            ("Timeline", "astrid.core.timeline.banodoco_composer"),
+            ("save_timeline", "astrid.core.timeline.banodoco_composer"),
+            ("load_timeline", "astrid.core.timeline.banodoco_composer"),
+        ]
+        for name, expected_module in checks:
+            with self.subTest(name=name):
+                obj = getattr(bc, name)
+                self.assertEqual(
+                    getattr(obj, "__module__", None),
+                    expected_module,
+                    f"{name}.__module__ is {getattr(obj, '__module__', None)!r}, "
+                    f"expected {expected_module!r}",
+                )
+
+
+# ---------------------------------------------------------------------------
+# astrid.timeline canonical-source verification
+# ---------------------------------------------------------------------------
+
+class TimelineCanonicalSourceTest(unittest.TestCase):
+    """The public ``astrid.timeline`` facade must expose every required name
+    and each name's ``__module__`` must point to canonical core, not to the
+    compatibility facade itself.
+
+    This confirms that ``astrid.timeline`` is a thin public re-export and the
+    implementation source lives in ``astrid.core.timeline``.
+    """
+
+    def test_top_level_names_resolve_to_canonical_core(self) -> None:
+        import astrid.timeline as t
+
+        # Functions and classes *defined* in our canonical core → strict check
+        strict_schema_checks: list[tuple[str, str]] = [
+            ("validate_timeline", "astrid.core.timeline.banodoco_schema"),
+            ("validate_timeline_config_for_container", "astrid.core.timeline.banodoco_schema"),
+            ("canonical_timeline_config", "astrid.core.timeline.banodoco_schema"),
+            ("canonical_empty_timeline", "astrid.core.timeline.banodoco_schema"),
+            ("timeline_config_digest", "astrid.core.timeline.banodoco_schema"),
+            ("timeline_configs_equal", "astrid.core.timeline.banodoco_schema"),
+            ("ArrangementDurationError", "astrid.core.timeline.banodoco_schema"),
+            ("_effect_ids", "astrid.core.timeline.banodoco_schema"),
+        ]
+        for name, expected_module in strict_schema_checks:
+            with self.subTest(group="strict-schema", name=name):
+                obj = getattr(t, name)
+                self.assertEqual(
+                    getattr(obj, "__module__", None),
+                    expected_module,
+                    f"{name}.__module__ = {getattr(obj, '__module__', None)!r}",
+                )
+
+        strict_composer_checks: list[tuple[str, str]] = [
+            ("Timeline", "astrid.core.timeline.banodoco_composer"),
+            ("TimelineClipView", "astrid.core.timeline.banodoco_composer"),
+            ("TimelineRenderView", "astrid.core.timeline.banodoco_composer"),
+            ("save_timeline", "astrid.core.timeline.banodoco_composer"),
+            ("load_timeline", "astrid.core.timeline.banodoco_composer"),
+            ("merge_generation", "astrid.core.timeline.banodoco_composer"),
+            ("resolve_timeline_theme", "astrid.core.timeline.banodoco_composer"),
+        ]
+        for name, expected_module in strict_composer_checks:
+            with self.subTest(group="strict-composer", name=name):
+                obj = getattr(t, name)
+                self.assertEqual(
+                    getattr(obj, "__module__", None),
+                    expected_module,
+                    f"{name}.__module__ = {getattr(obj, '__module__', None)!r}",
+                )
+
+        # TypedDict types: on Python >= 3.12 they resolve to our module;
+        # on Python < 3.12 they keep the external package __module__.
+        # Both are valid — the facade is a thin re-export.
+        typed_dict_ok = (
+            "astrid.core.timeline.banodoco_schema",
+            "banodoco_timeline_schema.generated",
+        )
+        for name in ("TimelineClip", "TimelineConfig", "ThemeOverrides",
+                      "AssetEntry", "SharedAssetEntry"):
+            with self.subTest(group="typed-dict", name=name):
+                obj = getattr(t, name)
+                actual = getattr(obj, "__module__", None)
+                self.assertIn(
+                    actual, typed_dict_ok,
+                    f"{name}.__module__ = {actual!r} not in {typed_dict_ok}",
+                )
+
+        # Typing constructs (Literal, Union aliases) → 'typing' or our module
+        typing_ok = (
+            "astrid.core.timeline.banodoco_schema",
+            "typing",
+        )
+        for name in ("AnimationReference", "TrackKind", "ParameterType"):
+            with self.subTest(group="typing-alias", name=name):
+                obj = getattr(t, name)
+                actual = getattr(obj, "__module__", None)
+                self.assertIn(
+                    actual, typing_ok,
+                    f"{name}.__module__ = {actual!r} not in {typing_ok}",
+                )
+
+    def test_no_private_logic_in_facade(self) -> None:
+        """The ``astrid.timeline`` compat module must not define private hooks
+        or validation wrappers — it is a pure re-export surface."""
+        import astrid.timeline
+
+        facade_file = astrid.timeline.__file__
+        self.assertIsNotNone(facade_file)
+        self.assertIn("__init__.py", str(facade_file))
+
+        # _sync_private_hooks must not exist anywhere in the facade
+        self.assertFalse(
+            hasattr(astrid.timeline, "_sync_private_hooks"),
+            "astrid.timeline must not expose _sync_private_hooks",
+        )
+
+    def test_timeline_model_is_thin_reexport(self) -> None:
+        """``astrid.timeline.timeline_model`` must not define its own symbols;
+        every name is re-exported from canonical core."""
+        import astrid.timeline.timeline_model as tm
+
+        tm_file = tm.__file__ if hasattr(tm, "__file__") else None
+        self.assertIsNotNone(tm_file)
+        # The module must not contain _sync_private_hooks
+        self.assertFalse(
+            hasattr(tm, "_sync_private_hooks"),
+            "timeline_model must not expose _sync_private_hooks",
+        )
+
+    def test_banodoco_composer_is_thin_reexport(self) -> None:
+        """``astrid.timeline.banodoco_composer`` must not define its own symbols;
+        every name is re-exported from canonical core."""
+        import astrid.timeline.banodoco_composer as bc
+
+        bc_file = bc.__file__ if hasattr(bc, "__file__") else None
+        self.assertIsNotNone(bc_file)
+        # The module must not contain _sync_private_hooks
+        self.assertFalse(
+            hasattr(bc, "_sync_private_hooks"),
+            "banodoco_composer must not expose _sync_private_hooks",
+        )
+
+
+# ---------------------------------------------------------------------------
 # astrid.core.task.lifecycle public import surface
 # ---------------------------------------------------------------------------
 

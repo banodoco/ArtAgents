@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from astrid import timeline as timeline_contract
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
+from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
 from astrid.threads.ids import generate_ulid
 
@@ -93,7 +93,7 @@ def create_timeline(
     tdir = timeline_dir(project_slug, ulid, root=root)
     tdir.mkdir(parents=True, exist_ok=False)
 
-    assembly = validate_timeline_config_json(timeline_contract.canonical_empty_timeline())
+    assembly = validate_timeline_config_json(canonical_empty_timeline())
     manifest = Manifest(
         schema_version=TIMELINE_SCHEMA_VERSION,
         contributing_runs=[],

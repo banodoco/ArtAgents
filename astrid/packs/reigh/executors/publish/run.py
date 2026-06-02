@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid import timeline
+from astrid.core import timeline
 from astrid.core.util.hash import sha256_file
 
 TIMELINE_ASSETS_BUCKET = "timeline-assets"

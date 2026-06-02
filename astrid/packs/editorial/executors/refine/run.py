@@ -36,7 +36,7 @@ from astrid.packs.editorial.executors.refine.src.reviewers.overlay_fit import Ov
 from astrid.packs.editorial.executors.refine.src.reviewers.speaker_flow import SpeakerFlowReviewer
 from astrid.packs.editorial.executors.refine.src.reviewers.visual_quality import VisualQualityReviewer
 from astrid.domains.hype.text_match import segments_in_range, token_set_similarity, tokenize
-from astrid.timeline import (
+from astrid.core.timeline import (
     canonical_timeline_config,
     is_all_generative_arrangement,
     load_arrangement,

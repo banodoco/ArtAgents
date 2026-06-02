@@ -15,10 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid import timeline as timeline_contract
 from astrid.core.timeline.events.schema import (
     TimelineActor,
     TimelineRecoveredPayload,
+)
+from astrid.core.timeline.banodoco_schema import (
+    timeline_config_digest,
+    validate_timeline_config_for_container,
 )
 from astrid.core.timeline.projection import (
     ProjectionError,
@@ -397,7 +400,7 @@ def _validate_authoritative_config(
 ) -> dict[str, Any]:
     """Return a validated raw TimelineConfig or raise a projection error."""
     try:
-        return timeline_contract.validate_timeline_config_for_container(config)
+        return validate_timeline_config_for_container(config)
     except Exception as exc:
         raise ProjectionError(
             event_id=event_id,
@@ -412,8 +415,8 @@ def _assert_snapshot_matches_anchor(
     *,
     event_id: str,
 ) -> None:
-    snapshot_digest = timeline_contract.timeline_config_digest(snapshot_config)
-    anchor_digest = timeline_contract.timeline_config_digest(anchor_config)
+    snapshot_digest = timeline_config_digest(snapshot_config)
+    anchor_digest = timeline_config_digest(anchor_config)
     if snapshot_digest != anchor_digest:
         raise ProjectionError(
             event_id=event_id,

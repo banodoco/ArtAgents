@@ -12,7 +12,7 @@ from astrid.domains.hype.arrangement_rules import (
 from astrid.domains.hype.text_match import segments_in_range, token_set_similarity, tokenize
 from astrid.packs.editorial.executors.refine.src.reviewers import Reviewer
 from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.timeline import load_registry
+from astrid.core.timeline import load_registry
 
 BOILERPLATE_TOKENS = {"um", "uh"}
 BOILERPLATE_BIGRAMS = {("you", "know"), ("i", "mean"), ("sort", "of"), ("kind", "of")}

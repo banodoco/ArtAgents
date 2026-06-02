@@ -34,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
-from astrid import timeline
+from astrid.core import timeline
 from astrid._paths import WORKSPACE_ROOT, executor_argv
 from astrid.audit import PARENT_IDS_ENV, AuditContext
 from astrid.core.cli_choices import add_choice_arg

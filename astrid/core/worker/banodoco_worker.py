@@ -232,7 +232,7 @@ def _worker_append_events(
             f"remote-only claim deferred to m6 (project_id={project_id})"
         )
 
-    from astrid import timeline as timeline_contract
+    from astrid.core.timeline import canonical_timeline_config
     from astrid.core.timeline._edit_helpers import pack_write_gateway
     from astrid.core.timeline.events.schema import TimelineActor
     from astrid.core.timeline.paths import find_timeline_by_event_stream_id
@@ -267,7 +267,7 @@ def _worker_append_events(
     new_config = mutator(snapshot_payload, 0)
     if not isinstance(new_config, dict):
         raise RuntimeError("worker mutator did not return a dict")
-    new_config = timeline_contract.canonical_timeline_config(new_config)
+    new_config = canonical_timeline_config(new_config)
 
     # Emit the validated full TimelineConfig replacement surface.
     events = [

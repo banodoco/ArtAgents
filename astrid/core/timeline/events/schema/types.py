@@ -11,12 +11,12 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
-from astrid import timeline as timeline_contract
 from astrid.core.timeline.kinds import (
     normalize_event_clip_kind,
     normalize_track_kind,
     normalize_transition_kind,
 )
+from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 
 EVENT_SCHEMA_VERSION = 2
 
@@ -64,10 +64,14 @@ TimelineImportSource = Literal["legacy_local", "supabase_config", "other"]
 # \"video\", \"image\", \"effect\", and \"opaque\" which are element-kind
 # descriptors rather than event-payload clip kinds.
 ClipKind = Literal["visual", "audio", "text"]
-# Canonical event-schema TrackKind; mirrors ``astrid.timeline.TrackKind`` and
-# the built-in track catalog (catalog=\"track\") in ``astrid.core.pack``.
-# ``astrid.timeline.timeline_model`` mirrors this definition because the event
-# schema cannot be imported there without a cycle; keep the two in sync.
+# Canonical event-schema TrackKind; mirrors
+# ``astrid.core.timeline.banodoco_schema.TrackKind`` and
+# the public ``astrid.timeline.TrackKind`` compatibility export, plus
+# the built-in track catalog (catalog="track") in ``astrid.core.pack``.
+# This definition is intentionally duplicated rather than imported from the
+# schema-model module: keeping event-payload schemas decoupled from the
+# Banodoco-schema implementation avoids import-time coupling between the two
+# layers. Do not consolidate into a shared kinds module.
 TrackKind = Literal["visual", "audio"]
 
 
@@ -334,7 +338,7 @@ class TimelineConfigReplacedPayload:
 
     def __post_init__(self) -> None:
         try:
-            config = timeline_contract.validate_timeline_config_for_container(self.config)
+            config = validate_timeline_config_for_container(self.config)
         except Exception as exc:
             raise TimelineEventSchemaError(str(exc)) from exc
         object.__setattr__(self, "config", config)
@@ -835,7 +839,7 @@ class TimelineRecoveredPayload:
         _require_nonempty_str(self.reason, "payload.reason")
         if self.projected_state_summary is not None:
             try:
-                projected_state_summary = timeline_contract.validate_timeline_config_for_container(
+                projected_state_summary = validate_timeline_config_for_container(
                     self.projected_state_summary
                 )
             except Exception as exc:

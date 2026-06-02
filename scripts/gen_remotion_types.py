@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate Remotion TypeScript types from timeline.py."""
+"""Generate Remotion TypeScript types from banodoco_schema.py."""
 
 import sys
 import types
@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import astrid.timeline as timeline
+import astrid.core.timeline as timeline
 
 BANNER = "\n".join(
     [
@@ -73,7 +73,7 @@ def _build_typeddict_registry() -> (
 
     Returns ``(canonical_by_id, ordered_canonical_emissions, aliases_by_id)``.
     Canonical is the ``Shared*``-prefixed alias when present (matches the
-    Pydantic import-as direction in ``astrid/timeline.py:25-31``); otherwise
+    Pydantic import-as direction in ``astrid/core/timeline/banodoco_schema.py``); otherwise
     the alphabetically-first alias. Every other name pointing at the same
     class becomes a ``export type X = Canonical;`` back-compat alias.
     """
