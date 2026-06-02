@@ -451,10 +451,10 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
             return_value=object(),
         ):
             stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
-                pipeline.main(["nonexistentcmd123"])
-            self.assertEqual(raised.exception.code, 2)
-            self.assertIn("astrid: unknown command", stderr.getvalue())
+            with contextlib.redirect_stderr(stderr):
+                exit_code = pipeline.main(["nonexistentcmd123"])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("unknown command", stderr.getvalue())
             self.assertIn("nonexistentcmd123", stderr.getvalue())
 
     def test_multiple_unknown_commands(self) -> None:
@@ -469,10 +469,10 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
             for cmd in bogus:
                 with self.subTest(cmd=cmd):
                     stderr = io.StringIO()
-                    with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
-                        pipeline.main([cmd])
-                    self.assertEqual(raised.exception.code, 2)
-                    self.assertIn(f"astrid: unknown command '{cmd}'", stderr.getvalue())
+                    with contextlib.redirect_stderr(stderr):
+                        exit_code = pipeline.main([cmd])
+                    self.assertEqual(exit_code, 2)
+                    self.assertIn(f"unknown command '{cmd}'", stderr.getvalue())
 
     def test_unknown_command_with_args(self) -> None:
         """Unknown command followed by extra args still exits 2."""
@@ -483,10 +483,10 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
             return_value=object(),
         ):
             stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
-                pipeline.main(["flarg", "--project", "demo"])
-            self.assertEqual(raised.exception.code, 2)
-            self.assertIn("astrid: unknown command", stderr.getvalue())
+            with contextlib.redirect_stderr(stderr):
+                exit_code = pipeline.main(["flarg", "--unknown-arg"])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("unknown command", stderr.getvalue())
 
     def test_unknown_command_never_routes_to_default_orchestrator(self) -> None:
         """Verify that an unknown command does NOT invoke the default orchestrator."""
@@ -502,8 +502,9 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
             ) as mock_fallback,
         ):
             stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit):
-                pipeline.main(["boguscmd"])
+            with contextlib.redirect_stderr(stderr):
+                exit_code = pipeline.main(["boguscmd"])
+            self.assertEqual(exit_code, 2)
             mock_fallback.assert_not_called()
 
 

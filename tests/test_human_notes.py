@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from astrid.contracts.errors import AstridError
 from astrid.packs.editorial.executors.arrange import run as arrange
 from astrid.packs.editorial.executors.editor_review import run as editor_review
 from astrid.packs.editorial.executors.human_notes import run as human_notes
@@ -204,7 +205,7 @@ class HumanNotesTest(unittest.TestCase):
         paths = self.write_inputs(tmp_dir)
         fake = FakeClaudeClient(self.payload([self.note(clip_uuid="ffffffff")]))
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
         self.assertFalse((paths["out"] / "editor_review.json").exists())
@@ -214,7 +215,7 @@ class HumanNotesTest(unittest.TestCase):
         paths = self.write_inputs(tmp_dir)
         fake = FakeClaudeClient(self.payload([self.note(clip_order=1, clip_uuid="00000002")]))
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
     def test_rejects_malformed_action_detail_micro_fix(self) -> None:
@@ -230,7 +231,7 @@ class HumanNotesTest(unittest.TestCase):
             )
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
     def test_rejects_malformed_action_detail_swap(self) -> None:
@@ -248,7 +249,7 @@ class HumanNotesTest(unittest.TestCase):
             )
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
     def test_rejects_malformed_action_detail_reorder(self) -> None:
@@ -258,7 +259,7 @@ class HumanNotesTest(unittest.TestCase):
             self.payload([self.note(action="reorder", action_detail={"reason": "Missing new order."})])
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
     def test_rejects_malformed_action_detail_insert_stinger(self) -> None:
@@ -280,7 +281,7 @@ class HumanNotesTest(unittest.TestCase):
             )
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
     def test_rejects_accept_with_non_null_action_detail(self) -> None:
@@ -290,7 +291,7 @@ class HumanNotesTest(unittest.TestCase):
             self.payload([self.note(action="accept", action_detail={"reason": "Should be null."})])
         )
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(AstridError):
             human_notes.main(self.argv(paths), client=fake)
 
     def test_prompt_contains_arrangement_listing_and_pool_digest_and_instructions(self) -> None:

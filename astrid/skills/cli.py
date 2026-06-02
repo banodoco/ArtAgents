@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 
 from . import doctor as doctor_fn
@@ -27,8 +27,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(handler(args))
     except (KeyError, FileExistsError, ValueError, RuntimeError) as exc:
-        print(f"skills: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(str(exc), recovery_command="check --help for usage and try again") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -108,7 +107,7 @@ def _resolve_packs(args: argparse.Namespace) -> list[str] | None:
     if getattr(args, "all", False):
         return None
     if not args.pack:
-        raise ValueError("specify a pack id or pass --all")
+        raise AstridError("specify a pack id or pass --all", recovery_command="specify a pack id or pass --all to install/uninstall all packs")
     return [args.pack]
 
 

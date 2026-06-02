@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project import paths as project_paths
 from astrid.core.session import cli
 from astrid.core.session import paths as session_paths
@@ -32,18 +33,31 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     return {"home": tmp_path / "home", "projects": tmp_path / "projects"}
 
 
+def _assert_astrid_error(call, *cause_parts: str, recovery: str | None = None) -> AstridError:
+    with pytest.raises(AstridError) as raised:
+        call()
+    error = raised.value
+    for part in cause_parts:
+        assert part in error.cause
+    if recovery is not None:
+        assert error.recovery_command == recovery
+    return error
+
+
 def test_takeover_requires_caller_to_be_bound(
     env: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="01RUN", force=False), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="01RUN", force=False), out=StringIO()
+        ),
+        "takeover:",
+        "matches neither",
+        recovery="astrid status",
     )
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "first recovery action: astrid status" in captured.err
     assert not (env["home"] / "sessions").exists()
 
 
@@ -119,14 +133,14 @@ def test_unbound_takeover_ambiguous_run_fails_before_session_or_lease_mutation(
     events_b = (run_b / "events.jsonl").read_bytes()
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
 
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="01RUN", force=True), out=StringIO()
+        ),
+        "ambiguous",
+        recovery="astrid status",
     )
 
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "first recovery action: astrid status" in captured.err
-    assert "ambiguous" in captured.err
     assert (run_a / "lease.json").read_bytes() == before_a
     assert (run_b / "lease.json").read_bytes() == before_b
     assert (run_a / "events.jsonl").read_bytes() == events_a
@@ -143,14 +157,14 @@ def test_unbound_takeover_target_session_without_run_fails_before_session_creati
     mint_session(env["home"], "S-DETACHED", project="demo", run_id=None)
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
 
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="S-DETACHED", force=True), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="S-DETACHED", force=True), out=StringIO()
+        ),
+        "not bound to a run",
+        recovery="astrid status",
     )
 
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "first recovery action: astrid status" in captured.err
-    assert "not bound to a run" in captured.err
     assert len(list((env["home"] / "sessions").glob("*.json"))) == 1
 
 
@@ -225,10 +239,13 @@ def test_takeover_refuses_warm_target_without_force(
     before_session = session_path(caller.id).read_bytes()
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
 
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="S-PREV", force=False), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="S-PREV", force=False), out=StringIO()
+        ),
+        "wrote within the last 60s",
+        recovery="astrid status",
     )
-    assert rc == 2
     # Lease still names the previous writer.
     assert read_lease(run_dir)["attached_session_id"] == "S-PREV"
     assert (run_dir / "events.jsonl").read_bytes() == before_events
@@ -251,11 +268,14 @@ def test_unbound_takeover_refuses_warm_target_before_session_creation(
     before_events = (run_dir / "events.jsonl").read_bytes()
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
 
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="01RUN", force=False), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="01RUN", force=False), out=StringIO()
+        ),
+        "wrote within the last 60s",
+        recovery="astrid status",
     )
 
-    assert rc == 2
     assert (run_dir / "lease.json").read_bytes() == before_lease
     assert (run_dir / "events.jsonl").read_bytes() == before_events
     assert not (env["home"] / "sessions").exists()
@@ -298,10 +318,14 @@ def test_takeover_unknown_target_errors(
     before_events = (run_dir / "events.jsonl").read_bytes()
     before_session = session_path(caller.id).read_bytes()
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="NONEXISTENT", force=False), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="NONEXISTENT", force=False), out=StringIO()
+        ),
+        "NONEXISTENT",
+        "matches neither",
+        recovery="astrid status",
     )
-    assert rc == 2
     assert (run_dir / "lease.json").read_bytes() == before_lease
     assert (run_dir / "events.jsonl").read_bytes() == before_events
     assert session_path(caller.id).read_bytes() == before_session
@@ -320,14 +344,15 @@ def test_takeover_missing_lease_errors_without_appending(
     caller = mint_session(env["home"], "S-NEW", project="demo", run_id="01RUN")
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
 
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="01RUN", force=True), out=StringIO()
+        ),
+        "cannot read canonical lease",
+        "missing lease",
+        recovery="astrid status",
     )
 
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "cannot read canonical lease" in captured.err
-    assert "missing lease" in captured.err
     assert (run_dir / "events.jsonl").read_bytes() == before
 
 
@@ -344,12 +369,13 @@ def test_takeover_malformed_lease_errors_with_distinct_message(
     caller = mint_session(env["home"], "S-NEW", project="demo", run_id="01RUN")
     monkeypatch.setenv(ASTRID_SESSION_ID_ENV, caller.id)
 
-    rc = cli.cmd_sessions_takeover(
-        argparse.Namespace(target="01RUN", force=True), out=StringIO()
+    _assert_astrid_error(
+        lambda: cli.cmd_sessions_takeover(
+            argparse.Namespace(target="01RUN", force=True), out=StringIO()
+        ),
+        "cannot read canonical lease",
+        "invalid JSON",
+        recovery="astrid status",
     )
 
-    captured = capsys.readouterr()
-    assert rc == 2
-    assert "cannot read canonical lease" in captured.err
-    assert "invalid JSON" in captured.err
     assert (run_dir / "events.jsonl").read_bytes() == before

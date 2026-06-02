@@ -27,6 +27,7 @@ Idempotency (SD-011):
 from __future__ import annotations
 
 
+from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('reigh.publish')
 import argparse
@@ -492,8 +493,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run(args)
     except PublishError as exc:
-        print(f"publish: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            str(exc),
+            recovery_command=(
+                "check the error details above, fix the issue, "
+                "and re-run the publish command"
+            ),
+        ) from exc
 
 
 def run(args: argparse.Namespace) -> int:

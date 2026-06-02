@@ -127,6 +127,7 @@ ALLOWED_BARE_RAISES: dict[tuple[str, int], str] = {
     ("astrid/packs/understanding/executors/scene_describe/run.py", 205): "wrapped by scene_describe.main() via run_pack_main before agent-facing output",
 }
 ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
+    ("astrid/packs/editorial/executors/refine/run.py", 684): "informational managed-mode diagnostic, not a user-facing error path",
     # Pipeline owns the canonical envelope renderer and unbound-session hint.
     ("astrid/pipeline.py", 152): "auto-resolved session hint is an intentional shared advisory",
     ("astrid/pipeline.py", 215): "canonical AstridError renderer",
@@ -142,6 +143,27 @@ ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
     ("astrid/core/element/cli.py", 31): "shared stderr helper for override diagnostics",
     ("astrid/packs/youtube/executors/youtube_audio/run.py", 99): "intentional command preview for pack subprocess diagnostics",
     ("astrid/packs/youtube/executors/youtube_audio/run.py", 115): "intentional success summary for pack subprocess diagnostics",
+    ("astrid/packs/cli.py", 39): "shared stderr helper for non-fatal warnings and diagnostics",
+    # Script pipeline retry progress logging — informational, not a user-facing error exit.
+    ("astrid/packs/editorial/executors/script_pipeline/run.py", 131): "retry progress logging inside DeepSeekClient.complete(); not a user-facing error exit",
+    # generate_video batch-loop warnings — non-fatal skip-and-continue, not error exits.
+    ("astrid/packs/generation/executors/generate_video/run.py", 786): "non-fatal warning: skipping row in batch loop due to model/backend mismatch",
+    ("astrid/packs/generation/executors/generate_video/run.py", 806): "non-fatal warning: skipping row in batch loop due to missing required features",
+    # assemble managed-mode diagnostic — informational, not a user-facing error exit.
+    ("astrid/packs/iteration/executors/assemble/run.py", 130): "managed-mode informational diagnostic printed before success-path execution proceeds",
+    # sprite_sheet progress messages and non-fatal warnings — informational, not user-facing error exits.
+    ("astrid/packs/rendering/executors/sprite_sheet/run.py", 441): "progress message: FAL upscaling frame X/Y — informational batch-loop status, not an error exit",
+    ("astrid/packs/rendering/executors/sprite_sheet/run.py", 1150): "non-fatal warning: animated WebP export failed — program continues with null animated_webp_path",
+    ("astrid/packs/rendering/executors/sprite_sheet/run.py", 1261): "progress message: Calling model for size — informational pre-API-call status, not an error exit",
+    ("astrid/packs/rendering/executors/sprite_sheet/run.py", 1269): "progress message: Sprite sheet completed in Xs — informational post-API-call summary, not an error exit",
+    ("astrid/packs/rendering/executors/sprite_sheet/run.py", 1272): "progress message: Post-processing existing sprite sheet — informational mode indicator, not an error exit",
+    ("astrid/packs/rendering/executors/sprite_sheet/run.py", 1302): "non-fatal warning: frame(s) touch safety edge — program continues to assemble outputs",
+    # video_understand progress messages — informational, not user-facing error exits.
+    ("astrid/packs/understanding/executors/video_understand/run.py", 270): "progress message: querying model/window/video during batch loop — informational status, not an error exit",
+    ("astrid/packs/understanding/executors/video_understand/run.py", 302): "success confirmation: wrote output path — informational post-write summary, not an error exit",
+    # visual_understand progress messages — informational, not user-facing error exits.
+    ("astrid/packs/understanding/executors/visual_understand/run.py", 426): "progress message: querying model/image during batch loop — informational status, not an error exit",
+    ("astrid/packs/understanding/executors/visual_understand/run.py", 462): "success confirmation: wrote output path — informational post-write summary, not an error exit",
 }
 
 

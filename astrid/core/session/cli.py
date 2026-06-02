@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
 from astrid.core.project.paths import project_dir, resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
@@ -91,7 +92,10 @@ def _parse_agent_override(raw: str) -> str:
     """Parse ``agent:<slug>`` from ``--as`` argument; raise on malformed."""
 
     if not raw.startswith("agent:"):
-        raise ValueError(f"--as must be of form 'agent:<slug>', got {raw!r}")
+        raise AstridError(
+            f"attach: --as must be of form 'agent:<slug>', got {raw!r}",
+            recovery_command="astrid attach <project> --as agent:<slug>",
+        )
     return validate_agent_slug(raw[len("agent:") :])
 
 
@@ -246,15 +250,16 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
     try:
         identity = _ensure_identity(out=out)
     except IdentityError as exc:
-        print(f"attach: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(f"attach: {exc}", recovery_command="astrid status") from exc
     agent_id = identity.agent_id
     if args.as_agent:
         try:
             agent_id = _parse_agent_override(args.as_agent)
         except (ValueError, IdentityError) as exc:
-            print(f"attach: {exc}", file=sys.stderr)
-            return 2
+            raise AstridError(
+                f"attach: {exc}",
+                recovery_command="astrid attach <project> --as agent:<slug>",
+            ) from exc
 
     if args.session:
         # Resume an existing session by id; the env var still has to be
@@ -262,11 +267,11 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
         try:
             stored = load_session(args.session, session_root=session_root)
         except SessionRecordNotFoundError:
-            print(
+            raise AstridError(
                 f"attach: no session file for id {args.session!r}",
-                file=sys.stderr,
+                recovery_command="astrid sessions ls",
+                state_snapshot={"session_id": args.session},
             )
-            return 2
         session = attach_session(
             project_slug=stored.project,
             agent_id=stored.agent_id,
@@ -286,45 +291,44 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
         slug = args.project or resolve_default_project()
         if not slug:
             projects = discover_projects()
-            print("attach: no project specified and no default project configured", file=sys.stderr)
-            if projects:
-                print("", file=sys.stderr)
-                print("projects:", file=sys.stderr)
-                for project_slug in projects:
-                    print(f"  {project_slug}", file=sys.stderr)
-                print("", file=sys.stderr)
-                print("choose one:", file=sys.stderr)
-                print(f"  astrid attach {projects[0]}", file=sys.stderr)
-                print(f"  astrid attach {projects[0]} --default", file=sys.stderr)
-                print(f"  astrid projects default {projects[0]}", file=sys.stderr)
-            else:
-                print("no projects discovered under the projects root", file=sys.stderr)
-                print("create one with: astrid projects create <slug>", file=sys.stderr)
-            return 2
+            recovery = (
+                f"astrid attach {projects[0]}"
+                if projects
+                else "astrid projects create <slug>"
+            )
+            raise AstridError(
+                "attach: no project specified and no default project configured",
+                valid_options=projects,
+                recovery_command=recovery,
+                state_snapshot={"projects": projects},
+            )
         try:
             require_project(slug)
         except ProjectError:
             projects = discover_projects()
             if args.project:
-                print(f"attach: project '{slug}' was not found under the current projects root", file=sys.stderr)
-            else:
-                print(
-                    f"attach: configured default project '{slug}' was not found under the current projects root",
-                    file=sys.stderr,
+                cause = f"attach: project '{slug}' was not found under the current projects root"
+                recovery = (
+                    f"astrid attach {projects[0]}"
+                    if projects
+                    else "astrid projects create <slug>"
                 )
-            if projects:
-                print("", file=sys.stderr)
-                print("projects:", file=sys.stderr)
-                for project_slug in projects:
-                    print(f"  {project_slug}", file=sys.stderr)
-                print("", file=sys.stderr)
-                print("choose one:", file=sys.stderr)
-                print(f"  astrid attach {projects[0]} --default", file=sys.stderr)
-                print(f"  astrid projects default {projects[0]}", file=sys.stderr)
             else:
-                print("no projects discovered under the projects root", file=sys.stderr)
-                print("create one with: astrid projects create <slug>", file=sys.stderr)
-            return 2
+                cause = (
+                    f"attach: configured default project '{slug}' was not found "
+                    "under the current projects root"
+                )
+                recovery = (
+                    f"astrid projects default {projects[0]}"
+                    if projects
+                    else "astrid projects create <slug>"
+                )
+            raise AstridError(
+                cause,
+                valid_options=projects,
+                recovery_command=recovery,
+                state_snapshot={"project": slug, "projects": projects},
+            )
         # Idempotency (#19): reuse a prior session for (slug, agent_id) when
         # safe, skipping the timeline-resolution / new-session branch entirely.
         # Killing the new-shell → reader → takeover dance was the dominant ask
@@ -357,11 +361,15 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
         if args.timeline:
             found = find_timeline_by_slug(slug, args.timeline)
             if found is None:
-                print(
+                from astrid.core.timeline.crud import list_timelines
+
+                available = [timeline.slug for timeline in list_timelines(slug)]
+                raise AstridError(
                     f"attach: timeline '{args.timeline}' not found in project '{slug}'",
-                    file=sys.stderr,
+                    valid_options=available,
+                    recovery_command=f"astrid attach {slug} --timeline <slug>",
+                    state_snapshot={"project": slug, "timeline": args.timeline},
                 )
-                return 2
             resolved_timeline_id = found[0]
             resolved_timeline_slug = args.timeline
         else:
@@ -374,7 +382,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                     print(
                         f"Using default timeline: {default_slug}. "
                         f"Use --timeline to override.",
-                        file=sys.stderr,
+                        file=out,
                     )
                 else:
                     resolved_timeline_slug = None
@@ -393,34 +401,37 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                         f"attach: no timelines exist for project '{slug}' yet; "
                         "session bound without a timeline. "
                         "Run `astrid timelines create <slug>` to make one.",
-                        file=sys.stderr,
+                        file=out,
                     )
                     resolved_timeline_slug = None
                 elif sys.stdin.isatty():
-                    print("Available timelines:", file=sys.stderr)
+                    print("Available timelines:", file=out)
                     for t in available:
-                        print(f"  {t.slug}  ({t.name})", file=sys.stderr)
+                        print(f"  {t.slug}  ({t.name})", file=out)
                     try:
                         choice = input("Choose a timeline slug: ").strip()
                     except (EOFError, KeyboardInterrupt):
-                        print("", file=sys.stderr)
-                        print("attach: cancelled", file=sys.stderr)
-                        return 2
+                        raise AstridError(
+                            "attach: cancelled",
+                            recovery_command=f"astrid attach {slug} --timeline <slug>",
+                        )
                     found = find_timeline_by_slug(slug, choice)
                     if found is None:
-                        print(
+                        raise AstridError(
                             f"attach: timeline '{choice}' not found",
-                            file=sys.stderr,
+                            valid_options=[t.slug for t in available],
+                            recovery_command=f"astrid attach {slug} --timeline <slug>",
+                            state_snapshot={"project": slug, "timeline": choice},
                         )
-                        return 2
                     resolved_timeline_id = found[0]
                     resolved_timeline_slug = choice
                 else:
-                    print(
+                    raise AstridError(
                         "no default timeline; pass --timeline <slug>",
-                        file=sys.stderr,
+                        valid_options=[t.slug for t in available],
+                        recovery_command=f"astrid attach {slug} --timeline <slug>",
+                        state_snapshot={"project": slug},
                     )
-                    return 2
         session = attach_session(
             project_slug=slug,
             agent_id=agent_id,
@@ -504,17 +515,19 @@ def cmd_sessions_detach(args: argparse.Namespace, *, out: Any = None) -> int:
     if not target:
         env_id = sys.modules["os"].environ.get(ASTRID_SESSION_ID_ENV)
         if not env_id:
-            print(
+            raise AstridError(
                 "detach: no session bound (ASTRID_SESSION_ID unset); pass a session id",
-                file=sys.stderr,
+                recovery_command="astrid sessions ls",
             )
-            return 2
         target = env_id
     try:
         _session_store().delete(target)
     except SessionRecordNotFoundError:
-        print(f"detach: no session file for id {target!r}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            f"detach: no session file for id {target!r}",
+            recovery_command="astrid sessions ls",
+            state_snapshot={"session_id": target},
+        )
     print(f"detached {target}", file=out)
     return 0
 
@@ -522,9 +535,11 @@ def cmd_sessions_detach(args: argparse.Namespace, *, out: Any = None) -> int:
 # ----- cmd_sessions_takeover --------------------------------------------
 
 
-def _print_takeover_status_recovery(reason: str) -> None:
-    print(f"takeover: {reason}", file=sys.stderr)
-    print("first recovery action: astrid status", file=sys.stderr)
+def _raise_takeover_status_recovery(reason: str) -> None:
+    raise AstridError(
+        f"takeover: {reason}",
+        recovery_command="astrid status",
+    )
 
 
 def _resolve_unbound_takeover_target(target: str) -> tuple[str, str, Path, str | None] | None:
@@ -532,13 +547,13 @@ def _resolve_unbound_takeover_target(target: str) -> tuple[str, str, Path, str |
     if target_path.exists():
         target_sess = Session.from_json(target_path)
         if target_sess.run_id is None:
-            _print_takeover_status_recovery(
+            _raise_takeover_status_recovery(
                 f"target session {target!r} is not bound to a run"
             )
             return None
         run_dir = project_dir(target_sess.project) / "runs" / target_sess.run_id
         if not (run_dir / EVENTS_FILENAME).exists():
-            _print_takeover_status_recovery(
+            _raise_takeover_status_recovery(
                 f"target session {target!r} points at missing run "
                 f"{target_sess.run_id!r} in project {target_sess.project!r}"
             )
@@ -551,13 +566,13 @@ def _resolve_unbound_takeover_target(target: str) -> tuple[str, str, Path, str |
         if (candidate / EVENTS_FILENAME).exists():
             matches.append((slug, candidate))
     if not matches:
-        _print_takeover_status_recovery(
+        _raise_takeover_status_recovery(
             f"{target!r} matches neither a session id nor a discovered run id"
         )
         return None
     if len(matches) > 1:
         projects = ", ".join(slug for slug, _ in matches)
-        _print_takeover_status_recovery(
+        _raise_takeover_status_recovery(
             f"run id {target!r} is ambiguous across projects: {projects}"
         )
         return None
@@ -576,8 +591,7 @@ def _build_takeover_session(
         identity = _ensure_identity(out=out)
         require_project(slug)
     except (IdentityError, ProjectError) as exc:
-        print(f"takeover: {exc}", file=sys.stderr)
-        return None
+        raise AstridError(f"takeover: {exc}", recovery_command="astrid status") from exc
 
     now = utc_now_iso()
     reusable = _find_reusable_session(slug, identity.agent_id)
@@ -617,8 +631,7 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
         # fallback would defeat its purpose.
         current = resolve_current_session()
     except SessionBindingError as exc:
-        print(f"takeover: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(f"takeover: {exc}", recovery_command="astrid status") from exc
     bootstrapped_unbound = False
     if current is None:
         resolved = _resolve_unbound_takeover_target(args.target)
@@ -628,11 +641,11 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
         try:
             lease = read_lease(target_run_dir)
         except LeaseError as exc:
-            print(
+            raise AstridError(
                 f"takeover: cannot read canonical lease for {target_run_dir.name!r}: {exc}",
-                file=sys.stderr,
+                recovery_command="astrid status",
+                state_snapshot={"run_id": target_run_dir.name},
             )
-            return 2
         role: SessionRole = (
             "orphan-pending"
             if lease.get("attached_session_id") is None
@@ -660,26 +673,32 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
         )
     except SessionTakeoverTargetError as exc:
         if "matches neither" in str(exc):
-            print(f"takeover: {exc}", file=sys.stderr)
+            cause = f"takeover: {exc}"
         elif not bootstrapped_unbound:
-            print(
+            cause = (
                 f"takeover: {args.target!r} matches neither a session id nor a run id "
-                f"in project {current.project!r}",
-                file=sys.stderr,
+                f"in project {current.project!r}"
             )
         else:
-            print(f"takeover: {exc}", file=sys.stderr)
-        return 2
+            cause = f"takeover: {exc}"
+        raise AstridError(
+            cause,
+            recovery_command="astrid status",
+            state_snapshot={"target": args.target, "project": current.project},
+        ) from exc
     except LeaseError as exc:
         msg = str(exc)
         if "missing lease" in msg or "invalid JSON" in msg:
-            print(
-                f"takeover: cannot read canonical lease for {args.target!r}: {exc}",
-                file=sys.stderr,
+            cause = (
+                f"takeover: cannot read canonical lease for {args.target!r}: {exc}"
             )
         else:
-            print(f"takeover: {exc}", file=sys.stderr)
-        return 2
+            cause = f"takeover: {exc}"
+        raise AstridError(
+            cause,
+            recovery_command="astrid status",
+            state_snapshot={"target": args.target},
+        ) from exc
 
     updated = result.lease
     if result.operation == "orphan-claim":
@@ -709,8 +728,7 @@ def cmd_status(args: argparse.Namespace, *, out: Any = None) -> int:
         # would mask the unbound-state it exists to surface.
         session = resolve_current_session()
     except SessionBindingError as exc:
-        print(f"status: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(f"status: {exc}", recovery_command="astrid status") from exc
 
     if session is None:
         return _render_unbound_status(out=out)

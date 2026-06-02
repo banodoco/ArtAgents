@@ -17,13 +17,13 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.contracts.errors import AstridError
 from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.util.time import utc_now_milliseconds
 
@@ -275,8 +275,10 @@ def _preflight_storage(storage_name: str | None, *, required: bool, context: str
     try:
         asyncio.run(require_existing_storage(storage_name, context=context))
     except Exception as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            str(exc),
+            recovery_command="verify the storage name exists in your RunPod account and is accessible, then retry",
+        ) from exc
     return 0
 
 
@@ -330,7 +332,7 @@ async def _terminate_pod_id(pod_id: str, config: Any, *, name: str | None = None
         msg = str(exc).lower()
         if "not found" in msg or "404" in msg or "does not exist" in msg:
             return True
-        print(f"WARNING: session teardown error: {exc}", file=sys.stderr)
+        log_and_swallow(exc, context="runpod.exec.session_teardown")
         return False
 
 
@@ -339,7 +341,10 @@ def _ssh_target_from_handle(handle: dict[str, Any]) -> tuple[str, str]:
     ssh = str(handle.get("ssh") or "")
     match = re.match(r"(\S+)\s+-p\s+(\d+)", ssh)
     if not match:
-        raise ValueError(f"pod_handle ssh field is missing or invalid: {ssh!r}")
+        raise AstridError(
+            f"pod_handle ssh field is missing or invalid: {ssh!r}",
+            recovery_command="verify the pod_handle.json has a valid ssh field (e.g. 'root@1.2.3.4 -p 22') and the pod is still running",
+        )
     return match.group(1), match.group(2)
 
 
@@ -381,9 +386,10 @@ def _load_handle_and_config(handle_path: Path) -> tuple[dict[str, Any], Any]:
     api_key_ref = handle["config_snapshot"]["api_key_ref"]
     api_key = os.environ.get(api_key_ref)
     if not api_key:
-        raise RuntimeError(
+        raise AstridError(
             f"API key env var {api_key_ref!r} is not set. "
-            f"The pod_handle stores only the env var name, never the literal key."
+            f"The pod_handle stores only the env var name, never the literal key.",
+            recovery_command=f"set the {api_key_ref} environment variable and retry",
         )
 
     snap = handle["config_snapshot"]
@@ -412,8 +418,10 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
 
     api_key = os.environ.get("RUNPOD_API_KEY")
     if not api_key:
-        print("ERROR: RUNPOD_API_KEY environment variable is required", file=sys.stderr)
-        return 1
+        raise AstridError(
+            "RUNPOD_API_KEY environment variable is required",
+            recovery_command="set the RUNPOD_API_KEY environment variable and retry",
+        )
 
     gpu_type = args.gpu_type or os.environ.get("RUNPOD_GPU_TYPE", "NVIDIA GeForce RTX 4090")
     if isinstance(gpu_type, str) and "," in gpu_type:
@@ -427,9 +435,7 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
     max_runtime = args.max_runtime_seconds or int(os.environ.get("RUNPOD_MAX_RUNTIME_SECONDS", "7200"))
     ports = getattr(args, "ports", None) or os.environ.get("RUNPOD_PORTS")
 
-    storage_rc = _preflight_storage(storage_name, required=storage_required, context="RunPod provision")
-    if storage_rc:
-        return storage_rc
+    _preflight_storage(storage_name, required=storage_required, context="RunPod provision")
 
     hourly_rate = _get_hourly_rate(api_key, gpu_type)
     provisioned_at = _utc_now_iso()
@@ -459,8 +465,10 @@ def cmd_provision(args: argparse.Namespace, produces_dir: Path) -> int:
     try:
         pod, ssh = asyncio.run(_provision())
     except Exception as exc:
-        print(f"ERROR: provision failed: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            str(exc),
+            recovery_command="check your RunPod API key, GPU type availability, and account balance, then retry",
+        ) from exc
 
     terminate_at_dt = datetime.now(timezone.utc).timestamp() + max_runtime
     terminate_at = datetime.fromtimestamp(terminate_at_dt, tz=timezone.utc).isoformat()
@@ -501,8 +509,10 @@ def cmd_exec(args: argparse.Namespace, produces_dir: Path) -> int:
     """Reattach to a provisioned pod, ship + run + download → exec_result.json + cost.json."""
     pod_handle_path = Path(args.pod_handle) if args.pod_handle else produces_dir / "pod_handle.json"
     if not pod_handle_path.is_file():
-        print(f"ERROR: pod_handle.json not found at {pod_handle_path}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"pod_handle.json not found at {pod_handle_path}",
+            recovery_command="run 'astrid runpod provision' first to create a pod, then retry exec",
+        )
 
     handle, config = _load_handle_and_config(pod_handle_path)
     hourly_rate = handle["hourly_rate"]
@@ -555,8 +565,10 @@ def cmd_exec(args: argparse.Namespace, produces_dir: Path) -> int:
     try:
         result = asyncio.run(_exec())
     except Exception as exc:
-        print(f"ERROR: exec failed: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            str(exc),
+            recovery_command="check pod connectivity and remote script syntax, then retry",
+        ) from exc
 
     duration = time.monotonic() - t0
 
@@ -576,16 +588,20 @@ def cmd_pull(args: argparse.Namespace, produces_dir: Path) -> int:
     """Pull files or directories from a provisioned pod using the saved handle."""
     pod_handle_path = Path(args.pod_handle) if args.pod_handle else produces_dir / "pod_handle.json"
     if not pod_handle_path.is_file():
-        print(f"ERROR: pod_handle.json not found at {pod_handle_path}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"pod_handle.json not found at {pod_handle_path}",
+            recovery_command="run 'astrid runpod provision' first to create a pod, then retry pull",
+        )
 
     handle = json.loads(pod_handle_path.read_text(encoding="utf-8"))
     local_dir = Path(args.local_dir) if args.local_dir else produces_dir / "artifact_dir"
     local_dir.mkdir(parents=True, exist_ok=True)
     remote_paths = list(args.remote_path or [])
     if not remote_paths:
-        print("ERROR: at least one --remote-path is required", file=sys.stderr)
-        return 2
+        raise AstridError(
+            "at least one --remote-path is required",
+            recovery_command="specify --remote-path for each file or directory to pull",
+        )
 
     artifacts: list[dict[str, Any]] = []
     for remote_path in remote_paths:
@@ -595,7 +611,7 @@ def cmd_pull(args: argparse.Namespace, produces_dir: Path) -> int:
             local_dir=local_dir,
             ssh_key=args.ssh_key,
         )
-        print(f"$ {' '.join(cmd)}", file=sys.stderr)
+        print(f"$ {' '.join(cmd)}")
         rv = subprocess.run(cmd)
         local_path = local_dir if remote_path.rstrip().endswith("/.") else local_dir / Path(remote_path.rstrip("/")).name
         exists = local_path.exists()
@@ -609,12 +625,12 @@ def cmd_pull(args: argparse.Namespace, produces_dir: Path) -> int:
             }
         )
         if rv.returncode != 0:
+            # Structured error reporting is the artifact_pull.json manifest +
+            # exit code 3 (the executor protocol's error channel); not a raise.
             _write_json(produces_dir / "artifact_pull.json", {"status": "failed", "artifacts": artifacts})
-            print(f"ERROR: artifact pull failed for {remote_path} rc={rv.returncode}", file=sys.stderr)
-            return rv.returncode or 3
+            return 3
         if not exists:
             _write_json(produces_dir / "artifact_pull.json", {"status": "missing_local", "artifacts": artifacts})
-            print(f"ERROR: pulled artifact missing locally: {local_path}", file=sys.stderr)
             return 3
 
     _write_json(produces_dir / "artifact_pull.json", {"status": "ok", "artifacts": artifacts})
@@ -631,8 +647,10 @@ def cmd_teardown(args: argparse.Namespace, produces_dir: Path) -> int:
     """Terminate a pod by pod_handle. Idempotent — 'not found' is a no-op."""
     pod_handle_path = Path(args.pod_handle) if args.pod_handle else produces_dir / "pod_handle.json"
     if not pod_handle_path.is_file():
-        print(f"ERROR: pod_handle.json not found at {pod_handle_path}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"pod_handle.json not found at {pod_handle_path}",
+            recovery_command="run 'astrid runpod provision' first to create a pod, then retry teardown",
+        )
 
     handle, config = _load_handle_and_config(pod_handle_path)
     hourly_rate = handle["hourly_rate"]
@@ -661,7 +679,6 @@ def cmd_teardown(args: argparse.Namespace, produces_dir: Path) -> int:
     except Exception as exc:
         receipt["status"] = "error"
         receipt["reason"] = str(exc)
-        print(f"ERROR: teardown failed: {exc}", file=sys.stderr)
 
     duration = time.monotonic() - t0
 
@@ -676,7 +693,12 @@ def cmd_teardown(args: argparse.Namespace, produces_dir: Path) -> int:
         print(f"Teardown: pod {handle['pod_id']} already gone (idempotent no-op)")
     else:
         print(f"Teardown: pod {handle['pod_id']} — {status}: {receipt.get('reason', '')}")
-    return 0 if status in ("terminated", "already_gone") else 1
+        raise AstridError(
+            f"teardown failed: {receipt['reason']}",
+            recovery_command="verify the pod still exists and your API key is valid, then retry",
+            state_snapshot={"pod_id": handle["pod_id"]},
+        )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -695,8 +717,10 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
 
     api_key = os.environ.get("RUNPOD_API_KEY")
     if not api_key:
-        print("ERROR: RUNPOD_API_KEY environment variable is required", file=sys.stderr)
-        return 1
+        raise AstridError(
+            "RUNPOD_API_KEY environment variable is required",
+            recovery_command="set the RUNPOD_API_KEY environment variable and retry",
+        )
 
     gpu_type = args.gpu_type or os.environ.get("RUNPOD_GPU_TYPE", "NVIDIA GeForce RTX 4090")
     if isinstance(gpu_type, str) and "," in gpu_type:
@@ -720,9 +744,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
     )
     excludes = set(args.excludes.split(",")) if args.excludes else set()
 
-    storage_rc = _preflight_storage(storage_name, required=storage_required, context="RunPod session")
-    if storage_rc:
-        return storage_rc
+    _preflight_storage(storage_name, required=storage_required, context="RunPod session")
 
     hourly_rate = _get_hourly_rate(api_key, gpu_type)
     provisioned_at = _utc_now_iso()
@@ -845,10 +867,12 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
         return exit_code
 
     except Exception as exc:
-        print(f"ERROR: session failed: {exc}", file=sys.stderr)
         total_duration = time.monotonic() - t0
         _write_cost_sidecar(produces_dir, duration_seconds=total_duration, hourly_rate=hourly_rate, basis_prefix="session (failed)")
-        return 2
+        raise AstridError(
+            str(exc),
+            recovery_command="check your RunPod API key, GPU availability, and remote script syntax, then retry",
+        ) from exc
 
     finally:
         # ---- teardown (guaranteed) ------------------------------------
@@ -859,7 +883,7 @@ def cmd_session(args: argparse.Namespace, produces_dir: Path) -> int:
                     _terminate_pod_id(pod_id, config, name=handle.get("name") if handle else None)
                 )
             except Exception as exc:
-                print(f"WARNING: session teardown failed: {exc}", file=sys.stderr)
+                log_and_swallow(exc, context="runpod.exec.session_teardown_failed")
             if teardown_ok:
                 try:
                     handle_path.unlink(missing_ok=True)
@@ -954,5 +978,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "session":
         return cmd_session(args, produces_dir)
     else:
-        print(f"ERROR: unknown command {args.command!r}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"unknown command {args.command!r}",
+            valid_options=["provision", "exec", "pull", "teardown", "session"],
+            recovery_command="use one of: provision, exec, pull, teardown, session",
+        )

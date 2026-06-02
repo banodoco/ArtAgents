@@ -9,6 +9,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
 
+from astrid.contracts.errors import AstridError
 from astrid.contracts.run_status import RunStatus
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RunPodHandle
@@ -78,8 +79,10 @@ def main(argv: list[str] | None = None) -> int:
         TrainingManifestError,
         TrainingRunShellError,
     ) as exc:
-        print(f"training_run: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(
+            str(exc),
+            recovery_command="python3 -m astrid.packs.training.orchestrators.training_run.run --config <config> --dry-run",
+        ) from exc
 
 
 def _add_run_arguments(parser: argparse.ArgumentParser) -> None:

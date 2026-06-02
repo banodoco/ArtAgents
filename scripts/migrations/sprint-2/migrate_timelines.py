@@ -52,7 +52,8 @@ from astrid.core.project.paths import (
     run_json_path,
 )
 from astrid.core.project.jsonio import read_json, write_json_atomic
-from astrid.core.project.schema import validate_project, utc_now_iso
+from astrid.core.project.schema import validate_project
+from astrid.core.util.time import utc_now_iso
 from astrid.core.timeline.model import (
     TIMELINE_SCHEMA_VERSION,
     Display,

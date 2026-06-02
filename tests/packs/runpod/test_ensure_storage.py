@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid import pipeline
 
 
@@ -226,10 +227,9 @@ def test_list_volumes_passthrough() -> None:
 def test_runpod_volumes_ls_requires_api_key(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
 
-    rc = pipeline._dispatch_runpod_volumes(None, ["ls"])
-
-    assert rc == 1
-    assert "RUNPOD_API_KEY is not set" in capsys.readouterr().err
+    with pytest.raises(AstridError) as raised:
+        pipeline._dispatch_runpod_volumes(None, ["ls"])
+    assert "RUNPOD_API_KEY is not set" in raised.value.cause
 
 
 def test_runpod_volumes_ls_emits_json_and_is_read_only(
@@ -256,10 +256,10 @@ def test_runpod_ensure_storage_cli_requires_datacenter_when_creation_needed(
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        rc = pipeline._dispatch_runpod_ensure_storage(None, ["missing-vol"])
+        with pytest.raises(AstridError) as raised:
+            pipeline._dispatch_runpod_ensure_storage(None, ["missing-vol"])
 
-    assert rc == 1
-    assert "datacenter_id is required" in capsys.readouterr().err
+    assert "datacenter_id is required" in raised.value.cause
     create_storage.assert_not_called()
 
 

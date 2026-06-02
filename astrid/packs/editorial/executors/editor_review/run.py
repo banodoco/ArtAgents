@@ -18,6 +18,7 @@ from typing import Any, Sequence
 from ..arrange.run import pool_digest
 from astrid.audit import AuditContext
 from astrid._media import ffprobe_duration_seconds
+from astrid.contracts.errors import AstridError
 from astrid.utilities.llm_clients import build_claude_client
 from astrid.timeline import load_arrangement, load_metadata, load_pool
 from ..transcribe.run import load_api_key
@@ -121,14 +122,23 @@ RESPONSE_SCHEMA: dict[str, Any] = {
 def _arrangement_orders(arrangement: dict[str, Any]) -> set[int]:
     clips = arrangement.get("clips")
     if not isinstance(clips, list):
-        raise ValueError("arrangement.clips must be a list")
+        raise AstridError(
+            "arrangement.clips must be a list",
+            recovery_command="fix arrangement.json: ensure 'clips' is a JSON array",
+        )
     orders: set[int] = set()
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict):
-            raise ValueError(f"arrangement.clips[{index}] must be an object")
+            raise AstridError(
+                f"arrangement.clips[{index}] must be an object",
+                recovery_command="fix arrangement.json: ensure each clip in 'clips' is a JSON object",
+            )
         order = clip.get("order")
         if not isinstance(order, int):
-            raise ValueError(f"arrangement.clips[{index}].order must be an integer")
+            raise AstridError(
+                f"arrangement.clips[{index}].order must be an integer",
+                recovery_command="fix arrangement.json: ensure each clip has an integer 'order' field",
+            )
         orders.add(order)
     return orders
 
@@ -136,17 +146,29 @@ def _arrangement_orders(arrangement: dict[str, Any]) -> set[int]:
 def _arrangement_order_uuid_map(arrangement: dict[str, Any]) -> dict[int, str]:
     clips = arrangement.get("clips")
     if not isinstance(clips, list):
-        raise ValueError("arrangement.clips must be a list")
+        raise AstridError(
+            "arrangement.clips must be a list",
+            recovery_command="fix arrangement.json: ensure 'clips' is a JSON array",
+        )
     result: dict[int, str] = {}
     for index, clip in enumerate(clips):
         if not isinstance(clip, dict):
-            raise ValueError(f"arrangement.clips[{index}] must be an object")
+            raise AstridError(
+                f"arrangement.clips[{index}] must be an object",
+                recovery_command="fix arrangement.json: ensure each clip in 'clips' is a JSON object",
+            )
         order = clip.get("order")
         if not isinstance(order, int):
-            raise ValueError(f"arrangement.clips[{index}].order must be an integer")
+            raise AstridError(
+                f"arrangement.clips[{index}].order must be an integer",
+                recovery_command="fix arrangement.json: ensure each clip has an integer 'order' field",
+            )
         clip_uuid = clip.get("uuid")
         if not isinstance(clip_uuid, str) or re.fullmatch(r"[0-9a-f]{8}", clip_uuid) is None:
-            raise ValueError(f"arrangement.clips[{index}].uuid must be 8 lowercase hex characters")
+            raise AstridError(
+                f"arrangement.clips[{index}].uuid must be 8 lowercase hex characters",
+                recovery_command="fix arrangement.json: ensure each clip has a 'uuid' field with 8 lowercase hex characters",
+            )
         result[order] = clip_uuid
     return result
 
@@ -162,14 +184,24 @@ def _validate_note_uuid_references(notes: list[Any], arrangement: dict[str, Any]
             continue
         clip_uuid = note.get("clip_uuid")
         if not isinstance(clip_uuid, str) or re.fullmatch(r"[0-9a-f]{8}", clip_uuid) is None:
-            raise ValueError(f"editor_review.notes[{index}].clip_uuid must be 8 lowercase hex characters")
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_uuid must be 8 lowercase hex characters",
+                recovery_command="fix editor_review.json: ensure each note's clip_uuid is 8 lowercase hex characters matching an arrangement clip",
+            )
         if clip_uuid not in valid_uuids:
-            raise ValueError(f"editor_review.notes[{index}].clip_uuid {clip_uuid!r} is not in arrangement")
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_uuid {clip_uuid!r} is not in arrangement",
+                recovery_command="fix editor_review.json: ensure each note's clip_uuid references a clip that exists in the arrangement",
+            )
         if clip_order not in order_to_uuid:
-            raise ValueError(f"editor_review.notes[{index}].clip_order {clip_order!r} is not in arrangement")
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_order {clip_order!r} is not in arrangement",
+                recovery_command="fix editor_review.json: ensure each note's clip_order references a clip that exists in the arrangement",
+            )
         if order_to_uuid[clip_order] != clip_uuid:
-            raise ValueError(
-                f"editor_review.notes[{index}].clip_uuid {clip_uuid!r} does not match clip_order {clip_order!r}"
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_uuid {clip_uuid!r} does not match clip_order {clip_order!r}",
+                recovery_command="fix editor_review.json: ensure each note's clip_uuid matches the arrangement clip at the given clip_order",
             )
     return order_to_uuid
 
@@ -177,19 +209,28 @@ def _validate_note_uuid_references(notes: list[Any], arrangement: dict[str, Any]
 def _require_detail(note: dict[str, Any], action: str) -> dict[str, Any]:
     detail = note.get("action_detail")
     if not isinstance(detail, dict):
-        raise ValueError(f"{action} note requires action_detail object")
+        raise AstridError(
+            f"{action} note requires action_detail object",
+            recovery_command=f"fix editor_review.json: set action_detail to an object for the {action} note, or use the correct action",
+        )
     return detail
 
 
 def _require_numeric(detail: dict[str, Any], field: str, action: str) -> None:
     if not isinstance(detail.get(field), (int, float)):
-        raise ValueError(f"{action} action_detail.{field} must be numeric")
+        raise AstridError(
+            f"{action} action_detail.{field} must be numeric",
+            recovery_command=f"fix editor_review.json: set action_detail.{field} to a number for the {action} note",
+        )
 
 
 def _require_detail_keys(detail: dict[str, Any], action: str, expected: set[str]) -> None:
     missing = expected - set(detail)
     if missing:
-        raise ValueError(f"{action} action_detail missing required keys: {sorted(missing)}")
+        raise AstridError(
+            f"{action} action_detail missing required keys: {sorted(missing)}",
+            recovery_command=f"fix editor_review.json: add the missing keys {sorted(missing)} to action_detail for the {action} note",
+        )
 
 
 def _validate_editor_notes(payload: dict[str, Any], arrangement: dict[str, Any]) -> None:
@@ -197,29 +238,48 @@ def _validate_editor_notes(payload: dict[str, Any], arrangement: dict[str, Any])
 
     notes = payload.get("notes")
     if not isinstance(notes, list):
-        raise ValueError("editor_review.notes must be a list")
+        raise AstridError(
+            "editor_review.notes must be a list",
+            recovery_command="fix editor_review.json: ensure 'notes' is a JSON array",
+        )
     order_to_uuid = _validate_note_uuid_references(notes, arrangement)
     valid_orders = set(order_to_uuid)
 
     for index, note in enumerate(notes):
         if not isinstance(note, dict):
-            raise ValueError(f"editor_review.notes[{index}] must be an object")
+            raise AstridError(
+                f"editor_review.notes[{index}] must be an object",
+                recovery_command="fix editor_review.json: ensure each note in 'notes' is a JSON object",
+            )
         action = note.get("action")
         if action not in EDITOR_ACTIONS:
-            raise ValueError(f"editor_review.notes[{index}].action is invalid")
+            raise AstridError(
+                f"editor_review.notes[{index}].action is invalid",
+                valid_options=list(EDITOR_ACTIONS),
+                recovery_command=f"fix editor_review.json: set note[{index}].action to one of {list(EDITOR_ACTIONS)}",
+            )
         clip_order = note.get("clip_order")
         if not isinstance(clip_order, int):
-            raise ValueError(f"editor_review.notes[{index}].clip_order must be an integer")
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_order must be an integer",
+                recovery_command="fix editor_review.json: ensure each note has an integer 'clip_order' field",
+            )
 
         if action == "insert-stinger":
             detail = _require_detail(note, action)
             _require_detail_keys(detail, action, {"after_clip_order", "candidate_pool_id", "duration_sec", "reason"})
             after_clip_order = detail.get("after_clip_order")
             if not isinstance(after_clip_order, int) or after_clip_order not in valid_orders:
-                raise ValueError("insert-stinger action_detail.after_clip_order must reference an existing clip order")
+                raise AstridError(
+                    "insert-stinger action_detail.after_clip_order must reference an existing clip order",
+                    recovery_command="fix editor_review.json: set after_clip_order to a clip order that exists in the arrangement",
+                )
             candidate_pool_id = detail.get("candidate_pool_id")
             if not isinstance(candidate_pool_id, str) or not candidate_pool_id:
-                raise ValueError("insert-stinger action_detail.candidate_pool_id must be a non-empty string")
+                raise AstridError(
+                    "insert-stinger action_detail.candidate_pool_id must be a non-empty string",
+                    recovery_command="fix editor_review.json: set candidate_pool_id to a valid pool entry id for the insert-stinger note",
+                )
             _require_numeric(detail, "duration_sec", action)
             continue
 
@@ -233,76 +293,149 @@ def _validate_editor_notes(payload: dict[str, Any], arrangement: dict[str, Any])
             _require_detail_keys(detail, action, {"candidate_pool_id", "role", "reason"})
             candidate_pool_id = note.get("candidate_pool_id")
             if not isinstance(candidate_pool_id, str) or not candidate_pool_id:
-                raise ValueError("swap note requires candidate_pool_id")
+                raise AstridError(
+                    "swap note requires candidate_pool_id",
+                    recovery_command="fix editor_review.json: set candidate_pool_id on the swap note to a valid pool entry id",
+                )
             if detail.get("candidate_pool_id") != candidate_pool_id:
-                raise ValueError("swap action_detail.candidate_pool_id must match note candidate_pool_id")
+                raise AstridError(
+                    "swap action_detail.candidate_pool_id must match note candidate_pool_id",
+                    recovery_command="fix editor_review.json: ensure swap action_detail.candidate_pool_id matches the note-level candidate_pool_id",
+                )
             if not isinstance(detail.get("role"), str) or not detail["role"]:
-                raise ValueError("swap action_detail.role must be a non-empty string")
+                raise AstridError(
+                    "swap action_detail.role must be a non-empty string",
+                    recovery_command="fix editor_review.json: set action_detail.role to a non-empty string for the swap note (e.g., 'primary', 'b-roll')",
+                )
         elif action == "reorder":
             detail = _require_detail(note, action)
             _require_detail_keys(detail, action, {"new_order", "reason"})
             new_order = detail.get("new_order")
             if not isinstance(new_order, int):
-                raise ValueError("reorder action_detail.new_order must be an integer")
+                raise AstridError(
+                    "reorder action_detail.new_order must be an integer",
+                    recovery_command="fix editor_review.json: set action_detail.new_order to an integer for the reorder note",
+                )
         elif action == "needs-better-pool-entry":
             detail = _require_detail(note, action)
             _require_detail_keys(detail, action, {"reason"})
             if not isinstance(detail.get("reason"), str) or not detail["reason"].strip():
-                raise ValueError("needs-better-pool-entry action_detail.reason must be a non-empty string")
+                raise AstridError(
+                    "needs-better-pool-entry action_detail.reason must be a non-empty string",
+                    recovery_command="fix editor_review.json: set action_detail.reason to a non-empty string explaining why a better pool entry is needed",
+                )
         elif action == "accept" and note.get("action_detail") is not None:
-            raise ValueError("accept action_detail must be null")
+            raise AstridError(
+                "accept action_detail must be null",
+                recovery_command="fix editor_review.json: set action_detail to null (or omit it) for accept notes",
+            )
 
 
 def _validate_review_payload_shape(payload: dict[str, Any], arrangement: dict[str, Any] | None = None) -> None:
     if not isinstance(payload, dict):
-        raise ValueError("editor_review payload must be an object")
+        raise AstridError(
+            "editor_review payload must be an object",
+            recovery_command="fix editor_review.json: ensure the top-level payload is a JSON object",
+        )
     allowed = set(RESPONSE_SCHEMA["properties"])
     unknown = sorted(set(payload) - allowed)
     if unknown:
-        raise ValueError(f"editor_review payload has unknown keys: {unknown}")
+        raise AstridError(
+            f"editor_review payload has unknown keys: {unknown}",
+            recovery_command=f"fix editor_review.json: remove unknown keys {unknown} from the payload",
+        )
     for field in RESPONSE_SCHEMA["required"]:
         if field not in payload:
-            raise ValueError(f"editor_review payload missing required field {field!r}")
+            raise AstridError(
+                f"editor_review payload missing required field {field!r}",
+                recovery_command=f"fix editor_review.json: add the required field {field!r} to the payload",
+            )
     iteration = payload.get("iteration")
     if not isinstance(iteration, int) or not 1 <= iteration <= 2:
-        raise ValueError("editor_review.iteration must be an integer between 1 and 2")
+        raise AstridError(
+            "editor_review.iteration must be an integer between 1 and 2",
+            valid_options=[1, 2],
+            recovery_command="fix editor_review.json: set iteration to 1 or 2",
+        )
     notes = payload.get("notes")
     if not isinstance(notes, list):
-        raise ValueError("editor_review.notes must be a list")
+        raise AstridError(
+            "editor_review.notes must be a list",
+            recovery_command="fix editor_review.json: ensure 'notes' is a JSON array",
+        )
     note_allowed = set(RESPONSE_SCHEMA["properties"]["notes"]["items"]["properties"])
     note_required = set(RESPONSE_SCHEMA["properties"]["notes"]["items"]["required"])
     for index, note in enumerate(notes):
         if not isinstance(note, dict):
-            raise ValueError(f"editor_review.notes[{index}] must be an object")
+            raise AstridError(
+                f"editor_review.notes[{index}] must be an object",
+                recovery_command="fix editor_review.json: ensure each note in 'notes' is a JSON object",
+            )
         unknown_note = sorted(set(note) - note_allowed)
         if unknown_note:
-            raise ValueError(f"editor_review.notes[{index}] has unknown keys: {unknown_note}")
+            raise AstridError(
+                f"editor_review.notes[{index}] has unknown keys: {unknown_note}",
+                recovery_command=f"fix editor_review.json: remove unknown keys {unknown_note} from note[{index}]",
+            )
         missing_note = sorted(note_required - set(note))
         if missing_note:
-            raise ValueError(f"editor_review.notes[{index}] missing required keys: {missing_note}")
+            raise AstridError(
+                f"editor_review.notes[{index}] missing required keys: {missing_note}",
+                recovery_command=f"fix editor_review.json: add required keys {missing_note} to note[{index}]",
+            )
         if not isinstance(note.get("clip_order"), int):
-            raise ValueError(f"editor_review.notes[{index}].clip_order must be an integer")
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_order must be an integer",
+                recovery_command="fix editor_review.json: ensure each note has an integer 'clip_order' field",
+            )
         clip_uuid = note.get("clip_uuid")
         if not isinstance(clip_uuid, str) or re.fullmatch(r"[0-9a-f]{8}", clip_uuid) is None:
-            raise ValueError(f"editor_review.notes[{index}].clip_uuid must be 8 lowercase hex characters")
+            raise AstridError(
+                f"editor_review.notes[{index}].clip_uuid must be 8 lowercase hex characters",
+                recovery_command="fix editor_review.json: ensure each note's clip_uuid is 8 lowercase hex characters",
+            )
         for key in ("observation", "brief_impact"):
             if not isinstance(note.get(key), str):
-                raise ValueError(f"editor_review.notes[{index}].{key} must be a string")
+                raise AstridError(
+                    f"editor_review.notes[{index}].{key} must be a string",
+                    recovery_command=f"fix editor_review.json: set note[{index}].{key} to a string",
+                )
         if note.get("action") not in EDITOR_ACTIONS:
-            raise ValueError(f"editor_review.notes[{index}].action is invalid")
+            raise AstridError(
+                f"editor_review.notes[{index}].action is invalid",
+                valid_options=list(EDITOR_ACTIONS),
+                recovery_command=f"fix editor_review.json: set note[{index}].action to one of {list(EDITOR_ACTIONS)}",
+            )
         detail = note.get("action_detail")
         if detail is not None and not isinstance(detail, dict):
-            raise ValueError(f"editor_review.notes[{index}].action_detail must be an object or null")
+            raise AstridError(
+                f"editor_review.notes[{index}].action_detail must be an object or null",
+                recovery_command=f"fix editor_review.json: set note[{index}].action_detail to an object or null",
+            )
         if note.get("priority") not in EDITOR_PRIORITIES:
-            raise ValueError(f"editor_review.notes[{index}].priority is invalid")
+            raise AstridError(
+                f"editor_review.notes[{index}].priority is invalid",
+                valid_options=list(EDITOR_PRIORITIES),
+                recovery_command=f"fix editor_review.json: set note[{index}].priority to one of {list(EDITOR_PRIORITIES)}",
+            )
         candidate_pool_id = note.get("candidate_pool_id")
         if candidate_pool_id is not None and not isinstance(candidate_pool_id, str):
-            raise ValueError(f"editor_review.notes[{index}].candidate_pool_id must be a string or null")
+            raise AstridError(
+                f"editor_review.notes[{index}].candidate_pool_id must be a string or null",
+                recovery_command=f"fix editor_review.json: set note[{index}].candidate_pool_id to a string or null",
+            )
     if payload.get("verdict") not in {"ship", "iterate", "rework"}:
-        raise ValueError("editor_review.verdict is invalid")
+        raise AstridError(
+            "editor_review.verdict is invalid",
+            valid_options=["ship", "iterate", "rework"],
+            recovery_command="fix editor_review.json: set verdict to 'ship', 'iterate', or 'rework'",
+        )
     ship_confidence = payload.get("ship_confidence")
     if not isinstance(ship_confidence, (int, float)) or not 0 <= float(ship_confidence) <= 1:
-        raise ValueError("editor_review.ship_confidence must be a number between 0 and 1")
+        raise AstridError(
+            "editor_review.ship_confidence must be a number between 0 and 1",
+            recovery_command="fix editor_review.json: set ship_confidence to a number between 0.0 and 1.0",
+        )
     if arrangement is not None:
         _validate_note_uuid_references(notes, arrangement)
 
@@ -467,7 +600,10 @@ def _brief_text(brief_dir: Path, arrangement: dict[str, Any]) -> str:
     text = arrangement.get("brief_text")
     if isinstance(text, str) and text.strip():
         return text.strip()
-    raise ValueError(f"brief text not found in {brief_path} or arrangement.brief_text")
+    raise AstridError(
+        f"brief text not found in {brief_path} or arrangement.brief_text",
+        recovery_command="ensure brief.txt exists in the brief directory or arrangement.json has a non-empty 'brief_text' field",
+    )
 
 
 def _clip_pool_and_role(clip: dict[str, Any]) -> tuple[str, str]:

@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from astrid.contracts.errors import AstridError
 from astrid.core.element.schema import load_element_definition
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
@@ -65,12 +66,8 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
 
     def test_main_validates_effect_id(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
-                code = main(["--effect-id", "Bad_ID", "--project-root", tmp, "--out", str(Path(tmp) / "report.json")])
-
-            self.assertEqual(code, 1)
-            self.assertIn("kebab-case", stderr.getvalue())
+            with self.assertRaisesRegex(AstridError, "kebab-case"):
+                main(["--effect-id", "Bad_ID", "--project-root", tmp, "--out", str(Path(tmp) / "report.json")])
 
     def test_canonical_cli_dry_run_uses_executor_runtime(self) -> None:
         stdout = io.StringIO()

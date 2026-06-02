@@ -11,10 +11,10 @@ import argparse
 import json
 import re
 import shutil
-import sys
 from pathlib import Path
 
 from astrid._paths import REPO_ROOT
+from astrid.contracts.errors import AstridError
 
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -99,7 +99,11 @@ def scaffold(
     force: bool = False,
 ) -> dict:
     if not _EFFECT_ID_RE.match(effect_id):
-        raise ValueError("effect id must be kebab-case, e.g. glass-product-card")
+        raise AstridError(
+            "effect id must be kebab-case, e.g. glass-product-card",
+            valid_options=["glass-product-card", "simple-fade", "hero-banner"],
+            recovery_command="pass a valid kebab-case effect id via --effect-id, e.g. glass-product-card",
+        )
 
     resolved_label = label or _title_from_id(effect_id)
     resolved_description = description or (
@@ -202,8 +206,7 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
         )
     except (FileExistsError, OSError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+        raise AstridError(str(exc), recovery_command="check the effect id, file paths, and permissions, then rerun") from exc
     print(f"html-canvas-effect: wrote {report['element_root']}")
     print(f"html-canvas-effect: report {args.out}")
     return 0

@@ -100,11 +100,12 @@ def test_build_ffmpeg_cmd_structure() -> None:
 
 # ── main: validation error ─────────────────────────────────────────────
 
-def test_main_validation_error_missing_input(tmp_path: Path) -> None:
+def test_main_validation_error_missing_input(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / "nonexistent.mp4"
     out = tmp_path / "out.mp4"
     rc = main(["--input", str(missing), "--start", "0", "--dur", "1", "--output", str(out)])
-    assert rc == 1
+    assert rc == 2
+    assert "not found" in capsys.readouterr().err
 
 
 # ── main: successful runner invocation ─────────────────────────────────
@@ -150,7 +151,7 @@ def test_main_output_directory_created(tmp_path: Path) -> None:
 
 # ── main: failure propagation ──────────────────────────────────────────
 
-def test_main_failure_propagation_nonzero(tmp_path: Path) -> None:
+def test_main_failure_propagation_nonzero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     src = tmp_path / "src.mp4"
     src.write_text("fake-video")
     out = tmp_path / "out.mp4"
@@ -162,10 +163,11 @@ def test_main_failure_propagation_nonzero(tmp_path: Path) -> None:
         ["--input", str(src), "--start", "0", "--dur", "1", "--output", str(out)],
         runner=fake_runner,
     )
-    assert rc == 1
+    assert rc == 2
+    assert "ffmpeg_stderr" in capsys.readouterr().err
 
 
-def test_main_failure_propagation_arbitrary_code(tmp_path: Path) -> None:
+def test_main_failure_propagation_arbitrary_code(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     src = tmp_path / "src.mp4"
     src.write_text("fake-video")
     out = tmp_path / "out.mp4"
@@ -177,7 +179,8 @@ def test_main_failure_propagation_arbitrary_code(tmp_path: Path) -> None:
         ["--input", str(src), "--start", "0", "--dur", "1", "--output", str(out)],
         runner=fake_runner,
     )
-    assert rc == 42
+    assert rc == 2
+    assert "ffmpeg_stderr" in capsys.readouterr().err
 
 
 # ── main: runner receives check=False ──────────────────────────────────
@@ -220,7 +223,7 @@ def test_main_empty_stderr_on_success(tmp_path: Path) -> None:
 
 # ── main: None stderr on failure does not crash ────────────────────────
 
-def test_main_none_stderr_on_failure(tmp_path: Path) -> None:
+def test_main_none_stderr_on_failure(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     src = tmp_path / "src.mp4"
     src.write_text("fake-video")
     out = tmp_path / "out.mp4"
@@ -232,7 +235,8 @@ def test_main_none_stderr_on_failure(tmp_path: Path) -> None:
         ["--input", str(src), "--start", "0", "--dur", "1", "--output", str(out)],
         runner=fake_runner,
     )
-    assert rc == 1
+    assert rc == 2
+    assert "ffmpeg exited with 1" in capsys.readouterr().err
 
 
 # ── main: path resolution (expanduser / relative) ──────────────────────

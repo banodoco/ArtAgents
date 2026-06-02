@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 
 HUGGING_FACE_MODELS_API = "https://huggingface.co/api/models"
@@ -171,7 +172,11 @@ def _match_details(result: dict[str, Any], terms: list[str], mode: str) -> dict[
     elif mode == "any":
         matched = bool(matched_terms)
     else:
-        raise ValueError("match_mode must be all or any")
+        raise AstridError(
+            "match_mode must be all or any",
+            valid_options=["all", "any"],
+            recovery_command="set --match-mode to 'all' or 'any'",
+        )
     score = sum(len(fields) for fields in terms_by_field.values())
     return {
         "matched": matched,
@@ -399,12 +404,21 @@ def _fetch_models(
             raw_data = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Hugging Face model search failed: HTTP {exc.code}: {detail}") from exc
+        raise AstridError(
+            f"Hugging Face model search failed: HTTP {exc.code}: {detail}",
+            recovery_command="verify the Hugging Face API is reachable and the base model id is correct, then retry",
+        ) from exc
     except urllib.error.URLError as exc:
-        raise RuntimeError(f"Hugging Face model search failed: {exc.reason}") from exc
+        raise AstridError(
+            f"Hugging Face model search failed: {exc.reason}",
+            recovery_command="check network connectivity and Hugging Face API availability, then retry",
+        ) from exc
 
     if not isinstance(raw_data, list):
-        raise RuntimeError("Hugging Face model search returned an unexpected payload")
+        raise AstridError(
+            "Hugging Face model search returned an unexpected payload",
+            recovery_command="verify the Hugging Face API is functioning correctly and retry",
+        )
     return [item for item in raw_data if isinstance(item, dict)]
 
 
@@ -446,16 +460,30 @@ def search_loras(
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     if limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise AstridError(
+            "limit must be at least 1",
+            recovery_command="set --limit to a value >= 1",
+        )
     if direction not in {"-1", "1"}:
-        raise ValueError("direction must be -1 or 1")
+        raise AstridError(
+            "direction must be -1 or 1",
+            valid_options=["-1", "1"],
+            recovery_command="set --direction to -1 or 1",
+        )
 
     if match_mode not in {"all", "any"}:
-        raise ValueError("match_mode must be all or any")
+        raise AstridError(
+            "match_mode must be all or any",
+            valid_options=["all", "any"],
+            recovery_command="set --match-mode to 'all' or 'any'",
+        )
     local_terms = _normalize_terms(match)
     effective_fetch_limit = fetch_limit if fetch_limit is not None else (max(limit, 100) if local_terms else limit)
     if effective_fetch_limit < limit:
-        raise ValueError("fetch_limit must be greater than or equal to limit")
+        raise AstridError(
+            "fetch_limit must be greater than or equal to limit",
+            recovery_command="set --fetch-limit to a value >= --limit and retry",
+        )
 
     raw_data = _fetch_models(
         base_model=base_model,
@@ -531,12 +559,23 @@ def discover_base_models(
     timeout: float = 30.0,
 ) -> dict[str, Any]:
     if limit < 1:
-        raise ValueError("limit must be at least 1")
+        raise AstridError(
+            "limit must be at least 1",
+            recovery_command="set --limit to a value >= 1",
+        )
     if direction not in {"-1", "1"}:
-        raise ValueError("direction must be -1 or 1")
+        raise AstridError(
+            "direction must be -1 or 1",
+            valid_options=["-1", "1"],
+            recovery_command="set --direction to -1 or 1",
+        )
 
     if match_mode not in {"all", "any"}:
-        raise ValueError("match_mode must be all or any")
+        raise AstridError(
+            "match_mode must be all or any",
+            valid_options=["all", "any"],
+            recovery_command="set --match-mode to 'all' or 'any'",
+        )
     local_terms = _normalize_terms(match)
     raw_data = _fetch_models(
         base_model=None,
@@ -612,40 +651,39 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    try:
-        list_base_models = bool(args.list_base_models or args.mode == "base-models")
-        fetch_limit = args.fetch_limit if args.fetch_limit and args.fetch_limit > 0 else None
-        limit = args.limit if args.limit and args.limit > 0 else None
-        if list_base_models:
-            payload = discover_base_models(
-                query=args.query,
-                match=args.match,
-                match_mode=args.match_mode,
-                base_model_match=args.base_model_match,
-                limit=fetch_limit or limit or DEFAULT_DISCOVERY_LIMIT,
-                sort=args.sort,
-                direction=args.direction,
-                token=args.token,
-                timeout=args.timeout,
+    list_base_models = bool(args.list_base_models or args.mode == "base-models")
+    fetch_limit = args.fetch_limit if args.fetch_limit and args.fetch_limit > 0 else None
+    limit = args.limit if args.limit and args.limit > 0 else None
+    if list_base_models:
+        payload = discover_base_models(
+            query=args.query,
+            match=args.match,
+            match_mode=args.match_mode,
+            base_model_match=args.base_model_match,
+            limit=fetch_limit or limit or DEFAULT_DISCOVERY_LIMIT,
+            sort=args.sort,
+            direction=args.direction,
+            token=args.token,
+            timeout=args.timeout,
+        )
+    else:
+        if not args.base_model:
+            raise AstridError(
+                "--base-model is required unless --list-base-models is set",
+                recovery_command="provide --base-model <repo_id> or use --list-base-models",
             )
-        else:
-            if not args.base_model:
-                raise ValueError("--base-model is required unless --list-base-models is set")
-            payload = search_loras(
-                base_model=args.base_model,
-                query=args.query,
-                match=args.match,
-                match_mode=args.match_mode,
-                limit=limit or 25,
-                fetch_limit=fetch_limit,
-                sort=args.sort,
-                direction=args.direction,
-                token=args.token,
-                timeout=args.timeout,
-            )
-    except (RuntimeError, ValueError) as exc:
-        print(f"search-loras: {exc}", file=sys.stderr)
-        return 2
+        payload = search_loras(
+            base_model=args.base_model,
+            query=args.query,
+            match=args.match,
+            match_mode=args.match_mode,
+            limit=limit or 25,
+            fetch_limit=fetch_limit,
+            sort=args.sort,
+            direction=args.direction,
+            token=args.token,
+            timeout=args.timeout,
+        )
 
     indent = None if args.compact else 2
     text = json.dumps(payload, indent=indent, sort_keys=False) + "\n"

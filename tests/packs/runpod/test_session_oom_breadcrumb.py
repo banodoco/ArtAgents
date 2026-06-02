@@ -11,6 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from astrid.contracts.errors import AstridError
+
 
 # ---------------------------------------------------------------------------
 # Session with crashing remote script leaves pod_handle.json breadcrumb
@@ -159,8 +161,8 @@ def test_breadcrumb_written_before_exec_and_survives_process_crash() -> None:
                     excludes = None
                     produces_dir = pd2
 
-                exit_code = cmd_session(Args(), produces_dir)
-                assert exit_code != 0, "Session with exec crash should return non-zero"
+                with pytest.raises(AstridError, match="simulated exec crash"):
+                    cmd_session(Args(), produces_dir)
 
                 # Python exceptions are caught by except, so finally runs.
                 # The handle is deleted. This is correct — only SIGKILL/OOM

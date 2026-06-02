@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import AuditContext
+from astrid.contracts.errors import AstridError
 from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 from astrid.theme_schema import load_theme
@@ -230,7 +231,11 @@ def _validate_no_generative_visual_sources(arrangement: dict[str, Any], pool: di
             continue
         pool_id = visual_source.get("pool_id")
         if pool_id in generative_ids:
-            raise ValueError(f"clip {index} uses generative visual_source {pool_id!r}, which is disabled for source-cut arrangements")
+            raise AstridError(
+                f"clip {index} uses generative visual_source {pool_id!r}, which is disabled for source-cut arrangements",
+                valid_options=["--allow-generative-effects"],
+                recovery_command="re-run with --allow-generative-effects flag to enable generative visual sources",
+            )
 
 
 def _validate_generative_params(arrangement: dict[str, Any], pool: dict[str, Any]) -> None:
@@ -435,18 +440,28 @@ def _validated_arrangement(
     target_duration_sec: float | None,
 ) -> dict[str, Any]:
     if not isinstance(response, dict):
-        raise ValueError("Claude arrangement response must be an object")
+        raise AstridError(
+            "Claude arrangement response must be an object",
+            recovery_command="retry the Claude API call; the model returned a malformed response",
+        )
     clips = response.get("clips")
     if not isinstance(clips, list):
-        raise ValueError("Claude arrangement response is missing clips")
+        raise AstridError(
+            "Claude arrangement response is missing clips",
+            recovery_command="retry the Claude API call; the response was missing the clips field",
+        )
     response_target_duration = response.get("target_duration_sec")
     if not isinstance(response_target_duration, (int, float)):
-        raise ValueError("Claude arrangement response is missing target_duration_sec")
+        raise AstridError(
+            "Claude arrangement response is missing target_duration_sec",
+            recovery_command="retry the Claude API call; the response was missing target_duration_sec",
+        )
     response_target_duration = float(response_target_duration)
     if target_duration_sec is not None and abs(response_target_duration - float(target_duration_sec)) > float(target_duration_sec) * 0.05:
-        raise ValueError(
-            "Claude arrangement response fell outside the requested target_duration_sec tolerance "
-            f"({response_target_duration:.1f}s != {float(target_duration_sec):.1f}s)"
+        raise AstridError(
+            f"Claude arrangement response fell outside the requested target_duration_sec tolerance "
+            f"({response_target_duration:.1f}s != {float(target_duration_sec):.1f}s)",
+            recovery_command="retry the Claude API call; the response target_duration_sec was outside the 5% tolerance window",
         )
     payload: dict[str, Any] = {
         "version": ARRANGEMENT_VERSION,

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from astrid import pipeline
+from astrid.contracts.errors import AstridError
 from astrid.core.adapter import DispatchResult
 from astrid.core.adapter import local as local_adapter_module
 from astrid.core.executor import cli as executor_cli
@@ -111,7 +112,8 @@ def test_hype_runtime_rejects_before_project_run_side_effects(
     _set_task_env(monkeypatch)
 
     with patch("astrid.core.task.gate.gate_command", wraps=task_gate.gate_command) as gate_spy:
-        assert hype_run.main(["--project", "demo", "--brief", "hello"]) == 1
+        with pytest.raises(AstridError, match="astrid next --project demo"):
+            hype_run.main(["--project", "demo", "--brief", "hello"])
 
     assert gate_spy.call_count == 1
     assert gate_spy.call_args.kwargs["reentry"] is True
@@ -135,6 +137,39 @@ def _setup_active_plan(tmp_projects_root: Path, *, command: str) -> None:
             "steps": [{"id": "step-1", "adapter": "local", "command": command}],
         }),
         encoding="utf-8",
+    )
+    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core.project.schema import build_run_record
+    from astrid import timeline as timeline_contract
+    from astrid.threads.ids import generate_ulid
+
+    timeline_id = generate_ulid()
+    timeline_dir = tmp_projects_root / "demo" / "timelines" / timeline_id
+    timeline_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(timeline_dir / "assembly.json", timeline_contract.canonical_empty_timeline())
+    write_json_atomic(
+        timeline_dir / "manifest.json",
+        {
+            "schema_version": 1,
+            "contributing_runs": [],
+            "final_outputs": [],
+            "tombstoned_at": None,
+        },
+    )
+    write_json_atomic(
+        timeline_dir / "display.json",
+        {
+            "schema_version": 1,
+            "slug": "primary",
+            "name": "Primary",
+            "is_default": True,
+        },
+    )
+    run_dir = tmp_projects_root / "demo" / "runs" / "task-run-1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(
+        run_dir / "run.json",
+        build_run_record("demo", "task-run-1", status="running", timeline_id=timeline_id),
     )
     seed_current_run("demo", run_id="task-run-1", plan_hash=compute_plan_hash(plan_path), root=tmp_projects_root)
 

@@ -51,6 +51,7 @@ from astrid.timeline import (
 )
 from ..transcribe.run import load_api_key
 from astrid.audit import register_outputs
+from astrid.contracts.errors import AstridError
 
 BOILERPLATE_TOKENS = {"um", "uh"}
 BOILERPLATE_BIGRAMS = {("you", "know"), ("i", "mean"), ("sort", "of"), ("kind", "of")}
@@ -125,14 +126,20 @@ def _resolve_ref(ref: str | None, out_dir: Path) -> Path | None:
 def _resolve_asset_path(registry_path: Path, registry: dict[str, Any], asset_key: str) -> Path | str:
     entry = registry.get("assets", {}).get(asset_key, {})
     if not isinstance(entry, dict):
-        raise ValueError(f"Asset registry entry {asset_key!r} is missing")
+        raise AstridError(
+            f"Asset registry entry {asset_key!r} is missing",
+            recovery_command="Check that the asset key exists in the registry and the registry file is correctly formed",
+        )
     if isinstance(entry.get("url"), str) and isinstance(entry.get("content_sha256"), str):
         return asset_cache.resolve(entry, want="path")
     if isinstance(entry.get("url"), str) and not isinstance(entry.get("file"), str):
         return entry["url"]
     file_value = entry.get("file")
     if not isinstance(file_value, str) or not file_value:
-        raise ValueError(f"Asset registry entry {asset_key!r} has no file path")
+        raise AstridError(
+            f"Asset registry entry {asset_key!r} has no file path",
+            recovery_command="Ensure the asset registry entry includes a valid 'file' field with an absolute or relative path",
+        )
     path = Path(file_value)
     return path if path.is_absolute() else (registry_path.parent / path).resolve()
 
@@ -159,14 +166,21 @@ def _resolve_primary_asset(
         if assets[only_key].get("type") == "audio":
             return None
         return str(only_key)
-    raise ValueError("refine requires --primary-asset when the asset registry has multiple keys and metadata lacks pipeline.config_snapshot.primary_asset")
+    raise AstridError(
+        "refine requires --primary-asset when the asset registry has multiple keys and metadata lacks pipeline.config_snapshot.primary_asset",
+        valid_options=sorted(assets.keys()),
+        recovery_command="Pass --primary-asset <key> to specify which asset to use, or add pipeline.config_snapshot.primary_asset to metadata",
+    )
 
 
 def _load_transcript_segments(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     segments = payload.get("segments") if isinstance(payload, dict) else payload
     if not isinstance(segments, list):
-        raise ValueError(f"Transcript payload at {path} must contain a segments list")
+        raise AstridError(
+            f"Transcript payload at {path} must contain a segments list",
+            recovery_command="Ensure the transcript file contains a JSON object with a 'segments' list, or pass a valid segments JSON array",
+        )
     return [segment for segment in segments if isinstance(segment, dict)]
 
 

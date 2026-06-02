@@ -20,8 +20,10 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
+from astrid.packs._canonical_entrypoint import run_pack_main
 
 
 API_URL = "https://api.openai.com/v1/responses"
@@ -42,8 +44,10 @@ def _pil():
 
 
 def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
+    raise AstridError(
+        message,
+        recovery_command="check the inputs and retry; see --help for usage",
+    )
 
 
 def _parse_timestamp(value: str) -> float:
@@ -331,9 +335,15 @@ def _call_responses_api(
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail_text = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI API error {exc.code}: {detail_text}") from exc
+        raise AstridError(
+            f"OpenAI API error {exc.code}: {detail_text}",
+            recovery_command="verify the API key and model name, then retry",
+        ) from exc
     except URLError as exc:
-        raise RuntimeError(f"Network error: {exc}") from exc
+        raise AstridError(
+            f"Network error: {exc}",
+            recovery_command="check network connectivity and retry",
+        ) from exc
 
 
 def _collect_inputs(args: argparse.Namespace) -> tuple[list[tuple[Path, str]], Path]:
@@ -487,7 +497,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    return run(build_parser().parse_args(argv))
+    def _run() -> int:
+        return run(build_parser().parse_args(argv))
+
+    return run_pack_main(
+        "understanding.visual_understand",
+        _run,
+        argv=argv,
+        recovery_command="check the inputs and retry; see --help for usage",
+    )
 
 
 if __name__ == "__main__":

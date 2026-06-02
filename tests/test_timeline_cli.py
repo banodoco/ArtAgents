@@ -1896,12 +1896,10 @@ def test_preview_out_guard_rejects_paths_inside_timeline_home(
 
     # Attempt to write inside timeline home — should be rejected
     out_inside = timeline_home / "stale_assembly.json"
-    rc = timeline_cli.main(
-        ["preview", "test-tl", "--at", at_event_id, "--out", str(out_inside)]
-    )
-    assert rc == 2
-    captured = capsys.readouterr()
-    assert "inside the timeline home" in captured.err
+    with pytest.raises(AstridError, match="inside the timeline home"):
+        timeline_cli.main(
+            ["preview", "test-tl", "--at", at_event_id, "--out", str(out_inside)]
+        )
 
 
 def test_preview_out_guard_allows_paths_outside_timeline_home(

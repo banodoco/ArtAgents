@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import register_outputs
+from astrid.contracts.errors import AstridError
 from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 
@@ -54,34 +55,67 @@ def scene_id_for(scene: dict[str, Any]) -> str:
 
 def validate_scene_triage(payload: Any) -> None:
     if not isinstance(payload, dict):
-        raise ValueError("scene_triage payload must be an object")
+        raise AstridError(
+            "scene_triage payload must be an object",
+            recovery_command="provide a valid JSON object as the scene_triage payload",
+        )
     if payload.get("version") != TRIAGE_VERSION:
-        raise ValueError(f"scene_triage.version must be {TRIAGE_VERSION}")
+        raise AstridError(
+            f"scene_triage.version must be {TRIAGE_VERSION}",
+            valid_options=[str(TRIAGE_VERSION)],
+            recovery_command=f"set version to {TRIAGE_VERSION} in the scene_triage payload",
+        )
     generated_at = payload.get("generated_at")
     if not isinstance(generated_at, str) or not generated_at.endswith("Z"):
-        raise ValueError("scene_triage.generated_at must be a UTC timestamp ending in 'Z'")
+        raise AstridError(
+            "scene_triage.generated_at must be a UTC timestamp ending in 'Z'",
+            recovery_command="provide a UTC timestamp ending in 'Z' for generated_at",
+        )
     entries = payload.get("entries")
     if not isinstance(entries, list):
-        raise ValueError("scene_triage.entries must be a list")
+        raise AstridError(
+            "scene_triage.entries must be a list",
+            recovery_command="provide entries as a JSON array",
+        )
     seen_ids: set[str] = set()
     for index, entry in enumerate(entries):
         path = f"scene_triage.entries[{index}]"
         if not isinstance(entry, dict):
-            raise ValueError(f"{path} must be an object")
+            raise AstridError(
+                f"{path} must be an object",
+                recovery_command=f"make {path} a JSON object with scene_id, triage_score, triage_tag",
+            )
         if set(entry) != {"scene_id", "triage_score", "triage_tag"}:
-            raise ValueError(f"{path} has unexpected keys")
+            raise AstridError(
+                f"{path} has unexpected keys",
+                valid_options=["scene_id", "triage_score", "triage_tag"],
+                recovery_command=f"ensure {path} has only the keys: scene_id, triage_score, triage_tag",
+            )
         scene_id = entry.get("scene_id")
         triage_score = entry.get("triage_score")
         triage_tag = entry.get("triage_tag")
         if not isinstance(scene_id, str) or not scene_id:
-            raise ValueError(f"{path}.scene_id must be a non-empty string")
+            raise AstridError(
+                f"{path}.scene_id must be a non-empty string",
+                recovery_command=f"provide a non-empty string for {path}.scene_id",
+            )
         if scene_id in seen_ids:
-            raise ValueError(f"{path}.scene_id {scene_id!r} is duplicated")
+            raise AstridError(
+                f"{path}.scene_id {scene_id!r} is duplicated",
+                recovery_command=f"remove or rename duplicate scene_id {scene_id!r} so every entry is unique",
+            )
         seen_ids.add(scene_id)
         if not isinstance(triage_score, int) or triage_score < 0 or triage_score > 5:
-            raise ValueError(f"{path}.triage_score must be an integer from 0 to 5")
+            raise AstridError(
+                f"{path}.triage_score must be an integer from 0 to 5",
+                valid_options=["0", "1", "2", "3", "4", "5"],
+                recovery_command=f"set {path}.triage_score to an integer from 0 to 5",
+            )
         if not isinstance(triage_tag, str) or not triage_tag:
-            raise ValueError(f"{path}.triage_tag must be a non-empty string")
+            raise AstridError(
+                f"{path}.triage_tag must be a non-empty string",
+                recovery_command=f"provide a non-empty string for {path}.triage_tag",
+            )
 
 
 def _resolve_frame_path(frame_path: str, shots_dir: Path) -> Path:
@@ -149,7 +183,10 @@ def build_triage(
     model: str = "claude-haiku-4-5-20251001",
 ) -> dict[str, Any]:
     if grid_size <= 0:
-        raise ValueError("grid_size must be > 0")
+        raise AstridError(
+            "grid_size must be > 0",
+            recovery_command="set grid_size to a positive integer (e.g. 20)",
+        )
     shots_by_scene = _shot_map(shots)
     entries: list[dict[str, Any]] = []
     batch: list[dict[str, Any]] = []
@@ -181,7 +218,11 @@ def build_triage(
         )
         raw_entries = response.get("entries")
         if not isinstance(raw_entries, list):
-            raise ValueError("Claude triage response is missing entries")
+            raise AstridError(
+                "Claude triage response is missing entries",
+                recovery_command="check the Claude API response format; it must contain an 'entries' array",
+                state_snapshot={"response_keys": list(response.keys()) if isinstance(response, dict) else None},
+            )
         entries.extend(raw_entries)
         batch = []
     if batch:
@@ -199,7 +240,11 @@ def build_triage(
         )
         raw_entries = response.get("entries")
         if not isinstance(raw_entries, list):
-            raise ValueError("Claude triage response is missing entries")
+            raise AstridError(
+                "Claude triage response is missing entries",
+                recovery_command="check the Claude API response format; it must contain an 'entries' array",
+                state_snapshot={"response_keys": list(response.keys()) if isinstance(response, dict) else None},
+            )
         entries.extend(raw_entries)
 
     # Claude occasionally emits the same scene_id twice across batch responses.

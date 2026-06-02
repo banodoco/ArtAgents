@@ -30,6 +30,8 @@ import shutil
 import sys
 from pathlib import Path
 
+from astrid.contracts.errors import AstridError
+from astrid.packs._canonical_entrypoint import run_pack_main
 from astrid.timeline import Timeline
 
 
@@ -72,8 +74,11 @@ def source_paths(out_dir):
     assets_path = out_dir.resolve() / "hype.assets.json"
     missing = [str(path) for path in (timeline_path, assets_path) if not path.is_file()]
     if missing:
-        print(f"open_in_reigh.py: missing required output file(s): {', '.join(missing)}", file=sys.stderr)
-        return None, None
+        raise AstridError(
+            f"open_in_reigh: missing required output file(s): {', '.join(missing)}",
+            recovery_command="Re-run the hype pipeline (cut.py -> create_hype_timeline) to generate "
+            "hype.timeline.json and hype.assets.json, or check that --out points to the correct directory.",
+        )
     return timeline_path, assets_path
 
 
@@ -161,25 +166,28 @@ def push_via_data_provider(args, timeline_path):
     The actual Supabase push is deferred to m6.
     """
     if not args.project_id:
-        print(
-            "open_in_reigh: --project-id is required for bridge metadata. "
-            "Use --print-sql, --copy-to, or --copy-files to skip the network.",
-            file=sys.stderr,
+        raise AstridError(
+            "open_in_reigh: --project-id is required for bridge metadata",
+            valid_options=["--project-id <UUID>", "--print-sql", "--copy-to <DIR>", "--copy-files"],
+            recovery_command="Provide --project-id with the reigh-app project UUID, "
+            "or use --print-sql / --copy-to / --copy-files to skip the network.",
         )
-        return 2
 
     new_timeline = load_timeline_blob(timeline_path)
     if not isinstance(new_timeline, dict):
-        print("open_in_reigh: timeline JSON must be a JSON object", file=sys.stderr)
-        return 2
+        raise AstridError(
+            "open_in_reigh: timeline JSON must be a JSON object",
+            recovery_command="Ensure the timeline file contains a JSON object (dictionary), "
+            "not an array or scalar. Re-export the timeline with the canonical schema.",
+        )
     if "placements" in new_timeline:
-        print(
+        raise AstridError(
             "open_in_reigh: refusing to bridge placement-style timeline.json to reigh-app. "
             "The DataProvider expects the canonical clip-shaped TimelineConfig "
-            "(per @banodoco/timeline-schema). Re-export with the collapsed schema first.",
-            file=sys.stderr,
+            "(per @banodoco/timeline-schema).",
+            recovery_command="Re-export the timeline with the collapsed clip-shaped schema "
+            "(without the 'placements' key) before bridging to reigh-app.",
         )
-        return 2
 
     if args.dry_run:
         print(
@@ -208,34 +216,35 @@ def push_via_data_provider(args, timeline_path):
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
-    timeline_path, assets_path = source_paths(args.out)
-    if timeline_path is None or assets_path is None:
-        return 1
+    def _run() -> int:
+        args = build_parser().parse_args(argv)
+        timeline_path, assets_path = source_paths(args.out)
 
-    # Escape hatches: --print-sql and --copy-to / --copy-files / probe.
-    handled_offline = False
-    if args.copy_to is not None or args.copy_files:
-        target = probe_target(args)
-        if target is not None:
-            maybe_copy_files(timeline_path, assets_path, target, args.dry_run)
+        # Escape hatches: --print-sql and --copy-to / --copy-files / probe.
+        handled_offline = False
+        if args.copy_to is not None or args.copy_files:
+            target = probe_target(args)
+            if target is not None:
+                maybe_copy_files(timeline_path, assets_path, target, args.dry_run)
+                handled_offline = True
+            elif args.copy_to is not None:
+                # User asked for a copy but the dir wasn't writable (probe_target only
+                # returns None when --copy-to is missing AND no probe match found).
+                handled_offline = True
+            else:
+                print_manual_handoff()
+                handled_offline = True
+
+        if args.print_sql:
+            print_sql(args, timeline_path, assets_path)
             handled_offline = True
-        elif args.copy_to is not None:
-            # User asked for a copy but the dir wasn't writable (probe_target only
-            # returns None when --copy-to is missing AND no probe match found).
-            handled_offline = True
-        else:
-            print_manual_handoff()
-            handled_offline = True
 
-    if args.print_sql:
-        print_sql(args, timeline_path, assets_path)
-        handled_offline = True
+        if handled_offline:
+            return 0
 
-    if handled_offline:
-        return 0
+        return push_via_data_provider(args, timeline_path)
 
-    return push_via_data_provider(args, timeline_path)
+    return run_pack_main("reigh.open_in_reigh", _run, argv=argv)
 
 
 if __name__ == "__main__":

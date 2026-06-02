@@ -157,7 +157,7 @@ def _main_impl(raw: list[str]) -> int:
                 print(
                     f"(auto-resolved session for project {discovered_slug!r} "
                     f"via .astrid-session; pass --project to override)",
-                    file=sys.stderr,
+                    file=sys.__stderr__,
                 )
 
             from astrid.core.project.paths import resolve_projects_root
@@ -168,8 +168,11 @@ def _main_impl(raw: list[str]) -> int:
                 projects_root=resolve_projects_root(),
             )
         except SessionBindingError as exc:
-            _print_unbound_gate_recovery(f"session: {exc}")
-            return 2
+            raise AstridError(
+                f"session: {exc}",
+                recovery_command="astrid status",
+                state_snapshot={"argv": raw},
+            ) from exc
         if session is None:
             project_hint = _extract_project_slug(raw)
             attach_hint = (
@@ -177,11 +180,12 @@ def _main_impl(raw: list[str]) -> int:
                 if project_hint
                 else "`astrid attach <project>`"
             )
-            _print_unbound_gate_recovery(
+            raise AstridError(
                 f"no session bound — run `astrid status` to list projects, then {attach_hint} "
-                "(or `astrid attach` if a default project is configured)"
+                "(or `astrid attach` if a default project is configured)",
+                recovery_command="astrid status",
+                state_snapshot={"argv": raw, "project": project_hint},
             )
-            return 2
 
     if _verb_bypasses_task_gate(raw):
         return _dispatch(raw)
@@ -240,11 +244,6 @@ def _verb_is_unbound_allowlisted(raw: list[str]) -> bool:
         if tuple(raw[: len(allowed)]) == allowed:
             return True
     return False
-
-
-def _print_unbound_gate_recovery(message: str) -> None:
-    print("first recovery action: astrid status", file=sys.stderr)
-    print(message, file=sys.stderr)
 
 
 def _dispatch(raw: list[str]) -> int:

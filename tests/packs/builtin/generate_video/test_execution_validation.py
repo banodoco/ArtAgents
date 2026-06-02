@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.executor.schema import load_executor_manifest
 from astrid.core.model_catalog.schema import ModeSpec
 
@@ -15,6 +16,15 @@ _EXECUTOR_YAML = (
     Path(__file__).resolve().parents[4]
     / "astrid/packs/generation/executors/generate_video/executor.yaml"
 )
+
+
+def _assert_astrid_error(call, *cause_parts: str) -> AstridError:
+    with pytest.raises(AstridError) as raised:
+        call()
+    error = raised.value
+    for part in cause_parts:
+        assert part in error.cause
+    return error
 
 
 def test_manifest_loads() -> None:
@@ -29,16 +39,18 @@ def test_execution_invalid_value(tmp_path: Path) -> None:
     from astrid.packs.generation.executors.generate_video.run import main
 
     out = tmp_path / "out"
-    code = main(
-        [
-            "--model", "wan-2.2",
-            "--mode", "t2v",
-            "--execution", "both",
-            "--prompt", "x",
-            "--out", str(out),
-        ]
+    _assert_astrid_error(
+        lambda: main(
+            [
+                "--model", "wan-2.2",
+                "--mode", "t2v",
+                "--execution", "both",
+                "--prompt", "x",
+                "--out", str(out),
+            ]
+        ),
+        "model 'wan-2.2' mode 't2v' has no 'both' backend",
     )
-    assert code == 1
 
 
 def test_execution_invalid_value_lists_pair_specific_backends(
@@ -49,19 +61,19 @@ def test_execution_invalid_value_lists_pair_specific_backends(
     from astrid.packs.generation.executors.generate_video.run import main
 
     out = tmp_path / "out"
-    code = main(
-        [
-            "--model", "wan-2.2",
-            "--mode", "t2v",
-            "--execution", "local",
-            "--prompt", "x",
-            "--out", str(out),
-        ]
+    error = _assert_astrid_error(
+        lambda: main(
+            [
+                "--model", "wan-2.2",
+                "--mode", "t2v",
+                "--execution", "local",
+                "--prompt", "x",
+                "--out", str(out),
+            ]
+        ),
+        "model 'wan-2.2' mode 't2v' has no 'local' backend",
     )
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "Available backends: cloud" in captured.err
-    assert "local" in captured.err
+    assert error.valid_options == ("cloud",)
 
 
 def test_registry_lookup_failure_is_reported_as_cli_error(
@@ -84,18 +96,18 @@ def test_registry_lookup_failure_is_reported_as_cli_error(
     )
 
     out = tmp_path / "out"
-    code = run_mod.main(
-        [
-            "--model", "wan-2.2",
-            "--mode", "t2v",
-            "--execution", "cloud",
-            "--prompt", "x",
-            "--out", str(out),
-        ]
+    _assert_astrid_error(
+        lambda: run_mod.main(
+            [
+                "--model", "wan-2.2",
+                "--mode", "t2v",
+                "--execution", "cloud",
+                "--prompt", "x",
+                "--out", str(out),
+            ]
+        ),
+        "generation backend 'cloud' is not registered",
     )
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "generation backend 'cloud' is not registered" in captured.err
 
 
 def test_video_prompt_file_custom_features_survive_helper_validation() -> None:

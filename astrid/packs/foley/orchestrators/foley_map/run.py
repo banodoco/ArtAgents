@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 
 GLOBAL_QUERY = (
@@ -45,14 +46,17 @@ def _tile_query(global_context: str, row: int, col: int, rows: int, cols: int) -
 
 
 def _run_subprocess(cmd: list[str], *, label: str) -> str:
-    print(f"[foley_map] {label}: {' '.join(cmd)}", file=sys.stderr)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
-        sys.stderr.write(proc.stdout)
-        sys.stderr.write(proc.stderr)
-        raise SystemExit(f"[foley_map] {label} failed (exit {proc.returncode})")
-    if proc.stderr.strip():
-        sys.stderr.write(proc.stderr)
+        raise AstridError(
+            f"[foley_map] {label} failed (exit {proc.returncode})",
+            recovery_command=f"Check the command's dependencies and retry: {' '.join(cmd)}",
+            state_snapshot={
+                "command": ' '.join(cmd),
+                "stdout": proc.stdout,
+                "stderr": proc.stderr,
+            },
+        )
     return proc.stdout
 
 
@@ -135,7 +139,7 @@ def step_prompts(args: argparse.Namespace, out: Path, manifest: dict[str, Any]) 
         "tile_prompts": tile_prompts,
     }
     prompts_path.write_text(json.dumps(prompts_payload, indent=2) + "\n", encoding="utf-8")
-    print(f"[foley_map] wrote prompts: {prompts_path}", file=sys.stderr)
+    print(f"[foley_map] wrote prompts: {prompts_path}")
     return prompts_payload
 
 
@@ -173,7 +177,7 @@ def step_foley(args: argparse.Namespace, out: Path, manifest: dict[str, Any],
         work.append((tid, clip_abs, tile_prompts[tid], out_audio))
 
     print(f"[foley_map] foley work: {len(work)} tiles "
-          f"(skipped {len(manifest['tiles']) - len(work)} cached)", file=sys.stderr)
+          f"(skipped {len(manifest['tiles']) - len(work)} cached)")
 
     with ThreadPoolExecutor(max_workers=args.foley_concurrency) as pool:
         futures = [
@@ -264,31 +268,31 @@ def main(argv: list[str] | None = None) -> int:
 
     retry_ids = _load_flagged(args.retry_flagged) if args.retry_flagged else None
 
-    print(f"[foley_map] step 1/5: tile_video", file=sys.stderr)
+    print(f"[foley_map] step 1/5: tile_video")
     tiles_manifest_path = step_tile(args, out)
     if args.stop_after == "tile":
         return 0
     manifest = json.loads(tiles_manifest_path.read_text(encoding="utf-8"))
 
-    print(f"[foley_map] step 2/5: visual_understand (global + per-tile)", file=sys.stderr)
+    print(f"[foley_map] step 2/5: visual_understand (global + per-tile)")
     prompts = step_prompts(args, out, manifest)
     if args.stop_after == "prompts":
         return 0
 
-    print(f"[foley_map] step 3/5: fal_foley × {len(manifest['tiles'])}", file=sys.stderr)
+    print(f"[foley_map] step 3/5: fal_foley × {len(manifest['tiles'])}")
     enriched = step_foley(args, out, manifest, prompts, retry_ids)
     if args.stop_after == "foley":
         # Still write the enriched manifest for resumption.
         (out / "tiles.json").write_text(json.dumps(enriched, indent=2) + "\n", encoding="utf-8")
         return 0
 
-    print(f"[foley_map] step 4/5: foley_review", file=sys.stderr)
+    print(f"[foley_map] step 4/5: foley_review")
     review_path = step_review(out, enriched)
     print(f"open file://{review_path}")
     if args.stop_after == "review":
         return 0
 
-    print(f"[foley_map] step 5/5: spatial_audio_page", file=sys.stderr)
+    print(f"[foley_map] step 5/5: spatial_audio_page")
     page_path = step_page(out)
     print(f"open file://{page_path}")
     return 0

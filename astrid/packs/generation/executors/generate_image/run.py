@@ -17,11 +17,11 @@ import hashlib
 import json
 import logging
 import random
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation.backends import (
     BackendAdapter,
@@ -306,12 +306,14 @@ def _create_backend_adapter(
     try:
         return backend_registry.create(execution, env_file=env_file)
     except KeyError as exc:
-        raise RuntimeError(
-            f"generation backend {execution!r} is not registered: {exc}"
+        raise AstridError(
+            f"generation backend {execution!r} is not registered: {exc}",
+            recovery_command="check available backends and retry with a registered backend",
         ) from exc
     except Exception as exc:
-        raise RuntimeError(
-            f"failed to initialize generation backend {execution!r}: {exc}"
+        raise AstridError(
+            f"failed to initialize generation backend {execution!r}: {exc}",
+            recovery_command="check backend configuration and environment, then retry",
         ) from exc
 
 
@@ -426,32 +428,38 @@ def main(argv: list[str] | None = None) -> int:
     try:
         backend_registry = load_default_generation_backend_registry()
     except Exception as exc:
-        print(f"Failed to load generation backend registry: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"Failed to load generation backend registry: {exc}",
+            recovery_command="ensure generation backend packages are installed and retry",
+        ) from exc
 
     # --- load registry -------------------------------------------------------
     try:
         registry = ModelRegistry.load_default()
     except Exception as exc:
-        print(f"Failed to load model registry: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"Failed to load model registry: {exc}",
+            recovery_command="ensure model registry packages are installed and retry",
+        ) from exc
 
     # --- validate (model, mode) pair exists ----------------------------------
     try:
         entry, mode_spec = registry.get_by_mode(args.model, mode_name)
     except KeyError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"Error: {exc}",
+            recovery_command="check available models and modes with --help and retry with a valid (model, mode) pair",
+        ) from exc
 
     # --- check backend availability for --execution --------------------------
     if not registry.backend_available(args.model, mode_name, args.execution):
         available = ", ".join(_available_backend_ids(mode_spec))
-        print(
-            f"Error: model {args.model!r} mode {mode_name!r} has no "
-            f"{args.execution!r} backend. Available backends: {available}",
-            file=sys.stderr,
+        raise AstridError(
+            f"model {args.model!r} mode {mode_name!r} has no "
+            f"{args.execution!r} backend",
+            valid_options=list(_available_backend_ids(mode_spec)),
+            recovery_command=f"choose one of the available backends: {available}",
         )
-        return 1
 
     warnings: list[dict[str, str]] = []
     dropped_features: list[str] = []
@@ -466,23 +474,18 @@ def main(argv: list[str] | None = None) -> int:
         prompts = _load_prompts(args.prompts_file, args.model, mode_name)
     else:
         if not args.prompt:
-            print(
-                "Error: either --prompt or --prompts-file is required.",
-                file=sys.stderr,
+            raise AstridError(
+                "either --prompt or --prompts-file is required",
+                recovery_command="provide --prompt 'your text' or --prompts-file path/to/prompts.jsonl",
             )
-            return 1
         prompts = [{"prompt": args.prompt, "model": args.model}]
 
     # --- build adapter (SD-004: dispatch through BackendAdapter) -------------
-    try:
-        adapter = _create_backend_adapter(
-            backend_registry,
-            args.execution,
-            env_file=args.env_file,
-        )
-    except RuntimeError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        return 1
+    adapter = _create_backend_adapter(
+        backend_registry,
+        args.execution,
+        env_file=args.env_file,
+    )
 
     # --- resolve image_ref path (for manifest tracking) ----------------------
     image_ref_resolved: str | None = None
@@ -534,10 +537,9 @@ def main(argv: list[str] | None = None) -> int:
                         f"Available: {available}"
                     )
                 if skip_reason is not None:
-                    print(
-                        f"Warning: skipping row {i} ({prompt_text!r}): "
-                        f"{skip_reason}",
-                        file=sys.stderr,
+                    logger.warning(
+                        "skipping row %d (%r): %s",
+                        i, prompt_text, skip_reason,
                     )
                     continue
 
@@ -554,9 +556,9 @@ def main(argv: list[str] | None = None) -> int:
                     requested_params,
                 )
             except SystemExit as exc:
-                print(
-                    f"Warning: skipping row {i} ({prompt_text!r}): {exc.code}",
-                    file=sys.stderr,
+                logger.warning(
+                    "skipping row %d (%r): %s",
+                    i, prompt_text, exc.code,
                 )
                 continue
             params, extra_warns, extra_drops = _drop_unsupported(

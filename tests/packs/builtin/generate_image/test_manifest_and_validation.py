@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.executor.schema import load_executor_manifest
 from astrid.core.model_catalog.schema import ModeSpec
 from astrid.core.util.http import Transport
@@ -87,6 +88,15 @@ def _logging_transport_with_upload(request: object) -> tuple[int, bytes]:
 _logging_transport_with_upload.calls = []  # type: ignore[attr-defined]
 
 
+def _assert_astrid_error(call, *cause_parts: str) -> AstridError:
+    with pytest.raises(AstridError) as raised:
+        call()
+    error = raised.value
+    for part in cause_parts:
+        assert part in error.cause
+    return error
+
+
 # ---------------------------------------------------------------------------
 # (a) Manifest validation
 # ---------------------------------------------------------------------------
@@ -114,16 +124,18 @@ def test_execution_invalid_value(tmp_path: Path) -> None:
     from astrid.packs.generation.executors.generate_image.run import main
 
     out = tmp_path / "out"
-    code = main(
-        [
-            "--model", "flux-dev",
-            "--mode", "t2i",
-            "--execution", "both",
-            "--prompt", "x",
-            "--out", str(out),
-        ]
+    _assert_astrid_error(
+        lambda: main(
+            [
+                "--model", "flux-dev",
+                "--mode", "t2i",
+                "--execution", "both",
+                "--prompt", "x",
+                "--out", str(out),
+            ]
+        ),
+        "model 'flux-dev' mode 't2i' has no 'both' backend",
     )
-    assert code == 1
 
 
 def test_execution_invalid_value_lists_pair_specific_backends(
@@ -134,19 +146,19 @@ def test_execution_invalid_value_lists_pair_specific_backends(
     from astrid.packs.generation.executors.generate_image.run import main
 
     out = tmp_path / "out"
-    code = main(
-        [
-            "--model", "flux-dev",
-            "--mode", "t2i",
-            "--execution", "local",
-            "--prompt", "x",
-            "--out", str(out),
-        ]
+    error = _assert_astrid_error(
+        lambda: main(
+            [
+                "--model", "flux-dev",
+                "--mode", "t2i",
+                "--execution", "local",
+                "--prompt", "x",
+                "--out", str(out),
+            ]
+        ),
+        "model 'flux-dev' mode 't2i' has no 'local' backend",
     )
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "Available backends: cloud" in captured.err
-    assert "local" in captured.err
+    assert error.valid_options == ("cloud",)
 
 
 def test_registry_lookup_failure_is_reported_as_cli_error(
@@ -169,18 +181,18 @@ def test_registry_lookup_failure_is_reported_as_cli_error(
     )
 
     out = tmp_path / "out"
-    code = run_mod.main(
-        [
-            "--model", "flux-dev",
-            "--mode", "t2i",
-            "--execution", "cloud",
-            "--prompt", "x",
-            "--out", str(out),
-        ]
+    _assert_astrid_error(
+        lambda: run_mod.main(
+            [
+                "--model", "flux-dev",
+                "--mode", "t2i",
+                "--execution", "cloud",
+                "--prompt", "x",
+                "--out", str(out),
+            ]
+        ),
+        "generation backend 'cloud' is not registered",
     )
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "generation backend 'cloud' is not registered" in captured.err
 
 
 # ---------------------------------------------------------------------------
@@ -256,16 +268,18 @@ def test_v1_model_id_rejected(tmp_path: Path) -> None:
 
     out = tmp_path / "out"
     # flux-dev-img2img does not exist in the v2 registry — should fail
-    code = main(
-        [
-            "--model", "flux-dev-img2img",
-            "--mode", "t2i",
-            "--execution", "cloud",
-            "--prompt", "a test",
-            "--out", str(out),
-        ]
+    _assert_astrid_error(
+        lambda: main(
+            [
+                "--model", "flux-dev-img2img",
+                "--mode", "t2i",
+                "--execution", "cloud",
+                "--prompt", "a test",
+                "--out", str(out),
+            ]
+        ),
+        "Unknown model 'flux-dev-img2img'",
     )
-    assert code != 0, "Expected non-zero exit for v1 model-id"
 
 
 # ---------------------------------------------------------------------------

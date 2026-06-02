@@ -19,12 +19,12 @@ import csv
 import hashlib
 import json
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.audit import AuditContext
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.util.hash import sha256_file
@@ -469,9 +469,10 @@ def _clip_bounds_for_duration(entry: dict[str, Any], duration: float, *, start: 
     start_sec = float(entry["src_start"] if start is None else start)
     source_end = float(entry["src_end"])
     if start_sec < 0 or source_end < start_sec:
-        raise ValueError(
+        raise AstridError(
             f"Invalid source bounds for pool entry {entry.get('id')!r}: "
-            f"{start_sec:.3f}-{source_end:.3f}"
+            f"{start_sec:.3f}-{source_end:.3f}",
+            recovery_command="check pool entry source timestamps and re-run pool_build with corrected bounds",
         )
     source_duration = max(0.0, source_end - start_sec)
     visible_duration = min(source_duration, duration)
@@ -1141,7 +1142,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if managed:
         # Managed mode: canonical mutations will route through the event gateway
         # (T10).  For now, validate that both flags are present.
-        print(f"cut: managed mode --project={args.project} --timeline-slug={args.timeline_slug}", file=sys.stderr)
+        print(f"cut: managed mode --project={args.project} --timeline-slug={args.timeline_slug}")
     else:
         # Unmanaged mode: writes run-local compatibility outputs only.
         if bool(getattr(args, "project", None)) != bool(getattr(args, "timeline_slug", None)):

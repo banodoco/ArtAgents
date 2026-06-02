@@ -9,6 +9,7 @@ from typing import Any
 import yaml
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.packs.training.orchestrators.dataset_build import run as dataset_run
 from astrid.packs.training.orchestrators.dataset_build.items import config_hash, make_candidate_item
 from astrid.packs.training.orchestrators.dataset_build.state import make_initial_state, read_review_state, set_status, write_review_state
@@ -318,7 +319,7 @@ def test_dataset_build_top_up_requires_round_aware_noninteractive_decisions(tmp_
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match=r"round 1"):
+    with pytest.raises(AstridError, match=r"round 1"):
         dataset_run.run_pipeline(parsed, tmp_path / "run", review_decisions_path=decisions_path)
 
     out_dir = tmp_path / "run"
@@ -996,7 +997,7 @@ def test_dataset_build_cli_preflights_no_spend_api_config_before_run_dir_creatio
     config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
     out_dir = tmp_path / "must-not-exist"
 
-    exit_code = dataset_run.main(["--config", str(config_path), "--out", str(out_dir)])
-
-    assert exit_code == 2
+    with pytest.raises(AstridError) as raised:
+        dataset_run.main(["--config", str(config_path), "--out", str(out_dir)])
+    assert "budgets.max_api_calls must be positive" in raised.value.cause
     assert not out_dir.exists()

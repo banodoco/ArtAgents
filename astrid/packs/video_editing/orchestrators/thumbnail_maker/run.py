@@ -30,6 +30,7 @@ from astrid.core.project.run import (
     reject_project_with_out,
 )
 from astrid.core.project.paths import project_dir, validate_project_slug
+from astrid.contracts.errors import AstridError
 
 
 # ---------------------------------------------------------------------------
@@ -383,8 +384,10 @@ def run_orchestrator(args: argparse.Namespace) -> int:
         return 0
 
     if project_slug is None:
-        print("thumbnail_maker: --project required for task-gate execution", file=sys.stderr)
-        return 1
+        raise AstridError(
+            "thumbnail_maker: --project required for task-gate execution",
+            recovery_command="add --project <slug> to your command",
+        )
 
     slug = validate_project_slug(project_slug)
     return _execute_via_task_gate(slug, args)
@@ -404,8 +407,10 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            print(f"thumbnail_maker: gate error: {exc.reason}", file=sys.stderr)
-            return 1
+            raise AstridError(
+                f"thumbnail_maker: gate error: {exc.reason}",
+                recovery_command="check project status with 'astrid status' and retry",
+            ) from exc
 
         if not decision.active:
             return 0
@@ -416,8 +421,10 @@ def _execute_via_task_gate(slug: str, args: argparse.Namespace) -> int:
         print(f"thumbnail_maker: running step: {' '.join(decision.command)}", flush=True)
         result = sp.run(decision.command, check=False)
         if result.returncode != 0:
-            print(f"thumbnail_maker: step failed with returncode={result.returncode}", file=sys.stderr)
-            return result.returncode
+            raise AstridError(
+                f"thumbnail_maker: step failed with returncode={result.returncode}",
+                recovery_command="inspect the failed step output and rerun with --verbose",
+            )
 
     return 0
 
@@ -447,8 +454,10 @@ def _run_step_subcommand(
                 reentry=True,
             )
         except task_gate.TaskRunGateError as exc:
-            print(exc.recovery, file=sys.stderr)
-            return 1
+            raise AstridError(
+                str(exc),
+                recovery_command="check project status with 'astrid status' and retry",
+            ) from exc
 
     returncode = runner(args)
     if decision is not None:
@@ -498,8 +507,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args=args,
                 runner=_exec_generate_thumbnails,
             )
-        print(f"thumbnail_maker: unknown subcommand: {args.command}", file=sys.stderr)
-        return 1
+        raise AstridError(
+            f"thumbnail_maker: unknown subcommand: {args.command}",
+            valid_options=sorted(step_commands),
+            recovery_command="choose one of the valid subcommands listed above",
+        )
 
     project_context = None
 
@@ -520,8 +532,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                     reentry=True,
                 )
             except task_gate.TaskRunGateError as exc:
-                print(exc.recovery, file=sys.stderr)
-                return 1
+                raise AstridError(
+                    str(exc),
+                    recovery_command="check project status with 'astrid status' and retry",
+                ) from exc
 
         if parsed.project:
             reject_project_with_out(parsed.project, parsed.out)

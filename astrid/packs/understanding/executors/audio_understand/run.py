@@ -5,14 +5,13 @@
 from __future__ import annotations
 
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 guard_canonical_entrypoint('understanding.audio_understand')
 import argparse
 import base64
 import json
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -20,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid._media import ffprobe_duration_seconds
+from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 
@@ -62,8 +62,10 @@ Compare the candidates as audio performances, not just transcript text. Return c
 
 
 def _die(message: str) -> None:
-    print(f"Error: {message}", file=sys.stderr)
-    raise SystemExit(1)
+    raise AstridError(
+        message,
+        recovery_command="fix the audio_understand inputs and rerun the command",
+    )
 
 
 def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
@@ -368,9 +370,15 @@ def _call_audio_model(
             return json.loads(response.read().decode("utf-8"))
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI API error {exc.code}: {detail}") from exc
+        raise AstridError(
+            f"OpenAI API error {exc.code}: {detail}",
+            recovery_command="verify your OpenAI API key is valid and the model name is correct, then retry",
+        ) from exc
     except URLError as exc:
-        raise RuntimeError(f"Network error: {exc}") from exc
+        raise AstridError(
+            f"Network error: {exc}",
+            recovery_command="check your network connection and verify the API endpoint is reachable, then retry",
+        ) from exc
 
 
 def run(args: argparse.Namespace) -> int:
@@ -452,7 +460,6 @@ def run(args: argparse.Namespace) -> int:
     for model in models:
         for audio_input in audio_inputs:
             audio_path = Path(audio_input["path"])
-            print(f"querying={model} audio_input={audio_input['kind']} index={audio_input['index']} audio={audio_path}", file=sys.stderr)
             started = time.time()
             try:
                 response = _call_audio_model(
@@ -488,7 +495,6 @@ def run(args: argparse.Namespace) -> int:
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text + "\n", encoding="utf-8")
-        print(f"wrote={args.out}", file=sys.stderr)
     return 0 if all(result["status"] == "ok" for result in results) else 1
 
 
@@ -525,7 +531,10 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    return run(build_parser().parse_args(argv))
+    def _run() -> int:
+        return run(build_parser().parse_args(argv))
+
+    return run_pack_main("understanding.audio_understand", _run, argv=argv)
 
 
 if __name__ == "__main__":
