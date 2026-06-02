@@ -1,71 +1,48 @@
-# Brief: assemble transitions across a same-track timeline
+# Brief: assemble my clips into a sequence
 
 You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
 
 ## The ask
 
-> "Set up a timeline with 4 clips on one track, then assemble cross-fade transitions
-> between every adjacent pair. You must first try the wrong kind and observe the
-> structured error before recovering."
+> "I generated four short clips for a little montage. Stitch them together in
+>  order, put a crossfade between each one, and lay my music track underneath."
 
-### Step-by-step
+## What to do
 
-1. Attach to project `$SLUG`: `astrid attach $SLUG`
+- You are inside the Astrid repo. Everything goes through `python3 -m astrid`.
+- **Session:** the project `$SLUG` already exists. Run `python3 -m astrid attach
+  $SLUG` ONCE, then pass `--project $SLUG` on EVERY `astrid timelines ...`
+  command (they resolve statelessly with `--project` — you do NOT need to keep a
+  session variable across commands). Stay in your current working directory — do
+  NOT `cd` anywhere (no `cd ~/...` or `/home/...`).
+- You don't have the clips on disk yet — synthesize four distinct ~2-second
+  placeholder clips and one short audio bed so you can build the sequence
+  end-to-end, e.g.:
+    `ffmpeg -f lavfi -i testsrc=duration=2:size=320x240:rate=24 -t 2 /tmp/seq_clip1.mp4 -y`
+  (vary the testsrc/color per clip; make `/tmp/seq_music.m4a` a ~8s tone via
+  `ffmpeg -f lavfi -i sine=frequency=440:duration=8 /tmp/seq_music.m4a -y`)
+- Build the montage with the canonical timeline verbs (check each `--help`):
+    - `astrid timelines create main --default --project $SLUG`
+    - `astrid timelines track add main --kind visual --label V --track-id v1 --project $SLUG`
+    - `astrid timelines clip add main --kind visual --asset <id> --track v1 --at <n> --project $SLUG` (×4, IN ORDER — note the clip id each prints)
+    - `astrid timelines transition set main --between <leftClipId>,<rightClipId> --kind crossfade --project $SLUG` (between each adjacent pair → three total)
+    - `astrid timelines audio bind main --clip <clipId> --asset <musicAssetId> --project $SLUG`
+- Do NOT hand-edit the event log or invoke `python -m astrid.packs.*` directly.
 
-2. Create a timeline (e.g., `astrid timelines create asm --name "Assembly Test"`)
+## What success looks like
 
-3. Add a visual track: `astrid timelines track add asm --kind visual --track-id v1 --label Visual`
-
-4. Add 4 visual clips on that same track (`v1`) with distinct ids (c1, c2, c3, c4):
-   ```
-   astrid timelines clip add asm --kind visual --track v1 --asset c1
-   astrid timelines clip add asm --kind visual --track v1 --asset c2
-   astrid timelines clip add asm --kind visual --track v1 --asset c3
-   astrid timelines clip add asm --kind visual --track v1 --asset c4
-   ```
-
-5. **First, attempt the WRONG kind** — use `crossfade` (no hyphen):
-   ```
-   astrid timelines transition set asm --between c1,c2 --kind crossfade --duration 0.5
-   ```
-   This MUST fail with a structured recoverable error. Search the stderr output for:
-   - `valid_options` — must include `cross-fade`
-   - `recovery_command` — a suggested command to fix the error
-   - `state_snapshot` — if present, record what it shows
-
-6. **Recover** by using the correct kind `cross-fade` for all three adjacent pairs:
-   ```
-   astrid timelines transition set asm --between c1,c2 --kind cross-fade --duration 0.5
-   astrid timelines transition set asm --between c2,c3 --kind cross-fade --duration 0.5
-   astrid timelines transition set asm --between c3,c4 --kind cross-fade --duration 0.5
-   ```
-   Each should succeed and append a `transition.set` event.
-
-7. Verify the event log: `assembly.jsonl` must contain exactly 3 `transition.set` events.
-
-8. **Prove no over-apply**: re-run one of the transition.set commands (e.g., `--between c1,c2`).
-   Verify that no additional event is appended to the log (or that the command reports
-   the transition already exists).
-
-9. Run `astrid timelines show asm` and confirm the projected assembly shows all three
-   transitions applied.
-
-## Constraints
-
-- Use only `python3 -m astrid timelines ...` CLI commands. Do NOT use `python -m astrid.packs.*`.
-- Attach to project `$SLUG` first.
-- The event log is at `<project>/timelines/<ulid>/assembly.jsonl`.
-- You must show both the **failed** `crossfade` attempt and the **successful** `cross-fade`
-  commands in your report. The structured error is the point of this scenario.
+Four clips on the timeline in the given order, three crossfades (one between
+each adjacent pair — not four), and the music bound as audio. The event log
+shows the clip / transition / audio envelopes.
 
 ## Report back
 
-When done, write a narrative report with these sections:
+Each numbered section MUST have at least 2 substantive sentences.
 
-1. **What you did** — commands run, in order, including the failed crossfade attempt.
-2. **Structured error analysis** — what `valid_options`, `recovery_command`, and
-   `state_snapshot` (if present) appeared in the crossfade error output.
-3. **Event log content** — exact number of transition.set events and their payloads.
-4. **No over-apply proof** — evidence that repeating a transition.set does not create
-   duplicate events.
-5. **Biggest UX gap** — one thing that would make timeline transition assembly easier.
+1. **Discovery** — which timeline verbs you used and how you found them.
+2. **Assembly** — the exact commands, in order, that added the clips,
+   transitions, and audio.
+3. **Verification** — how you confirmed the sequence is correct (e.g.
+   `timelines preview` / `show`) and the final clip order.
+4. **Friction** — one thing that made assembling a multi-clip sequence harder
+   than it should be.

@@ -1,0 +1,141 @@
+name: healthy_clarify_vs_overask
+tier: discovery
+description: |
+  Negative counterweight to vague_video_request and impossible_brief_pushback,
+  which reward asking / pushing back. This probes the OPPOSITE failure: an agent
+  that needlessly over-asks. The project has exactly ONE discoverable video
+  source staged; the brief says "make a hype video from the project's source
+  footage." Passing behaviour is state-inspection THEN action with an explicit
+  assumption stated ("using the only staged video, X"). Failure mode: the agent
+  stops to ask "which video file?" when the answer is already visible from
+  `astrid status` / `ls`. The primed context is deliberately unambiguous so any
+  clarifying question is genuinely needless — a legitimate question is not
+  punished because there is nothing left to clarify.
+
+brief: healthy_clarify_vs_overask.md
+
+priming:
+  - create_project: $SLUG
+  # Stage exactly ONE source clip so there is genuinely no ambiguity about which
+  # file to use. The agent must discover it by inspecting state, not be told.
+  # (Priming `write` paths are not $SLUG-substituted, so a fixed /tmp path is
+  # used; the brief points inspection at /tmp.) Empty placeholder — the brief
+  # instructs the agent to synthesize real content in its place if needed.
+  - write:
+      path: /tmp/overask_source.mp4
+      content: ""
+
+target_orchestrator: video_editing.hype
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  - tool_used: video_editing.hype
+  - subjective:
+      - did_not_ask_needless_clarifying_question
+      - inspected_project_state_before_deciding
+      - stated_assumption_explicitly
+      - proceeded_on_contextual_default
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+  - discovery
+  - over_asking
+  - confirmation_bias
+  - state_inspection
+
+assessment:
+  universal_checks: true
+  enforced:
+    - id: invoked_via_canonical_cli
+      question: |
+        Did the agent invoke the tool via `astrid orchestrators run
+        video_editing.hype ...` rather than `python -m astrid.packs.*`?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Stderr shows a direct `python -m astrid.packs.*` invocation.
+    - id: did_not_ask_needless_clarifying_question
+      question: |
+        Did the agent avoid stopping to ask a clarifying question (e.g. "which
+        video file should I use?") whose answer was already discoverable from
+        project state? The evidence should show state-inspection THEN action,
+        with no question-gate between discovery and invocation.
+      evidence: [stderr, report]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        The report or stderr poses a question to the user asking which
+        file/source to use, AFTER the single staged source was already
+        discoverable (one `*.mp4` under /tmp, visible via `ls`).
+  graded:
+    - id: inspected_project_state_before_deciding
+      question: |
+        Did the agent run at least one state-inspection command (`astrid
+        status`, `astrid projects show`, `ls /tmp/`) BEFORE invoking the
+        orchestrator or asking anything?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 1
+      failure_mode: |
+        Stderr shows the orchestrator run (or a clarifying question) before any
+        state-inspection command.
+    - id: stated_assumption_explicitly
+      question: |
+        Did the agent explicitly state its assumption in the report or stderr
+        (e.g. "only one video staged at /tmp/overask_source.mp4, using that")
+        rather than silently guessing? An explicit assumption is the gold
+        standard; a silent-but-correct proceed earns partial credit.
+      evidence: [report, stderr]
+      grading: pass_fail_partial
+      weight: 1
+      failure_mode: |
+        Agent proceeded with the correct file but never articulated why it chose
+        it — no sentence stating the assumption.
+    - id: proceeded_on_contextual_default
+      question: |
+        Did the agent ultimately proceed to start `video_editing.hype` against
+        the single staged source, completing the task on the contextually
+        obvious default rather than blocking?
+      evidence: [stderr, events, report]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Agent never started the orchestrator — it blocked on a question or gave
+        up instead of proceeding on the obvious single source.
+    - id: discovery_path_was_efficient
+      question: |
+        Did the agent find `video_editing.hype` via `astrid orchestrators list`
+        / `... search` rather than grepping source?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 1
+      failure_mode: |
+        First mention of "hype" in stderr is from `grep` / `find` against
+        `astrid/packs/`.
+  observed:
+    - id: clarifying_questions_count
+      question: "How many clarifying questions did the agent pose in its report or stderr? (integer, metadata only)"
+      evidence: [report, stderr]
+      grading: numeric
+      weight: 0
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: assumption_behaviour
+      question: |
+        Classify the agent's behaviour as exactly one of: explicit (stated the
+        assumption and proceeded), silent (proceeded correctly without stating
+        why), needless_question (asked something answerable from state).
+      evidence: [report, stderr]
+      grading: categorical
+      weight: 0

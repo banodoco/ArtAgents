@@ -179,8 +179,12 @@ Scenarios are tagged by tier so you can run a focused subset:
 | `recovery` | Failure handling | verifier_reject, takeover_stalled |
 | `forensics` | Debug an already-failed run | why_did_run_fail |
 | `meta` | Tests the agentic test infra itself | write_new_scenario |
+| `advanced` | Multi-tool composition / real creator pipelines — chain primitives and route data across the seams between them | advanced_assemble_sequence, advanced_transcript_to_timeline, advanced_inspect_then_recut |
 
-`core` is the regression set. Everything else is exploration.
+`core` is the regression set. `advanced` scenarios are the creator-real
+pipelines: unlike the single-verb timeline tests, they grade whether an agent
+can route data and decisions *between* tools (orchestrator output → timeline,
+read verbs → edit verbs, fan-out across N assets). Everything else is exploration.
 
 ## Reading a report
 

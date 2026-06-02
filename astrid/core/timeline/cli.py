@@ -98,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="is_default",
         help="Set as the project default timeline.",
     )
+    _add_project_arg(create_parser)
     create_parser.set_defaults(handler=cmd_create)
 
     # --- show ---
@@ -114,6 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit structured JSON instead of pretty-print.",
     )
+    _add_project_arg(show_parser)
     show_parser.set_defaults(handler=cmd_show)
 
     # --- rename ---
@@ -121,6 +123,7 @@ def build_parser() -> argparse.ArgumentParser:
     rename_parser.add_argument("old_slug", metavar="slug", help="Current timeline slug.")
     rename_parser.add_argument("new_slug", metavar="new-slug", help="New timeline slug.")
     _add_expected_version_arg(rename_parser)
+    _add_project_arg(rename_parser)
     rename_parser.set_defaults(handler=cmd_rename)
 
     # --- finalize ---
@@ -137,6 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
     finalize_parser.add_argument(
         "--recorded-by", default="agent:cli", help="Agent identifier."
     )
+    _add_project_arg(finalize_parser)
     finalize_parser.set_defaults(handler=cmd_finalize)
 
     # --- tombstone ---
@@ -144,6 +148,7 @@ def build_parser() -> argparse.ArgumentParser:
         "tombstone", help="Soft-delete a timeline (marks tombstoned, leaves files)."
     )
     tombstone_parser.add_argument("slug", help="Timeline slug.")
+    _add_project_arg(tombstone_parser)
     tombstone_parser.set_defaults(handler=cmd_tombstone)
 
     # --- purge ---
@@ -156,6 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Confirm you really want to delete this timeline permanently.",
     )
+    _add_project_arg(purge_parser)
     purge_parser.set_defaults(handler=cmd_purge)
 
     # --- set-default ---
@@ -163,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         "set-default", help="Set a timeline as the project default."
     )
     set_default_parser.add_argument("slug", help="Timeline slug.")
+    _add_project_arg(set_default_parser)
     set_default_parser.set_defaults(handler=cmd_set_default)
 
     # --- export (Sprint 5b) ---
@@ -174,6 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include aborted runs in the export bundle.",
     )
+    _add_project_arg(export_parser)
     export_parser.set_defaults(handler=cmd_export)
 
     # --- cost (Sprint 5b) ---
@@ -190,6 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include aborted runs in the cost rollup.",
     )
+    _add_project_arg(cost_parser)
     cost_parser.set_defaults(handler=cmd_cost)
 
     # --- history (m7) ---
@@ -211,6 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=50,
         help="Maximum number of events to return (default: 50).",
     )
+    _add_project_arg(history_parser)
     history_parser.set_defaults(handler=cmd_history)
 
     # --- diff (m7) ---
@@ -237,6 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include projected before/after assembly snapshots.",
     )
+    _add_project_arg(diff_parser)
     diff_parser.set_defaults(handler=cmd_diff)
 
     # --- audit (m7) ---
@@ -252,6 +263,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="include_ops",
         help="Include operational failure logs in the audit report.",
     )
+    _add_project_arg(audit_parser)
     audit_parser.set_defaults(handler=cmd_audit)
 
     # --- preview (m7) ---
@@ -273,6 +285,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write projected state to this file (default: stdout).",
     )
+    _add_project_arg(preview_parser)
     preview_parser.set_defaults(handler=cmd_preview)
 
     # --- who-edited (m7) ---
@@ -282,6 +295,7 @@ def build_parser() -> argparse.ArgumentParser:
     who_edited_parser.add_argument(
         "slug_or_id", help="Timeline slug, ULID, or event-stream UUID."
     )
+    _add_project_arg(who_edited_parser)
     who_edited_parser.set_defaults(handler=cmd_who_edited)
 
     # --- clip ---
@@ -305,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     pos_group.add_argument("--after", dest="after_id", help="Insert after clip id.")
     pos_group.add_argument("--before", dest="before_id", help="Insert before clip id.")
     _add_expected_version_arg(clip_add)
+    _add_project_arg(clip_add)
     clip_add.set_defaults(handler=cmd_clip_add)
 
     # clip remove
@@ -312,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_remove.add_argument("slug", help="Timeline slug.")
     clip_remove.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     _add_expected_version_arg(clip_remove)
+    _add_project_arg(clip_remove)
     clip_remove.set_defaults(handler=cmd_clip_remove)
 
     # clip move
@@ -320,6 +336,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_move.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_move.add_argument("--to", required=True, dest="to_position", help="Target position: index, after:<id>, or before:<id>.")
     _add_expected_version_arg(clip_move)
+    _add_project_arg(clip_move)
     clip_move.set_defaults(handler=cmd_clip_move)
 
     # clip retrack
@@ -334,6 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Existing target track identifier.",
     )
     _add_expected_version_arg(clip_retrack)
+    _add_project_arg(clip_retrack)
     clip_retrack.set_defaults(handler=cmd_clip_retrack)
 
     # clip retime
@@ -343,6 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_retime.add_argument("--start", required=True, type=float, help="Start time in seconds (>= 0).")
     clip_retime.add_argument("--duration", required=True, type=float, help="Duration in seconds (> 0).")
     _add_expected_version_arg(clip_retime)
+    _add_project_arg(clip_retime)
     clip_retime.set_defaults(handler=cmd_clip_retime)
 
     # clip swap
@@ -351,6 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_swap.add_argument("--a", required=True, dest="clip_a", help="First clip identifier.")
     clip_swap.add_argument("--b", required=True, dest="clip_b", help="Second clip identifier.")
     _add_expected_version_arg(clip_swap)
+    _add_project_arg(clip_swap)
     clip_swap.set_defaults(handler=cmd_clip_swap)
 
     # clip replace
@@ -359,6 +379,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_replace.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_replace.add_argument("--with", required=True, dest="with_asset_id", metavar="ASSET_ID", help="Replacement asset identifier.")
     _add_expected_version_arg(clip_replace)
+    _add_project_arg(clip_replace)
     clip_replace.set_defaults(handler=cmd_clip_replace)
 
     # clip set-text
@@ -367,6 +388,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_set_text.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_set_text.add_argument("--text", required=True, help="Text content.")
     _add_expected_version_arg(clip_set_text)
+    _add_project_arg(clip_set_text)
     clip_set_text.set_defaults(handler=cmd_clip_set_text)
 
     # clip annotate
@@ -375,6 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     clip_annotate.add_argument("--clip-id", required=True, dest="clip_id", help="Clip identifier.")
     clip_annotate.add_argument("--note", required=True, help="Annotation note text.")
     _add_expected_version_arg(clip_annotate)
+    _add_project_arg(clip_annotate)
     clip_annotate.set_defaults(handler=cmd_clip_annotate)
 
     # --- transition ---
@@ -390,6 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     trans_set.add_argument("--duration", type=float, default=0.5, dest="duration_seconds",
                            help="Transition duration in seconds (default: 0.5).")
     _add_expected_version_arg(trans_set)
+    _add_project_arg(trans_set)
     trans_set.set_defaults(handler=cmd_transition_set)
 
     # transition remove
@@ -398,6 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
     trans_remove.add_argument("--between", required=True, metavar="LEFT,RIGHT",
                               help="Two clip ids separated by comma (left clip, right clip).")
     _add_expected_version_arg(trans_remove)
+    _add_project_arg(trans_remove)
     trans_remove.set_defaults(handler=cmd_transition_remove)
 
     # --- effect ---
@@ -412,6 +437,7 @@ def build_parser() -> argparse.ArgumentParser:
     effect_add_p.add_argument("--params", action="append", dest="params_raw", metavar="k=v",
                               help="Effect parameter as k=v (repeatable).")
     _add_expected_version_arg(effect_add_p)
+    _add_project_arg(effect_add_p)
     effect_add_p.set_defaults(handler=cmd_effect_add)
 
     # effect remove
@@ -420,6 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
     effect_remove_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
     effect_remove_p.add_argument("--effect-id", required=True, dest="effect_id", help="Effect identifier.")
     _add_expected_version_arg(effect_remove_p)
+    _add_project_arg(effect_remove_p)
     effect_remove_p.set_defaults(handler=cmd_effect_remove)
 
     # effect tune
@@ -430,6 +457,7 @@ def build_parser() -> argparse.ArgumentParser:
     effect_tune_p.add_argument("--param", required=True, help="Parameter name (k).")
     effect_tune_p.add_argument("--value", required=True, help="Parameter value (parsed as JSON).")
     _add_expected_version_arg(effect_tune_p)
+    _add_project_arg(effect_tune_p)
     effect_tune_p.set_defaults(handler=cmd_effect_tune)
 
     # --- theme ---
@@ -441,6 +469,7 @@ def build_parser() -> argparse.ArgumentParser:
     theme_set_p.add_argument("slug", help="Timeline slug.")
     theme_set_p.add_argument("--theme", required=True, dest="theme_id", help="Theme identifier.")
     _add_expected_version_arg(theme_set_p)
+    _add_project_arg(theme_set_p)
     theme_set_p.set_defaults(handler=cmd_theme_set)
 
     # theme override
@@ -450,6 +479,7 @@ def build_parser() -> argparse.ArgumentParser:
                                   help="Override namespace (visual|generation|voice|audio|pacing).")
     theme_override_p.add_argument("--value", required=True, help="Override value (parsed as JSON).")
     _add_expected_version_arg(theme_override_p)
+    _add_project_arg(theme_override_p)
     theme_override_p.set_defaults(handler=cmd_theme_override)
 
     # --- track ---
@@ -464,6 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     track_add_p.add_argument("--track-id", default=None, dest="track_id",
                              help="Track identifier (auto-generated UUID if omitted).")
     _add_expected_version_arg(track_add_p)
+    _add_project_arg(track_add_p)
     track_add_p.set_defaults(handler=cmd_track_add)
 
     # track remove
@@ -471,6 +502,7 @@ def build_parser() -> argparse.ArgumentParser:
     track_remove_p.add_argument("slug", help="Timeline slug.")
     track_remove_p.add_argument("--track-id", required=True, dest="track_id", help="Track identifier.")
     _add_expected_version_arg(track_remove_p)
+    _add_project_arg(track_remove_p)
     track_remove_p.set_defaults(handler=cmd_track_remove)
 
     # --- audio ---
@@ -483,6 +515,7 @@ def build_parser() -> argparse.ArgumentParser:
     audio_bind_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
     audio_bind_p.add_argument("--asset", required=True, dest="asset_id", help="Audio asset identifier.")
     _add_expected_version_arg(audio_bind_p)
+    _add_project_arg(audio_bind_p)
     audio_bind_p.set_defaults(handler=cmd_audio_bind)
 
     # audio unbind
@@ -490,6 +523,7 @@ def build_parser() -> argparse.ArgumentParser:
     audio_unbind_p.add_argument("slug", help="Timeline slug.")
     audio_unbind_p.add_argument("--clip", required=True, dest="clip_id", help="Clip identifier.")
     _add_expected_version_arg(audio_unbind_p)
+    _add_project_arg(audio_unbind_p)
     audio_unbind_p.set_defaults(handler=cmd_audio_unbind)
 
     # --- pool ---
@@ -501,6 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     pool_add_p.add_argument("slug", help="Timeline slug.")
     pool_add_p.add_argument("--asset", required=True, dest="asset_id", help="Asset identifier.")
     _add_expected_version_arg(pool_add_p)
+    _add_project_arg(pool_add_p)
     pool_add_p.set_defaults(handler=cmd_pool_add)
 
     # pool remove
@@ -508,6 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
     pool_remove_p.add_argument("slug", help="Timeline slug.")
     pool_remove_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
     _add_expected_version_arg(pool_remove_p)
+    _add_project_arg(pool_remove_p)
     pool_remove_p.set_defaults(handler=cmd_pool_remove)
 
     # pool score
@@ -516,6 +552,7 @@ def build_parser() -> argparse.ArgumentParser:
     pool_score_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
     pool_score_p.add_argument("--score", type=float, required=True, help="Score between 0 and 1.")
     _add_expected_version_arg(pool_score_p)
+    _add_project_arg(pool_score_p)
     pool_score_p.set_defaults(handler=cmd_pool_score)
 
     # --- arrangement ---
@@ -531,6 +568,7 @@ def build_parser() -> argparse.ArgumentParser:
     arr_set_p.add_argument("--from-json", required=True, dest="from_json",
                            help="Path to a JSON file containing the new arrangement.")
     _add_expected_version_arg(arr_set_p)
+    _add_project_arg(arr_set_p)
     arr_set_p.set_defaults(handler=cmd_arrangement_set)
 
     # arrangement show
@@ -538,6 +576,7 @@ def build_parser() -> argparse.ArgumentParser:
     arr_show_p.add_argument("slug", help="Timeline slug.")
     arr_show_p.add_argument("--json", dest="json_out", action="store_true",
                             help="Emit structured JSON.")
+    _add_project_arg(arr_show_p)
     arr_show_p.set_defaults(handler=cmd_arrangement_show)
 
     # --- migrate-events ---
@@ -652,6 +691,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Human-readable reason for the branch.",
     )
+    _add_project_arg(branch_create)
     branch_create.set_defaults(handler=cmd_branch_create)
 
     # branch list
@@ -661,6 +701,7 @@ def build_parser() -> argparse.ArgumentParser:
     branch_list.add_argument(
         "source_slug_or_id", help="Source timeline slug, ULID, or UUID."
     )
+    _add_project_arg(branch_list)
     branch_list.set_defaults(handler=cmd_branch_list)
 
     # --- undo (m9) ---
@@ -775,6 +816,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Actually perform the erasure (preview-only without this flag).",
     )
+    _add_project_arg(erase_parser)
     erase_parser.set_defaults(handler=cmd_erase)
 
     # --- recover (m9) ---
@@ -809,6 +851,7 @@ def build_parser() -> argparse.ArgumentParser:
     branches_parser.add_argument(
         "source_slug_or_id", help="Source timeline slug, ULID, or UUID."
     )
+    _add_project_arg(branches_parser)
     branches_parser.set_defaults(handler=cmd_branch_list)
 
     return parser
@@ -860,7 +903,7 @@ def cmd_ls(args: argparse.Namespace) -> int:
 
 
 def cmd_create(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     result = crud.create_timeline(
         session.project,
         args.slug,
@@ -879,7 +922,7 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     data = crud.show_timeline(
         session.project,
         args.slug,
@@ -987,7 +1030,7 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_rename(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     extra = _expected_version_kwargs(args)
     result = crud.rename_timeline(
         session.project,
@@ -1006,7 +1049,7 @@ def cmd_rename(args: argparse.Namespace) -> int:
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     from_run = args.from_run
     if from_run is None:
         from_run = read_current_run(session.project) or ""
@@ -1038,7 +1081,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
 
 def cmd_tombstone(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     result = crud.tombstone_timeline(session.project, args.slug)
     print(
         f"tombstoned timeline '{result['slug']}' at {result['tombstoned_at']}"
@@ -1052,7 +1095,7 @@ def cmd_tombstone(args: argparse.Namespace) -> int:
 
 
 def cmd_purge(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
 
     if not args.yes_really:
         raise AstridError(
@@ -1089,7 +1132,7 @@ def cmd_purge(args: argparse.Namespace) -> int:
 
 
 def cmd_set_default(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     result = crud.set_default(session.project, args.slug)
     print(
         f"timeline '{result['slug']}' is now the default for project '{session.project}'"
@@ -1104,7 +1147,7 @@ def cmd_set_default(args: argparse.Namespace) -> int:
 
 def cmd_export(args: argparse.Namespace) -> int:
     """Export a timeline as a self-contained tarball bundle."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     data = crud.show_timeline(session.project, args.slug)
     if data is None:
         raise AstridError(
@@ -1230,7 +1273,7 @@ def _run_initial_plan_payload(events_path: Path) -> dict[str, object] | None:
 
 def cmd_cost(args: argparse.Namespace) -> int:
     """Aggregate cost across all contributing runs in a timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     data = crud.show_timeline(session.project, args.slug)
     if data is None:
         raise AstridError(
@@ -1404,7 +1447,7 @@ def _clip_success(event: "TimelineEvent", backend_name: str) -> str:
 
 
 def cmd_clip_add(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     pos = _parse_clip_position(args)
     extra = _expected_version_kwargs(args)
@@ -1423,7 +1466,7 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_remove(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.remove_clip(
@@ -1438,7 +1481,7 @@ def cmd_clip_remove(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_move(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     pos = _parse_move_position(args.to_position)
     extra = _expected_version_kwargs(args)
@@ -1455,7 +1498,7 @@ def cmd_clip_move(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_retrack(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.retrack_clip(
@@ -1471,7 +1514,7 @@ def cmd_clip_retrack(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_retime(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.retime_clip(
@@ -1488,7 +1531,7 @@ def cmd_clip_retime(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_swap(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.swap_clips(
@@ -1504,7 +1547,7 @@ def cmd_clip_swap(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_replace(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.replace_clip(
@@ -1520,7 +1563,7 @@ def cmd_clip_replace(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_set_text(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.set_clip_text(
@@ -1536,7 +1579,7 @@ def cmd_clip_set_text(args: argparse.Namespace) -> int:
 
 
 def cmd_clip_annotate(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = clip_edits.annotate_clip(
@@ -1570,7 +1613,7 @@ def _parse_between(raw: str) -> tuple[str, str]:
 
 
 def cmd_transition_set(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     left, right = _parse_between(args.between)
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
@@ -1589,7 +1632,7 @@ def cmd_transition_set(args: argparse.Namespace) -> int:
 
 
 def cmd_transition_remove(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     left, right = _parse_between(args.between)
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
@@ -1646,7 +1689,7 @@ def _edit_success(domain: str, event: "TimelineEvent", backend_name: str) -> str
 
 
 def cmd_effect_add(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     params = _parse_params(args.params_raw)
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
@@ -1664,7 +1707,7 @@ def cmd_effect_add(args: argparse.Namespace) -> int:
 
 
 def cmd_effect_remove(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = effect_edits.effect_remove(
@@ -1680,7 +1723,7 @@ def cmd_effect_remove(args: argparse.Namespace) -> int:
 
 
 def cmd_effect_tune(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     value = _parse_json_value(args.value, flag="--value")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
@@ -1704,7 +1747,7 @@ def cmd_effect_tune(args: argparse.Namespace) -> int:
 
 
 def cmd_theme_set(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = theme_edits.theme_set(
@@ -1719,7 +1762,7 @@ def cmd_theme_set(args: argparse.Namespace) -> int:
 
 
 def cmd_theme_override(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     value = _parse_json_value(args.value, flag="--value")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
@@ -1741,7 +1784,7 @@ def cmd_theme_override(args: argparse.Namespace) -> int:
 
 
 def cmd_track_add(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     from uuid import uuid4 as _uuid4
 
@@ -1761,7 +1804,7 @@ def cmd_track_add(args: argparse.Namespace) -> int:
 
 
 def cmd_track_remove(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = track_edits.track_remove(
@@ -1781,7 +1824,7 @@ def cmd_track_remove(args: argparse.Namespace) -> int:
 
 
 def cmd_audio_bind(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = audio_edits.audio_bind(
@@ -1797,7 +1840,7 @@ def cmd_audio_bind(args: argparse.Namespace) -> int:
 
 
 def cmd_audio_unbind(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = audio_edits.audio_unbind(
@@ -1817,7 +1860,7 @@ def cmd_audio_unbind(args: argparse.Namespace) -> int:
 
 
 def cmd_pool_add(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = pool_edits.pool_asset_add(
@@ -1832,7 +1875,7 @@ def cmd_pool_add(args: argparse.Namespace) -> int:
 
 
 def cmd_pool_remove(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
     extra = _expected_version_kwargs(args)
     event = pool_edits.pool_asset_remove(
@@ -1847,7 +1890,7 @@ def cmd_pool_remove(args: argparse.Namespace) -> int:
 
 
 def cmd_pool_score(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     if args.score < 0 or args.score > 1:
         raise TimelineEditError("score must be between 0 and 1")
     backend_name = _resolve_clip_backend_name(session.project, args.slug)
@@ -1870,7 +1913,7 @@ def cmd_pool_score(args: argparse.Namespace) -> int:
 
 
 def cmd_arrangement_set(args: argparse.Namespace) -> int:
-    _require_session()
+    _require_session(slug=getattr(args, "project", None))
     raise TimelineEditError(
         "arrangement set is retired: arrangement.replaced is migration-only "
         "legacy. Use timeline.config_replaced with a raw TimelineConfig for "
@@ -1879,7 +1922,7 @@ def cmd_arrangement_set(args: argparse.Namespace) -> int:
 
 
 def cmd_arrangement_show(args: argparse.Namespace) -> int:
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     arrangement = crud.get_arrangement(session.project, args.slug)
     if arrangement is None:
         data = crud.show_timeline(session.project, args.slug)
@@ -2097,7 +2140,7 @@ def _format_history_row(version: int, event: TimelineEvent, backend_name: str) -
 
 def cmd_history(args: argparse.Namespace) -> int:
     """Read and pretty-print the event history of a timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .eventlog import select_timeline_backend
@@ -2177,7 +2220,7 @@ def _summarize_event_payload(event: TimelineEvent) -> str:
 
 def cmd_diff(args: argparse.Namespace) -> int:
     """Semantic diff between two events in a timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .eventlog import select_timeline_backend
@@ -2299,7 +2342,7 @@ def _diff_keys(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
 
 def cmd_audit(args: argparse.Namespace) -> int:
     """Verify event chain integrity and projection parity."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .eventlog import select_timeline_backend
@@ -2441,7 +2484,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 def cmd_preview(args: argparse.Namespace) -> int:
     """Project a past state at a specific event."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .eventlog import select_timeline_backend
@@ -2507,7 +2550,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 def cmd_who_edited(args: argparse.Namespace) -> int:
     """Show actor rollup for a timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .eventlog import select_timeline_backend
@@ -2656,7 +2699,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
 def cmd_branch_create(args: argparse.Namespace) -> int:
     """Create a branch timeline from a source timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
 
     from .branch import create_branch_timeline
 
@@ -2697,7 +2740,7 @@ def cmd_branch_create(args: argparse.Namespace) -> int:
 
 def cmd_branch_list(args: argparse.Namespace) -> int:
     """List branches of a source timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
 
     from .branch import list_branches
 
@@ -2732,7 +2775,7 @@ def cmd_branch_list(args: argparse.Namespace) -> int:
 
 def cmd_undo(args: argparse.Namespace) -> int:
     """Undo the latest undoable event on a timeline."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .inverses import plan_inverses
@@ -2881,7 +2924,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
 
 def cmd_mass_undo(args: argparse.Namespace) -> int:
     """Mass-undo events matching filter criteria (preview-first, chunked writes)."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .observability import resolve_timeline_target
@@ -3007,7 +3050,7 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
 
 def cmd_erase(args: argparse.Namespace) -> int:
     """Erase (redact) event payloads matching a selector."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .erasure import (
@@ -3120,7 +3163,7 @@ def cmd_erase(args: argparse.Namespace) -> int:
 
 def cmd_recover(args: argparse.Namespace) -> int:
     """Recover a timeline to a known-good anchor event."""
-    session = _require_session()
+    session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
     from .operations import recover_to_event
@@ -3187,6 +3230,13 @@ def _require_session(slug: str | None = None) -> Any:
     if session is None:
         raise SessionBindingError(_SESSION_GATE_HINT)
     return session
+
+
+def _add_project_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--project",
+        help="Project slug (required when no session is bound).",
+    )
 
 
 def _add_expected_version_arg(parser: argparse.ArgumentParser) -> None:

@@ -1,0 +1,115 @@
+name: advanced_inspect_then_recut
+tier: advanced
+description: |
+  Tests the read-informs-write seam: the read-only timeline verbs must COMPOSE
+  with the edit verbs. The agent builds an over-long (~50s) rough cut from five
+  clips, then inspects it (timelines preview/show/history) to decide which clips
+  to drop, and REMOVES clips to bring it under a ~20s target — trimming the
+  existing timeline, not tearing it down and rebuilding. Probes whether the read
+  verbs (today tested only for non-mutation) are actually usable to drive a
+  decision, and whether the agent does a targeted recut vs a rebuild.
+
+brief: advanced_inspect_then_recut.md
+
+priming:
+  - create_project: $SLUG
+
+agents:
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
+
+acceptance:
+  - no_aborts
+  - events_contain: clip.added
+  - events_contain: clip.removed
+  - no_cross_project_binding
+  - subjective:
+      - inspected_before_trimming
+      - recut_to_target_length
+      - trimmed_not_rebuilt
+      - used_canonical_timeline_verbs
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+  - advanced
+  - composition
+  - timeline
+  - read_informs_write
+
+assessment:
+  universal_checks: true
+  enforced:
+    - id: inspected_before_trimming
+      question: |
+        Did the agent run a read-only timeline command (`timelines preview`,
+        `show`, or `history`) to inspect the clips BEFORE removing any — i.e. the
+        recut was informed by inspecting state, not blind?
+      evidence: [stderr, report]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        The first removal command / `clip.removed` appears in stderr with no
+        prior `timelines preview/show/history` read.
+    - id: recut_to_target_length
+      question: |
+        Is the final timeline at or under the ~20-second target (verifiable via
+        the agent's preview/show output or the remaining clip durations), down
+        from the ~50s rough cut?
+      evidence: [stderr, report, events]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Final timeline still well over 20s, or the agent never removed enough
+        clips to reach the target.
+    - id: trimmed_not_rebuilt
+      question: |
+        Did the agent reach the target by REMOVING clips (clip.removed) from the
+        existing timeline, rather than deleting/recreating the timeline or
+        re-adding a fresh set?
+      evidence: [events, stderr]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Events show a timeline teardown/recreate or a second full batch of
+        clip.added replacing the first, instead of clip.removed on the original.
+  graded:
+    - id: used_canonical_timeline_verbs
+      question: |
+        Did the agent use `astrid timelines ...` verbs throughout rather than
+        hand-editing the event log or `python -m astrid.packs.*`?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 1
+      failure_mode: |
+        Direct event-log edits or pack-internal invocation in stderr.
+    - id: justified_what_it_cut
+      question: |
+        Does the report explain which clips were removed and why (a real
+        decision), rather than removing arbitrarily?
+      evidence: [report]
+      grading: pass_fail_partial
+      weight: 1
+      failure_mode: |
+        No rationale for which clips were dropped.
+    - id: report_shape_intact
+      question: |
+        Does the report contain each numbered section the brief asked for, each
+        non-empty?
+      evidence: [report]
+      grading: pass_fail
+      weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: clip_removed_count
+      question: "How many clip.removed events are in the log? (integer, metadata only)"
+      evidence: [events]
+      grading: numeric
+      weight: 0

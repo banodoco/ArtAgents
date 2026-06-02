@@ -6,7 +6,7 @@
 
 # REQUIRED
 name: snake_case_identifier              # also the file name (without .yaml)
-tier: core | discovery | authoring | recovery | forensics | meta
+tier: core | discovery | authoring | recovery | forensics | meta | advanced
 description: |
   One paragraph stating the agent-facing failure mode this scenario probes.
   This goes into the report so future maintainers understand intent.

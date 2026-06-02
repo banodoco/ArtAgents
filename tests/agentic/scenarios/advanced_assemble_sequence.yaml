@@ -1,135 +1,114 @@
 name: advanced_assemble_sequence
-tier: recovery
+tier: advanced
 description: |
-  Agent is asked to assemble transitions across a 4-clip same-track timeline.
-  The scenario enforces that the agent MUST first attempt the wrong kind
-  ``crossfade`` (no hyphen), observe the structured recoverable error with
-  ``valid_options`` including ``cross-fade`` and a ``recovery_command``,
-  then recover by using the correct ``--kind cross-fade``. Final state must
-  have exactly 3 transition.set events (one per adjacent pair) and repeated
-  reconciliation must produce no over-apply.
+  The dominant real-creator loop: assemble several separately-produced clips
+  into one sequence. The agent synthesizes four placeholder clips + an audio
+  bed, then composes them via the canonical timeline verbs — register each as a
+  pool asset, add four clips IN ORDER, set a crossfade between each adjacent
+  pair (three transitions, not four), and bind the music. Probes fan-out (the
+  same verb applied N times), ordering, and the N-1 off-by-one on transitions —
+  composition the single-verb timeline tests never exercise together.
 
 brief: advanced_assemble_sequence.md
 
 priming:
-- create_project: ${SLUG}
-
-target_orchestrator: video_editing.hype
+  - create_project: $SLUG
 
 agents:
-- model: deepseek-v4-pro
-  count: 1
-  subagent_type: general-purpose
+  - model: deepseek-v4-pro
+    count: 1
+    subagent_type: general-purpose
 
 acceptance:
-- no_aborts
-- events_contain: track.added
-- events_contain: clip.added
-- events_contain: transition.set
-- events_contain_count: { kind: transition.set, min: 3, max: 3 }
-- no_cross_project_binding
-- subjective:
-  - attempted_crossfade_first
-  - observed_valid_options_and_recovery
-  - recovered_with_cross_fade
-  - confirmed_no_over_apply
+  - no_aborts
+  - events_contain: clip.added
+  - events_contain: transition.set
+  - events_contain: audio.bound
+  - no_cross_project_binding
+  - subjective:
+      - assembled_clips_in_order
+      - transitions_between_each_clip
+      - bound_audio_track
+      - used_canonical_timeline_verbs
 
 budget:
   max_tokens_per_agent: 32768
-  max_wall_clock_min: 12
+  max_wall_clock_min: 15
 
 tags:
-- timeline
-- transition
-- recovery
-- assemble
-- structured_error
+  - advanced
+  - composition
+  - timeline
+  - fan_out
 
 assessment:
-  enforced:
-  - id: invoked_via_canonical_cli
-    question: |
-      Did the agent invoke timeline commands via `astrid timelines ...`
-      rather than `python -m astrid.packs.*` or direct imports?
-    evidence: [stderr]
-    grading: pass_fail
-    weight: 2
-    failure_mode: |
-      Stderr shows direct `python -m astrid.packs.*` invocation instead
-      of `astrid timelines` CLI.
-  - id: attempted_crossfade_first
-    question: |
-      Did the agent first attempt `--kind crossfade` (no hyphen) and
-      observe the recoverable error with valid_options and recovery_command
-      before switching to `--kind cross-fade`?
-    evidence: [stderr, report]
-    grading: pass_fail
-    weight: 2
-    failure_mode: |
-      Agent immediately used `--kind cross-fade` without first attempting
-      `crossfade` and observing the structured error recovery metadata, or
-      hit a raw argparse SystemExit(2) without valid_options.
-  - id: exactly_three_transitions
-    question: |
-      Does the event log contain exactly three transition.set events,
-      one for each adjacent same-track pair (4 clips → 3 transitions)?
-    evidence: [project_tree, events]
-    grading: pass_fail
-    weight: 2
-    failure_mode: |
-      Event log has fewer or more than 3 transition.set events; arrangement
-      may be incomplete or duplicated.
-  - id: no_over_apply_on_repeat
-    question: |
-      Did the agent verify that repeating the same transition assembly
-      commands produces zero additional transition.set events?
-    evidence: [stderr, report, events]
-    grading: pass_fail
-    weight: 2
-    failure_mode: |
-      Agent ran assembly more than once and event log accumulated extra
-      transition.set events beyond the initial 3.
-  graded:
-  - id: recovery_path_documented
-    question: |
-      Did the agent document the invalid crossfade attempt, the structured
-      error metadata (valid_options, recovery_command), and the recovery
-      path in its report?
-    evidence: [report]
-    grading: pass_fail
-    weight: 1
-  - id: report_shape_intact
-    question: "Does the report contain the required sections?"
-    evidence: [report]
-    grading: pass_fail
-    weight: 1
-  observed:
-  - id: shell_calls_count
-    question: "How many shell calls did the agent make?"
-    evidence: [stderr]
-    grading: numeric
-    weight: 0
-  - id: crossfade_attempt_count
-    question: "How many times did the agent attempt `crossfade` before switching to `cross-fade`?"
-    evidence: [stderr]
-    grading: numeric
-    weight: 0
-extras:
-  target_orchestrator: video_editing.hype
-  legacy_acceptance:
-  - no_aborts
-  - events_contain: track.added
-  - events_contain: clip.added
-  - events_contain: transition.set
-  - events_contain_count: { kind: transition.set, min: 3, max: 3 }
-  - no_cross_project_binding
-  - subjective:
-    - attempted_crossfade_first
-    - observed_valid_options_and_recovery
-    - recovered_with_cross_fade
-    - confirmed_no_over_apply
-
   universal_checks: true
-  m2_checks:
-    c3_no_mutation_on_read:
-      enabled: true
+  enforced:
+    - id: assembled_clips_in_order
+      question: |
+        Did the agent add all four clips to the timeline as `clip.added` events,
+        in the order the brief gave them (clips reference assets directly via
+        `--asset`)?
+      evidence: [events, stderr]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Fewer than four `clip.added` events, or clips added out of order.
+    - id: transitions_between_each_clip
+      question: |
+        Did the agent set a transition between each ADJACENT pair — three
+        `transition.set` events for four clips (N-1), not four or zero?
+      evidence: [events]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Zero `transition.set` events, or an off-by-one (four/two) showing the
+        agent didn't reason about N-1 boundaries.
+    - id: bound_audio_track
+      question: |
+        Did the agent bind the music track to the timeline (an `audio.bound`
+        event)?
+      evidence: [events]
+      grading: pass_fail
+      weight: 1
+      failure_mode: |
+        No `audio.bound` event — the agent assembled video but never bound the
+        requested music.
+  graded:
+    - id: used_canonical_timeline_verbs
+      question: |
+        Did the agent build the sequence via `astrid timelines ...` verbs rather
+        than hand-editing the event log or invoking `python -m astrid.packs.*`?
+      evidence: [stderr]
+      grading: pass_fail
+      weight: 2
+      failure_mode: |
+        Stderr shows direct event-log edits or `python -m astrid.packs.*`.
+    - id: verified_the_assembly
+      question: |
+        Did the agent verify the result with a read-only command
+        (`timelines preview` / `show` / `history`) and report the final clip
+        order?
+      evidence: [stderr, report]
+      grading: pass_fail_partial
+      weight: 1
+      failure_mode: |
+        No read-only verification; the agent assumed success without checking.
+    - id: report_shape_intact
+      question: |
+        Does the report contain each numbered section the brief asked for, each
+        non-empty?
+      evidence: [report]
+      grading: pass_fail
+      weight: 1
+  observed:
+    - id: shell_calls_count
+      question: "How many shell calls did the agent make? (integer, metadata only)"
+      evidence: [stderr]
+      grading: numeric
+      weight: 0
+    - id: clip_added_count
+      question: "How many clip.added events are in the log? (integer, metadata only)"
+      evidence: [events]
+      grading: numeric
+      weight: 0
