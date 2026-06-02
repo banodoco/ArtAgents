@@ -63,6 +63,7 @@ assessment:
     grading: numeric
     weight: 0
 extras:
+  prime_default_timeline: true
   target_orchestrator: video_editing.hype
   legacy_acceptance:
   - no_aborts
