@@ -654,6 +654,15 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
         self.assertEqual(obj["kind"], "cross-fade")
         self.assertEqual(obj["duration_seconds"], 2.5)
 
+    def test_transition_set_payload_canonicalizes_alias_kind(self) -> None:
+        payload = TransitionSetPayload(
+            left_clip_id="clip-a",
+            right_clip_id="clip-b",
+            kind="crossfade",
+            duration_seconds=2.5,
+        )
+        self.assertEqual(payload.kind, "cross-fade")
+
     def test_transition_set_rejects_empty_left_clip_id(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
             TransitionSetPayload(left_clip_id="", right_clip_id="b", kind="cross-fade", duration_seconds=1.0)
@@ -665,6 +674,10 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
     def test_transition_set_rejects_empty_kind(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
             TransitionSetPayload(left_clip_id="a", right_clip_id="b", kind="", duration_seconds=1.0)
+
+    def test_transition_set_rejects_unknown_kind(self) -> None:
+        with self.assertRaisesRegex(TimelineEventSchemaError, "transition kind must be one of"):
+            TransitionSetPayload(left_clip_id="a", right_clip_id="b", kind="wipe", duration_seconds=1.0)
 
     def test_transition_set_rejects_negative_duration(self) -> None:
         with self.assertRaises(TimelineEventSchemaError):
@@ -1003,13 +1016,13 @@ class SecondaryPayloadSchemaTest(unittest.TestCase):
             ts="2026-05-20T12:00:00Z",
             actor=actor,
             kind="transition.set",
-            payload={"left_clip_id": "a", "right_clip_id": "b", "kind": "wipe", "duration_seconds": 2.0},
+            payload={"left_clip_id": "a", "right_clip_id": "b", "kind": "crossfade", "duration_seconds": 2.0},
         )
         self.assertIsInstance(event.payload, TransitionSetPayload)
         p = event.payload
         assert isinstance(p, TransitionSetPayload)
         self.assertEqual(p.left_clip_id, "a")
-        self.assertEqual(p.kind, "wipe")
+        self.assertEqual(p.kind, "cross-fade")
         self.assertEqual(p.duration_seconds, 2.0)
 
         # effect.added from dict with params

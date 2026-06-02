@@ -7,6 +7,8 @@ import json
 import sys
 from typing import Any
 
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
+
 from . import doctor as doctor_fn
 from . import install as install_fn
 from . import list_state, sync as sync_fn, uninstall as uninstall_fn
@@ -30,7 +32,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid skills",
         description="Install the Astrid skills layer into supported agent harnesses (claude, codex, hermes).",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -44,8 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser("install", help="Install pack(s) into harness(es).")
     install_parser.add_argument("pack", nargs="?", help="Pack id, or omit with --all.")
     install_parser.add_argument("--all", action="store_true", help="Install every available pack.")
-    install_parser.add_argument("--harness", action="append", choices=HARNESS_CHOICES, help="One or more harnesses (default: all).")
-    install_parser.add_argument("--mechanism", choices=("symlink", "external-dir"), default="symlink", help="Hermes-only mechanism (default: symlink).")
+    add_choice_arg(install_parser, "--harness", values=HARNESS_CHOICES, action="append", help="One or more harnesses (default: all).")
+    add_choice_arg(install_parser, "--mechanism", values=("symlink", "external-dir"), default="symlink", help="Hermes-only mechanism (default: symlink).")
     install_parser.add_argument("--force", action="store_true", help="Overwrite existing non-symlink targets.")
     install_parser.add_argument("--dry-run", action="store_true")
     install_parser.add_argument("--json", action="store_true")
@@ -54,13 +56,13 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove pack(s) from harness(es).")
     uninstall_parser.add_argument("pack", nargs="?")
     uninstall_parser.add_argument("--all", action="store_true")
-    uninstall_parser.add_argument("--harness", action="append", choices=HARNESS_CHOICES)
+    add_choice_arg(uninstall_parser, "--harness", values=HARNESS_CHOICES, action="append")
     uninstall_parser.add_argument("--dry-run", action="store_true")
     uninstall_parser.add_argument("--json", action="store_true")
     uninstall_parser.set_defaults(handler=_cmd_uninstall)
 
     sync_parser = subparsers.add_parser("sync", help="Re-install every pack into every detected harness; prune orphans.")
-    sync_parser.add_argument("--mechanism", choices=("symlink", "external-dir"), default="symlink")
+    add_choice_arg(sync_parser, "--mechanism", values=("symlink", "external-dir"), default="symlink")
     sync_parser.add_argument("--force", action="store_true")
     sync_parser.add_argument("--dry-run", action="store_true")
     sync_parser.add_argument("--json", action="store_true")

@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 guard_canonical_entrypoint('understanding.scene_describe')
 import argparse
 import json
@@ -254,31 +254,34 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    from ..asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
-    scenes = json.loads(args.scenes.read_text(encoding="utf-8"))
-    triage = json.loads(args.triage.read_text(encoding="utf-8"))
-    out_dir = args.out.resolve()
-    out_dir.mkdir(parents=True, exist_ok=True)
-    payload = build_scene_descriptions(
-        scenes,
-        triage,
-        args.video.resolve(),
-        client=build_gemini_client(args.env_file),
-        top_n=args.top_n,
-        model=args.model,
-        out_dir=out_dir,
-    )
-    out_path = out_dir / "scene_descriptions.json"
-    out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    register_outputs(
-        stage="scene_describe",
-        outputs=[("scene_descriptions", out_path, "Scene descriptions")],
-        metadata={"model": args.model, "top_n": args.top_n},
-    )
-    print(out_path)
-    return 0
+    def _run() -> int:
+        parser = build_parser()
+        args = parser.parse_args(argv)
+        from ..asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+        scenes = json.loads(args.scenes.read_text(encoding="utf-8"))
+        triage = json.loads(args.triage.read_text(encoding="utf-8"))
+        out_dir = args.out.resolve()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        payload = build_scene_descriptions(
+            scenes,
+            triage,
+            args.video.resolve(),
+            client=build_gemini_client(args.env_file),
+            top_n=args.top_n,
+            model=args.model,
+            out_dir=out_dir,
+        )
+        out_path = out_dir / "scene_descriptions.json"
+        out_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        register_outputs(
+            stage="scene_describe",
+            outputs=[("scene_descriptions", out_path, "Scene descriptions")],
+            metadata={"model": args.model, "top_n": args.top_n},
+        )
+        print(out_path)
+        return 0
+
+    return run_pack_main("understanding.scene_describe", _run, argv=list(argv) if argv is not None else None)
 
 
 if __name__ == "__main__":

@@ -18,6 +18,7 @@ from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 from astrid.core.util.http import FAL_QUEUE_URL, HttpClient, default_client
 from astrid.packs.video_editing.orchestrators.logo_ideas.run import (
@@ -446,8 +447,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--source-rows", type=int, default=None, help="Override source grid rows (default auto-detect).")
     p.add_argument("--source-cols", type=int, default=None, help="Override source grid cols (default auto-detect).")
     p.add_argument("--size", default=DEFAULT_SIZE, type=_validate_size, help=f"gpt-image-2 size WxH (default {DEFAULT_SIZE}).")
-    p.add_argument("--quality", default=DEFAULT_QUALITY, choices=("low", "medium", "high", "auto"), help=f"gpt-image-2 quality (default {DEFAULT_QUALITY}).")
-    p.add_argument("--output-format", default="png", choices=("png", "jpeg", "webp"), help="Output image format.")
+    add_choice_arg(p, "--quality", values=("low", "medium", "high", "auto"), default=DEFAULT_QUALITY, help=f"gpt-image-2 quality (default {DEFAULT_QUALITY}).")
+    add_choice_arg(p, "--output-format", values=("png", "jpeg", "webp"), default="png", help="Output image format.")
     p.add_argument("--model", default=DEFAULT_FIREWORKS_MODEL, help="Fireworks chat model id.")
     p.add_argument("--no-kimi", action="store_true", help="Skip the Kimi expansion; send the brief verbatim.")
     p.add_argument("--env-file", type=Path, help="Env file with FIREWORKS_API_KEY and FAL_KEY.")

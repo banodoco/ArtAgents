@@ -12,6 +12,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError, coerce_astrid_error
+from astrid.core.cli_choices import (
+    AstridArgumentError,
+    RecoverableArgumentParser,
+    add_choice_arg,
+    add_kind_arg,
+)
 from astrid.core.project.current_run import read_current_run
 from astrid.core.project.jsonio import read_json
 from astrid.core.project.paths import project_dir
@@ -36,6 +43,7 @@ from ._edit_helpers import TimelineEditError
 from .eventlog import EventLogError
 from .events.schema import ClipPosition, TimelineActor
 from .integrity import verify
+from .kinds import default_transition_kind
 from .paths import assembly_identity_path, find_timeline_by_slug
 from .projection import ErasedPayloadProjectionError, ProjectionError
 
@@ -50,22 +58,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
+    except AstridArgumentError as exc:
+        raise AstridError(str(exc)) from exc
     except (crud.TimelineCrudError, TimelineEditError, SessionBindingError, EventLogError) as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 2
+        raise coerce_astrid_error(exc) from exc
     except ErasedPayloadProjectionError as exc:
-        print(f"timelines: {exc} (erased payload)", file=sys.stderr)
-        return 2
-    except ProjectionError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 2
-    except ValueError as exc:
-        print(f"timelines: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(f"{exc} (erased payload)") from exc
+    except (ProjectionError, ValueError) as exc:
+        raise AstridError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid timelines",
         description="Create, inspect, and manage project timelines.",
     )
@@ -287,7 +291,7 @@ def build_parser() -> argparse.ArgumentParser:
     # clip add
     clip_add = clip_subs.add_parser("add", help="Add a clip to a timeline.")
     clip_add.add_argument("slug", help="Timeline slug.")
-    clip_add.add_argument("--kind", required=True, choices=["visual", "audio", "text"], help="Clip kind.")
+    add_kind_arg(clip_add, "--kind", catalog="clip", required=True, help="Clip kind.")
     clip_add.add_argument("--asset", required=True, help="Asset identifier.")
     clip_add.add_argument(
         "--track",
@@ -382,7 +386,7 @@ def build_parser() -> argparse.ArgumentParser:
     trans_set.add_argument("slug", help="Timeline slug.")
     trans_set.add_argument("--between", required=True, metavar="LEFT,RIGHT",
                            help="Two clip ids separated by comma (left clip, right clip).")
-    trans_set.add_argument("--kind", default="cross-fade", help="Transition kind (default: cross-fade).")
+    add_kind_arg(trans_set, "--kind", catalog="transition", default=default_transition_kind(), help="Transition kind.")
     trans_set.add_argument("--duration", type=float, default=0.5, dest="duration_seconds",
                            help="Transition duration in seconds (default: 0.5).")
     _add_expected_version_arg(trans_set)
@@ -455,8 +459,7 @@ def build_parser() -> argparse.ArgumentParser:
     # track add
     track_add_p = track_subs.add_parser("add", help="Add a track.")
     track_add_p.add_argument("slug", help="Timeline slug.")
-    track_add_p.add_argument("--kind", required=True, choices=["visual", "audio"],
-                             help="Track kind: visual or audio.")
+    add_kind_arg(track_add_p, "--kind", catalog="track", required=True, help="Track kind.")
     track_add_p.add_argument("--label", default=None, help="Optional human-readable label.")
     track_add_p.add_argument("--track-id", default=None, dest="track_id",
                              help="Track identifier (auto-generated UUID if omitted).")
@@ -582,13 +585,7 @@ def build_parser() -> argparse.ArgumentParser:
     push_parser.add_argument(
         "slug_or_id", help="Local timeline slug, ULID, or event-stream UUID."
     )
-    push_parser.add_argument(
-        "--to",
-        required=True,
-        dest="to_backend",
-        choices=["supabase"],
-        help="Destination backend (only 'supabase' in v1).",
-    )
+    add_choice_arg(push_parser, "--to", values=("supabase",), dest="to_backend", required=True, help="Destination backend (only 'supabase' in v1).")
     push_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -602,13 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     pull_parser.add_argument(
         "slug_or_id", help="Remote timeline slug or event-stream UUID on Supabase."
     )
-    pull_parser.add_argument(
-        "--from",
-        required=True,
-        dest="from_backend",
-        choices=["supabase"],
-        help="Source backend (only 'supabase' in v1).",
-    )
+    add_choice_arg(pull_parser, "--from", values=("supabase",), dest="from_backend", required=True, help="Source backend (only 'supabase' in v1).")
     pull_parser.add_argument(
         "--project",
         required=True,
@@ -679,13 +670,7 @@ def build_parser() -> argparse.ArgumentParser:
     undo_parser.add_argument(
         "slug", help="Timeline slug."
     )
-    undo_parser.add_argument(
-        "--from",
-        dest="from_backend",
-        default=None,
-        choices=["supabase"],
-        help="Backend to undo on (default: local_fs).",
-    )
+    add_choice_arg(undo_parser, "--from", values=("supabase",), dest="from_backend", default=None, help="Backend to undo on (default: local_fs).")
     undo_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -723,13 +708,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Confirm mass undo (required to actually write).",
     )
-    mass_undo_parser.add_argument(
-        "--from",
-        dest="from_backend",
-        default=None,
-        choices=["supabase"],
-        help="Backend to undo on (default: local_fs).",
-    )
+    add_choice_arg(mass_undo_parser, "--from", values=("supabase",), dest="from_backend", default=None, help="Backend to undo on (default: local_fs).")
     mass_undo_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",
@@ -816,13 +795,7 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Human-readable reason for the recovery.",
     )
-    recover_parser.add_argument(
-        "--from",
-        dest="from_backend",
-        default=None,
-        choices=["supabase"],
-        help="Backend to recover on (default: local_fs).",
-    )
+    add_choice_arg(recover_parser, "--from", values=("supabase",), dest="from_backend", default=None, help="Backend to recover on (default: local_fs).")
     recover_parser.add_argument(
         "--project",
         help="Project slug (required when no session is bound).",

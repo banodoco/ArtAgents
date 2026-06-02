@@ -1,3 +1,7 @@
+import contextlib
+import io
+import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -86,6 +90,27 @@ class QuoteScoutTest(unittest.TestCase):
         parser = quote_scout.build_parser()
         with self.assertRaises(SystemExit):
             parser.parse_args(["--transcript", "x.json", "--out", "out", "--brief", "brief.txt"])
+
+    def test_main_renders_astrid_error_for_internal_validation_failure(self) -> None:
+        tmp_dir = Path(tempfile.mkdtemp(prefix="quote-scout-main-"))
+        self.addCleanup(shutil.rmtree, tmp_dir, True)
+        transcript = tmp_dir / "transcript.json"
+        transcript.write_text(json.dumps({}), encoding="utf-8")
+        stderr = io.StringIO()
+
+        with (
+            unittest.mock.patch.object(quote_scout, "build_claude_client", return_value=object()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            rc = quote_scout.main(
+                ["--transcript", str(transcript), "--out", str(tmp_dir / "out")]
+            )
+
+        rendered = stderr.getvalue()
+        self.assertEqual(rc, 2)
+        self.assertIn("transcript must be a list or an object with segments", rendered)
+        self.assertIn("capability_id", rendered)
+        self.assertNotIn("Traceback", rendered)
 
 
 if __name__ == "__main__":

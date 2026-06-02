@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.hash import sha256_file
 from astrid.packs.video_editing.orchestrators.thumbnail_maker.plan_template import build_plan_v2, emit_plan_json
 from astrid.packs.training.executors.asset_cache import run as asset_cache
@@ -244,10 +245,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--size", default=DEFAULT_SIZE, type=normalized_size)
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT)
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--quality", default=DEFAULT_QUALITY, choices=("low", "medium", "high", "auto"))
-    parser.add_argument("--output-format", default=DEFAULT_OUTPUT_FORMAT, choices=("png", "jpeg", "jpg", "webp"))
-    parser.add_argument("--visual-mode", default=DEFAULT_VISUAL_MODE, choices=("fast", "best"))
-    parser.add_argument("--reference-mode", default=DEFAULT_REFERENCE_MODE, choices=("auto", "always", "never"))
+    add_choice_arg(parser, "--quality", values=("low", "medium", "high", "auto"), default=DEFAULT_QUALITY)
+    add_choice_arg(parser, "--output-format", values=("png", "jpeg", "jpg", "webp"), default=DEFAULT_OUTPUT_FORMAT)
+    add_choice_arg(parser, "--visual-mode", values=("fast", "best"), default=DEFAULT_VISUAL_MODE)
+    add_choice_arg(parser, "--reference-mode", values=("auto", "always", "never"), default=DEFAULT_REFERENCE_MODE)
     parser.add_argument("--max-candidates", type=int, default=DEFAULT_MAX_CANDIDATES)
     parser.add_argument("--previous-manifest", type=Path)
     parser.add_argument("--feedback")

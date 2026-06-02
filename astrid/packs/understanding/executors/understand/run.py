@@ -18,6 +18,7 @@ from collections.abc import Callable
 from importlib import import_module
 import sys
 
+from astrid.core.cli_choices import add_choice_arg
 
 ALIASES: dict[str, str | Callable[[list[str]], int]] = {
     "audio": "astrid.packs.understanding.executors.audio_understand.run:main",
@@ -36,9 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
             "understand --mode video --video source.mp4 --at 01:20"
         ),
     )
-    parser.add_argument(
+    add_choice_arg(
+        parser,
         "--mode",
-        choices=sorted(ALIASES),
+        values=sorted(ALIASES),
         required=True,
         help="Understanding modality. All other arguments are forwarded to the selected executor.",
     )

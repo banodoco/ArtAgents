@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core._search import (
     SearchRecord,
     short_description_or_truncated,
@@ -31,17 +33,22 @@ from .registry import OrchestratorRegistry, load_default_registry
 from .schema import OrchestratorDefinition, OrchestratorValidationError, to_capability_handle
 
 
+# Shared stderr sink for command previews and legacy override diagnostics.
+def _eprint(*args: object) -> None:
+    print(*args, file=sys.stderr)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     parse_argv, passthrough = _split_run_passthrough(list(argv) if argv is not None else sys.argv[1:])
     args = parser.parse_args(parse_argv)
     if getattr(args, "command", None) == "run":
         args.orchestrator_args = passthrough
-    # FLAG-S1-002: 'new' short-circuits BEFORE load_default_registry() so
-    # scaffold commands never load the built-in registry or import pack code.
-    if getattr(args, "command", None) == "new":
-        return int(args.handler(args, registry=None))
     try:
+        # FLAG-S1-002: 'new' short-circuits BEFORE load_default_registry() so
+        # scaffold commands never load the built-in registry or import pack code.
+        if getattr(args, "command", None) == "new":
+            return int(args.handler(args, registry=None))
         # SD2: orchestrator CLI defaults to Path.cwd() so forks land in the
         # user's current project, not the source-tree REPO_ROOT.
         project_root = getattr(args, "project_root", None) or Path.cwd()
@@ -55,12 +62,11 @@ def main(argv: list[str] | None = None) -> int:
         registry.override_store = override_store
         return int(args.handler(args, registry))
     except (KeyError, OrchestratorValidationError, ProjectRunError, ValueError, OverrideStoreError) as exc:
-        print(f"orchestrators: {exc}", file=sys.stderr)
-        return 2
+        raise AstridError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid orchestrators",
         description="List, inspect, validate, and run Astrid orchestrators.",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -78,7 +84,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available orchestrators.")
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    list_parser.add_argument("--kind", choices=("built_in", "external"), help="Filter orchestrators by kind.")
+    add_choice_arg(
+        list_parser,
+        "--kind",
+        values=("built_in", "external"),
+        help="Filter orchestrators by kind.",
+    )
     list_parser.add_argument("--pack", help="Filter orchestrators by source pack id.")
     list_parser.add_argument("--no-describe", action="store_true", help="Omit the short_description column for legacy parsers.")
     list_parser.add_argument("--show-overrides", action="store_true", help="Annotate capabilities with active overrides.")
@@ -218,12 +229,12 @@ def _cmd_new(args: argparse.Namespace, registry: Any) -> int:
 
     # Validate early so we can safely split for the plan-template format.
     if not _QID_RE.fullmatch(qualified_id):
-        print(
+        raise AstridError(
             f"orchestrators new: qualified id {qualified_id!r} must be "
             f"'<pack>.<slug>' with letters/digits/underscore",
-            file=sys.stderr,
+            recovery_command="astrid orchestrators new <pack>.<slug>",
+            state_snapshot={"qualified_id": qualified_id},
         )
-        return 2
 
     pack, slug = qualified_id.split(".", 1)
 
@@ -652,10 +663,10 @@ def _print_run_result(result: Any) -> None:
     commands = result.planned_commands or ((result.command,) if result.command else ())
     for command in commands:
         if command:
-            print(shlex.join(command), file=sys.stderr)
+            _eprint(shlex.join(command))
     if result.errors:
         for error in result.errors:
-            print(f"{error.kind}: {error.message}", file=sys.stderr)
+            _eprint(f"{error.kind}: {error.message}")
 
 
 def _print_ports(label: str, ports: tuple[Any, ...]) -> None:
@@ -679,7 +690,7 @@ def _print_outputs(orchestrator: OrchestratorDefinition) -> None:
 def _cmd_override(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
     store = registry.override_store
     if store is None:
-        print("orchestrators: override store not available", file=sys.stderr)
+        _eprint("orchestrators: override store not available")
         return 1
     action = getattr(args, "override_action", None)
     if action == "set":
@@ -697,7 +708,7 @@ def _cmd_override(args: argparse.Namespace, registry: OrchestratorRegistry) -> i
             for override_id, target in sorted(mappings.items()):
                 print(f"{override_type}/{override_id} → {target}")
     else:
-        print(f"orchestrators override: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"orchestrators override: unknown action {action!r}")
         return 2
     return 0
 
@@ -722,7 +733,7 @@ def _cmd_dirty(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
         if dirty_found == 0:
             print("no dirty orchestrators")
     else:
-        print(f"orchestrators dirty: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"orchestrators dirty: unknown action {action!r}")
         return 2
     return 0
 
@@ -747,7 +758,7 @@ def _cmd_update(args: argparse.Namespace, registry: OrchestratorRegistry) -> int
         print(report["report"])
         return 0 if report.get("applied") else 1
     else:
-        print(f"orchestrators update: unknown action {action!r}", file=sys.stderr)
+        _eprint(f"orchestrators update: unknown action {action!r}")
         return 2
 
 

@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.util.time import utc_now_milliseconds
 
@@ -897,7 +898,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_exec.add_argument("--remote-root", help="Remote path on the pod.")
     p_exec.add_argument("--remote-script", help="Script file path or inline command.")
     p_exec.add_argument("--timeout", type=int, help="Execution timeout in seconds.")
-    p_exec.add_argument("--upload-mode", choices=("sftp_walk", "tarball"), help="Upload mode.")
+    add_choice_arg(p_exec, "--upload-mode", values=("sftp_walk", "tarball"), help="Upload mode.")
     p_exec.add_argument("--excludes", help="Comma-separated glob patterns to exclude from upload.")
 
     # --- pull ---
@@ -929,7 +930,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_sess.add_argument("--remote-root", help="Remote path on the pod.")
     p_sess.add_argument("--remote-script", help="Script file path or inline command.")
     p_sess.add_argument("--timeout", type=int, help="Execution timeout in seconds.")
-    p_sess.add_argument("--upload-mode", choices=("sftp_walk", "tarball"), help="Upload mode.")
+    add_choice_arg(p_sess, "--upload-mode", values=("sftp_walk", "tarball"), help="Upload mode.")
     p_sess.add_argument("--excludes", help="Comma-separated glob patterns to exclude from upload.")
 
     return parser

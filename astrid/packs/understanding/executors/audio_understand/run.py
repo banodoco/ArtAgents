@@ -20,6 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid._media import ffprobe_duration_seconds
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 
 
@@ -507,10 +508,10 @@ def build_parser() -> argparse.ArgumentParser:
     add("--chunk-sec", type=float, default=30.0, help="Auto chunk length when --at/--start are omitted.")
     add("--max-chunks", type=int, default=12)
     add("--max-clip-sec", type=float, default=0.0, help="For repeated --audio comparison clips, trim each source to this many seconds. 0 keeps full clips.")
-    add("--audition-reel", choices=["auto", "always", "never"], default="auto", help="Build one numbered audio reel for comparative judging. Auto enables it for multiple clips/windows.")
+    add_choice_arg(parser, "--audition-reel", values=("auto", "always", "never"), default="auto", help="Build one numbered audio reel for comparative judging. Auto enables it for multiple clips/windows.")
     add("--reel-gap-sec", type=float, default=0.45, help="Silence after each audition reel candidate.")
     add("--sample-rate", type=int, default=16000)
-    add("--mode", choices=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="fast uses gpt-audio-mini; best uses gpt-audio.")
+    add_choice_arg(parser, "--mode", values=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="fast uses gpt-audio-mini; best uses gpt-audio.")
     add("--model", help="Explicit model override.")
     add("--compare-model", action="append", default=[], help="Additional audio model to query against the same windows.")
     add("--out-dir", type=Path, default=Path("runs/audio-understanding"))

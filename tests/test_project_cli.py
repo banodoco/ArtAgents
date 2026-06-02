@@ -18,6 +18,7 @@ T11 reinstated `list <project_id>` / `edit <project_id>` over reigh-app
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import tempfile
@@ -26,8 +27,11 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from astrid.contracts.errors import AstridError
+from astrid.core.cli_choices import StaticChoices
 from astrid.core.project import paths
 from astrid.core.project import cli as project_cli
+from astrid.core.project.project import ProjectError
 from astrid.core.reigh import data_provider as dp_mod
 from astrid.core.reigh import timeline_io as tio
 from astrid.core.reigh.errors import TimelineVersionConflictError
@@ -35,6 +39,13 @@ from astrid.core.reigh.supabase_client import SupabaseHTTPError
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices[name]
+    raise AssertionError(f"missing subparser {name!r}")
 
 
 def _canonical_timeline() -> dict[str, Any]:
@@ -92,6 +103,21 @@ class CreateShowSourceCLITest(unittest.TestCase):
         project_cli.main(["create", "demo", "--project-id", "abc-uuid"])
         rc = project_cli.main(["show", "--project", "demo", "--json"])
         self.assertEqual(rc, 0)
+
+    def test_main_raises_astrid_error_for_project_error(self) -> None:
+        with patch.object(project_cli, "_cmd_ls", side_effect=ProjectError("boom")):
+            with self.assertRaises(AstridError) as excinfo:
+                project_cli.main(["ls"])
+        self.assertEqual(str(excinfo.exception), "boom")
+
+    def test_source_add_kind_uses_static_choices_wrapper(self) -> None:
+        parser = project_cli.build_parser()
+        source_parser = _subparser(parser, "source")
+        source_add = _subparser(source_parser, "add")
+        kind_action = next(action for action in source_add._actions if action.dest == "kind")
+
+        self.assertIsInstance(kind_action.choices, StaticChoices)
+        self.assertEqual(kind_action.choices.valid_options, tuple(sorted(project_cli.SOURCE_KINDS)))
 
 
 class ListCLITest(unittest.TestCase):

@@ -25,6 +25,7 @@ from typing import Any, Sequence
 
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.audit import AuditContext
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_seconds
@@ -86,9 +87,10 @@ def build_parser() -> argparse.ArgumentParser:
             "For multi-source JSON picks without a main key, this flag is required."
         ),
     )
-    parser.add_argument(
+    add_choice_arg(
+        parser,
         "--renderer",
-        choices=["remotion"],
+        values=("remotion",),
         default="remotion",
         help="Render backend. remotion (default) uses tools/remotion/.",
     )

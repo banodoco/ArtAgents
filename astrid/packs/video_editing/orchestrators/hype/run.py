@@ -33,6 +33,7 @@ except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
 from astrid.audit import AuditContext, PARENT_IDS_ENV
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid import timeline
@@ -193,9 +194,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="Asset cache root directory. Defaults to HYPE_CACHE_DIR or ~/.cache/banodoco-hype.",
         default=argparse.SUPPRESS,
     )
-    parser.add_argument(
+    add_choice_arg(
+        parser,
         "--drift",
-        choices=("strict", "warn", "refetch"),
+        values=("strict", "warn", "refetch"),
         help="Content drift handling mode for cached URL assets.",
         default=argparse.SUPPRESS,
     )

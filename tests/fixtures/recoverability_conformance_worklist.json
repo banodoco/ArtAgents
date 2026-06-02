@@ -1,0 +1,3163 @@
+{
+  "ast_findings": [
+    {
+      "kind": "direct_stderr",
+      "line": 249,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"attach: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 256,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"attach: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 265,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                f\"attach: no session file for id {args.session!r}\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 289,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"attach: no project specified and no default project configured\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 291,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 292,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"projects:\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 294,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  {project_slug}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 295,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 296,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"choose one:\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 297,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  astrid attach {projects[0]}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 298,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  astrid attach {projects[0]} --default\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 299,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  astrid projects default {projects[0]}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 301,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"no projects discovered under the projects root\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 302,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"create one with: astrid projects create <slug>\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 309,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"attach: project '{slug}' was not found under the current projects root\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 311,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                    f\"attach: configured default project '{slug}' was not found under the current projects root\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 316,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 317,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"projects:\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 319,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  {project_slug}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 320,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 321,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"choose one:\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 322,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  astrid attach {projects[0]} --default\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 323,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  astrid projects default {projects[0]}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 325,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"no projects discovered under the projects root\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 326,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"create one with: astrid projects create <slug>\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 360,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                    f\"attach: timeline '{args.timeline}' not found in project '{slug}'\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 374,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                        f\"Using default timeline: {default_slug}. \"\n                        f\"Use --timeline to override.\",\n                        file=sys.stderr,\n                    )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 392,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                        f\"attach: no timelines exist for project '{slug}' yet; \"\n                        \"session bound without a timeline. \"\n                        \"Run `astrid timelines create <slug>` to make one.\",\n                        file=sys.stderr,\n                    )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 400,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"Available timelines:\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 402,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"  {t.slug}  ({t.name})\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 406,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 407,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"attach: cancelled\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 411,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                            f\"attach: timeline '{choice}' not found\",\n                            file=sys.stderr,\n                        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 419,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                        \"no default timeline; pass --timeline <slug>\",\n                        file=sys.stderr,\n                    )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 507,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                \"detach: no session bound (ASTRID_SESSION_ID unset); pass a session id\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 516,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"detach: no session file for id {target!r}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 526,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"takeover: {reason}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 527,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\"first recovery action: astrid status\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 579,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"takeover: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 620,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"takeover: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 631,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                f\"takeover: cannot read canonical lease for {target_run_dir.name!r}: {exc}\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 663,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"takeover: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 665,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                f\"takeover: {args.target!r} matches neither a session id nor a run id \"\n                f\"in project {current.project!r}\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 671,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"takeover: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 676,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(\n                f\"takeover: cannot read canonical lease for {args.target!r}: {exc}\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 681,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"takeover: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 712,
+      "path": "astrid/core/session/cli.py",
+      "source": "print(f\"status: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 830,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            \"timelines: no project specified; use --project <slug> or bind a session with 'astrid attach'\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 890,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timeline '{args.slug}' not found\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1012,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n                \"timelines: no current run bound; pass --from-run explicitly\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1056,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            f\"timelines: purge requires --yes-really to permanently delete timeline '{args.slug}'\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1069,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1070,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"timelines: purge cancelled\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1073,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"timelines: purge cancelled\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1105,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timeline '{args.slug}' not found\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1228,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timeline '{args.slug}' not found\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1876,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timeline '{args.slug}' not found\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1917,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"timelines migrate-events: must specify --project or --all-projects\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1921,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"(no projects discovered)\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2092,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2170,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2191,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            f\"timelines: event '{args.from_event_id}' not found in timeline '{target.slug}'\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2197,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            f\"timelines: event '{args.to_event_id}' not found in timeline '{target.slug}'\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2239,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: failed to project state at from event: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2244,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: failed to project state at to event: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2283,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2422,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2434,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: failed to project state at '{args.at_event_id}': {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2448,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n                f\"timelines: --out path '{out_path_raw}' is inside the timeline home; \"\n                f\"refusing to overwrite canonical files\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2481,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2549,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines push: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2587,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines pull: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2626,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines branch create: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2654,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines branch list: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2690,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines undo: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2704,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            f\"timelines undo: chain verification failed: \"\n            f\"{verification.error or 'unknown error'}; refusing to undo\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2714,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"timelines undo: no events in timeline\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2738,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"timelines undo: no undoable events found (all are lifecycle/ops or erased)\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2748,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines undo: failed to project before state: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2754,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines undo: failed to project after state: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2761,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\"timelines undo: no inverse planned for target event\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2802,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines undo: warning \u2014 projection regeneration failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2828,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            \"timelines mass-undo: at least one of --since, --actor, or --actor-prefix must be specified\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2838,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines mass-undo: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2859,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(\n            f\"timelines mass-undo: chain verification failed: \"\n            f\"{verification.error or 'unknown error'}; refusing to undo\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2873,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines mass-undo: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2904,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines mass-undo: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2915,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"  ERROR (partial failure): {result.error}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2944,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines erase: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 2975,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines erase: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 3012,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines erase: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 3048,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "print(f\"timelines recover: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 3085,
+      "path": "astrid/core/timeline/cli.py",
+      "source": "raise ValueError(\n        \"no project specified; use --project <slug> or bind a session with 'astrid attach'\"\n    )"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 90,
+      "path": "astrid/orchestrate/cli.py",
+      "source": "print(msg, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 127,
+      "path": "astrid/orchestrate/cli.py",
+      "source": "print(f\"recommended next: astrid author check {qid}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 296,
+      "path": "astrid/orchestrate/cli.py",
+      "source": "print(f\"recommended next: astrid author check {qid}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 94,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"packs validate: {path} is not a directory or does not exist\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 130,
+      "path": "astrid/packs/cli.py",
+      "source": "print(err, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 135,
+      "path": "astrid/packs/cli.py",
+      "source": "print(f\"warning: {w}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 284,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"packs new: invalid pack id {pack_id!r}. \"\n            f\"Must match pattern: ^[a-z][a-z0-9_]*$\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 293,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"packs new: directory {target} already exists; \"\n            f\"refusing to overwrite\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 301,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"packs new: parent directory {target.parent} does not exist\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 377,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"packs new: scaffolded pack fails validation ({len(errors)} error(s))\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 382,
+      "path": "astrid/packs/cli.py",
+      "source": "print(f\"  {err}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 387,
+      "path": "astrid/packs/cli.py",
+      "source": "print(f\"warning: {w}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 477,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"inspect: pack {pack_id!r} is not installed.\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 485,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"inspect: cannot resolve active revision for {pack_id!r}.\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 493,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\n            f\"inspect: no pack manifest found in installed revision {rev_dir}.\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 505,
+      "path": "astrid/packs/cli.py",
+      "source": "print(f\"inspect: failed to parse pack manifest: {e}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 509,
+      "path": "astrid/packs/cli.py",
+      "source": "print(\"inspect: pack manifest is not a mapping\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1206,
+      "path": "astrid/packs/cli.py",
+      "source": "print(f\"packs inspect: unknown pack {pack_id!r}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1402,
+      "path": "astrid/packs/cli.py",
+      "source": "print(err, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1407,
+      "path": "astrid/packs/cli.py",
+      "source": "print(f\"warning: {warning}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 233,
+      "path": "astrid/packs/editorial/executors/arrange/run.py",
+      "source": "raise ValueError(f\"clip {index} uses generative visual_source {pool_id!r}, which is disabled for source-cut arrangements\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 438,
+      "path": "astrid/packs/editorial/executors/arrange/run.py",
+      "source": "raise ValueError(\"Claude arrangement response must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 441,
+      "path": "astrid/packs/editorial/executors/arrange/run.py",
+      "source": "raise ValueError(\"Claude arrangement response is missing clips\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 444,
+      "path": "astrid/packs/editorial/executors/arrange/run.py",
+      "source": "raise ValueError(\"Claude arrangement response is missing target_duration_sec\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 447,
+      "path": "astrid/packs/editorial/executors/arrange/run.py",
+      "source": "raise ValueError(\n            \"Claude arrangement response fell outside the requested target_duration_sec tolerance \"\n            f\"({response_target_duration:.1f}s != {float(target_duration_sec):.1f}s)\"\n        )"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 124,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"arrangement.clips must be a list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 128,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"arrangement.clips[{index}] must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 131,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"arrangement.clips[{index}].order must be an integer\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 139,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"arrangement.clips must be a list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 143,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"arrangement.clips[{index}] must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 146,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"arrangement.clips[{index}].order must be an integer\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 149,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"arrangement.clips[{index}].uuid must be 8 lowercase hex characters\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 165,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].clip_uuid must be 8 lowercase hex characters\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 167,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].clip_uuid {clip_uuid!r} is not in arrangement\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 169,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].clip_order {clip_order!r} is not in arrangement\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 171,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\n                f\"editor_review.notes[{index}].clip_uuid {clip_uuid!r} does not match clip_order {clip_order!r}\"\n            )"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 180,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"{action} note requires action_detail object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 186,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"{action} action_detail.{field} must be numeric\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 192,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"{action} action_detail missing required keys: {sorted(missing)}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 200,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"editor_review.notes must be a list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 206,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}] must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 209,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].action is invalid\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 212,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].clip_order must be an integer\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 219,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"insert-stinger action_detail.after_clip_order must reference an existing clip order\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 222,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"insert-stinger action_detail.candidate_pool_id must be a non-empty string\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 236,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"swap note requires candidate_pool_id\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 238,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"swap action_detail.candidate_pool_id must match note candidate_pool_id\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 240,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"swap action_detail.role must be a non-empty string\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 246,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"reorder action_detail.new_order must be an integer\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 251,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"needs-better-pool-entry action_detail.reason must be a non-empty string\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 253,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"accept action_detail must be null\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 258,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"editor_review payload must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 262,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review payload has unknown keys: {unknown}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 265,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review payload missing required field {field!r}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 268,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"editor_review.iteration must be an integer between 1 and 2\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 271,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"editor_review.notes must be a list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 276,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}] must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 279,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}] has unknown keys: {unknown_note}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 282,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}] missing required keys: {missing_note}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 284,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].clip_order must be an integer\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 287,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].clip_uuid must be 8 lowercase hex characters\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 290,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].{key} must be a string\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 292,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].action is invalid\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 295,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].action_detail must be an object or null\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 297,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].priority is invalid\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 300,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"editor_review.notes[{index}].candidate_pool_id must be a string or null\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 302,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"editor_review.verdict is invalid\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 305,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(\"editor_review.ship_confidence must be a number between 0 and 1\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 470,
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "source": "raise ValueError(f\"brief text not found in {brief_path} or arrangement.brief_text\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 149,
+      "path": "astrid/packs/editorial/executors/human_review/run.py",
+      "source": "raise ValueError(\"batch save matched no item_ids\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 177,
+      "path": "astrid/packs/editorial/executors/human_review/run.py",
+      "source": "raise ValueError(\"batch save requires item_ids or scope='filtered'\")"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 481,
+      "path": "astrid/packs/editorial/executors/human_review/run.py",
+      "source": "print(f\"Error: --html not found: {args.html}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 484,
+      "path": "astrid/packs/editorial/executors/human_review/run.py",
+      "source": "print(f\"Error: --data not found: {args.data}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 525,
+      "path": "astrid/packs/editorial/executors/human_review/run.py",
+      "source": "print(f\"human_review: timeout after {args.timeout}s without /submit\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 128,
+      "path": "astrid/packs/editorial/executors/refine/run.py",
+      "source": "raise ValueError(f\"Asset registry entry {asset_key!r} is missing\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 135,
+      "path": "astrid/packs/editorial/executors/refine/run.py",
+      "source": "raise ValueError(f\"Asset registry entry {asset_key!r} has no file path\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 162,
+      "path": "astrid/packs/editorial/executors/refine/run.py",
+      "source": "raise ValueError(\"refine requires --primary-asset when the asset registry has multiple keys and metadata lacks pipeline.config_snapshot.primary_asset\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 169,
+      "path": "astrid/packs/editorial/executors/refine/run.py",
+      "source": "raise ValueError(f\"Transcript payload at {path} must contain a segments list\")"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 670,
+      "path": "astrid/packs/editorial/executors/refine/run.py",
+      "source": "print(f\"refine: managed mode --project={args.project} --timeline-slug={args.timeline_slug}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 112,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"{self.provider.name} API error: {data['error']}\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 117,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"{self.provider.name} HTTP {exc.code}: {detail}\") from exc"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 123,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "print(\n                    f\"{self.provider.name} call failed; retrying in {wait_seconds}s \"\n                    f\"({attempt}/3): {last_error}\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 129,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(str(last_error))"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 200,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"unsupported script provider: {config.provider.name}\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 204,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"{config.provider.api_key_env} is required\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 338,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"judge returned invalid JSON: {content}\") from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 340,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"judge selected unknown candidate {winner}\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 523,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(\"PyYAML is required to parse script pipeline presets\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 528,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"script pipeline config must be an object: {path}\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 534,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"{path} must be an object\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 541,
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "source": "raise RuntimeError(f\"{path} is required\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 57,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(\"scene_triage payload must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 59,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"scene_triage.version must be {TRIAGE_VERSION}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 62,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(\"scene_triage.generated_at must be a UTC timestamp ending in 'Z'\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 65,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(\"scene_triage.entries must be a list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 70,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"{path} must be an object\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 72,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"{path} has unexpected keys\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 77,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"{path}.scene_id must be a non-empty string\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 79,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"{path}.scene_id {scene_id!r} is duplicated\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 82,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"{path}.triage_score must be an integer from 0 to 5\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 84,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(f\"{path}.triage_tag must be a non-empty string\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 152,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(\"grid_size must be > 0\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 184,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(\"Claude triage response is missing entries\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 202,
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "source": "raise ValueError(\"Claude triage response is missing entries\")"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 96,
+      "path": "astrid/packs/fal/executors/fal_foley/run.py",
+      "source": "print(f\"Error: clip not found: {clip}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 48,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] {label}: {' '.join(cmd)}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 51,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "sys.stderr.write(proc.stdout)",
+      "stderr_kind": "write"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 52,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "sys.stderr.write(proc.stderr)",
+      "stderr_kind": "write"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 55,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "sys.stderr.write(proc.stderr)",
+      "stderr_kind": "write"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 138,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] wrote prompts: {prompts_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 175,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] foley work: {len(work)} tiles \"\n          f\"(skipped {len(manifest['tiles']) - len(work)} cached)\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 267,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] step 1/5: tile_video\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 273,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] step 2/5: visual_understand (global + per-tile)\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 278,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] step 3/5: fal_foley \u00d7 {len(manifest['tiles'])}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 285,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] step 4/5: foley_review\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 291,
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "source": "print(f\"[foley_map] step 5/5: spatial_audio_page\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 309,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "raise RuntimeError(\n            f\"generation backend {execution!r} is not registered: {exc}\"\n        ) from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 313,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "raise RuntimeError(\n            f\"failed to initialize generation backend {execution!r}: {exc}\"\n        ) from exc"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 429,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(f\"Failed to load generation backend registry: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 436,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(f\"Failed to load model registry: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 443,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(f\"Error: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 449,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(\n            f\"Error: model {args.model!r} mode {mode_name!r} has no \"\n            f\"{args.execution!r} backend. Available backends: {available}\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 469,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(\n                \"Error: either --prompt or --prompts-file is required.\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 484,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(f\"Error: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 537,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(\n                        f\"Warning: skipping row {i} ({prompt_text!r}): \"\n                        f\"{skip_reason}\",\n                        file=sys.stderr,\n                    )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 557,
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "source": "print(\n                    f\"Warning: skipping row {i} ({prompt_text!r}): {exc.code}\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 60,
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
+      "source": "print(f\"Error: {message}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 65,
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
+      "source": "print(f\"Warning: {message}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 236,
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
+      "source": "print(\"No image was rendered; nothing to open.\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 274,
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
+      "source": "print(f\"[{index}/{len(jobs)}] Calling {payload['model']} for {payload['n']} image(s)\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 277,
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
+      "source": "print(f\"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 463,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "raise RuntimeError(\n            f\"generation backend {execution!r} is not registered: {exc}\"\n        ) from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 467,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "raise RuntimeError(\n            f\"failed to initialize generation backend {execution!r}: {exc}\"\n        ) from exc"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 659,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(f\"Failed to load generation backend registry: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 666,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(f\"Failed to load model registry: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 673,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(f\"Error: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 679,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(\n            f\"Error: model {args.model!r} mode {mode_name!r} has no \"\n            f\"{args.execution!r} backend. Available backends: {available}\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 703,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(\n                \"Error: either --prompt or --prompts-file is required.\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 718,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(f\"Error: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 780,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(\n                        f\"Warning: skipping row {i} ({prompt_text!r}): \"\n                        f\"{skip_reason}\",\n                        file=sys.stderr,\n                    )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 800,
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "source": "print(\n                    f\"Warning: skipping row {i} ({prompt_text!r}): {exc.code}\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 126,
+      "path": "astrid/packs/iteration/executors/assemble/run.py",
+      "source": "print(f\"assemble: managed mode --project={args.project} --timeline-slug={args.timeline_slug}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 133,
+      "path": "astrid/packs/iteration/executors/assemble/run.py",
+      "source": "print(\"--project and --timeline-slug must be supplied together for managed mode, or both omitted for unmanaged artifact mode\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 148,
+      "path": "astrid/packs/iteration/executors/assemble/run.py",
+      "source": "print(str(exc), file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 75,
+      "path": "astrid/packs/iteration/executors/prepare/run.py",
+      "source": "print(str(exc), file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 83,
+      "path": "astrid/packs/media/executors/clip_extract/run.py",
+      "source": "print(f\"Error: {error}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 91,
+      "path": "astrid/packs/media/executors/clip_extract/run.py",
+      "source": "print(f\"  [clip_extract] {shlex.join(cmd)}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 96,
+      "path": "astrid/packs/media/executors/clip_extract/run.py",
+      "source": "print(\n            f\"Error: ffmpeg exited with {result.returncode}\", file=sys.stderr\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 100,
+      "path": "astrid/packs/media/executors/clip_extract/run.py",
+      "source": "sys.stderr.write(result.stderr)",
+      "stderr_kind": "write"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 75,
+      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
+      "source": "print(f\"open_in_reigh.py: missing required output file(s): {', '.join(missing)}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 164,
+      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
+      "source": "print(\n            \"open_in_reigh: --project-id is required for bridge metadata. \"\n            \"Use --print-sql, --copy-to, or --copy-files to skip the network.\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 173,
+      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
+      "source": "print(\"open_in_reigh: timeline JSON must be a JSON object\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 176,
+      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
+      "source": "print(\n            \"open_in_reigh: refusing to bridge placement-style timeline.json to reigh-app. \"\n            \"The DataProvider expects the canonical clip-shaped TimelineConfig \"\n            \"(per @banodoco/timeline-schema). Re-export with the collapsed schema first.\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 495,
+      "path": "astrid/packs/reigh/executors/publish/run.py",
+      "source": "print(f\"publish: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 102,
+      "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py",
+      "source": "raise ValueError(\"effect id must be kebab-case, e.g. glass-product-card\")"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 205,
+      "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py",
+      "source": "print(str(exc), file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 441,
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "source": "print(f\"FAL upscaling frame {index}/{len(frames)} with {args.ai_upscale_model}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1150,
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "source": "print(f\"Warning: animated WebP export failed: {type(exc).__name__}: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1261,
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "source": "print(f\"Calling {args.model} for {size} sprite sheet\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1269,
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "source": "print(f\"Sprite sheet completed in {time.time() - started:.1f}s\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1272,
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "source": "print(f\"Post-processing existing sprite sheet {input_sheet}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1302,
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "source": "print(f\"Warning: {len(edge_warnings)} frame(s) touch the safety edge after slicing.\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 278,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 333,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"WARNING: session teardown error: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 342,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "raise ValueError(f\"pod_handle ssh field is missing or invalid: {ssh!r}\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 384,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "raise RuntimeError(\n            f\"API key env var {api_key_ref!r} is not set. \"\n            f\"The pod_handle stores only the env var name, never the literal key.\"\n        )"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 415,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(\"ERROR: RUNPOD_API_KEY environment variable is required\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 462,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: provision failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 504,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: pod_handle.json not found at {pod_handle_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 558,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: exec failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 579,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: pod_handle.json not found at {pod_handle_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 587,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(\"ERROR: at least one --remote-path is required\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 598,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"$ {' '.join(cmd)}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 613,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: artifact pull failed for {remote_path} rc={rv.returncode}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 617,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: pulled artifact missing locally: {local_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 634,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: pod_handle.json not found at {pod_handle_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 664,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: teardown failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 698,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(\"ERROR: RUNPOD_API_KEY environment variable is required\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 848,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: session failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 862,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"WARNING: session teardown failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 957,
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "source": "print(f\"ERROR: unknown command {args.command!r}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 174,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"match_mode must be all or any\")"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 402,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise RuntimeError(f\"Hugging Face model search failed: HTTP {exc.code}: {detail}\") from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 404,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise RuntimeError(f\"Hugging Face model search failed: {exc.reason}\") from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 407,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise RuntimeError(\"Hugging Face model search returned an unexpected payload\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 449,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"limit must be at least 1\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 451,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"direction must be -1 or 1\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 454,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"match_mode must be all or any\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 458,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"fetch_limit must be greater than or equal to limit\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 534,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"limit must be at least 1\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 536,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"direction must be -1 or 1\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 539,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"match_mode must be all or any\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 633,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "raise ValueError(\"--base-model is required unless --list-base-models is set\")"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 647,
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "source": "print(f\"search-loras: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 118,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "print(f\"training.dataset_build: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 153,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "print(f\"training.dataset_build: {type(exc).__name__}: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 970,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(f\"{path.name} must contain a candidates list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 981,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(f\"{path.name} must contain filtered item groups\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 985,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(f\"{path.name} must contain active and rejected lists\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 993,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(f\"{path.name} must contain an items list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 1277,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(f\"non-interactive top-up round {round_index} requires review decisions JSON with rounds.{round_index}\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 1286,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(\"review decisions JSON must be an object or list\")"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 1307,
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "source": "raise ValueError(f\"round {round_index} review decisions missing required item_ids: {', '.join(missing)}\")"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 81,
+      "path": "astrid/packs/training/orchestrators/training_run/run.py",
+      "source": "print(f\"training_run: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 65,
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py",
+      "source": "print(f\"Error: {message}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 371,
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py",
+      "source": "raise RuntimeError(f\"OpenAI API error {exc.code}: {detail}\") from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 373,
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py",
+      "source": "raise RuntimeError(f\"Network error: {exc}\") from exc"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 455,
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py",
+      "source": "print(f\"querying={model} audio_input={audio_input['kind']} index={audio_input['index']} audio={audio_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 491,
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py",
+      "source": "print(f\"wrote={args.out}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 73,
+      "path": "astrid/packs/understanding/executors/video_understand/run.py",
+      "source": "print(f\"Error: {message}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 239,
+      "path": "astrid/packs/understanding/executors/video_understand/run.py",
+      "source": "print(f\"Error: --response-schema file not found: {schema_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 265,
+      "path": "astrid/packs/understanding/executors/video_understand/run.py",
+      "source": "print(f\"querying={model} window={window['index']} video={video_path}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 297,
+      "path": "astrid/packs/understanding/executors/video_understand/run.py",
+      "source": "print(f\"wrote={args.out}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 45,
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py",
+      "source": "print(f\"Error: {message}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 334,
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py",
+      "source": "raise RuntimeError(f\"OpenAI API error {exc.code}: {detail_text}\") from exc"
+    },
+    {
+      "exception": "RuntimeError",
+      "kind": "bare_raise",
+      "line": 336,
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py",
+      "source": "raise RuntimeError(f\"Network error: {exc}\") from exc"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 416,
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py",
+      "source": "print(f\"querying={model} image={image_for_query}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 452,
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py",
+      "source": "print(f\"wrote={args.out}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 472,
+      "path": "astrid/packs/video_editing/executors/cut/run.py",
+      "source": "raise ValueError(\n            f\"Invalid source bounds for pool entry {entry.get('id')!r}: \"\n            f\"{start_sec:.3f}-{source_end:.3f}\"\n        )"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1144,
+      "path": "astrid/packs/video_editing/executors/cut/run.py",
+      "source": "print(f\"cut: managed mode --project={args.project} --timeline-slug={args.timeline_slug}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 174,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(f\"event_talks: source not found: {args.source}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 468,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(\n            \"event_talks: --project required for task-gate execution\",\n            file=sys.stderr,\n        )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 493,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(f\"event_talks: gate error: {exc.reason}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 508,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(\n                f\"event_talks: step failed with returncode={result.returncode}\",\n                file=sys.stderr,\n            )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 542,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(exc.recovery, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 602,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(f\"event_talks: unknown subcommand: {cmd}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 626,
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "source": "print(exc.recovery, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 106,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(message, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1139,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(f\"{step_name}: failed; last {len(tail)} log lines from {log_path}:\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1141,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(line, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1310,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(\n                    f\"pipeline: editor note clip_uuid={clip_uuid!r} not found; falling back to clip_order\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1315,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(\"pipeline: editor note missing clip_uuid; falling back to clip_order\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1487,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(f\"hype: plan emission failed: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1640,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(exc.recovery, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 1645,
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "source": "print(f\"astrid: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 386,
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "source": "print(\"thumbnail_maker: --project required for task-gate execution\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 407,
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "source": "print(f\"thumbnail_maker: gate error: {exc.reason}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 419,
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "source": "print(f\"thumbnail_maker: step failed with returncode={result.returncode}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 450,
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "source": "print(exc.recovery, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 501,
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "source": "print(f\"thumbnail_maker: unknown subcommand: {args.command}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 523,
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "source": "print(exc.recovery, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 79,
+      "path": "astrid/packs/youtube/executors/upload/run.py",
+      "source": "print(f\"publish-youtube: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 157,
+      "path": "astrid/pipeline.py",
+      "source": "print(\n                    f\"(auto-resolved session for project {discovered_slug!r} \"\n                    f\"via .astrid-session; pass --project to override)\",\n                    file=sys.stderr,\n                )",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 246,
+      "path": "astrid/pipeline.py",
+      "source": "print(\"first recovery action: astrid status\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 247,
+      "path": "astrid/pipeline.py",
+      "source": "print(message, file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "kind": "direct_stderr",
+      "line": 30,
+      "path": "astrid/skills/cli.py",
+      "source": "print(f\"skills: {exc}\", file=sys.stderr)",
+      "stderr_kind": "print"
+    },
+    {
+      "exception": "ValueError",
+      "kind": "bare_raise",
+      "line": 111,
+      "path": "astrid/skills/cli.py",
+      "source": "raise ValueError(\"specify a pack id or pass --all\")"
+    }
+  ],
+  "expected_parser_surface_count": 64,
+  "expected_parser_surfaces": [
+    {
+      "builder": "build_parser",
+      "module": "astrid.core.element.cli",
+      "path": "astrid/core/element/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.core.executor.cli",
+      "path": "astrid/core/executor/cli.py"
+    },
+    {
+      "builder": "_build_parser",
+      "module": "astrid.core.model_catalog.cli",
+      "path": "astrid/core/model_catalog/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.core.orchestrator.cli",
+      "path": "astrid/core/orchestrator/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.core.project.cli",
+      "path": "astrid/core/project/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.core.session.cli",
+      "path": "astrid/core/session/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.core.timeline.cli",
+      "path": "astrid/core/timeline/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.doctor",
+      "path": "astrid/doctor.py"
+    },
+    {
+      "builder": "_build_parser",
+      "module": "astrid.orchestrate.cli",
+      "path": "astrid/orchestrate/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.cli",
+      "path": "astrid/packs/cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.arrange.run",
+      "path": "astrid/packs/editorial/executors/arrange/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.boundary_candidates.run",
+      "path": "astrid/packs/editorial/executors/boundary_candidates/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.editor_review.run",
+      "path": "astrid/packs/editorial/executors/editor_review/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.human_notes.run",
+      "path": "astrid/packs/editorial/executors/human_notes/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.human_review.run",
+      "path": "astrid/packs/editorial/executors/human_review/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.inspect_cut.run",
+      "path": "astrid/packs/editorial/executors/inspect_cut/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.quality_zones.run",
+      "path": "astrid/packs/editorial/executors/quality_zones/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.quote_scout.run",
+      "path": "astrid/packs/editorial/executors/quote_scout/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.refine.run",
+      "path": "astrid/packs/editorial/executors/refine/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.scenes.run",
+      "path": "astrid/packs/editorial/executors/scenes/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.script_pipeline.run",
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.shots.run",
+      "path": "astrid/packs/editorial/executors/shots/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.transcribe.run",
+      "path": "astrid/packs/editorial/executors/transcribe/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.editorial.executors.triage.run",
+      "path": "astrid/packs/editorial/executors/triage/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.fal.executors.fal_foley.run",
+      "path": "astrid/packs/fal/executors/fal_foley/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.foley.executors.foley_review.run",
+      "path": "astrid/packs/foley/executors/foley_review/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.foley.executors.tile_video.run",
+      "path": "astrid/packs/foley/executors/tile_video/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.foley.orchestrators.foley_map.run",
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.generation.executors.generate_image.run",
+      "path": "astrid/packs/generation/executors/generate_image/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.generation.executors.generate_image_openai.run",
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.generation.executors.generate_video.run",
+      "path": "astrid/packs/generation/executors/generate_video/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.iteration.executors.assemble.run",
+      "path": "astrid/packs/iteration/executors/assemble/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.iteration.executors.prepare.run",
+      "path": "astrid/packs/iteration/executors/prepare/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.media.executors.clip_extract.run",
+      "path": "astrid/packs/media/executors/clip_extract/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.moirae.executors.moirae.run",
+      "path": "astrid/packs/moirae/executors/moirae/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.reigh.executors.open_in_reigh.run",
+      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.reigh.executors.publish.run",
+      "path": "astrid/packs/reigh/executors/publish/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.reigh.executors.reigh_data.run",
+      "path": "astrid/packs/reigh/executors/reigh_data/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.reigh.executors.spatial_audio_page.run",
+      "path": "astrid/packs/reigh/executors/spatial_audio_page/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.rendering.executors.html_canvas_effect.run",
+      "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.rendering.executors.sprite_sheet.run",
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.runpod.executors._common",
+      "path": "astrid/packs/runpod/executors/_common.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.training.executors.pool_build.run",
+      "path": "astrid/packs/training/executors/pool_build/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.training.executors.pool_merge.run",
+      "path": "astrid/packs/training/executors/pool_merge/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.training.executors.search_loras.run",
+      "path": "astrid/packs/training/executors/search_loras/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.training.orchestrators.dataset_build.run",
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.training.orchestrators.training_run.run",
+      "path": "astrid/packs/training/orchestrators/training_run/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.understanding.executors.audio_understand.run",
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.understanding.executors.scene_describe.run",
+      "path": "astrid/packs/understanding/executors/scene_describe/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.understanding.executors.understand.run",
+      "path": "astrid/packs/understanding/executors/understand/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.understanding.executors.video_understand.run",
+      "path": "astrid/packs/understanding/executors/video_understand/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.understanding.executors.visual_understand.run",
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.vibecomfy.executors.run.run",
+      "path": "astrid/packs/vibecomfy/executors/run/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.vibecomfy.executors.validate.run",
+      "path": "astrid/packs/vibecomfy/executors/validate/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.executors.cut.run",
+      "path": "astrid/packs/video_editing/executors/cut/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.animate_image.run",
+      "path": "astrid/packs/video_editing/orchestrators/animate_image/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.event_talks.run",
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.hype.run",
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.logo_ideas.run",
+      "path": "astrid/packs/video_editing/orchestrators/logo_ideas/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.thumbnail_maker.run",
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.vary_grid.run",
+      "path": "astrid/packs/video_editing/orchestrators/vary_grid/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.youtube.executors.upload.run",
+      "path": "astrid/packs/youtube/executors/upload/run.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.setup_cli",
+      "path": "astrid/setup_cli.py"
+    },
+    {
+      "builder": "build_parser",
+      "module": "astrid.skills.cli",
+      "path": "astrid/skills/cli.py"
+    }
+  ],
+  "kind_arg_findings": [],
+  "mode": "zero",
+  "non_kind_enum_findings": [],
+  "scanned_parser_surface_count": 63,
+  "scanned_parser_surfaces": [
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.core.element.cli",
+      "path": "astrid/core/element/cli.py",
+      "prog": "python3 -m astrid elements"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.core.executor.cli",
+      "path": "astrid/core/executor/cli.py",
+      "prog": "python3 -m astrid executors"
+    },
+    {
+      "builder": "_build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.core.model_catalog.cli",
+      "path": "astrid/core/model_catalog/cli.py",
+      "prog": "astrid models"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.core.orchestrator.cli",
+      "path": "astrid/core/orchestrator/cli.py",
+      "prog": "python3 -m astrid orchestrators"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.core.project.cli",
+      "path": "astrid/core/project/cli.py",
+      "prog": "python3 -m astrid projects"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.core.session.cli",
+      "path": "astrid/core/session/cli.py",
+      "prog": "python3 -m astrid sessions"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 8,
+      "module": "astrid.core.timeline.cli",
+      "path": "astrid/core/timeline/cli.py",
+      "prog": "python3 -m astrid timelines"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.doctor",
+      "path": "astrid/doctor.py",
+      "prog": "python3 -m astrid doctor"
+    },
+    {
+      "builder": "_build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.orchestrate.cli",
+      "path": "astrid/orchestrate/cli.py",
+      "prog": "astrid author"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 6,
+      "module": "astrid.packs.cli",
+      "path": "astrid/packs/cli.py",
+      "prog": "python3 -m astrid packs"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.arrange.run",
+      "path": "astrid/packs/editorial/executors/arrange/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.editorial.executors.boundary_candidates.run",
+      "path": "astrid/packs/editorial/executors/boundary_candidates/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.editor_review.run",
+      "path": "astrid/packs/editorial/executors/editor_review/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.human_notes.run",
+      "path": "astrid/packs/editorial/executors/human_notes/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.human_review.run",
+      "path": "astrid/packs/editorial/executors/human_review/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.inspect_cut.run",
+      "path": "astrid/packs/editorial/executors/inspect_cut/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.quality_zones.run",
+      "path": "astrid/packs/editorial/executors/quality_zones/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.quote_scout.run",
+      "path": "astrid/packs/editorial/executors/quote_scout/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.refine.run",
+      "path": "astrid/packs/editorial/executors/refine/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.scenes.run",
+      "path": "astrid/packs/editorial/executors/scenes/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.script_pipeline.run",
+      "path": "astrid/packs/editorial/executors/script_pipeline/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.shots.run",
+      "path": "astrid/packs/editorial/executors/shots/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.editorial.executors.transcribe.run",
+      "path": "astrid/packs/editorial/executors/transcribe/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.editorial.executors.triage.run",
+      "path": "astrid/packs/editorial/executors/triage/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.fal.executors.fal_foley.run",
+      "path": "astrid/packs/fal/executors/fal_foley/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.foley.executors.foley_review.run",
+      "path": "astrid/packs/foley/executors/foley_review/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.foley.executors.tile_video.run",
+      "path": "astrid/packs/foley/executors/tile_video/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.foley.orchestrators.foley_map.run",
+      "path": "astrid/packs/foley/orchestrators/foley_map/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.generation.executors.generate_image.run",
+      "path": "astrid/packs/generation/executors/generate_image/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 3,
+      "module": "astrid.packs.generation.executors.generate_image_openai.run",
+      "path": "astrid/packs/generation/executors/generate_image_openai/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 3,
+      "module": "astrid.packs.generation.executors.generate_video.run",
+      "path": "astrid/packs/generation/executors/generate_video/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.iteration.executors.assemble.run",
+      "path": "astrid/packs/iteration/executors/assemble/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.iteration.executors.prepare.run",
+      "path": "astrid/packs/iteration/executors/prepare/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.media.executors.clip_extract.run",
+      "path": "astrid/packs/media/executors/clip_extract/run.py",
+      "prog": "media.clip_extract"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.moirae.executors.moirae.run",
+      "path": "astrid/packs/moirae/executors/moirae/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.reigh.executors.open_in_reigh.run",
+      "path": "astrid/packs/reigh/executors/open_in_reigh/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.reigh.executors.publish.run",
+      "path": "astrid/packs/reigh/executors/publish/run.py",
+      "prog": "tools/publish.py"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.reigh.executors.reigh_data.run",
+      "path": "astrid/packs/reigh/executors/reigh_data/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.reigh.executors.spatial_audio_page.run",
+      "path": "astrid/packs/reigh/executors/spatial_audio_page/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.rendering.executors.html_canvas_effect.run",
+      "path": "astrid/packs/rendering/executors/html_canvas_effect/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.packs.rendering.executors.sprite_sheet.run",
+      "path": "astrid/packs/rendering/executors/sprite_sheet/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.packs.runpod.executors._common",
+      "path": "astrid/packs/runpod/executors/_common.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.training.executors.pool_build.run",
+      "path": "astrid/packs/training/executors/pool_build/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.training.executors.pool_merge.run",
+      "path": "astrid/packs/training/executors/pool_merge/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 3,
+      "module": "astrid.packs.training.executors.search_loras.run",
+      "path": "astrid/packs/training/executors/search_loras/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.training.orchestrators.dataset_build.run",
+      "path": "astrid/packs/training/orchestrators/dataset_build/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.training.orchestrators.training_run.run",
+      "path": "astrid/packs/training/orchestrators/training_run/run.py",
+      "prog": "python3 -m astrid.packs.training.orchestrators.training_run.run"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.packs.understanding.executors.audio_understand.run",
+      "path": "astrid/packs/understanding/executors/audio_understand/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.understanding.executors.scene_describe.run",
+      "path": "astrid/packs/understanding/executors/scene_describe/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.understanding.executors.understand.run",
+      "path": "astrid/packs/understanding/executors/understand/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.understanding.executors.video_understand.run",
+      "path": "astrid/packs/understanding/executors/video_understand/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.packs.understanding.executors.visual_understand.run",
+      "path": "astrid/packs/understanding/executors/visual_understand/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.vibecomfy.executors.run.run",
+      "path": "astrid/packs/vibecomfy/executors/run/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.vibecomfy.executors.validate.run",
+      "path": "astrid/packs/vibecomfy/executors/validate/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.video_editing.executors.cut.run",
+      "path": "astrid/packs/video_editing/executors/cut/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.video_editing.orchestrators.event_talks.run",
+      "path": "astrid/packs/video_editing/orchestrators/event_talks/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 1,
+      "module": "astrid.packs.video_editing.orchestrators.hype.run",
+      "path": "astrid/packs/video_editing/orchestrators/hype/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.packs.video_editing.orchestrators.logo_ideas.run",
+      "path": "astrid/packs/video_editing/orchestrators/logo_ideas/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 4,
+      "module": "astrid.packs.video_editing.orchestrators.thumbnail_maker.run",
+      "path": "astrid/packs/video_editing/orchestrators/thumbnail_maker/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 2,
+      "module": "astrid.packs.video_editing.orchestrators.vary_grid.run",
+      "path": "astrid/packs/video_editing/orchestrators/vary_grid/run.py",
+      "prog": "-c"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.packs.youtube.executors.upload.run",
+      "path": "astrid/packs/youtube/executors/upload/run.py",
+      "prog": "publish-youtube"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 0,
+      "module": "astrid.setup_cli",
+      "path": "astrid/setup_cli.py",
+      "prog": "python3 -m astrid setup"
+    },
+    {
+      "builder": "build_parser",
+      "enum_arg_count": 4,
+      "module": "astrid.skills.cli",
+      "path": "astrid/skills/cli.py",
+      "prog": "python3 -m astrid skills"
+    }
+  ],
+  "skipped_parser_surface_count": 1,
+  "skipped_parser_surfaces": [
+    {
+      "builder": "build_parser",
+      "module": "astrid.packs.video_editing.orchestrators.animate_image.run",
+      "path": "astrid/packs/video_editing/orchestrators/animate_image/run.py",
+      "reason": "Traceback (most recent call last):"
+    }
+  ]
+}

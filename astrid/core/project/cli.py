@@ -22,12 +22,13 @@ import hashlib
 import json
 import shutil
 import subprocess
-import sys
 import tarfile
 import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
 
+from astrid.contracts.errors import AstridError, coerce_astrid_error
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core.session.binding import (
     SessionBindingError,
     resolve_current_session,
@@ -61,13 +62,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.handler(args))
-    except (FileExistsError, FileNotFoundError, ProjectError, ValueError) as exc:
-        print(f"projects: {exc}", file=sys.stderr)
-        return 2
+    except ProjectError as exc:
+        raise coerce_astrid_error(exc) from exc
+    except (FileExistsError, FileNotFoundError, ValueError) as exc:
+        raise AstridError(str(exc)) from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid projects",
         description="Create, inspect, and manage persistent Astrid projects.",
     )
@@ -112,7 +114,12 @@ def build_parser() -> argparse.ArgumentParser:
     asset_group = source_add.add_mutually_exclusive_group(required=True)
     asset_group.add_argument("--file", dest="file_path", help="Local source media file.")
     asset_group.add_argument("--url", help="Remote http(s) source media URL.")
-    source_add.add_argument("--kind", choices=sorted(SOURCE_KINDS), help="Source media kind.")
+    add_choice_arg(
+        source_add,
+        "--kind",
+        values=sorted(SOURCE_KINDS),
+        help="Source media kind.",
+    )
     source_add.add_argument("--type", help="Asset type such as video/mp4, image/png, or audio/mpeg.")
     source_add.add_argument("--duration", type=float, help="Asset duration in seconds.")
     source_add.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")

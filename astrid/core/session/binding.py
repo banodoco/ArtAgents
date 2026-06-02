@@ -8,11 +8,11 @@ env-inheritance spike confirms this); do not silently scrub it.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project.paths import project_dir
 from astrid.core.session.lease import read_lease
 from astrid.core.session.model import Session, SessionValidationError
@@ -21,8 +21,11 @@ from astrid.core.session.paths import session_path
 ASTRID_SESSION_ID_ENV = "ASTRID_SESSION_ID"
 
 
-class SessionBindingError(RuntimeError):
+class SessionBindingError(AstridError):
     """Raised when the session-binding env var points at a missing/invalid record."""
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(cause)
 
 
 SESSION_FILE_NAME = ".astrid-session"

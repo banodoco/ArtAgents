@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 from astrid.packs.video_editing.orchestrators.logo_ideas.run import (
     FAL_QUEUE_URL,
@@ -291,13 +292,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, required=True, help="Output directory.")
     p.add_argument("--prompt", default=None, help="Extra direction appended to the built-in style-transfer prompt. Use --replace-prompt to override the whole thing.")
     p.add_argument("--replace-prompt", default=None, help="Replace the entire gpt-image-2 prompt (skips the built-in identity/composition/scene rules).")
-    p.add_argument("--quality", default=DEFAULT_QUALITY, choices=("low", "medium", "high", "auto"), help=f"gpt-image-2 quality (default {DEFAULT_QUALITY}).")
-    p.add_argument("--output-format", default=DEFAULT_OUTPUT_FORMAT, choices=("png", "jpeg", "webp"), help="Generated image format.")
-    p.add_argument("--resolution", default=DEFAULT_RESOLUTION, choices=VALID_RESOLUTIONS, help=f"Wan Animate output resolution (default {DEFAULT_RESOLUTION}).")
+    add_choice_arg(p, "--quality", values=("low", "medium", "high", "auto"), default=DEFAULT_QUALITY, help=f"gpt-image-2 quality (default {DEFAULT_QUALITY}).")
+    add_choice_arg(p, "--output-format", values=("png", "jpeg", "webp"), default=DEFAULT_OUTPUT_FORMAT, help="Generated image format.")
+    add_choice_arg(p, "--resolution", values=VALID_RESOLUTIONS, default=DEFAULT_RESOLUTION, help=f"Wan Animate output resolution (default {DEFAULT_RESOLUTION}).")
     p.add_argument("--num-inference-steps", type=int, default=DEFAULT_STEPS, help=f"Wan Animate steps (default {DEFAULT_STEPS}).")
     p.add_argument("--guidance-scale", type=float, default=DEFAULT_GUIDANCE, help=f"Wan Animate guidance scale (default {DEFAULT_GUIDANCE}).")
     p.add_argument("--shift", type=float, default=DEFAULT_SHIFT, help=f"Wan Animate shift, 1.0..10.0 (default {DEFAULT_SHIFT}).")
-    p.add_argument("--video-quality", default=DEFAULT_VIDEO_QUALITY, choices=VALID_VIDEO_QUALITIES, help=f"Wan Animate write quality (default {DEFAULT_VIDEO_QUALITY}).")
+    add_choice_arg(p, "--video-quality", values=VALID_VIDEO_QUALITIES, default=DEFAULT_VIDEO_QUALITY, help=f"Wan Animate write quality (default {DEFAULT_VIDEO_QUALITY}).")
     p.add_argument("--use-turbo", action="store_true", help="Enable Wan Animate turbo path.")
     p.add_argument("--seed", type=int, default=None, help="Wan Animate seed.")
     p.add_argument("--env-file", type=Path, help="Env file with FAL_KEY.")

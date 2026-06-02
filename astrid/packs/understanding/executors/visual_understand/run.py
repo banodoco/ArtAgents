@@ -20,6 +20,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 
 
@@ -462,10 +463,10 @@ def build_parser() -> argparse.ArgumentParser:
     add("--image", type=Path, action="append", help="Image path; repeat for multiple images.")
     add("--video", type=Path, help="Video path to sample frames from.")
     add("--at", action="append", help="Frame timestamp(s), comma-separated or repeated. Supports seconds, MM:SS, HH:MM:SS.")
-    add("--mode", choices=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="Model preset: fast is cheapest/default, best uses the strongest detail model.")
+    add_choice_arg(parser, "--mode", values=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="Model preset: fast is cheapest/default, best uses the strongest detail model.")
     add("--model", help="Explicit model override; bypasses --mode for the primary query.")
     add("--compare-model", action="append", default=[], help="Additional model to query with the same image/contact sheet.")
-    add("--detail", choices=["low", "high", "auto"], default="low")
+    add_choice_arg(parser, "--detail", values=("low", "high", "auto"), default="low")
     add("--cols", type=int, default=4)
     add("--tile-width", type=int, default=480)
     add("--max-images", type=int, default=DEFAULT_MAX_IMAGES)

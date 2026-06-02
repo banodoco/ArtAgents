@@ -13,6 +13,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
+
 from . import paths
 from .jsonio import read_json, write_json_atomic
 from astrid.core.util.time import utc_now_seconds
@@ -20,8 +22,11 @@ from astrid.core.util.time import utc_now_seconds
 from .schema import build_project, validate_project
 
 
-class ProjectError(RuntimeError):
+class ProjectError(AstridError):
     """Raised when project persistence operations fail."""
+
+    def __init__(self, cause: str) -> None:
+        super().__init__(cause)
 
 
 def create_project(

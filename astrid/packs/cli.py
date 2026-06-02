@@ -18,6 +18,7 @@ from typing import Any, Optional
 
 import yaml
 
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -1231,7 +1232,7 @@ def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) ->
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``packs`` subcommand parser."""
-    parser = argparse.ArgumentParser(
+    parser = RecoverableArgumentParser(
         prog="python3 -m astrid packs",
         description="Manage and validate Astrid packs.",
     )
@@ -1260,8 +1261,8 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     list_parser.add_argument("--category", help="Filter by metadata.category.")
     _add_taxonomy_filter_args(list_parser)
-    list_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
-    list_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
+    add_choice_arg(list_parser, "--status", values=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    add_choice_arg(list_parser, "--visibility", values=("visible", "hidden"), help="Filter by visibility.")
     list_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     list_parser.set_defaults(handler=_handle_list)
 
@@ -1283,8 +1284,8 @@ def build_parser() -> argparse.ArgumentParser:
     status_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     status_parser.add_argument("--category", help="Filter by metadata.category.")
     _add_taxonomy_filter_args(status_parser)
-    status_parser.add_argument("--status", choices=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
-    status_parser.add_argument("--visibility", choices=("visible", "hidden"), help="Filter by visibility.")
+    add_choice_arg(status_parser, "--status", values=("active", "deprecated", "stub", "experimental"), help="Filter by effective status.")
+    add_choice_arg(status_parser, "--visibility", values=("visible", "hidden"), help="Filter by visibility.")
     status_parser.add_argument("--show-hidden", action="store_true", help="Include hidden packs.")
     status_parser.set_defaults(handler=_handle_status)
 

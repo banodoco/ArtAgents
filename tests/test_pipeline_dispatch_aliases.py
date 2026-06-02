@@ -40,9 +40,10 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         for token in ("performers", "instruments", "conductors", "primitives"):
             with self.subTest(token=token):
                 stderr = io.StringIO()
-                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
-                    pipeline.main([token, "list"])
-                self.assertEqual(raised.exception.code, 2)
+                with contextlib.redirect_stderr(stderr):
+                    exit_code = pipeline.main([token, "list"])
+                self.assertEqual(exit_code, 2)
+                self.assertIn(f"unknown command '{token}'", stderr.getvalue())
 
     def test_doctor_and_setup_dispatch_before_legacy_validation(self) -> None:
         from astrid import doctor, setup_cli
@@ -122,10 +123,10 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ),
         ):
             stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
-                pipeline.main(["boguscmd"])
-            self.assertEqual(raised.exception.code, 2)
-            self.assertIn("astrid: unknown command 'boguscmd'", stderr.getvalue())
+            with contextlib.redirect_stderr(stderr):
+                exit_code = pipeline.main(["boguscmd"])
+            self.assertEqual(exit_code, 2)
+            self.assertIn("unknown command 'boguscmd'", stderr.getvalue())
 
     def test_flag_style_invocation_still_passes_through(self) -> None:
         """T7: --prefixed args pass through to default brief orchestrator."""

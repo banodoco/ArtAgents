@@ -26,7 +26,6 @@ from typing import Any
 
 from ._edit_helpers import (
     ClipEditError,
-    TimelineEditError,
     _default_actor,
     _materialize,
     _resolve_backend,
@@ -46,6 +45,7 @@ from .events.schema import (
     TimelineActor,
     TimelineEvent,
 )
+from .kinds import normalize_event_clip_kind
 
 
 # ---------------------------------------------------------------------------
@@ -166,8 +166,7 @@ def add_clip(
 
     if not isinstance(asset_id, str) or not asset_id.strip():
         raise ClipEditError("asset_id must be a non-empty string")
-    if kind not in {"visual", "audio", "text"}:
-        raise ClipEditError(f"kind must be 'visual', 'audio', or 'text', got {kind!r}")
+    kind = normalize_event_clip_kind(kind, error_cls=ClipEditError)
     resolved_track_id = track_id or ("audio" if kind == "audio" else "visual")
     if not isinstance(resolved_track_id, str) or not resolved_track_id.strip():
         raise ClipEditError("track_id must be a non-empty string")

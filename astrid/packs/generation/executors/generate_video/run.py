@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationResult,
@@ -603,24 +604,27 @@ def build_parser() -> argparse.ArgumentParser:
             "or a comma-separated list of 'url:scale' entries."
         ),
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--enable-safety-checker",
+        values=("true", "false"),
         dest="enable_safety_checker",
         default=None,
-        choices=["true", "false"],
         help="Toggle the safety checker on/off (string-encoded bool).",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--enable-prompt-expansion",
+        values=("true", "false"),
         dest="enable_prompt_expansion",
         default=None,
-        choices=["true", "false"],
         help="Toggle prompt expansion on/off (wan-only).",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--acceleration",
+        values=("none", "regular", "high"),
         default=None,
-        choices=["none", "regular", "high"],
         help="Inference acceleration preset (wan-only).",
     )
     p.add_argument(

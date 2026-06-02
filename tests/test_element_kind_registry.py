@@ -23,6 +23,7 @@ from astrid.core.pack import (
     ElementKindRegistry,
     PackValidationError,
     _normalize_element_kinds,
+    _normalize_timeline_kinds,
     discover_packs,
     element_kind_registry_for_pack,
     iter_element_roots,
@@ -55,6 +56,18 @@ class BuiltinRegistrationTest(unittest.TestCase):
             ),
         )
 
+    def test_builtin_clip_track_and_transition_catalogs_are_available(self) -> None:
+        self.assertEqual(
+            ELEMENT_KIND_REGISTRY.canonical_kinds(catalog="clip"),
+            ("video", "image", "audio", "text", "effect", "opaque"),
+        )
+        self.assertEqual(ELEMENT_KIND_REGISTRY.canonical_kinds(catalog="track"), ("visual", "audio"))
+        self.assertEqual(ELEMENT_KIND_REGISTRY.canonical_kinds(catalog="transition"), ("cross-fade",))
+        self.assertEqual(ELEMENT_KIND_REGISTRY.accepted_names(catalog="transition"), ("cross-fade", "crossfade"))
+        self.assertEqual(ELEMENT_KIND_REGISTRY.default_kind(catalog="track"), "visual")
+        self.assertEqual(ELEMENT_KIND_REGISTRY.default_kind(catalog="transition"), "cross-fade")
+        self.assertEqual(ELEMENT_KIND_REGISTRY.valid_options(catalog="clip"), ("video", "image", "audio", "text", "effect", "opaque"))
+
     def test_builtin_singular_aliases_normalize_to_canonical(self) -> None:
         self.assertEqual(ELEMENT_KIND_REGISTRY.normalize("effects"), "effects")
         self.assertEqual(ELEMENT_KIND_REGISTRY.normalize("effect"), "effects")
@@ -84,6 +97,31 @@ class BuiltinRegistrationTest(unittest.TestCase):
         self.assertEqual(desc.id, "effects")
         self.assertEqual(desc.singular, "effect")
         self.assertEqual(desc.canonical_kind, "effects")
+
+    def test_element_catalog_has_no_default_kind(self) -> None:
+        """The 'element' catalog has three built-in kinds but no default is
+        explicitly registered. default_kind(catalog='element') returns None."""
+        self.assertIsNone(ELEMENT_KIND_REGISTRY.default_kind(catalog="element"))
+
+    def test_all_builtin_catalogs_have_nonempty_valid_options(self) -> None:
+        """Every known built-in catalog must have at least one valid option."""
+        for catalog in ("element", "clip", "track", "transition"):
+            with self.subTest(catalog=catalog):
+                options = ELEMENT_KIND_REGISTRY.valid_options(catalog=catalog)
+                self.assertGreater(len(options), 0)
+                # Every option is a non-empty string
+                for option in options:
+                    self.assertIsInstance(option, str)
+                    self.assertTrue(option.strip())
+
+    def test_descriptors_across_all_catalogs(self) -> None:
+        """descriptors(catalog=None) returns descriptors from all catalogs."""
+        all_descriptors = ELEMENT_KIND_REGISTRY.descriptors(catalog=None)
+        catalogs_seen = {d.catalog for d in all_descriptors}
+        self.assertIn("element", catalogs_seen)
+        self.assertIn("clip", catalogs_seen)
+        self.assertIn("track", catalogs_seen)
+        self.assertIn("transition", catalogs_seen)
 
     def test_aliases_property_includes_all_nonempty_identifiers(self) -> None:
         desc = ElementKindDescriptor(id="widgets", singular="widget", plural="widgets")
@@ -192,6 +230,109 @@ class DuplicateDeclarationTest(unittest.TestCase):
                     ElementKindDescriptor(id="brushes"),
                 ]
             )
+
+    def test_register_conflicting_timeline_alias_raises_catalog_specific_error(self) -> None:
+        registry = ElementKindRegistry()
+        with self.assertRaisesRegex(
+            ValueError,
+            r"duplicate clip kind alias 'video': 'video' and 'still'",
+        ):
+            registry.register_many(
+                [
+                    ElementKindDescriptor(catalog="clip", id="still", aliases=("video",)),
+                ]
+            )
+
+    def test_register_many_is_atomic_when_later_descriptor_conflicts(self) -> None:
+        registry = ElementKindRegistry()
+        before = registry.canonical_kinds(catalog="clip")
+        with self.assertRaisesRegex(ValueError, r"duplicate clip kind alias 'video'"):
+            registry.register_many(
+                [
+                    ElementKindDescriptor(catalog="clip", id="still"),
+                    ElementKindDescriptor(catalog="clip", id="frame", aliases=("video",)),
+                ]
+            )
+        self.assertEqual(registry.canonical_kinds(catalog="clip"), before)
+        with self.assertRaises(ValueError):
+            registry.normalize("still", catalog="clip")
+
+    def test_register_many_is_atomic_when_default_conflict_occurs(self) -> None:
+        """When a register_many batch contains a duplicate default,
+        the entire batch must be rolled back (no partial registration)."""
+        registry = ElementKindRegistry()
+        before = registry.canonical_kinds(catalog="transition")
+        before_default = registry.default_kind(catalog="transition")
+        with self.assertRaisesRegex(ValueError, r"duplicate default transition kind:"):
+            registry.register_many(
+                [
+                    ElementKindDescriptor(catalog="transition", id="wipe", default=True),
+                ]
+            )
+        self.assertEqual(registry.canonical_kinds(catalog="transition"), before)
+        self.assertEqual(registry.default_kind(catalog="transition"), before_default)
+
+    def test_register_many_is_atomic_when_conflict_in_middle_of_batch(self) -> None:
+        """When a register_many batch has a conflict in the middle,
+        earlier descriptors in the same batch must not commit."""
+        registry = ElementKindRegistry()
+        before_clip = registry.canonical_kinds(catalog="clip")
+        before_element = registry.canonical_kinds(catalog="element")
+        # "still" should be OK, but "video" alias conflicts with builtin
+        with self.assertRaisesRegex(ValueError, r"duplicate clip kind alias 'video'"):
+            registry.register_many(
+                [
+                    ElementKindDescriptor(catalog="clip", id="still"),
+                    ElementKindDescriptor(catalog="clip", id="frame", aliases=("video",)),
+                ]
+            )
+        self.assertEqual(registry.canonical_kinds(catalog="clip"), before_clip)
+        self.assertEqual(registry.canonical_kinds(catalog="element"), before_element)
+        with self.assertRaises(ValueError):
+            registry.normalize("still", catalog="clip")
+
+    def test_same_alias_in_different_catalogs_is_allowed(self) -> None:
+        """An alias can be reused across different catalogs without conflict.
+        Each catalog maintains its own alias namespace."""
+        registry = ElementKindRegistry()
+        # Register "raw" as an alias in the clip catalog
+        registry.register(
+            ElementKindDescriptor(catalog="clip", id="raw_footage", aliases=("raw",))
+        )
+        self.assertEqual(registry.normalize("raw", catalog="clip"), "raw_footage")
+        # Register "raw" as an alias in the track catalog — should be OK
+        registry.register(
+            ElementKindDescriptor(catalog="track", id="raw_audio", aliases=("raw",))
+        )
+        self.assertEqual(registry.normalize("raw", catalog="track"), "raw_audio")
+        # The clip catalog alias still resolves correctly
+        self.assertEqual(registry.normalize("raw", catalog="clip"), "raw_footage")
+
+    def test_same_canonical_id_in_different_catalogs_is_allowed(self) -> None:
+        """The same canonical ID like 'audio' exists in clip and track
+        catalogs — both should coexist without conflict."""
+        registry = ElementKindRegistry()
+        self.assertEqual(registry.normalize("audio", catalog="clip"), "audio")
+        self.assertEqual(registry.normalize("audio", catalog="track"), "audio")
+        # Registering a new descriptor with same id in a different catalog is fine
+        registry.register(
+            ElementKindDescriptor(catalog="transition", id="audio")
+        )
+        self.assertEqual(registry.normalize("audio", catalog="transition"), "audio")
+
+    def test_register_many_atomic_with_default_and_alias_conflict_combined(self) -> None:
+        """When a batch has both a valid default entry and a conflicting alias
+        later in the same batch, the default must not commit."""
+        registry = ElementKindRegistry()
+        before_default = registry.default_kind(catalog="clip")
+        with self.assertRaisesRegex(ValueError, r"duplicate clip kind alias 'video'"):
+            registry.register_many(
+                [
+                    ElementKindDescriptor(catalog="clip", id="still", default=True),
+                    ElementKindDescriptor(catalog="clip", id="frame", aliases=("video",)),
+                ]
+            )
+        self.assertEqual(registry.default_kind(catalog="clip"), before_default)
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +470,89 @@ class PackDeclaredKindLoadingTest(unittest.TestCase):
                 [{"id": "ok", "bad_key": "value"}],
                 path="extensions.elements.kinds",
             )
+
+    def test_pack_timeline_kinds_normalize_and_load(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = Path(tmp) / "demo"
+            pack_root.mkdir(parents=True)
+            (pack_root / "pack.json").write_text(
+                json.dumps(
+                    {
+                        "id": "demo",
+                        "name": "Demo Pack",
+                        "version": "0.1.0",
+                        "schema_version": "1",
+                        "extensions": {
+                            "timeline": {
+                                "kinds": [
+                                    {"catalog": "clip", "id": "still", "aliases": ["image_still"], "default": True},
+                                    {"catalog": "track", "id": "music"},
+                                    {"catalog": "transition", "id": "dip-to-white", "aliases": ["dip"]},
+                                ]
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(
+                pack.extensions["timeline"]["kinds"],
+                [
+                    {"catalog": "clip", "id": "still", "aliases": ["image_still"], "default": True},
+                    {"catalog": "track", "id": "music"},
+                    {"catalog": "transition", "id": "dip-to-white", "aliases": ["dip"]},
+                ],
+            )
+
+            registry = element_kind_registry_for_pack(pack)
+
+            self.assertEqual(registry.normalize("image_still", catalog="clip"), "still")
+            self.assertEqual(registry.normalize("music", catalog="track"), "music")
+            self.assertEqual(registry.default_kind(catalog="clip"), "still")
+            self.assertEqual(registry.default_kind(catalog="track"), "visual")
+            self.assertEqual(registry.default_kind(catalog="transition"), "cross-fade")
+            self.assertEqual(registry.normalize("dip", catalog="transition"), "dip-to-white")
+
+    def test_pack_timeline_kinds_reject_invalid_catalog(self) -> None:
+        with self.assertRaisesRegex(PackValidationError, r"catalog must be one of"):
+            _normalize_timeline_kinds(
+                [{"catalog": "layer", "id": "hero"}],
+                path="extensions.timeline.kinds",
+            )
+
+    def test_pack_timeline_kinds_reject_duplicate_aliases_with_catalog_specific_message(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = Path(tmp) / "demo"
+            pack_root.mkdir(parents=True)
+            (pack_root / "pack.json").write_text(
+                json.dumps(
+                    {
+                        "id": "demo",
+                        "name": "Demo Pack",
+                        "version": "0.1.0",
+                        "schema_version": "1",
+                        "extensions": {
+                            "timeline": {
+                                "kinds": [
+                                    {"catalog": "clip", "id": "still", "aliases": ["video"]},
+                                ]
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.timeline\.kinds is invalid: duplicate clip kind alias 'video': 'video' and 'still'",
+            ):
+                element_kind_registry_for_pack(pack)
 
     def test_iter_element_roots_with_pack_declared_kind_after_registration(self) -> None:
         """After registering a pack-declared kind into a fresh registry,

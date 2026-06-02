@@ -186,6 +186,32 @@
           },
           "additionalProperties": false
         },
+        "timeline": {
+          "type": "object",
+          "properties": {
+            "kinds": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["catalog", "id"],
+                "properties": {
+                  "catalog": {
+                    "type": "string",
+                    "enum": ["transition", "clip", "track"]
+                  },
+                  "id": {"type": "string", "minLength": 1},
+                  "aliases": {
+                    "type": "array",
+                    "items": {"type": "string", "minLength": 1}
+                  },
+                  "default": {"type": "boolean"}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
         "schemas": {
           "type": "object"
         }

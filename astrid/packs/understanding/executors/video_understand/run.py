@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid._media import ffprobe_duration_seconds
+from astrid.core.cli_choices import add_choice_arg
 from astrid.utilities.llm_clients import build_gemini_client
 
 
@@ -312,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
     add("--chunk-sec", type=float, default=30.0, help="Auto chunk length when --at/--start are omitted.")
     add("--max-chunks", type=int, default=8)
     add("--max-width", type=int, default=960, help="Downscale extracted clips to this width before upload. 0 keeps source width.")
-    add("--mode", choices=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="fast uses Gemini Flash; best uses Gemini Pro.")
+    add_choice_arg(parser, "--mode", values=sorted(MODEL_PRESETS), default=DEFAULT_MODE, help="fast uses Gemini Flash; best uses Gemini Pro.")
     add("--model", help="Explicit Gemini model override.")
     add("--compare-model", action="append", default=[], help="Additional Gemini model to query against the same windows.")
     add("--out-dir", type=Path, default=Path("runs/video-understanding"))

@@ -12,7 +12,9 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Iterator
+from typing import Callable, Iterator
+
+from astrid.contracts.errors import AstridError, render_astrid_error, wrap_degraded_error
 
 
 _CANONICAL_RUNTIME_CAPABILITY: ContextVar[str | None] = ContextVar(
@@ -52,3 +54,33 @@ def guard_canonical_entrypoint(pack_id: str) -> None:
         file=sys.stderr,
     )
     sys.exit(2)
+
+
+def run_pack_main(
+    capability_id: str,
+    runner: Callable[[], int],
+    *,
+    argv: list[str] | None = None,
+    recovery_command: str | None = None,
+) -> int:
+    """Run a pack entrypoint with AstridError rendering and degraded fallback."""
+
+    snapshot = {"argv": list(argv or ()), "capability_id": capability_id}
+    try:
+        return runner()
+    except AstridError as exc:
+        return render_astrid_error(exc)
+    except (ValueError, RuntimeError) as exc:
+        return render_astrid_error(
+            AstridError(
+                str(exc),
+                recovery_command=recovery_command or f"python3 -m astrid executors run {capability_id} --help",
+                state_snapshot=snapshot,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        bug = wrap_degraded_error(
+            exc,
+            state_snapshot=snapshot,
+        )
+        return render_astrid_error(bug)

@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationResult,
@@ -323,10 +324,11 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Generate images from text prompts via local or cloud backends.",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--mode",
+        values=("t2i", "i2i", "edit", "inpaint", "outpaint", "upscale"),
         required=True,
-        choices=["t2i", "i2i", "edit", "inpaint", "outpaint", "upscale"],
         help="Generation mode: t2i (text-to-image), i2i (image-to-image), "
         "edit (instruction-guided edit), inpaint, outpain, upscale.  "
         "Only t2i, i2i, edit are wired this sprint (SD-005).",

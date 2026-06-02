@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import add_choice_arg
 
 GLOBAL_QUERY = (
     "You are designing AMBIENT atmosphere audio for a video — drones, hums, "
@@ -249,7 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Path to flagged.json (downloaded from review.html); only re-run tiles flagged 'bad'.")
     p.add_argument("--force-prompts", action="store_true", help="Re-run VLM prompts even if prompts.json exists.")
     p.add_argument("--force-foley", action="store_true", help="Re-run Foley calls even when audio file exists.")
-    p.add_argument("--stop-after", choices=["tile", "prompts", "foley", "review", "page"], default="page",
+    add_choice_arg(p, "--stop-after", values=("tile", "prompts", "foley", "review", "page"), default="page",
                    help="Stop after the named stage.")
     p.add_argument("--dry-run", action="store_true",
                    help="Plan everything; tile_video runs (cheap), VLM and Foley are stubbed.")

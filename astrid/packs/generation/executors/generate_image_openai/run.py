@@ -22,6 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.audit import AuditContext
+from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key as _resolve_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
 
@@ -389,9 +390,10 @@ def build_parser() -> argparse.ArgumentParser:
     add = parser.add_argument
     add("--prompt", action="append", help="Prompt; repeat for multiple prompts.")
     add("--prompts-file", type=Path, help="Text, JSON, or JSONL prompt list.")
-    add(
+    add_choice_arg(
+        parser,
         "--preset",
-        choices=sorted(PRESETS),
+        values=sorted(PRESETS),
         help="Use a canned prompt + behaviour preset (e.g. saint-peter-of-banodoco). "
         "If no --prompt or --prompts-file is given, the preset's prompt is used.",
     )
@@ -402,8 +404,8 @@ def build_parser() -> argparse.ArgumentParser:
     add("--quality", default=DEFAULT_QUALITY)
     add("--output-format", default=DEFAULT_FORMAT)
     add("--output-compression", type=int)
-    add("--background", choices=sorted(BACKGROUNDS))
-    add("--moderation", choices=sorted(MODERATION))
+    add_choice_arg(parser, "--background", values=sorted(BACKGROUNDS))
+    add_choice_arg(parser, "--moderation", values=sorted(MODERATION))
     add("--out-dir", type=Path, default=Path("output/gpt-image"))
     add("--manifest", type=Path, default=Path("output/gpt-image/manifest.json"))
     add("--env-file", type=Path)

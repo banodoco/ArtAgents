@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from astrid.core.cli_choices import add_choice_arg
 
 HUGGING_FACE_MODELS_API = "https://huggingface.co/api/models"
 DEFAULT_DISCOVERY_LIMIT = 1000
@@ -591,16 +592,16 @@ def discover_base_models(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Search Hugging Face Hub for LoRA adapters by base model.")
-    parser.add_argument("--mode", choices=("search", "base-models"), default="search", help="Run a LoRA search or discover base-model names. Default search.")
+    add_choice_arg(parser, "--mode", values=("search", "base-models"), default="search", help="Run a LoRA search or discover base-model names. Default search.")
     parser.add_argument("--base-model", help="Base model repo id, for example stabilityai/stable-diffusion-xl-base-1.0.")
     parser.add_argument("--query", help="Optional Hugging Face API text search.")
     parser.add_argument("--match", action="append", default=[], help="Local substring filter across repo id, tags, and safetensors filenames. May be repeated.")
-    parser.add_argument("--match-mode", choices=("all", "any"), default="all", help="Whether all --match terms or any --match term must match. Default all.")
+    add_choice_arg(parser, "--match-mode", values=("all", "any"), default="all", help="Whether all --match terms or any --match term must match. Default all.")
     parser.add_argument("--base-model-match", action="append", default=[], help="With --list-base-models, filter extracted base model ids by substring. May be repeated.")
     parser.add_argument("--limit", type=int, help="Maximum result count. Default 25 for search, 1000 for --list-base-models.")
     parser.add_argument("--fetch-limit", type=int, help="How many API results to fetch before applying --match. Defaults to max(limit, 100) when matching.")
     parser.add_argument("--sort", default="downloads", help="Hub sort field. Default downloads.")
-    parser.add_argument("--direction", choices=("-1", "1"), default="-1", help="Sort direction: -1 desc, 1 asc.")
+    add_choice_arg(parser, "--direction", values=("-1", "1"), default="-1", help="Sort direction: -1 desc, 1 asc.")
     parser.add_argument("--list-base-models", action="store_true", help="Scan LoRA repos and list discovered base_model tags instead of searching one base model.")
     parser.add_argument("--token", help="Optional Hugging Face token. Prefer HF_TOKEN or HUGGING_FACE_HUB_TOKEN.")
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds.")

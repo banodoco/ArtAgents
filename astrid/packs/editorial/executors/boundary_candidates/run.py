@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+from astrid.core.cli_choices import add_choice_arg
 
 VERSION = 1
 
@@ -267,7 +268,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--shots", type=Path)
     parser.add_argument("--quality-zones", type=Path)
     parser.add_argument("--holding-screens", type=Path)
-    parser.add_argument("--kind", choices=["start", "end", "both"], default="both")
+    add_choice_arg(parser, "--kind", values=("start", "end", "both"), default="both")
     parser.add_argument("--window", type=float, default=45.0)
     parser.add_argument("--max-candidates", type=int, default=16)
     return parser

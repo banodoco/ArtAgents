@@ -582,6 +582,231 @@ extensions:
                 },
             )
 
+    def test_extensions_timeline_kinds_round_trip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+name: Builtin
+version: 0.1.0
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        aliases:
+          - image_still
+      - catalog: track
+        id: music
+        default: true
+      - catalog: transition
+        id: dip-to-white
+        aliases:
+          - dip
+""",
+            )
+            pack = load_pack_manifest(pack_manifest_path(pack_root))
+            self.assertEqual(
+                pack.extensions["timeline"]["kinds"],
+                [
+                    {"catalog": "clip", "id": "still", "aliases": ["image_still"]},
+                    {"catalog": "track", "id": "music", "default": True},
+                    {"catalog": "transition", "id": "dip-to-white", "aliases": ["dip"]},
+                ],
+            )
+
+    def test_extensions_reject_invalid_timeline_kind_catalog(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: layer
+        id: hero
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.timeline\.kinds\[0\]\.catalog must be one of",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_missing_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"missing required field pack\.extensions\.timeline\.kinds\[0\]\.id",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_empty_string_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: ""
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.timeline\.kinds\[0\]\.id must be a non-empty string",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_non_string_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: 42
+""",
+            )
+            with self.assertRaises(PackValidationError):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_non_boolean_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        default: "yes"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.timeline\.kinds\[0\]\.default must be a boolean",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_non_array_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        aliases: "not_an_array"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.timeline\.kinds\[0\]\.aliases must be an array",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_empty_string_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        aliases:
+          - ""
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"must be a non-empty string",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_non_string_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        aliases:
+          - 123
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"must be a non-empty string",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kind_unknown_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        unknown_field: true
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"has unknown field",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
+    def test_extensions_reject_timeline_kinds_non_array(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pack_root = self._write_pack(
+                Path(tmp),
+                """schema_version: 1
+id: builtin
+extensions:
+  timeline:
+    kinds: "not_an_array"
+""",
+            )
+            with self.assertRaisesRegex(
+                PackValidationError,
+                r"pack\.extensions\.timeline\.kinds must be an array",
+            ):
+                load_pack_manifest(pack_manifest_path(pack_root))
+
     # ------------------------------------------------------------------
     # JSON serialization / to_dict() round-trip
     # ------------------------------------------------------------------
@@ -886,7 +1111,7 @@ support: core
                 with tempfile.TemporaryDirectory() as tmp:
                     pack_root = self._write_pack(
                         Path(tmp),
-                        f"id: builtin\n{field}: \" \"\n",
+                        f"id: builtin\n{field}: " "\n",
                     )
                     with self.assertRaisesRegex(
                         PackValidationError,
@@ -1063,7 +1288,7 @@ aliases:
     canonical_id: builtin.y
 """,
             )
-            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\\[0\\].kind"):
+            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\[0\].kind"):
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_alias_missing_alias_rejected(self) -> None:
@@ -1077,7 +1302,7 @@ aliases:
     canonical_id: builtin.y
 """,
             )
-            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\\[0\\].alias"):
+            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\[0\].alias"):
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_alias_missing_canonical_id_rejected(self) -> None:
@@ -1091,7 +1316,7 @@ aliases:
     alias: builtin.x
 """,
             )
-            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\\[0\\].canonical_id"):
+            with self.assertRaisesRegex(PackValidationError, "missing required field pack.aliases\[0\].canonical_id"):
                 load_pack_manifest(pack_manifest_path(pack_root))
 
     def test_alias_empty_string_alias_rejected(self) -> None:
@@ -1562,6 +1787,27 @@ class PackSchemaRuntimeParityTest(unittest.TestCase):
         self.assertEqual(pack.agent, {})
         self.assertEqual(pack.extensions, {})
 
+    def test_parity_timeline_kind_extensions_both_accept(self) -> None:
+        yaml_body = """schema_version: 1
+id: builtin
+name: Builtin
+version: 0.1.0
+extensions:
+  timeline:
+    kinds:
+      - catalog: clip
+        id: still
+        aliases:
+          - image_still
+      - catalog: track
+        id: music
+        default: true
+"""
+        js_errors = self._json_schema_errors(yaml_body)
+        self.assertEqual(js_errors, [], f"JSON Schema rejected: {js_errors}")
+        rt_error = self._runtime_error(yaml_body, "builtin")
+        self.assertIsNone(rt_error, f"Runtime rejected: {rt_error}")
+
     def test_parity_full_manifest_both_accept(self) -> None:
         yaml_body = (
             "schema_version: 1\nid: external\nname: Ext\nversion: 2.0.0\n"
@@ -1774,7 +2020,7 @@ class PackSchemaRuntimeParityTest(unittest.TestCase):
                 r"permissions\[0\]\.services",
             ),
             (
-                "permissions:\n  - id: network\n    reason: ok\n    services:\n      - \"\"\n",
+                "permissions:\n  - id: network\n    reason: ok\n    services:\n      - ""\n",
                 r"permissions\[0\]\.services",
             ),
             (

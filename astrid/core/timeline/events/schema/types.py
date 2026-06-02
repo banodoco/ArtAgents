@@ -12,6 +12,11 @@ from typing import Any, Literal
 from uuid import UUID
 
 from astrid import timeline as timeline_contract
+from astrid.core.timeline.kinds import (
+    normalize_event_clip_kind,
+    normalize_track_kind,
+    normalize_transition_kind,
+)
 
 EVENT_SCHEMA_VERSION = 2
 
@@ -54,7 +59,15 @@ TimelineEventKind = Literal[
     "arrangement.replaced",
 ]
 TimelineImportSource = Literal["legacy_local", "supabase_config", "other"]
+# Event-level clip classification.  Mirrors a subset of the built-in clip
+# catalog (catalog=\"clip\") in ``astrid.core.pack``; the catalog also carries
+# \"video\", \"image\", \"effect\", and \"opaque\" which are element-kind
+# descriptors rather than event-payload clip kinds.
 ClipKind = Literal["visual", "audio", "text"]
+# Canonical event-schema TrackKind; mirrors ``astrid.timeline.TrackKind`` and
+# the built-in track catalog (catalog=\"track\") in ``astrid.core.pack``.
+# ``astrid.timeline.timeline_model`` mirrors this definition because the event
+# schema cannot be imported there without a cycle; keep the two in sync.
 TrackKind = Literal["visual", "audio"]
 
 
@@ -348,10 +361,11 @@ class ClipAddedPayload:
 
     def __post_init__(self) -> None:
         _require_nonempty_str(self.clip_id, "payload.clip_id")
-        if self.kind not in {"visual", "audio", "text"}:
-            raise TimelineEventSchemaError(
-                "payload.kind must be 'visual', 'audio', or 'text'"
-            )
+        object.__setattr__(
+            self,
+            "kind",
+            normalize_event_clip_kind(self.kind, error_cls=TimelineEventSchemaError),
+        )
         _require_nonempty_str(self.track_id, "payload.track_id")
         _require_nonempty_str(self.asset_id, "payload.asset_id")
         coerced = _coerce_clip_position(self.position, "payload.position")
@@ -504,13 +518,22 @@ class ClipAnnotatedPayload:
 class TransitionSetPayload:
     left_clip_id: str
     right_clip_id: str
+    # ``kind`` is intentionally ``str`` rather than a ``Literal`` type alias.
+    # The set of valid transition kinds is defined by the runtime catalog
+    # (catalog=\"transition\") in ``astrid.core.pack``, which may be extended
+    # by packs via ``extensions.timeline.kinds``.  Validation occurs at
+    # runtime through the registry rather than at static-analysis time.
     kind: str
     duration_seconds: float
 
     def __post_init__(self) -> None:
         _require_nonempty_str(self.left_clip_id, "payload.left_clip_id")
         _require_nonempty_str(self.right_clip_id, "payload.right_clip_id")
-        _require_nonempty_str(self.kind, "payload.kind")
+        object.__setattr__(
+            self,
+            "kind",
+            normalize_transition_kind(self.kind, error_cls=TimelineEventSchemaError),
+        )
         if not isinstance(self.duration_seconds, (int, float)) or isinstance(self.duration_seconds, bool):
             raise TimelineEventSchemaError("payload.duration_seconds must be a number")
         if self.duration_seconds <= 0:
@@ -642,8 +665,11 @@ class TrackAddedPayload:
 
     def __post_init__(self) -> None:
         _require_nonempty_str(self.track_id, "payload.track_id")
-        if self.kind not in {"visual", "audio"}:
-            raise TimelineEventSchemaError("payload.kind must be 'visual' or 'audio'")
+        object.__setattr__(
+            self,
+            "kind",
+            normalize_track_kind(self.kind, error_cls=TimelineEventSchemaError),
+        )
         _require_nonempty_str(self.label, "payload.label")
 
     def to_json_obj(self) -> dict[str, Any]:

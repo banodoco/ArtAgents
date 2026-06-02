@@ -18,6 +18,8 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any, List, Literal, TypedDict, Union, cast
 
+from astrid.core.timeline.kinds import normalize_track_kind
+
 try:
     from banodoco_timeline_schema import (
         AssetEntry as SharedAssetEntry,
@@ -139,6 +141,10 @@ Theme = SharedTheme
 materialize_output = _materialize_output
 
 ParameterType = Literal["number", "select", "boolean", "color", "audio-binding"]
+# Model-level TrackKind; mirrors ``astrid.core.timeline.events.schema.types.TrackKind``
+# and the built-in track catalog (catalog=\"track\") in ``astrid.core.pack``.
+# Kept as an independent definition (not an import) to avoid a circular dependency:
+# the event schema imports ``astrid.timeline``, which imports this module.
 TrackKind = Literal["visual", "audio"]
 TrackFit = Literal["cover", "contain", "manual"]
 TrackBlendMode = Literal[
@@ -750,6 +756,7 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
             for field in ("id", "kind", "label"):
                 if field not in track:
                     raise ValueError(f"tracks[{index}].{field} is required")
+            normalize_track_kind(track.get("kind"))
     overrides = config.get("theme_overrides")
     if overrides is not None:
         if not isinstance(overrides, dict):
