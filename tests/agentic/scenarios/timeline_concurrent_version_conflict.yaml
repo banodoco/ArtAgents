@@ -1,0 +1,45 @@
+name: timeline_concurrent_version_conflict
+tier: forensics
+description: |
+  Structural M4 scenario verifying deterministic EventLogStaleVersionError
+  behaviour when two writers race on the same timeline.  The fixture
+  performs two sequential appends at the same expected_version; the
+  second append is rejected with a deterministic conflict diagnostic.
+  The winner's append is verified, chain integrity is confirmed, and the
+  diagnostic proves the conflict mechanism was version/CAS-based without
+  lease coupling.
+mode: structural
+
+brief: timeline_concurrent_version_conflict.md
+
+priming:
+  - create_project: ${SLUG}
+
+agents:
+  - model: ""
+    dispatcher: fake
+    count: 1
+
+budget:
+  max_tokens_per_agent: 0
+  max_wall_clock_min: 1
+
+tags:
+  - m4
+  - timeline
+  - concurrency
+  - conflict
+  - structural
+
+extras:
+  m4_fixture:
+    name: timeline_concurrent_version_conflict
+  m4_checks:
+    timeline_concurrent_version_conflict:
+      enabled: true
+
+assessment:
+  universal_checks: false
+  enforced: []
+  graded: []
+  observed: []

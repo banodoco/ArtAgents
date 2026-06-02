@@ -1,0 +1,42 @@
+name: orchestrator_run_persists
+tier: core
+description: |
+  Structural M4 scenario verifying that orchestrator terminal execution
+  persists to events.jsonl and that produced artifacts match their
+  expected CAS hashes.  The fixture runs `video_editing.event_talks
+  --project <slug> --dry-run` to prove terminal success and writes
+  deterministic diagnostic evidence under m4/.
+mode: structural
+
+brief: orchestrator_run_persists.md
+
+priming:
+  - create_project: ${SLUG}
+
+agents:
+  - model: ""
+    dispatcher: fake
+    count: 1
+
+budget:
+  max_tokens_per_agent: 0
+  max_wall_clock_min: 1
+
+tags:
+  - m4
+  - orchestrator
+  - structural
+  - persistence
+
+extras:
+  m4_fixture:
+    name: orchestrator_run_persists
+  m4_checks:
+    orchestrator_run_persists:
+      enabled: true
+
+assessment:
+  universal_checks: false
+  enforced: []
+  graded: []
+  observed: []

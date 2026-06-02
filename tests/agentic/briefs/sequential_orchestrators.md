@@ -1,4 +1,4 @@
-You're testing whether an agent can do TWO orchestrators back-to-back in the same project. Project `$SLUG` is fresh — no active run. Working dir is `/Users/peteromalley/Documents/reigh-workspace/Astrid`.
+You're testing whether an agent can do TWO orchestrators back-to-back in the same project. Project `${SLUG}` is fresh — no active run. Working dir is `/Users/peteromalley/Documents/reigh-workspace/Astrid`.
 
 **Your job:**
 1. Complete `builtin.agent_probe` end-to-end on this project.
@@ -11,7 +11,7 @@ You're testing whether an agent can do TWO orchestrators back-to-back in the sam
 ## Setup
 
 - Working directory: already at `/Users/peteromalley/Documents/reigh-workspace/Astrid`.
-- Use `--agent $AGENT_ID` for any `--agent` flag.
+- Use `--agent ${AGENT_ID}` for any `--agent` flag.
 - For attested steps: write artifacts at the printed path, run the printed `astrid ack` command.
 - For verifier rejections: read the reason, revise, re-ack.
 
@@ -33,4 +33,4 @@ Each numbered section MUST have at least 2 substantive sentences.
 4. **Friction points.** Especially the cross-orchestrator handoff. What was clear, what wasn't?
 5. **Biggest UX surprise.**
 
-Be honest. Confusion is data. Run tag: `$RUN_TAG`.
+Be honest. Confusion is data. Run tag: `${RUN_TAG}`.

@@ -11,25 +11,108 @@ description: |
 brief: cold_restart_midrun.md
 
 priming:
-  - create_project: $SLUG
-  - start: builtin.agent_probe
-  - ack:
-      - step: baseline_write
-        produces:
-          baseline.json: {ok: true, agent: agentic-primer}
-      - step: summarize
-        produces:
-          summary.json: {summary: "Hash-pinned plans freeze the task contract so agents and humans agree on what comes next."}
-      - ack_only       # no produces; plain ack
+- create_project: ${SLUG}
+- start: builtin.agent_probe
+- ack:
+  - step: baseline_write
+    produces:
+      baseline.json: {ok: true, agent: agentic-primer}
+  - step: summarize
+    produces:
+      summary.json: {summary: "Hash-pinned plans freeze the task contract so agents and humans agree on what comes next."}
+  - ack_only           # no produces; plain ack
 
 target_orchestrator: builtin.agent_probe
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
+  # Machine-graded
+- events_contain: run_completed
+- leaf_count_complete: 6
+- no_aborts
+- tool_used: builtin.agent_probe
+
+  # Subjective (graded from the agent's narrative report)
+- subjective:
+  - cold_start_path_clear
+  - recovered_without_external_help
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+- cold_restart
+- mid_run
+- attached_handoff
+
+assessment:
+  enforced:
+  - id: resumed_without_abort
+    question: |
+      Did the agent finish the in-flight run without calling `astrid
+      abort`, `astrid project delete`, or trying to start a new run on
+      the same project?
+    evidence: [stderr, events]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr contains `astrid abort` or events contain `run_aborted`.
+  - id: acked_remaining_three_steps
+    question: |
+      Were exactly the three remaining steps (the ones NOT already
+      attested by `agentic-primer` in priming) the ones the agent
+      acked, and did the run reach `run_completed`?
+    evidence: [events, stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Events show duplicate acks on the three primer-attested steps,
+      or the run never reaches `run_completed`.
+  graded:
+  - id: discovered_mid_run_state
+    question: |
+      Did the agent read `astrid status` / `astrid next` (or equivalent
+      CLI surfaces) to discover the run was mid-flight BEFORE making
+      any mutating call? Covers `cold_start_path_clear`.
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      First mutating call (start/ack/abort) appears in stderr before
+      any read-only status/next/list invocation.
+  - id: recovered_without_external_help
+    question: |
+      Did the agent proceed from the mid-run state using only the
+      CLI surface, without asking the human / requesting docs /
+      pasting source-file contents into the report as proof of
+      confusion? Covers `recovered_without_external_help`.
+    evidence: [report, stderr]
+    grading: pass_fail_partial
+    weight: 1
+    failure_mode: |
+      Report contains "I couldn't figure out X" / "I had to read the
+      source" / blocked-on-human-input phrasing.
+  - id: report_shape_intact
+    question: |
+      Does the report contain each numbered section the brief asked
+      for, each non-empty?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
+  observed:
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: builtin.agent_probe
+  legacy_acceptance:
   # Machine-graded
   - events_contain: run_completed
   - leaf_count_complete: 6
@@ -38,76 +121,10 @@ acceptance:
 
   # Subjective (graded from the agent's narrative report)
   - subjective:
-      - cold_start_path_clear
-      - recovered_without_external_help
+    - cold_start_path_clear
+    - recovered_without_external_help
 
-budget:
-  max_tokens_per_agent: 32768
-  max_wall_clock_min: 15
-
-tags:
-  - cold_restart
-  - mid_run
-  - attached_handoff
-
-assessment:
   universal_checks: true
-  enforced:
-      - id: resumed_without_abort
-        question: |
-          Did the agent finish the in-flight run without calling `astrid
-          abort`, `astrid project delete`, or trying to start a new run on
-          the same project?
-        evidence: [stderr, events]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Stderr contains `astrid abort` or events contain `run_aborted`.
-      - id: acked_remaining_three_steps
-        question: |
-          Were exactly the three remaining steps (the ones NOT already
-          attested by `agentic-primer` in priming) the ones the agent
-          acked, and did the run reach `run_completed`?
-        evidence: [events, stderr]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Events show duplicate acks on the three primer-attested steps,
-          or the run never reaches `run_completed`.
-  graded:
-      - id: discovered_mid_run_state
-        question: |
-          Did the agent read `astrid status` / `astrid next` (or equivalent
-          CLI surfaces) to discover the run was mid-flight BEFORE making
-          any mutating call? Covers `cold_start_path_clear`.
-        evidence: [stderr, report]
-        grading: pass_fail
-        weight: 1
-        failure_mode: |
-          First mutating call (start/ack/abort) appears in stderr before
-          any read-only status/next/list invocation.
-      - id: recovered_without_external_help
-        question: |
-          Did the agent proceed from the mid-run state using only the
-          CLI surface, without asking the human / requesting docs /
-          pasting source-file contents into the report as proof of
-          confusion? Covers `recovered_without_external_help`.
-        evidence: [report, stderr]
-        grading: pass_fail_partial
-        weight: 1
-        failure_mode: |
-          Report contains "I couldn't figure out X" / "I had to read the
-          source" / blocked-on-human-input phrasing.
-      - id: report_shape_intact
-        question: |
-          Does the report contain each numbered section the brief asked
-          for, each non-empty?
-        evidence: [report]
-        grading: pass_fail
-        weight: 1
-  observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make? (integer, metadata only)"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  m2_checks:
+    c3_no_mutation_on_read:
+      enabled: true

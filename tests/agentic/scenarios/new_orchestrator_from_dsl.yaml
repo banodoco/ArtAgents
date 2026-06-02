@@ -19,89 +19,104 @@ description: |
 brief: new_orchestrator_from_dsl.md
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
   # Machine-graded — we can see whether the agent ran the author CLI.
-  - no_aborts
+- no_aborts
 
   # Subjective — graded from the agent's narrative report.
-  - subjective:
-      - new_orchestrator_compiles
-      - chose_dsl_over_yaml
-      - used_author_check_loop
-      - qualified_id_correctly
+- subjective:
+  - new_orchestrator_compiles
+  - chose_dsl_over_yaml
+  - used_author_check_loop
+  - qualified_id_correctly
 
 budget:
   max_tokens_per_agent: 65536
   max_wall_clock_min: 25
 
 tags:
-  - authoring
-  - dsl
-  - discovery
+- authoring
+- dsl
+- discovery
 
 assessment:
-  universal_checks: true
   enforced:
-      - id: new_orchestrator_compiles
-        question: |
-          Does `astrid author check <id>` succeed against the
-          agent's new orchestrator (exit 0, no validation errors)?
-        evidence: [stderr, report]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Stderr shows `astrid author check ...` exiting non-zero, or
-          the agent never ran the check at all and shipped the
-          orchestrator blind.
-      - id: chose_dsl_over_yaml
-        question: |
-          Did the agent write a Python DSL file (using `@orchestrator`
-          / DSL primitives from `astrid/orchestrate/dsl.py`) rather
-          than a hand-written orchestrator YAML?
-        evidence: [project_tree, report]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          tree.txt shows the orchestrator was authored as a `.yaml`
-          without an accompanying `.py` DSL file.
+  - id: new_orchestrator_compiles
+    question: |
+      Does `astrid author check <id>` succeed against the
+      agent's new orchestrator (exit 0, no validation errors)?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows `astrid author check ...` exiting non-zero, or
+      the agent never ran the check at all and shipped the
+      orchestrator blind.
+  - id: chose_dsl_over_yaml
+    question: |
+      Did the agent write a Python DSL file (using `@orchestrator`
+      / DSL primitives from `astrid/orchestrate/dsl.py`) rather
+      than a hand-written orchestrator YAML?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      tree.txt shows the orchestrator was authored as a `.yaml`
+      without an accompanying `.py` DSL file.
   graded:
-      - id: used_author_check_loop
-        question: |
-          Did the agent iterate via `astrid author check` (≥1 check
-          invocation in stderr) before declaring done?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 1
-      - id: qualified_id_correctly
-        question: |
-          Is the orchestrator id qualified as `<pack>.<name>` rather
-          than a bare unqualified name?
-        evidence: [project_tree, stderr]
-        grading: pass_fail
-        weight: 1
-      - id: discovered_canonical_authoring_path
-        question: |
-          Did the agent discover the canonical authoring path via
-          `astrid author --help` / AGENTS.md / the DSL primitives —
-          rather than inventing a non-existent verb?
-        evidence: [stderr, report]
-        grading: pass_fail
-        weight: 1
-        failure_mode: |
-          Stderr shows the agent invoking a CLI verb that doesn't exist
-          (e.g. `astrid scaffold`, `astrid new-orchestrator`).
+  - id: used_author_check_loop
+    question: |
+      Did the agent iterate via `astrid author check` (≥1 check
+      invocation in stderr) before declaring done?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 1
+  - id: qualified_id_correctly
+    question: |
+      Is the orchestrator id qualified as `<pack>.<name>` rather
+      than a bare unqualified name?
+    evidence: [project_tree, stderr]
+    grading: pass_fail
+    weight: 1
+  - id: discovered_canonical_authoring_path
+    question: |
+      Did the agent discover the canonical authoring path via
+      `astrid author --help` / AGENTS.md / the DSL primitives —
+      rather than inventing a non-existent verb?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      Stderr shows the agent invoking a CLI verb that doesn't exist
+      (e.g. `astrid scaffold`, `astrid new-orchestrator`).
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make? (integer, metadata only)"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
-    - id: canonical_bypass_form
-      question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
-      evidence: [stderr]
-      grading: text
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+  - id: canonical_bypass_form
+    question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
+    evidence: [stderr]
+    grading: text
+    weight: 0
+extras:
+  legacy_acceptance:
+  # Machine-graded — we can see whether the agent ran the author CLI.
+  - no_aborts
+
+  # Subjective — graded from the agent's narrative report.
+  - subjective:
+    - new_orchestrator_compiles
+    - chose_dsl_over_yaml
+    - used_author_check_loop
+    - qualified_id_correctly
+
+  universal_checks: true
+  m2_checks:
+    c4_projection_fidelity:
+      enabled: true

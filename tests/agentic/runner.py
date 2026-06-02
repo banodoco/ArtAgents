@@ -1,901 +1,207 @@
-"""Agentic test runner.
+"""Sisypy-backed agentic test runner for Astrid.
 
-Reads a scenario YAML, primes the project state, fans out subagents in
-parallel, collects reports + events.jsonl, runs the auditor, and writes
-a summary.json + per-agent markdown under reports/<date>-<tag>/.
+This is the primary public entry point.  It thinly delegates to the
+Sisypy CLI, using the ``AstridProjectAdapter`` from ``adapter.py``.
+The legacy runner (``runner_legacy.py``) and parallel runner
+(``parallel_runner.py``) were decommissioned in M5.
 
 Usage:
-    python -m tests.agentic.runner <scenario>
-    python -m tests.agentic.runner --tier discovery
-    python -m tests.agentic.runner --all
-    python -m tests.agentic.runner <scenario> --dry-run     # show plan only
-    python -m tests.agentic.runner <scenario> --tag custom  # tag the report
+    python -m tests.agentic.runner --help
+    python -m tests.agentic.runner <scenario> [--actor ...] [--mode ...]
+    python -m tests.agentic.runner _smoke --actor fake --mode structural
 
-This is intentionally a thin shim. Heavy lifting (subagent dispatch) lives
-in subagent-launcher; auditing lives in auditor.py. The runner just
-glues them together.
+Legacy flags (``--all``, ``--tier``, ``--agent``, ``--only``,
+``--timeout``, ``--budget``, ``--run-tag``) are rejected with a clear
+error directing users to the Sisypy equivalents.
 """
 
 from __future__ import annotations
 
-import argparse
-import datetime as dt
 import json
-import os
-import subprocess
 import sys
-import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.paths import resolve_projects_root
+import yaml
 
-try:
-    import yaml
-except ImportError:
-    print("agentic runner: missing PyYAML; pip install pyyaml", file=sys.stderr)
-    sys.exit(2)
+# ---------------------------------------------------------------------------
+# Legacy flags that MUST NOT leak into the Sisypy-backed runner.
+# These were used by the decommissioned legacy runner (runner_legacy.py).
+# ---------------------------------------------------------------------------
+_LEGACY_ONLY_FLAGS: set[str] = {
+    "--all",
+    "--tier",
+    "--agent",
+    "--only",
+    "--timeout",
+    "--budget",
+    "--run-tag",
+}
 
+_LEGACY_ALIASES: dict[str, str] = {
+    "--all": "The legacy runner has been decommissioned. "
+    "Omit scenario names to run all scenarios in the Sisypy runner, "
+    "or use `python -m tests.agentic.runner --help`.",
+    "--tier": "The legacy runner has been decommissioned. "
+    "Use `--tags <tag>` in the Sisypy runner for filtering, "
+    "or `python -m tests.agentic.runner --help`.",
+    "--agent": "Use `--actor <dispatcher>` in the Sisypy runner (e.g. `--actor hermes`).",
+    "--only": "Pass a single scenario name as a positional argument instead.",
+    "--timeout": "Timeouts are managed by the Sisypy dispatcher; see Sisypy docs.",
+    "--budget": "Budget is managed per-scenario via the scenario YAML.",
+    "--run-tag": "Use `--tag <label>` in the Sisypy runner for report grouping.",
+}
 
-AGENTIC_ROOT = Path(__file__).resolve().parent
-SCENARIOS_DIR = AGENTIC_ROOT / "scenarios"
-BRIEFS_DIR = AGENTIC_ROOT / "briefs"
-REPORTS_DIR = AGENTIC_ROOT / "reports"
-ASTRID_REPO_ROOT = AGENTIC_ROOT.parent.parent
-HERMES_LAUNCHER = Path.home() / ".claude/skills/subagent-launcher/launch_hermes_agent.py"
-
-
-@dataclass
-class AgentInvocation:
-    """One concrete agent run within a scenario."""
-
-    scenario_name: str
-    slug: str
-    agent_id: str
-    model: str
-    brief_path: Path
-    stdout_path: Path
-    stderr_path: Path
-
-
-def _now_tag() -> str:
-    return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-
-
-def _load_scenario(name: str) -> dict[str, Any]:
-    path = SCENARIOS_DIR / f"{name}.yaml"
-    if not path.is_file():
-        raise FileNotFoundError(f"scenario {name!r} not found at {path}")
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError(f"scenario {name!r}: top-level YAML must be a mapping")
-    required = {"name", "tier", "description", "brief", "agents", "acceptance"}
-    missing = required - payload.keys()
-    if missing:
-        raise ValueError(f"scenario {name!r}: missing required keys: {sorted(missing)}")
-    if payload["name"] != name:
-        raise ValueError(
-            f"scenario file is {name}.yaml but its `name` field is {payload['name']!r} — "
-            "they must match"
-        )
-    return payload
+SCENARIOS_DIR = Path(__file__).resolve().parent / "scenarios"
+BRIEFS_DIR = Path(__file__).resolve().parent / "briefs"
+_STRUCTURAL_GUARD_WARNING = (
+    "Structural-mode guard active: RUNPOD_API_KEY and cloud credentials stripped, "
+    "no-GPU constraints enforced."
+)
 
 
-def _render_brief(template_path: Path, *, slug: str, agent_id: str, run_tag: str,
-                  target_orchestrator: str | None = None) -> str:
-    """Substitute $SLUG / $AGENT_ID / $RUN_TAG / $TARGET_ORCH in a brief template."""
-    raw = template_path.read_text(encoding="utf-8")
-    subs = {
-        "$SLUG": slug,
-        "$AGENT_ID": agent_id,
-        "$RUN_TAG": run_tag,
-        "$TARGET_ORCH": target_orchestrator or "<not-specified>",
-    }
-    for k, v in subs.items():
-        raw = raw.replace(k, v)
-    return raw
-
-
-def _astrid(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    """Run a python3 -m astrid command in the repo root."""
-    cmd = [sys.executable, "-m", "astrid", *args]
-    return subprocess.run(
-        cmd,
-        cwd=str(ASTRID_REPO_ROOT),
-        capture_output=True,
-        text=True,
-        env={**os.environ, **(env or {})},
-    )
-
-
-def _with_env(overrides: dict[str, str], fn):
-    """Run fn with temporary process env overrides."""
-    old: dict[str, str | None] = {k: os.environ.get(k) for k in overrides}
-    os.environ.update(overrides)
-    try:
-        return fn()
-    finally:
-        for key, value in old.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
-
-
-def _prime_start_with_plan(slug: str, payload: dict[str, Any], env: dict[str, str]) -> None:
-    """Start a task run from an inline compiled plan.
-
-    This is intentionally narrow: it lets negative tests construct a precise
-    mid-run failure state without mutating the repo's checked-in
-    astrid/packs/*/build/*.json files.
-    """
-    orchestrator_id = str(payload.get("id") or "")
-    plan = payload.get("plan")
-    if not orchestrator_id or not isinstance(plan, dict):
-        raise ValueError("start_with_plan payload must be {id: ..., plan: {...}}")
-    if "." not in orchestrator_id:
-        raise ValueError("start_with_plan id must be qualified as <pack>.<name>")
-    pack, _, name = orchestrator_id.partition(".")
-    plan_root = Path(os.environ.get("TMPDIR", "/tmp")) / "astrid-agentic-inline-plans" / slug
-    build_dir = plan_root / pack / "build"
-    build_dir.mkdir(parents=True, exist_ok=True)
-    (build_dir / f"{name}.json").write_text(
-        json.dumps(plan, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-
-    def _start() -> int:
-        from astrid.core.task.lifecycle import cmd_start
-
-        cwd_old = Path.cwd()
-        os.chdir(ASTRID_REPO_ROOT)
-        try:
-            return cmd_start(
-                [orchestrator_id, "--project", slug],
-                packs_root=plan_root,
-                projects_root=resolve_projects_root(),
+def _check_legacy_flags(argv: list[str]) -> None:
+    """Reject any legacy-only flags with a helpful migration message."""
+    for arg in argv:
+        if arg in _LEGACY_ONLY_FLAGS:
+            msg = _LEGACY_ALIASES.get(arg, f"Legacy flag {arg!r} is not supported.")
+            print(
+                f"error: {arg!r} is a legacy runner flag that is no longer supported. "
+                f"The legacy runner was decommissioned in M5.\n{msg}\n"
+                f"Run `python -m tests.agentic.runner --help` for supported flags.",
+                file=sys.stderr,
             )
-        finally:
-            os.chdir(cwd_old)
+            sys.exit(2)
+        # Catch --flag=value forms
+        for legacy_flag in _LEGACY_ONLY_FLAGS:
+            if arg.startswith(f"{legacy_flag}="):
+                msg = _LEGACY_ALIASES.get(legacy_flag, f"Legacy flag {legacy_flag!r} is not supported.")
+                print(
+                    f"error: {arg!r} is a legacy runner flag that is no longer supported. "
+                    f"The legacy runner was decommissioned in M5.\n{msg}\n"
+                    f"Run `python -m tests.agentic.runner --help` for supported flags.",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
 
-    rc = _with_env(env, _start)
-    if rc != 0:
-        raise RuntimeError(f"prime start_with_plan {orchestrator_id}: rc={rc}")
 
+def _strip_structural_guard_warnings(result: dict[str, Any]) -> dict[str, Any]:
+    """Treat structural guard notices as warnings, not run-blocking errors."""
 
-def _prime_project(slug: str, scenario: dict[str, Any]) -> None:
-    """Execute the scenario's priming steps. Always creates the project first;
-    additional priming verbs are applied in order. A "primer" session is
-    attached up-front so subsequent verbs (start, ack) can pass the CLI
-    session gate.
-    """
-    priming = scenario.get("priming") or []
-    # `empty_projects_root` opts out of implicit project creation so a
-    # scenario can probe the genuine "no project exists yet" first wall —
-    # every other scenario primes the project away. Gated here (not in the
-    # verb loop below) because priming verbs run AFTER creation; suppressing
-    # creation has to happen before the create call itself.
-    skip_create = any(
-        isinstance(s, dict) and bool(s.get("empty_projects_root"))
-        for s in priming
-    )
-    if not skip_create:
-        # Always create.
-        result = _astrid("projects", "create", slug)
-        if result.returncode != 0 and "already exists" not in result.stderr:
-            raise RuntimeError(f"create_project {slug}: {result.stderr}")
+    def _iter_runs(summary: dict[str, Any]) -> list[dict[str, Any]]:
+        if "runs" in summary:
+            runs = summary.get("runs", [])
+            return runs if isinstance(runs, list) else []
+        if "scenarios" in summary:
+            out: list[dict[str, Any]] = []
+            for scenario_summary in summary.get("scenarios", []):
+                if isinstance(scenario_summary, dict):
+                    runs = scenario_summary.get("runs", [])
+                    if isinstance(runs, list):
+                        out.extend(run for run in runs if isinstance(run, dict))
+            return out
+        if "results" in summary:
+            runs = summary.get("results", [])
+            return [run for run in runs if isinstance(run, dict)] if isinstance(runs, list) else []
+        return []
 
-    # Attach a primer session so `start` / `ack` can pass the CLI gate.
-    # We parse the `export ASTRID_SESSION_ID=…` line and thread it into
-    # every subsequent _astrid call via the env override. The session is
-    # the runner's "primer" actor and is intentionally distinct from the
-    # agent's actor identity (so reader-state scenarios work).
-    primer_env: dict[str, str] = {}
-    needs_session = any(
-        isinstance(s, dict) and next(iter(s)) in {"start", "start_with_plan", "ack"}
-        for s in (scenario.get("priming") or [])
-    )
-    if needs_session:
-        # `astrid attach` is idempotent (#19/#23) so repeat-attaches are
-        # safe. We use --as agent:agentic-primer to ensure the primer is
-        # a distinct identity from whatever the agent uses.
-        result = _astrid("attach", slug, "--as", "agent:agentic-primer")
-        if result.returncode != 0:
-            raise RuntimeError(f"prime attach {slug}: {result.stderr or result.stdout}")
-        for line in result.stdout.splitlines():
-            if line.startswith("export ASTRID_SESSION_ID="):
-                primer_env["ASTRID_SESSION_ID"] = line.split("=", 1)[1].strip()
+    runs = _iter_runs(result)
+    for run in runs:
+        errors = run.get("errors")
+        if not isinstance(errors, list):
+            continue
+        remaining = [err for err in errors if err != _STRUCTURAL_GUARD_WARNING]
+        removed = [err for err in errors if err == _STRUCTURAL_GUARD_WARNING]
+        if removed:
+            warnings = run.get("warnings")
+            if not isinstance(warnings, list):
+                warnings = []
+            warnings.extend(removed)
+            run["warnings"] = warnings
+        run["errors"] = remaining
+
+    if "has_blocked_or_error" in result:
+        has_blocked_or_error = False
+        if result.get("error"):
+            has_blocked_or_error = True
+        for run in runs:
+            outcome = run.get("outcome", "")
+            if outcome in ("blocked_prerequisite", "skipped_live"):
+                has_blocked_or_error = True
                 break
+            if run.get("errors"):
+                has_blocked_or_error = True
+                break
+        result["has_blocked_or_error"] = has_blocked_or_error
 
-    # Walk priming verbs.
-    for step in scenario.get("priming", []) or []:
-        if not isinstance(step, dict) or len(step) != 1:
-            raise ValueError(f"priming step must be a single-key mapping, got {step!r}")
-        verb, payload = next(iter(step.items()))
-        if verb == "create_project":
-            # Already done; allow as explicit no-op.
-            continue
-        elif verb == "empty_projects_root":
-            # Handled before creation (see skip_create above); no-op here.
-            continue
-        elif verb == "start":
-            # payload is the orchestrator id
-            res = _astrid("start", str(payload), "--project", slug, env=primer_env)
-            if res.returncode != 0:
-                raise RuntimeError(f"prime start {payload}: {res.stderr}")
-        elif verb == "start_with_plan":
-            if not isinstance(payload, dict):
-                raise ValueError("start_with_plan payload must be a mapping")
-            _prime_start_with_plan(slug, payload, primer_env)
-        elif verb == "ack":
-            # payload is a list, each item either:
-            #   - "step-id"         (plain ack; produces file must already exist or
-            #                        the step has no produces)
-            #   - {step: "step-id", produces: {"name": <json|str>}}
-            #                       (write each produces file at the step's
-            #                        produces/ dir, then ack)
-            # Synthesised content is JSON-encoded if dict/list, else stringified.
-            if not isinstance(payload, list):
-                raise ValueError(f"ack payload must be a list of step ids or dicts")
-            for entry in payload:
-                if isinstance(entry, str):
-                    step_id = entry
-                    produces_map: dict[str, Any] = {}
-                elif isinstance(entry, dict):
-                    step_id = str(entry.get("step", ""))
-                    produces_map = entry.get("produces", {}) or {}
-                    if not step_id:
-                        raise ValueError(f"ack dict missing 'step': {entry!r}")
-                else:
-                    raise ValueError(f"ack item must be str or dict, got {entry!r}")
-                # Discover the active run id so we can resolve produces/ paths.
-                run_dir = None
-                if produces_map:
-                    status = _astrid("status", "--project", slug, env=primer_env)
-                    for line in status.stdout.splitlines():
-                        if line.strip().startswith("run-id:"):
-                            run_id = line.split(":", 1)[1].strip()
-                            run_dir = (
-                                resolve_projects_root()
-                                / slug / "runs" / run_id
-                            )
-                            break
-                    if run_dir is None:
-                        raise RuntimeError(
-                            f"prime ack {step_id}: could not resolve run id "
-                            f"from status output"
-                        )
-                    produces_root = run_dir / "steps" / step_id / "v1" / "produces"
-                    produces_root.mkdir(parents=True, exist_ok=True)
-                    for name, content in produces_map.items():
-                        target = produces_root / name
-                        if isinstance(content, (dict, list)):
-                            target.write_text(json.dumps(content), encoding="utf-8")
-                        else:
-                            target.write_text(str(content), encoding="utf-8")
-                res = _astrid(
-                    "ack", step_id, "--project", slug,
-                    "--decision", "approve",
-                    "--agent", "agentic-primer",
-                    "--evidence", "note=primed-by-runner",
-                    env=primer_env,
-                )
-                if res.returncode != 0:
-                    raise RuntimeError(f"prime ack {step_id}: {res.stderr}")
-        elif verb == "write":
-            # payload: {path: str, content: str}
-            # Write a fixture file before the agent runs. Path is resolved
-            # absolute or relative to the project dir.
-            if not isinstance(payload, dict) or "path" not in payload:
-                raise ValueError("write payload must be {path: ..., content: ...}")
-            target = Path(str(payload["path"])).expanduser()
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(str(payload.get("content", "")), encoding="utf-8")
-        elif verb == "touch":
-            # payload: path string. Updates the file's mtime (creates empty
-            # file if missing). Useful for ambiguity-window tests.
-            target = Path(str(payload)).expanduser()
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.touch()
-        elif verb == "mkdir":
-            # payload: path string. Defensive helper for fixtures that need
-            # a directory before the agent runs.
-            target = Path(str(payload)).expanduser()
-            target.mkdir(parents=True, exist_ok=True)
-        elif verb == "abort":
-            # payload: optional reason string. Aborts the active run so a
-            # scenario can stage a genuinely aborted/failed run for the
-            # agent to investigate (forensics tier). Requires a prior
-            # `start` / `start_with_plan`. `astrid abort` is idempotent
-            # (returns 0 with no active run), so this is safe to call once.
-            abort_args = ["abort", "--project", slug]
-            reason = str(payload).strip() if payload else ""
-            if reason:
-                abort_args += ["--reason", reason]
-            res = _astrid(*abort_args, env=primer_env)
-            if res.returncode != 0:
-                raise RuntimeError(f"prime abort {slug}: {res.stderr}")
-        else:
-            raise ValueError(f"unknown priming verb: {verb}")
+    return result
 
 
-def _build_invocations(
-    scenario: dict[str, Any], run_tag: str, report_dir: Path,
-) -> list[AgentInvocation]:
-    """Materialise one AgentInvocation per (agent, count) pair in the scenario."""
-    invocations: list[AgentInvocation] = []
-    scenario_name = scenario["name"]
-    target_orch = scenario.get("target_orchestrator")
-    brief_template = BRIEFS_DIR / scenario["brief"]
-    if not brief_template.is_file():
-        raise FileNotFoundError(f"brief template not found: {brief_template}")
-    invocation_idx = 0
-    for agent_spec in scenario["agents"]:
-        model = agent_spec["model"]
-        count = int(agent_spec.get("count", 1))
-        for _i in range(count):
-            invocation_idx += 1
-            short_model = model.replace("deepseek-v4-pro", "ds").replace("kimi-k2p5", "k").replace("claude", "cl")
-            slug = f"agentic-{scenario_name.replace('_','-')}-{short_model}-{invocation_idx}"[:48]
-            agent_id = f"agentic-{scenario_name}-{short_model}-{invocation_idx}"
-            brief_text = _render_brief(
-                brief_template, slug=slug, agent_id=agent_id, run_tag=run_tag,
-                target_orchestrator=target_orch,
-            )
-            brief_path = report_dir / f"{slug}.brief.md"
-            brief_path.write_text(brief_text, encoding="utf-8")
-            invocations.append(AgentInvocation(
-                scenario_name=scenario_name,
-                slug=slug,
-                agent_id=agent_id,
-                model=model,
-                brief_path=brief_path,
-                stdout_path=report_dir / f"{slug}.report.md",
-                stderr_path=report_dir / f"{slug}.stderr.log",
-            ))
-    return invocations
+def main(argv: list[str] | None = None) -> None:
+    """Entry point for ``python -m tests.agentic.runner``.
 
-
-def _dispatch_hermes(inv: AgentInvocation, *, max_tokens: int) -> int:
-    """Fan out a DeepSeek/Kimi agent via the hermes-agentic launcher."""
-    if inv.model == "deepseek-v4-pro":
-        model_arg = "deepseek:deepseek-v4-pro"
-    elif inv.model == "kimi-k2p5":
-        model_arg = "fireworks:accounts/fireworks/models/kimi-k2p5"
-    else:
-        raise ValueError(f"hermes dispatch: unsupported model {inv.model!r}")
-    if not HERMES_LAUNCHER.is_file():
-        raise RuntimeError(f"hermes launcher not found at {HERMES_LAUNCHER}")
-    env = os.environ.copy()
-    env.pop("ASTRID_SESSION_ID", None)  # agents start unbound
-    env["PYENV_VERSION"] = "3.11.11"
-    cmd = [
-        sys.executable, str(HERMES_LAUNCHER),
-        f"--model={model_arg}",
-        "--toolsets=file,web,terminal",
-        f"--query-file={inv.brief_path}",
-        f"--max-tokens={max_tokens}",
-        f"--project-dir={ASTRID_REPO_ROOT}",
-    ]
-    with inv.stdout_path.open("w", encoding="utf-8") as out, \
-         inv.stderr_path.open("w", encoding="utf-8") as err:
-        result = subprocess.run(cmd, stdout=out, stderr=err, env=env)
-    return result.returncode
-
-
-def _dispatch_claude(inv: AgentInvocation) -> int:
-    """Claude subagents need to be dispatched via the harness's Agent tool,
-    which isn't callable from a subprocess. For Claude runs, the runner
-    writes a manifest the calling harness reads and dispatches via Agent
-    tool calls. The runner.py path here is a stub.
+    Delegates to ``sisypy.console_cli`` with the ``AstridProjectAdapter``
+    and prints the result JSON before exiting with the computed code.
     """
-    inv.stdout_path.write_text(
-        "# Claude dispatch is harness-driven\n\n"
-        "Claude subagents must be launched via the Agent tool from inside\n"
-        "the calling Claude Code session. The runner emitted the brief at:\n"
-        f"  {inv.brief_path}\n"
-        "Use the harness Agent tool with:\n"
-        f"  description: 'Agentic test: {inv.scenario_name}'\n"
-        f"  subagent_type: 'general-purpose'\n"
-        f"  prompt: <contents of {inv.brief_path}>\n"
-        "Then copy the agent's final report into this file.\n",
-        encoding="utf-8",
-    )
-    return 0
+    if argv is None:
+        argv = sys.argv[1:]
 
+    # --- Guard: reject legacy-only flags before Sisypy parses them ---
+    _check_legacy_flags(argv)
 
-# ---------------------------------------------------------------------------
-# Fix A: post-actor enforcement helpers
-# ---------------------------------------------------------------------------
+    # --- Lazy import to keep startup fast for --help ---
+    from tests.agentic.adapter import AstridProjectAdapter  # noqa: E402
+    from tests.agentic.normalize import discover_scenarios, normalize_scenario  # noqa: E402
 
+    adapter = AstridProjectAdapter()
 
-def _check_canonical_bypass(
-    stderr_path: Path,
-    scenario_cfg: dict[str, Any] | None = None,
-    *,
-    from_offset: int = 0,
-) -> str | None:
-    """Detect execution-context bypass of the canonical ``astrid`` CLI.
-
-    Returns the *matched line* if a bypass pattern is found, ``None``
-    otherwise.  Requires execution context (``python`` / ``python3``
-    prefix + ``astrid.packs.*`` module or ``/astrid/packs/`` path).
-    File-read mentions (``📖 read ./astrid/packs/...``) MUST NOT trigger.
-
-    When ``from_offset`` > 0, only stderr content *after* that byte
-    offset is scanned — callers use this after a re-prompt so they only
-    inspect freshly-emitted stderr.
-
-    Returns ``None`` immediately when the scenario's ``assessment``
-    block declares ``bypass_exempt: true`` (authoring scenarios).
-    """
-    if scenario_cfg:
-        assessment = scenario_cfg.get("assessment", {})
-        if isinstance(assessment, dict) and assessment.get("bypass_exempt"):
-            return None
     try:
-        raw = stderr_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return None
-    if from_offset > 0:
-        raw = raw[from_offset:]
-    # Execution-context only: python/python3 prefix + module or path.
-    import re as _re
-
-    _BYPASS_RE = _re.compile(
-        r"\bpython3?\b.*?(?:-m\s+astrid\.packs\.|/\bastrid\b/packs/)",
-    )
-    for line in raw.splitlines():
-        if _BYPASS_RE.search(line):
-            return line.strip()
-    return None
-
-
-def _reprompt_actor(
-    inv: AgentInvocation,
-    reason: str,
-    instruction: str,
-    *,
-    max_tokens: int,
-) -> tuple[int, int]:
-    """Dispatch *one* follow-up turn asking the agent to correct an issue.
-
-    Builds a query from the original brief, the prior report, and a
-    re-prompt instruction block, then fans out via the hermes launcher.
-
-    Returns ``(exit_code, stderr_bytes_before)`` — callers use
-    ``stderr_bytes_before`` as ``from_offset`` when re-checking bypass.
-    The marker line ``--- REPROMPT: <reason> ---`` is a fixed label
-    that does **not** embed any bypass-pattern string.
-    """
-    # Byte count of existing stderr before we append.
-    stderr_bytes_before = 0
-    try:
-        stderr_bytes_before = inv.stderr_path.stat().st_size
-    except OSError:
-        pass
-
-    # Read prior report for context.
-    prior_report = ""
-    try:
-        prior_report = inv.stdout_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-    # Read original brief.
-    brief_text = ""
-    try:
-        brief_text = inv.brief_path.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        pass
-
-    re_prompt = (
-        f"{brief_text}\n\n"
-        f"---\n\n"
-        f"## Your prior response\n\n{prior_report}\n\n"
-        f"---\n\n"
-        f"## REPROMPT: {reason}\n\n{instruction}"
-    )
-    re_prompt_path = inv.brief_path.with_suffix(".reprompt.md")
-    re_prompt_path.write_text(re_prompt, encoding="utf-8")
-
-    # Model mapping — same logic as _dispatch_hermes (NOT hardcoded).
-    if inv.model == "deepseek-v4-pro":
-        model_arg = "deepseek:deepseek-v4-pro"
-    elif inv.model == "kimi-k2p5":
-        model_arg = "fireworks:accounts/fireworks/models/kimi-k2p5"
-    else:
-        raise ValueError(f"_reprompt_actor: unsupported model {inv.model!r}")
-
-    if not HERMES_LAUNCHER.is_file():
-        raise RuntimeError(f"hermes launcher not found at {HERMES_LAUNCHER}")
-
-    env = os.environ.copy()
-    env.pop("ASTRID_SESSION_ID", None)
-    env["PYENV_VERSION"] = "3.11.11"
-
-    # Append a fixed-label marker to stderr (does NOT embed a bypass
-    # pattern string — safe for from_offset re-checks).
-    marker = f"--- REPROMPT: {reason} ---\n"
-    with inv.stderr_path.open("a", encoding="utf-8") as err:
-        err.write(marker)
-
-    cmd = [
-        sys.executable,
-        str(HERMES_LAUNCHER),
-        f"--model={model_arg}",
-        "--toolsets=file,web,terminal",
-        f"--query-file={re_prompt_path}",
-        f"--max-tokens={max_tokens}",
-        f"--project-dir={ASTRID_REPO_ROOT}",
-    ]
-    with inv.stdout_path.open("w", encoding="utf-8") as out, \
-         inv.stderr_path.open("a", encoding="utf-8") as err:
-        result = subprocess.run(cmd, stdout=out, stderr=err, env=env)
-    return result.returncode, stderr_bytes_before
-
-
-def _run_one(inv: AgentInvocation, *, max_tokens: int, scenario_cfg: dict[str, Any] | None = None) -> dict[str, Any]:
-    started = time.time()
-    out: dict[str, Any] = {}
-    if inv.model.startswith("claude"):
-        # Claude actor dispatch is harness-driven (not subprocess-callable).
-        # The v6 pipeline uses DeepSeek/Kimi via hermes; Claude is reserved
-        # for the harness loop. Log and skip with an ungraded marker rather
-        # than emit the stub doc — keeps summary.json honest.
+        from sisypy import build_cli_parser, run_from_args, summary_exit_code  # noqa: E402
+    except ImportError:
         print(
-            f"[{inv.scenario_name}] WARN: skipping Claude actor {inv.slug!r} — "
-            "Claude dispatch is harness-driven, not runnable from the runner subprocess.",
+            "Sisypy is not importable. Install it via:\n"
+            "  pip install git+https://github.com/peteromallet/sisypy.git",
             file=sys.stderr,
         )
-        inv.stdout_path.write_text(
-            "# Skipped — Claude actor not dispatchable from runner\n",
-            encoding="utf-8",
-        )
-        inv.stderr_path.write_text("", encoding="utf-8")
-        rc = 0
-        skipped = True
-    else:
-        rc = _dispatch_hermes(inv, max_tokens=max_tokens)
-        skipped = False
-    elapsed = time.time() - started
+        sys.exit(3)
 
-    # Snapshot evidence post-actor, before returning. The project dir
-    # lives under ~/Documents/reigh-workspace/astrid-projects/<slug>.
-    project_dir = (
-        resolve_projects_root() / inv.slug
-    )
-    try:
-        # Local import keeps the module-level import graph lean and tolerates
-        # capture.py being absent in older trees (defensive — capture is part
-        # of this sprint and should always be present going forward).
-        try:
-            from tests.agentic.capture import capture_evidence  # noqa: PLC0415
-        except ModuleNotFoundError:
-            _here = Path(__file__).resolve().parent
-            if str(_here) not in sys.path:
-                sys.path.insert(0, str(_here))
-            from capture import capture_evidence  # type: ignore[no-redef]  # noqa: PLC0415
-        report_dir = inv.stdout_path.parent
-        evidence_path = capture_evidence(project_dir, report_dir, inv.slug, inv.stdout_path)
-        evidence_str: str | None = str(evidence_path)
-    except Exception as exc:
-        print(
-            f"[{inv.scenario_name}] WARN: capture_evidence failed for {inv.slug}: {exc}",
-            file=sys.stderr,
-        )
-        evidence_str = None
-
-    # Fix D: surface silent actor failures. When rc != 0 and the report
-    # is effectively empty (≤1 non-blank line), write an explicit
-    # .actor_failed.txt marker so the auditor can surface a hard fail.
-    actor_failed_marker: str | None = None
-    if rc != 0:
-        report_text = ""
-        try:
-            report_text = inv.stdout_path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            pass
-        non_blank = [l for l in report_text.splitlines() if l.strip()]
-        if len(non_blank) <= 1:
-            stderr_tail = ""
-            try:
-                stderr_raw = inv.stderr_path.read_text(encoding="utf-8", errors="replace")
-                stderr_tail = "\n".join(stderr_raw.splitlines()[-20:])
-            except Exception:
-                pass
-            marker_path = inv.stdout_path.with_suffix(".actor_failed.txt")
-            marker_path.write_text(
-                f"actor_failed: returncode={rc} elapsed={elapsed:.1f}s\n"
-                f"stderr_tail:\n{stderr_tail}\n",
-                encoding="utf-8",
-            )
-            actor_failed_marker = str(marker_path)
-
-    # -------------------------------------------------------------------
-    # Fix A: post-actor enforcement — canonical-bypass.
-    # Each check fires at most ONE re-prompt per scenario per dogfood.
-    # -------------------------------------------------------------------
-    reprompt_dispatched: dict[str, int] = {"canonical_bypass": 0}
-    if not skipped:
-        # --- canonical_bypass check --------------------------------------
-        bypass_first = _check_canonical_bypass(inv.stderr_path, scenario_cfg)
-        if bypass_first is not None and reprompt_dispatched["canonical_bypass"] < 1:
-            reprompt_dispatched["canonical_bypass"] += 1
-            reason = "canonical CLI bypass detected"
-            instruction = (
-                f"you invoked '{bypass_first}'; "
-                "the canonical CLI is 'astrid <kind> run <id> [...]'. "
-                "Retry using the canonical form, then continue with the report."
-            )
-            _rc2, stderr_off = _reprompt_actor(inv, reason, instruction, max_tokens=max_tokens)
-            bypass_second = _check_canonical_bypass(
-                inv.stderr_path, scenario_cfg, from_offset=stderr_off,
-            )
-            if bypass_second is None:
-                out["canonical_bypass"] = "resolved_after_reprompt"
-            else:
-                out["canonical_bypass"] = "rejected"
-        elif bypass_first is not None:
-            out["canonical_bypass"] = "rejected"
-
-    out.update({
-        "slug": inv.slug,
-        "agent_id": inv.agent_id,
-        "model": inv.model,
-        "returncode": rc,
-        "elapsed_sec": round(elapsed, 1),
-        "report_path": str(inv.stdout_path),
-        "stderr_path": str(inv.stderr_path),
-        "evidence_pack": evidence_str,
-        "actor_failed": actor_failed_marker,
-    })
-    if skipped:
-        out["skipped"] = "claude_actor_not_dispatchable"
-    return out
-
-
-def _run_scenario(name: str, run_tag: str) -> dict[str, Any]:
-    scenario = _load_scenario(name)
-    report_dir = REPORTS_DIR / f"{run_tag}-{name}"
-    report_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[{name}] report dir: {report_dir}", file=sys.stderr)
-
-    invocations = _build_invocations(scenario, run_tag, report_dir)
-    print(f"[{name}] priming {len(invocations)} project(s)…", file=sys.stderr)
-    for inv in invocations:
-        _prime_project(inv.slug, scenario)
-
-    budget = scenario.get("budget", {}) or {}
-    max_tokens = int(budget.get("max_tokens_per_agent", 32768))
-    print(f"[{name}] dispatching {len(invocations)} agent(s) in parallel…", file=sys.stderr)
-    results: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=len(invocations)) as pool:
-        futures = {pool.submit(_run_one, inv, max_tokens=max_tokens, scenario_cfg=scenario): inv for inv in invocations}
-        for future in as_completed(futures):
-            inv = futures[future]
-            try:
-                result = future.result()
-            except Exception as exc:
-                result = {
-                    "slug": inv.slug, "agent_id": inv.agent_id, "model": inv.model,
-                    "returncode": -1, "elapsed_sec": 0.0,
-                    "report_path": str(inv.stdout_path), "stderr_path": str(inv.stderr_path),
-                    "error": str(exc),
-                }
-            results.append(result)
-            print(f"[{name}]   {result['slug']} done in {result['elapsed_sec']}s "
-                  f"(rc={result['returncode']})", file=sys.stderr)
-
-    # Hand off to the auditor. Try both the package-style import (used when
-    # invoked as `python -m tests.agentic.runner`) and the sibling-file
-    # fallback (used when invoked as `python3 tests/agentic/runner.py`).
-    try:
-        from tests.agentic.auditor import audit_scenario  # noqa: PLC0415
-    except ModuleNotFoundError:
-        _here = Path(__file__).resolve().parent
-        if str(_here) not in sys.path:
-            sys.path.insert(0, str(_here))
-        from auditor import audit_scenario  # type: ignore[no-redef]  # noqa: PLC0415
-    summary = audit_scenario(scenario, invocations, results, report_dir)
-    (report_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
-    print(f"[{name}] summary: passed={summary['aggregate']['passed']}/"
-          f"{summary['aggregate']['total']}", file=sys.stderr)
-    return summary
-
-
-# ---------------------------------------------------------------------------
-# Dry-run validation (pytest-facing, no subprocess / network)
-# ---------------------------------------------------------------------------
-
-import re as _re  # noqa: E402
-
-_KNOWN_TOKENS = frozenset({"$SLUG", "$AGENT_ID", "$RUN_TAG", "$TARGET_ORCH"})
-_TOKEN_RE = _re.compile(r"\$[A-Z][A-Z0-9_]{1,30}")
-
-
-def _find_unresolved_tokens(text: str) -> set[str]:
-    """Return every $TOKEN-like substring that is not a known variable."""
-    return {m.group(0) for m in _TOKEN_RE.finditer(text)} - _KNOWN_TOKENS
-
-
-def validate_scenario_dry_run(
-    name: str,
-    *,
-    run_tag: str = "dry-run-validation",
-    report_dir: Path | None = None,
-) -> dict[str, Any]:
-    """Load a scenario YAML, validate its shape, render briefs, and report
-    any unresolved template tokens — all without subprocess or network calls.
-
-    Returns a dict with keys ``ok``, ``errors``, ``warnings``, and
-    ``invocations``.  Callers must monkeypatch ``SCENARIOS_DIR`` and
-    ``BRIEFS_DIR`` if they want to point at synthetic fixtures.
-    """
-    errors: list[str] = []
-    warnings: list[str] = []
-    invocations: list[dict[str, Any]] = []
-
-    # -- load YAML -----------------------------------------------------------
-    try:
-        scenario = _load_scenario(name)
-    except (FileNotFoundError, ValueError) as exc:
-        return {
-            "ok": False,
-            "errors": [str(exc)],
-            "warnings": [],
-            "invocations": [],
-        }
-    # _load_scenario already checks name/tier/description/brief/agents/acceptance
-    # plus name-match; we mirror those checks explicitly for the dry-run result.
-
-    required = {"name", "tier", "description", "brief", "agents", "acceptance"}
-    missing = required - scenario.keys()
-    if missing:
-        errors.append(f"missing required keys: {sorted(missing)}")
-    if scenario.get("name") != name:
-        errors.append(
-            f"name-field mismatch: file is {name}.yaml but `name` field "
-            f"is {scenario.get('name')!r}"
-        )
-    if not isinstance(scenario.get("agents"), list) or not scenario.get("agents"):
-        errors.append("agents must be a non-empty list")
-    if errors:
-        return {"ok": False, "errors": errors, "warnings": warnings, "invocations": invocations}
-
-    # -- brief template existence -------------------------------------------
-    brief_rel = scenario.get("brief", "")
-    brief_template = BRIEFS_DIR / brief_rel
-    if not brief_template.is_file():
-        errors.append(f"brief template not found: {brief_template}")
-        return {"ok": False, "errors": errors, "warnings": warnings, "invocations": invocations}
-
-    # -- build invocation summaries -----------------------------------------
-    target_orch = scenario.get("target_orchestrator")
-    scenario_name = scenario["name"]
-    idx = 0
-    for agent_spec in scenario["agents"]:
-        model = agent_spec.get("model", "unknown")
-        count = int(agent_spec.get("count", 1))
-        for _i in range(count):
-            idx += 1
-            short_model = (
-                model.replace("deepseek-v4-pro", "ds")
-                .replace("kimi-k2p5", "k")
-                .replace("claude", "cl")
-            )
-            slug = f"agentic-{scenario_name.replace('_', '-')}-{short_model}-{idx}"[:48]
-            agent_id = f"agentic-{scenario_name}-{short_model}-{idx}"
-            rendered = _render_brief(
-                brief_template,
-                slug=slug,
-                agent_id=agent_id,
-                run_tag=run_tag,
-                target_orchestrator=target_orch,
-            )
-            # Write rendered brief to report_dir when provided (pytest tmp_path).
-            if report_dir is not None:
-                brief_path = report_dir / f"{slug}.brief.md"
-                brief_path.write_text(rendered, encoding="utf-8")
-
-            unresolved = _find_unresolved_tokens(rendered)
-            inv_summary = {
-                "index": idx,
-                "model": model,
-                "slug": slug,
-                "agent_id": agent_id,
-                "unresolved_tokens": sorted(unresolved),
-            }
-            invocations.append(inv_summary)
-            if unresolved:
-                warnings.append(
-                    f"invocation {idx} ({agent_id}): "
-                    f"unresolved tokens: {sorted(unresolved)}"
-                )
-
-    if any(inv["unresolved_tokens"] for inv in invocations):
-        all_unresolved = sorted(
-            {t for inv in invocations for t in inv["unresolved_tokens"]}
-        )
-        errors.append(f"unresolved template tokens: {all_unresolved}")
-
-    return {
-        "ok": len(errors) == 0,
-        "errors": errors,
-        "warnings": warnings,
-        "invocations": invocations,
-    }
-
-
-def _scenario_files() -> list[Path]:
-    return sorted(p for p in SCENARIOS_DIR.glob("*.yaml") if not p.name.startswith("_"))
-
-
-def _filter_scenarios(*, names: list[str] | None, tier: str | None, tag: str | None) -> list[str]:
-    all_scenarios = _scenario_files()
-    if names:
-        selected = []
-        for n in names:
-            path = SCENARIOS_DIR / f"{n}.yaml"
-            if not path.is_file():
-                raise FileNotFoundError(f"scenario {n!r} not found")
-            selected.append(path)
-    else:
-        selected = list(all_scenarios)
-    if tier:
-        selected = [p for p in selected if yaml.safe_load(p.read_text(encoding="utf-8")).get("tier") == tier]
-    if tag:
-        selected = [
-            p for p in selected
-            if tag in (yaml.safe_load(p.read_text(encoding="utf-8")).get("tags") or [])
-        ]
-    return [p.stem for p in selected]
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="tests.agentic.runner")
-    parser.add_argument("scenarios", nargs="*", help="scenario name(s); omit with --all/--tier")
-    parser.add_argument("--all", action="store_true", help="run every scenario under scenarios/")
-    parser.add_argument("--tier", help="run scenarios tagged with this tier")
-    parser.add_argument("--tag", help="filter by tag in the scenario's `tags:` list")
-    parser.add_argument("--run-tag", default=_now_tag(), help="prefix for the report directory")
-    parser.add_argument("--dry-run", action="store_true", help="show planned invocations and exit")
+    parser = build_cli_parser(adapter)
     args = parser.parse_args(argv)
 
-    if not args.scenarios and not args.all and not args.tier and not args.tag:
-        parser.error("specify a scenario name, --all, --tier, or --tag")
+    if getattr(args, "reassess", None):
+        result = _strip_structural_guard_warnings(run_from_args(adapter, args))
+        print(json.dumps(result, indent=2, default=str))
+        sys.exit(summary_exit_code(result))
 
-    names = _filter_scenarios(
-        names=args.scenarios if args.scenarios else None,
-        tier=args.tier, tag=args.tag,
-    )
-    if not names:
-        print("no scenarios matched", file=sys.stderr)
-        return 1
+    scenarios_dir = Path(args.scenarios_dir)
+    if scenarios_dir == Path("scenarios"):
+        scenarios_dir = SCENARIOS_DIR
 
-    if args.dry_run:
-        print(f"would run {len(names)} scenario(s): {', '.join(names)}")
-        return 0
+    briefs_dir = Path(args.briefs_dir)
+    if briefs_dir == Path("briefs"):
+        briefs_dir = BRIEFS_DIR
 
-    REPORTS_DIR.mkdir(exist_ok=True)
-    overall = []
-    for n in names:
-        try:
-            summary = _run_scenario(n, args.run_tag)
-            overall.append(summary)
-        except Exception as exc:
-            print(f"[{n}] FAILED to run: {exc}", file=sys.stderr)
-            overall.append({"scenario": n, "error": str(exc)})
+    selected_paths = discover_scenarios(args.scenarios, scenarios_dir=scenarios_dir)
 
-    # Top-level summary across all scenarios.
-    batch_dir = REPORTS_DIR / args.run_tag
-    batch_dir.mkdir(exist_ok=True)
-    (batch_dir / "batch.json").write_text(json.dumps(overall, indent=2), encoding="utf-8")
-    failures = [s for s in overall if s.get("error") or s.get("aggregate", {}).get("passed", 0) < s.get("aggregate", {}).get("total", 0)]
-    return 0 if not failures else 1
+    with tempfile.TemporaryDirectory(prefix="astrid-sisypy-") as temp_dir:
+        normalized_dir = Path(temp_dir)
+        for scenario_path in selected_paths:
+            raw_scenario = yaml.safe_load(scenario_path.read_text(encoding="utf-8"))
+            normalized = normalize_scenario(raw_scenario)
+            normalized_path = normalized_dir / scenario_path.name
+            normalized_path.write_text(
+                yaml.safe_dump(normalized, sort_keys=False),
+                encoding="utf-8",
+            )
+
+        args.scenarios_dir = str(normalized_dir)
+        args.briefs_dir = str(briefs_dir)
+
+        result = _strip_structural_guard_warnings(run_from_args(adapter, args))
+        print(json.dumps(result, indent=2, default=str))
+        sys.exit(summary_exit_code(result))
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

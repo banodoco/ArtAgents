@@ -1,7 +1,7 @@
 """Offline meta-test: agentic suite filesystem roots must not escape to real $HOME.
 
 Collectable by pytest without running any agentic scenario.  Verifies that the
-constants exposed by cleanup.py and parallel_runner.py resolve under $TMPDIR
+constants exposed by cleanup.py resolve under $TMPDIR
 (or an env-var override) and never under the developer's real home directory.
 """
 
@@ -86,13 +86,13 @@ def test_cleanup_astrid_home_under_sandbox_when_no_env_override() -> None:
 
 
 # ---------------------------------------------------------------------------
-# parallel_runner.py identity source
+# cleanup.py identity source
 # ---------------------------------------------------------------------------
 
 
 def test_parallel_runner_suite_sandbox_not_under_real_home() -> None:
-    """parallel_runner._SUITE_SANDBOX must not be under the real home directory."""
-    from tests.agentic.parallel_runner import _SUITE_SANDBOX
+    """cleanup._SUITE_SANDBOX must not be under the real home directory."""
+    from tests.agentic.cleanup import _SUITE_SANDBOX
 
     real_home = _home()
     try:
@@ -100,13 +100,13 @@ def test_parallel_runner_suite_sandbox_not_under_real_home() -> None:
     except ValueError:
         return
     raise AssertionError(
-        f"parallel_runner._SUITE_SANDBOX {_SUITE_SANDBOX!r} resolves under real $HOME {real_home!r}"
+        f"cleanup._SUITE_SANDBOX {_SUITE_SANDBOX!r} resolves under real $HOME {real_home!r}"
     )
 
 
 def test_parallel_runner_identity_source_not_under_real_home() -> None:
-    """The identity.json source path in parallel_runner must not be under real $HOME."""
-    from tests.agentic.parallel_runner import _SUITE_SANDBOX
+    """The identity.json source path in cleanup must not be under real $HOME."""
+    from tests.agentic.cleanup import _SUITE_SANDBOX
 
     identity_source = _SUITE_SANDBOX / "home" / "identity.json"
     real_home = _home()
@@ -120,13 +120,13 @@ def test_parallel_runner_identity_source_not_under_real_home() -> None:
 
 
 def test_parallel_runner_suite_sandbox_under_tmpdir() -> None:
-    """parallel_runner._SUITE_SANDBOX resolves under $TMPDIR."""
-    from tests.agentic.parallel_runner import _SUITE_SANDBOX
+    """cleanup._SUITE_SANDBOX resolves under $TMPDIR."""
+    from tests.agentic.cleanup import _SUITE_SANDBOX
 
     tmpdir = _tmpdir()
     try:
         _SUITE_SANDBOX.relative_to(tmpdir)
     except ValueError:
         raise AssertionError(
-            f"parallel_runner._SUITE_SANDBOX {_SUITE_SANDBOX!r} is not under $TMPDIR {tmpdir!r}"
+            f"cleanup._SUITE_SANDBOX {_SUITE_SANDBOX!r} is not under $TMPDIR {tmpdir!r}"
         )

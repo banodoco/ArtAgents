@@ -1,8 +1,8 @@
 # Ground truth — hand-graded reference verdicts
 
 The `<scenario>.expected.json` files in this directory are the
-hand-graded reference verdicts the assessor (`assessor.py`) is
-calibrated against by `meta_test.py`.
+hand-graded reference verdicts the legacy assessor (`assessor.py`,
+decommissioned in M5) was calibrated against by `meta_test.py`.
 
 ## Schema
 

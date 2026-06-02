@@ -1,0 +1,21 @@
+# Agentic Coverage Matrix
+
+Structural mode is the default proof surface here: it avoids live network/GPU/spend, and the M5 synthesis flow is read-only over captured Sisypy evidence packs.
+
+## Domain x Challenge
+
+| Domain | Locate | Operate | Compose | Author | Resume | Repair | Refuse |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Discovery | `vague_video_request`, `specific_transcribe`, `search_before_authoring`, `cross_pack_composition`, `recover_from_no_search_results` | Empty: error-message legibility for discovery output is future work. | Empty: discovery is a precursor surface, not a composition target today. | Empty: `ambiguous_brief_clarification` is optional/future, not implemented in M5. | Empty: no discovery-specific resume flow is scoped today. | Empty: broader query-debugging UX is future work; M5 kept search fallback inside Locate. | `no_tool_exists_pushback` |
+| Timeline | Empty: timeline read/browse checks are folded into Operate so scenarios are not double-counted. | `timeline_track`, `timeline_clip`, `timeline_audio`, `timeline_transition`, `timeline_effect`, `timeline_theme`, `timeline_arrangement`, `timeline_pool`, `timeline_preview`, `timeline_diff`, `timeline_history`, `timeline_audit` | `timeline_compose_edit` | Empty: timeline authoring DSL is out of scope. | Empty: timeline resume semantics piggyback on session recovery; no dedicated gap scenario yet. | `timeline_tamper_recovery`, `timeline_mass_undo`, `timeline_concurrent_version_conflict` | Empty: no timeline refusal scenario is planned. |
+| Orchestration/Execution | Empty: executor/orchestrator lookup is covered under Discovery×Locate. | `orchestrator_run_persists` | `sequential_orchestrators`, `artifact_pipeline` | Empty: authoring execution surfaces live under the Authoring domain. | Empty: rerun/resume after execution crash is future work beyond session attach coverage. | `executor_failure_recovery` | `impossible_brief_pushback` |
+| Authoring | Empty: authoring discovery prerequisites are counted in Discovery×Locate/Compose, not here. | Empty: standalone author-only operate loop is future work; M5 used Authoring×Repair instead. | `cross_pack_authoring` | `new_executor_for_cli`, `new_orchestrator_from_dsl` | Empty: resume an interrupted authoring session is future work. | `modify_existing_orchestrator`, `broken_authoring_fix`, `author_run_revise_loop` | Empty: no authoring-specific refusal brief is planned. |
+| Data-Retention/Integrity | Empty: retention/GC inspection coverage is future work. | `timeline_large_audit` | Empty: Supabase sync / cross-store composition is future work. | Empty: authoring retention policies are future work. | Empty: retention-aware resume after partial persistence is future work. | `durability_after_crash` | Empty: retention-policy refusal coverage is future work. |
+| Infrastructure | `discover_projects_runs_sessions` | `taskrun_concurrent_lease` | Empty: multi-project orchestration over infra objects is out of scope. | Empty: infrastructure authoring/configuration flows are out of scope. | `cold_restart_midrun`, `reader_takeover`, `idempotent_reattach`, `concurrent_disambiguation` | Empty: session corruption and same-project concurrent writers remain future work. | Empty: no infrastructure refusal brief is planned. |
+| Platform-targets | Empty: live GPU/Reigh/RunPod discovery is out of scope for structural mode. | Empty: live provider execution requires GPU/spend and is out of scope. | Empty: provider-to-provider composition requires live GPU/Reigh/RunPod and is out of scope. | `wrap_comfy_workflow` | Empty: provider session resume is future work. | Empty: provider-specific repair loops require live external platforms and are out of scope. | Empty: provider refusal coverage is future work. |
+
+## Notes
+
+- All 42 production scenarios are placed exactly once above: 29 migrated M3 scenarios, 7 M4 structural scenarios, and 6 M5 additions.
+- `ambiguous_brief_clarification` is explicitly optional/future. It is not implemented in M5.
+- Empty cells are intentional. The remaining gaps cluster around live GPU/provider workflows, Supabase sync, retention/GC, error-message legibility, and same-project concurrent-writer recovery.

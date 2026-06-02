@@ -22,99 +22,113 @@ description: |
 brief: new_executor_for_cli.md
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
-  - no_aborts
+- no_aborts
 
-  - subjective:
-      - discovered_executors_new_command
-      - created_executor_yaml_correctly
-      - wrote_run_py_with_proper_args
-      - qualified_id_correctly
-      - chose_executor_over_orchestrator
+- subjective:
+  - discovered_executors_new_command
+  - created_executor_yaml_correctly
+  - wrote_run_py_with_proper_args
+  - qualified_id_correctly
+  - chose_executor_over_orchestrator
 
 budget:
   max_tokens_per_agent: 65536
   max_wall_clock_min: 25
 
 tags:
-  - authoring
-  - executor
-  - cli_wrap
+- authoring
+- executor
+- cli_wrap
 
 assessment:
-  universal_checks: true
   enforced:
-      - id: created_executor_yaml_correctly
-        question: |
-          Does `executor.yaml` declare all required fields (`id`, `kind`,
-          `inputs`, `outputs`, `command.argv`) with values matching the
-          brief's ffmpeg one-liner?
-        evidence: [project_tree, report]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          executor.yaml is missing one or more of {id, kind, inputs,
-          outputs, command.argv} or has placeholder values.
-      - id: wrote_run_py_with_proper_args
-        question: |
-          Does `run.py` parse the documented args (`input`, `start`,
-          `dur`, `output`) and actually shell out to ffmpeg with the
-          substitution `ffmpeg -i {input} -ss {start} -t {dur} -c copy
-          {output}`?
-        evidence: [project_tree, report]
-        grading: pass_fail
-        weight: 2
-      - id: ran_smoke_via_canonical_cli
-        question: |
-          Did the agent test the new executor via `astrid executors run
-          <pack>.clip_extract ...` (canonical surface) rather than
-          `python -m astrid.packs.<pack>.clip_extract.run`?
-        evidence: [stderr]
-        grading: pass_fail_partial
-        weight: 1
+  - id: created_executor_yaml_correctly
+    question: |
+      Does `executor.yaml` declare all required fields (`id`, `kind`,
+      `inputs`, `outputs`, `command.argv`) with values matching the
+      brief's ffmpeg one-liner?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      executor.yaml is missing one or more of {id, kind, inputs,
+      outputs, command.argv} or has placeholder values.
+  - id: wrote_run_py_with_proper_args
+    question: |
+      Does `run.py` parse the documented args (`input`, `start`,
+      `dur`, `output`) and actually shell out to ffmpeg with the
+      substitution `ffmpeg -i {input} -ss {start} -t {dur} -c copy
+      {output}`?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 2
+  - id: ran_smoke_via_canonical_cli
+    question: |
+      Did the agent test the new executor via `astrid executors run
+      <pack>.clip_extract ...` (canonical surface) rather than
+      `python -m astrid.packs.<pack>.clip_extract.run`?
+    evidence: [stderr]
+    grading: pass_fail_partial
+    weight: 1
   graded:
-      - id: discovered_executors_new_command
-        question: |
-          Did the agent discover and run `astrid executors new` (or
-          equivalent scaffolding verb) rather than hand-building the
-          folder layout?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          First mutating action on `astrid/packs/` is a `mkdir -p` /
-          manual file write before any `executors new` invocation.
-      - id: qualified_id_correctly
-        question: |
-          Is the executor id qualified as `<pack>.clip_extract`
-          (e.g. `builtin.clip_extract` or a user-pack qualifier) rather
-          than bare `clip_extract`?
-        evidence: [project_tree, report]
-        grading: pass_fail
-        weight: 1
-      - id: chose_executor_over_orchestrator
-        question: |
-          Did the agent build an executor (folder + executor.yaml +
-          run.py) rather than mis-routing into an orchestrator authoring
-          path (DSL / `@orchestrator`)?
-        evidence: [project_tree, stderr]
-        grading: pass_fail
-        weight: 1
-        failure_mode: |
-          tree.txt shows `@orchestrator` / a DSL file, or stderr shows
-          `astrid author new` invoked without a sibling `executors new`.
+  - id: discovered_executors_new_command
+    question: |
+      Did the agent discover and run `astrid executors new` (or
+      equivalent scaffolding verb) rather than hand-building the
+      folder layout?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      First mutating action on `astrid/packs/` is a `mkdir -p` /
+      manual file write before any `executors new` invocation.
+  - id: qualified_id_correctly
+    question: |
+      Is the executor id qualified as `<pack>.clip_extract`
+      (e.g. `builtin.clip_extract` or a user-pack qualifier) rather
+      than bare `clip_extract`?
+    evidence: [project_tree, report]
+    grading: pass_fail
+    weight: 1
+  - id: chose_executor_over_orchestrator
+    question: |
+      Did the agent build an executor (folder + executor.yaml +
+      run.py) rather than mis-routing into an orchestrator authoring
+      path (DSL / `@orchestrator`)?
+    evidence: [project_tree, stderr]
+    grading: pass_fail
+    weight: 1
+    failure_mode: |
+      tree.txt shows `@orchestrator` / a DSL file, or stderr shows
+      `astrid author new` invoked without a sibling `executors new`.
   observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make? (integer, metadata only)"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
-    - id: canonical_bypass_form
-      question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
-      evidence: [stderr]
-      grading: text
-      weight: 0
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+  - id: canonical_bypass_form
+    question: "If a canonical-bypass was detected, what form did it take? (string, metadata only)"
+    evidence: [stderr]
+    grading: text
+    weight: 0
+extras:
+  legacy_acceptance:
+  - no_aborts
+
+  - subjective:
+    - discovered_executors_new_command
+    - created_executor_yaml_correctly
+    - wrote_run_py_with_proper_args
+    - qualified_id_correctly
+    - chose_executor_over_orchestrator
+
+  universal_checks: true
+  m2_checks:
+    c4_projection_fidelity:
+      enabled: true

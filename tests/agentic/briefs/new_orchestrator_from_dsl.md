@@ -1,4 +1,4 @@
-You're in `/Users/peteromalley/Documents/reigh-workspace/Astrid`. Your project is `$SLUG`. Use `--agent $AGENT_ID` for any `--agent` flag.
+You're in `/Users/peteromalley/Documents/reigh-workspace/Astrid`. Your project is `${SLUG}`. Use `--agent ${AGENT_ID}` for any `--agent` flag.
 
 **Your job:** build a new Astrid orchestrator that does three things, end-to-end:
 

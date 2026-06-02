@@ -12,16 +12,97 @@ description: |
 brief: cross_pack_composition.md
 
 priming:
-  - create_project: $SLUG
+- create_project: ${SLUG}
 
 target_orchestrator: video_editing.hype
 
 agents:
-  - model: deepseek-v4-pro
-    count: 1
-    subagent_type: general-purpose
+- model: deepseek-v4-pro
+  count: 1
+  subagent_type: general-purpose
 
 acceptance:
+  # Machine-graded. Discovery-tier scenario: the signal we care about
+  # is the *composition decision* (one invocation of `video_editing.hype`,
+  # not two separate stages). A `--dry-run` against a placeholder
+  # video is enough to demonstrate that — we don't require the
+  # downstream pipeline to actually finish on synthetic input.
+- no_aborts
+- tool_used: video_editing.hype
+  # Subjective
+- subjective:
+  - discovered_hype_includes_transcribe
+  - composed_correctly
+  - read_hype_skill
+
+budget:
+  max_tokens_per_agent: 32768
+  max_wall_clock_min: 15
+
+tags:
+- skill_trigger
+- composition
+- discovery
+
+assessment:
+  enforced:
+  - id: composed_correctly
+    question: |
+      Did the agent invoke `video_editing.hype` exactly once for the
+      composed pipeline (not transcribe-then-hype, not duplicate
+      runs)?
+    evidence: [stderr, events]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Stderr shows back-to-back `executors run editorial.transcribe`
+      AND `orchestrators run video_editing.hype` invocations on the same
+      media.
+  - id: invoked_via_canonical_cli
+    question: |
+      Did the agent invoke hype via `astrid orchestrators run
+      video_editing.hype` rather than `python -m astrid.packs.video_editing.hype`
+      or a direct import?
+    evidence: [stderr]
+    grading: pass_fail
+    weight: 2
+  graded:
+  - id: discovered_hype_includes_transcribe
+    question: |
+      Did the agent discover (and call out explicitly in their
+      narrative) that `video_editing.hype` already runs `editorial.transcribe`
+      internally, rather than treating them as two separate stages?
+    evidence: [report, stderr]
+    grading: pass_fail
+    weight: 2
+    failure_mode: |
+      Report or stderr describes a two-stage pipeline
+      (transcribe -> hype) without acknowledging the implicit
+      composition.
+  - id: read_hype_skill
+    question: |
+      Did the agent read the hype STAGE/SKILL doc (via `astrid
+      orchestrators inspect video_editing.hype`, or reading STAGE.md
+      directly) BEFORE running it?
+    evidence: [stderr, report]
+    grading: pass_fail
+    weight: 1
+  - id: report_shape_intact
+    question: |
+      Does the report contain each numbered section the brief asked
+      for, including the composition decision rationale?
+    evidence: [report]
+    grading: pass_fail
+    weight: 1
+  observed:
+  - id: shell_calls_count
+    question: "How many shell calls did the agent make? (integer, metadata only)"
+    evidence: [stderr]
+    grading: numeric
+    weight: 0
+extras:
+  target_orchestrator: video_editing.hype
+  legacy_acceptance:
   # Machine-graded. Discovery-tier scenario: the signal we care about
   # is the *composition decision* (one invocation of `video_editing.hype`,
   # not two separate stages). A `--dry-run` against a placeholder
@@ -31,73 +112,11 @@ acceptance:
   - tool_used: video_editing.hype
   # Subjective
   - subjective:
-      - discovered_hype_includes_transcribe
-      - composed_correctly
-      - read_hype_skill
+    - discovered_hype_includes_transcribe
+    - composed_correctly
+    - read_hype_skill
 
-budget:
-  max_tokens_per_agent: 32768
-  max_wall_clock_min: 15
-
-tags:
-  - skill_trigger
-  - composition
-  - discovery
-
-assessment:
   universal_checks: true
-  enforced:
-      - id: composed_correctly
-        question: |
-          Did the agent invoke `video_editing.hype` exactly once for the
-          composed pipeline (not transcribe-then-hype, not duplicate
-          runs)?
-        evidence: [stderr, events]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Stderr shows back-to-back `executors run editorial.transcribe`
-          AND `orchestrators run video_editing.hype` invocations on the same
-          media.
-      - id: invoked_via_canonical_cli
-        question: |
-          Did the agent invoke hype via `astrid orchestrators run
-          video_editing.hype` rather than `python -m astrid.packs.video_editing.hype`
-          or a direct import?
-        evidence: [stderr]
-        grading: pass_fail
-        weight: 2
-  graded:
-      - id: discovered_hype_includes_transcribe
-        question: |
-          Did the agent discover (and call out explicitly in their
-          narrative) that `video_editing.hype` already runs `editorial.transcribe`
-          internally, rather than treating them as two separate stages?
-        evidence: [report, stderr]
-        grading: pass_fail
-        weight: 2
-        failure_mode: |
-          Report or stderr describes a two-stage pipeline
-          (transcribe -> hype) without acknowledging the implicit
-          composition.
-      - id: read_hype_skill
-        question: |
-          Did the agent read the hype STAGE/SKILL doc (via `astrid
-          orchestrators inspect video_editing.hype`, or reading STAGE.md
-          directly) BEFORE running it?
-        evidence: [stderr, report]
-        grading: pass_fail
-        weight: 1
-      - id: report_shape_intact
-        question: |
-          Does the report contain each numbered section the brief asked
-          for, including the composition decision rationale?
-        evidence: [report]
-        grading: pass_fail
-        weight: 1
-  observed:
-    - id: shell_calls_count
-      question: "How many shell calls did the agent make? (integer, metadata only)"
-      evidence: [stderr]
-      grading: numeric
-      weight: 0
+  m2_checks:
+    c4_projection_fidelity:
+      enabled: true

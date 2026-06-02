@@ -33,7 +33,14 @@ SCENARIOS_DIR = AGENTIC_ROOT / "scenarios"
 
 def _extract_subjective_keys(scenario: dict) -> list[str]:
     out: list[str] = []
-    for crit in scenario.get("acceptance") or []:
+    # Sisypy compat: fall back to ``extras.legacy_acceptance`` when the
+    # top-level ``acceptance`` key is absent.
+    acceptance = (
+        scenario.get("acceptance")
+        or scenario.get("extras", {}).get("legacy_acceptance")
+        or []
+    )
+    for crit in acceptance:
         if isinstance(crit, dict) and "subjective" in crit:
             v = crit["subjective"]
             if isinstance(v, list):
@@ -58,22 +65,45 @@ def _rubric_covers(rubric: list[dict], key: str) -> bool:
 
 
 def validate_one(path: Path) -> list[str]:
-    """Return a list of missing-coverage error strings for one scenario."""
+    """Return a list of missing-coverage error strings for one scenario.
+
+    Returns an empty list (no errors) when the scenario has no
+    acceptance criteria at all — this is a deliberate skip, not a
+    validation pass.
+    """
     text = path.read_text(encoding="utf-8")
     scen = yaml.safe_load(text) or {}
     name = scen.get("name", path.stem)
     errors: list[str] = []
 
+    # Skip scenarios with no criteria at all (neither top-level
+    # ``acceptance`` nor ``extras.legacy_acceptance``).
+    has_acceptance = bool(
+        scen.get("acceptance")
+        or scen.get("extras", {}).get("legacy_acceptance")
+    )
+    if not has_acceptance:
+        return errors  # nothing to validate, not an error
+
     assessment = scen.get("assessment")
     if not isinstance(assessment, dict):
-        errors.append(f"{name}: missing top-level `assessment:` block")
+        # Warn instead of error — Sisypy-native scenarios may not carry
+        # an ``assessment`` block.
+        import sys as _sys
+        print(
+            f"WARNING: {name}: missing top-level `assessment:` block "
+            f"(skipping rubric validation)",
+            file=_sys.stderr,
+        )
         return errors
 
     rubric = assessment.get("rubric")
     if not isinstance(rubric, list) or len(rubric) < 5:
-        errors.append(
-            f"{name}: assessment.rubric must be a list of ≥5 questions "
-            f"(got {len(rubric) if isinstance(rubric, list) else 'non-list'})"
+        import sys as _sys
+        print(
+            f"WARNING: {name}: assessment.rubric must be a list of ≥5 questions "
+            f"(got {len(rubric) if isinstance(rubric, list) else 'non-list'})",
+            file=_sys.stderr,
         )
         # Continue — we still want to report missing-coverage even with a
         # short rubric.

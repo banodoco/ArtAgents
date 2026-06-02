@@ -1,6 +1,6 @@
 # Brief: transcribe an audio file
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
@@ -13,7 +13,7 @@ That's the whole task. Straightforward transcription, file -> text.
 
 - You are working inside the Astrid repo. Everything goes through
   `python3 -m astrid`.
-- Attach to project `$SLUG` first.
+- Attach to project `${SLUG}` first.
 - If `/tmp/audio_example.mp3` does not exist, synthesize a tiny placeholder
   yourself before running anything that needs it. A 1-second silent clip
   is acceptable:
@@ -28,7 +28,7 @@ That's the whole task. Straightforward transcription, file -> text.
 
 ## What success looks like
 
-You discovered `$TARGET_ORCH` (the canonical Astrid transcribe executor),
+You discovered `${TARGET_ORCH}` (the canonical Astrid transcribe executor),
 read its STAGE doc, and ran it against `/tmp/audio_example.mp3`.
 
 ## Report back

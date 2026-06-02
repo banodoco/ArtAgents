@@ -1,19 +1,19 @@
 # Brief: diagnose a bad upstream artifact
 
-You are agent `$AGENT_ID` working in project `$SLUG` (run tag `$RUN_TAG`).
+You are agent `${AGENT_ID}` working in project `${SLUG}` (run tag `${RUN_TAG}`).
 
 ## The ask
 
 > "The transcribe step seems to have produced bad output. Diagnose and recover."
 
 There is already an in-flight task run on this project. A prior actor started
-`$TARGET_ORCH`, attested `transcribe`, and parked the run at the next step.
+`${TARGET_ORCH}`, attested `transcribe`, and parked the run at the next step.
 
 ## Constraints
 
 - You are working inside the Astrid repo. Everything goes through `python3 -m astrid`.
-- Attach to project `$SLUG` first.
-- Start with `python3 -m astrid status --project $SLUG` and `python3 -m astrid next --project $SLUG`.
+- Attach to project `${SLUG}` first.
+- Start with `python3 -m astrid status --project ${SLUG}` and `python3 -m astrid next --project ${SLUG}`.
 - Inspect the upstream `transcribe` output before approving the current step.
 - You may either repair the bad artifact and continue, or abort/stop with a clear reason.
 - Do not silently continue on corrupt data.
