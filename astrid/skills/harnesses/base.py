@@ -81,6 +81,53 @@ class HarnessAdapter:
         )
 
 
+def is_ours(link_name: str) -> bool:
+    """Return True when *link_name* is a skill entry this layer manages.
+
+    "Ours" is the gateway ``astrid`` link and any ``astrid-<pack>`` per-pack
+    link. Foreign entries (e.g. a global ``image-generation`` skill) are never
+    matched, so the prune/refresh logic can refuse to touch them.
+    """
+    return link_name == "astrid" or link_name.startswith("astrid-")
+
+
+def ours_link_to_pack_id(link_name: str) -> str | None:
+    """Map an ``astrid``/``astrid-<pack>`` link name back to its pack id.
+
+    Returns ``"_core"`` for the gateway ``astrid`` link, the suffix for an
+    ``astrid-<pack>`` link, or ``None`` when the name is not ours.
+    """
+    if link_name == "astrid":
+        return "_core"
+    if link_name.startswith("astrid-"):
+        return link_name[len("astrid-") :]
+    return None
+
+
+def prune_orphan_skill_links(skills_dir: Path, known_pack_ids: set[str]) -> list[Path]:
+    """Remove ``astrid-*`` symlinks whose pack id is not in *known_pack_ids*.
+
+    Only our own symlinks are considered, and only symlinks are removed; a
+    foreign entry or a real (non-symlink) file/dir is never touched. The
+    gateway ``astrid`` link is never pruned here (it is always re-linked).
+    Returns the list of removed link paths.
+    """
+    removed: list[Path] = []
+    if not skills_dir.is_dir():
+        return removed
+    for entry in sorted(skills_dir.iterdir()):
+        name = entry.name
+        if name == "astrid" or not name.startswith("astrid-"):
+            continue
+        if not entry.is_symlink():
+            continue
+        pack_id = ours_link_to_pack_id(name)
+        if pack_id is not None and pack_id not in known_pack_ids:
+            entry.unlink()
+            removed.append(entry)
+    return removed
+
+
 def ensure_symlink(target: Path, source: Path, *, force: bool = False) -> bool:
     """Idempotently create ``target`` as a symlink → ``source``.
 
@@ -129,5 +176,8 @@ __all__ = [
     "InstallRecord",
     "PlannedStep",
     "ensure_symlink",
+    "is_ours",
+    "ours_link_to_pack_id",
+    "prune_orphan_skill_links",
     "remove_symlink",
 ]
