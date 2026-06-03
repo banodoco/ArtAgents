@@ -51,6 +51,11 @@ class BackendSpec:
     #: (e.g. ``"fal-ai/flux/dev"``).
     endpoint: str = ""
 
+    #: Falcon endpoint slug for LoRA routing (cloud only).
+    #: When set and LoRAs are requested, this overrides ``endpoint``
+    #: (e.g. ``"fal-ai/flux-lora"``).
+    lora_endpoint: str | None = None
+
     #: Mapping from canonical feature names to backend-specific parameter
     #: names.  Every key in this map MUST correspond to a feature declared
     #: in the parent ``ModeSpec.supports`` list.
@@ -424,6 +429,7 @@ def _validate_backend_spec(
         template=str(template),
         template_hash=str(template_hash),
         endpoint=str(endpoint),
+        lora_endpoint=raw.get("lora_endpoint"),
         param_map=param_map,
     )
 
@@ -448,3 +454,159 @@ def _require_feature(
 ) -> Feature:
     """Validate that *value* is a recognised ``Feature`` literal."""
     return taxonomy_registry.require_feature(value, path=path)
+
+
+# ---------------------------------------------------------------------------
+# LoRA registry schema
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class LoraSource:
+    """Source information for a LoRA adapter."""
+
+    #: HuggingFace repository (e.g. ``"XLabs-AI/flux-RealismLora"``).
+    repo: str = ""
+
+    #: Filename within the repository (e.g. ``"lora.safetensors"``).
+    file: str = ""
+
+    #: Direct download URL for the LoRA weights.
+    url: str = ""
+
+
+@dataclass(frozen=True)
+class LoraEntry:
+    """A registered LoRA adapter entry."""
+
+    #: Unique LoRA identifier (e.g. ``"flux-realism"``).
+    id: str
+
+    #: Human-readable name (e.g. ``"FLUX Realism"``).
+    name: str = ""
+
+    #: Model ID this LoRA is designed for (e.g. ``"flux-dev"``).
+    base_model: str = ""
+
+    #: Intent category (e.g. ``"realism"``, ``"style"``).
+    intent: str = ""
+
+    #: Source information for the LoRA weights.
+    source: LoraSource = field(default_factory=LoraSource)
+
+    #: Default scale/strength to apply (0.0–1.0).
+    default_scale: float = 1.0
+
+    #: Whether this LoRA has been visually verified.
+    verified: bool = False
+
+    #: Free-form notes about this LoRA.
+    notes: str = ""
+
+
+def validate_lora_registry(
+    raw: dict[str, Any],
+    *,
+    model_ids: frozenset[str] | None = None,
+) -> list[LoraEntry]:
+    """Validate a raw LoRA registry dict and return a list of :class:`LoraEntry`.
+
+    The *raw* dict must have the top-level shape::
+
+        {
+            "schema_version": 1,
+            "loras": [ { ... }, ... ]
+        }
+
+    Raises:
+        ValueError: If any validation rule is violated.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"lora registry must be a dict, got {type(raw).__name__}")
+
+    schema_version = raw.get("schema_version")
+    if schema_version != 1:
+        raise ValueError(
+            f"unsupported lora registry schema_version: {schema_version!r} (expected 1)"
+        )
+
+    loras_raw = raw.get("loras")
+    if not isinstance(loras_raw, list):
+        raise ValueError(
+            f"'loras' must be a list, got {type(loras_raw).__name__}"
+        )
+    if not loras_raw:
+        raise ValueError("'loras' must not be empty")
+
+    entries: list[LoraEntry] = []
+    seen_ids: set[str] = set()
+    model_id_set: frozenset[str] = model_ids or frozenset()
+
+    for idx, item in enumerate(loras_raw):
+        prefix = f"loras[{idx}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{prefix}: must be a dict, got {type(item).__name__}")
+
+        lora_id = _require_str(item, "id", prefix)
+
+        # -- duplicate check -------------------------------------------------
+        if lora_id in seen_ids:
+            raise ValueError(f"{prefix}: duplicate lora id {lora_id!r}")
+        seen_ids.add(lora_id)
+
+        name = item.get("name", "")
+        base_model = _require_str(item, "base_model", prefix)
+        intent = item.get("intent", "")
+
+        # -- base_model cross-check ------------------------------------------
+        if model_id_set and base_model not in model_id_set:
+            raise ValueError(
+                f"{prefix}: base_model {base_model!r} not found in model registry"
+            )
+
+        # -- source -----------------------------------------------------------
+        source_raw = item.get("source")
+        if not isinstance(source_raw, dict):
+            raise ValueError(
+                f"{prefix}.source: must be a dict, got {type(source_raw).__name__}"
+            )
+        source = LoraSource(
+            repo=source_raw.get("repo", ""),
+            file=source_raw.get("file", ""),
+            url=source_raw.get("url", ""),
+        )
+
+        default_scale = item.get("default_scale", 1.0)
+        if not isinstance(default_scale, (int, float)):
+            raise ValueError(
+                f"{prefix}.default_scale: must be a number, "
+                f"got {type(default_scale).__name__}"
+            )
+
+        verified = item.get("verified", False)
+        if not isinstance(verified, bool):
+            raise ValueError(
+                f"{prefix}.verified: must be a boolean, "
+                f"got {type(verified).__name__}"
+            )
+
+        notes = item.get("notes", "")
+        if not isinstance(notes, str):
+            raise ValueError(
+                f"{prefix}.notes: must be a string, got {type(notes).__name__}"
+            )
+
+        entries.append(
+            LoraEntry(
+                id=lora_id,
+                name=str(name),
+                base_model=base_model,
+                intent=str(intent),
+                source=source,
+                default_scale=float(default_scale),
+                verified=verified,
+                notes=str(notes),
+            )
+        )
+
+    return entries

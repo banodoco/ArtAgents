@@ -1574,3 +1574,130 @@ class TestValidateRegistryWithGenerationTaxonomy:
         )
         with pytest.raises(ValueError, match="unknown backend key"):
             validate_registry_with_backends(raw, taxonomy_registry=registry)
+
+
+# ---------------------------------------------------------------------------
+# LoRA registry tests
+# ---------------------------------------------------------------------------
+
+
+class TestLoraRegistryLoad:
+    """LoRA registry loads from loras.yaml and validates base_model."""
+
+    def test_load_default_loras(self) -> None:
+        """The shipped loras.yaml loads with model_ids validation."""
+        from astrid.core.model_catalog.registry import LoraRegistry
+        from astrid.core.model_catalog.registry import ModelRegistry
+
+        model_registry = ModelRegistry.load_default()
+        model_ids = frozenset(e.id for e in model_registry.list_all())
+        lora_registry = LoraRegistry.load_default(model_ids=model_ids)
+        entries = lora_registry.list_all()
+        assert len(entries) == 3
+        ids = {e.id for e in entries}
+        assert ids == {"flux-realism", "z-realgen-v2", "flux2-klein-realism"}
+
+    def test_get_by_id(self) -> None:
+        """LoRA lookup by id returns the correct entry."""
+        from astrid.core.model_catalog.registry import LoraRegistry
+        from astrid.core.model_catalog.registry import ModelRegistry
+
+        model_registry = ModelRegistry.load_default()
+        model_ids = frozenset(e.id for e in model_registry.list_all())
+        lora_registry = LoraRegistry.load_default(model_ids=model_ids)
+        entry = lora_registry.get("flux-realism")
+        assert entry.base_model == "flux-dev"
+        assert entry.intent == "realism"
+        assert entry.verified is True
+        assert entry.source.file == "lora.safetensors"
+
+    def test_list_by_base_model(self) -> None:
+        """list_by_base_model filters correctly."""
+        from astrid.core.model_catalog.registry import LoraRegistry
+        from astrid.core.model_catalog.registry import ModelRegistry
+
+        model_registry = ModelRegistry.load_default()
+        model_ids = frozenset(e.id for e in model_registry.list_all())
+        lora_registry = LoraRegistry.load_default(model_ids=model_ids)
+        flux_loras = lora_registry.list_by_base_model("flux-dev")
+        assert len(flux_loras) == 1
+        assert flux_loras[0].id == "flux-realism"
+
+    def test_unknown_lora_raises_keyerror(self) -> None:
+        """Unknown LoRA id raises KeyError listing available."""
+        from astrid.core.model_catalog.registry import LoraRegistry
+        from astrid.core.model_catalog.registry import ModelRegistry
+
+        model_registry = ModelRegistry.load_default()
+        model_ids = frozenset(e.id for e in model_registry.list_all())
+        lora_registry = LoraRegistry.load_default(model_ids=model_ids)
+        with pytest.raises(KeyError, match="Unknown LoRA 'nonexistent'"):
+            lora_registry.get("nonexistent")
+
+    def test_base_model_validation_on_load(self) -> None:
+        """Loading with model_ids that don't include a LoRA's base_model fails."""
+        from astrid.core.model_catalog.schema import validate_lora_registry
+
+        raw = {
+            "schema_version": 1,
+            "loras": [
+                {
+                    "id": "test-lora",
+                    "name": "Test LoRA",
+                    "base_model": "nonexistent-model",
+                    "intent": "realism",
+                    "source": {
+                        "repo": "test/repo",
+                        "file": "lora.safetensors",
+                        "url": "https://example.com/lora.safetensors",
+                    },
+                    "default_scale": 1.0,
+                    "verified": False,
+                    "notes": "",
+                }
+            ],
+        }
+        with pytest.raises(
+            ValueError, match="base_model 'nonexistent-model' not found in model registry"
+        ):
+            validate_lora_registry(raw, model_ids=frozenset({"valid-model"}))
+
+    def test_duplicate_lora_id_rejected(self) -> None:
+        """Duplicate LoRA ids are rejected by validation."""
+        from astrid.core.model_catalog.schema import validate_lora_registry
+
+        raw = {
+            "schema_version": 1,
+            "loras": [
+                {
+                    "id": "dup-lora",
+                    "name": "A",
+                    "base_model": "flux-dev",
+                    "intent": "realism",
+                    "source": {
+                        "repo": "test/a",
+                        "file": "a.safetensors",
+                        "url": "https://example.com/a.safetensors",
+                    },
+                    "default_scale": 1.0,
+                    "verified": False,
+                    "notes": "",
+                },
+                {
+                    "id": "dup-lora",
+                    "name": "B",
+                    "base_model": "flux-dev",
+                    "intent": "style",
+                    "source": {
+                        "repo": "test/b",
+                        "file": "b.safetensors",
+                        "url": "https://example.com/b.safetensors",
+                    },
+                    "default_scale": 1.0,
+                    "verified": False,
+                    "notes": "",
+                },
+            ],
+        }
+        with pytest.raises(ValueError, match="duplicate lora id 'dup-lora'"):
+            validate_lora_registry(raw, model_ids=frozenset({"flux-dev"}))

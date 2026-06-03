@@ -49,6 +49,7 @@ models:
               steps: steps
           cloud:
             endpoint: fal-ai/z-image/turbo
+            lora_endpoint: fal-ai/z-image/turbo/lora
             param_map:
               prompt: prompt
               seed: seed
@@ -228,6 +229,7 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/flux/dev
+            lora_endpoint: fal-ai/flux-lora
             param_map:
               prompt: prompt
               seed: seed
@@ -321,6 +323,7 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/flux-2/klein/9b
+            lora_endpoint: fal-ai/flux-2/lora
             param_map:
               prompt: prompt
               seed: seed
