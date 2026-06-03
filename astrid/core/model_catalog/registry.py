@@ -19,8 +19,10 @@ from astrid.core.generation.backends.registry import (
 )
 from astrid.core.generation.features import load_default_generation_taxonomy_registry
 from astrid.core.model_catalog.schema import (
+    LoraEntry,
     ModelEntry,
     ModeSpec,
+    validate_lora_registry,
     validate_registry_with_backends,
 )
 
@@ -158,3 +160,62 @@ def _load_yaml(path: Path) -> dict[str, Any]:
             f"got {type(data).__name__}"
         )
     return data
+
+
+class LoraRegistry:
+    """In-memory registry of LoRA adapter entries.
+
+    Loaded from the shipped ``loras.yaml`` via :meth:`load_default`.
+    """
+
+    def __init__(self, entries: list[LoraEntry]) -> None:
+        self._by_id: dict[str, LoraEntry] = {e.id: e for e in entries}
+
+    # -- lookup ----------------------------------------------------------
+
+    def get(self, lora_id: str) -> LoraEntry:
+        """Return the :class:`LoraEntry` for *lora_id*.
+
+        Raises:
+            KeyError: If *lora_id* is not registered.
+        """
+        try:
+            return self._by_id[lora_id]
+        except KeyError:
+            available = ", ".join(sorted(self._by_id))
+            raise KeyError(
+                f"Unknown LoRA {lora_id!r}. Available: {available}"
+            ) from None
+
+    def list_by_base_model(self, base_model: str) -> list[LoraEntry]:
+        """Return all LoRAs designed for *base_model*."""
+        return [e for e in self._by_id.values() if e.base_model == base_model]
+
+    def list_all(self) -> list[LoraEntry]:
+        """Return every registered LoRA entry."""
+        return list(self._by_id.values())
+
+    # -- loading ---------------------------------------------------------
+
+    @classmethod
+    def load_default(
+        cls,
+        *,
+        model_ids: frozenset[str],
+    ) -> LoraRegistry:
+        """Load the shipped ``loras.yaml`` from the catalog directory.
+
+        Parameters:
+            model_ids: Set of valid model IDs (accepted but base-model
+                cross-check is deferred to generation-time in fal.py;
+                use :func:`validate_lora_registry` directly for
+                load-time cross-check).
+        """
+        yaml_path = Path(__file__).resolve().parent / "loras.yaml"
+        if not yaml_path.is_file():
+            raise FileNotFoundError(f"lora registry not found: {yaml_path}")
+        raw = _load_yaml(yaml_path)
+        # Load all loras; base_model cross-check is done by the caller
+        # (fal.py) at generation time, not at registry-load time.
+        entries = validate_lora_registry(raw, model_ids=None)
+        return cls(entries)

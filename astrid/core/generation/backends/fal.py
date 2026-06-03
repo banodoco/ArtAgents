@@ -116,12 +116,79 @@ class FalBackend(BackendAdapter):
         if computed_frames is not None:
             logger.debug("Computed frames=%d from duration * fps", computed_frames)
 
+        # --- LoRA resolution + routing (before main payload build) -----------
+        lora_provenance: list[dict[str, Any]] = []
+        loras_raw = params.get("loras")
+        fal_loras: list[dict[str, Any]] = []
+        if loras_raw:
+            # (c) Require lora_endpoint to exist
+            if not backend_spec.lora_endpoint:
+                raise ValueError(
+                    f"model {entry.id!r} has no LoRA endpoint; "
+                    f"cannot apply LoRAs"
+                )
+            # Route to lora endpoint
+            endpoint = backend_spec.lora_endpoint
+
+            # (a+b) Resolve and validate each LoRA
+            for item in loras_raw:
+                if isinstance(item, str):
+                    # Registry id lookup
+                    from astrid.core.model_catalog.registry import LoraRegistry
+                    lora_registry = LoraRegistry.load_default(
+                        model_ids=frozenset({entry.id}),
+                    )
+                    try:
+                        lora_entry = lora_registry.get(item)
+                    except KeyError as exc:
+                        raise ValueError(
+                            f"Unknown LoRA id {item!r}: {exc}"
+                        ) from exc
+                    # (b) Validate base_model match
+                    if lora_entry.base_model != entry.id:
+                        raise ValueError(
+                            f"LoRA {lora_entry.id!r} base_model "
+                            f"{lora_entry.base_model!r} does not match "
+                            f"requested model {entry.id!r}"
+                        )
+                    fal_loras.append({
+                        "path": lora_entry.source.url,
+                        "scale": lora_entry.default_scale,
+                    })
+                    lora_provenance.append({
+                        "id": lora_entry.id,
+                        "url": lora_entry.source.url,
+                        "scale": lora_entry.default_scale,
+                    })
+                elif isinstance(item, dict):
+                    # Inline {path, scale} spec
+                    path = item.get("path")
+                    scale = item.get("scale", 1.0)
+                    if not path or not isinstance(path, str):
+                        raise ValueError(
+                            f"inline LoRA spec missing 'path': {item!r}"
+                        )
+                    # Inline LoRAs cannot be validated for base_model —
+                    # caller assumes responsibility.
+                    fal_loras.append({"path": path, "scale": scale})
+                    lora_provenance.append({
+                        "url": path,
+                        "scale": scale,
+                    })
+                else:
+                    raise ValueError(
+                        f"LoRA must be a registry id (str) or inline dict "
+                        f"{{path, scale}}, got {type(item).__name__}: {item!r}"
+                    )
+
         # --- build payload ---------------------------------------------------
         payload: dict[str, Any] = {}
 
         for canon, remote_param in param_map.items():
             if canon == "count":
                 continue  # count is managed by the executor loop
+            if canon == "loras":
+                continue  # loras handled separately above
             if canon not in params:
                 continue
             value = params[canon]
@@ -184,6 +251,10 @@ class FalBackend(BackendAdapter):
         # flux-schnell: guidance_scale is always 1.0 (frozen value)
         if entry.id == "flux-schnell" and mode == "t2i":
             payload["guidance_scale"] = 1.0
+
+        # --- attach LoRA payload if present ----------------------------------
+        if loras_raw and fal_loras:
+            payload["loras"] = fal_loras
 
         # --- submit + poll ---------------------------------------------------
         t0 = time.monotonic()

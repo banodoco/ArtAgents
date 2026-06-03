@@ -108,9 +108,9 @@ def test_manifest_loads() -> None:
     assert manifest.id == "generation.generate_image"
     assert manifest.kind == "built_in"
     assert manifest.version == "2.0"
-    # v2 executor has 13 inputs: mode, prompt, prompts_file, model, image_ref,
-    # execution, count, seed, negative_prompt, size, strength, guidance_scale, steps
-    assert len(manifest.inputs) == 13
+    # v2 executor has 14 inputs: mode, prompt, prompts_file, model, image_ref,
+    # execution, count, seed, negative_prompt, size, strength, guidance_scale, steps, loras
+    assert len(manifest.inputs) == 14
     assert len(manifest.outputs) == 2  # generated_images, image_manifest
 
 
@@ -485,3 +485,135 @@ def test_prompt_file_required_and_supported_custom_features_are_merged() -> None
     assert "rogue_feature" not in filtered
     assert set(dropped) == {"count", "rogue_feature"}
     assert {warning["feature"] for warning in warnings} == {"count", "rogue_feature"}
+
+
+# ---------------------------------------------------------------------------
+# LoRA parsing tests
+# ---------------------------------------------------------------------------
+
+
+class TestLoraArgParsing:
+    """Tests for _parse_loras_arg in the generate_image executor."""
+
+    def test_empty_loras(self) -> None:
+        from astrid.packs.generation.executors.generate_image.run import _parse_loras_arg
+        assert _parse_loras_arg(None) == []
+        assert _parse_loras_arg("") == []
+        assert _parse_loras_arg("  ") == []
+
+    def test_registry_ids(self) -> None:
+        from astrid.packs.generation.executors.generate_image.run import _parse_loras_arg
+        result = _parse_loras_arg("flux-realism,z-realgen-v2")
+        assert result == ["flux-realism", "z-realgen-v2"]
+
+    def test_inline_path_at_scale(self) -> None:
+        from astrid.packs.generation.executors.generate_image.run import _parse_loras_arg
+        result = _parse_loras_arg("https://example.com/lora.safetensors@0.8")
+        assert len(result) == 1
+        assert result[0] == {"path": "https://example.com/lora.safetensors", "scale": 0.8}
+
+    def test_mixed_registry_and_inline(self) -> None:
+        from astrid.packs.generation.executors.generate_image.run import _parse_loras_arg
+        result = _parse_loras_arg("flux-realism,https://x.com/lora.safetensors@0.5")
+        assert result == [
+            "flux-realism",
+            {"path": "https://x.com/lora.safetensors", "scale": 0.5},
+        ]
+
+    def test_inline_without_scale_defaults(self) -> None:
+        from astrid.packs.generation.executors.generate_image.run import _parse_loras_arg
+        result = _parse_loras_arg("https://example.com/lora.safetensors")
+        assert result == ["https://example.com/lora.safetensors"]
+
+
+# ---------------------------------------------------------------------------
+# Fal backend LoRA routing tests (unit-level, no network)
+# ---------------------------------------------------------------------------
+
+
+class TestFalLoraRouting:
+    """Tests for LoRA routing + validation in FalBackend.generate()."""
+
+    def test_missing_lora_endpoint_raises(self) -> None:
+        """When a model has no lora_endpoint, requesting loras raises ValueError."""
+        from astrid.core.generation.backends.fal import FalBackend
+        from astrid.core.model_catalog.schema import BackendSpec, ModelEntry, ModeSpec
+        from astrid.core.util.http import HttpClient
+
+        entry = ModelEntry(
+            id="no-lora-model",
+            modality="image",
+            modes={
+                "t2i": ModeSpec(
+                    supports=("prompt",),
+                    requires=("prompt",),
+                    backends={
+                        "cloud": BackendSpec(
+                            endpoint="fal-ai/test",
+                            lora_endpoint="",  # no lora endpoint
+                            param_map={"prompt": "prompt"},
+                        )
+                    },
+                )
+            },
+        )
+
+        class FakeClient(HttpClient):
+            def __init__(self) -> None:
+                super().__init__()
+
+        backend = FalBackend(client=FakeClient())
+        import os
+        os.environ["FAL_KEY"] = "test-key"
+
+        with pytest.raises(ValueError, match="has no LoRA endpoint"):
+            backend.generate(
+                entry=entry,
+                mode="t2i",
+                params={"prompt": "test", "loras": ["some-id"]},
+                out_dir=Path("/tmp"),
+            )
+
+    def test_base_mismatch_raises(self) -> None:
+        """When a LoRA's base_model != entry.id, ValueError is raised."""
+        from astrid.core.generation.backends.fal import FalBackend
+        from astrid.core.model_catalog.schema import BackendSpec, ModelEntry, ModeSpec
+        from astrid.core.util.http import HttpClient
+
+        entry = ModelEntry(
+            id="flux-dev",
+            modality="image",
+            modes={
+                "t2i": ModeSpec(
+                    supports=("prompt",),
+                    requires=("prompt",),
+                    backends={
+                        "cloud": BackendSpec(
+                            endpoint="fal-ai/flux/dev",
+                            lora_endpoint="fal-ai/flux-lora",
+                            param_map={"prompt": "prompt"},
+                        )
+                    },
+                )
+            },
+        )
+
+        class FakeClient(HttpClient):
+            def __init__(self) -> None:
+                super().__init__()
+
+        backend = FalBackend(client=FakeClient())
+        import os
+        os.environ["FAL_KEY"] = "test-key"
+
+        # flux-realism is for flux-dev, but we request it on z-image... 
+        # Actually, registry lookup will fail first because base_model mismatch.
+        # Let's request a LoRA that IS in the registry but for a different model.
+        # We use "z-realgen-v2" which has base_model=z-image, not flux-dev.
+        with pytest.raises(ValueError, match="does not match"):
+            backend.generate(
+                entry=entry,
+                mode="t2i",
+                params={"prompt": "test", "loras": ["z-realgen-v2"]},
+                out_dir=Path("/tmp"),
+            )

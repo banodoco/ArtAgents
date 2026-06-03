@@ -296,6 +296,36 @@ def _available_backend_ids(mode_spec: Any) -> tuple[str, ...]:
     return tuple(sorted(mode_spec.backends))
 
 
+def _parse_loras_arg(raw: str | None) -> list[str | dict[str, Any]]:
+    """Parse the ``--loras`` CLI value into a list for the backend.
+
+    Format: comma-separated tokens.  Each token is either:
+    * A registry id (kebab-case, no ``@`` or ``://``) → passed as a str
+    * A ``path@scale`` spec (URL or path containing ``://`` or ``.safetensors``
+      followed by ``@`` and a float) → passed as ``{"path": ..., "scale": ...}``
+    """
+    if not raw or not raw.strip():
+        return []
+    result: list[str | dict[str, Any]] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        # Check for path@scale syntax
+        if "@" in token and ("://" in token or ".safetensors" in token):
+            parts = token.rsplit("@", 1)
+            path = parts[0].strip()
+            try:
+                scale = float(parts[1].strip())
+            except (ValueError, IndexError):
+                scale = 1.0
+            result.append({"path": path, "scale": scale})
+        else:
+            # Registry id
+            result.append(token)
+    return result
+
+
 def _create_backend_adapter(
     backend_registry: GenerationBackendRegistry,
     execution: str,
@@ -411,6 +441,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Env file holding FAL_KEY (for cloud execution).",
     )
+    p.add_argument(
+        "--loras",
+        default=None,
+        help="Comma-separated LoRA registry ids and/or path@scale specs "
+        "(e.g. 'flux-realism' or 'https://...lora.safetensors@0.8').",
+    )
     return p
 
 
@@ -498,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
             image_ref_resolved = ref
 
     # --- sequential N=1 generation loop -------------------------------------
+    loras_parsed = _parse_loras_arg(args.loras)
     all_outputs: list[dict[str, Any]] = []
     count = max(1, args.count or 1)
     prompt_text: str | None = None
@@ -587,6 +624,8 @@ def main(argv: list[str] | None = None) -> int:
         # --- build canonical params dict for adapter -------------------------
         params["seed"] = seed
         params["count"] = 1  # N=1 per loop iteration
+        if loras_parsed:
+            params["loras"] = loras_parsed
 
         # --- dispatch to adapter (SD-004) ------------------------------------
         result: GenerationResult = adapter.generate(
@@ -638,6 +677,8 @@ def main(argv: list[str] | None = None) -> int:
         all_applied_features,
     )
     manifest_path = out / "manifest.json"
+    if loras_parsed:
+        manifest["loras"] = loras_parsed
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"manifest={manifest_path}")
     return 0

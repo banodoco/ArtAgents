@@ -132,6 +132,13 @@
       "name": "steps",
       "required": false,
       "type": "integer"
+    },
+    {
+      "default": "",
+      "description": "Comma-separated LoRA registry ids and/or path@scale specs (e.g. 'flux-realism,z-realgen-v2' or 'https://...@0.8').",
+      "name": "loras",
+      "required": false,
+      "type": "string"
     }
   ],
   "isolation": {
