@@ -104,6 +104,7 @@ DEFAULT_PROJECT_SLUG = "default"
 _AUTO_BIND_RUN_VERBS: tuple[tuple[str, ...], ...] = (
     ("executors", "run"),
     ("orchestrators", "run"),
+    ("scratch", "run"),
 )
 
 
@@ -480,6 +481,39 @@ def _dispatch_test(args: list[str]) -> int:
     return result.returncode
 
 
+def _dispatch_scratch(args: list[str]) -> int:
+    """Run a throwaway Python script with default project context.
+
+    ``astrid scratch run <file.py>`` inherits the session's default project
+    (auto-bound by the session gate) and runs the script via ``sys.executable``.
+    No DSL, no templating, no alternate generation path — just a thin wrapper
+    around subprocess execution with the bound session environment.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="astrid scratch")
+    sub = parser.add_subparsers(dest="scratch_command")
+    run_parser = sub.add_parser("run", help="Run a throwaway Python script")
+    run_parser.add_argument("file", help="Python file to run")
+    run_parser.add_argument(
+        "extra", nargs=argparse.REMAINDER, help="Extra arguments forwarded to the script"
+    )
+
+    parsed = parser.parse_args(args)
+    if parsed.scratch_command != "run":
+        parser.print_help()
+        return 1
+
+    file_path = Path(parsed.file)
+    if not file_path.is_file():
+        print(f"scratch: file not found: {file_path}", file=sys.__stderr__)
+        return 1
+
+    extra = parsed.extra or []
+    result = subprocess.run([sys.executable, str(file_path)] + extra)
+    return result.returncode
+
+
 _TOP_LEVEL_HANDLERS = {
     "attach": _dispatch_attach,
     "sessions": lambda args: _dispatch_sessions(args),
@@ -511,6 +545,7 @@ _TOP_LEVEL_HANDLERS = {
     "timelines": _dispatch_timelines,
     "modalities": _dispatch_modalities,
     "runpod": lambda args: _dispatch_runpod(args),
+    "scratch": _dispatch_scratch,
     "doctor": _dispatch_doctor,
     "setup": _dispatch_setup,
     "audit": _dispatch_audit,
@@ -876,20 +911,16 @@ def _auto_bind_default_project_session(raw: list[str]) -> Any:
     try:
         import os
 
-        from astrid.core.project.paths import resolve_projects_root
-        from astrid.core.project.project import create_project
         from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
-        from astrid.core.session.config import resolve_default_project
+        from astrid.core.project.paths import resolve_projects_root
+        from astrid.core.session.config import resolve_default_project_for_sdk
         from astrid.core.session.identity import read_identity
         from astrid.core.session.lifecycle import create_session
         from astrid.core.session.paths import sessions_dir
 
-        slug = resolve_default_project() or DEFAULT_PROJECT_SLUG
+        slug = resolve_default_project_for_sdk(fallback_slug=DEFAULT_PROJECT_SLUG)
         projects_root = resolve_projects_root()
         session_root = sessions_dir()
-
-        # Create-or-reuse the offline default project (cache-only mode).
-        create_project(slug, exist_ok=True, root=projects_root)
 
         identity = read_identity()
         agent_id = identity.agent_id if identity is not None else DEFAULT_PROJECT_SLUG

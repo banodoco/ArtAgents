@@ -515,5 +515,50 @@ class LintTest(unittest.TestCase):
         self.assertEqual(discovery.lint_shared_skill_md("nothing forbidden here"), [])
 
 
+class GenerationSkillDiscoveryTest(unittest.TestCase):
+    """Verify that ``astrid skills list`` surfaces the updated generation skill."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        descriptors = discovery.list_skills()
+        cls._descriptors = descriptors
+        gen = next((d for d in descriptors if d.pack_id == "generation"), None)
+        assert gen is not None, "generation pack must be discoverable via list_skills()"
+        cls._desc = gen
+        cls._raw_text = gen.skill_md.read_text(encoding="utf-8")
+
+    def test_generation_pack_is_discovered(self) -> None:
+        self.assertIsNotNone(self._desc)
+        self.assertEqual(self._desc.pack_id, "generation")
+
+    def test_description_references_facade(self) -> None:
+        """The generation skill summary describes the ``astrid.generate`` facade."""
+        self.assertIn("astrid.generate", self._desc.description)
+
+    def test_short_description_includes_facade_or_generation(self) -> None:
+        """The short description (what ``astrid skills list`` prints) is non-empty
+        and references generation or the facade."""
+        sd = self._desc.short_description
+        self.assertTrue(sd, "short_description must be non-empty")
+        self.assertTrue(
+            "generate" in sd.lower() or "generation" in sd.lower(),
+            f"short_description should mention generation: {sd!r}",
+        )
+
+    def test_skill_text_contains_facade_image_example(self) -> None:
+        """The SKILL.md body contains ``astrid.generate.image(`` examples."""
+        self.assertIn("astrid.generate.image(", self._raw_text)
+
+    def test_skill_text_contains_facade_video_example(self) -> None:
+        """The SKILL.md body contains ``astrid.generate.video(`` examples."""
+        self.assertIn("astrid.generate.video(", self._raw_text)
+
+    def test_skill_text_contains_openai_exclusion_note(self) -> None:
+        """The SKILL.md body states that ``execution=\"openai\"`` is rejected by the
+        facade and that ``generate_image_openai`` remains CLI/executor-only."""
+        self.assertIn("generate_image_openai", self._raw_text)
+        self.assertIn("execution=\"openai\"", self._raw_text)
+
+
 if __name__ == "__main__":
     unittest.main()

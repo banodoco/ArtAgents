@@ -166,7 +166,8 @@
     "env": [
       "FAL_KEY"
     ],
-    "runtime_entrypoint": "main",
+    "runtime_entrypoint": "run_sdk",
+    "runtime_entrypoint_note": "run_sdk is the in-process entrypoint returning a JSON-safe payload dict; subprocess / CLI compatibility remains via main() and the __main__ guard at the bottom of run.py.",
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.generation.executors.generate_image.run"
   },

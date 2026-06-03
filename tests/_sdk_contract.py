@@ -4,6 +4,7 @@ EXPECTED_PUBLIC_NAMES = (
     "discover",
     "get_capability",
     "invoke",
+    "generate",
     "read_events",
     "subscribe_events",
     "Capability",

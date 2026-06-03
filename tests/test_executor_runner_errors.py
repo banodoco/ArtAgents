@@ -732,6 +732,55 @@ def test_external_executor_in_process_mode_avoids_subprocess_and_returns_executo
     }
 
 
+def test_external_executor_in_process_mode_shallow_merges_runtime_payload_with_runner_keys_authoritative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = _executor(
+        executor_id="test.in_process_payload_merge",
+        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(executor)
+
+    def _fake_in_process(*args: Any, **kwargs: Any) -> Any:
+        return types.SimpleNamespace(
+            returncode=7,
+            payload={
+                "artifact": str(tmp_path / "artifact.json"),
+                "returncode": 99,
+                "executor_id": "runtime.executor",
+                "missing_binaries": ["runtime-bin"],
+                "skipped": True,
+                "skipped_reason": "runtime value",
+            },
+        )
+
+    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fake_in_process)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    assert result.returncode == 7
+    assert result.payload == {
+        "artifact": str(tmp_path / "artifact.json"),
+        "executor_id": executor.id,
+        "missing_binaries": [],
+        "returncode": 7,
+        "skipped": False,
+        "skipped_reason": "",
+    }
+
+
 def test_external_executor_default_mode_remains_subprocess_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -944,3 +993,160 @@ def test_unknown_executor_id_raises_key_error(tmp_path: Path) -> None:
     registry = ExecutorRegistry()
     with pytest.raises(KeyError, match="unknown executor id"):
         run_executor(ExecutorRunRequest(executor_id="nope.nada", out=tmp_path), registry)
+
+
+# ---------------------------------------------------------------------------
+# Generation facade contract tests — GENERATION_RESULT_KEY passthrough
+# and runner-authoritative collision precedence
+# ---------------------------------------------------------------------------
+
+
+def test_in_process_generation_result_key_passthrough_preserves_dict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime payload keys outside the runner-authoritative set are preserved.
+
+    When an in-process executor returns a payload containing
+    ``GENERATION_RESULT_KEY``, the generation result dict must survive the
+    ``_merge_runner_payload`` shallow merge so facade code (T6+) can
+    reconstruct a ``GenerationResult`` later.
+    """
+    from astrid.core.generation import GENERATION_RESULT_KEY
+
+    executor = _executor(
+        executor_id="test.gen_result_passthrough",
+        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(executor)
+
+    gen_result = {
+        "mode": "t2i",
+        "backend": "local",
+        "model": "z-image",
+        "image_paths": ["/tmp/img_01.png", "/tmp/img_02.png"],
+        "ok": True,
+        "error": None,
+        "manifest": {"prompt": "a red bicycle"},
+        "run_dir": "/tmp/run_abc",
+    }
+
+    def _fake_in_process(*args: Any, **kwargs: Any) -> Any:
+        return types.SimpleNamespace(
+            returncode=0,
+            payload={
+                "custom_artifact": str(tmp_path / "out.json"),
+                GENERATION_RESULT_KEY: gen_result,
+            },
+        )
+
+    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fake_in_process)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    # Runner-authoritative keys are set.
+    assert result.payload["executor_id"] == executor.id
+    assert result.payload["returncode"] == 0
+    assert result.payload["missing_binaries"] == []
+    assert result.payload["skipped"] is False
+    assert result.payload["skipped_reason"] == ""
+
+    # Runtime-only key is preserved.
+    assert result.payload["custom_artifact"] == str(tmp_path / "out.json")
+
+    # GENERATION_RESULT_KEY is preserved intact.
+    assert result.payload[GENERATION_RESULT_KEY] == gen_result
+    assert result.payload[GENERATION_RESULT_KEY]["mode"] == "t2i"
+    assert result.payload[GENERATION_RESULT_KEY]["image_paths"] == [
+        "/tmp/img_01.png",
+        "/tmp/img_02.png",
+    ]
+
+
+def test_in_process_returncode_collision_runner_wins_and_generation_result_preserved(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SC5: runtime ``returncode`` is overwritten by the runner's authoritative value.
+
+    A synthetic in-process executor returning
+    ``{GENERATION_RESULT_KEY: {...}, "returncode": 99}`` must yield:
+    * preserved ``generation_result`` in the payload
+    * runner-level ``returncode`` (7, not 99) in both ``result.returncode``
+      and ``result.payload["returncode"]``
+    """
+    from astrid.core.generation import GENERATION_RESULT_KEY
+
+    executor = _executor(
+        executor_id="test.returncode_collision",
+        argv=(sys.executable, "-m", "astrid.packs.youtube.executors.upload.run", "--help"),
+        metadata={
+            "runtime_module": "astrid.packs.youtube.executors.upload.run",
+            "runtime_entrypoint": "main",
+        },
+    )
+    registry = _registry(executor)
+
+    gen_result = {
+        "mode": "t2v",
+        "backend": "local",
+        "model": "wan-2.2",
+        "video_paths": ["/tmp/vid_01.mp4"],
+        "ok": True,
+        "error": None,
+        "manifest": {"prompt": "a cat walking"},
+        "run_dir": "/tmp/run_def",
+    }
+
+    def _fake_in_process(*args: Any, **kwargs: Any) -> Any:
+        return types.SimpleNamespace(
+            returncode=7,
+            payload={
+                GENERATION_RESULT_KEY: gen_result,
+                "returncode": 99,
+                "executor_id": "runtime.executor",
+                "missing_binaries": ["runtime-bin"],
+                "skipped": True,
+                "skipped_reason": "runtime value",
+            },
+        )
+
+    monkeypatch.setattr(executor_runner, "invoke_in_process_command", _fake_in_process)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            execution_mode="in_process",
+        ),
+        registry,
+    )
+
+    # Runner returncode is authoritative on the result struct.
+    assert result.returncode == 7
+
+    # Runner returncode is authoritative in the payload — runtime's 99 is
+    # overwritten during _merge_runner_payload.
+    assert result.payload["returncode"] == 7
+
+    # Other runner-authoritative keys also overwrite runtime values.
+    assert result.payload["executor_id"] == executor.id
+    assert result.payload["missing_binaries"] == []
+    assert result.payload["skipped"] is False
+    assert result.payload["skipped_reason"] == ""
+
+    # GENERATION_RESULT_KEY is preserved intact alongside runner keys.
+    assert result.payload[GENERATION_RESULT_KEY] == gen_result
+    assert result.payload[GENERATION_RESULT_KEY]["mode"] == "t2v"
+    assert result.payload[GENERATION_RESULT_KEY]["video_paths"] == ["/tmp/vid_01.mp4"]

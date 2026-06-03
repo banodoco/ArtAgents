@@ -326,6 +326,435 @@ class InvocationResult:
         )
 
 
+def _sdk_exception_from_payload(error: Mapping[str, Any] | None) -> AstridSDKError:
+    message = "generation invocation failed"
+    if error:
+        raw_message = error.get("message")
+        if isinstance(raw_message, str) and raw_message:
+            message = raw_message
+    sdk_error_name = error.get("sdk_error") if error else None
+    if isinstance(sdk_error_name, str):
+        exc_type = globals().get(sdk_error_name)
+        if isinstance(exc_type, type) and issubclass(exc_type, AstridSDKError):
+            return exc_type(message)
+    sdk_category = error.get("sdk_category") if error else None
+    if sdk_category == "validation":
+        return CapabilityValidationError(message)
+    if sdk_category == "missing_input":
+        return CapabilityMissingInputError(message)
+    if sdk_category == "precondition":
+        return CapabilityPreconditionError(message)
+    if sdk_category == "runtime":
+        return CapabilityRuntimeError(message)
+    if sdk_category == "lease":
+        return CapabilityLeaseError(message)
+    if sdk_category == "event_log":
+        return CapabilityEventLogError(message)
+    return CapabilityInvocationError(message)
+
+
+def _load_generation_result_type() -> tuple[str, Any]:
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+
+    return GENERATION_RESULT_KEY, GenerationResult
+
+
+def _reconstruct_generation_result(result: InvocationResult) -> Any:
+    generation_result_key, generation_result_type = _load_generation_result_type()
+
+    if not result.ok:
+        raise _sdk_exception_from_payload(result.error)
+
+    raw_result = result.raw_result
+    if not isinstance(raw_result, Mapping):
+        raise CapabilityRuntimeError("generation executor returned a non-mapping raw_result")
+
+    payload = raw_result.get("payload")
+    if not isinstance(payload, Mapping):
+        raise CapabilityRuntimeError("generation executor returned a non-mapping payload")
+
+    if generation_result_key not in payload:
+        raise CapabilityRuntimeError(
+            f"generation executor payload is missing {generation_result_key!r}"
+        )
+
+    generation_payload = payload[generation_result_key]
+    if isinstance(generation_payload, generation_result_type):
+        return generation_payload
+    if not isinstance(generation_payload, Mapping):
+        raise CapabilityRuntimeError(
+            f"generation executor payload {generation_result_key!r} must be a mapping or GenerationResult"
+        )
+
+    from_dict = getattr(generation_result_type, "from_dict", None)
+    if not callable(from_dict):
+        raise CapabilityRuntimeError("GenerationResult.from_dict is unavailable")
+
+    reconstructed = from_dict(dict(generation_payload))
+    if not isinstance(reconstructed, generation_result_type):
+        raise CapabilityRuntimeError("GenerationResult.from_dict returned an unexpected type")
+    return reconstructed
+
+
+def _load_model_registry(
+    *,
+    project_root: str | Path | None = None,
+    extra_pack_roots: tuple[str, ...] = (),
+    include_installed: bool = True,
+) -> Any:
+    """Lazily load the generation model registry.
+
+    Imported inside the call so ``import astrid`` does not pull in the
+    model catalog, YAML parser, or backend registry until a facade method
+    is actually invoked.
+    """
+    from astrid.core.model_catalog.registry import ModelRegistry
+
+    return ModelRegistry.load_default(
+        **_registry_load_kwargs(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        ),
+    )
+
+
+def _infer_image_mode(
+    explicit_mode: str | None,
+    inputs: dict[str, Any],
+) -> str:
+    """Infer the image generation mode.
+
+    Inference rules (deliberately narrow):
+    * ``image_ref`` present  → ``"i2i"``
+    * ``image_ref`` absent   → ``"t2i"``
+    * ``edit`` / ``inpaint`` / ``outpaint`` / ``upscale`` require an
+      explicit *mode* argument — they cannot be inferred.
+    """
+    if explicit_mode is not None:
+        return explicit_mode
+
+    if inputs.get("image_ref"):
+        return "i2i"
+    return "t2i"
+
+
+_EXPLICIT_ONLY_IMAGE_MODES: frozenset[str] = frozenset(
+    {"edit", "inpaint", "outpaint", "upscale"}
+)
+
+
+def _infer_video_mode(
+    explicit_mode: str | None,
+    inputs: dict[str, Any],
+) -> str:
+    """Infer the video generation mode.
+
+    Inference rules:
+    * ``image_ref`` + ``image_end_ref`` present  → ``"flf"``
+    * ``image_ref`` present only                  → ``"i2v"``
+    * neither                                    → ``"t2v"``
+    """
+    if explicit_mode is not None:
+        return explicit_mode
+
+    has_image_ref = bool(inputs.get("image_ref"))
+    has_image_end_ref = bool(inputs.get("image_end_ref"))
+
+    if has_image_ref and has_image_end_ref:
+        return "flf"
+    if has_image_ref:
+        return "i2v"
+    return "t2v"
+
+
+def _resolve_execution(
+    model_entry: Any,
+    mode: str,
+    explicit_execution: str | None,
+    *,
+    model: str,
+) -> str:
+    """Validate or infer the execution backend for *(model, mode)*.
+
+    * If *explicit_execution* is given it is validated against the
+      backends declared for the mode.
+    * If *explicit_execution* is ``None`` it is inferred **only** when
+      exactly one backend is declared; otherwise a clear diagnostic is
+      raised asking the caller to choose.
+    """
+    mode_spec = model_entry.modes.get(mode)
+    if mode_spec is None:
+        available_modes = ", ".join(sorted(model_entry.modes))
+        raise CapabilityValidationError(
+            f"Model {model!r} does not support mode {mode!r}. "
+            f"Available modes: {available_modes}"
+        )
+
+    backend_ids = list(mode_spec.backends.keys())
+    if not backend_ids:
+        raise CapabilityValidationError(
+            f"Model {model!r} mode {mode!r} has no configured backends"
+        )
+
+    if explicit_execution is not None:
+        if explicit_execution not in backend_ids:
+            raise CapabilityValidationError(
+                f"Execution {explicit_execution!r} is not available for "
+                f"model {model!r} mode {mode!r}. "
+                f"Available: {', '.join(sorted(backend_ids))}"
+            )
+        return explicit_execution
+
+    if len(backend_ids) == 1:
+        return backend_ids[0]
+
+    raise CapabilityValidationError(
+        f"Ambiguous execution for model {model!r} mode {mode!r}. "
+        f"Available backends: {', '.join(sorted(backend_ids))}. "
+        f"Please specify one explicitly via the 'execution' parameter."
+    )
+
+
+@dataclass(frozen=True)
+class GenerationFacade:
+    """Public typed facade for generation executors.
+
+    Built-in ``image`` and ``video`` are first-class methods.  Plugin
+    verbs registered via :func:`astrid.core.generation.verbs.register_verb`
+    are resolved through ``__getattr__`` so that ``astrid.generate.<name>``
+    works for third-party generation verbs without the facade importing
+    plugin registration modules.
+    """
+
+    def __getattr__(self, name: str) -> Any:
+        """Resolve a plugin-registered generation verb by *name*.
+
+        Called only when normal attribute lookup fails, so built-in
+        ``image`` and ``video`` always take priority.
+        """
+        # Lazy-import the verb registry — do NOT import astrid.sdk from
+        # the verbs module.
+        from astrid.core.generation.verbs import (
+            get_verb,
+            list_verbs,
+            load_generation_verb_plugins,
+        )
+
+        # Ensure plugin verbs are loaded (idempotent).
+        load_generation_verb_plugins()
+
+        try:
+            return get_verb(name)
+        except KeyError:
+            known = list_verbs()
+            hint = f" Available plugin verbs: {', '.join(known)}." if known else ""
+            raise AttributeError(
+                f"'GenerationFacade' has no attribute {name!r}. "
+                f"Built-in methods: image, video.{hint}"
+            ) from None
+
+    def image(
+        self,
+        *,
+        model: str,
+        mode: str | None = None,
+        execution: str | None = None,
+        out: Path | str | None = None,
+        project: str | None = None,
+        project_root: str | Path | None = None,
+        extra_pack_roots: tuple[str, ...] = (),
+        include_installed: bool = True,
+        banodoco_config: Any | None = None,
+        active_theme: str | Path | None = None,
+        include_missing_roots: bool = False,
+        brief: Path | str | None = None,
+        dry_run: bool = False,
+        check_binaries: bool = False,
+        python_exec: str | None = None,
+        verbose: bool = False,
+        argv: tuple[str, ...] = (),
+        **inputs: Any,
+    ) -> Any:
+        # --- openai guard (SD-005) ---------------------------------------
+        if execution == "openai":
+            raise CapabilityPreconditionError(
+                "astrid.generate.image does not support execution='openai'; use executor "
+                "'generation.generate_image_openai' directly"
+            )
+
+        # --- mode inference / validation ---------------------------------
+        resolved_mode = _infer_image_mode(mode, inputs)
+
+        # --- model catalog validation ------------------------------------
+        registry = _load_model_registry(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+        try:
+            model_entry = registry.get(model)
+        except KeyError as exc:
+            raise CapabilityValidationError(str(exc)) from exc
+
+        # Reject inference-only modes when they slip through
+        if mode is None and resolved_mode in _EXPLICIT_ONLY_IMAGE_MODES:
+            raise CapabilityValidationError(
+                f"Mode {resolved_mode!r} requires an explicit 'mode' argument"
+            )
+
+        # --- execution inference / validation ----------------------------
+        resolved_execution = _resolve_execution(
+            model_entry,
+            resolved_mode,
+            execution,
+            model=model,
+        )
+
+        # --- output routing -------------------------------------------------
+        if out is not None:
+            invoke_out = out
+            invoke_project = None
+        elif project is not None:
+            invoke_out = None
+            invoke_project = project
+        else:
+            from astrid.core.session.config import resolve_default_project_for_sdk
+
+            invoke_out = None
+            invoke_project = resolve_default_project_for_sdk(
+                projects_root=project_root,
+            )
+
+        # --- invoke ------------------------------------------------------
+        result = invoke(
+            "generation.generate_image",
+            kind="executor",
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+            banodoco_config=banodoco_config,
+            active_theme=active_theme,
+            include_missing_roots=include_missing_roots,
+            out=invoke_out,
+            project=invoke_project,
+            inputs={
+                "model": model,
+                "mode": resolved_mode,
+                "execution": resolved_execution,
+                **inputs,
+            },
+            brief=brief,
+            dry_run=dry_run,
+            check_binaries=check_binaries,
+            python_exec=python_exec,
+            verbose=verbose,
+            execution_mode="in_process",
+            argv=argv,
+        )
+        if dry_run:
+            # A dry run builds the command but does not generate, so there is no
+            # GenerationResult to reconstruct — return the raw InvocationResult
+            # (which carries the previewed command).
+            return result
+        return _reconstruct_generation_result(result)
+
+    def video(
+        self,
+        *,
+        model: str,
+        mode: str | None = None,
+        execution: str | None = None,
+        out: Path | str | None = None,
+        project: str | None = None,
+        project_root: str | Path | None = None,
+        extra_pack_roots: tuple[str, ...] = (),
+        include_installed: bool = True,
+        banodoco_config: Any | None = None,
+        active_theme: str | Path | None = None,
+        include_missing_roots: bool = False,
+        brief: Path | str | None = None,
+        dry_run: bool = False,
+        check_binaries: bool = False,
+        python_exec: str | None = None,
+        verbose: bool = False,
+        argv: tuple[str, ...] = (),
+        **inputs: Any,
+    ) -> Any:
+        # --- mode inference / validation ---------------------------------
+        resolved_mode = _infer_video_mode(mode, inputs)
+
+        # --- model catalog validation ------------------------------------
+        registry = _load_model_registry(
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+        )
+        try:
+            model_entry = registry.get(model)
+        except KeyError as exc:
+            raise CapabilityValidationError(str(exc)) from exc
+
+        # --- execution inference / validation ----------------------------
+        resolved_execution = _resolve_execution(
+            model_entry,
+            resolved_mode,
+            execution,
+            model=model,
+        )
+
+        # --- output routing -------------------------------------------------
+        if out is not None:
+            invoke_out = out
+            invoke_project = None
+        elif project is not None:
+            invoke_out = None
+            invoke_project = project
+        else:
+            from astrid.core.session.config import resolve_default_project_for_sdk
+
+            invoke_out = None
+            invoke_project = resolve_default_project_for_sdk(
+                projects_root=project_root,
+            )
+
+        # --- invoke ------------------------------------------------------
+        result = invoke(
+            "generation.generate_video",
+            kind="executor",
+            project_root=project_root,
+            extra_pack_roots=extra_pack_roots,
+            include_installed=include_installed,
+            banodoco_config=banodoco_config,
+            active_theme=active_theme,
+            include_missing_roots=include_missing_roots,
+            out=invoke_out,
+            project=invoke_project,
+            inputs={
+                "model": model,
+                "mode": resolved_mode,
+                "execution": resolved_execution,
+                **inputs,
+            },
+            brief=brief,
+            dry_run=dry_run,
+            check_binaries=check_binaries,
+            python_exec=python_exec,
+            verbose=verbose,
+            execution_mode="in_process",
+            argv=argv,
+        )
+        if dry_run:
+            # A dry run builds the command but does not generate, so there is no
+            # GenerationResult to reconstruct — return the raw InvocationResult.
+            return result
+        return _reconstruct_generation_result(result)
+
+
+generate = GenerationFacade()
+
+
 def read_events(
     project: str,
     run_id: str,
@@ -1233,7 +1662,7 @@ def invoke(
 
     try:
         if capability.capability_type == "executor":
-            if out is None:
+            if out is None and project is None:
                 raise CapabilityInvocationError("executor invocations require an out path")
             from astrid.core.executor.runner import ExecutorRunRequest
 
@@ -1320,6 +1749,7 @@ __all__ = [
     "SafetyDeclaration",
     "UnsupportedCapabilityError",
     "discover",
+    "generate",
     "get_capability",
     "invoke",
     "read_events",

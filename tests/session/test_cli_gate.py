@@ -395,7 +395,7 @@ def test_bound_session_missing_file_errors_with_hint(
 
 
 def test_stateless_executor_run_auto_binds_default_project_without_attach(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """A stateless `executors run --out` invocation must NOT require a prior
     `astrid attach`: the gate auto-binds a default project (creating it on
@@ -424,6 +424,7 @@ def test_stateless_executor_run_auto_binds_default_project_without_attach(
 
     assert "no session bound" not in stderr
     assert rc == 0
+    assert "auto-bound default project 'default'" in capfd.readouterr().err
     # Default project was created on first use under the isolated projects root.
     assert (env["projects"] / "default" / "project.json").is_file()
     # A session pointer was written and the process is now bound for the run.
@@ -434,7 +435,7 @@ def test_stateless_executor_run_auto_binds_default_project_without_attach(
 
 
 def test_auto_bind_honors_configured_workspace_default_project(
-    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
 ) -> None:
     """When a workspace/user default project is configured, auto-bind uses it
     instead of the literal ``default`` slug."""
@@ -458,6 +459,7 @@ def test_auto_bind_honors_configured_workspace_default_project(
     )
 
     assert "no session bound" not in stderr
+    assert "auto-bound default project 'scratch'" in capfd.readouterr().err
     # Auto-bind created the *configured* default ("scratch"), not the literal
     # fallback slug.
     assert (env["projects"] / "scratch" / "project.json").is_file()

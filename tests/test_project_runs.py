@@ -140,6 +140,27 @@ def test_project_run_rejects_project_plus_out(tmp_path: Path, monkeypatch: pytes
     assert list((tmp_path / "projects" / "demo" / "runs").glob("*")) == []
 
 
+def test_project_run_allows_implicit_out_when_project_supplied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+    registry = ExecutorRegistry([_writer_executor("test.writer")])
+
+    result = run_executor(ExecutorRunRequest("test.writer", out=None, project="demo"), registry)
+
+    assert result.returncode == 0
+    records = _project_records(projects_root)
+    assert [record["status"] for record in records] == ["completed"]
+    writer_out = Path(records[0]["out"])
+    assert writer_out.exists()
+    assert (writer_out / "env.txt").read_text(encoding="utf-8") == "1"
+
+
 def test_prepare_project_run_skips_timeline_when_requires_timeline_false(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
