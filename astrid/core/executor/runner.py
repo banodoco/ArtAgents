@@ -567,10 +567,110 @@ def _expand_external_command(
         raise ExecutorRunnerError(f"executor {executor.id!r} has no command")
     placeholders = _placeholder_values(executor, request, values)
     argv = tuple(_expand_placeholders(part, placeholders) for part in executor.command.argv)
+    consumed = _consumed_input_names(executor)
     argv = (*argv, *_expand_input_arg_mappings(executor, values))
+    argv = (*argv, *_auto_forward_untemplated_inputs(executor, values, consumed))
     cwd = _expand_placeholders(executor.command.cwd, placeholders) if executor.command.cwd else None
     env = {key: _expand_placeholders(value, placeholders) for key, value in executor.command.env.items()}
     return argv, cwd, env
+
+
+# Truthy/falsey string forms used when an `--input name=value` boolean reaches
+# the runner (CLI inputs arrive as strings, so a declared boolean port is a
+# string like "true"/"false").
+_BOOLEAN_TRUE = frozenset({"1", "true", "yes", "on"})
+_BOOLEAN_FALSE = frozenset({"", "0", "false", "no", "off"})
+
+
+def _consumed_input_names(executor: ExecutorDefinition) -> set[str]:
+    """Names already routed into the command by a placeholder or input_arg mapping.
+
+    An input is "consumed" when its ``name`` (or its declared ``placeholder``
+    alias) appears as a ``{token}`` anywhere in ``command.argv``/``cwd``/``env``,
+    or when it is the target of a ``command.input_args`` mapping. Auto-forwarding
+    skips consumed inputs so they are never double-passed.
+    """
+    consumed: set[str] = set()
+    if executor.command is None:
+        return consumed
+    tokens: set[str] = set()
+    for part in executor.command.argv:
+        tokens.update(_PLACEHOLDER_RE.findall(part))
+    if executor.command.cwd:
+        tokens.update(_PLACEHOLDER_RE.findall(executor.command.cwd))
+    for value in executor.command.env.values():
+        tokens.update(_PLACEHOLDER_RE.findall(value))
+    for mapping in executor.command.input_args:
+        consumed.add(mapping.input)
+    for port in executor.inputs:
+        if port.name in tokens:
+            consumed.add(port.name)
+        if port.placeholder and port.placeholder in tokens:
+            consumed.add(port.name)
+    return consumed
+
+
+def _input_flag(name: str) -> str:
+    """Convert a snake_case input name to its ``--kebab-case`` CLI flag."""
+    return "--" + name.replace("_", "-")
+
+
+def _auto_forward_untemplated_inputs(
+    executor: ExecutorDefinition,
+    values: Mapping[str, Any],
+    consumed: set[str],
+) -> tuple[str, ...]:
+    """Forward declared inputs that were not templated into the command.
+
+    For every declared input that (a) has a non-empty provided value, (b) was
+    not already consumed by a ``{placeholder}`` token, and (c) is not covered by
+    a ``command.input_args`` mapping, append it as ``--<kebab-name> <value>``
+    (or just ``--<kebab-name>`` for a truthy boolean port). This makes inputs
+    like ``--input prompt=hello`` reach the executor's ``run.py`` argparse, which
+    were otherwise silently dropped.
+
+    Opt-out via metadata for executors whose ``run.py`` does not accept the
+    derived flags:
+
+    * ``metadata.auto_forward_inputs: false`` disables forwarding entirely.
+    * ``metadata.auto_forward_skip: [name, ...]`` skips specific input names.
+    """
+    if executor.command is None:
+        return ()
+    metadata = executor.metadata or {}
+    if metadata.get("auto_forward_inputs") is False:
+        return ()
+    skip = set(metadata.get("auto_forward_skip") or ())
+    argv: list[str] = []
+    for port in executor.inputs:
+        if port.name in consumed or port.name in skip:
+            continue
+        value = values.get(port.name)
+        if not _has_value(value):
+            continue
+        if port.type == "boolean":
+            if _is_truthy_flag(value):
+                argv.append(_input_flag(port.name))
+            continue
+        for item in _iter_input_values(value):
+            if not _has_value(item):
+                continue
+            argv.append(_input_flag(port.name))
+            argv.append(_stringify_value(item))
+    return tuple(argv)
+
+
+def _is_truthy_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in _BOOLEAN_TRUE:
+        return True
+    if text in _BOOLEAN_FALSE:
+        return False
+    # Unknown non-empty string: treat as truthy so an explicitly-provided flag
+    # is not silently dropped.
+    return bool(text)
 
 
 def _prepare_project_request(

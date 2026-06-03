@@ -40,6 +40,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "auto_forward_inputs": false,
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.reigh.executors.open_in_reigh.run"
   },
