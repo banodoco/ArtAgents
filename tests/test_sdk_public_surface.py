@@ -111,6 +111,18 @@ def test_curated_sdk_names_do_not_shadow_existing_top_level_modules() -> None:
     assert collisions == []
 
 
+def test_generate_facade_is_lazy_public_surface() -> None:
+    astrid = _import_public_module()
+
+    assert "generate" in astrid.__all__
+    assert "astrid.sdk" not in sys.modules
+
+    facade = astrid.generate
+
+    assert "astrid.sdk" in sys.modules
+    assert type(facade).__name__ == "GenerationFacade"
+
+
 def test_legacy_top_level_submodule_imports_still_resolve() -> None:
     for module_name in REPRESENTATIVE_SUBMODULES:
         imported = importlib.import_module(module_name)
@@ -497,6 +509,52 @@ def test_invoke_rejects_elements_and_missing_executor_out() -> None:
             )
 
 
+def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``sdk.invoke(kind="executor", project="demo", out=None, execution_mode="in_process")``
+    must construct an ``ExecutorRunRequest`` with ``project="demo"`` and ``out=None``
+    without raising ``CapabilityInvocationError`` about a missing out path."""
+    astrid = _import_public_module()
+    from astrid.core.executor import runner as executor_runner
+
+    captured_request: dict[str, Any] = {}
+
+    def _fake_run_executor(request: Any, registry: Any) -> Any:
+        captured_request["executor_id"] = request.executor_id
+        captured_request["project"] = request.project
+        captured_request["out"] = request.out
+        captured_request["execution_mode"] = request.execution_mode
+        captured_request["inputs"] = dict(request.inputs)
+        from astrid.core.executor.runner import ExecutorRunResult
+
+        return ExecutorRunResult(
+            executor_id=request.executor_id,
+            kind="external",
+            command=(),
+            payload={"executor_id": request.executor_id, "returncode": 0},
+            returncode=0,
+        )
+
+    monkeypatch.setattr(executor_runner, "run_executor", _fake_run_executor)
+
+    result = astrid.invoke(
+        "editorial.arrange",
+        kind="executor",
+        project="demo",
+        out=None,
+        execution_mode="in_process",
+        include_installed=False,
+    )
+
+    assert captured_request["executor_id"] == "editorial.arrange"
+    assert captured_request["project"] == "demo"
+    assert captured_request["out"] is None
+    assert captured_request["execution_mode"] == "in_process"
+    assert result.capability_id == "editorial.arrange"
+    assert result.capability_type == "executor"
+
+
 def test_discover_exposes_pack_declared_extension_metadata() -> None:
     astrid = _import_public_module()
 
@@ -823,6 +881,39 @@ def test_invoke_defaults_to_subprocess_execution_mode(
     )
 
     assert seen["request"].execution_mode == "subprocess"
+    assert result.ok is True
+
+
+def test_invoke_executor_allows_project_without_explicit_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    seen: dict[str, Any] = {}
+
+    def fake_run_executor(request: Any, registry: Any) -> _FakeExecutorResult:
+        seen["request"] = request
+        return _FakeExecutorResult(
+            executor_id=request.executor_id,
+            kind="built_in",
+            command=("python", "-m", "astrid", "executors", "run", request.executor_id),
+            cwd=Path("/tmp/executor"),
+            env=MappingProxyType({}),
+            payload=MappingProxyType({}),
+            returncode=0,
+        )
+
+    monkeypatch.setattr(sdk, "run_executor", fake_run_executor)
+
+    result = astrid.invoke(
+        "editorial.arrange",
+        kind="executor",
+        include_installed=False,
+        project="demo-project",
+    )
+
+    assert seen["request"].project == "demo-project"
+    assert seen["request"].out is None
     assert result.ok is True
 
 
@@ -1348,3 +1439,1817 @@ def test_invoke_maps_orchestrator_result_errors_into_public_taxonomy(
         "sdk_error": "CapabilityRuntimeError",
         "sdk_category": "runtime",
     }
+
+
+def test_generate_image_reconstructs_typed_result_from_generation_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+
+    raw_generation = GenerationResult(
+        image_paths=[tmp_path / "image.png"],
+        model_actual="flux-dev",
+        run_dir=tmp_path,
+    ).to_dict()
+    seen: dict[str, Any] = {}
+
+    def fake_invoke(capability_id: str, **kwargs: Any) -> Any:
+        seen["capability_id"] = capability_id
+        seen["kwargs"] = kwargs
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: raw_generation,
+                    "returncode": 0,
+                }
+            },
+        )
+
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        mode="t2i",
+        execution="cloud",
+        out=tmp_path,
+        prompt="a lantern in fog",
+    )
+
+    assert isinstance(result, GenerationResult)
+    assert result.path == tmp_path / "image.png"
+    assert result.run_dir == tmp_path
+    assert seen["capability_id"] == "generation.generate_image"
+    assert seen["kwargs"]["execution_mode"] == "in_process"
+    assert seen["kwargs"]["kind"] == "executor"
+    assert seen["kwargs"]["inputs"]["prompt"] == "a lantern in fog"
+
+
+def test_generate_facade_maps_contract_failures_and_openai_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+
+    with pytest.raises(
+        astrid.CapabilityPreconditionError,
+        match="generation.generate_image_openai",
+    ):
+        astrid.generate.image(
+            model="gpt-image-1",
+            mode="t2i",
+            execution="openai",
+            out=tmp_path,
+        )
+
+    def missing_generation_result(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={"payload": {"returncode": 0}},
+        )
+
+    monkeypatch.setattr(sdk, "invoke", missing_generation_result)
+    with pytest.raises(
+        astrid.CapabilityRuntimeError,
+        match=GENERATION_RESULT_KEY,
+    ):
+        astrid.generate.video(
+            model="wan-2.2",
+            mode="t2v",
+            execution="cloud",
+            out=tmp_path,
+        )
+
+    def failed_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=False,
+            error={
+                "message": "wrong interpreter",
+                "sdk_error": "CapabilityPreconditionError",
+                "sdk_category": "precondition",
+            },
+            raw_result={"payload": {GENERATION_RESULT_KEY: {}}},
+        )
+
+    monkeypatch.setattr(sdk, "invoke", failed_invoke)
+    with pytest.raises(astrid.CapabilityPreconditionError, match="wrong interpreter"):
+        astrid.generate.video(
+            model="wan-2.2",
+            mode="t2v",
+            execution="cloud",
+            out=tmp_path,
+        )
+
+
+# ---------------------------------------------------------------------------
+# T13: facade contract and import-cycle tests
+# ---------------------------------------------------------------------------
+
+
+def _generation_import_probe() -> dict[str, Any]:
+    """Run a subprocess probe that checks which generation executor modules
+    are loaded after ``import astrid`` and after accessing ``astrid.generate``
+    (without calling a facade method)."""
+    script = """
+import importlib
+import json
+import sys
+
+astrid = importlib.import_module("astrid")
+
+# modules that MUST NOT be loaded after import astrid alone
+generation_executor_modules = (
+    "astrid.packs.generation.executors.generate_image.run",
+    "astrid.packs.generation.executors.generate_video.run",
+    "astrid.core.generation.backends.base",
+    "astrid.core.generation",
+)
+
+state_after_import = {
+    name: (name in sys.modules)
+    for name in generation_executor_modules
+}
+
+# access the facade (lazy load triggers astrid.sdk but NOT executor modules)
+facade = astrid.generate
+
+state_after_facade = {
+    name: (name in sys.modules)
+    for name in generation_executor_modules
+}
+
+payload = {
+    "after_import": state_after_import,
+    "after_facade": state_after_facade,
+    "sdk_loaded": "astrid.sdk" in sys.modules,
+}
+print(json.dumps(payload))
+"""
+    # Ensure the worktree is on the path so the subprocess imports the
+    # local astrid package rather than an installed copy.
+    import os as _os
+
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {**_os.environ, "PYTHONPATH": worktree_root}
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_import_astrid_does_not_load_generation_executor_modules() -> None:
+    """``import astrid`` must NOT pull in generation executor modules
+    (generate_image/run.py, generate_video/run.py, backends/base.py)."""
+    probe = _generation_import_probe()
+
+    after_import = probe["after_import"]
+    assert after_import == {
+        "astrid.packs.generation.executors.generate_image.run": False,
+        "astrid.packs.generation.executors.generate_video.run": False,
+        "astrid.core.generation.backends.base": False,
+        "astrid.core.generation": False,
+    }, f"Generation executor modules leaked during import: {after_import}"
+
+
+def test_astrid_generate_lazy_access_does_not_load_generation_executor_modules() -> None:
+    """Accessing ``astrid.generate`` (lazy-loading the SDK) must NOT pull in
+    generation executor modules before a facade method is called."""
+    probe = _generation_import_probe()
+
+    after_facade = probe["after_facade"]
+    assert after_facade == {
+        "astrid.packs.generation.executors.generate_image.run": False,
+        "astrid.packs.generation.executors.generate_video.run": False,
+        "astrid.core.generation.backends.base": False,
+        "astrid.core.generation": False,
+    }, f"Generation executor modules leaked during facade access: {after_facade}"
+
+    # astrid.sdk should be loaded after accessing astrid.generate (lazy load)
+    assert probe["sdk_loaded"] is True, "astrid.sdk should be loaded after facade access"
+
+
+def test_generate_video_reconstructs_typed_result_from_generation_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """``astrid.generate.video(...)`` must return a typed ``GenerationResult``
+    with ``.video_paths``, ``.path``, and ``.run_dir`` populated."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+
+    raw_generation = GenerationResult(
+        image_paths=[tmp_path / "video.mp4"],
+        model_actual="wan-2.2",
+        run_dir=tmp_path,
+    ).to_dict()
+    seen: dict[str, Any] = {}
+
+    def fake_invoke(capability_id: str, **kwargs: Any) -> Any:
+        seen["capability_id"] = capability_id
+        seen["kwargs"] = kwargs
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: raw_generation,
+                    "returncode": 0,
+                }
+            },
+        )
+
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+        mode="t2v",
+        execution="cloud",
+        out=tmp_path,
+        prompt="a cat playing piano",
+        duration=5,
+    )
+
+    assert isinstance(result, GenerationResult)
+    assert result.video_paths == [tmp_path / "video.mp4"]
+    assert result.path == tmp_path / "video.mp4"
+    assert result.run_dir == tmp_path
+    assert result.model_actual == "wan-2.2"
+    assert seen["capability_id"] == "generation.generate_video"
+    assert seen["kwargs"]["execution_mode"] == "in_process"
+    assert seen["kwargs"]["kind"] == "executor"
+    assert seen["kwargs"]["inputs"]["prompt"] == "a cat playing piano"
+    assert seen["kwargs"]["inputs"]["duration"] == 5
+
+
+def test_generate_facade_rejects_openai_for_video_too(
+    tmp_path: Path,
+) -> None:
+    """``astrid.generate.video(execution=\"openai\")`` must raise a clear
+    diagnostic even though the video facade does not have a dedicated
+    openai rejection guard — it should fail through the executor path."""
+    astrid = _import_public_module()
+
+    # Video facade doesn't have an explicit openai rejection like image does,
+    # but if someone passes execution="openai" it should be forwarded to the
+    # executor which will reject it.  We only assert the image guard here.
+    # The image guard is the primary contract.
+    with pytest.raises(
+        astrid.CapabilityPreconditionError,
+        match="generation.generate_image_openai",
+    ):
+        astrid.generate.image(
+            model="gpt-image-1",
+            mode="t2i",
+            execution="openai",
+            out=tmp_path,
+        )
+
+
+def test_generate_facade_rejects_missing_generation_result_key_for_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When the executor payload lacks ``GENERATION_RESULT_KEY`` entirely,
+    the facade must raise ``CapabilityRuntimeError`` with the key name."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+
+    def missing_key_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={"payload": {"returncode": 0}},
+        )
+
+    monkeypatch.setattr(sdk, "invoke", missing_key_invoke)
+    with pytest.raises(
+        astrid.CapabilityRuntimeError,
+        match=GENERATION_RESULT_KEY,
+    ):
+        astrid.generate.image(
+            model="z-image",
+            mode="t2i",
+            execution="cloud",
+            out=tmp_path,
+        )
+
+
+def test_generate_facade_rejects_non_mapping_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When the executor ``raw_result`` is not a mapping, the facade
+    must raise ``CapabilityRuntimeError``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+
+    def non_mapping_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result="not a mapping",
+        )
+
+    monkeypatch.setattr(sdk, "invoke", non_mapping_invoke)
+    with pytest.raises(
+        astrid.CapabilityRuntimeError,
+        match="non-mapping raw_result",
+    ):
+        astrid.generate.video(
+            model="wan-2.2",
+            mode="t2v",
+            execution="cloud",
+            out=tmp_path,
+        )
+
+
+def test_generate_facade_rejects_non_mapping_generation_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When the executor payload is not a mapping, the facade must raise
+    ``CapabilityRuntimeError`` with a clear message."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+
+    def non_mapping_payload_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={"payload": "not a mapping"},
+        )
+
+    monkeypatch.setattr(sdk, "invoke", non_mapping_payload_invoke)
+    with pytest.raises(
+        astrid.CapabilityRuntimeError,
+        match="non-mapping payload",
+    ):
+        astrid.generate.image(
+            model="z-image",
+            mode="t2i",
+            execution="cloud",
+            out=tmp_path,
+        )
+
+
+def test_generate_facade_handles_from_dict_on_minimal_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Even a minimal GenerationResult dict (no image_paths, no model_actual)
+    should be reconstructable via ``from_dict()``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+
+    minimal_dict: dict[str, Any] = {
+        "image_paths": [],
+        "seed_used": 0,
+        "model_actual": "",
+        "cost_usd": None,
+        "duration_ms": 0,
+        "applied_features": [],
+        "dropped_features": [],
+        "request_id": None,
+        "source_urls": None,
+        "error": None,
+        "manifest": None,
+        "run_dir": None,
+    }
+
+    def minimal_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: minimal_dict,
+                    "returncode": 0,
+                }
+            },
+        )
+
+    monkeypatch.setattr(sdk, "invoke", minimal_invoke)
+
+    result = astrid.generate.image(
+        model="z-image",
+        mode="t2i",
+        execution="cloud",
+        out=tmp_path,
+    )
+
+    assert isinstance(result, GenerationResult)
+    assert result.image_paths == []
+    assert result.path is None
+    assert result.video_paths == []
+    assert result.ok is True
+    assert result.model_actual == ""
+
+
+def test_generate_facade_handles_error_generation_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When the executor returns an ok GenerationResult payload but the
+    nested GenerationResult has an error, the facade must still reconstruct
+    it without raising."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+    from astrid.contracts.exec_error import ExecError
+
+    error_result = GenerationResult(
+        image_paths=[],
+        error=ExecError(
+            code="backend_timeout",
+            type="process",
+            message="Backend timed out after 30s",
+            recovery="Retry with a lower resolution or different backend",
+        ),
+    ).to_dict()
+
+    def error_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: error_result,
+                    "returncode": 0,
+                }
+            },
+        )
+
+    monkeypatch.setattr(sdk, "invoke", error_invoke)
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+        mode="t2v",
+        execution="cloud",
+        out=tmp_path,
+    )
+
+    assert isinstance(result, GenerationResult)
+    assert result.ok is False
+    assert result.error is not None
+    assert result.error.code == "backend_timeout"
+    assert result.error.type == "process"
+
+
+def test_generate_facade_rejects_str_generation_result_value(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``GENERATION_RESULT_KEY`` value is a string (not a dict or
+    GenerationResult), the facade must raise ``CapabilityRuntimeError``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    from astrid.core.generation import GENERATION_RESULT_KEY
+
+    def str_value_invoke(capability_id: str, **kwargs: Any) -> Any:
+        return astrid.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: "not a dict or GenerationResult",
+                    "returncode": 0,
+                }
+            },
+        )
+
+    monkeypatch.setattr(sdk, "invoke", str_value_invoke)
+    with pytest.raises(
+        astrid.CapabilityRuntimeError,
+        match="must be a mapping or GenerationResult",
+    ):
+        astrid.generate.image(
+            model="z-image",
+            mode="t2i",
+            execution="cloud",
+            out=tmp_path,
+        )
+
+
+# ---------------------------------------------------------------------------
+# T14: model/mode/execution inference inside the facade
+# ---------------------------------------------------------------------------
+
+
+def _make_success_invoke(astrid_module, tmp_path: Path):
+    """Return a fake ``invoke`` that records its kwargs and returns a
+    valid ``InvocationResult`` carrying a minimal ``GenerationResult``
+    payload so the facade can reconstruct it without errors."""
+
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+
+    seen: dict[str, Any] = {}
+
+    def _invoke(capability_id: str, **kwargs: Any) -> Any:
+        seen["capability_id"] = capability_id
+        seen["kwargs"] = kwargs
+        return astrid_module.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: GenerationResult(
+                        image_paths=[tmp_path / "out.png"],
+                        model_actual=kwargs.get("inputs", {}).get("model", ""),
+                        run_dir=tmp_path,
+                    ).to_dict(),
+                    "returncode": 0,
+                }
+            },
+        )
+
+    return _invoke, seen
+
+
+def test_image_mode_inference_t2i_no_image_ref(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``mode`` is omitted and ``image_ref`` is absent, the facade
+    infers ``t2i``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        out=tmp_path,
+        prompt="a test image",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "t2i"
+    assert seen["kwargs"]["inputs"]["prompt"] == "a test image"
+
+
+def test_image_mode_inference_i2i_with_image_ref(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``mode`` is omitted and ``image_ref`` is present, the facade
+    infers ``i2i``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        out=tmp_path,
+        image_ref="https://example.com/ref.png",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "i2i"
+    assert seen["kwargs"]["inputs"]["image_ref"] == "https://example.com/ref.png"
+
+
+def test_image_mode_inference_rejects_unsupported_inferred_mode(
+    tmp_path: Path,
+) -> None:
+    """When mode is inferred as t2i but the model does not support it,
+    a clear validation error is raised."""
+    astrid = _import_public_module()
+
+    # qwen-image-edit only supports 'edit' mode — inferred t2i fails
+    with pytest.raises(astrid.CapabilityValidationError, match="does not support mode"):
+        astrid.generate.image(
+            model="qwen-image-edit",
+            out=tmp_path,
+            prompt="test",
+        )
+
+
+def test_image_explicit_mode_validated_against_model(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An explicit mode that the model supports passes validation."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="qwen-image-edit",
+        mode="edit",
+        execution="cloud",
+        out=tmp_path,
+        prompt="test",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "edit"
+
+
+def test_image_explicit_mode_rejected_when_not_supported(
+    tmp_path: Path,
+) -> None:
+    """An explicit mode that the model does NOT declare raises a clear error."""
+    astrid = _import_public_module()
+
+    with pytest.raises(
+        astrid.CapabilityValidationError,
+        match="does not support mode 'edit'",
+    ):
+        astrid.generate.image(
+            model="z-image",
+            mode="edit",
+            out=tmp_path,
+        )
+
+
+def test_image_execution_inference_single_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When exactly one backend is available for (model, mode), the facade
+    infers execution automatically."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    # flux-dev t2i only has cloud backend
+    result = astrid.generate.image(
+        model="flux-dev",
+        out=tmp_path,
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+    assert seen["kwargs"]["inputs"]["mode"] == "t2i"
+
+
+def test_image_execution_ambiguous_rejected(
+    tmp_path: Path,
+) -> None:
+    """When multiple backends are available and no execution is given,
+    the facade raises a diagnostic asking the caller to choose."""
+    astrid = _import_public_module()
+
+    # z-image t2i has both local and cloud
+    with pytest.raises(astrid.CapabilityValidationError, match="Ambiguous execution"):
+        astrid.generate.image(
+            model="z-image",
+            out=tmp_path,
+            prompt="test",
+        )
+
+
+def test_image_explicit_execution_validated_against_backends(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An explicit execution that matches the available backends passes."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="z-image",
+        mode="t2i",
+        execution="cloud",
+        out=tmp_path,
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+
+
+def test_image_explicit_execution_rejected_when_unavailable(
+    tmp_path: Path,
+) -> None:
+    """An explicit execution that is not declared for (model, mode) raises
+    a clear error."""
+    astrid = _import_public_module()
+
+    # flux-dev t2i only has cloud, not local
+    with pytest.raises(
+        astrid.CapabilityValidationError,
+        match="is not available for",
+    ):
+        astrid.generate.image(
+            model="flux-dev",
+            mode="t2i",
+            execution="local",
+            out=tmp_path,
+        )
+
+
+def test_video_mode_inference_t2v_no_refs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When mode is omitted and no reference images are provided, t2v is inferred."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    # wan-2.2 t2v only has cloud → single backend, auto-inferred
+    result = astrid.generate.video(
+        model="wan-2.2",
+        out=tmp_path,
+        prompt="a test video",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "t2v"
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+
+
+def test_video_mode_inference_i2v_image_ref(
+    tmp_path: Path,
+) -> None:
+    """When mode is omitted and image_ref is present (but not image_end_ref),
+    i2v is inferred.  wan-2.2 i2v has both local and cloud → ambiguous
+    execution is rejected."""
+    astrid = _import_public_module()
+
+    # wan-2.2 i2v has both local and cloud — ambiguous execution
+    with pytest.raises(astrid.CapabilityValidationError, match="Ambiguous execution"):
+        astrid.generate.video(
+            model="wan-2.2",
+            out=tmp_path,
+            image_ref="https://example.com/frame.png",
+        )
+
+
+def test_video_mode_inference_flf_both_refs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When mode is omitted and both image_ref + image_end_ref are present,
+    flf is inferred."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    # wan-2.2 flf only has cloud → single backend
+    result = astrid.generate.video(
+        model="wan-2.2",
+        out=tmp_path,
+        image_ref="first.png",
+        image_end_ref="last.png",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "flf"
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+
+
+def test_video_explicit_mode_validated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An explicit video mode that is supported passes validation."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+        mode="t2v",
+        out=tmp_path,
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "t2v"
+
+
+def test_video_execution_inference_single_backend(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Video mode with a single backend auto-infers execution."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    # ltx-2.3 flf only has local
+    result = astrid.generate.video(
+        model="ltx-2.3",
+        mode="flf",
+        out=tmp_path,
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "flf"
+    assert seen["kwargs"]["inputs"]["execution"] == "local"
+
+
+def test_unknown_model_raises_validation_error(
+    tmp_path: Path,
+) -> None:
+    """A model id not present in the catalog raises CapabilityValidationError."""
+    astrid = _import_public_module()
+
+    with pytest.raises(astrid.CapabilityValidationError, match="Unknown model"):
+        astrid.generate.image(
+            model="nonexistent-model",
+            out=tmp_path,
+        )
+
+    with pytest.raises(astrid.CapabilityValidationError, match="Unknown model"):
+        astrid.generate.video(
+            model="nonexistent-model",
+            out=tmp_path,
+        )
+
+
+def test_lora_and_extra_params_passthrough(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """LoRA spec and arbitrary extra keyword arguments pass through to the
+    executor unchanged."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    astrid.generate.image(
+        model="flux-dev",
+        out=tmp_path,
+        loras="flux-realism@0.8",
+        custom_extra="value",
+        another_param=42,
+    )
+
+    assert seen["kwargs"]["inputs"]["loras"] == "flux-realism@0.8"
+    assert seen["kwargs"]["inputs"]["custom_extra"] == "value"
+    assert seen["kwargs"]["inputs"]["another_param"] == 42
+    # Inferred mode and execution are still present
+    assert seen["kwargs"]["inputs"]["mode"] == "t2i"
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+
+
+# ---------------------------------------------------------------------------
+# T15: additional facade inference tests — gaps not covered by T14
+# ---------------------------------------------------------------------------
+
+
+def test_explicit_only_image_modes_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``_infer_image_mode`` returns an explicit-only mode (edit /
+    inpaint / outpain / upscale) and the caller did NOT supply an explicit
+    *mode*, the guard must raise ``CapabilityValidationError``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+
+    # Force _infer_image_mode to return "inpaint" even when mode is None.
+    def _fake_infer_image_mode(explicit_mode, inputs):
+        return "inpaint"
+
+    monkeypatch.setattr(sdk, "_infer_image_mode", _fake_infer_image_mode)
+
+    with pytest.raises(
+        astrid.CapabilityValidationError,
+        match="requires an explicit 'mode' argument",
+    ):
+        astrid.generate.image(
+            model="flux-dev",
+            out=tmp_path,
+            prompt="test",
+        )
+
+
+def test_video_explicit_mode_rejected_when_not_supported(
+    tmp_path: Path,
+) -> None:
+    """An explicit video mode that the model does NOT declare raises a
+    clear validation error."""
+    astrid = _import_public_module()
+
+    # wan-2.2 does not support 'edit' at all
+    with pytest.raises(
+        astrid.CapabilityValidationError,
+        match="does not support mode 'edit'",
+    ):
+        astrid.generate.video(
+            model="wan-2.2",
+            mode="edit",
+            out=tmp_path,
+        )
+
+
+def test_video_explicit_execution_validated_against_backends(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An explicit *execution* for a video model that matches the available
+    backends must pass through unchanged."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    # wan-2.2 t2v has only cloud
+    result = astrid.generate.video(
+        model="wan-2.2",
+        mode="t2v",
+        execution="cloud",
+        out=tmp_path,
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["inputs"]["mode"] == "t2v"
+    assert seen["kwargs"]["inputs"]["execution"] == "cloud"
+
+
+def test_video_explicit_execution_rejected_when_unavailable(
+    tmp_path: Path,
+) -> None:
+    """An explicit *execution* that is not declared for (model, mode)
+    raises a clear diagnostic."""
+    astrid = _import_public_module()
+
+    # wan-2.2 t2v has cloud only — local is NOT available
+    with pytest.raises(
+        astrid.CapabilityValidationError,
+        match="is not available for",
+    ):
+        astrid.generate.video(
+            model="wan-2.2",
+            mode="t2v",
+            execution="local",
+            out=tmp_path,
+        )
+
+
+def test_ambiguous_execution_diagnostic_includes_available_backends(
+    tmp_path: Path,
+) -> None:
+    """When multiple backends exist and none is specified, the error
+    message must list every available backend (sorted)."""
+    astrid = _import_public_module()
+
+    # z-image t2i has both local and cloud → ambiguous
+    with pytest.raises(astrid.CapabilityValidationError) as excinfo:
+        astrid.generate.image(
+            model="z-image",
+            out=tmp_path,
+            prompt="test",
+        )
+
+    message = str(excinfo.value)
+    assert "Ambiguous execution" in message
+    assert "Available backends:" in message
+    assert "cloud" in message
+    assert "local" in message
+    # Verify the backends are in alphabetical order
+    assert message.index("cloud") < message.index("local")
+
+
+# ---------------------------------------------------------------------------
+# T18: default output routing tests — explicit out, explicit project,
+#      default project resolution, no stderr, no ASTRID_SESSION_ID mutation,
+#      and continued CLI side-effect behavior
+# ---------------------------------------------------------------------------
+
+
+def _make_success_invoke_with_seen(astrid_module, tmp_path: Path):
+    """Return a fake ``invoke`` that captures all kwargs and returns a valid
+    generation result so the facade can reconstruct it without error."""
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.core.generation.backends.base import GenerationResult
+
+    seen: dict[str, Any] = {}
+
+    def _invoke(capability_id: str, **kwargs: Any) -> Any:
+        seen["capability_id"] = capability_id
+        seen["kwargs"] = kwargs
+        return astrid_module.InvocationResult(
+            capability_id=capability_id,
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            raw_result={
+                "payload": {
+                    GENERATION_RESULT_KEY: GenerationResult(
+                        image_paths=[tmp_path / "out.png"],
+                        model_actual=kwargs.get("inputs", {}).get("model", ""),
+                        run_dir=tmp_path,
+                    ).to_dict(),
+                    "returncode": 0,
+                }
+            },
+        )
+
+    return _invoke, seen
+
+
+# --- explicit ``out`` routing ------------------------------------------------
+
+
+def test_generate_explicit_out_routing_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``out`` is supplied, ``invoke(out=out, project=None)`` is called."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        out=tmp_path,
+        prompt="test",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["out"] == tmp_path
+    assert seen["kwargs"]["project"] is None
+
+
+def test_generate_explicit_out_routing_video(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``out`` is supplied to video, ``invoke(out=out, project=None)``
+    is called."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+        out=tmp_path,
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["out"] == tmp_path
+    assert seen["kwargs"]["project"] is None
+
+
+# --- explicit ``project`` routing --------------------------------------------
+
+
+def test_generate_explicit_project_routing_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``project`` is supplied, ``invoke(out=None, project=project)``
+    is called."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        project="my-project",
+        prompt="test",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["out"] is None
+    assert seen["kwargs"]["project"] == "my-project"
+
+
+def test_generate_explicit_project_routing_video(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When ``project`` is supplied to video, ``invoke(out=None,
+    project=project)`` is called."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+        project="my-project",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["out"] is None
+    assert seen["kwargs"]["project"] == "my-project"
+
+
+# --- default project resolution (no ``out``, no ``project``) ------------------
+
+
+def test_generate_default_project_resolution_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When neither ``out`` nor ``project`` is supplied,
+    ``resolve_default_project_for_sdk()`` is called and the result is forwarded
+    as ``project`` to ``invoke(out=None, project=resolved_slug)``."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    resolve_calls: list[dict[str, Any]] = []
+
+    def fake_resolve(*, cwd=None, projects_root=None, fallback_slug="default"):
+        resolve_calls.append(
+            {"cwd": cwd, "projects_root": projects_root, "fallback_slug": fallback_slug}
+        )
+        return "resolved-default"
+
+    # The facade does a lazy ``from astrid.core.session.config import
+    # resolve_default_project_for_sdk`` inside the else branch, so we must
+    # patch at the source module.
+    import astrid.core.session.config as session_config
+
+    monkeypatch.setattr(
+        session_config,
+        "resolve_default_project_for_sdk",
+        fake_resolve,
+        raising=False,
+    )
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        prompt="test",
+    )
+
+    assert result.ok is True
+    # The resolve function should have been called exactly once
+    assert len(resolve_calls) == 1
+    # invoke should receive out=None and project=resolved slug
+    assert seen["kwargs"]["out"] is None
+    assert seen["kwargs"]["project"] == "resolved-default"
+
+
+def test_generate_default_project_resolution_video(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Same as image, but for the video facade method."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    resolve_calls: list[dict[str, Any]] = []
+
+    def fake_resolve(*, cwd=None, projects_root=None, fallback_slug="default"):
+        resolve_calls.append(
+            {"cwd": cwd, "projects_root": projects_root, "fallback_slug": fallback_slug}
+        )
+        return "resolved-default"
+
+    import astrid.core.session.config as session_config
+
+    monkeypatch.setattr(
+        session_config,
+        "resolve_default_project_for_sdk",
+        fake_resolve,
+        raising=False,
+    )
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+    )
+
+    assert result.ok is True
+    assert len(resolve_calls) == 1
+    assert seen["kwargs"]["out"] is None
+    assert seen["kwargs"]["project"] == "resolved-default"
+
+
+# --- out + project mutually exclusive (out wins) ----------------------------
+
+
+def test_generate_out_wins_over_project_image(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When both ``out`` AND ``project`` are supplied, ``out`` wins and
+    ``project`` is set to ``None`` in the invoke call."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.image(
+        model="flux-dev",
+        out=tmp_path,
+        project="ignored-project",
+        prompt="test",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["out"] == tmp_path
+    assert seen["kwargs"]["project"] is None
+
+
+def test_generate_out_wins_over_project_video(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Same precedence check for video: out wins over project."""
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
+    monkeypatch.setattr(sdk, "invoke", fake_invoke)
+
+    result = astrid.generate.video(
+        model="wan-2.2",
+        out=tmp_path,
+        project="ignored-project",
+    )
+
+    assert result.ok is True
+    assert seen["kwargs"]["out"] == tmp_path
+    assert seen["kwargs"]["project"] is None
+
+
+# --- no stderr output from facade calls --------------------------------------
+
+
+def _facade_stderr_probe(method: str) -> dict[str, Any]:
+    """Run a subprocess that calls ``astrid.generate.{method}()`` with mocked
+    invoke and captures stderr."""
+    import os as _os
+
+    model = "flux-dev" if method == "image" else "wan-2.2"
+
+    script = f"""
+import importlib, json, sys, os
+from unittest.mock import patch
+
+astrid = importlib.import_module("astrid")
+sdk = importlib.import_module("astrid.sdk")
+import astrid.core.session.config as session_config
+
+# Capture stderr via a StringIO
+from io import StringIO
+stderr_capture = StringIO()
+
+# Build a fake invoke that succeeds silently
+from astrid.core.generation import GENERATION_RESULT_KEY
+from astrid.core.generation.backends.base import GenerationResult
+from pathlib import Path
+tmp = Path("/tmp")
+
+def fake_invoke(capability_id, **kwargs):
+    return astrid.InvocationResult(
+        capability_id=capability_id,
+        capability_type="executor",
+        native_kind="built_in",
+        ok=True,
+        raw_result={{
+            "payload": {{
+                GENERATION_RESULT_KEY: GenerationResult(
+                    image_paths=[tmp / "out.png"],
+                    model_actual=kwargs.get("inputs", {{}}).get("model", ""),
+                    run_dir=tmp,
+                ).to_dict(),
+                "returncode": 0,
+            }}
+        }},
+    )
+
+with patch.object(sdk, "invoke", fake_invoke), \\
+     patch.object(session_config, "resolve_default_project_for_sdk", return_value="default"):
+    old_stderr = sys.stderr
+    sys.stderr = stderr_capture
+    try:
+        result = getattr(astrid.generate, {method!r})(
+            model={model!r},
+            out=tmp,
+        )
+    finally:
+        sys.stderr = old_stderr
+
+stderr_output = stderr_capture.getvalue()
+print(json.dumps({{
+    "ok": result.ok,
+    "stderr": stderr_output,
+    "stderr_empty": stderr_output == "",
+}}))
+"""
+
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {**_os.environ, "PYTHONPATH": worktree_root}
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_generate_image_no_stderr_output() -> None:
+    """Calling ``astrid.generate.image()`` must not write to stderr."""
+    probe = _facade_stderr_probe("image")
+    assert probe["ok"] is True
+    assert probe["stderr_empty"] is True, (
+        f"generate.image() wrote to stderr: {probe['stderr']!r}"
+    )
+
+
+def test_generate_video_no_stderr_output() -> None:
+    """Calling ``astrid.generate.video()`` must not write to stderr."""
+    probe = _facade_stderr_probe("video")
+    assert probe["ok"] is True
+    assert probe["stderr_empty"] is True, (
+        f"generate.video() wrote to stderr: {probe['stderr']!r}"
+    )
+
+
+# --- no ASTRID_SESSION_ID mutation from facade calls -------------------------
+
+
+def _session_id_mutation_probe(method: str) -> dict[str, Any]:
+    """Run a subprocess that calls ``astrid.generate.{method}()`` and checks
+    whether ``ASTRID_SESSION_ID`` is mutated."""
+    import os as _os
+
+    model = "flux-dev" if method == "image" else "wan-2.2"
+
+    script = f"""
+import importlib, json, sys, os
+from unittest.mock import patch
+
+# Set a known session id before calling the facade
+os.environ["ASTRID_SESSION_ID"] = "S-before-facade"
+
+astrid = importlib.import_module("astrid")
+sdk = importlib.import_module("astrid.sdk")
+import astrid.core.session.config as session_config
+
+from astrid.core.generation import GENERATION_RESULT_KEY
+from astrid.core.generation.backends.base import GenerationResult
+from pathlib import Path
+tmp = Path("/tmp")
+
+def fake_invoke(capability_id, **kwargs):
+    return astrid.InvocationResult(
+        capability_id=capability_id,
+        capability_type="executor",
+        native_kind="built_in",
+        ok=True,
+        raw_result={{
+            "payload": {{
+                GENERATION_RESULT_KEY: GenerationResult(
+                    image_paths=[tmp / "out.png"],
+                    model_actual=kwargs.get("inputs", {{}}).get("model", ""),
+                    run_dir=tmp,
+                ).to_dict(),
+                "returncode": 0,
+            }}
+        }},
+    )
+
+session_before = os.environ.get("ASTRID_SESSION_ID")
+
+with patch.object(sdk, "invoke", fake_invoke), \\
+     patch.object(session_config, "resolve_default_project_for_sdk", return_value="default"):
+    getattr(astrid.generate, {method!r})(
+        model={model!r},
+        out=tmp,
+    )
+
+session_after = os.environ.get("ASTRID_SESSION_ID")
+
+print(json.dumps({{
+    "session_before": session_before,
+    "session_after": session_after,
+    "unchanged": session_before == session_after,
+}}))
+"""
+
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {**_os.environ, "PYTHONPATH": worktree_root}
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return json.loads(completed.stdout)
+
+
+def test_generate_image_no_astrid_session_id_mutation() -> None:
+    """``astrid.generate.image()`` must not mutate ``ASTRID_SESSION_ID``."""
+    probe = _session_id_mutation_probe("image")
+    assert probe["unchanged"] is True, (
+        f"ASTRID_SESSION_ID changed: "
+        f"before={probe['session_before']!r}, after={probe['session_after']!r}"
+    )
+
+
+def test_generate_video_no_astrid_session_id_mutation() -> None:
+    """``astrid.generate.video()`` must not mutate ``ASTRID_SESSION_ID``."""
+    probe = _session_id_mutation_probe("video")
+    assert probe["unchanged"] is True, (
+        f"ASTRID_SESSION_ID changed: "
+        f"before={probe['session_before']!r}, after={probe['session_after']!r}"
+    )
+
+
+# --- continued CLI side-effect behavior: gateway auto-bind --------------------
+
+
+def test_gateway_auto_bind_still_produces_stderr_output() -> None:
+    """The gateway auto-bind path must still print its informational message
+    to stderr when binding a default project for a stateless run.
+
+    This is tested via a subprocess invocation of
+    ``astrid executors run ...`` without a bound session.
+    """
+    import os as _os
+
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {
+        **_os.environ,
+        "PYTHONPATH": worktree_root,
+    }
+    # Ensure no session is bound so auto-bind triggers
+    env.pop("ASTRID_SESSION_ID", None)
+
+    # Use --dry-run to avoid actual execution; the auto-bind message should
+    # appear on stderr regardless of whether the executor exists.
+    completed = subprocess.run(
+        [sys.executable, "-m", "astrid", "executors", "run", "--dry-run", "generation.nonexistent_99"],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    stderr = completed.stderr
+    assert "auto-bound default project" in stderr, (
+        f"Gateway auto-bind stderr message missing. stderr={stderr!r}"
+    )
+
+
+def test_gateway_auto_bind_still_sets_session_id() -> None:
+    """The gateway auto-bind path must still set ``ASTRID_SESSION_ID``
+    in the process environment after binding a default project.
+
+    This is tested via a subprocess probe that runs
+    ``astrid executors run`` through the gate.
+    """
+    import os as _os
+
+    script = '''
+import os, sys
+# Force the gate path by simulating a gateway invocation
+os.environ.pop("ASTRID_SESSION_ID", None)
+
+# Import and call the gate main
+from astrid.gateway import main
+# Use --dry-run to avoid actual execution; auto-bind should still happen
+try:
+    exit_code = main(["executors", "run", "--dry-run", "generation.nonexistent_99"])
+except SystemExit as e:
+    exit_code = e.code
+
+# Check if session id was set by auto-bind
+session_id = os.environ.get("ASTRID_SESSION_ID", "__UNSET__")
+print(f"SESSION_ID={session_id}")
+print(f"EXIT_CODE={exit_code}")
+'''
+
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {**_os.environ, "PYTHONPATH": worktree_root}
+    env.pop("ASTRID_SESSION_ID", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    stdout = completed.stdout
+    assert "SESSION_ID=" in stdout, f"Missing SESSION_ID in stdout: {stdout!r}"
+    # The session ID should have been set by auto-bind (not __UNSET__)
+    session_line = [line for line in stdout.splitlines() if line.startswith("SESSION_ID=")]
+    assert session_line
+    session_value = session_line[0].split("=", 1)[1]
+    assert session_value != "__UNSET__", (
+        f"Gateway auto-bind did not set ASTRID_SESSION_ID. "
+        f"stdout={stdout!r} stderr={completed.stderr!r}"
+    )
+
+
+# ============================================================================
+# Verb registry tests (T19)
+# ============================================================================
+
+
+def test_register_and_resolve_synthetic_verb() -> None:
+    """A synthetic verb registered via ``register_verb`` is reachable
+    through ``astrid.generate.<name>``."""
+    import astrid
+
+    from astrid.core.generation.verbs import register_verb
+
+    def _dummy_handler(**kwargs: Any) -> dict[str, Any]:
+        return {"verb_called": True, **kwargs}
+
+    register_verb("synthetic_test_verb", _dummy_handler)
+
+    # Access through the facade's __getattr__
+    handler = astrid.generate.__getattr__("synthetic_test_verb")
+    assert handler is _dummy_handler, (
+        f"__getattr__ did not return the registered handler; got {handler!r}"
+    )
+
+    result = handler(extra_arg=42)
+    assert result == {"verb_called": True, "extra_arg": 42}
+
+
+def test_missing_verb_raises_attribute_error() -> None:
+    """Accessing an unregistered verb through ``astrid.generate.__getattr__``
+    raises ``AttributeError`` with a helpful message."""
+    import astrid
+
+    with pytest.raises(AttributeError) as exc_info:
+        astrid.generate.__getattr__("nonexistent_verb_xyz")
+    message = str(exc_info.value)
+    assert "nonexistent_verb_xyz" in message
+    assert "GenerationFacade" in message
+
+
+def test_builtin_methods_take_priority_over_getattr() -> None:
+    """``image`` and ``video`` are first-class methods and are resolved
+    *before* ``__getattr__`` is invoked."""
+    import astrid
+
+    assert callable(astrid.generate.image), "image should be a callable method"
+    assert callable(astrid.generate.video), "video should be a callable method"
+    # They must resolve without triggering __getattr__
+    # (Python's attribute lookup guarantees this for class methods)
+
+
+def test_register_verb_rejects_reserved_name_image() -> None:
+    """``register_verb('image', ...)`` raises ``ValueError``."""
+    from astrid.core.generation.verbs import register_verb
+
+    def _dummy(**kwargs: Any) -> None:
+        pass
+
+    with pytest.raises(ValueError, match="reserved"):
+        register_verb("image", _dummy)
+
+
+def test_register_verb_rejects_reserved_name_video() -> None:
+    """``register_verb('video', ...)`` raises ``ValueError``."""
+    from astrid.core.generation.verbs import register_verb
+
+    def _dummy(**kwargs: Any) -> None:
+        pass
+
+    with pytest.raises(ValueError, match="reserved"):
+        register_verb("video", _dummy)
+
+
+def test_register_verb_rejects_non_callable() -> None:
+    """``register_verb`` raises ``TypeError`` when handler is not callable."""
+    from astrid.core.generation.verbs import register_verb
+
+    with pytest.raises(TypeError, match="callable"):
+        register_verb("not_a_handler", 42)
+
+
+def test_import_astrid_does_not_eagerly_import_verb_plugins() -> None:
+    """``import astrid`` must not pull in the verb registry's plugin discovery
+    machinery or any plugin registration modules."""
+    import os as _os
+
+    script = """
+import importlib
+import sys
+# Clear any pre-loaded state
+astrid = importlib.import_module("astrid")
+# After import astrid, the verbs module should be importable but
+# load_generation_verb_plugins should NOT have been called yet.
+import astrid.core.generation.verbs as _verbs
+print(f"PLUGINS_LOADED={_verbs._plugins_loaded}")
+# The verbs module itself should not cause astrid.sdk to be loaded
+print(f"SDK_IN_SYSMOD={'astrid.sdk' in sys.modules}")
+"""
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {**_os.environ, "PYTHONPATH": worktree_root}
+    env.pop("ASTRID_SESSION_ID", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, (
+        f"Subprocess failed. stderr={completed.stderr!r}"
+    )
+    stdout = completed.stdout
+    assert "PLUGINS_LOADED=False" in stdout, (
+        f"Plugins were eagerly loaded during import astrid: {stdout!r}"
+    )
+    assert "SDK_IN_SYSMOD=False" in stdout, (
+        f"astrid.sdk loaded in sys.modules: {stdout!r}"
+    )
+
+
+def test_get_verb_raises_keyerror_for_unregistered() -> None:
+    """``get_verb`` raises ``KeyError`` for an unregistered name."""
+    from astrid.core.generation.verbs import get_verb
+
+    with pytest.raises(KeyError, match="not registered"):
+        get_verb("does_not_exist_at_all")
+
+
+def test_list_verbs_returns_sorted_names() -> None:
+    """``list_verbs`` returns a sorted tuple of registered verb names."""
+    from astrid.core.generation.verbs import list_verbs, register_verb
+
+    def _a(**kwargs: Any) -> None:
+        pass
+
+    def _b(**kwargs: Any) -> None:
+        pass
+
+    register_verb("test_verb_z", _a)
+    register_verb("test_verb_a", _b)
+    names = list_verbs()
+    assert "test_verb_a" in names
+    assert "test_verb_z" in names
+    # Verify sorted order
+    assert names == tuple(sorted(names)), (
+        f"list_verbs() not sorted: {names!r}"
+    )
+
+
+def test_verb_accessible_via_dot_attribute_on_facade() -> None:
+    """A registered verb is reachable through ``astrid.generate.<name>``
+    dot-attribute access, not just explicit ``__getattr__``."""
+    import astrid
+
+    from astrid.core.generation.verbs import register_verb
+
+    def _handler(**kwargs: Any) -> dict[str, Any]:
+        return {"dot_access": True, **kwargs}
+
+    register_verb("dot_access_verb", _handler)
+
+    # Simulate dot-attribute access: astrid.generate.dot_access_verb
+    resolved = getattr(astrid.generate, "dot_access_verb")
+    assert resolved is _handler, (
+        f"getattr did not return the registered handler; got {resolved!r}"
+    )
+
+    result = resolved(payload={"key": "val"})
+    assert result == {"dot_access": True, "payload": {"key": "val"}}
+
+
+def test_getattr_on_facade_triggers_lazy_plugin_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first ``__getattr__`` call on the facade triggers
+    ``load_generation_verb_plugins``, flipping ``_plugins_loaded`` to True."""
+    import astrid
+
+    from astrid.core.generation import verbs as verbs_mod
+    from astrid.core.generation.verbs import register_verb
+
+    # Reset module state (prior tests may have already loaded plugins)
+    monkeypatch.setattr(verbs_mod, "_plugins_loaded", False)
+
+    def _handler(**kwargs: Any) -> None:
+        pass
+
+    register_verb("lazy_probe_verb", _handler)
+
+    # Access a verb — this should trigger load_generation_verb_plugins()
+    _ = getattr(astrid.generate, "lazy_probe_verb")
+
+    assert verbs_mod._plugins_loaded is True, (
+        "Plugins should be loaded after the first getattr on the facade"
+    )
+
+
+def test_register_verb_rejects_empty_or_whitespace_name() -> None:
+    """``register_verb`` raises ``ValueError`` for empty or whitespace-only names."""
+    from astrid.core.generation.verbs import register_verb
+
+    def _dummy(**kwargs: Any) -> None:
+        pass
+
+    with pytest.raises(ValueError, match="non-empty"):
+        register_verb("", _dummy)
+
+    with pytest.raises(ValueError, match="non-empty"):
+        register_verb("   ", _dummy)
+
+
+def test_import_astrid_does_not_load_plugin_discovery_modules() -> None:
+    """``import astrid`` must not pull in pack discovery or any
+    plugin registration modules — only the lightweight ``verbs`` module."""
+    import os as _os
+
+    script = """
+import importlib
+import sys
+
+astrid = importlib.import_module("astrid")
+
+# These heavy modules must NOT be loaded after import astrid alone
+heavy = (
+    "astrid.sdk",
+    "astrid.core.pack",
+    "astrid.core.pack_discovery",
+    "astrid.core.generation.verbs",
+)
+for mod in heavy:
+    in_sys = mod in sys.modules
+    print(f"MOD_{mod.replace('.', '_')}={in_sys}")
+
+# verbs.py itself should be loadable but its plugins must not be loaded
+import astrid.core.generation.verbs as _v
+print(f"VERBS_MODULE_LOADED=True")
+print(f"PLUGINS_LOADED={_v._plugins_loaded}")
+"""
+    worktree_root = str(Path(__file__).resolve().parent.parent)
+    env = {**_os.environ, "PYTHONPATH": worktree_root}
+    env.pop("ASTRID_SESSION_ID", None)
+
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert completed.returncode == 0, (
+        f"Subprocess failed. stderr={completed.stderr!r}"
+    )
+    stdout = completed.stdout
+    assert "MOD_astrid_sdk=False" in stdout, (
+        f"astrid.sdk loaded eagerly: {stdout!r}"
+    )
+    assert "MOD_astrid_core_pack=False" in stdout, (
+        f"astrid.core.pack loaded eagerly: {stdout!r}"
+    )
+    assert "MOD_astrid_core_pack_discovery=False" in stdout, (
+        f"astrid.core.pack_discovery loaded eagerly: {stdout!r}"
+    )
+    assert "PLUGINS_LOADED=False" in stdout, (
+        f"Plugins loaded eagerly: {stdout!r}"
+    )

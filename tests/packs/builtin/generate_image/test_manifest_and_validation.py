@@ -15,6 +15,7 @@ Covers:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -22,6 +23,7 @@ from unittest.mock import patch
 import pytest
 
 from astrid.contracts.errors import AstridError
+from astrid.core.generation.backends import GenerationResult
 from astrid.core.executor.schema import load_executor_manifest
 from astrid.core.model_catalog.schema import ModeSpec
 from astrid.core.util.http import Transport
@@ -108,10 +110,142 @@ def test_manifest_loads() -> None:
     assert manifest.id == "generation.generate_image"
     assert manifest.kind == "built_in"
     assert manifest.version == "2.0"
+    assert manifest.metadata["runtime_entrypoint"] == "run_sdk"
     # v2 executor has 14 inputs: mode, prompt, prompts_file, model, image_ref,
     # execution, count, seed, negative_prompt, size, strength, guidance_scale, steps, loras
     assert len(manifest.inputs) == 14
     assert len(manifest.outputs) == 2  # generated_images, image_manifest
+
+
+def test_generate_core_returns_enriched_generation_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generate_core preserves manifest writing while returning a typed result."""
+    from astrid.packs.generation.executors.generate_image import run as run_mod
+
+    class FakeAdapter:
+        def generate(
+            self,
+            *,
+            entry: object,
+            mode: str,
+            params: dict[str, object],
+            out_dir: Path,
+        ) -> GenerationResult:
+            image_path = out_dir / "generated_001.png"
+            image_path.write_bytes(
+                b"\x89PNG\r\n\x1a\n"
+                b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+                b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"
+                b"\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            assert mode == "t2i"
+            assert params["prompt"] == "red kite"
+            assert params["loras"] == ["flux-realism"]
+            return GenerationResult(
+                image_paths=[image_path],
+                seed_used=int(params["seed"]),
+                model_actual="fal-ai/flux/dev",
+                cost_usd=0.42,
+                duration_ms=321,
+                applied_features=["prompt", "seed", "loras"],
+                request_id="req-123",
+                source_urls=["https://example.com/generated_001.png"],
+            )
+
+    class FakeBackendRegistry:
+        def create(self, execution: str, *, env_file: Path | None) -> FakeAdapter:
+            assert execution == "cloud"
+            assert env_file is None
+            return FakeAdapter()
+
+    embedded_calls: list[tuple[Path, dict[str, str]]] = []
+
+    def _fake_embed_png_text(path: Path, fields: dict[str, str]) -> None:
+        embedded_calls.append((path, fields))
+
+    monkeypatch.setattr(
+        run_mod,
+        "load_default_generation_backend_registry",
+        lambda: FakeBackendRegistry(),
+    )
+    monkeypatch.setattr(run_mod, "embed_png_text", _fake_embed_png_text)
+
+    out = tmp_path / "out"
+    result = run_mod.generate_core(
+        [
+            "--model", "flux-dev",
+            "--mode", "t2i",
+            "--execution", "cloud",
+            "--prompt", "red kite",
+            "--out", str(out),
+            "--seed", "7",
+            "--loras", "flux-realism",
+        ]
+    )
+
+    manifest_path = out / "manifest.json"
+    assert manifest_path.exists()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert result.ok is True
+    assert result.path == out / "images" / "generated_001.png"
+    assert result.image_paths == [out / "images" / "generated_001.png"]
+    assert result.seed_used == 7
+    assert result.model_actual == "fal-ai/flux/dev"
+    assert result.cost_usd == 0.42
+    assert result.duration_ms == 321
+    assert result.request_id == "req-123"
+    assert result.source_urls == ["https://example.com/generated_001.png"]
+    assert result.applied_features == ["prompt", "seed", "loras"]
+    assert result.dropped_features == []
+    assert result.run_dir == out.resolve()
+    assert result.manifest == manifest
+    assert manifest["outputs"][0]["path"] == "images/generated_001.png"
+    assert manifest["loras"] == ["flux-realism"]
+    assert len(embedded_calls) == 1
+    embedded_path, embedded_fields = embedded_calls[0]
+    assert embedded_path == out / "images" / "generated_001.png"
+    assert embedded_fields["prompt"] == "red kite"
+    assert embedded_fields["negative_prompt"] == ""
+    assert embedded_fields["model"] == "flux-dev"
+    assert embedded_fields["model_actual"] == "fal-ai/flux/dev"
+    assert embedded_fields["seed"] == "7"
+    assert embedded_fields["request_id"] == "req-123"
+    assert embedded_fields["loras"] == "['flux-realism']"
+    assert embedded_fields["created"]
+
+
+def test_run_sdk_and_main_preserve_in_process_and_cli_contracts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """run_sdk returns payload data while main keeps the legacy manifest print."""
+    from astrid.core.generation import GENERATION_RESULT_KEY
+    from astrid.packs.generation.executors.generate_image import run as run_mod
+
+    result = GenerationResult(
+        image_paths=[tmp_path / "out" / "images" / "generated_001.png"],
+        seed_used=11,
+        model_actual="fal-ai/flux/dev",
+        manifest={"schema_version": 2},
+        run_dir=(tmp_path / "out").resolve(),
+    )
+
+    monkeypatch.setattr(run_mod, "generate_core", lambda argv=None: result)
+
+    payload = run_mod.run_sdk(["--model", "flux-dev"])
+    assert payload["returncode"] == 0
+    assert payload[GENERATION_RESULT_KEY] is result
+
+    code = run_mod.main(["--model", "flux-dev"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert captured.err == ""
+    assert captured.out == f"manifest={result.run_dir / 'manifest.json'}\n"
 
 
 # ---------------------------------------------------------------------------

@@ -215,6 +215,37 @@ def test_set_default_project_writes_workspace_config(
     assert config.resolve_default_project(ws) is None
 
 
+def test_resolve_default_project_for_sdk_creates_default_project_without_env_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import os
+
+    monkeypatch.setenv(paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    monkeypatch.delenv(binding.ASTRID_SESSION_ID_ENV, raising=False)
+
+    slug = config.resolve_default_project_for_sdk()
+
+    assert slug == "default"
+    assert (tmp_path / "projects" / "default" / "project.json").is_file()
+    assert os.environ.get(binding.ASTRID_SESSION_ID_ENV) is None
+
+
+def test_resolve_default_project_for_sdk_honors_workspace_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    ws = tmp_path / "ws"
+    config.set_default_project("scratch", cwd=ws)
+
+    slug = config.resolve_default_project_for_sdk(cwd=ws)
+
+    assert slug == "scratch"
+    assert (tmp_path / "projects" / "scratch" / "project.json").is_file()
+    assert not (tmp_path / "projects" / "default").exists()
+
+
 def test_config_rejects_non_object(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -54,6 +54,28 @@ def resolve_default_project(cwd: str | Path | None = None) -> str | None:
     return value
 
 
+def resolve_default_project_for_sdk(
+    *,
+    cwd: str | Path | None = None,
+    projects_root: str | Path | None = None,
+    fallback_slug: str = "default",
+) -> str:
+    """Return a runnable default project slug for SDK/CLI callers.
+
+    This is the side-effect-controlled extraction of the gateway's stateless
+    auto-bind project resolution. It may create the project directory on first
+    use, but it never prints, binds a session, or mutates ``ASTRID_SESSION_ID``.
+    """
+
+    from astrid.core.project.paths import resolve_projects_root
+    from astrid.core.project.project import create_project
+
+    slug = resolve_default_project(cwd) or fallback_slug
+    root = Path(projects_root) if projects_root is not None else resolve_projects_root()
+    create_project(slug, exist_ok=True, root=root)
+    return slug
+
+
 def set_default_project(
     slug: str | None,
     *,

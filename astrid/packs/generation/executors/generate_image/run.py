@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationBackendRegistry,
@@ -451,13 +452,73 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _request_to_argv(request: Any) -> list[str]:
+    """Translate an executor-style request object into CLI argv."""
+    argv: list[str] = []
+    inputs = getattr(request, "inputs", {}) or {}
+    flag_names = (
+        "mode",
+        "prompt",
+        "prompts_file",
+        "model",
+        "image_ref",
+        "execution",
+        "count",
+        "seed",
+        "negative_prompt",
+        "size",
+        "strength",
+        "guidance_scale",
+        "steps",
+        "env_file",
+        "loras",
+    )
+    for name in flag_names:
+        value = inputs.get(name)
+        if value in (None, ""):
+            continue
+        if name == "loras" and not isinstance(value, str):
+            value = json.dumps(value)
+        argv.extend([f"--{name.replace('_', '-')}", str(value)])
+    out = getattr(request, "out", None)
+    if out not in (None, ""):
+        argv.extend(["--out", str(out)])
+    return argv
+
+
+def _coerce_args(
+    args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
+) -> argparse.Namespace:
+    """Return a parsed args namespace from CLI argv, a namespace, or a request."""
+    if isinstance(args_or_request, argparse.Namespace):
+        return args_or_request
+    if args_or_request is None or isinstance(args_or_request, (list, tuple)):
+        return build_parser().parse_args(args_or_request)
+    if hasattr(args_or_request, "inputs"):
+        return build_parser().parse_args(_request_to_argv(args_or_request))
+    raise TypeError(
+        "generate_core expected argparse.Namespace, argv list/tuple, or executor request"
+    )
+
+
+def _manifest_path_for_run_dir(run_dir: Path | None) -> Path:
+    if run_dir is None:
+        raise AstridError(
+            "generation result is missing run_dir",
+            recovery_command="run generation through generate_core/main so the executor can write manifest metadata",
+        )
+    return run_dir / "manifest.json"
+
+
 # ---------------------------------------------------------------------------
-# main
+# core entrypoints
 # ---------------------------------------------------------------------------
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+def generate_core(
+    args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
+) -> GenerationResult:
+    args = _coerce_args(args_or_request)
 
     mode_name: str = args.mode  # SD-005: explicit --mode required
 
@@ -537,6 +598,7 @@ def main(argv: list[str] | None = None) -> int:
     # --- sequential N=1 generation loop -------------------------------------
     loras_parsed = _parse_loras_arg(args.loras)
     all_outputs: list[dict[str, Any]] = []
+    generated_paths: list[Path] = []
     count = max(1, args.count or 1)
     prompt_text: str | None = None
     final_seed: int = 0
@@ -546,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
     request_id: str | None = None
     source_urls: list[str] | None = None
     all_applied_features: list[str] = []
+    result_error = None
 
     for i in range(count):
         # Determine the prompt entry for this iteration
@@ -635,6 +698,7 @@ def main(argv: list[str] | None = None) -> int:
             params=params,
             out_dir=images_dir,
         )
+        generated_paths.extend(result.image_paths)
 
         # Convert GenerationResult to manifest output dicts
         for img_path in result.image_paths:
@@ -670,6 +734,7 @@ def main(argv: list[str] | None = None) -> int:
         duration_ms = result.duration_ms
         request_id = result.request_id
         source_urls = result.source_urls
+        result_error = result.error
         if result.applied_features:
             all_applied_features = list(result.applied_features)
 
@@ -695,6 +760,74 @@ def main(argv: list[str] | None = None) -> int:
     if loras_parsed:
         manifest["loras"] = loras_parsed
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    generation_result = GenerationResult(
+        image_paths=generated_paths,
+        seed_used=final_seed,
+        model_actual=model_actual,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+        applied_features=list(all_applied_features),
+        dropped_features=list(dropped_features),
+        request_id=request_id,
+        source_urls=source_urls,
+        error=result_error,
+        manifest=manifest,
+        run_dir=out,
+    )
+    return generation_result
+
+
+def run_sdk(argv: list[str] | None = None) -> dict[str, Any]:
+    """In-process entrypoint returning a JSON-safe payload dict.
+
+    On success returns ``{GENERATION_RESULT_KEY: result, \"returncode\": 0}``.
+    On failure returns a JSON-safe diagnostic with a non-zero ``returncode``,
+    preserving the original exception type and message for the caller.
+
+    Subprocess / CLI compatibility is preserved through ``main()`` and the
+    ``__main__`` guard at the bottom of this module.
+    """
+    try:
+        result = generate_core(argv)
+    except AstridError as exc:
+        diagnostic: dict[str, Any] = {
+            "type": "AstridError",
+            "cause": exc.cause,
+            "recovery_command": exc.recovery_command,
+        }
+        if exc.valid_options:
+            diagnostic["valid_options"] = exc.valid_options
+        return {"returncode": 1, "error": diagnostic}
+    except SystemExit as exc:
+        code = exc.code
+        if isinstance(code, int) and code != 0:
+            returncode = code
+        elif code and str(code):
+            returncode = 1
+        else:
+            returncode = 0
+        return {
+            "returncode": returncode,
+            "error": {
+                "type": "SystemExit",
+                "message": str(code) if code else "",
+            },
+        }
+    except Exception as exc:
+        return {
+            "returncode": 1,
+            "error": {
+                "type": type(exc).__name__,
+                "message": str(exc),
+            },
+        }
+    return {"returncode": 0, GENERATION_RESULT_KEY: result}
+
+
+def main(argv: list[str] | None = None) -> int:
+    result = generate_core(argv)
+    manifest_path = _manifest_path_for_run_dir(result.run_dir)
     print(f"manifest={manifest_path}")
     return 0
 

@@ -8,6 +8,7 @@ _SDK_EXPORTS = (
     "discover",
     "get_capability",
     "invoke",
+    "generate",
     "read_events",
     "subscribe_events",
     "Capability",

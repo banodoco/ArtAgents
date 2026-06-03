@@ -84,7 +84,7 @@ def _pipeline_steps_by_name() -> Mapping[str, Any]:
 @dataclass(frozen=True)
 class ExecutorRunRequest:
     executor_id: str
-    out: Path | str
+    out: Path | str | None
     project: str | None = None
     inputs: Mapping[str, Any] = field(default_factory=dict)
     outputs: Mapping[str, Any] = field(default_factory=dict)
@@ -517,13 +517,11 @@ def _run_in_process_executor_command(
         command=command,
         cwd=cwd,
         env=dict(env),
-        payload={
-            "executor_id": executor.id,
-            "missing_binaries": [],
-            "returncode": result.returncode,
-            "skipped": False,
-            "skipped_reason": "",
-        },
+        payload=_merge_runner_payload(
+            result.payload,
+            executor_id=executor.id,
+            returncode=result.returncode,
+        ),
         returncode=result.returncode,
     )
 
@@ -552,6 +550,25 @@ def _in_process_executor_error_result(
         returncode=1,
         error=error,
     )
+
+
+def _merge_runner_payload(
+    payload: Mapping[str, Any],
+    *,
+    executor_id: str,
+    returncode: int | None,
+) -> dict[str, Any]:
+    merged = dict(payload)
+    merged.update(
+        {
+            "executor_id": executor_id,
+            "missing_binaries": [],
+            "returncode": returncode,
+            "skipped": False,
+            "skipped_reason": "",
+        }
+    )
+    return merged
 
 
 def _run_external_executor(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> ExecutorRunResult:
