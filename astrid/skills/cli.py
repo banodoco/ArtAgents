@@ -9,6 +9,7 @@ from typing import Any
 from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 
+from . import check as check_fn
 from . import doctor as doctor_fn
 from . import install as install_fn
 from . import list_state
@@ -62,8 +63,21 @@ def build_parser() -> argparse.ArgumentParser:
     uninstall_parser.add_argument("--json", action="store_true")
     uninstall_parser.set_defaults(handler=_cmd_uninstall)
 
-    sync_parser = subparsers.add_parser("sync", help="Re-install every pack into every detected harness; prune orphans.")
+    sync_parser = subparsers.add_parser(
+        "sync",
+        help="Link the gateway skill + regenerate its pack registry into every detected harness; prune orphans.",
+    )
     add_choice_arg(sync_parser, "--mechanism", values=("symlink", "external-dir"), default="symlink")
+    sync_parser.add_argument(
+        "--deep",
+        action="store_true",
+        help="Also link each pack's skill as astrid-<pack> (default: gateway only).",
+    )
+    sync_parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry-run drift report only; make no changes and exit non-zero if drift exists.",
+    )
     sync_parser.add_argument("--force", action="store_true")
     sync_parser.add_argument("--dry-run", action="store_true")
     sync_parser.add_argument("--json", action="store_true")
@@ -141,8 +155,33 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def _cmd_sync(args: argparse.Namespace) -> int:
-    report = sync_fn(mechanism=args.mechanism, force=args.force, dry_run=args.dry_run)
+    if getattr(args, "check", False):
+        report = check_fn(deep=args.deep)
+        return _emit_check_report(report, args)
+    report = sync_fn(
+        mechanism=args.mechanism,
+        force=args.force,
+        deep=args.deep,
+        dry_run=args.dry_run,
+    )
     return _emit_report(report, args)
+
+
+def _emit_check_report(report: dict[str, Any], args: argparse.Namespace) -> int:
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        detected = ", ".join(report["detected"]) or "(none)"
+        print(f"detected harnesses: {detected}")
+        if report["registry_stale"]:
+            print("  [drift] registry block in _core/skill/SKILL.md is out of date")
+        for entry in report["missing"]:
+            print(f"  [drift] {entry['harness']:<7} {entry['pack']:<14} not linked")
+        for entry in report["stale_links"]:
+            print(f"  [drift] {entry['harness']:<7} {entry['link']:<14} stale link (pack gone)")
+        if not report["has_drift"]:
+            print("clean: registry current and all links present")
+    return 1 if report["has_drift"] else 0
 
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
@@ -172,8 +211,13 @@ def _emit_report(report: dict[str, Any], args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps(report, indent=2))
         return 0
+    registry = report.get("registry")
+    if registry is not None:
+        state = "updated" if registry["changed"] else "ok"
+        print(f"[registry] _core/skill/SKILL.md pack block {state}")
     if not report["actions"]:
-        print("no detected harnesses; nothing to do")
+        if registry is None:
+            print("no detected harnesses; nothing to do")
         return 0
     for action in report["actions"]:
         print(f"[{action['harness']}]")

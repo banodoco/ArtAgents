@@ -8,11 +8,10 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
-from . import discovery, state
+from . import discovery, registry, state
 from .discovery import SkillDescriptor, list_skills
 from .harnesses import ADAPTERS, HarnessAdapter, adapter_for, all_adapters
 
@@ -93,14 +92,39 @@ def sync(
     *,
     mechanism: str = "symlink",
     force: bool = False,
+    deep: bool = False,
     dry_run: bool = False,
     state_path: Path | None = None,
+    skill_md_path: Path | None = None,
 ) -> dict:
-    descriptors = list_skills()
+    """Refresh the gateway link + registry block (and, with *deep*, per-pack links).
+
+    Default (gateway-only) links just the ``_core`` skill as ``astrid`` into
+    every detected harness and regenerates the managed pack registry block in
+    the gateway ``SKILL.md``. With *deep*, every discovered pack skill is also
+    linked as ``astrid-<pack>`` and the block records those skill names.
+    Orphan ``astrid-*`` installs (no longer-discovered packs) are pruned.
+    """
+    all_descriptors = list_skills()
+    if deep:
+        descriptors = all_descriptors
+    else:
+        descriptors = [d for d in all_descriptors if d.pack_id == "_core"]
     targets = _resolve_harnesses(None)
     current_state = state.load(state_path)
 
     report: dict = {"actions": []}
+
+    # Regenerate the managed registry block in the gateway skill first so the
+    # block reflects the descriptors we are about to (re)link.
+    registry_changed = registry.regenerate(
+        skill_md_path=skill_md_path,
+        descriptors=all_descriptors,
+        deep=deep,
+        dry_run=dry_run,
+    )
+    report["registry"] = {"changed": registry_changed}
+
     for harness_name, adapter in targets.items():
         kwargs: dict = {"force": force}
         if harness_name == "hermes":
@@ -127,10 +151,88 @@ def sync(
                 for pid, info in current_state["installs"].get(harness_name, {}).items()
                 if pid in installed_ids
             }
+            # Prune stale ``astrid-*`` symlinks whose pack is no longer
+            # discoverable. A pack that merely isn't linked this run (e.g.
+            # gateway-only mode) is still discovered, so it survives; only
+            # packs that vanished entirely are removed.
+            skills_dir = getattr(adapter, "skills_dir", None)
+            if skills_dir is not None and kwargs.get("mechanism", "symlink") != "external-dir":
+                from .harnesses.base import prune_orphan_skill_links
+
+                known_ids = {d.pack_id for d in all_descriptors}
+                for removed in prune_orphan_skill_links(skills_dir, known_ids):
+                    steps.append(_pruned_step(removed))
+                    state.record_uninstall(
+                        current_state, harness_name, _link_pack_id(removed.name)
+                    )
         report["actions"].append({"harness": harness_name, "steps": [_step_to_dict(s) for s in steps]})
 
     if not dry_run:
         state.save(current_state, state_path)
+    return report
+
+
+def check(*, deep: bool = False, skill_md_path: Path | None = None) -> dict:
+    """Dry-run drift report for the gateway link + registry block + per-pack links.
+
+    Reports, without making any change:
+
+    * ``registry_stale`` — the managed pack registry block in the gateway
+      ``SKILL.md`` is missing or out of date.
+    * ``missing`` — packs that should be linked into a detected harness but
+      are not (the gateway ``astrid`` link always; ``astrid-<pack>`` links too
+      when *deep*).
+    * ``stale_links`` — ``astrid-*`` symlinks whose pack is no longer
+      discoverable.
+
+    ``has_drift`` is ``True`` when any category is non-empty; callers map that
+    to a non-zero exit code.
+    """
+    from .harnesses.base import ours_link_to_pack_id
+
+    all_descriptors = list_skills()
+    known_ids = {d.pack_id for d in all_descriptors}
+    if deep:
+        expected = all_descriptors
+    else:
+        expected = [d for d in all_descriptors if d.pack_id == "_core"]
+
+    detected = {name: adapter for name, adapter in all_adapters().items() if adapter.detect()}
+
+    report: dict = {
+        "detected": list(detected.keys()),
+        "registry_stale": not registry.is_current(
+            skill_md_path=skill_md_path, descriptors=all_descriptors, deep=deep
+        ),
+        "missing": [],
+        "stale_links": [],
+    }
+
+    for harness_name, adapter in detected.items():
+        for descriptor in expected:
+            ok, _msg = adapter.verify(descriptor)
+            if not ok:
+                report["missing"].append(
+                    {"harness": harness_name, "pack": descriptor.pack_id}
+                )
+        skills_dir = getattr(adapter, "skills_dir", None)
+        if skills_dir is None or not skills_dir.is_dir():
+            continue
+        for entry in sorted(skills_dir.iterdir()):
+            name = entry.name
+            if name == "astrid" or not name.startswith("astrid-"):
+                continue
+            if not entry.is_symlink():
+                continue
+            pack_id = ours_link_to_pack_id(name)
+            if pack_id is not None and pack_id not in known_ids:
+                report["stale_links"].append(
+                    {"harness": harness_name, "link": name, "path": str(entry)}
+                )
+
+    report["has_drift"] = bool(
+        report["registry_stale"] or report["missing"] or report["stale_links"]
+    )
     return report
 
 
@@ -268,10 +370,20 @@ def list_state(*, state_path: Path | None = None) -> dict:
 
 
 def nudge_if_needed(*, argv: list[str], state_path: Path | None = None, stream=sys.stderr) -> bool:
-    """Optionally print a one-line nudge to ``stream``.
+    """Auto-heal the gateway skill layer for every detected harness.
 
-    Returns True if a nudge was emitted. Cheap path: env var or no detected
-    harness aborts before any IO beyond two os.path checks.
+    On every CLI invocation the gateway calls this. When a detected harness
+    (claude/codex/hermes) is missing the gateway ``astrid`` skill link, this
+    performs the idempotent **gateway-only** install for the affected harnesses
+    (the same link/state machinery as ``skills sync`` without ``--deep``) and
+    prints one terse line to ``stream``. It never sprays per-pack ``astrid-*``
+    links and never writes the repo (no registry regeneration) — only harness
+    skill dirs (``~/.claude/skills`` etc.) are touched.
+
+    Returns True if an auto-heal was performed (a line printed). Cheap path:
+    ``ASTRID_NO_NUDGE``/``--quiet``/``skills``/help, or no detected harness,
+    aborts before any FS work beyond the detect probes. ``state_path`` is the
+    test seam (with ``$HOME`` pinning the harness dirs).
     """
     if os.environ.get(NUDGE_ENV):
         return False
@@ -287,47 +399,39 @@ def nudge_if_needed(*, argv: list[str], state_path: Path | None = None, stream=s
     descriptors = list_skills()
     if not descriptors:
         return False
-    expected_ids = {d.pack_id for d in descriptors}
-
-    current_state = state.load(state_path)
-    stale_harnesses: list[str] = []
-    for harness_name in detected:
-        installed = set(current_state["installs"].get(harness_name, {}).keys())
-        if not expected_ids.issubset(installed):
-            stale_harnesses.append(harness_name)
-
-    if not stale_harnesses:
+    core_descriptor = next((d for d in descriptors if d.pack_id == "_core"), None)
+    if core_descriptor is None:
         return False
 
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=NUDGE_INTERVAL_DAYS)
-    fresh_for_all = True
-    for harness_name in stale_harnesses:
-        last = current_state.get("nudge", {}).get(harness_name, {}).get("last_shown_at")
-        if not last:
-            fresh_for_all = False
-            break
+    # Drift = a detected harness missing the gateway link on disk. We check the
+    # filesystem (verify) rather than only the state file so a deleted link
+    # re-heals even when state still claims it installed.
+    drifted: list[str] = []
+    for harness_name, adapter in detected.items():
         try:
-            last_dt = datetime.fromisoformat(last)
-        except ValueError:
-            fresh_for_all = False
-            break
-        if last_dt.tzinfo is None:
-            last_dt = last_dt.replace(tzinfo=timezone.utc)
-        if last_dt < cutoff:
-            fresh_for_all = False
-            break
-    if fresh_for_all:
+            ok, _msg = adapter.verify(core_descriptor)
+        except Exception:  # noqa: BLE001 - a flaky probe must not block the command
+            ok = False
+        if not ok:
+            drifted.append(harness_name)
+
+    if not drifted:
         return False
 
-    pretty = " / ".join(name.capitalize() for name in stale_harnesses)
+    # Idempotent gateway-only install for exactly the drifted harnesses. This
+    # reuses install() (link machinery + state recording) and never regenerates
+    # the registry block, so the repo is never written on the auto path.
+    try:
+        install(["_core"], drifted, force=False, state_path=state_path)
+    except Exception:  # noqa: BLE001 - never let auto-heal break the real command
+        return False
+
+    pretty = " / ".join(name.capitalize() for name in drifted)
     message = (
-        f"[astrid] Tip: install the skills layer for {pretty}: "
-        f"python3 -m astrid skills install --all   (suppress: {NUDGE_ENV}=1)"
+        f"[astrid] auto-linked skills layer for {pretty} "
+        f"(suppress: {NUDGE_ENV}=1)"
     )
     print(message, file=stream)
-    for harness_name in stale_harnesses:
-        state.record_nudge(current_state, harness_name)
-    state.save(current_state, state_path)
     return True
 
 
@@ -384,9 +488,26 @@ def _step_to_dict(step) -> dict:
     }
 
 
+def _pruned_step(target: Path):
+    from .harnesses.base import PlannedStep
+
+    return PlannedStep(
+        description=f"pruned stale {target}",
+        target=target,
+        extras={"changed": True, "pruned": True},
+    )
+
+
+def _link_pack_id(link_name: str) -> str:
+    from .harnesses.base import ours_link_to_pack_id
+
+    return ours_link_to_pack_id(link_name) or link_name
+
+
 __all__ = [
     "NUDGE_ENV",
     "NUDGE_INTERVAL_DAYS",
+    "check",
     "doctor",
     "install",
     "list_skills",
