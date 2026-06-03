@@ -139,6 +139,21 @@ img = astrid.generate.image(
 When both `out` and `project` are supplied, `out` wins and `project` is
 ignored.
 
+### Self-describing outputs
+
+Every generated file carries its own provenance, so an image stays identifiable
+after it leaves its run directory:
+
+- **PNG outputs** get the generation metadata embedded as `astrid_*` tEXt chunks
+  (`astrid_prompt`, `astrid_model`, `astrid_model_actual` = the actual endpoint,
+  `astrid_seed`, `astrid_request_id`, `astrid_created`, plus `astrid_loras` when
+  used). Local (vibecomfy/ComfyUI) outputs additionally keep ComfyUI's own
+  `prompt`/`workflow` chunks — both are preserved.
+- A full `manifest.json` sidecar (schema v2) sits beside the outputs in the run
+  dir with the complete record (request, outputs + sha256 hashes, cost, timings).
+
+Read the embedded fields with `PIL.Image.open(path).text` or any PNG tEXt reader.
+
 ## Scratchpad convention
 
 For quick experiments and throwaway scripts, drop a `.py` file and run it with
@@ -249,3 +264,8 @@ use the `vibecomfy` skill instead (escape hatch).
 |---|---|
 | `FAL_KEY` | generate_image (cloud), generate_video (cloud) |
 | `OPENAI_API_KEY` | generate_image_openai |
+
+Set these in the process environment, or in a `.env` / `.env.local` file at the
+repo root (both are searched; `.env.local` is gitignored and wins over `.env`).
+The resolver also walks `~/.env` and a few workspace locations — see
+`astrid.core.util.secrets.candidate_env_files`.

@@ -48,12 +48,16 @@ def candidate_env_files(
         candidates.extend(Path.home() / name for name in names)
         candidates.extend(Path.home() / ".codex" / name for name in names)
     else:
+        # Local override convention: `.env.local` wins over `.env` in the
+        # working/repo/workspace dirs (so a developer's gitignored
+        # `.env.local` is honored, matching the `reigh` profile).
+        local_names = (".env.local", ".env")
+        candidates.extend(Path.cwd() / name for name in local_names)
+        candidates.append(Path(__file__).resolve().parent / ".env")
+        candidates.extend(repo_root / name for name in local_names)
+        candidates.extend(workspace / name for name in local_names)
         candidates.extend(
             [
-                Path.cwd() / ".env",
-                Path(__file__).resolve().parent / ".env",
-                repo_root / ".env",
-                workspace / ".env",
                 workspace / "reigh-app" / ".env",
                 workspace / "reigh-worker" / ".env",
                 workspace / "reigh-worker-orchestrator" / ".env",
