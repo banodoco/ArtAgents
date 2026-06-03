@@ -79,7 +79,21 @@ def prepare_project_run(
     root: str | Path | None = None,
     run_id: str | None = None,
     timeline_id: str | None = None,
+    requires_timeline: bool | None = None,
 ) -> ProjectRunContext:
+    """Prepare a project-scoped run directory and run record.
+
+    ``requires_timeline`` controls whether a live project timeline must exist:
+
+    * ``True`` — resolve (and demand) exactly one live timeline (legacy default).
+    * ``False`` — skip timeline resolution entirely; the run carries no
+      ``timeline_id``. Use for stateless executors (image/video generation,
+      understanding, rendering, foley, lora search) that never touch a timeline.
+    * ``None`` — auto-detect from the executor's
+      ``metadata.requires_timeline`` flag (defaulting to ``True`` when the
+      executor cannot be resolved or omits the flag), so callers that already
+      pass ``tool_id`` get the conditional behavior for free.
+    """
     require_project(project_slug, root=root)
     projects_root = paths.resolve_projects_root(root)
     parent_run_id = task_env.task_run_id_env()
@@ -129,7 +143,9 @@ def prepare_project_run(
             record=record,
             root=projects_root,
         )
-    if timeline_id is None:
+    if requires_timeline is None:
+        requires_timeline = _executor_requires_timeline(tool_id)
+    if timeline_id is None and requires_timeline:
         timeline_id, _timeline_slug = resolve_required_project_timeline(project_slug, root=projects_root)
     effective_run_id = paths.validate_run_id(run_id or generate_run_id())
     run_root = paths.run_dir(project_slug, effective_run_id, root=projects_root)
@@ -149,7 +165,8 @@ def prepare_project_run(
     )
     run_json_path = paths.run_json_path(project_slug, effective_run_id, root=projects_root)
     write_json_atomic(run_json_path, record)
-    _record_contributing_run(project_slug, timeline_id, effective_run_id, root=projects_root)
+    if timeline_id is not None:
+        _record_contributing_run(project_slug, timeline_id, effective_run_id, root=projects_root)
     return ProjectRunContext(
         project_slug=project_slug,
         run_id=effective_run_id,
@@ -196,6 +213,46 @@ def resolve_required_project_timeline(
         f"({choices}); recovery: python3 -m astrid attach {project_slug} && "
         "python3 -m astrid timelines set-default <slug>"
     )
+
+
+def _executor_requires_timeline(tool_id: str | None) -> bool:
+    """Resolve an executor's ``metadata.requires_timeline`` flag from ``tool_id``.
+
+    Defaults to ``True`` (timeline required) for backward compatibility whenever
+    the flag is absent, the executor cannot be resolved, or the registry fails
+    to load. Only an explicit ``requires_timeline: false`` in the executor's
+    metadata opts a run out of timeline resolution. The registry lookup is
+    lazily imported (avoiding an import cycle: executor → project) and cached so
+    repeated runs do not re-discover packs.
+    """
+    if not tool_id:
+        return True
+    metadata = _executor_metadata(tool_id)
+    if metadata is None:
+        return True
+    value = metadata.get("requires_timeline", True)
+    return bool(value)
+
+
+def _executor_metadata(tool_id: str) -> Mapping[str, Any] | None:
+    try:
+        registry = _default_executor_registry()
+        executor = registry.get(tool_id)
+    except Exception:
+        return None
+    return getattr(executor, "metadata", None)
+
+
+_DEFAULT_EXECUTOR_REGISTRY: Any = None
+
+
+def _default_executor_registry() -> Any:
+    global _DEFAULT_EXECUTOR_REGISTRY
+    if _DEFAULT_EXECUTOR_REGISTRY is None:
+        from astrid.core.executor.registry import load_default_registry
+
+        _DEFAULT_EXECUTOR_REGISTRY = load_default_registry()
+    return _DEFAULT_EXECUTOR_REGISTRY
 
 
 def _timeline_id_from_parent_run(

@@ -389,3 +389,96 @@ def test_bound_session_missing_file_errors_with_hint(
     # The SessionBindingError message is what surfaces, not the bare
     # "no session bound" gate hint.
     assert "no session file" in stderr or "session:" in stderr
+
+
+# ----- onboarding ceremony: stateless run auto-binds a default project ----
+
+
+def test_stateless_executor_run_auto_binds_default_project_without_attach(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stateless `executors run --out` invocation must NOT require a prior
+    `astrid attach`: the gate auto-binds a default project (creating it on
+    first use) and sets ASTRID_SESSION_ID, then the run proceeds."""
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    out_dir = env["projects"].parent / "out"
+
+    rc, _stdout, stderr = _run_pipeline(
+        [
+            "executors",
+            "run",
+            "generation.generate_image",
+            "--out",
+            str(out_dir),
+            "--input",
+            "model=flux-dev",
+            "--input",
+            "mode=t2i",
+            "--input",
+            "execution=cloud",
+            "--input",
+            "prompt=hello",
+            "--dry-run",
+        ]
+    )
+
+    assert "no session bound" not in stderr
+    assert rc == 0
+    # Default project was created on first use under the isolated projects root.
+    assert (env["projects"] / "default" / "project.json").is_file()
+    # A session pointer was written and the process is now bound for the run.
+    import os
+
+    assert (env["projects"] / "default" / ".astrid-session").is_file()
+    assert os.environ.get(ASTRID_SESSION_ID_ENV)
+
+
+def test_auto_bind_honors_configured_workspace_default_project(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When a workspace/user default project is configured, auto-bind uses it
+    instead of the literal ``default`` slug."""
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+    from astrid.core.session.config import set_default_project
+
+    set_default_project("scratch", scope="user")
+    out_dir = env["projects"].parent / "out2"
+
+    rc, _stdout, stderr = _run_pipeline(
+        [
+            "executors",
+            "run",
+            "understanding.understand",
+            "--out",
+            str(out_dir),
+            "--input",
+            "mode=describe",
+            "--dry-run",
+        ]
+    )
+
+    assert "no session bound" not in stderr
+    # Auto-bind created the *configured* default ("scratch"), not the literal
+    # fallback slug.
+    assert (env["projects"] / "scratch" / "project.json").is_file()
+    assert not (env["projects"] / "default").exists()
+
+
+def test_gated_executors_list_still_errors_without_session(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Auto-bind is scoped to `run` verbs only — non-run executor verbs (and
+    any `--project`-explicit run) keep the documented `no session bound`
+    error, so the feature does not silently widen the unbound allowlist."""
+    monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
+
+    rc, _stdout, stderr = _run_pipeline(["executors", "list"])
+    assert rc == 2
+    assert stderr.splitlines()[0].startswith("no session bound")
+
+    # An explicit --project run is left to the dispatched command's own project
+    # resolution; the gate does not auto-bind over it.
+    rc2, _stdout2, stderr2 = _run_pipeline(
+        ["executors", "run", "generation.generate_image", "--project", "demo", "--dry-run"]
+    )
+    assert "no session bound" in stderr2
