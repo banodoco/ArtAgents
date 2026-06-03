@@ -46,23 +46,28 @@ use the `vibecomfy` skill instead (escape hatch).
 
 ## CLI quick-start
 
+Pass every declared input with `--input NAME=VALUE` (snake_case names; the
+runner forwards them to the executor as `--kebab-case` flags). `--out` is a
+top-level run flag, not an input. The CLI does not accept arbitrary passthrough
+arguments after `--`.
+
 ```bash
 # Image from text (cloud, fast)
-python3 -m astrid executors run generation.generate_image -- \
-  --model flux-schnell --mode t2i --execution cloud \
-  --prompt "a serene mountain lake at dawn" --out ./out
+python3 -m astrid executors run generation.generate_image \
+  --input model=flux-schnell --input mode=t2i --input execution=cloud \
+  --input prompt="a serene mountain lake at dawn" --out ./out
 
 # Image from text (local, open model)
-python3 -m astrid executors run generation.generate_image -- \
-  --model z-image --mode t2i --execution local \
-  --prompt "a serene mountain lake at dawn" --out ./out
+python3 -m astrid executors run generation.generate_image \
+  --input model=z-image --input mode=t2i --input execution=local \
+  --input prompt="a serene mountain lake at dawn" --out ./out
 
 # Video from text (cloud)
-python3 -m astrid executors run generation.generate_video -- \
-  --model wan-2.2 --mode t2v --execution cloud \
-  --prompt "a wave crashing on rocks" --out ./out
+python3 -m astrid executors run generation.generate_video \
+  --input model=wan-2.2 --input mode=t2v --input execution=cloud \
+  --input prompt="a wave crashing on rocks" --out ./out
 
 # OpenAI image generation from a prompt file
-python3 -m astrid executors run generation.generate_image_openai -- \
-  --prompts-file ./prompts.jsonl --out-dir ./out/images --manifest ./out/manifest.json
+python3 -m astrid executors run generation.generate_image_openai \
+  --input prompts_file=./prompts.jsonl --out ./out
 ```

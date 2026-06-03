@@ -205,6 +205,177 @@ def test_builtin_render_omits_optional_theme_when_not_supplied_and_forwards_when
     assert themed[-2:] == ("--theme", "theme.json")
 
 
+# ---------------------------------------------------------------------------
+# Auto-forward of untemplated declared inputs (the dropped-prompt bug fix)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_image_auto_forwards_prompt_and_numeric_inputs(tmp_path: Path) -> None:
+    """`--input prompt=...` reaches generate_image's run.py as `--prompt ...`.
+
+    Regression for the bug where declared inputs that are neither a
+    `{placeholder}` token nor an `input_args` mapping were silently dropped.
+    """
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="generation.generate_image",
+            out=tmp_path / "img",
+            inputs={
+                "model": "z-image",
+                "mode": "t2i",
+                "execution": "local",
+                "prompt": "a red bicycle",
+                "seed": "42",
+                "steps": "30",
+                "negative_prompt": "blurry",
+                "guidance_scale": "7.5",
+            },
+            python_exec="/opt/python",
+        ),
+        load_default_registry(),
+    )
+
+    # Forwarded value flags use kebab-cased input names.
+    assert "--prompt" in command
+    assert command[command.index("--prompt") + 1] == "a red bicycle"
+    assert command[command.index("--seed") + 1] == "42"
+    assert command[command.index("--steps") + 1] == "30"
+    assert command[command.index("--negative-prompt") + 1] == "blurry"
+    assert command[command.index("--guidance-scale") + 1] == "7.5"
+    # Templated inputs are passed exactly once (not double-forwarded).
+    for flag in ("--model", "--mode", "--execution", "--out"):
+        assert command.count(flag) == 1
+    # Untemplated inputs that were not supplied are omitted entirely.
+    assert "--size" not in command
+    assert "--strength" not in command
+
+
+def test_generate_video_auto_forwards_prompt_and_frame_inputs(tmp_path: Path) -> None:
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="generation.generate_video",
+            out=tmp_path / "vid",
+            inputs={
+                "model": "wan-2.2",
+                "mode": "t2v",
+                "execution": "local",
+                "prompt": "a cat walking",
+                "frames": "81",
+                "fps": "16",
+            },
+            python_exec="/opt/python",
+        ),
+        load_default_registry(),
+    )
+
+    assert command[command.index("--prompt") + 1] == "a cat walking"
+    assert command[command.index("--frames") + 1] == "81"
+    assert command[command.index("--fps") + 1] == "16"
+    for flag in ("--model", "--mode", "--execution", "--out"):
+        assert command.count(flag) == 1
+
+
+def test_auto_forward_does_not_double_pass_placeholder_or_input_arg_inputs(
+    tmp_path: Path,
+) -> None:
+    """Inputs consumed by a placeholder or input_args mapping are not re-appended."""
+    executor = _executor(
+        executor_id="test.no_double",
+        inputs=(
+            Port(name="model", required=True, type="string"),
+            Port(name="item", required=False, type="string"),
+            Port(name="prompt", required=False, type="string"),
+        ),
+        argv=("run", "--model", "{model}"),
+    )
+    executor = ExecutorDefinition(
+        **{
+            **executor.__dict__,
+            "command": CommandSpec(
+                argv=("run", "--model", "{model}"),
+                input_args=(CommandInputArg(input="item", flag="--item"),),
+            ),
+        }
+    )
+
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            inputs={"model": "z", "item": "thing", "prompt": "hi"},
+        ),
+        _registry(executor),
+    )
+
+    # `model` consumed by placeholder, `item` by input_args -> each once.
+    assert command.count("--model") == 1
+    assert command.count("--item") == 1
+    # `prompt` is untemplated -> auto-forwarded once.
+    assert command.count("--prompt") == 1
+    assert command[command.index("--prompt") + 1] == "hi"
+
+
+def test_auto_forward_boolean_input_emits_bare_flag_only_when_truthy(
+    tmp_path: Path,
+) -> None:
+    def _build(value: str) -> tuple[str, ...]:
+        executor = _executor(
+            executor_id="test.boolflag",
+            inputs=(Port(name="fake", required=False, type="boolean"),),
+            argv=("run",),
+        )
+        return build_executor_command(
+            ExecutorRunRequest(
+                executor_id=executor.id,
+                out=tmp_path,
+                inputs={"fake": value},
+            ),
+            _registry(executor),
+        )
+
+    truthy = _build("true")
+    assert "--fake" in truthy
+    # Boolean flags never carry a value argument.
+    assert truthy[-1] == "--fake"
+
+    falsey = _build("false")
+    assert "--fake" not in falsey
+
+
+def test_auto_forward_respects_executor_metadata_opt_out(tmp_path: Path) -> None:
+    executor = _executor(
+        executor_id="test.optout",
+        inputs=(Port(name="assets", required=False, type="file"),),
+        argv=("run",),
+        metadata={"auto_forward_inputs": False},
+    )
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            inputs={"assets": "/tmp/a.json"},
+        ),
+        _registry(executor),
+    )
+    assert "--assets" not in command
+
+
+def test_reigh_open_in_reigh_does_not_forward_unsupported_assets_flag(
+    tmp_path: Path,
+) -> None:
+    """`reigh.open_in_reigh` opts out: its run.py argparse has no `--assets`."""
+    command = build_executor_command(
+        ExecutorRunRequest(
+            executor_id="reigh.open_in_reigh",
+            out=tmp_path,
+            inputs={"timeline": "/tmp/t.json", "assets": "/tmp/a.json"},
+            python_exec="/opt/python",
+        ),
+        load_default_registry(),
+    )
+    assert "--assets" not in command
+
+
 def test_executor_argv_resolves_canonical_id_and_bare_pipeline_step() -> None:
     assert executor_argv("rendering.render", "/opt/python") == [
         "/opt/python",
