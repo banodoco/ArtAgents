@@ -30,6 +30,7 @@ from astrid.core.generation.backends import (
     load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry
+from astrid.core.util.png_metadata import embed_png_text
 
 logger = logging.getLogger(__name__)
 
@@ -648,6 +649,20 @@ def main(argv: list[str] | None = None) -> int:
                 "bytes": img_path.stat().st_size,
             }
             all_outputs.append(output_entry)
+
+            # Embed Astrid metadata as astrid_* tEXt chunks (PR-017).
+            _embed_fields: dict[str, str] = {
+                "prompt": prompt_text or getattr(args, "prompt", ""),
+                "negative_prompt": getattr(args, "negative_prompt", None) or "",
+                "model": entry.id,
+                "model_actual": result.model_actual,
+                "seed": str(seed),
+                "request_id": result.request_id or "",
+                "created": datetime.now(timezone.utc).isoformat(),
+            }
+            if params.get("loras"):
+                _embed_fields["loras"] = str(params["loras"])
+            embed_png_text(img_path, _embed_fields)
 
         final_seed = result.seed_used
         model_actual = result.model_actual
