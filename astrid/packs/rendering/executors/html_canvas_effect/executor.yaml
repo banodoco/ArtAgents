@@ -61,6 +61,7 @@
     "network": false
   },
   "metadata": {
+    "requires_timeline": false,
     "runtime_module": "astrid.packs.rendering.executors.html_canvas_effect.run",
     "runtime_file": "run.py",
     "creates": "astrid/packs/local/elements/effects/<effect_id>",

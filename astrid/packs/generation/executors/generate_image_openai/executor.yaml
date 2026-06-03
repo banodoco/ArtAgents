@@ -55,6 +55,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "requires_timeline": false,
     "api_provider": "openai",
     "env": [
       "OPENAI_API_KEY"

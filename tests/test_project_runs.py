@@ -140,6 +140,72 @@ def test_project_run_rejects_project_plus_out(tmp_path: Path, monkeypatch: pytes
     assert list((tmp_path / "projects" / "demo" / "runs").glob("*")) == []
 
 
+def test_prepare_project_run_skips_timeline_when_requires_timeline_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A stateless run (requires_timeline=False) prepares with no live
+    timeline and writes a run record carrying no timeline_id."""
+    from astrid.core.project.run import prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")  # NB: no create_timeline() — there is no live timeline.
+
+    context = prepare_project_run(
+        "demo",
+        tool_id="test.stateless",
+        kind="executor",
+        requires_timeline=False,
+    )
+
+    assert "timeline_id" not in context.record
+    assert (Path(context.record["out"]) / "run.json").exists() or context.run_json_path.exists()
+    on_disk = _read_json(context.run_json_path)
+    assert "timeline_id" not in on_disk
+
+
+def test_prepare_project_run_demands_timeline_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The default (requires_timeline left unset → True) still demands a live
+    timeline, preserving backward-compatible behavior for timeline-aware
+    executors."""
+    from astrid.core.project.run import ProjectRunError, prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")  # no timeline
+
+    with pytest.raises(ProjectRunError, match="no live timelines"):
+        prepare_project_run("demo", tool_id="test.stateful", kind="executor")
+
+
+def test_prepare_project_run_autodetects_requires_timeline_from_executor_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With requires_timeline=None (the default), the flag is read from the
+    executor's metadata.requires_timeline. The built-in stateless
+    generation.generate_image executor declares it false, so a project with no
+    live timeline prepares cleanly."""
+    from astrid.core.project.run import prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")  # no timeline
+
+    context = prepare_project_run(
+        "demo",
+        tool_id="generation.generate_image",
+        kind="executor",
+        # requires_timeline omitted → auto-detect from executor metadata.
+    )
+
+    assert "timeline_id" not in context.record
+
+
 def test_run_record_baseline_snapshot_is_sha256_hex_at_canonical_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

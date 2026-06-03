@@ -56,6 +56,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "requires_timeline": false,
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.rendering.executors.sprite_sheet.run"
   },
