@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.contracts.errors import AstridError
 from astrid.core.task.claim import (
     CLAIM_KIND,
     UNCLAIM_KIND,
@@ -54,25 +55,22 @@ def test_parse_for_flag_human() -> None:
 
 
 def test_parse_for_flag_rejects_bare_string() -> None:
-    import sys
-    with pytest.raises(SystemExit):
+    with pytest.raises(AstridError):
         _parse_for_flag("nobody")
 
 
 def test_parse_for_flag_rejects_legacy_actor_prefix() -> None:
-    with pytest.raises(SystemExit):
+    with pytest.raises(AstridError):
         _parse_for_flag("actor:bob")
 
 
 def test_parse_for_flag_rejects_empty_agent() -> None:
-    import sys
-    with pytest.raises(SystemExit):
+    with pytest.raises(AstridError):
         _parse_for_flag("agent:")
 
 
 def test_parse_for_flag_rejects_empty_human() -> None:
-    import sys
-    with pytest.raises(SystemExit):
+    with pytest.raises(AstridError):
         _parse_for_flag("human:")
 
 

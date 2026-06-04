@@ -9,10 +9,10 @@ under Sprint 1's writer_epoch CAS (apex contract preserved).
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from astrid.contracts.errors import AstridError, build_state_snapshot
 from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.session.binding import resolve_current_session
 from astrid.core.session.writer import writer_context_for_project
@@ -21,8 +21,17 @@ CLAIM_KIND = "claim"
 UNCLAIM_KIND = "unclaim"
 
 
-def _print_err(msg: str) -> None:
-    print(msg, file=sys.stderr)
+def _raise_claim_error(
+    cause: str,
+    *,
+    recovery_command: str,
+    **state: object,
+) -> None:
+    raise AstridError(
+        cause,
+        recovery_command=recovery_command,
+        state_snapshot=build_state_snapshot(state),
+    )
 
 
 def _resolve_session_identity(slug: str | None = None) -> tuple[str, str, str]:
@@ -78,22 +87,34 @@ def _make_unclaim_event(
 def _parse_for_flag(for_value: str) -> tuple[str, str]:
     """Parse ``--for agent:<id>`` or ``--for human:<name>`` into (identity, kind)."""
     if not isinstance(for_value, str) or not for_value:
-        _print_err("claim: --for must be 'agent:<id>' or 'human:<name>'")
-        sys.exit(1)
+        _raise_claim_error(
+            "claim: --for must be 'agent:<id>' or 'human:<name>'",
+            recovery_command="astrid claim <step> --project <project> --run-id <run-id> --for agent:<id>",
+            for_value=for_value,
+        )
     if for_value.startswith("agent:"):
         ident = for_value[len("agent:"):]
         if not ident:
-            _print_err("claim: --for agent:<id> missing agent id")
-            sys.exit(1)
+            _raise_claim_error(
+                "claim: --for agent:<id> missing agent id",
+                recovery_command="astrid claim <step> --project <project> --run-id <run-id> --for agent:<id>",
+                for_value=for_value,
+            )
         return f"agent:{ident}", "agent"
     if for_value.startswith("human:"):
         ident = for_value[len("human:"):]
         if not ident:
-            _print_err("claim: --for human:<name> missing name")
-            sys.exit(1)
+            _raise_claim_error(
+                "claim: --for human:<name> missing name",
+                recovery_command="astrid claim <step> --project <project> --run-id <run-id> --for human:<name>",
+                for_value=for_value,
+            )
         return f"human:{ident}", "human"
-    _print_err(f"claim: --for must be 'agent:<id>' or 'human:<name>', got {for_value!r}")
-    sys.exit(1)
+    _raise_claim_error(
+        f"claim: --for must be 'agent:<id>' or 'human:<name>', got {for_value!r}",
+        recovery_command="astrid claim <step> --project <project> --run-id <run-id> --for agent:<id>",
+        for_value=for_value,
+    )
     return "", ""  # unreachable
 
 
@@ -164,28 +185,40 @@ def _resolve_claim_identity(args) -> tuple[str, str]:
     )
     if agent_id:
         return f"agent:{agent_id}", "agent"
-    _print_err(
+    _raise_claim_error(
         "claim: no --for flag supplied and no session identity available; "
-        "run `astrid attach <project>` first or supply --for agent:<id> or --for human:<name>"
+        "run `astrid attach <project>` first or supply --for agent:<id> or --for human:<name>",
+        recovery_command=f"astrid attach {getattr(args, 'project', '<project>')}",
+        project=getattr(args, "project", None),
+        run_id=getattr(args, "run_id", None),
+        step=getattr(args, "step", None),
     )
-    sys.exit(1)
     return "", ""  # unreachable
 
 
-def _check_session_writable(slug: str | None = None) -> None:
+def _check_session_writable(slug: str | None = None, *, run_id: str | None = None) -> None:
     """Reject read-only sessions with a clear error. T9: pass slug for file
     fallback when ``ASTRID_SESSION_ID`` is unset (FLAG-S1-003)."""
     session = resolve_current_session(slug=slug)
     if session is None:
-        _print_err("claim: no session bound; run `astrid attach <project>` first")
-        sys.exit(1)
+        _raise_claim_error(
+            "claim: no session bound; run `astrid attach <project>` first",
+            recovery_command=f"astrid attach {slug or '<project>'}",
+            project=slug,
+            run_id=run_id,
+        )
     if session.role == "reader":
-        _print_err(
+        takeover_target = run_id or session.run_id or "<run-id>"
+        _raise_claim_error(
             f"claim: session {session.id!r} is read-only; "
             "only writer sessions can claim/unclaim steps. "
-            f"Run `astrid sessions takeover --project {session.project}` to become writer."
+            "Run `astrid sessions takeover <run-id>` to become writer.",
+            recovery_command=f"astrid sessions takeover {takeover_target}",
+            project=session.project,
+            run_id=takeover_target,
+            session_id=session.id,
+            role=session.role,
         )
-        sys.exit(1)
 
 
 def cmd_claim(argv: Sequence[str], *, projects_root: Path | None = None) -> int:
@@ -203,15 +236,28 @@ def cmd_claim(argv: Sequence[str], *, projects_root: Path | None = None) -> int:
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    _check_session_writable(slug=getattr(args, "project", None))
-
-    slug = validate_project_slug(args.project)
-    run_id = validate_run_id(args.run_id)
+    try:
+        slug = validate_project_slug(args.project)
+        run_id = validate_run_id(args.run_id)
+    except Exception as exc:
+        _raise_claim_error(
+            f"claim: {exc}",
+            recovery_command="astrid claim <step> --project <project> --run-id <run-id> --for agent:<id>",
+            project=getattr(args, "project", None),
+            run_id=getattr(args, "run_id", None),
+            step=getattr(args, "step", None),
+        )
+    _check_session_writable(slug=slug, run_id=run_id)
     run_dir = project_dir(slug, root=projects_root) / "runs" / run_id
 
     if not (run_dir / "events.jsonl").exists():
-        _print_err(f"claim: no run {run_id!r} for project {slug!r}")
-        return 1
+        _raise_claim_error(
+            f"claim: no run {run_id!r} for project {slug!r}",
+            recovery_command=f"astrid runs ls --project {slug}",
+            project=slug,
+            run_id=run_id,
+            step=args.step,
+        )
 
     claimed_by, claimed_by_kind = _resolve_claim_identity(args)
     try:
@@ -224,8 +270,13 @@ def cmd_claim(argv: Sequence[str], *, projects_root: Path | None = None) -> int:
             )
             writer.append(event)
     except Exception as exc:
-        _print_err(f"claim: event-append failed: {exc}")
-        return 1
+        _raise_claim_error(
+            f"claim: event-append failed: {exc}",
+            recovery_command=f"astrid sessions takeover {run_id}",
+            project=slug,
+            run_id=run_id,
+            step=args.step,
+        )
 
     print(f"claimed {args.step!r} for {claimed_by}")
     return 0
@@ -246,15 +297,28 @@ def cmd_unclaim(argv: Sequence[str], *, projects_root: Path | None = None) -> in
     except SystemExit as exc:
         return int(exc.code or 2)
 
-    _check_session_writable(slug=getattr(args, "project", None))
-
-    slug = validate_project_slug(args.project)
-    run_id = validate_run_id(args.run_id)
+    try:
+        slug = validate_project_slug(args.project)
+        run_id = validate_run_id(args.run_id)
+    except Exception as exc:
+        _raise_claim_error(
+            f"unclaim: {exc}",
+            recovery_command="astrid unclaim <step> --project <project> --run-id <run-id> --for agent:<id>",
+            project=getattr(args, "project", None),
+            run_id=getattr(args, "run_id", None),
+            step=getattr(args, "step", None),
+        )
+    _check_session_writable(slug=slug, run_id=run_id)
     run_dir = project_dir(slug, root=projects_root) / "runs" / run_id
 
     if not (run_dir / "events.jsonl").exists():
-        _print_err(f"unclaim: no run {run_id!r} for project {slug!r}")
-        return 1
+        _raise_claim_error(
+            f"unclaim: no run {run_id!r} for project {slug!r}",
+            recovery_command=f"astrid runs ls --project {slug}",
+            project=slug,
+            run_id=run_id,
+            step=args.step,
+        )
 
     unclaimed_by, unclaimed_by_kind = _resolve_claim_identity(args)
     try:
@@ -267,8 +331,13 @@ def cmd_unclaim(argv: Sequence[str], *, projects_root: Path | None = None) -> in
             )
             writer.append(event)
     except Exception as exc:
-        _print_err(f"unclaim: event-append failed: {exc}")
-        return 1
+        _raise_claim_error(
+            f"unclaim: event-append failed: {exc}",
+            recovery_command=f"astrid sessions takeover {run_id}",
+            project=slug,
+            run_id=run_id,
+            step=args.step,
+        )
 
     print(f"unclaimed {args.step!r} for {unclaimed_by}")
     return 0

@@ -210,6 +210,7 @@ def cmd_runs_ls(
         choices=_RUNS_LS_STATUSES,
         help="filter by terminal status",
     )
+    parser.add_argument("--json", action="store_true", help="emit run summaries as JSON")
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -238,6 +239,23 @@ def cmd_runs_ls(
             if args.status is not None and status != args.status:
                 continue
             rows.append((proj.name, run_dir.name, status, last_kind, last_ts))
+
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "run_id": run_id,
+                        "status": status,
+                        "started_at": last_ts or None,
+                        "summary": last_kind or None,
+                    }
+                    for _slug, run_id, status, last_kind, last_ts in rows
+                ],
+                sort_keys=True,
+            )
+        )
+        return 0
 
     for slug, run_id, status, last_kind, last_ts in rows:
         print(f"{slug}\t{run_id}\t{status}\t{last_kind}\t{last_ts}")

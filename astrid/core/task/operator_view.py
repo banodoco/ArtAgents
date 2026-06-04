@@ -363,9 +363,9 @@ def _ack_identity_token(
         return f"--{assignee[0]} {assignee[1]}"
     return "--agent <id>" if ack_kind == "agent" else "--human <name>"
 
-def _format_ack_template(
+def _ack_template_parts(
     *, path_str: str, slug: str, step, claimed_identity: str | None, has_repeat_for_each: bool
-) -> str:
+) -> _AckTemplate:
     ack_kind = step.ack.kind if step.ack is not None else "agent"
     identity = _ack_identity_token(
         step=step, ack_kind=ack_kind, claimed_identity=claimed_identity
@@ -376,7 +376,18 @@ def _format_ack_template(
     )
     if has_repeat_for_each:
         base += " [--item <id>]"
-    return base
+    return _AckTemplate(command=base)
+
+def _format_ack_template(
+    *, path_str: str, slug: str, step, claimed_identity: str | None, has_repeat_for_each: bool
+) -> str:
+    return _ack_template_parts(
+        path_str=path_str,
+        slug=slug,
+        step=step,
+        claimed_identity=claimed_identity,
+        has_repeat_for_each=has_repeat_for_each,
+    ).command
 
 def _format_claim_line(*, step, claimed_identity: str | None) -> str:
     parts = [f"assignee: {getattr(step, 'assignee', 'system')}"]
@@ -411,6 +422,54 @@ class _HostCloseHint:
 @dataclass(frozen=True)
 class _RunComplete:
     pass
+
+
+NEXT_JSON_SCHEMA: dict[str, str] = {
+    "schema_version": "int: currently 1",
+    "project": "str|null: resolved project slug",
+    "run_id": "str|null: active run id",
+    "state": "str: coarse lifecycle state",
+    "action": "str|null: machine-readable action kind",
+    "command": "str|null: exact shell command to run next",
+    "step": "str|null: current step path",
+    "blocked": "bool: true when no immediate progress command is available",
+    "reason": "str|null: compact explanation for the selected action",
+}
+
+
+@dataclass(frozen=True)
+class _NextJson:
+    project: str | None
+    run_id: str | None
+    state: str
+    action: str | None
+    command: str | None
+    step: str | None
+    blocked: bool
+    reason: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "project": self.project,
+            "run_id": self.run_id,
+            "state": self.state,
+            "action": self.action,
+            "command": self.command,
+            "step": self.step,
+            "blocked": self.blocked,
+            "reason": self.reason,
+        }
+
+
+@dataclass(frozen=True)
+class _AckTemplate:
+    command: str
+
+
+def _emit_next_json(payload: _NextJson) -> int:
+    print(json.dumps(payload.to_dict(), sort_keys=True))
+    return 0
 
 def _has_host_step_attested(events, host_path_tuple) -> bool:
     path_str = STEP_PATH_SEP.join(host_path_tuple)
@@ -633,15 +692,22 @@ def cmd_next(
         default=None,
         help="optional reason recorded with each --skip event",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exactly one machine-readable next-action object on stdout",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
         return _system_exit_code(exc)
 
-    # Always print preamble first, verbatim, every call (SD-023) — even on
-    # error / exhausted paths so Stop-hook context re-injection is consistent.
-    print(PROHIBITION_PREAMBLE)
-    print()
+    json_mode = bool(args.json)
+    if not json_mode:
+        # Always print preamble first, verbatim, every call (SD-023) — even on
+        # error / exhausted paths so Stop-hook context re-injection is consistent.
+        print(PROHIBITION_PREAMBLE)
+        print()
 
     # Universal port-of-call (#13): derive slug from --project OR the bound
     # session OR fall through to the unbound discovery hint. The agent-UX
@@ -686,6 +752,20 @@ def cmd_next(
     # --project, print the single attach action instead of inspecting run
     # state anonymously.
     if session is None:
+        if json_mode:
+            command = f"astrid attach {slug}" if slug and explicit_project else "astrid status"
+            return _emit_next_json(
+                _NextJson(
+                    project=slug if explicit_project else None,
+                    run_id=None,
+                    state="unbound",
+                    action="attach" if slug and explicit_project else "none",
+                    command=command,
+                    step=None,
+                    blocked=False,
+                    reason="no session bound",
+                )
+            )
         _print_next_unbound_hint(
             projects_root,
             target_slug=slug if explicit_project else None,
@@ -702,6 +782,19 @@ def cmd_next(
 
     active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=None,
+                    state="no_active_run",
+                    action="start",
+                    command=f"astrid start <orchestrator-id> --project {slug}",
+                    step=None,
+                    blocked=False,
+                    reason="session bound but no active task run",
+                )
+            )
         # SESSION BOUND, NO RUN: print orchestrator suggestions + the
         # exact `astrid start` template the agent should type next.
         _print_next_no_run_hint(slug, projects_root)
@@ -741,6 +834,19 @@ def cmd_next(
         and _session.project == slug
         and not is_writer_for(_session, run_dir)
     ):
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=run_id,
+                    state="reader",
+                    action="claim",
+                    command=f"astrid sessions takeover {run_id}",
+                    step=None,
+                    blocked=True,
+                    reason="attached as reader; another session holds the writer lease",
+                )
+            )
         print(f"attached to {slug!r} as reader — another session holds the writer lease.")
         print()
         print("take over the run to advance:")
@@ -791,6 +897,19 @@ def cmd_next(
     )
     if isinstance(tail_action, _RewindRetry):
         path_str = STEP_PATH_SEP.join(tail_action.path) if tail_action.path else ""
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=run_id,
+                    state="blocked",
+                    action="ack",
+                    command=None,
+                    step=path_str or None,
+                    blocked=True,
+                    reason=f"previous attempt rejected: {tail_action.reason}",
+                )
+            )
         msg = (
             f"Previous attempt rejected: {tail_action.reason}. "
             f"Re-write the artifact for {path_str!r} and re-ack."
@@ -799,10 +918,25 @@ def cmd_next(
         return 0
     if isinstance(tail_action, _HostCloseHint):
         host_path_str = STEP_PATH_SEP.join(tail_action.host_path)
+        command = (
+            f"astrid ack {host_path_str} --project {slug} --decision approve "
+            f"--agent <id> --evidence ..."
+        )
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=run_id,
+                    state="ready",
+                    action="ack",
+                    command=command,
+                    step=host_path_str,
+                    blocked=False,
+                    reason="all for_each items complete; close the host step",
+                )
+            )
         msg = (
-            f"All items complete. Close the host with `astrid ack "
-            f"{host_path_str} --project {slug} --decision approve "
-            f"--agent <id> --evidence ...` (omit --item)."
+            f"All items complete. Close the host with `{command}` (omit --item)."
         )
         print(render_step_instructions(
             msg,
@@ -810,6 +944,19 @@ def cmd_next(
         ))
         return 0
     if isinstance(tail_action, _RunComplete):
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=run_id,
+                    state="complete",
+                    action="none",
+                    command=None,
+                    step=None,
+                    blocked=False,
+                    reason="run complete",
+                )
+            )
         print(render_step_instructions(
             "Run complete. Nothing to do.",
             **{**_tail_render_kwargs, "plan_step_path": None, "item_id": None, "iteration": None},
@@ -871,6 +1018,19 @@ def cmd_next(
             plan, events, events_path, run_id,
             slug=slug, projects_root=projects_root,
         ):
+            if json_mode:
+                return _emit_next_json(
+                    _NextJson(
+                        project=slug,
+                        run_id=run_id,
+                        state="complete",
+                        action="none",
+                        command=None,
+                        step=None,
+                        blocked=False,
+                        reason="run complete",
+                    )
+                )
             print(render_step_instructions(
                 "Run complete. Nothing to do.",
                 projects_root=projects_root,
@@ -891,6 +1051,20 @@ def cmd_next(
                 just_finished_plan_id=getattr(plan, "plan_id", None),
             )
         else:
+            if json_mode:
+                parked = STEP_PATH_SEP.join(peek.path_tuple) if peek.path_tuple else "<root>"
+                return _emit_next_json(
+                    _NextJson(
+                        project=slug,
+                        run_id=run_id,
+                        state="blocked",
+                        action="none",
+                        command=None,
+                        step=parked,
+                        blocked=True,
+                        reason="cursor parked with no legal action",
+                    )
+                )
             parked = STEP_PATH_SEP.join(peek.path_tuple) if peek.path_tuple else "<root>"
             print(
                 f"run not complete: cursor parked at {parked} with no legal action",
@@ -910,7 +1084,7 @@ def cmd_next(
         iteration=peek.iteration,
     )
 
-    if peek.step.assignee != "system" or claimed_identity is not None:
+    if not json_mode and (peek.step.assignee != "system" or claimed_identity is not None):
         print(_format_claim_line(step=peek.step, claimed_identity=claimed_identity))
         print()
 
@@ -924,7 +1098,21 @@ def cmd_next(
             iteration=peek.iteration,
             item_id=peek.item_id,
         )
-        print(f"run: {render_step_instructions(rendered.display_command, **_render_kwargs)}")
+        command = render_step_instructions(rendered.display_command, **_render_kwargs)
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=run_id,
+                    state="ready",
+                    action="run",
+                    command=command,
+                    step=path_str,
+                    blocked=False,
+                    reason=None,
+                )
+            )
+        print(f"run: {command}")
         if not _command_has_project_arg(rendered.canonical_command):
             print(
                 "warning: this code-step command uses task env instead of a local --project "
@@ -937,6 +1125,34 @@ def cmd_next(
             "and skips a duplicate step_dispatched event.)"
         )
     elif is_attested_kind(peek.step):
+        schema_reqs = _format_schema_requirements(peek.step)
+        host_has_for_each = peek.item_id is not None
+        if not host_has_for_each:
+            host_step = find_step_by_path(plan, peek.path_tuple)
+            if host_step is not None and isinstance(
+                getattr(host_step, "repeat", None), RepeatForEach
+            ):
+                host_has_for_each = True
+        ack_template = _ack_template_parts(
+            path_str=path_str,
+            slug=slug,
+            step=peek.step,
+            claimed_identity=claimed_identity,
+            has_repeat_for_each=host_has_for_each,
+        )
+        if json_mode:
+            return _emit_next_json(
+                _NextJson(
+                    project=slug,
+                    run_id=run_id,
+                    state="ready",
+                    action="ack",
+                    command=ack_template.command,
+                    step=path_str,
+                    blocked=False,
+                    reason=None,
+                )
+            )
         print(render_step_instructions(
             peek.step.instructions or peek.step.command or "",
             **_render_kwargs,
@@ -946,7 +1162,6 @@ def cmd_next(
         # hit this on schema_strict). Emits "required keys for X: a, b, c"
         # per produces entry when the check is json_schema with required
         # fields; silent for non-schema produces.
-        schema_reqs = _format_schema_requirements(peek.step)
         if schema_reqs:
             print()
             print(schema_reqs)
@@ -956,22 +1171,7 @@ def cmd_next(
         # being set is the reliable signal that we're inside a for_each
         # host. Fall back to looking up the host in the plan when item_id
         # is None to handle a top-level for_each that hasn't dispatched yet.
-        host_has_for_each = peek.item_id is not None
-        if not host_has_for_each:
-            host_step = find_step_by_path(plan, peek.path_tuple)
-            if host_step is not None and isinstance(
-                getattr(host_step, "repeat", None), RepeatForEach
-            ):
-                host_has_for_each = True
-        print(
-            _format_ack_template(
-                path_str=path_str,
-                slug=slug,
-                step=peek.step,
-                claimed_identity=claimed_identity,
-                has_repeat_for_each=host_has_for_each,
-            )
-        )
+        print(ack_template.command)
     else:
         # Defensive: peek_current_step should never surface a group step.
         _print_err(f"next: unexpected step kind {type(peek.step).__name__}")
