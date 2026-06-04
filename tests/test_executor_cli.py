@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -226,6 +227,54 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
         )
         self.assertNotIn("echo hello", stdout)
         self.assertNotIn("echo hello", stderr)
+
+    def test_run_uses_gateway_resolved_project_without_mutating_raw_argv(self):
+        from unittest.mock import MagicMock, patch
+
+        import astrid.core.executor.cli as cli_mod
+        import astrid.core.executor.runner as runner_mod
+
+        captured = {}
+        fake_result = MagicMock()
+        fake_result.missing_binaries = []
+        fake_result.skipped = False
+        fake_result.command = ()
+        fake_result.payload = None
+        fake_result.returncode = 0
+        fake_result.ok = True
+
+        fake_args = MagicMock()
+        fake_args.executor_id = "some.executor"
+        fake_args.project = None
+        fake_args.out = str(ROOT / "tmp-gateway-out")
+        fake_args.brief = None
+        fake_args.dry_run = False
+        fake_args.check_binaries = False
+        fake_args.python_exec = None
+        fake_args.verbose = False
+        fake_args.timeline_id = None
+        fake_args.input = []
+        fake_args.json = False
+        fake_args._raw_argv = ("run", "some.executor", "--out", fake_args.out)
+
+        def _capture(request, registry):
+            captured["request"] = request
+            return fake_result
+
+        with patch.dict(os.environ, {"ASTRID_GATEWAY_RESOLVED_PROJECT": "demo"}, clear=False), \
+             patch.object(runner_mod, "run_executor", side_effect=_capture), \
+             patch("astrid.core.executor.cli._reject_run_passthrough"), \
+             patch("astrid.core.executor.cli._require_qualified_id"), \
+             patch("astrid.core.executor.cli._project_uuid_or_none", return_value=None), \
+             patch("astrid.core.executor.cli._executor_needs_out", return_value=False), \
+             patch("astrid.core.executor.cli._run_inputs", return_value={}):
+            rc = cli_mod._cmd_run(fake_args, MagicMock())
+
+        request = captured["request"]
+        self.assertEqual(rc, 0)
+        self.assertEqual(request.project, "demo")
+        self.assertTrue(request.project_was_auto_resolved)
+        self.assertNotIn("--project", request.argv)
 
 
 import subprocess

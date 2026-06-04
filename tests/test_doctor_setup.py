@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest import mock
 
 from astrid import doctor, setup_cli
 from astrid.core.element.registry import load_default_registry as load_element_registry
+from astrid.core.project.project import create_project
 from astrid.structure import TOP_LEVEL_ASTRID_DIRS, validate_repo_structure
 
 
@@ -22,8 +24,17 @@ class DoctorSetupTest(unittest.TestCase):
             result = fn(argv)
         return result, stdout.getvalue(), stderr.getvalue()
 
+    def _stable_env_template_check(self) -> doctor.DoctorCheck:
+        return doctor.DoctorCheck(
+            name="env template",
+            status="ok",
+            detail="test-provisioned env template",
+            required=False,
+        )
+
     def test_doctor_text_and_json_reports_required_checks(self) -> None:
-        result, stdout, stderr = self.capture(doctor.main, [])
+        with mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
+            result, stdout, stderr = self.capture(doctor.main, [])
 
         self.assertEqual(result, 0, stderr)
         self.assertIn("Astrid doctor", stdout)
@@ -37,9 +48,11 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("[ok] vibecomfy metadata:", stdout)
         self.assertIn("[ok] remotion config:", stdout)
         self.assertIn("[ok] timeline catalog:", stdout)
+        self.assertIn("stale project runs:", stdout)
         self.assertIn("runpod stale handles:", stdout)
 
-        result, stdout, stderr = self.capture(doctor.main, ["--json"])
+        with mock.patch.object(doctor, "_check_env_template", side_effect=self._stable_env_template_check):
+            result, stdout, stderr = self.capture(doctor.main, ["--json"])
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
         self.assertTrue(payload["ok"])
@@ -47,6 +60,7 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("vibecomfy metadata", {item["name"] for item in payload["checks"]})
         self.assertIn("dependency audit", {item["name"] for item in payload["checks"]})
         self.assertIn("env template", {item["name"] for item in payload["checks"]})
+        self.assertIn("stale project runs", {item["name"] for item in payload["checks"]})
 
     def test_doctor_required_check_failure_returns_nonzero(self) -> None:
         with mock.patch.object(doctor, "load_executor_registry", side_effect=RuntimeError("registry exploded")):
@@ -57,7 +71,11 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("[fail] executor registry: registry exploded", stdout)
 
     def test_doctor_optional_binaries_warn_by_default_and_can_be_strict(self) -> None:
-        with mock.patch.object(doctor.shutil, "which", return_value=None):
+        with mock.patch.object(doctor.shutil, "which", return_value=None), mock.patch.object(
+            doctor,
+            "_check_env_template",
+            side_effect=self._stable_env_template_check,
+        ):
             result, stdout, stderr = self.capture(doctor.main, [])
             strict_result, strict_stdout, strict_stderr = self.capture(doctor.main, ["--strict-optional"])
 
@@ -213,6 +231,87 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertEqual(check.status, "warn")
         self.assertFalse(check.required)
         self.assertIn("runpod-lifecycle", check.detail)
+
+    def test_doctor_repairs_confidently_dead_project_run_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            projects_root = Path(tmp)
+            create_project("demo", root=projects_root)
+            run_dir = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAA"
+            run_dir.mkdir(parents=True)
+            run_json = run_dir / "run.json"
+            run_json.write_text(
+                json.dumps(
+                    {
+                        "artifacts": {},
+                        "created_at": "2026-06-04T00:00:00Z",
+                        "kind": "executor",
+                        "metadata": {
+                            "pid": 424242,
+                            "prepared_at": "2026-06-04T00:00:00Z",
+                            "process_platform": sys.platform,
+                        },
+                        "out": str(run_dir),
+                        "project_slug": "demo",
+                        "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+                        "schema_version": 1,
+                        "status": "running",
+                        "updated_at": "2026-06-04T00:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(doctor, "_probe_pid_liveness", return_value="dead"), mock.patch(
+                "astrid.core.project.paths.resolve_projects_root",
+                return_value=projects_root,
+            ):
+                check = doctor._check_stale_project_runs()
+
+            repaired = json.loads(run_json.read_text(encoding="utf-8"))
+
+        self.assertEqual(check.status, "warn")
+        self.assertIn("repaired 1 stale RUNNING project run", check.detail)
+        self.assertEqual(repaired["status"], "failed")
+        self.assertEqual(repaired["metadata"]["doctor_repair"]["kind"], "stale_running")
+        self.assertEqual(repaired["metadata"]["doctor_repair"]["liveness"], "dead")
+        self.assertIn("astrid doctor repaired stale RUNNING record", repaired["metadata"]["error"])
+
+    def test_doctor_leaves_running_record_untouched_when_liveness_is_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            projects_root = Path(tmp)
+            create_project("demo", root=projects_root)
+            run_dir = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAB"
+            run_dir.mkdir(parents=True)
+            run_json = run_dir / "run.json"
+            original = {
+                "artifacts": {},
+                "created_at": "2026-06-04T00:00:00Z",
+                "kind": "executor",
+                "metadata": {
+                    "pid": 424243,
+                    "prepared_at": "2026-06-04T00:00:00Z",
+                    "process_platform": "different-platform",
+                },
+                "out": str(run_dir),
+                "project_slug": "demo",
+                "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+                "schema_version": 1,
+                "status": "running",
+                "updated_at": "2026-06-04T00:00:00Z",
+            }
+            run_json.write_text(json.dumps(original), encoding="utf-8")
+
+            with mock.patch(
+                "astrid.core.project.paths.resolve_projects_root",
+                return_value=projects_root,
+            ):
+                check = doctor._check_stale_project_runs()
+
+            unchanged = json.loads(run_json.read_text(encoding="utf-8"))
+
+        self.assertEqual(check.status, "warn")
+        self.assertIn("liveness was unknown", check.detail)
+        self.assertEqual(unchanged, original)
 
     def test_setup_dry_run_does_not_mutate_workspace(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

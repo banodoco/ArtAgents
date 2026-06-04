@@ -25,6 +25,7 @@ orchestrator registry.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -101,7 +102,13 @@ _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 # session for one of these run verbs, we auto-bind to a default project
 # (creating it on first use) instead of erroring with "no session bound".
 DEFAULT_PROJECT_SLUG = "default"
+ASTRID_GATEWAY_RESOLVED_PROJECT_ENV = "ASTRID_GATEWAY_RESOLVED_PROJECT"
 _AUTO_BIND_RUN_VERBS: tuple[tuple[str, ...], ...] = (
+    ("executors", "run"),
+    ("orchestrators", "run"),
+    ("scratch", "run"),
+)
+_REQUEST_SCOPED_PROJECT_RUN_VERBS: tuple[tuple[str, ...], ...] = (
     ("executors", "run"),
     ("orchestrators", "run"),
     ("scratch", "run"),
@@ -149,6 +156,7 @@ def _main_impl(raw: list[str]) -> int:
 
     # Session gate. Verbs outside the unbound allowlist require a resolvable
     # session record; print the documented hint and exit 2 otherwise.
+    session = None
     if not _verb_is_unbound_allowlisted(raw):
         from .core.session.binding import (
             SessionBindingError,
@@ -200,11 +208,12 @@ def _main_impl(raw: list[str]) -> int:
                 state_snapshot={"argv": raw, "project": project_hint},
             )
 
+    request_project = _resolved_request_project_slug(raw, session)
     if _verb_bypasses_task_gate(raw):
-        return _dispatch(raw)
+        return _dispatch_with_resolved_project(raw, request_project)
     project_slug = _extract_project_slug(raw)
     if project_slug is None:
-        return _dispatch(raw)
+        return _dispatch_with_resolved_project(raw, request_project)
 
     from .core.task import gate as task_gate
 
@@ -226,7 +235,7 @@ def _main_impl(raw: list[str]) -> int:
         if decision.step_kind == "code" and decision.adapter:
             returncode = _wait_adapter(decision)
         else:
-            returncode = _dispatch(raw)
+            returncode = _dispatch_with_resolved_project(raw, request_project)
         return returncode
     finally:
         task_gate.record_dispatch_complete(decision, returncode)
@@ -488,8 +497,20 @@ def _dispatch_scratch(args: list[str]) -> int:
     (auto-bound by the session gate) and runs the script via ``sys.executable``.
     No DSL, no templating, no alternate generation path — just a thin wrapper
     around subprocess execution with the bound session environment.
+
+    M1: scratch runs are now ledgered through the project run lifecycle:
+    ``kind='scratch'``, ``tool_id='scratch.run'``, ``requires_timeline=False``.
+    The subprocess receives ``ASTRID_PROJECT_RUN=1`` and return-code metadata
+    drives the finalize status (completed/failed).
     """
     import argparse
+
+    from astrid.contracts.run_status import RunStatus
+    from astrid.core.project.run import (
+        finalize_project_run,
+        prepare_project_run,
+    )
+    from astrid.core.subprocess_env import build_child_subprocess_env
 
     parser = argparse.ArgumentParser(prog="astrid scratch")
     sub = parser.add_subparsers(dest="scratch_command")
@@ -509,8 +530,53 @@ def _dispatch_scratch(args: list[str]) -> int:
         print(f"scratch: file not found: {file_path}", file=sys.__stderr__)
         return 1
 
+    # Resolve the project slug: prefer the gateway-resolved project (set by
+    # _dispatch_with_resolved_project via _REQUEST_SCOPED_PROJECT_RUN_VERBS),
+    # then fall back to the session's default or the canonical default slug.
+    project_slug = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
+    if not project_slug:
+        try:
+            from astrid.core.session.binding import resolve_current_session_with_fs_fallback
+            from astrid.core.project.paths import resolve_projects_root
+
+            session = resolve_current_session_with_fs_fallback(
+                projects_root=resolve_projects_root(),
+            )
+            if session and getattr(session, "project", None):
+                project_slug = session.project
+        except Exception:
+            pass
+    if not project_slug:
+        project_slug = DEFAULT_PROJECT_SLUG
+
     extra = parsed.extra or []
-    result = subprocess.run([sys.executable, str(file_path)] + extra)
+    argv = [str(file_path)] + extra
+
+    context = prepare_project_run(
+        project_slug,
+        tool_id="scratch.run",
+        kind="scratch",
+        argv=argv,
+        requires_timeline=False,
+    )
+
+    child_env = build_child_subprocess_env(
+        explicit_env={
+            "ASTRID_PROJECT_RUN": "1",
+        },
+    )
+    result = subprocess.run(
+        [sys.executable, str(file_path)] + extra,
+        env=child_env,
+    )
+
+    status = RunStatus.COMPLETED if result.returncode == 0 else RunStatus.FAILED
+    finalize_project_run(
+        context,
+        status=status,
+        returncode=result.returncode,
+    )
+
     return result.returncode
 
 
@@ -871,6 +937,33 @@ def _extract_project_slug(raw: list[str]) -> str | None:
     return None
 
 
+def _resolved_request_project_slug(raw: list[str], session: Any) -> str | None:
+    if session is None or _extract_project_slug(raw) is not None or _has_cli_option(raw, "--timeline-id"):
+        return None
+    for prefix in _REQUEST_SCOPED_PROJECT_RUN_VERBS:
+        if tuple(raw[: len(prefix)]) == prefix:
+            return str(getattr(session, "project", "") or "") or None
+    return None
+
+
+def _dispatch_with_resolved_project(raw: list[str], project_slug: str | None) -> int:
+    if not project_slug:
+        return _dispatch(raw)
+    previous = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
+    os.environ[ASTRID_GATEWAY_RESOLVED_PROJECT_ENV] = project_slug
+    try:
+        return _dispatch(raw)
+    finally:
+        if previous is None:
+            os.environ.pop(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV, None)
+        else:
+            os.environ[ASTRID_GATEWAY_RESOLVED_PROJECT_ENV] = previous
+
+
+def _has_cli_option(raw: list[str], option: str) -> bool:
+    return any(token == option or token.startswith(f"{option}=") for token in raw)
+
+
 def _invocation_is_auto_bindable_run(raw: list[str]) -> bool:
     """True for stateless run verbs that may auto-bind a default project.
 
@@ -909,8 +1002,6 @@ def _auto_bind_default_project_session(raw: list[str]) -> Any:
     if not _invocation_is_auto_bindable_run(raw):
         return None
     try:
-        import os
-
         from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
         from astrid.core.project.paths import resolve_projects_root
         from astrid.core.session.config import resolve_default_project_for_sdk

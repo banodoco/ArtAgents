@@ -55,6 +55,24 @@ def guard_canonical_entrypoint(pack_id: str) -> None:
     sys.exit(2)
 
 
+def warn_if_unledgered() -> None:
+    """Emit a stderr warning when a generation executor's main() runs without the
+    harness marker ``ASTRID_PROJECT_RUN``.
+
+    This is warning-only — no ledger entry is created.  When the environment
+    variable is present the call is in-band and no warning is produced.
+    """
+    import os
+    import sys
+
+    if not os.environ.get("ASTRID_PROJECT_RUN"):
+        print(
+            "[astrid] running unledgered — invoke through executors run"
+            " or the SDK to persist a run record",
+            file=sys.stderr,
+        )
+
+
 def run_pack_main(
     capability_id: str,
     runner: Callable[[], int],

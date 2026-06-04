@@ -28,6 +28,7 @@ from astrid.core.runtime import (
     invoke_in_process_command,
 )
 from astrid.core.runtime._normalize import normalize_python_runtime_result
+from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
@@ -60,6 +61,7 @@ class OrchestratorRunRequest:
     python_exec: str | None = None
     verbose: bool = False
     execution_mode: Literal["subprocess", "in_process"] = "subprocess"
+    project_was_auto_resolved: bool = False
 
 
 @dataclass(frozen=True)
@@ -173,6 +175,19 @@ class OrchestratorCapabilityRunner(CapabilityRunner[OrchestratorRunRequest, Orch
         self, request: OrchestratorRunRequest, definition: OrchestratorDefinition
     ) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
         return _prepare_project_request(request, definition)
+
+    def resolve_project_request(
+        self, request: OrchestratorRunRequest, definition: OrchestratorDefinition
+    ) -> OrchestratorRunRequest:
+        return _resolve_project_request(request, definition)
+
+    def is_dry_run(self, request: OrchestratorRunRequest, definition: OrchestratorDefinition) -> bool:
+        return bool(request.dry_run)
+
+    def prepare_dry_run_request(
+        self, request: OrchestratorRunRequest, definition: OrchestratorDefinition
+    ) -> OrchestratorRunRequest:
+        return _prepare_dry_run_request(request, definition)
 
     def run_inner(self, request: OrchestratorRunRequest, definition: OrchestratorDefinition) -> OrchestratorRunResult:
         return _run_orchestrator_inner(request, definition)
@@ -540,28 +555,45 @@ def _prepare_project_request(
 ) -> tuple[ProjectRunContext | None, OrchestratorRunRequest]:
     if not request.project:
         return None, request
-    reject_project_with_out(request.project, request.out)
+    if not request.project_was_auto_resolved:
+        reject_project_with_out(request.project, request.out)
     if orchestrator.runtime.kind != "command":
         raise OrchestratorRunnerError("--project is currently supported only for command-runtime orchestrators")
     if _orchestrator_requires_output_path(orchestrator) and _has_cli_option(tuple(request.orchestrator_args), "--out"):
         raise OrchestratorRunnerError(
             f"--project cannot be combined with passthrough --out for {orchestrator.id}"
         )
+    record_out = request.out if request.out not in (None, "") else None
     context = prepare_project_run(
         request.project,
         tool_id=orchestrator.id,
         kind="orchestrator",
         argv=_project_argv(request),
-        metadata={"dry_run": bool(request.dry_run)},
+        metadata={
+            "dry_run": bool(request.dry_run),
+            "project_was_auto_resolved": bool(request.project_was_auto_resolved),
+        },
+        record_out=record_out,
+        requires_timeline=False if request.project_was_auto_resolved else None,
     )
-    args = tuple(request.orchestrator_args)
-    if _orchestrator_requires_output_path(orchestrator):
-        args = (*args, "--out", str(context.run_root))
-    return context, replace(request, out=context.run_root, orchestrator_args=args)
+    effective_out = request.out if record_out is not None else context.run_root
+    return context, _request_with_effective_out(request, orchestrator, effective_out)
 
 
 def _orchestrator_requires_output_path(orchestrator: OrchestratorDefinition) -> bool:
     return bool(orchestrator.metadata.get("requires_output_path"))
+
+
+def _request_with_effective_out(
+    request: OrchestratorRunRequest,
+    orchestrator: OrchestratorDefinition,
+    out: str | Path,
+) -> OrchestratorRunRequest:
+    effective_out = Path(out).expanduser().resolve()
+    args = tuple(request.orchestrator_args)
+    if _orchestrator_requires_output_path(orchestrator) and not _has_cli_option(args, "--out"):
+        args = (*args, "--out", str(effective_out))
+    return replace(request, out=effective_out, orchestrator_args=args)
 
 
 def _project_argv(request: OrchestratorRunRequest) -> list[str]:
@@ -613,6 +645,31 @@ def _finalize_project_orchestrator(
 
 def _project_subprocess_env(request: OrchestratorRunRequest) -> dict[str, str]:
     return project_run_env() if request.project else {}
+
+
+def _resolve_project_request(
+    request: OrchestratorRunRequest,
+    orchestrator: OrchestratorDefinition,
+) -> OrchestratorRunRequest:
+    if request.project or request.out in (None, "") or orchestrator.runtime.kind != "command":
+        return request
+    return replace(
+        request,
+        project=resolve_default_project_for_sdk(),
+        project_was_auto_resolved=True,
+    )
+
+
+def _prepare_dry_run_request(
+    request: OrchestratorRunRequest,
+    orchestrator: OrchestratorDefinition,
+) -> OrchestratorRunRequest:
+    if request.out not in (None, ""):
+        return _request_with_effective_out(request, orchestrator, request.out)
+    placeholder = (
+        Path.cwd() / ".astrid-dry-run" / request.orchestrator_id.replace(".", "-")
+    ).resolve()
+    return _request_with_effective_out(request, orchestrator, placeholder)
 
 
 def _command_subprocess_env(

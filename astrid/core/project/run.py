@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -80,6 +82,8 @@ def prepare_project_run(
     run_id: str | None = None,
     timeline_id: str | None = None,
     requires_timeline: bool | None = None,
+    ledger_out: str | Path | None = None,
+    record_out: str | Path | None = None,
 ) -> ProjectRunContext:
     """Prepare a project-scoped run directory and run record.
 
@@ -96,6 +100,11 @@ def prepare_project_run(
     """
     require_project(project_slug, root=root)
     projects_root = paths.resolve_projects_root(root)
+    prepared_at = utc_now_seconds()
+    base_metadata = dict(metadata or {})
+    base_metadata.setdefault("pid", os.getpid())
+    base_metadata.setdefault("prepared_at", prepared_at)
+    base_metadata.setdefault("process_platform", sys.platform)
     parent_run_id = task_env.task_run_id_env()
     if parent_run_id:
         task_project = task_env.task_project_env()
@@ -112,8 +121,8 @@ def prepare_project_run(
             )
         run_root = step_dir_for(project_slug, parent_run_id, step_id, step_version=1, root=projects_root)
         run_root.mkdir(parents=True, exist_ok=True)
-        now = utc_now_seconds()
-        run_metadata = dict(metadata or {})
+        now = prepared_at
+        run_metadata = dict(base_metadata)
         run_metadata.update({"attached_to_task_run": True, "task_step_id": step_id})
         record: dict[str, Any] = {
             "artifacts": {},
@@ -134,6 +143,8 @@ def prepare_project_run(
             record["argv"] = redact_cli_args(list(argv))
         if timeline_id is not None:
             record["timeline_id"] = timeline_id
+            # Contract exemption: task-attached child runs contribute through
+            # their parent task run, so the parent is recorded at prepare time.
             _record_contributing_run(project_slug, timeline_id, parent_run_id, root=projects_root)
         return ProjectRunContext(
             project_slug=project_slug,
@@ -148,7 +159,11 @@ def prepare_project_run(
     if timeline_id is None and requires_timeline:
         timeline_id, _timeline_slug = resolve_required_project_timeline(project_slug, root=projects_root)
     effective_run_id = paths.validate_run_id(run_id or generate_run_id())
-    run_root = paths.run_dir(project_slug, effective_run_id, root=projects_root)
+    run_root = (
+        Path(ledger_out).expanduser().resolve()
+        if ledger_out not in (None, "")
+        else paths.run_dir(project_slug, effective_run_id, root=projects_root)
+    )
     if run_root.exists() and any(run_root.iterdir()):
         raise ProjectRunError(f"project run directory already exists: {run_root}")
     run_root.mkdir(parents=True, exist_ok=True)
@@ -158,15 +173,13 @@ def prepare_project_run(
         tool_id=tool_id,
         kind=kind,
         status=RunStatus.RUNNING,
-        out=run_root,
+        out=record_out if record_out not in (None, "") else run_root,
         argv=redact_cli_args(list(argv or ())),
-        metadata=dict(metadata or {}),
+        metadata=dict(base_metadata),
         timeline_id=timeline_id,
     )
-    run_json_path = paths.run_json_path(project_slug, effective_run_id, root=projects_root)
+    run_json_path = run_root / "run.json"
     write_json_atomic(run_json_path, record)
-    if timeline_id is not None:
-        _record_contributing_run(project_slug, timeline_id, effective_run_id, root=projects_root)
     return ProjectRunContext(
         project_slug=project_slug,
         run_id=effective_run_id,
@@ -311,15 +324,28 @@ def finalize_project_run(
     attached_to_task_run = bool(merged_metadata.get("attached_to_task_run"))
     record["status"] = _normalize_status(status, returncode=returncode)
     record["updated_at"] = utc_now_seconds()
+    manifest_path = discover_manifest_path(record.get("out"), fallback_root=context.run_root)
+    if manifest_path is not None:
+        record["manifest_path"] = str(manifest_path)
+    else:
+        record.pop("manifest_path", None)
     artifacts = dict(record.get("artifacts", {}))
     mirror_dest = context.run_root / "produces" if attached_to_task_run else None
-    artifacts.update(
-        mirror_hype_artifacts(context.run_root, brief_slug=brief_slug, artifact_roots=artifact_roots, dest_root=mirror_dest)
+    mirrored_artifacts = mirror_hype_artifacts(
+        context.run_root, brief_slug=brief_slug, artifact_roots=artifact_roots, dest_root=mirror_dest
     )
+    artifacts.update(mirrored_artifacts)
+    if not mirrored_artifacts and manifest_path is not None:
+        manifest_outputs = load_manifest_output_artifacts(manifest_path)
+        if manifest_outputs:
+            artifacts["outputs"] = manifest_outputs
     record["artifacts"] = artifacts
     normalized = validate_run_record(record)
     if not attached_to_task_run:
         write_json_atomic(context.run_json_path, normalized)
+        timeline_id = normalized.get("timeline_id")
+        if normalized.get("status") == RunStatus.COMPLETED.value and isinstance(timeline_id, str) and timeline_id:
+            _record_contributing_run(context.project_slug, timeline_id, context.run_id, root=context.root)
     context.record.clear()
     context.record.update(normalized)
     return normalized
@@ -469,6 +495,40 @@ def mirror_hype_artifacts(
     return mirrored
 
 
+def discover_manifest_path(
+    out_root: str | Path | None,
+    *,
+    fallback_root: str | Path | None = None,
+) -> Path | None:
+    candidate_root: Path | None = None
+    if out_root not in (None, ""):
+        candidate_root = Path(out_root).expanduser().resolve()
+    elif fallback_root not in (None, ""):
+        candidate_root = Path(fallback_root).expanduser().resolve()
+    if candidate_root is None:
+        return None
+    manifest_path = candidate_root / "manifest.json"
+    return manifest_path if manifest_path.is_file() else None
+
+
+def load_manifest_output_artifacts(manifest_path: str | Path) -> list[dict[str, Any]]:
+    try:
+        manifest = read_json(manifest_path)
+    except Exception:
+        return []
+    outputs = manifest.get("outputs")
+    if not isinstance(outputs, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for item in outputs:
+        if not isinstance(item, Mapping):
+            continue
+        artifact = dict(item)
+        artifact["source"] = "manifest"
+        normalized.append(artifact)
+    return normalized
+
+
 def discover_hype_artifact_root(
     run_root: str | Path,
     *,
@@ -543,8 +603,10 @@ __all__ = [
     "TIMELINE_BINDING_MODES",
     "bind_managed_timeline",
     "discover_hype_artifact_root",
+    "discover_manifest_path",
     "finalize_project_run",
     "load_run_record",
+    "load_manifest_output_artifacts",
     "mirror_hype_artifacts",
     "prepare_project_run",
     "project_run_env",

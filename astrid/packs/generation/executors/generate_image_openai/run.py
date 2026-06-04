@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main, warn_if_unledgered
 
 guard_canonical_entrypoint('generation.generate_image_openai')
 import argparse
@@ -24,6 +24,7 @@ from urllib.request import Request, urlopen
 
 from astrid.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.util.atomic_io import write_json_atomic
 from astrid.core.util.secrets import load_api_key as _resolve_key
 from astrid.threads.variants import write_sidecar as write_variant_sidecar
 
@@ -271,65 +272,72 @@ def generate(args: argparse.Namespace) -> int:
             print(json.dumps({"endpoint": API_URL, "outputs": [str(path) for path in paths], **payload}, indent=2))
             continue
 
-        print(f"[{index}/{len(jobs)}] Calling {payload['model']} for {payload['n']} image(s)")
-        started = time.time()
-        response = _call_image_api(payload, api_key, args.timeout)
-        print(f"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s")
-        written = _write_images(response, paths, args.force)
-        variant_artifacts.extend(
-            _variant_artifacts_for_generated_images(
-                run_id=run_id,
-                prompt_index=index,
-                prompt=prompt,
-                payload=payload,
-                response=response,
-                paths=written,
-            )
-        )
-        if audit is not None:
-            prompt_id = audit.register_prompt_ref(
-                prompt=prompt,
-                label=f"Image prompt {index}",
-                stage="generate_image",
-                metadata={key: value for key, value in payload.items() if key != "prompt"},
-            )
-            output_ids = [
-                audit.register_asset(
-                    kind="generated_image",
-                    path=output,
-                    label=Path(output).name,
-                    parents=[prompt_id],
-                    stage="generate_image",
-                    metadata={
-                        "model": payload.get("model"),
-                        "size": payload.get("size"),
-                        "quality": payload.get("quality"),
-                        "output_format": payload.get("output_format"),
-                        "created": response.get("created"),
-                    },
+        try:
+            print(f"[{index}/{len(jobs)}] Calling {payload['model']} for {payload['n']} image(s)")
+            started = time.time()
+            response = _call_image_api(payload, api_key, args.timeout)
+            print(f"[{index}/{len(jobs)}] Completed in {time.time() - started:.1f}s")
+            written = _write_images(response, paths, args.force)
+            variant_artifacts.extend(
+                _variant_artifacts_for_generated_images(
+                    run_id=run_id,
+                    prompt_index=index,
+                    prompt=prompt,
+                    payload=payload,
+                    response=response,
+                    paths=written,
                 )
-                for output in written
-            ]
-            audit.register_node(
-                stage="generate_image",
-                label=f"Generate image job {index}",
-                parents=[prompt_id],
-                outputs=output_ids,
-                metadata={"model": payload.get("model"), "n": payload.get("n"), "usage": response.get("usage")},
             )
-        manifest.append(
-            {
-                "prompt": prompt,
-                "request": {key: value for key, value in payload.items() if key != "prompt"},
-                "outputs": written,
-                "usage": response.get("usage"),
-                "created": response.get("created"),
-            }
-        )
+            if audit is not None:
+                prompt_id = audit.register_prompt_ref(
+                    prompt=prompt,
+                    label=f"Image prompt {index}",
+                    stage="generate_image",
+                    metadata={key: value for key, value in payload.items() if key != "prompt"},
+                )
+                output_ids = [
+                    audit.register_asset(
+                        kind="generated_image",
+                        path=output,
+                        label=Path(output).name,
+                        parents=[prompt_id],
+                        stage="generate_image",
+                        metadata={
+                            "model": payload.get("model"),
+                            "size": payload.get("size"),
+                            "quality": payload.get("quality"),
+                            "output_format": payload.get("output_format"),
+                            "created": response.get("created"),
+                        },
+                    )
+                    for output in written
+                ]
+                audit.register_node(
+                    stage="generate_image",
+                    label=f"Generate image job {index}",
+                    parents=[prompt_id],
+                    outputs=output_ids,
+                    metadata={"model": payload.get("model"), "n": payload.get("n"), "usage": response.get("usage")},
+                )
+            manifest.append(
+                {
+                    "prompt": prompt,
+                    "request": {key: value for key, value in payload.items() if key != "prompt"},
+                    "outputs": written,
+                    "usage": response.get("usage"),
+                    "created": response.get("created"),
+                }
+            )
+        except BaseException:
+            if manifest and args.manifest and not args.dry_run:
+                try:
+                    write_json_atomic(args.manifest, manifest)
+                except Exception:
+                    pass
+            raise
 
     if args.manifest and not args.dry_run:
-        args.manifest.parent.mkdir(parents=True, exist_ok=True)
-        args.manifest.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        write_json_atomic(args.manifest, manifest)
         if audit is not None:
             audit.register_asset(
                 kind="image_manifest",
@@ -416,6 +424,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    warn_if_unledgered()
+
     def _run() -> int:
         args = build_parser().parse_args(argv)
         return generate(args)

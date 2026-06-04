@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import pkgutil
 import subprocess
 import sys
@@ -2669,15 +2670,17 @@ def test_generate_default_project_resolution_video(
     assert seen["kwargs"]["project"] == "resolved-default"
 
 
-# --- out + project mutually exclusive (out wins) ----------------------------
+# --- out + project both passed through (runner enforces SD1 rejection) --------
 
 
 def test_generate_out_wins_over_project_image(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """When both ``out`` AND ``project`` are supplied, ``out`` wins and
-    ``project`` is set to ``None`` in the invoke call."""
+    """When both ``out`` AND ``project`` are supplied, both are passed
+    through to ``invoke()`` — the runner will enforce the strict
+    project+out rejection (SD1).  The SDK no longer silently drops
+    the project."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
@@ -2692,14 +2695,15 @@ def test_generate_out_wins_over_project_image(
 
     assert result.ok is True
     assert seen["kwargs"]["out"] == tmp_path
-    assert seen["kwargs"]["project"] is None
+    assert seen["kwargs"]["project"] == "ignored-project"
 
 
 def test_generate_out_wins_over_project_video(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Same precedence check for video: out wins over project."""
+    """Same routing for video: both ``out`` and ``project`` are passed
+    through; the runner enforces SD1 rejection."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
     fake_invoke, seen = _make_success_invoke_with_seen(astrid, tmp_path)
@@ -2713,7 +2717,7 @@ def test_generate_out_wins_over_project_video(
 
     assert result.ok is True
     assert seen["kwargs"]["out"] == tmp_path
-    assert seen["kwargs"]["project"] is None
+    assert seen["kwargs"]["project"] == "ignored-project"
 
 
 # --- no stderr output from facade calls --------------------------------------
@@ -2988,6 +2992,66 @@ print(f"EXIT_CODE={exit_code}")
         f"Gateway auto-bind did not set ASTRID_SESSION_ID. "
         f"stdout={stdout!r} stderr={completed.stderr!r}"
     )
+
+
+def test_gateway_run_passes_bound_project_via_request_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import types
+    from unittest.mock import MagicMock, patch
+
+    from astrid.core.project import paths as project_paths
+    from astrid.core.project.project import create_project
+    from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+    from astrid.core.session.lifecycle import create_session
+    from astrid.core.session.paths import sessions_dir
+    from astrid.core.timeline.crud import create_timeline
+    from astrid.gateway import main
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.setenv("ASTRID_HOME", str(tmp_path / "astrid-home"))
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+    session = create_session(
+        project_slug="demo",
+        agent_id="tester",
+        projects_root=projects_root,
+        session_root=sessions_dir(),
+        write_project_pointer=True,
+    )
+    monkeypatch.setenv(ASTRID_SESSION_ID_ENV, session.id)
+
+    captured: dict[str, Any] = {}
+    fake_result = types.SimpleNamespace(
+        missing_binaries=(),
+        skipped=False,
+        command=(),
+        payload=None,
+        returncode=0,
+        ok=True,
+        error=None,
+    )
+    fake_registry = MagicMock()
+    fake_registry.get.return_value = MagicMock()
+
+    def _capture(request, registry):
+        captured["request"] = request
+        return fake_result
+
+    out_dir = tmp_path / "bound-out"
+
+    with patch("astrid.core.executor.cli.load_default_registry", return_value=fake_registry), \
+         patch("astrid.core.executor.runner.run_executor", side_effect=_capture):
+        rc = main(["executors", "run", "test.executor", "--out", str(out_dir)])
+
+    request = captured["request"]
+    assert rc == 0
+    assert request.project == "demo"
+    assert request.project_was_auto_resolved is True
+    assert "--project" not in request.argv
+    assert os.environ.get(ASTRID_SESSION_ID_ENV) == session.id
 
 
 # ============================================================================

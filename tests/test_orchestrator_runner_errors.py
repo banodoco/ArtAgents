@@ -17,6 +17,8 @@ import pytest
 
 from astrid.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.orchestrator.registry import OrchestratorRegistry
+from astrid.core.project import paths as project_paths
+from astrid.core.project.project import create_project
 from astrid.core.orchestrator.runner import (
     OrchestratorRunRequest,
     OrchestratorRunnerError,
@@ -24,6 +26,7 @@ from astrid.core.orchestrator.runner import (
     run_orchestrator,
 )
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.timeline.crud import create_timeline
 
 
 # ---------------------------------------------------------------------------
@@ -605,9 +608,6 @@ def test_project_orchestrator_must_be_command_runtime(
 def test_project_orchestrator_rejects_passthrough_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from astrid.core.project import paths as project_paths
-    from astrid.core.project.project import create_project
-
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
     create_project("demo")
 
@@ -631,16 +631,93 @@ def test_project_orchestrator_rejects_passthrough_out(
         )
 
 
+def test_orchestrator_cli_rejects_project_plus_out(tmp_path: Path) -> None:
+    import argparse
+
+    from astrid.core.orchestrator import cli as cli_mod
+
+    with pytest.raises(ValueError, match="--project cannot be combined with --out"):
+        cli_mod._cmd_run(
+            argparse.Namespace(
+                orchestrator_id="test.command",
+                out=str(tmp_path / "manual-out"),
+                project="demo",
+                input=[],
+                brief=None,
+                orchestrator_args=(),
+                dry_run=False,
+                python_exec=None,
+                verbose=False,
+            ),
+            _registry(_command_orchestrator()),
+        )
+
+
+def test_command_orchestrator_dry_run_uses_placeholder_out_without_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    orch = _command_orchestrator(
+        orchestrator_id="video_editing.hype",
+        argv=(sys.executable, "-c", "pass", "{orchestrator_args}"),
+        metadata={"requires_output_path": True},
+    )
+    registry = _registry(orch)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(
+            orchestrator_id=orch.id,
+            project="demo",
+            dry_run=True,
+        ),
+        registry,
+    )
+
+    assert result.dry_run is True
+    assert "--out" in result.command
+    assert str((Path.cwd() / ".astrid-dry-run" / "video_editing-hype").resolve()) in result.command
+    assert list((tmp_path / "projects" / "demo" / "runs").glob("*")) == []
+
+
+def test_orchestrator_out_only_auto_resolves_default_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))
+    create_project("default")
+    create_timeline("default", "main", is_default=True)
+
+    out_dir = tmp_path / "auto-orch-out"
+    orch = _command_orchestrator(
+        orchestrator_id="video_editing.hype",
+        argv=(sys.executable, "-c", "pass", "{orchestrator_args}"),
+        metadata={"requires_output_path": True},
+    )
+    registry = _registry(orch)
+
+    result = run_orchestrator(
+        OrchestratorRunRequest(orchestrator_id=orch.id, out=out_dir),
+        registry,
+    )
+
+    records = sorted((projects_root / "default" / "runs").glob("*/run.json"))
+
+    assert result.returncode == 0
+    assert result.command[-2:] == ("--out", str(out_dir.resolve()))
+    assert len(records) == 1
+
 # ---------------------------------------------------------------------------
-# _output_value — --out required to derive output
+# _output_value — dry-run placeholder out covers derived outputs
 # ---------------------------------------------------------------------------
 
 
-def test_output_derivation_requires_out_when_no_template(tmp_path: Path) -> None:
-    # Command orchestrator with an output that has no path_template and no
-    # placeholder in its command; this lets us pass _validate_out_requirement
-    # (dry_run=True) and reach _output_value, which then complains because
-    # request.out is None.
+def test_output_derivation_uses_dry_run_placeholder_out(tmp_path: Path) -> None:
+    # Dry-run now synthesizes a placeholder out directory before command/output
+    # expansion, so derived outputs no longer fail just because no explicit
+    # --out was supplied.
     orch = OrchestratorDefinition(
         id="test.output_needs_out",
         name="Output Needs Out",
@@ -654,11 +731,12 @@ def test_output_derivation_requires_out_when_no_template(tmp_path: Path) -> None
     )
     registry = _unvalidated_registry(orch)
 
-    with pytest.raises(OrchestratorRunnerError, match=r"--out is required to derive output 'result'"):
-        run_orchestrator(
-            OrchestratorRunRequest(orchestrator_id=orch.id, dry_run=True),
-            registry,
-        )
+    result = run_orchestrator(
+        OrchestratorRunRequest(orchestrator_id=orch.id, dry_run=True),
+        registry,
+    )
+
+    assert result.dry_run is True
 
 
 # ---------------------------------------------------------------------------

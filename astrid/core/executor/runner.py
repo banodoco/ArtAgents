@@ -36,6 +36,7 @@ from astrid.core.runtime import (
     InProcessInvocationError,
     invoke_in_process_command,
 )
+from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
@@ -96,6 +97,7 @@ class ExecutorRunRequest:
     verbose: bool = False
     argv: tuple[str, ...] = ()
     execution_mode: Literal["subprocess", "in_process"] = "subprocess"
+    project_was_auto_resolved: bool = False
 
 
 @dataclass(frozen=True)
@@ -184,6 +186,19 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
         self, request: ExecutorRunRequest, definition: ExecutorDefinition
     ) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
         return _prepare_project_request(request, definition)
+
+    def resolve_project_request(
+        self, request: ExecutorRunRequest, definition: ExecutorDefinition
+    ) -> ExecutorRunRequest:
+        return _resolve_project_request(request)
+
+    def is_dry_run(self, request: ExecutorRunRequest, definition: ExecutorDefinition) -> bool:
+        return bool(request.dry_run)
+
+    def prepare_dry_run_request(
+        self, request: ExecutorRunRequest, definition: ExecutorDefinition
+    ) -> ExecutorRunRequest:
+        return _prepare_dry_run_request(request)
 
     def run_inner(self, request: ExecutorRunRequest, definition: ExecutorDefinition) -> ExecutorRunResult:
         return _run_executor_inner(request, definition)
@@ -697,15 +712,23 @@ def _prepare_project_request(
 ) -> tuple[ProjectRunContext | None, ExecutorRunRequest]:
     if not request.project:
         return None, request
-    reject_project_with_out(request.project, request.out)
+    if not request.project_was_auto_resolved:
+        reject_project_with_out(request.project, request.out)
+    record_out = request.out if request.out not in (None, "") else None
     context = prepare_project_run(
         request.project,
         tool_id=executor.id,
         kind="executor",
         argv=_project_argv(request),
-        metadata={"dry_run": bool(request.dry_run)},
+        metadata={
+            "dry_run": bool(request.dry_run),
+            "project_was_auto_resolved": bool(request.project_was_auto_resolved),
+        },
+        record_out=record_out,
+        requires_timeline=False if request.project_was_auto_resolved else None,
     )
-    return context, replace(request, out=context.run_root)
+    effective_out = request.out if record_out is not None else context.run_root
+    return context, replace(request, out=effective_out)
 
 
 def _project_argv(request: ExecutorRunRequest) -> list[str]:
@@ -744,15 +767,36 @@ def _finalize_project_executor(
     returncode: int | None,
     error: BaseException | str | None = None,
 ) -> None:
-    metadata = {"dry_run": bool(request.dry_run)}
+    artifact_roots = [request.out, context.run_root] if request.out not in (None, "") else [context.run_root]
+    metadata = {
+        "dry_run": bool(request.dry_run),
+        "project_was_auto_resolved": bool(request.project_was_auto_resolved),
+    }
     finalize_project_run(
         context,
         status=status,
         returncode=returncode,
         error=error,
         metadata=metadata,
-        artifact_roots=[context.run_root],
+        artifact_roots=artifact_roots,
     )
+
+
+def _resolve_project_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
+    if request.project:
+        return request
+    return replace(
+        request,
+        project=resolve_default_project_for_sdk(),
+        project_was_auto_resolved=True,
+    )
+
+
+def _prepare_dry_run_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
+    if request.out not in (None, ""):
+        return request
+    placeholder = (Path.cwd() / ".astrid-dry-run" / request.executor_id.replace(".", "-")).resolve()
+    return replace(request, out=placeholder)
 
 
 def _project_subprocess_env(request: ExecutorRunRequest) -> dict[str, str]:

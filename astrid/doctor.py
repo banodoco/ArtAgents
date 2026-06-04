@@ -87,7 +87,7 @@ def run_checks(*, optional_binaries: tuple[str, ...] = ("ffmpeg", "npx", "uv", "
     checks.append(_capture_check("remotion config", _check_remotion_config))
     checks.append(_capture_check("timeline catalog", _check_timeline_catalog))
     checks.append(_check_runpod_stale_handles())
-    checks.append(_check_projects_root())
+    checks.extend((_check_stale_project_runs(), _check_projects_root()))
     for binary in optional_binaries:
         checks.append(_check_optional_binary(binary))
     return tuple(checks)
@@ -425,6 +425,79 @@ def _check_runpod_stale_handles() -> DoctorCheck:
     )
 
 
+def _check_stale_project_runs() -> DoctorCheck:
+    from astrid.contracts.run_status import RunStatus
+    from astrid.core.project.jsonio import read_json
+    from astrid.core.project.paths import resolve_projects_root
+    from astrid.core.project.run import update_run_record
+    from astrid.core.util.time import utc_now_seconds
+
+    projects_root = resolve_projects_root()
+    if not projects_root.is_dir():
+        return DoctorCheck(
+            name="stale project runs",
+            status="ok",
+            detail="no projects root to scan",
+            required=False,
+        )
+
+    repaired = 0
+    unknown = 0
+    for run_json_path in sorted(projects_root.glob("*/runs/*/run.json")):
+        try:
+            raw = read_json(run_json_path)
+        except Exception:
+            continue
+        if not isinstance(raw, dict) or raw.get("status") != RunStatus.RUNNING.value:
+            continue
+        project_slug = raw.get("project_slug")
+        run_id = raw.get("run_id")
+        if not isinstance(project_slug, str) or not isinstance(run_id, str):
+            continue
+        verdict, detail = _project_run_liveness(raw)
+        if verdict == "dead":
+            metadata = dict(raw.get("metadata", {}))
+            metadata["doctor_repair"] = {
+                "detail": detail,
+                "kind": "stale_running",
+                "liveness": "dead",
+                "repaired_at": utc_now_seconds(),
+                "repaired_by": "astrid doctor",
+            }
+            metadata["error"] = f"astrid doctor repaired stale RUNNING record: {detail}"
+            update_run_record(
+                project_slug,
+                run_id,
+                {
+                    "metadata": metadata,
+                    "status": RunStatus.FAILED.value,
+                },
+                root=projects_root,
+            )
+            repaired += 1
+        elif verdict == "unknown":
+            unknown += 1
+
+    if repaired:
+        detail = f"repaired {repaired} stale RUNNING project run(s)"
+        if unknown:
+            detail = f"{detail}; left {unknown} RUNNING record(s) untouched because liveness was unknown"
+        return DoctorCheck(name="stale project runs", status="warn", detail=detail, required=False)
+    if unknown:
+        return DoctorCheck(
+            name="stale project runs",
+            status="warn",
+            detail=f"left {unknown} RUNNING record(s) untouched because liveness was unknown",
+            required=False,
+        )
+    return DoctorCheck(
+        name="stale project runs",
+        status="ok",
+        detail="no stale RUNNING project runs detected",
+        required=False,
+    )
+
+
 def _check_projects_root() -> DoctorCheck:
     from astrid.core.project.paths import PROJECTS_ROOT_ENV, resolve_projects_root
 
@@ -585,6 +658,40 @@ def _spec_origin(spec: importlib.machinery.ModuleSpec) -> Path | None:
     if locations:
         return Path(next(iter(locations)))
     return None
+
+
+def _project_run_liveness(record: Mapping[str, object]) -> tuple[str, str]:
+    metadata = record.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return ("unknown", "missing run metadata")
+    if metadata.get("attached_to_task_run") is True:
+        return ("unknown", "task-attached runs are out of scope")
+    pid = metadata.get("pid")
+    if not isinstance(pid, int) or pid <= 0:
+        return ("unknown", "missing or invalid pid")
+    process_platform = metadata.get("process_platform")
+    if not isinstance(process_platform, str) or not process_platform:
+        return ("unknown", "missing process platform")
+    if process_platform != sys.platform:
+        return ("unknown", f"recorded platform {process_platform!r} does not match current platform {sys.platform!r}")
+    verdict = _probe_pid_liveness(pid)
+    if verdict == "alive":
+        return ("alive", f"pid {pid} is still alive")
+    if verdict == "dead":
+        return ("dead", f"pid {pid} is not alive on {process_platform}")
+    return ("unknown", f"could not determine liveness for pid {pid}")
+
+
+def _probe_pid_liveness(pid: int) -> str:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "dead"
+    except PermissionError:
+        return "alive"
+    except OSError:
+        return "unknown"
+    return "alive"
 
 
 if __name__ == "__main__":
