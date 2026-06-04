@@ -12,6 +12,7 @@ The three timeline identifiers (slug, ULID, event-stream UUID) have three distin
 
 ## Locked decisions
 Compat-first (no big-bang sidecar rewrite); threads/ internals untouched; migration tested against COPIES of real sidecars from ~/Documents/reigh-workspace/astrid-projects (37+ projects, multiple historical versions).
+REVIEW-FOUND TRAPS (mandatory): (a) Session.to_dict() uses asdict() (model.py:57-58) — a field rename silently changes the on-disk JSON key; the transition serializer must WRITE BOTH keys (timeline_id + timeline_ulid) for one release, not just read both. (b) Exclusion list for the grep-gate: reigh bridge parameter names (core/reigh/timeline_io.py:85-173), threads/record.py:41-42 record_run(timeline_id=) (carries a UUID — naming collision, not a consumer), timeline/cli.py export reads of event-record timeline_id (L1445,2172). (c) Export-path non-interference assertion in the conformance tests.
 
 ## Anti-scope
 No project-resolution changes (M2); no run-id work (M3); no gateway auto-bind changes.

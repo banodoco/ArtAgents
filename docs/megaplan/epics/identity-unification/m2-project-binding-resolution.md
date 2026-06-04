@@ -13,6 +13,7 @@ Four independent paths today: binding.py:157 resolve_current_session (deliberate
 
 ## Locked decisions
 Zero observable behavior change (this milestone is a refactor behind characterization tests); auto-bind's ledger-perimeter role (post run-ledger) is consumed as-is.
+REVIEW-FOUND RESHAPE REQUIREMENTS (mandatory): (a) "zero change" is only statable with a PINNED WORKSPACE SHAPE — characterization fixtures must cover BOTH single-project (auto-resolve) and multi-project (fail-closed) cardinality for `next`/discovery paths; the contract doc states this ambient dependency explicitly. (b) `status` is bifurcated at the GATEWAY level (gateway.py:337-349 routes no-project status to session cmd_status, --project status to lifecycle) — the resolver consumes this fork as an explicit policy input; do not collapse it. (c) Auto-bind MUTATES os.environ as a side effect — the unified resolver's contract documents this as a declared output, not hidden state.
 
 ## Anti-scope
 No new env vars; no precedence changes (file a ticket if the table reveals an indefensible inconsistency — changing it is a later, deliberate decision).

@@ -1,0 +1,27 @@
+base_branch: main
+merge_policy: auto
+
+# Epic: output/result contract — promoted from single megaplan to 2 milestones
+# after independent review measured the true adoption surface at 30+ executors
+# (~3-4 weeks) and found the registry-enumeration conformance mechanism would
+# silently skip executors that declare no outputs. M1 = contract + full-registry
+# gate (exemption-listed) + core families; M2 = exemption burndown.
+
+milestones:
+  - label: m1-contract-and-core-families
+    idea: docs/megaplan/epics/output-result-contract/m1-contract-and-core-families.md
+    branch: epic/output-contract-m1-core
+    profile: partnered
+    vendor: codex
+    robustness: full
+    depth: medium
+    notes: "partnered/full/medium @codex — contract + gate design premium; adoption mechanical."
+
+  - label: m2-exemption-burndown
+    idea: docs/megaplan/epics/output-result-contract/m2-exemption-burndown.md
+    branch: epic/output-contract-m2-burndown
+    depends_on: [m1-contract-and-core-families]
+    profile: directed
+    vendor: codex
+    robustness: full
+    notes: "directed/full @codex — mechanical adoption against M1's frozen contract."
