@@ -10,6 +10,8 @@ propagation, cwd propagation).
 
 from __future__ import annotations
 
+import importlib
+import io
 import sys
 import textwrap
 import types
@@ -18,6 +20,7 @@ from typing import Any, Mapping
 
 import pytest
 
+import astrid.packs
 from astrid._paths import executor_argv, resolve_executor_runtime_module
 from astrid.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.executor.cli import main as executor_cli_main
@@ -77,6 +80,18 @@ def _registry(executor: ExecutorDefinition) -> ExecutorRegistry:
     # Bypass full validation for some intentionally malformed fixtures.
     registry._executors[executor.id] = executor  # type: ignore[attr-defined]
     return registry
+
+
+def _extend_packs_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    pack_root = tmp_path / "astrid" / "packs"
+    pack_root.mkdir(parents=True)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(
+        astrid.packs,
+        "__path__",
+        [str(pack_root), *list(astrid.packs.__path__)],
+    )
+    return pack_root
 
 
 def test_command_input_args_expand_repeated_and_optional_values_in_order(tmp_path: Path) -> None:
@@ -858,6 +873,74 @@ def test_external_executor_in_process_mode_rejects_different_python_interpreter(
     assert result.error.code == "in_process_precondition"
     assert result.error.type == "precondition"
     assert "requires interpreter" in result.error.message
+
+
+def test_external_executor_in_process_mode_captures_logs_and_preserves_terminal_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SC13: the supported path is serialized execution, so stdout/stderr are
+    monkeypatched once at the process level and must still receive live output
+    while run logs are written."""
+
+    pack_root = _extend_packs_path(monkeypatch, tmp_path)
+    module_path = pack_root / "chatty_runtime_test.py"
+    module_path.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import sys",
+                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "guard_canonical_entrypoint('test.in_process_chatty')",
+                "",
+                "def main(argv=None):",
+                "    print('chatty stdout line')",
+                "    print('chatty stderr line', file=sys.stderr)",
+                "    return {'artifact': 'ok'}",
+            ]
+        ),
+        encoding='utf-8',
+    )
+    importlib.invalidate_caches()
+    sys.modules.pop("astrid.packs.chatty_runtime_test", None)
+
+    executor = _executor(
+        executor_id="test.in_process_chatty",
+        argv=(sys.executable, "-m", "astrid.packs.chatty_runtime_test"),
+        metadata={
+            "runtime_module": "astrid.packs.chatty_runtime_test",
+            "runtime_entrypoint": "main",
+        },
+    )
+    live_stdout = io.StringIO()
+    live_stderr = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", live_stdout)
+    monkeypatch.setattr(sys, "stderr", live_stderr)
+
+    request = ExecutorRunRequest(
+        executor_id=executor.id,
+        out=tmp_path,
+        execution_mode="in_process",
+        run_root=tmp_path / "run",
+    )
+    result = executor_runner._run_in_process_executor_command(
+        executor,
+        request,
+        command=executor.command.argv,
+        cwd=None,
+        env={},
+    )
+
+    assert result.returncode == 0
+    assert result.payload["artifact"] == "ok"
+    assert live_stdout.getvalue().splitlines() == ["chatty stdout line"]
+    assert live_stderr.getvalue().splitlines() == ["chatty stderr line"]
+    assert (tmp_path / "run" / "logs" / "stdout.log").read_text(encoding="utf-8").splitlines() == [
+        "chatty stdout line"
+    ]
+    assert (tmp_path / "run" / "logs" / "stderr.log").read_text(encoding="utf-8").splitlines() == [
+        "chatty stderr line"
+    ]
 
 
 def test_external_executor_env_includes_definition_env(tmp_path: Path) -> None:

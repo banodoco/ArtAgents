@@ -11,6 +11,7 @@ from astrid.core.model_catalog.schema import (
     LoraSource,
     ModelEntry,
     ModeSpec,
+    Price,
     validate_lora_registry,
     validate_registry,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "ModeSpec",
     "ModelEntry",
     "ModelRegistry",
+    "Price",
     "validate_lora_registry",
     "validate_registry",
 ]

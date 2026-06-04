@@ -108,10 +108,16 @@ def test_build_and_validate_run_record_round_trip() -> None:
         status=RunStatus.RUNNING,
         argv=["--flag", "value"],
         metadata={"baseline_snapshot": "abc"},
+        session_id="session-123",
+        auto_bound=True,
+        invocation="sdk",
     )
     normalized = validate_run_record(record)
     assert normalized["status"] == "running"
     assert normalized["argv"] == ["--flag", "value"]
+    assert normalized["session_id"] == "session-123"
+    assert normalized["auto_bound"] is True
+    assert normalized["invocation"] == "sdk"
     assert normalized["metadata"]["baseline_snapshot"] == "abc"
     assert normalized["schema_version"] == RUN_SCHEMA_VERSION
 
@@ -121,6 +127,67 @@ def test_run_record_status_must_be_known() -> None:
     record["status"] = "garbage"
     with pytest.raises(ProjectValidationError, match="unmapped run-record status"):
         validate_run_record(record)
+
+
+def test_run_record_provenance_defaults_round_trip() -> None:
+    record = build_run_record("demo", "01HXYZ", status=RunStatus.RUNNING)
+
+    assert record["session_id"] is None
+    assert record["auto_bound"] is False
+    assert record["invocation"] == "cli"
+
+    normalized = validate_run_record(record)
+    assert normalized["session_id"] is None
+    assert normalized["auto_bound"] is False
+    assert normalized["invocation"] == "cli"
+
+
+def test_run_record_invocation_must_be_known() -> None:
+    record = build_run_record("demo", "01HXYZ")
+    record["invocation"] = "garbage"
+
+    with pytest.raises(ProjectValidationError, match="run.invocation"):
+        validate_run_record(record)
+
+
+def test_legacy_auto_resolved_metadata_populates_canonical_auto_bound() -> None:
+    record = build_run_record(
+        "demo",
+        "01HXYZ",
+        metadata={"project_was_auto_resolved": True},
+    )
+
+    assert record["auto_bound"] is True
+    assert record["metadata"]["project_was_auto_resolved"] is True
+
+    legacy = dict(record)
+    legacy.pop("auto_bound", None)
+    normalized = validate_run_record(legacy)
+    assert normalized["auto_bound"] is True
+    assert normalized["metadata"]["project_was_auto_resolved"] is True
+
+
+def test_explicit_auto_bound_does_not_duplicate_legacy_metadata() -> None:
+    record = build_run_record(
+        "demo",
+        "01HXYZ",
+        auto_bound=True,
+        metadata={"project_was_auto_resolved": True, "baseline_snapshot": "abc"},
+    )
+
+    assert record["auto_bound"] is True
+    assert "project_was_auto_resolved" not in record["metadata"]
+    assert record["metadata"]["baseline_snapshot"] == "abc"
+
+
+def test_explicit_auto_bound_wins_over_legacy_metadata_on_validate() -> None:
+    record = build_run_record("demo", "01HXYZ")
+    record["auto_bound"] = False
+    record["metadata"]["project_was_auto_resolved"] = True
+
+    normalized = validate_run_record(record)
+    assert normalized["auto_bound"] is False
+    assert normalized["metadata"]["project_was_auto_resolved"] is True
 
 
 def test_schema_constants_are_versioned() -> None:

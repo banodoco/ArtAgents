@@ -1716,6 +1716,7 @@ def invoke(
                 verbose=verbose,
                 execution_mode=execution_mode,
                 argv=tuple(argv),
+                invocation="sdk",
             )
             result = run_executor(request, executor_registry)
             raw_result = _normalize_executor_result(result)
@@ -1735,6 +1736,7 @@ def invoke(
                 python_exec=python_exec,
                 verbose=verbose,
                 execution_mode=execution_mode,
+                invocation="sdk",
             )
             result = run_orchestrator(request, orchestrator_registry)
             raw_result = _normalize_orchestrator_result(result)

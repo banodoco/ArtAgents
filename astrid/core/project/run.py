@@ -41,6 +41,35 @@ SENSITIVE_ARG_NAMES = {
     "--secret",
     "--token",
 }
+# Normalized (dashes → underscores, no leading dashes) exact-match set
+# used by _is_sensitive_key after key normalization.  Keep in sync with
+# the substrings below.
+_SENSITIVE_NORMALIZED_NAMES: set[str] = {
+    "access_key",
+    "api_key",
+    "apikey",
+    "auth",
+    "bearer",
+    "credential",
+    "env_file",
+    "fal_key",
+    "key",
+    "password",
+    "secret",
+    "token",
+}
+_SENSITIVE_SUBSTRINGS: tuple[str, ...] = (
+    "access_key",
+    "api_key",
+    "apikey",
+    "auth",
+    "bearer",
+    "credential",
+    "fal_key",
+    "password",
+    "secret",
+    "token",
+)
 HYPE_ARTIFACTS = {
     "timeline": ("hype.timeline.json", "timeline.json"),
     "assets": ("hype.assets.json", "assets.json"),
@@ -84,6 +113,9 @@ def prepare_project_run(
     requires_timeline: bool | None = None,
     ledger_out: str | Path | None = None,
     record_out: str | Path | None = None,
+    session_id: str | None = None,
+    auto_bound: bool | None = None,
+    invocation: str = "cli",
 ) -> ProjectRunContext:
     """Prepare a project-scoped run directory and run record.
 
@@ -97,6 +129,10 @@ def prepare_project_run(
       ``metadata.requires_timeline`` flag (defaulting to ``True`` when the
       executor cannot be resolved or omits the flag), so callers that already
       pass ``tool_id`` get the conditional behavior for free.
+
+    ``session_id`` resolves in order: explicit parameter, then
+    ``ASTRID_SESSION_ID`` from the environment, then no value. This function
+    does not inspect project binding files directly.
     """
     require_project(project_slug, root=root)
     projects_root = paths.resolve_projects_root(root)
@@ -105,6 +141,9 @@ def prepare_project_run(
     base_metadata.setdefault("pid", os.getpid())
     base_metadata.setdefault("prepared_at", prepared_at)
     base_metadata.setdefault("process_platform", sys.platform)
+    effective_session_id = session_id or os.environ.get("ASTRID_SESSION_ID")
+    if auto_bound is not None:
+        base_metadata.pop("project_was_auto_resolved", None)
     parent_run_id = task_env.task_run_id_env()
     if parent_run_id:
         task_project = task_env.task_project_env()
@@ -126,7 +165,9 @@ def prepare_project_run(
         run_metadata.update({"attached_to_task_run": True, "task_step_id": step_id})
         record: dict[str, Any] = {
             "artifacts": {},
+            "auto_bound": bool(auto_bound) if auto_bound is not None else False,
             "created_at": now,
+            "invocation": "task",
             "metadata": run_metadata,
             "out": str(run_root),
             "project_slug": project_slug,
@@ -135,6 +176,8 @@ def prepare_project_run(
             "status": RunStatus.RUNNING.value,
             "updated_at": now,
         }
+        if effective_session_id is not None:
+            record["session_id"] = effective_session_id
         if tool_id is not None:
             record["tool_id"] = tool_id
         if kind is not None:
@@ -176,6 +219,9 @@ def prepare_project_run(
         out=record_out if record_out not in (None, "") else run_root,
         argv=redact_cli_args(list(argv or ())),
         metadata=dict(base_metadata),
+        session_id=effective_session_id,
+        auto_bound=auto_bound,
+        invocation=invocation,
         timeline_id=timeline_id,
     )
     run_json_path = run_root / "run.json"
@@ -327,6 +373,10 @@ def finalize_project_run(
     manifest_path = discover_manifest_path(record.get("out"), fallback_root=context.run_root)
     if manifest_path is not None:
         record["manifest_path"] = str(manifest_path)
+        # Copy numeric manifest cost_usd into run metadata for ledger fallback
+        manifest_cost = _read_manifest_cost_usd(manifest_path)
+        if manifest_cost is not None:
+            merged_metadata["cost_usd"] = manifest_cost
     else:
         record.pop("manifest_path", None)
     artifacts = dict(record.get("artifacts", {}))
@@ -511,6 +561,18 @@ def discover_manifest_path(
     return manifest_path if manifest_path.is_file() else None
 
 
+def _read_manifest_cost_usd(manifest_path: str | Path) -> float | None:
+    """Read a numeric ``cost_usd`` from a generation manifest, if present."""
+    try:
+        manifest = read_json(manifest_path)
+    except Exception:
+        return None
+    value = manifest.get("cost_usd")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
 def load_manifest_output_artifacts(manifest_path: str | Path) -> list[dict[str, Any]]:
     try:
         manifest = read_json(manifest_path)
@@ -585,10 +647,21 @@ def _has_hype_artifact_set(path: Path) -> bool:
 
 
 def _is_sensitive_key(value: str) -> bool:
+    """Test whether *value* looks like a sensitive CLI argument name.
+
+    Matching is normalized so that kebab-case, snake_case, and
+    ``name=value`` / ``--flag=value`` forms all trigger redaction.
+    Two-token flag forms (e.g. ``--access-key sk-...``) are handled
+    upstream in ``redact_cli_args``.
+    """
     normalized = value.strip().lower()
-    if normalized in SENSITIVE_ARG_NAMES:
+    # Strip leading dashes (up to 2) to handle --flag and -f forms.
+    key_part = normalized.lstrip("-")
+    # Normalize remaining dashes to underscores so --fal-key ↔ fal_key.
+    key_part = key_part.replace("-", "_")
+    if key_part in _SENSITIVE_NORMALIZED_NAMES:
         return True
-    return any(token in normalized for token in ("api_key", "apikey", "password", "secret", "token"))
+    return any(token in key_part for token in _SENSITIVE_SUBSTRINGS)
 
 
 __all__ = [

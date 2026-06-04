@@ -272,7 +272,7 @@ class FalBackend(BackendAdapter):
         request_id: str | None = result.get("request_id")
         source_urls: list[str] | None = None
 
-        # Try to extract cost from result (fal may include it)
+        # Try to extract cost from result (fal API-reported cost is preferred)
         if isinstance(result.get("cost"), (int, float)):
             cost_usd = float(result["cost"])
 
@@ -285,6 +285,12 @@ class FalBackend(BackendAdapter):
         # or {"image": {"url": ...}} or {"video": {"url": ...}} etc.
         asset_urls = _extract_asset_urls(result)
         source_urls = list(asset_urls)
+
+        # --- cost fallback to typed registry price ----------------------------
+        # If the API did not report a cost (missing or non-numeric), fall back
+        # to the registry price when available.  Unpriced backends keep None.
+        if cost_usd is None and backend_spec.price is not None:
+            cost_usd = len(asset_urls) * backend_spec.price.usd
 
         for idx, url in enumerate(asset_urls):
             try:
