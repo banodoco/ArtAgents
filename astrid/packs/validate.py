@@ -737,6 +737,13 @@ class PackValidator:
         ):
             return component_dir / Path(*parts[5:]).with_suffix(".py")
         if (
+            len(parts) >= 4
+            and parts[0] == pack_id
+            and parts[1] in {"executors", "orchestrators"}
+            and parts[2] == component_dir.name
+        ):
+            return self.pack_root / Path(*parts[1:]).with_suffix(".py")
+        if (
             len(parts) >= 5
             and parts[0:2] == ["astrid", "packs"]
             and parts[2] == pack_id

@@ -15,6 +15,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
+from astrid._paths import REPO_ROOT
 from astrid.contracts.capability_runner import CapabilityRunner
 from astrid.contracts.exec_error import (
     ExecError,
@@ -763,15 +764,42 @@ def _command_subprocess_env(
     request: ExecutorRunRequest,
     command_env: Mapping[str, str],
 ) -> dict[str, str]:
+    external_pack_env = _external_pack_pythonpath_env(executor, command_env)
     return build_child_subprocess_env(
         explicit_env={
             **command_env,
+            **external_pack_env,
             **_project_subprocess_env(request),
             "ASTRID_INTERNAL_INVOCATION": "1",
         },
         passthrough=executor.isolation.env_passthrough,
         declared_passthrough=executor.isolation.env_passthrough,
     )
+
+
+def _external_pack_pythonpath_env(
+    executor: ExecutorDefinition,
+    command_env: Mapping[str, str],
+) -> dict[str, str]:
+    if executor.command is None:
+        return {}
+    argv = tuple(executor.command.argv)
+    if len(argv) < 3 or argv[1] != "-m":
+        return {}
+    pack_id = str(executor.metadata.get("source_pack") or "")
+    module = argv[2]
+    if not pack_id or not module.startswith(f"{pack_id}."):
+        return {}
+    pack_root_raw = executor.metadata.get("pack_root")
+    if not isinstance(pack_root_raw, str) or not pack_root_raw:
+        return {}
+    pack_root = Path(pack_root_raw).expanduser().resolve()
+    builtin_root = (REPO_ROOT / "astrid" / "packs" / pack_id).resolve()
+    if pack_root == builtin_root:
+        return {}
+    pack_parent = str(pack_root.parent)
+    existing = command_env.get("PYTHONPATH") or os.environ.get("PYTHONPATH")
+    return {"PYTHONPATH": pack_parent if not existing else os.pathsep.join((pack_parent, existing))}
 
 
 def _placeholder_values(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> dict[str, str]:

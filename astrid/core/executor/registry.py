@@ -311,7 +311,7 @@ def _load_pack_executors_from_packs(
         for root in iter_executor_roots(pack):
             for executor in load_folder_executors(root):
                 validate_content_id_in_pack(executor.id, pack, content_type="executor")
-                executors.append(_attach_pack_metadata(executor, pack.id, content_root=root))
+                executors.append(_attach_pack_metadata(executor, pack.id, pack_root=pack.root, content_root=root))
     return tuple(executors)
 
 
@@ -319,11 +319,14 @@ def _attach_pack_metadata(
     executor: ExecutorDefinition,
     pack_id: str,
     *,
+    pack_root: Path | None = None,
     content_root: Path | None = None,
 ) -> ExecutorDefinition:
     metadata = dict(executor.metadata)
     metadata["source"] = "pack"
     metadata["source_pack"] = pack_id
+    if pack_root is not None:
+        metadata["pack_root"] = str(pack_root)
     metadata["priority"] = 10 if pack_id == "local" else 30
     if content_root is not None:
         metadata["content_root"] = str(content_root)

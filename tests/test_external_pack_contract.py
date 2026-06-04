@@ -25,9 +25,19 @@ from pathlib import Path
 import pytest
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 # ---------------------------------------------------------------------------
 # Helper: check the fixture directory for Python files / banned imports
 # ---------------------------------------------------------------------------
+
+def _with_repo_pythonpath(env: dict[str, str]) -> dict[str, str]:
+    updated = dict(env)
+    existing = updated.get("PYTHONPATH")
+    updated["PYTHONPATH"] = str(_REPO_ROOT) if not existing else os.pathsep.join((str(_REPO_ROOT), existing))
+    return updated
+
 
 def _assert_fixture_has_no_python_files(fixture_root: Path) -> None:
     """Fail if the fixture directory contains any ``.py`` file."""
@@ -165,6 +175,7 @@ def test_external_pack_via_env_path() -> None:
         # copied root, cwd outside the repo
         env = os.environ.copy()
         env["ASTRID_PACKS_PATH"] = str(tmp_path)
+        env = _with_repo_pythonpath(env)
 
         completed = subprocess.run(
             [sys.executable, str(script_path)],
@@ -189,6 +200,123 @@ def test_external_pack_via_env_path() -> None:
         assert result["glow_id"] == "widgets/glow", f"unexpected glow_id: {result['glow_id']}"
         assert result["glow_capability_type"] == "element"
         assert result["glow_native_kind"] == "widgets"
+
+
+def test_external_pack_python_executor_validates_and_runs() -> None:
+    """An env-discovered external pack can expose a top-level Python module executor."""
+    pack_id = "external_py_exec"
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        pack_root = tmp_path / pack_id
+        exec_root = pack_root / "executors" / "echo"
+        exec_root.mkdir(parents=True)
+        (pack_root / "pack.yaml").write_text(
+            f"""\
+schema_version: 1
+id: {pack_id}
+name: External Python Executor
+version: 0.1.0
+description: External Python executor contract fixture.
+content:
+  executors: executors
+agent:
+  purpose: Testing external Python executor dispatch.
+  entrypoints:
+    - validate
+""",
+            encoding="utf-8",
+        )
+        (pack_root / "AGENTS.md").write_text("# External Python Executor\n", encoding="utf-8")
+        (pack_root / "README.md").write_text("# External Python Executor\n", encoding="utf-8")
+        (exec_root / "STAGE.md").write_text("# Echo\n", encoding="utf-8")
+        (exec_root / "executor.yaml").write_text(
+            f"""\
+schema_version: 1
+id: {pack_id}.echo
+name: Echo
+kind: external
+version: 0.1.0
+description: Writes a JSON marker file.
+command:
+  argv:
+    - "{{python_exec}}"
+    - "-m"
+    - "{pack_id}.executors.echo.run"
+    - "--out"
+    - "{{out}}/result.json"
+metadata:
+  runtime_module: {pack_id}.executors.echo.run
+""",
+            encoding="utf-8",
+        )
+        (exec_root / "run.py").write_text(
+            """\
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args(argv)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"ok": True}) + "\\n", encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+""",
+            encoding="utf-8",
+        )
+
+        env = os.environ.copy()
+        env["ASTRID_PACKS_PATH"] = str(tmp_path)
+        env = _with_repo_pythonpath(env)
+
+        validate = subprocess.run(
+            [sys.executable, "-m", "astrid", "packs", "validate", str(pack_root)],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            env=env,
+            timeout=60,
+        )
+        assert validate.returncode == 0, (
+            f"External Python pack failed validation\nSTDOUT:\n{validate.stdout}\nSTDERR:\n{validate.stderr}"
+        )
+
+        out_dir = tmp_path / "out"
+        run = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "astrid",
+                "executors",
+                "--pack-root",
+                str(tmp_path),
+                "run",
+                f"{pack_id}.echo",
+                "--out",
+                str(out_dir),
+                "--python-exec",
+                sys.executable,
+            ],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+            env=env,
+            timeout=60,
+        )
+        assert run.returncode == 0, (
+            f"External Python executor failed\nSTDOUT:\n{run.stdout}\nSTDERR:\n{run.stderr}"
+        )
+        assert (out_dir / "result.json").is_file()
 
 
 def test_test_file_itself_avoids_internal_imports() -> None:
