@@ -28,7 +28,7 @@ Every agent-facing verb obeys one CLI contract: machine output on stdout (`--jso
 Existing tests green incl. test_agent_cli_kernel.py and recoverability conformance; no behavior change to verb semantics; agents currently regex-parsing prose must not break before the next release — keep prose templates' content stable in default mode.
 
 ## Done criteria
-Conformance suite green; every lifecycle verb has --json; zero plain-argparse surfaces; zero raw sys.exit in CLI modules.
+Conformance suite green; every lifecycle verb has --json; zero plain-argparse surfaces and zero raw sys.exit WITHIN the enumerated agent-facing surface list (Scope item 3).
 
 ## Touchpoints
 astrid/core/task/operator_view.py, run_store.py, run_audit.py, plan_builder.py, lifecycle_ack.py, lifecycle_skip.py, claim.py, astrid/core/session/cli.py, astrid/gateway.py (dispatch parsers), astrid/core/cli_choices.py, docs/, tests/.
