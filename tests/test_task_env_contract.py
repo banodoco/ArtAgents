@@ -25,6 +25,7 @@ def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
     timeline_id = _seed_project_with_timeline(tmp_projects_root, "demo")
     _seed_parent_run(tmp_projects_root, "demo", "task-run-1", timeline_id)
     _set_task_env(monkeypatch, project="demo", run_id="task-run-1", step_id="step-1")
+    monkeypatch.setenv("ASTRID_SESSION_ID", "S-TASK-1")
 
     context = prepare_project_run("demo", root=tmp_projects_root)
 
@@ -33,6 +34,9 @@ def test_task_env_prepare_project_run_attaches_to_step_dir_without_run_json(
     assert not context.run_json_path.exists()
     assert context.record["status"] == "running"
     assert context.record["timeline_id"] == timeline_id
+    assert context.record["session_id"] == "S-TASK-1"
+    assert context.record["auto_bound"] is False
+    assert context.record["invocation"] == "task"
     assert context.record["metadata"]["attached_to_task_run"] is True
     assert context.record["metadata"]["task_step_id"] == "step-1"
 

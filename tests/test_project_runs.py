@@ -111,6 +111,7 @@ def test_orchestrator_out_only_auto_resolves_default_project_and_ledgers(
 ) -> None:
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.setenv("ASTRID_SESSION_ID", "S-ORCH-OUT")
     _clear_thread_env(monkeypatch)
     create_project("default")
     create_timeline("default", "main", is_default=True)
@@ -125,6 +126,9 @@ def test_orchestrator_out_only_auto_resolves_default_project_and_ledgers(
     assert len(records) == 1
     assert records[0]["project_slug"] == "default"
     assert records[0]["out"] == str(out_dir.resolve())
+    assert records[0]["session_id"] == "S-ORCH-OUT"
+    assert records[0]["auto_bound"] is True
+    assert records[0]["invocation"] == "cli"
     assert records[0]["metadata"]["project_was_auto_resolved"] is True
     assert (out_dir / "orch-env.txt").read_text(encoding="utf-8") == "1"
 

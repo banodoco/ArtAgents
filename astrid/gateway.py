@@ -38,6 +38,10 @@ from astrid.contracts.errors import (
     wrap_degraded_error,
 )
 from astrid.core.util.log_and_swallow import log_and_swallow
+from astrid.core.runtime.log_capture import (
+    open_run_log_capture,
+    run_subprocess_with_capture,
+)
 
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
 # of main(): for these verbs the --project flag identifies the run, NOT a
@@ -558,6 +562,8 @@ def _dispatch_scratch(args: list[str]) -> int:
         kind="scratch",
         argv=argv,
         requires_timeline=False,
+        auto_bound=True,
+        invocation="scratch",
     )
 
     child_env = build_child_subprocess_env(
@@ -565,19 +571,22 @@ def _dispatch_scratch(args: list[str]) -> int:
             "ASTRID_PROJECT_RUN": "1",
         },
     )
-    result = subprocess.run(
-        [sys.executable, str(file_path)] + extra,
-        env=child_env,
-    )
+    with open_run_log_capture(context.run_root) as logs:
+        returncode = run_subprocess_with_capture(
+            [sys.executable, str(file_path)] + extra,
+            env=child_env,
+            stdout_log=logs.stdout,
+            stderr_log=logs.stderr,
+        )
 
-    status = RunStatus.COMPLETED if result.returncode == 0 else RunStatus.FAILED
+    status = RunStatus.COMPLETED if returncode == 0 else RunStatus.FAILED
     finalize_project_run(
         context,
         status=status,
-        returncode=result.returncode,
+        returncode=returncode,
     )
 
-    return result.returncode
+    return returncode
 
 
 _TOP_LEVEL_HANDLERS = {
@@ -646,7 +655,7 @@ def _dispatch_sessions(args: list[str]) -> int:
 
 
 def _dispatch_runs(args: list[str]) -> int:
-    """Dispatch ``astrid runs {ls,show,artifacts,trace,cost}`` sub-verbs."""
+    """Dispatch ``astrid runs {ls,show,artifacts,trace,cost,gc}`` sub-verbs."""
     import argparse
 
     from .core.task.lifecycle import cmd_runs_ls
@@ -656,6 +665,7 @@ def _dispatch_runs(args: list[str]) -> int:
         cmd_run_show,
         cmd_run_trace,
     )
+    from astrid.core.task.run_gc import cmd_runs_gc
 
     parser = argparse.ArgumentParser(prog="astrid runs")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -664,6 +674,7 @@ def _dispatch_runs(args: list[str]) -> int:
     sub.add_parser("artifacts").set_defaults(handler=cmd_run_artifacts)
     sub.add_parser("trace").set_defaults(handler=cmd_run_trace)
     sub.add_parser("cost").set_defaults(handler=cmd_run_cost)
+    sub.add_parser("gc").set_defaults(handler=cmd_runs_gc)
     parsed, tail = parser.parse_known_args(args)
     return int(parsed.handler(tail))
 

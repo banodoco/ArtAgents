@@ -716,6 +716,100 @@ def cmd_sessions_takeover(args: argparse.Namespace, *, out: Any = None) -> int:
     return 0
 
 
+# ----- cmd_sessions_prune -----------------------------------------------
+
+
+def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
+    """Prune stale session records.
+
+    Defaults to dry-run: lists candidates without deleting anything.
+    Pass ``--apply`` to actually remove the listed session files.
+
+    A session is considered stale when its ``last_used_at`` is older than
+    ``--older-than-days`` (default 30) relative to the current UTC time.
+    """
+    if out is None:
+        out = sys.stdout
+    try:
+        from datetime import datetime, timedelta, timezone as dt_timezone
+
+        now = datetime.now(dt_timezone.utc)
+        cutoff = now - timedelta(days=args.older_than_days)
+    except Exception:
+        print("prune: unable to compute cutoff", file=sys.stderr)
+        return 2
+
+    all_sessions = _list_session_files()
+    if not all_sessions:
+        print("no session records found", file=out)
+        return 0
+
+    stale: list[tuple[Session, float, Path]] = []
+    for s in all_sessions:
+        spath = _session_store().session_path(s.id)
+        try:
+            last_used = datetime.fromisoformat(s.last_used_at)
+        except (ValueError, TypeError):
+            # Unparseable timestamp — treat as stale for safety.
+            stale.append((s, float("inf"), spath))
+            continue
+        age_days = (now - last_used).total_seconds() / 86400.0
+        if last_used < cutoff:
+            stale.append((s, age_days, spath))
+
+    if not stale:
+        print(
+            f"no stale sessions found (cutoff: >{args.older_than_days} days)",
+            file=out,
+        )
+        return 0
+
+    # Stable sort: oldest first (largest age_days).
+    stale.sort(key=lambda t: t[1], reverse=True)
+
+    dry_run = not args.apply
+    header = "[DRY RUN] " if dry_run else ""
+    print(
+        f"{header}{len(stale)} stale session(s) older than "
+        f"{args.older_than_days} days",
+        file=out,
+    )
+    print(file=out)
+
+    for s, age_days, spath in stale:
+        age_str = f"{age_days:.1f}d" if age_days != float("inf") else "?"
+        action = "would delete" if dry_run else "deleting"
+        print(
+            f"  {action} {s.id}  project={s.project}  "
+            f"age={age_str}  path={spath}",
+            file=out,
+        )
+
+    if dry_run:
+        print(file=out)
+        print("Dry run — no sessions were deleted.", file=out)
+        print("Re-run with --apply to delete the listed sessions.", file=out)
+        return 0
+
+    # Apply mode: actually delete.
+    deleted = 0
+    errors = 0
+    for s, age_days, spath in stale:
+        try:
+            _session_store().delete(s.id)
+            deleted += 1
+        except Exception as exc:
+            print(f"  error deleting {s.id}: {exc}", file=sys.stderr)
+            errors += 1
+
+    print(file=out)
+    print(f"deleted {deleted} session record(s).", file=out)
+    if errors:
+        print(f"{errors} error(s) encountered; see stderr.", file=out)
+        return 2
+    return 0
+
+
 # ----- cmd_status -------------------------------------------------------
 
 
@@ -952,6 +1046,20 @@ def build_parser() -> argparse.ArgumentParser:
     takeover.add_argument("target", help="Session id or run id.")
     takeover.add_argument("--force", action="store_true", help="Allow takeover of a warm target.")
     takeover.set_defaults(handler=cmd_sessions_takeover)
+
+    prune = sub.add_parser("prune", help="Prune stale session records (dry-run by default).")
+    prune.add_argument(
+        "--older-than-days",
+        type=int,
+        default=30,
+        help="Delete sessions whose last_used_at is older than this many days (default: 30).",
+    )
+    prune.add_argument(
+        "--apply",
+        action="store_true",
+        help="Actually delete stale sessions. Without this flag, prune runs in dry-run mode.",
+    )
+    prune.set_defaults(handler=cmd_sessions_prune)
 
     status = sub.add_parser("status", help="Print the current session breadcrumb.")
     status.set_defaults(handler=cmd_status)

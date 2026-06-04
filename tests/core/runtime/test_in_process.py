@@ -4,6 +4,8 @@ import importlib
 import json
 import os
 import sys
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 import pytest
@@ -420,3 +422,61 @@ def test_repeated_invocation_does_not_leak_module_state(
     # After unconditional reload the module-level list must contain
     # only the argv from the *second* invocation — no leakage.
     assert r2.payload["seen"] == ["second"]
+
+
+def test_invoke_capture_wraps_only_runtime_entrypoint_and_preserves_live_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The redirect-based capture is process-global, so this test exercises the
+    supported serialized case: one in-process invocation with the caller's
+    stdout/stderr already redirected."""
+
+    pack_root = _extend_packs_path(monkeypatch, tmp_path)
+    module_path = pack_root / "demo_runtime_test.py"
+    module_path.write_text(
+        "\n".join(
+            [
+                "from __future__ import annotations",
+                "import sys",
+                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "print('import stdout line')",
+                "print('import stderr line', file=sys.stderr)",
+                "guard_canonical_entrypoint('demo.capability')",
+                "",
+                "def main(argv=None):",
+                "    print('runtime stdout line')",
+                "    print('runtime stderr line', file=sys.stderr)",
+                "    return {'ok': True}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    importlib.invalidate_caches()
+    sys.modules.pop("astrid.packs.demo_runtime_test", None)
+
+    live_stdout = StringIO()
+    live_stderr = StringIO()
+    captured_stdout = StringIO()
+    captured_stderr = StringIO()
+
+    with redirect_stdout(live_stdout), redirect_stderr(live_stderr):
+        result = invoke_in_process_command(
+            [sys.executable, "-m", "astrid.packs.demo_runtime_test"],
+            metadata={"runtime_module": "astrid.packs.demo_runtime_test"},
+            owner_id="demo.capability",
+            stdout_log=captured_stdout,
+            stderr_log=captured_stderr,
+        )
+
+    assert result.returncode == 0
+    assert live_stdout.getvalue().splitlines() == [
+        "import stdout line",
+        "runtime stdout line",
+    ]
+    assert live_stderr.getvalue().splitlines() == [
+        "import stderr line",
+        "runtime stderr line",
+    ]
+    assert captured_stdout.getvalue().splitlines() == ["runtime stdout line"]
+    assert captured_stderr.getvalue().splitlines() == ["runtime stderr line"]

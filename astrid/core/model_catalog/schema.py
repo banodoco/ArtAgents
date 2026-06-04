@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 from astrid.core.generation.features import (
@@ -30,6 +31,14 @@ from astrid.core.generation.features import (
 # ---------------------------------------------------------------------------
 # Dataclasses
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Price:
+    """Validated per-output price metadata for a backend endpoint."""
+
+    usd: float
+    unit: str
 
 
 @dataclass(frozen=True)
@@ -63,6 +72,9 @@ class BackendSpec:
     #: Example (cloud): ``{"prompt": "prompt", "seed": "seed", "size":
     #: "image_size"}``.
     param_map: dict[str, str] = field(default_factory=dict)
+
+    #: Optional validated unit price for this backend endpoint.
+    price: Price | None = None
 
 
 @dataclass(frozen=True)
@@ -391,6 +403,8 @@ def _validate_backend_spec(
     if backend_id == CLOUD_BACKEND_ID and not endpoint:
         raise ValueError(f"{path}.endpoint: must be a non-empty string for cloud backend")
 
+    price = _validate_backend_price(raw.get("price"), f"{path}.price")
+
     # -- param_map -------------------------------------------------------
     param_map_raw = raw.get("param_map", {})
     if not isinstance(param_map_raw, dict):
@@ -431,7 +445,40 @@ def _validate_backend_spec(
         endpoint=str(endpoint),
         lora_endpoint=raw.get("lora_endpoint"),
         param_map=param_map,
+        price=price,
     )
+
+
+_ALLOWED_PRICE_UNITS = frozenset({"image", "output", "video"})
+
+
+def _validate_backend_price(raw: Any, path: str) -> Price | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: must be a dict, got {type(raw).__name__}")
+    expected_keys = {"unit", "usd"}
+    actual_keys = set(raw)
+    unknown = sorted(actual_keys - expected_keys)
+    missing = sorted(expected_keys - actual_keys)
+    if unknown or missing:
+        problems: list[str] = []
+        if missing:
+            problems.append(f"missing keys: {', '.join(missing)}")
+        if unknown:
+            problems.append(f"unknown keys: {', '.join(unknown)}")
+        raise ValueError(f"{path}: price objects must contain exactly 'unit' and 'usd' ({'; '.join(problems)})")
+    unit = _require_str(raw, "unit", path)
+    if unit not in _ALLOWED_PRICE_UNITS:
+        allowed = ", ".join(sorted(_ALLOWED_PRICE_UNITS))
+        raise ValueError(f"{path}.unit: unsupported price unit {unit!r}; expected one of: {allowed}")
+    usd = raw.get("usd")
+    if isinstance(usd, bool) or not isinstance(usd, (int, float)):
+        raise ValueError(f"{path}.usd: must be a non-negative number, got {type(usd).__name__}")
+    usd_value = float(usd)
+    if not math.isfinite(usd_value) or usd_value < 0:
+        raise ValueError(f"{path}.usd: must be a non-negative finite number")
+    return Price(usd=usd_value, unit=unit)
 
 
 # ---------------------------------------------------------------------------
