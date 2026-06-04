@@ -20,6 +20,7 @@ orchestrator runner can adopt it later without changing this skeleton.
 
 from __future__ import annotations
 
+import sys
 from typing import Generic, Protocol, TypeVar
 
 from astrid.contracts.run_status import RunStatus
@@ -61,6 +62,15 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
 
     # -- project run context -----------------------------------------------
 
+    def resolve_project_request(self, request: RequestT, definition: DefinitionT) -> RequestT:
+        return request
+
+    def is_dry_run(self, request: RequestT, definition: DefinitionT) -> bool:
+        return False
+
+    def prepare_dry_run_request(self, request: RequestT, definition: DefinitionT) -> RequestT:
+        return request
+
     def prepare_project(self, request: RequestT, definition: DefinitionT) -> tuple[object | None, RequestT]:
         raise NotImplementedError
 
@@ -81,6 +91,11 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
     def result_returncode(self, result: ResultT) -> int | None:
         raise NotImplementedError
 
+    def mark_finalize_failed(
+        self, context: object, request: RequestT, finalize_error: BaseException
+    ) -> None:
+        """Best-effort secondary write after success-path finalize failure."""
+
     # -- inner execution ---------------------------------------------------
 
     def run_inner(self, request: RequestT, definition: DefinitionT) -> ResultT:
@@ -92,27 +107,56 @@ class CapabilityRunner(Generic[RequestT, ResultT, DefinitionT]):
         self.maybe_gate(request)
         active_registry = registry if registry is not None else self.load_default_registry()
         definition = active_registry.get(self.request_id(request))
-        project_context, effective_request = self.prepare_project(request, definition)
+        if self.is_dry_run(request, definition):
+            return self.run_inner(self.prepare_dry_run_request(request, definition), definition)
+        resolved_request = self.resolve_project_request(request, definition)
+        project_context, effective_request = self.prepare_project(resolved_request, definition)
         try:
             result = self.run_inner(effective_request, definition)
         except Exception as exc:
             if project_context is not None:
+                try:
+                    self.finalize_project(
+                        project_context,
+                        effective_request,
+                        status=RunStatus.FAILED,
+                        returncode=-1,
+                        error=exc,
+                    )
+                except Exception as finalize_exc:
+                    _attach_exception_note(
+                        exc,
+                        "finalize after execution failure also failed: "
+                        f"{finalize_exc.__class__.__name__}: {finalize_exc}",
+                    )
+            raise
+        if project_context is not None:
+            try:
                 self.finalize_project(
                     project_context,
                     effective_request,
-                    status=RunStatus.FAILED,
-                    returncode=-1,
-                    error=exc,
+                    status=self.status_for_result(result),
+                    returncode=self.result_returncode(result),
                 )
-            raise
-        if project_context is not None:
-            self.finalize_project(
-                project_context,
-                effective_request,
-                status=self.status_for_result(result),
-                returncode=self.result_returncode(result),
-            )
+            except Exception as finalize_exc:
+                try:
+                    self.mark_finalize_failed(project_context, effective_request, finalize_exc)
+                except Exception as mark_exc:
+                    _attach_exception_note(
+                        finalize_exc,
+                        "mark_finalize_failed also failed: "
+                        f"{mark_exc.__class__.__name__}: {mark_exc}",
+                    )
+                raise
         return result
+
+
+def _attach_exception_note(exc: BaseException, note: str) -> None:
+    add_note = getattr(exc, "add_note", None)
+    if callable(add_note):
+        add_note(note)
+        return
+    print(note, file=sys.stderr)
 
 
 __all__ = ["CapabilityRunner"]

@@ -8,6 +8,8 @@ self-describing independent of its ``manifest.json`` sidecar.
 from __future__ import annotations
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 from typing import Union
 
@@ -27,6 +29,10 @@ def embed_png_text(
     If *preserve_existing* is ``True`` (the default), any tEXt chunks
     already present (like ComfyUI's ``prompt`` and ``workflow``) are
     read and re-written before the new Astrid chunks are added.
+
+    Writes to a sibling temporary file then atomically replaces the
+    original via ``os.replace()`` so concurrent readers never observe
+    a half-written PNG.
 
     Returns ``True`` on success, ``False`` for non-PNG or missing paths
     (silent no-op — no exception raised).
@@ -68,8 +74,18 @@ def embed_png_text(
             safe_value = _to_latin1_safe(str(value))
             pnginfo.add_text(astrid_key, safe_value)
 
-        # Save in place.  Use the original format/mode; PNG is lossless.
-        img.save(path, pnginfo=pnginfo)
+        # Save to a sibling temp file, then atomically replace the original.
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{path.name}.", suffix=".png.tmp", dir=path.parent
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            os.close(fd)  # Pillow will open its own handle
+            img.save(tmp_path, format="PNG", pnginfo=pnginfo)
+            os.replace(tmp_path, path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
         logger.debug("embed_png_text: embedded %d fields into %s", len(fields), path)
         return True
 

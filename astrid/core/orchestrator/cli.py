@@ -618,20 +618,35 @@ def _cmd_run(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
     from .runner import OrchestratorRunRequest, run_orchestrator
 
     _require_qualified_id(args.orchestrator_id, "orchestrator id")
+    auto_resolved_project = _gateway_resolved_project(args.project)
+    project_was_auto_resolved = auto_resolved_project is not None and args.project is None
+    effective_project = args.project or auto_resolved_project
+    if effective_project and args.out and not project_was_auto_resolved:
+        raise ValueError("--project cannot be combined with --out; project runs own their output directory")
     request = OrchestratorRunRequest(
         orchestrator_id=args.orchestrator_id,
         out=Path(args.out) if args.out else None,
-        project=args.project,
+        project=effective_project,
         inputs=_parse_input_values(args.input),
         brief=Path(args.brief) if args.brief else None,
         orchestrator_args=tuple(args.orchestrator_args),
         dry_run=bool(args.dry_run),
         python_exec=args.python_exec,
         verbose=bool(args.verbose),
+        project_was_auto_resolved=project_was_auto_resolved,
     )
     result = run_orchestrator(request, registry)
     _print_run_result(result)
     return int(result.returncode or 0)
+
+
+def _gateway_resolved_project(explicit_project: str | None) -> str | None:
+    if explicit_project is not None:
+        return None
+    from astrid.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
+
+    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
+    return value or None
 
 
 def _parse_input_values(raw_values: list[str]) -> dict[str, str]:

@@ -12,10 +12,12 @@ plans even for orchestrators that normally build dynamic start plans.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from astrid.contracts.run_status import RunStatus
 from astrid.core.project.current_run import (
     clear_current_run,
     read_current_run,
@@ -154,7 +156,7 @@ def _summarize_run_dir(run_dir: Path) -> tuple[str, str, str]:
     """
     events_path = run_dir / "events.jsonl"
     if not events_path.is_file():
-        return "in-flight", "", ""
+        return _summarize_run_json_status(run_dir), "", ""
     events = read_events(events_path)
     if not events:
         return "in-flight", "", ""
@@ -176,7 +178,23 @@ def _summarize_run_dir(run_dir: Path) -> tuple[str, str, str]:
         return "completed", last_kind, last_ts
     return "in-flight", last_kind, last_ts
 
-_RUNS_LS_STATUSES = ("completed", "in-flight", "aborted")
+
+def _summarize_run_json_status(run_dir: Path) -> str:
+    run_json_path = run_dir / "run.json"
+    if not run_json_path.is_file():
+        return "in-flight"
+    try:
+        raw = json.loads(run_json_path.read_text(encoding="utf-8"))
+        status = raw.get("status") if isinstance(raw, dict) else None
+        if isinstance(status, str):
+            parsed = RunStatus.from_run_record_status(status)
+            return "in-flight" if parsed is RunStatus.RUNNING else parsed.value
+    except (OSError, ValueError, json.JSONDecodeError):
+        return "in-flight"
+    return "in-flight"
+
+
+_RUNS_LS_STATUSES = ("completed", "in-flight", "aborted", "failed", "blocked", "skipped")
 
 
 def cmd_runs_ls(

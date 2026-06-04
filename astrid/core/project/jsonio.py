@@ -1,13 +1,18 @@
-"""Deterministic JSON IO helpers for project state."""
+"""Deterministic JSON IO helpers for project state.
+
+Delegates to the shared atomic-I/O primitives in
+:mod:`astrid.core.util.atomic_io` while preserving the
+existing ``ProjectJsonError`` exception and import paths.
+"""
 
 from __future__ import annotations
 
-import errno
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
+
+from astrid.core.util.atomic_io import read_json as _atomic_read_json
+from astrid.core.util.atomic_io import write_json_atomic as _atomic_write_json
 
 
 class ProjectJsonError(RuntimeError):
@@ -15,43 +20,26 @@ class ProjectJsonError(RuntimeError):
 
 
 def read_json(path: str | Path) -> Any:
-    json_path = Path(path)
+    """Read and parse a JSON file at *path*.
+
+    Wraps lower-level errors in :class:`ProjectJsonError`.
+    """
     try:
-        return json.loads(json_path.read_text(encoding="utf-8"))
+        return _atomic_read_json(path)
     except FileNotFoundError:
         raise
-    except json.JSONDecodeError as exc:
-        raise ProjectJsonError(f"invalid JSON in {json_path}: {exc.msg}") from exc
+    except ValueError as exc:
+        raise ProjectJsonError(str(exc)) from exc
     except OSError as exc:
-        raise ProjectJsonError(f"failed to read {json_path}: {exc}") from exc
+        raise ProjectJsonError(f"failed to read {path}: {exc}") from exc
 
 
 def write_json_atomic(path: str | Path, payload: Any) -> None:
-    json_path = Path(path)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{json_path.name}.", suffix=".tmp", dir=json_path.parent)
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, json_path)
-        _fsync_dir(json_path.parent)
-    finally:
-        tmp_path.unlink(missing_ok=True)
+    """Atomically write *payload* as JSON to *path*.
 
-
-def _fsync_dir(path: Path) -> None:
-    flags = getattr(os, "O_DIRECTORY", 0) | os.O_RDONLY
-    fd: int | None = None
+    Delegates to :func:`astrid.core.util.atomic_io.write_json_atomic`.
+    """
     try:
-        fd = os.open(path, flags)
-        os.fsync(fd)
+        _atomic_write_json(path, payload)
     except OSError as exc:
-        if exc.errno not in {errno.EINVAL, errno.ENOTSUP, errno.EBADF}:
-            raise
-    finally:
-        if fd is not None:
-            os.close(fd)
+        raise ProjectJsonError(f"failed to write {path}: {exc}") from exc

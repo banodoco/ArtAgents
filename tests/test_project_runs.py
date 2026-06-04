@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -51,9 +53,12 @@ def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_coll
 def test_executor_legacy_out_no_longer_writes_thread_record(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
+    projects_root = tmp_path / "projects"
     monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
-    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
     _clear_thread_env(monkeypatch)
+    create_project("default")
+    create_timeline("default", "main", is_default=True)
     registry = ExecutorRegistry([_writer_executor("test.writer")])
     out = repo / "runs" / "legacy"
 
@@ -62,7 +67,11 @@ def test_executor_legacy_out_no_longer_writes_thread_record(tmp_path: Path, monk
     assert result.returncode == 0
     assert not (out / "run.json").exists()
     assert not (repo / ".astrid" / "threads.json").exists()
-    assert not (tmp_path / "projects").exists()
+    records = [_read_json(path) for path in sorted((projects_root / "default" / "runs").glob("*/run.json"))]
+    assert [record["project_slug"] for record in records] == ["default"]
+    assert records[0]["out"] == str(out)
+    assert records[0]["metadata"]["project_was_auto_resolved"] is True
+    assert (Path(records[0]["out"]) / "env.txt").read_text(encoding="utf-8") == "1"
 
 
 def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,7 +102,31 @@ def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_p
     )
     assert dry.dry_run is True
     assert "--out" in dry.command
-    assert str(projects_root / "demo" / "runs") in " ".join(dry.command)
+    assert str((Path.cwd() / ".astrid-dry-run" / "video_editing-hype").resolve()) in " ".join(dry.command)
+    assert len(_project_records(projects_root)) == 1
+
+
+def test_orchestrator_out_only_auto_resolves_default_project_and_ledgers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("default")
+    create_timeline("default", "main", is_default=True)
+
+    out_dir = tmp_path / "orch-out"
+    registry = OrchestratorRegistry([_writer_orchestrator("test.orch")])
+
+    result = run_orchestrator(OrchestratorRunRequest("test.orch", out=out_dir), registry)
+
+    assert result.returncode == 0
+    records = [_read_json(path) for path in sorted((projects_root / "default" / "runs").glob("*/run.json"))]
+    assert len(records) == 1
+    assert records[0]["project_slug"] == "default"
+    assert records[0]["out"] == str(out_dir.resolve())
+    assert records[0]["metadata"]["project_was_auto_resolved"] is True
+    assert (out_dir / "orch-env.txt").read_text(encoding="utf-8") == "1"
 
 
 def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,6 +258,166 @@ def test_prepare_project_run_autodetects_requires_timeline_from_executor_metadat
     )
 
     assert "timeline_id" not in context.record
+
+
+def test_prepare_project_run_records_external_out_and_prepare_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    external_out = tmp_path / "external-output"
+    context = prepare_project_run(
+        "demo",
+        tool_id="test.writer",
+        kind="executor",
+        record_out=external_out,
+    )
+
+    assert context.run_root != external_out.resolve()
+    assert context.record["out"] == str(external_out)
+    metadata = context.record["metadata"]
+    assert metadata["pid"] > 0
+    assert metadata["prepared_at"]
+    assert metadata["process_platform"] == sys.platform
+    on_disk = _read_json(context.run_json_path)
+    assert on_disk["out"] == str(external_out)
+    assert on_disk["metadata"]["process_platform"] == sys.platform
+
+
+def test_standalone_timeline_contribution_records_only_after_successful_finalize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import finalize_project_run, prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    timeline = create_timeline("demo", "main", is_default=True)
+    manifest_path = projects_root / "demo" / "timelines" / timeline["ulid"] / "manifest.json"
+
+    context = prepare_project_run("demo", tool_id="test.writer", kind="executor")
+
+    assert _read_json(manifest_path)["contributing_runs"] == []
+
+    finalize_project_run(context, status=RunStatus.COMPLETED, returncode=0)
+
+    assert _read_json(manifest_path)["contributing_runs"] == [context.run_id]
+
+
+def test_failed_standalone_timeline_run_does_not_record_contribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import finalize_project_run, prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    timeline = create_timeline("demo", "main", is_default=True)
+    manifest_path = projects_root / "demo" / "timelines" / timeline["ulid"] / "manifest.json"
+
+    context = prepare_project_run("demo", tool_id="test.writer", kind="executor")
+    finalize_project_run(context, status=RunStatus.FAILED, returncode=1)
+
+    assert _read_json(manifest_path)["contributing_runs"] == []
+
+
+def test_task_attached_parent_contribution_remains_prepare_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import prepare_project_run, write_run_record
+    from astrid.core.subprocess_env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    timeline = create_timeline("demo", "main", is_default=True)
+    parent_run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAT"
+    write_run_record(
+        "demo",
+        parent_run_id,
+        kind="task",
+        status=RunStatus.RUNNING,
+        timeline_id=timeline["ulid"],
+    )
+    monkeypatch.setenv(TASK_PROJECT_ENV, "demo")
+    monkeypatch.setenv(TASK_RUN_ID_ENV, parent_run_id)
+    monkeypatch.setenv(TASK_STEP_ID_ENV, "render")
+    manifest_path = projects_root / "demo" / "timelines" / timeline["ulid"] / "manifest.json"
+
+    context = prepare_project_run("demo", tool_id="test.writer", kind="executor")
+
+    assert context.run_id == parent_run_id
+    assert _read_json(manifest_path)["contributing_runs"] == [parent_run_id]
+
+
+def test_concurrent_successful_finalizes_do_not_lose_timeline_contributions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import finalize_project_run, prepare_project_run
+    from astrid.core.timeline import crud as timeline_crud
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    timeline = create_timeline("demo", "main", is_default=True)
+    manifest_path = projects_root / "demo" / "timelines" / timeline["ulid"] / "manifest.json"
+    contexts = [
+        prepare_project_run("demo", tool_id="test.writer", kind="executor"),
+        prepare_project_run("demo", tool_id="test.writer", kind="executor"),
+    ]
+
+    original_manifest_lock = timeline_crud._manifest_lock
+    first_thread_holds_lock = threading.Event()
+    second_thread_attempted_lock = threading.Event()
+    entrant_state = {"count": 0}
+    state_lock = threading.Lock()
+
+    @contextmanager
+    def coordinated_manifest_lock(path: Path):
+        with state_lock:
+            entrant_state["count"] += 1
+            entrant_number = entrant_state["count"]
+        if entrant_number == 1:
+            with original_manifest_lock(path):
+                first_thread_holds_lock.set()
+                assert second_thread_attempted_lock.wait(timeout=2), "second finalize never contended for the manifest lock"
+                yield
+            return
+        second_thread_attempted_lock.set()
+        with original_manifest_lock(path):
+            yield
+
+    monkeypatch.setattr(timeline_crud, "_manifest_lock", coordinated_manifest_lock)
+
+    thread_errors: list[BaseException] = []
+
+    def finalize(context) -> None:
+        try:
+            finalize_project_run(context, status=RunStatus.COMPLETED, returncode=0)
+        except BaseException as exc:  # pragma: no cover - surfaced through assertion below.
+            thread_errors.append(exc)
+
+    first = threading.Thread(target=finalize, args=(contexts[0],))
+    second = threading.Thread(target=finalize, args=(contexts[1],))
+    first.start()
+    assert first_thread_holds_lock.wait(timeout=2), "first finalize never acquired the manifest lock"
+    second.start()
+    first.join()
+    second.join()
+
+    assert thread_errors == []
+    assert second_thread_attempted_lock.is_set()
+    assert _read_json(manifest_path)["contributing_runs"] == [context.run_id for context in contexts]
 
 
 def test_run_record_baseline_snapshot_is_sha256_hex_at_canonical_path(
@@ -535,3 +728,299 @@ def test_hype_prepare_project_main_falls_back_to_project_slug(
     assert slug == "my-proj", (
         f"slug should fall back to project slug for generic brief names, got {slug!r}"
     )
+
+
+# ── M1 T3: Characterization tests for pre-fix ledger edge cases ─────────
+
+
+def test_dry_run_with_project_creates_ledger_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Dry-run short-circuits before prepare/finalize and writes no ledger."""
+    from astrid.core.executor.registry import ExecutorRegistry
+    from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    registry = ExecutorRegistry([_writer_executor("test.writer")])
+    result = run_executor(
+        ExecutorRunRequest("test.writer", out="", project="demo", dry_run=True),
+        registry,
+    )
+
+    assert result.dry_run is True
+    records = _project_records(projects_root)
+    assert records == []
+
+
+def test_summarize_run_dir_uses_run_json_status_when_events_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run.json status is the fallback when a project run has no events stream."""
+    from astrid.core.task.run_store import _summarize_run_dir
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+
+    run_dir = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    run_json = {
+        "artifacts": {},
+        "created_at": "2026-06-01T00:00:00Z",
+        "metadata": {},
+        "out": str(run_dir),
+        "project_slug": "demo",
+        "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        "schema_version": 1,
+        "status": "completed",
+        "tool_id": "test.tool",
+        "updated_at": "2026-06-01T00:00:00Z",
+    }
+    (run_dir / "run.json").write_text(
+        json.dumps(run_json, indent=2, sort_keys=True), encoding="utf-8"
+    )
+
+    status, last_kind, last_ts = _summarize_run_dir(run_dir)
+
+    assert status == "completed"
+    assert last_kind == ""
+    assert last_ts == ""
+
+
+def test_summarize_run_dir_keeps_event_stream_status_when_events_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Task-run events remain the status authority when events.jsonl exists."""
+    from astrid.core.task.run_store import _summarize_run_dir
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+
+    run_dir = projects_root / "demo" / "runs" / "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "artifacts": {},
+                "created_at": "2026-06-01T00:00:00Z",
+                "metadata": {},
+                "out": str(run_dir),
+                "project_slug": "demo",
+                "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW",
+                "schema_version": 1,
+                "status": "completed",
+                "updated_at": "2026-06-01T00:00:00Z",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "events.jsonl").write_text(
+        json.dumps({"kind": "run_started", "ts": "2026-06-01T00:00:01Z"}) + "\n",
+        encoding="utf-8",
+    )
+
+    status, last_kind, last_ts = _summarize_run_dir(run_dir)
+
+    assert status == "in-flight"
+    assert last_kind == "run_started"
+    assert last_ts == "2026-06-01T00:00:01Z"
+
+
+def test_run_show_uses_run_json_status_when_events_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    from astrid.core.task.run_audit import cmd_run_show
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    run_id = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+    run_dir = projects_root / "demo" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "run.json").write_text(
+        json.dumps(
+            {
+                "artifacts": {},
+                "created_at": "2026-06-01T00:00:00Z",
+                "metadata": {},
+                "out": str(run_dir),
+                "project_slug": "demo",
+                "run_id": run_id,
+                "schema_version": 1,
+                "status": "failed",
+                "updated_at": "2026-06-01T00:00:00Z",
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+
+    rc = cmd_run_show([run_id, "--project", "demo", "--json"], projects_root=projects_root)
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "failed"
+
+
+def test_finalize_without_hype_artifacts_uses_manifest_fallback_from_effective_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Manifest fallback uses the effective output directory, not the ledger root."""
+    from astrid.core.project.run import (
+        finalize_project_run,
+        prepare_project_run,
+    )
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    external_out = tmp_path / "executor-out"
+    external_out.mkdir()
+    context = prepare_project_run("demo", tool_id="test.stateless", kind="executor", record_out=external_out)
+
+    manifest = {
+        "outputs": [
+            {"path": "image_001.png", "type": "image/png", "seed": 7},
+        ],
+        "metadata": {"model": "test-model"},
+    }
+    manifest_path = external_out / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+    record = finalize_project_run(
+        context,
+        status=RunStatus.COMPLETED,
+        returncode=0,
+    )
+
+    artifacts = record.get("artifacts", {})
+    assert record["manifest_path"] == str(manifest_path.resolve())
+    assert artifacts["outputs"] == [
+        {"path": "image_001.png", "type": "image/png", "seed": 7, "source": "manifest"},
+    ]
+    assert context.run_root != external_out
+
+
+def test_finalize_preserves_hype_artifact_precedence_over_manifest_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from astrid.core.project.run import finalize_project_run, prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    context = prepare_project_run("demo", tool_id="test.stateless", kind="executor")
+    run_out = Path(context.record["out"])
+    (run_out / "manifest.json").write_text(
+        json.dumps({"outputs": [{"path": "image_001.png", "type": "image/png"}]}),
+        encoding="utf-8",
+    )
+    (run_out / "hype.timeline.json").write_text(json.dumps({"clips": []}), encoding="utf-8")
+    (run_out / "hype.assets.json").write_text(json.dumps({"assets": {}}), encoding="utf-8")
+    (run_out / "hype.metadata.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    record = finalize_project_run(context, status=RunStatus.COMPLETED, returncode=0)
+
+    assert record["manifest_path"] == str((run_out / "manifest.json").resolve())
+    assert sorted(record["artifacts"]) == ["assets", "metadata", "timeline"]
+    assert "outputs" not in record["artifacts"]
+
+
+def test_explicit_project_plus_out_rejected_at_runner_level(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Characterize: --project --out rejection is strict at runner level.
+
+    This is already tested by test_project_run_rejects_project_plus_out above.
+    This characterization test additionally verifies that the rejection happens
+    BEFORE any project run directory is created — i.e., it leaves no ledger
+    artifacts behind.
+
+    The settled decision SD1 requires this rejection stay strict for explicit
+    CLI/direct callers while auto-resolved projects bypass it via metadata.
+    """
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+
+    registry = ExecutorRegistry([_writer_executor("test.writer")])
+
+    with pytest.raises(Exception, match="--project cannot be combined with --out"):
+        run_executor(
+            ExecutorRunRequest("test.writer", out=str(tmp_path / "out"), project="demo"),
+            registry,
+        )
+
+    # Verify no run directory was created
+    runs_glob = list((tmp_path / "projects" / "demo" / "runs").glob("*"))
+    assert runs_glob == [], (
+        f"Rejection must leave no ledger artifacts; found {len(runs_glob)}"
+    )
+
+
+def test_auto_resolved_project_not_rejected_with_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Auto-resolved project + out= is ledgered without tripping CLI-only rejection."""
+    from astrid.core.executor.registry import ExecutorRegistry
+    from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+
+    projects_root, _ = _setup_project_env_conformance(
+        tmp_path, monkeypatch, "default"
+    )
+    out_dir = tmp_path / "auto-out"
+    out_dir.mkdir()
+
+    registry = ExecutorRegistry([_writer_executor("test.writer")])
+    result = run_executor(
+        ExecutorRunRequest("test.writer", out=str(out_dir)), registry
+    )
+
+    assert result.returncode == 0
+    records = [_read_json(path) for path in sorted((projects_root / "default" / "runs").glob("*/run.json"))]
+    assert len(records) == 1
+    assert records[0]["project_slug"] == "default"
+    assert records[0]["out"] == str(out_dir)
+    assert records[0]["metadata"]["project_was_auto_resolved"] is True
+
+
+def _setup_project_env_conformance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    project_slug: str = "demo",
+    *,
+    with_timeline: bool = True,
+) -> tuple[Path, Path]:
+    """Set up a temp project and return (projects_root, project_path).
+
+    Same as _setup_project_env in test_run_ledger_conformance.py but defined
+    locally to avoid cross-test-module imports.
+    """
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    create_project(project_slug)
+    if with_timeline:
+        create_timeline(project_slug, "main", is_default=True)
+    return projects_root, projects_root / project_slug

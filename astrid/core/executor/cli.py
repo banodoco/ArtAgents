@@ -595,6 +595,8 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     _reject_run_passthrough(getattr(args, "_raw_argv", ()) or ())
     _require_qualified_id(args.executor_id, "executor id")
     executor = registry.get(args.executor_id)
+    auto_resolved_project = _gateway_resolved_project(args.project)
+    project_was_auto_resolved = auto_resolved_project is not None and args.project is None
     project_uuid = _project_uuid_or_none(args.project)
     if project_uuid is not None:
         # UUID mode: --project is a reigh-app UUID, runs need an --out for
@@ -605,8 +607,8 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
             raise ValueError("--out is required when --project is a reigh-app UUID")
         local_project: str | None = None
     else:
-        local_project = args.project
-        if local_project and args.out:
+        local_project = args.project or auto_resolved_project
+        if local_project and args.out and not project_was_auto_resolved:
             raise ValueError("--project cannot be combined with --out; project runs own their output directory")
     if not args.out and local_project is None and project_uuid is None and _executor_needs_out(executor):
         raise ValueError("--out is required for this executor")
@@ -621,6 +623,7 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         python_exec=args.python_exec,
         verbose=bool(args.verbose),
         argv=tuple(getattr(args, "_raw_argv", ()) or ()),
+        project_was_auto_resolved=project_was_auto_resolved,
     )
     result = run_executor(request, registry)
     if result.missing_binaries:
@@ -647,6 +650,15 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
             out_dir=Path(args.out),
         )
     return rc
+
+
+def _gateway_resolved_project(explicit_project: str | None) -> str | None:
+    if explicit_project is not None:
+        return None
+    from astrid.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
+
+    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
+    return value or None
 
 
 _UUID_RE = __import__("re").compile(

@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+try:  # pragma: no cover - non-POSIX fallback is exercised only off Unix.
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
 
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
@@ -480,16 +487,32 @@ def record_contributing_run(
         raise TimelineCrudError(
             f"timeline {timeline_ulid!r} has no manifest.json in project {project_slug!r}"
         )
-    manifest = Manifest.from_json(mp)
-    if run_id in manifest.contributing_runs:
-        return
-    updated = Manifest(
-        schema_version=TIMELINE_SCHEMA_VERSION,
-        contributing_runs=[*manifest.contributing_runs, run_id],
-        final_outputs=list(manifest.final_outputs),
-        tombstoned_at=manifest.tombstoned_at,
-    )
-    updated.write(mp)
+    with _manifest_lock(mp):
+        manifest = Manifest.from_dict(json.loads(mp.read_text(encoding="utf-8")))
+        if run_id in manifest.contributing_runs:
+            return
+        updated = Manifest(
+            schema_version=TIMELINE_SCHEMA_VERSION,
+            contributing_runs=[*manifest.contributing_runs, run_id],
+            final_outputs=list(manifest.final_outputs),
+            tombstoned_at=manifest.tombstoned_at,
+        )
+        updated.write(mp)
+
+
+@contextmanager
+def _manifest_lock(manifest_path: Path):
+    """Serialize manifest read-modify-write updates with a sidecar flock."""
+    lock_path = manifest_path.with_suffix(f"{manifest_path.suffix}.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------

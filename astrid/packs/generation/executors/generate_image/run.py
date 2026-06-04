@@ -10,7 +10,7 @@ Features are validated per-mode (SD-003).
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, warn_if_unledgered
 
 guard_canonical_entrypoint('generation.generate_image')
 import argparse
@@ -31,6 +31,7 @@ from astrid.core.generation.backends import (
     load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry
+from astrid.core.util.atomic_io import write_json_atomic
 from astrid.core.util.png_metadata import embed_png_text
 
 logger = logging.getLogger(__name__)
@@ -692,51 +693,79 @@ def generate_core(
             params["loras"] = loras_parsed
 
         # --- dispatch to adapter (SD-004) ------------------------------------
-        result: GenerationResult = adapter.generate(
-            entry=entry,
-            mode=mode_name,
-            params=params,
-            out_dir=images_dir,
-        )
-        generated_paths.extend(result.image_paths)
-
-        # Convert GenerationResult to manifest output dicts
-        for img_path in result.image_paths:
-            content_hash = (
-                "sha256:"
-                + hashlib.sha256(img_path.read_bytes()).hexdigest()
+        try:
+            result: GenerationResult = adapter.generate(
+                entry=entry,
+                mode=mode_name,
+                params=params,
+                out_dir=images_dir,
             )
-            rel = str(img_path.relative_to(out))
-            output_entry: dict[str, Any] = {
-                "path": rel,
-                "content_hash": content_hash,
-                "bytes": img_path.stat().st_size,
-            }
-            all_outputs.append(output_entry)
+            generated_paths.extend(result.image_paths)
 
-            # Embed Astrid metadata as astrid_* tEXt chunks (PR-017).
-            _embed_fields: dict[str, str] = {
-                "prompt": prompt_text or getattr(args, "prompt", ""),
-                "negative_prompt": getattr(args, "negative_prompt", None) or "",
-                "model": entry.id,
-                "model_actual": result.model_actual,
-                "seed": str(seed),
-                "request_id": result.request_id or "",
-                "created": datetime.now(timezone.utc).isoformat(),
-            }
-            if params.get("loras"):
-                _embed_fields["loras"] = str(params["loras"])
-            embed_png_text(img_path, _embed_fields)
+            # Convert GenerationResult to manifest output dicts
+            for img_path in result.image_paths:
+                content_hash = (
+                    "sha256:"
+                    + hashlib.sha256(img_path.read_bytes()).hexdigest()
+                )
+                rel = str(img_path.relative_to(out))
+                output_entry: dict[str, Any] = {
+                    "path": rel,
+                    "content_hash": content_hash,
+                    "bytes": img_path.stat().st_size,
+                }
+                all_outputs.append(output_entry)
 
-        final_seed = result.seed_used
-        model_actual = result.model_actual
-        cost_usd = result.cost_usd
-        duration_ms = result.duration_ms
-        request_id = result.request_id
-        source_urls = result.source_urls
-        result_error = result.error
-        if result.applied_features:
-            all_applied_features = list(result.applied_features)
+                # Embed Astrid metadata as astrid_* tEXt chunks (PR-017).
+                _embed_fields: dict[str, str] = {
+                    "prompt": prompt_text or getattr(args, "prompt", ""),
+                    "negative_prompt": getattr(args, "negative_prompt", None) or "",
+                    "model": entry.id,
+                    "model_actual": result.model_actual,
+                    "seed": str(seed),
+                    "request_id": result.request_id or "",
+                    "created": datetime.now(timezone.utc).isoformat(),
+                }
+                if params.get("loras"):
+                    _embed_fields["loras"] = str(params["loras"])
+                embed_png_text(img_path, _embed_fields)
+
+            final_seed = result.seed_used
+            model_actual = result.model_actual
+            cost_usd = result.cost_usd
+            duration_ms = result.duration_ms
+            request_id = result.request_id
+            source_urls = result.source_urls
+            result_error = result.error
+            if result.applied_features:
+                all_applied_features = list(result.applied_features)
+        except BaseException:
+            if all_outputs:
+                try:
+                    manifest = _build_manifest(
+                        args,
+                        entry,
+                        mode_name,
+                        model_actual,
+                        all_outputs,
+                        final_seed,
+                        warnings,
+                        dropped_features,
+                        image_ref_resolved,
+                        prompt_text,
+                        cost_usd,
+                        duration_ms,
+                        request_id,
+                        source_urls,
+                        all_applied_features,
+                    )
+                    manifest_path = out / "manifest.json"
+                    if loras_parsed:
+                        manifest["loras"] = loras_parsed
+                    write_json_atomic(manifest_path, manifest)
+                except Exception:
+                    pass
+            raise
 
     # --- emit manifest -------------------------------------------------------
     manifest = _build_manifest(
@@ -759,7 +788,7 @@ def generate_core(
     manifest_path = out / "manifest.json"
     if loras_parsed:
         manifest["loras"] = loras_parsed
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(manifest_path, manifest)
 
     generation_result = GenerationResult(
         image_paths=generated_paths,
@@ -826,6 +855,7 @@ def run_sdk(argv: list[str] | None = None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    warn_if_unledgered()
     result = generate_core(argv)
     manifest_path = _manifest_path_for_run_dir(result.run_dir)
     print(f"manifest={manifest_path}")

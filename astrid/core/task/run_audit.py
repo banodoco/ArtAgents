@@ -51,13 +51,15 @@ def cmd_run_show(
 
     events_path = run_root / "events.jsonl"
     plan_path = proj_root / "plan.json"
+    run_json_path = run_root / "run.json"
 
     events = read_events(events_path) if events_path.exists() else []
+    run_json = _read_run_json(run_json_path)
     cached_plan = load_plan(plan_path) if plan_path.exists() else None
     plan = apply_mutations(cached_plan, events) if cached_plan is not None else initial_plan_from_events(events)
 
     # Run status
-    run_status = _run_status(events)
+    run_status = _run_status(events) if events_path.exists() else _run_status_from_record(run_json)
 
     # Plan info
     plan_hash_val = initial_plan_hash_from_events(events) or "unknown"
@@ -79,13 +81,7 @@ def cmd_run_show(
 
     # Consumes
     consumes: list[dict[str, Any]] = []
-    run_json_path = run_root / "run.json"
-    if run_json_path.exists():
-        try:
-            run_json = json.loads(run_json_path.read_text(encoding="utf-8"))
-            consumes = run_json.get("consumes", [])
-        except (json.JSONDecodeError, OSError):
-            pass
+    consumes = run_json.get("consumes", [])
 
     # Timestamps
     started_ts = ""
@@ -390,6 +386,9 @@ def cmd_run_cost(
 
     events_path = run_root / "events.jsonl"
     events = read_events(events_path) if events_path.exists() else []
+    run_status = _run_status(events)
+    if not events_path.exists():
+        run_status = _run_status_from_record(_read_run_json(run_root / "run.json"))
 
     by_source = _cost_by_source(events)
     total = sum(c.get("amount", 0) for c in by_source.values() if isinstance(c, dict))
@@ -400,7 +399,7 @@ def cmd_run_cost(
                 {
                     "run_id": args.run_id,
                     "project": slug,
-                    "status": _run_status(events),
+                    "status": run_status,
                     "grand_total": total,
                     "by_source": by_source,
                 },
@@ -624,6 +623,28 @@ def _run_status(events: list[dict[str, Any]]) -> str:
     if status is RunStatus.RUNNING:
         return "in-flight"
     return status.value
+
+
+def _run_status_from_record(record: dict[str, Any]) -> str:
+    raw_status = record.get("status")
+    if isinstance(raw_status, str):
+        try:
+            status = RunStatus.from_run_record_status(raw_status)
+        except ValueError:
+            return "in-flight"
+        return "in-flight" if status is RunStatus.RUNNING else status.value
+    return "in-flight"
+
+
+def _read_run_json(run_json_path: Path) -> dict[str, Any]:
+    if run_json_path.exists():
+        try:
+            loaded = json.loads(run_json_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
 
 
 def _build_step_rows(

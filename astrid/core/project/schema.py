@@ -190,6 +190,12 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
         argv = payload["argv"]
         if not isinstance(argv, list) or not all(isinstance(item, str) for item in argv):
             raise ProjectValidationError("run.argv must be a list of strings")
+    if "manifest_path" in payload:
+        manifest_path = payload["manifest_path"]
+        if manifest_path is None:
+            payload.pop("manifest_path")
+        else:
+            payload["manifest_path"] = _require_string(manifest_path, "run.manifest_path")
     if "timeline_id" in payload:
         tid = payload["timeline_id"]
         if tid is None:

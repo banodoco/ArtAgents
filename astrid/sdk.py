@@ -526,6 +526,14 @@ class GenerationFacade:
     are resolved through ``__getattr__`` so that ``astrid.generate.<name>``
     works for third-party generation verbs without the facade importing
     plugin registration modules.
+
+    .. note::
+
+       **M1 static coverage gap — plugin-loaded generation verbs.**
+       Only the built-in ``image`` and ``video`` methods are covered by the
+       M1 ledger contract.  Plugin verbs registered via ``register_verb``
+       and dispatched through ``__getattr__`` are intentionally out of scope
+       for M1.  See ``docs/run-ledger-contract.md`` limits table.
     """
 
     def __getattr__(self, name: str) -> Any:
@@ -533,6 +541,13 @@ class GenerationFacade:
 
         Called only when normal attribute lookup fails, so built-in
         ``image`` and ``video`` always take priority.
+
+        .. note::
+
+           Plugin-loaded generation verbs are an **M1 static coverage gap**.
+           They are not subject to the M1 ledger contract and are
+           intentionally excluded from conformance testing (see
+           ``tests/test_run_ledger_conformance.py`` module docstring).
         """
         # Lazy-import the verb registry — do NOT import astrid.sdk from
         # the verbs module.
@@ -613,9 +628,17 @@ class GenerationFacade:
         )
 
         # --- output routing -------------------------------------------------
+        # The generate facade intentionally bypasses invoke()'s both-None
+        # guard (see invoke() L1665) by always ensuring at least one of
+        # ``out`` or ``project`` is set, or by auto-resolving a default
+        # project when neither is supplied.
         if out is not None:
+            # External out= path → thread into executor request so the
+            # output lands at the caller-chosen location.  When project is
+            # also explicitly supplied we pass both through — the runner
+            # will enforce the strict project+out rejection (SD1).
             invoke_out = out
-            invoke_project = None
+            invoke_project = project  # may be None → runner auto-resolves
         elif project is not None:
             invoke_out = None
             invoke_project = project
@@ -705,9 +728,17 @@ class GenerationFacade:
         )
 
         # --- output routing -------------------------------------------------
+        # The generate facade intentionally bypasses invoke()'s both-None
+        # guard (see invoke() L1665) by always ensuring at least one of
+        # ``out`` or ``project`` is set, or by auto-resolving a default
+        # project when neither is supplied.
         if out is not None:
+            # External out= path → thread into executor request so the
+            # output lands at the caller-chosen location.  When project is
+            # also explicitly supplied we pass both through — the runner
+            # will enforce the strict project+out rejection (SD1).
             invoke_out = out
-            invoke_project = None
+            invoke_project = project  # may be None → runner auto-resolves
         elif project is not None:
             invoke_out = None
             invoke_project = project
@@ -1662,6 +1693,11 @@ def invoke(
 
     try:
         if capability.capability_type == "executor":
+            # Both-None guard: executor invocations need at least one of
+            # ``out`` (external output path) or ``project`` (ledgered run).
+            # The generate facade (generate.image / generate.video)
+            # intentionally bypasses this guard by always resolving a
+            # project or threading an external out= path.
             if out is None and project is None:
                 raise CapabilityInvocationError("executor invocations require an out path")
             from astrid.core.executor.runner import ExecutorRunRequest

@@ -17,7 +17,7 @@ v2v and video-edit are not wired this sprint.
 from __future__ import annotations
 
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, warn_if_unledgered
 guard_canonical_entrypoint('generation.generate_video')
 import argparse
 
@@ -42,6 +42,7 @@ from astrid.core.generation.backends import (
     load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry
+from astrid.core.util.atomic_io import write_json_atomic
 
 logger = logging.getLogger(__name__)
 
@@ -906,44 +907,71 @@ def generate_core(
         params["count"] = 1  # N=1 per loop iteration
 
         # --- dispatch to adapter (SD-004) ------------------------------------
-        result: GenerationResult = adapter.generate(
-            entry=entry,
-            mode=mode_name,
-            params=params,
-            out_dir=videos_dir,
-        )
-        generated_paths.extend(result.video_paths)
-
-        # Convert GenerationResult to manifest output dicts
-        for vid_path in result.video_paths:
-            content_hash = (
-                "sha256:"
-                + hashlib.sha256(vid_path.read_bytes()).hexdigest()
+        try:
+            result: GenerationResult = adapter.generate(
+                entry=entry,
+                mode=mode_name,
+                params=params,
+                out_dir=videos_dir,
             )
-            rel = str(vid_path.relative_to(out))
+            generated_paths.extend(result.video_paths)
 
-            # ffprobe best-effort metadata
-            probe = _ffprobe_metadata(vid_path)
+            # Convert GenerationResult to manifest output dicts
+            for vid_path in result.video_paths:
+                content_hash = (
+                    "sha256:"
+                    + hashlib.sha256(vid_path.read_bytes()).hexdigest()
+                )
+                rel = str(vid_path.relative_to(out))
 
-            output_entry: dict[str, Any] = {
-                "path": rel,
-                "content_hash": content_hash,
-                "bytes": vid_path.stat().st_size,
-                "duration_seconds": probe.get("duration_seconds"),
-                "fps": probe.get("fps"),
-                "resolution": probe.get("resolution"),
-            }
-            all_outputs.append(output_entry)
+                # ffprobe best-effort metadata
+                probe = _ffprobe_metadata(vid_path)
 
-        final_seed = result.seed_used
-        model_actual = result.model_actual
-        cost_usd = result.cost_usd
-        duration_ms = result.duration_ms
-        request_id = result.request_id
-        source_urls = result.source_urls
-        result_error = result.error
-        if result.applied_features:
-            all_applied_features = list(result.applied_features)
+                output_entry: dict[str, Any] = {
+                    "path": rel,
+                    "content_hash": content_hash,
+                    "bytes": vid_path.stat().st_size,
+                    "duration_seconds": probe.get("duration_seconds"),
+                    "fps": probe.get("fps"),
+                    "resolution": probe.get("resolution"),
+                }
+                all_outputs.append(output_entry)
+
+            final_seed = result.seed_used
+            model_actual = result.model_actual
+            cost_usd = result.cost_usd
+            duration_ms = result.duration_ms
+            request_id = result.request_id
+            source_urls = result.source_urls
+            result_error = result.error
+            if result.applied_features:
+                all_applied_features = list(result.applied_features)
+        except BaseException:
+            if all_outputs:
+                try:
+                    manifest = _build_manifest(
+                        args,
+                        entry,
+                        mode_name,
+                        model_actual,
+                        all_outputs,
+                        final_seed,
+                        warnings,
+                        dropped_features,
+                        image_ref_resolved,
+                        image_end_ref_resolved,
+                        prompt_text,
+                        cost_usd,
+                        duration_ms,
+                        request_id,
+                        source_urls,
+                        all_applied_features,
+                    )
+                    manifest_path = out / "manifest.json"
+                    write_json_atomic(manifest_path, manifest)
+                except Exception:
+                    pass
+            raise
 
     # --- emit manifest -------------------------------------------------------
     manifest = _build_manifest(
@@ -965,7 +993,7 @@ def generate_core(
         all_applied_features,
     )
     manifest_path = out / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    write_json_atomic(manifest_path, manifest)
 
     return GenerationResult(
         image_paths=generated_paths,
@@ -1023,6 +1051,7 @@ def run_sdk(argv: list[str] | None = None) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    warn_if_unledgered()
     result = generate_core(argv)
     manifest_path = _manifest_path_for_run_dir(result.run_dir)
     print(f"manifest={manifest_path}")

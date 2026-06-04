@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from astrid.core.util.atomic_io import write_json_atomic
+
 from .ids import is_ulid, require_ulid
 from .schema import SCHEMA_VERSION, utc_now
 
@@ -177,8 +179,7 @@ def write_sidecar(out_path: Path, artifacts: Iterable[Mapping[str, Any]]) -> Non
     if not items:
         return
     payload = {"schema_version": SCHEMA_VERSION, "artifacts": items}
-    out_path.mkdir(parents=True, exist_ok=True)
-    (out_path / VARIANT_SIDECAR_NAME).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_json_atomic(out_path / VARIANT_SIDECAR_NAME, payload)
 
 
 def parse_selector(selector: str) -> tuple[str, list[int], bool]:
