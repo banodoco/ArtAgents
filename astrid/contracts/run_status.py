@@ -34,7 +34,39 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Any, Mapping, Sequence
 
-__all__ = ["RunStatus"]
+__all__ = [
+    "RunStatus",
+    "STEP_IN_FLIGHT_KINDS",
+    "STEP_LIFECYCLE_KINDS",
+    "STEP_TERMINAL_KINDS",
+    "TASK_FINALIZABLE_EVENT_KINDS",
+]
+
+
+STEP_TERMINAL_KINDS = frozenset(
+    (
+        "step_completed",
+        "step_failed",
+        "step_skipped",
+        "step_attested",
+    )
+)
+"""Step-level events that resolve a leaf for cursor/progress/completion."""
+
+STEP_IN_FLIGHT_KINDS = frozenset(("step_dispatched", "step_awaiting_fetch"))
+"""Step lifecycle events that keep a leaf active."""
+
+STEP_LIFECYCLE_KINDS = STEP_TERMINAL_KINDS | STEP_IN_FLIGHT_KINDS
+"""Step lifecycle events that can update a leaf's latest lifecycle state."""
+
+TASK_FINALIZABLE_EVENT_KINDS = STEP_TERMINAL_KINDS | frozenset(
+    (
+        "step_awaiting_fetch",
+        "item_completed",
+        "item_attested",
+    )
+)
+"""Event kinds accepted by the task gate finalization wrapper."""
 
 
 class RunStatus(StrEnum):

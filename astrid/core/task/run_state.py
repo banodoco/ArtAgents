@@ -12,17 +12,21 @@ from __future__ import annotations
 
 from typing import Any
 
+from astrid.contracts.run_status import STEP_LIFECYCLE_KINDS, STEP_TERMINAL_KINDS
 from astrid.core.task.plan import STEP_PATH_SEP, iter_steps_with_path
 
 __all__ = ["_run_is_complete"]
+
+_RUN_STATE_LIFECYCLE_KINDS = STEP_LIFECYCLE_KINDS
+_RUN_STATE_TERMINAL_KINDS = STEP_TERMINAL_KINDS
 
 
 def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
     """Return True only when all leaf steps are terminal-non-aborted.
 
-    Terminal-non-aborted means the step has a ``step_completed`` or
-    ``step_failed`` event and is NOT in ``awaiting_fetch`` or ``dispatched``
-    without terminal follow-up.
+    Terminal-non-aborted means the step has one of the canonical step terminal
+    events and is NOT in ``awaiting_fetch`` or ``dispatched`` without terminal
+    follow-up.
     """
     leaves: list[tuple[str, int]] = []
     if hasattr(plan, "steps") and plan.steps is not None:
@@ -45,21 +49,13 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
     # the 12-DeepSeek regression probe: every run hit 6/6 attested but
     # ``_run_is_complete`` returned False because the per-leaf latest_kind was
     # ``produces_check_passed``, not ``step_attested``.
-    _LIFECYCLE_KINDS = {
-        "step_dispatched",
-        "step_completed",
-        "step_failed",
-        "step_skipped",
-        "step_attested",
-        "step_awaiting_fetch",
-    }
     latest_by_path: dict[tuple[str, int], str] = {}
     latest_dispatch_version_by_path: dict[str, int] = {}
     for event in events:
         kind = event.get("kind")
         if not isinstance(kind, str):
             continue
-        if kind not in _LIFECYCLE_KINDS:
+        if kind not in _RUN_STATE_LIFECYCLE_KINDS:
             continue
         raw_version = event.get("step_version")
         path_list = event.get("plan_step_path")
@@ -102,7 +98,7 @@ def _run_is_complete(plan: Any, events: list[dict[str, Any]]) -> bool:
         # ``step_attested`` is the terminal event for attested steps (the gate
         # at gate.py:275 already treats it as advance-eligible alongside the
         # other terminal kinds), so completion must accept it too.
-        if latest_kind not in {"step_completed", "step_failed", "step_skipped", "step_attested"}:
+        if latest_kind not in _RUN_STATE_TERMINAL_KINDS:
             return False
 
     return True

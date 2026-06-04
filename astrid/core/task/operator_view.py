@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from astrid.contracts.run_status import RunStatus
+from astrid.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
 from astrid.core.project.current_run import (
     read_current_run_state,
 )
@@ -61,6 +61,8 @@ from astrid.core.task.session_discovery import (
     _print_next_unbound_hint,
 )
 
+_PROGRESS_TERMINAL_KINDS = STEP_TERMINAL_KINDS
+
 
 def _print_err(msg: str) -> None:
     print(msg, file=sys.stderr)
@@ -75,18 +77,17 @@ def _leaf_progress(plan, events: Sequence[dict]) -> tuple[int, int]:
 
     Total counts every leaf path in the plan tree (repeat expansion ignored —
     a for_each host contributes 1, not N). Completed counts distinct leaf
-    paths with a terminal event: step_completed, step_attested, or step_skipped.
+    paths with a terminal event.
     """
     total_paths: set[tuple[str, ...]] = set()
     for path_tuple, step in iter_steps_with_path(plan):
         if is_leaf_step(step):
             total_paths.add(path_tuple)
-    terminal_kinds = {"step_completed", "step_attested", "step_skipped"}
     done_paths: set[tuple[str, ...]] = set()
     for ev in events:
         if not isinstance(ev, dict):
             continue
-        if ev.get("kind") not in terminal_kinds:
+        if ev.get("kind") not in _PROGRESS_TERMINAL_KINDS:
             continue
         raw_path = ev.get("plan_step_path")
         if isinstance(raw_path, list) and raw_path:
