@@ -6,6 +6,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
+from astrid.contracts.run_status import STEP_TERMINAL_KINDS
 from astrid.core.task.gate_base import TaskRunGateError
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
@@ -16,6 +17,8 @@ from astrid.core.task.plan import (
     is_group_step,
     is_legacy_repeat_until_condition,
 )
+
+_CURSOR_ADVANCE_KINDS = STEP_TERMINAL_KINDS
 
 
 @dataclass
@@ -61,10 +64,10 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
     """Replay ``events.jsonl`` left-to-right to reconstruct the path-stack cursor.
 
     Reconstructible from events alone (supports partial-replay resume):
-    ``nested_entered`` pushes, ``nested_exited`` pops + advances parent,
-    ``step_completed`` / ``step_attested`` mark a step advance-eligible iff it
-    has no produces; otherwise advance is deferred until the contiguous block
-    contains a ``produces_check_passed`` for every declared produces name.
+    ``nested_entered`` pushes, ``nested_exited`` pops + advances parent.
+    Canonical step terminal events advance the step cursor: successful terminal
+    events with produces wait for matching ``produces_check_passed`` coverage,
+    while failed/skipped terminal events resolve the step immediately.
     ``produces_check_failed`` / ``cursor_rewind`` clear pending state without
     advancing. ``iteration_started`` pushes an iteration frame; ``iteration_failed``
     pops it without advancing the host. ``for_each_expanded`` records the host's
@@ -213,7 +216,7 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
                             else:
                                 frames[-1].child_index += 1
                                 pending[-1] = None
-        elif kind in ("step_completed", "step_attested", "step_skipped"):
+        elif kind in _CURSOR_ADVANCE_KINDS:
             # #20 fix — repeat.until cursor stall: when the topmost frame is
             # an iteration frame whose body is already exhausted (typically
             # because the body's step_attested + produces_check_passed
@@ -275,10 +278,8 @@ def derive_cursor(plan: TaskPlan, events: Sequence[dict[str, Any]], *, slug: str
             ):
                 continue
             produces = getattr(step, "produces", ())
-            # Skipped steps bypass produces-check gating entirely — the
-            # cursor advances on the skip event without waiting for any
-            # produces_check_passed coverage.
-            if kind == "step_skipped" or not produces:
+            # Failed/skipped terminal events bypass produces-check gating entirely.
+            if kind in ("step_failed", "step_skipped") or not produces:
                 top.child_index += 1
                 pending[-1] = None
             else:

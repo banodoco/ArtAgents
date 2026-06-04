@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
+from astrid.contracts.run_status import TASK_FINALIZABLE_EVENT_KINDS
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir
 from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision
@@ -50,6 +51,7 @@ from astrid.core.task.events import (
     make_step_completed_event,
     make_step_dispatched_event,
     make_step_failed_event,
+    make_step_skipped_event,
     read_events,
 )
 from astrid.core.task.plan import (
@@ -124,6 +126,8 @@ from astrid.core.task.gate_checks import (
     _run_inline_checks,
 )
 
+_GATE_FINALIZABLE_EVENT_KINDS = TASK_FINALIZABLE_EVENT_KINDS
+
 
 @dataclass(frozen=True)
 class _ActiveWriterAppend:
@@ -135,15 +139,12 @@ _FinalizeAppendMode = Literal["decision"] | _ActiveWriterAppend
 
 @dataclass(frozen=True)
 class _TerminalEventRequest:
-    kind: Literal[
-        "step_completed",
-        "step_failed",
-        "step_awaiting_fetch",
-        "item_completed",
-        "step_attested",
-        "item_attested",
-    ]
+    kind: str
     payload: dict[str, Any]
+
+    def __post_init__(self) -> None:
+        if self.kind not in _GATE_FINALIZABLE_EVENT_KINDS:
+            raise ValueError(f"unknown terminal event kind: {self.kind!r}")
 
 
 @dataclass(frozen=True)
@@ -1176,6 +1177,8 @@ def _finalize_step(
             event = make_step_completed_event(**payload)
         elif terminal_event.kind == "step_failed":
             event = make_step_failed_event(**payload)
+        elif terminal_event.kind == "step_skipped":
+            event = make_step_skipped_event(**payload)
         elif terminal_event.kind == "step_awaiting_fetch":
             event = make_step_awaiting_fetch_event(**payload)
         elif terminal_event.kind == "item_completed":
