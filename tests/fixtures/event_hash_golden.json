@@ -1,0 +1,14 @@
+{
+  "_comment": "FROZEN golden fixtures for event-hash byte-stability (formalization-quickwins item 3). Generated 2026-06-05 from pre-consolidation code at primitive level: timeline = prev_hash embedded in payload then sha256_hex(exclude_hash=True); task = _event_hash(prev_hash, event). The consolidation MUST reproduce both byte-identically. DO NOT REGENERATE \u2014 a frozen artifact, not a derived one.",
+  "input_payload": {
+    "data": {
+      "alpha": 1,
+      "beta": "two"
+    },
+    "kind": "test_event",
+    "ts": "2026-06-05T00:00:00+00:00"
+  },
+  "input_prev_hash": "sha256:abababababababababababababababababababababababababababababababab",
+  "task_prepended_digest": "sha256:cab696ad44ca8f941d463c6a55e8c0c4df6639662f51709c0743526e88587105",
+  "timeline_embedded_digest": "f5f0aaba511419bc9aebf3bfacad2d38cbd4f1cf119469e789c80b2021c72680"
+}

@@ -19,7 +19,7 @@ Audit synthesis: /tmp/astrid-contracts/SYNTHESIS.md (if absent, the items below 
 Item 2 (env_vars.py) lands FIRST in the commit series — items 1's conformance test and 6's deletion reference the canonical constants. Note: cli.py:_write_session_pointer (item 6) is confirmed DEAD CODE (zero callers) — deletion is safe.
 
 ## Locked decisions
-- Item 3: no algorithm change, no on-disk migration, golden verify-stability test mandatory.
+- Item 3: no algorithm change, no on-disk migration, golden verify-stability test mandatory — AND the golden fixture is PRE-COMMITTED at tests/fixtures/event_hash_golden.json (frozen 2026-06-05 from pre-consolidation code; second-opinion review: the safety net must not be authored by the same planner it guards). The conformance test MUST assert against this exact file; regenerating it is forbidden and should fail review.
 - Item 2: backward-compat read of the misspelled ASTRID_AUTHOR_TEST value for one release.
 - Item 1: conformance validates syntax/parsability of recovery commands, not end-to-end execution.
 - All changes additive to public APIs; no exception-type changes visible to callers.
