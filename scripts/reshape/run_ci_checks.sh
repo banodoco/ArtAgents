@@ -16,6 +16,12 @@ export ASTRID_PROJECTS_ROOT
 "$PYTHON_BIN" -c 'from astrid.core.session.identity import Identity, write_identity; write_identity(Identity(agent_id="ci", created_at="2026-01-01T00:00:00Z"))'
 trap 'rm -rf "$ASTRID_HOME" "$ASTRID_PROJECTS_ROOT"' EXIT
 
+# Generate the remotion TS types before tests: remotion/src/types.generated.ts
+# is deliberately gitignored (generated artifact), but the schema-contract
+# tests require it to exist on clean CI checkouts.
+"$PYTHON_BIN" scripts/gen_remotion_types.py
+
+
 # Argument parsing: recognise --json and --changed.
 JSON_MODE=false
 CHANGED_MODE=false
