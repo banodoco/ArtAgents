@@ -4,6 +4,11 @@ Walks upward from a source root collecting ``.gitignore`` files,
 parses patterns, and produces a ``shutil.copytree``-compatible
 *ignore* callback that skips gitignored paths plus hard-coded
 common exclusions.
+
+A ``.astridignore`` file at the source root (same syntax as
+``.gitignore``) is also honored, with the highest precedence. It lets a
+pack exclude tracked-but-irrelevant content (backend code, large assets,
+test suites) from the installed copy without untracking it from git.
 """
 
 from __future__ import annotations
@@ -126,6 +131,12 @@ class GitIgnoreFilter:
             if parent == current:  # Reached filesystem root
                 break
             current = parent
+
+        # .astridignore at the source root only — install-time exclusions for
+        # tracked content. Appended last so it takes the highest precedence.
+        astridignore = self.source_root / ".astridignore"
+        if astridignore.is_file():
+            collected = collected + self._parse_gitignore(astridignore)
 
         self._patterns = collected
 
