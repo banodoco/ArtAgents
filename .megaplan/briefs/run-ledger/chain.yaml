@@ -1,0 +1,41 @@
+base_branch: main
+merge_policy: auto
+
+# Epic: Run Ledger — every Astrid execution produces exactly one truthful,
+# project-bound ledger entry.
+#
+# Input material: audit-dossier.md (17-agent adversarially-verified persistence
+# audit, 2026-06-04) + audit-wave1-digest.md, both in this directory.
+#
+# Sizing (megaplan-prep, 2026-06-04; operator bumped m2 directed→partnered,
+# vendor codex on both):
+# - m1 partnered/full/medium @codex — cross-cutting invocation-surface rewiring
+#   (choke point reshapes how gateway/SDK/runner compose = topological-coupling
+#   trigger → premium planner; critique/review premium because the sprint's
+#   whole point is finding perimeter holes). Depth medium not high: the audit
+#   dossier makes the brief spec-shaped (root causes + fix directions locked),
+#   so the planner deliberates on design, not discovery. Prep skipped for the
+#   same reason — the dossier IS the prep.
+# - m2 partnered/full @codex — operator call: premium critique/review on the
+#   livability grab-bag too (tee pump + session fail-closed semantics sit in
+#   load-bearing core paths).
+# Handoff artifact m1→m2: docs/run-ledger-contract.md + the conformance test.
+
+milestones:
+  - label: m1-contract-and-perimeter
+    idea: .megaplan/briefs/run-ledger/m1-contract-and-perimeter.md
+    branch: epic/run-ledger-m1-contract-and-perimeter
+    profile: partnered
+    vendor: codex
+    robustness: full
+    depth: medium
+    notes: "partnered/full/medium @codex. Contract doc + conformance test + execution choke point + Tier-2 integrity fixes. Audit dossier attached; do not re-research, re-verify cited lines before editing."
+
+  - label: m2-rich-ledger-livability
+    idea: .megaplan/briefs/run-ledger/m2-rich-ledger-livability.md
+    branch: epic/run-ledger-m2-rich-ledger-livability
+    depends_on: [m1-contract-and-perimeter]
+    profile: partnered
+    vendor: codex
+    robustness: full
+    notes: "partnered/full @codex. Provenance + cost + log capture + session/export/retention livability. M1 conformance test must stay green throughout."
