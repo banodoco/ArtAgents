@@ -8,9 +8,9 @@ M1 (same directory) landed write_manifest(), the full-registry gate, and the cor
 
 ## Scope (the review-measured long tail, ~15+ executors)
 editorial: triage, arrange, quality_zones, boundary_candidates, validate, refine, editor_review, human_review, human_notes, inspect_cut, script_pipeline (verify each actually writes artifacts; no-artifact verbs become reasoned exemptions instead).
-iteration: assemble (6 declared outputs), prepare.
+iteration: prepare (assemble moved to M1 — contract-shaping).
 rendering: render, sprite_sheet, html_canvas_effect.
-comfy_wrap.run (writes output.png), vibecomfy.run, video_editing.cut, media.clip_extract, moirae, fal.fal_foley, reigh.spatial_audio_page, reigh.reigh_data, youtube.youtube_audio.
+comfy_wrap.run (writes output.png), vibecomfy.run (or reasoned exemption — external escape hatch), video_editing.cut, media.clip_extract, moirae, fal.fal_foley, reigh.reigh_data, youtube.youtube_audio. (spatial_audio_page moved to M1 — directory-output rule.)
 
 ## Locked decisions
 M1's manifest schema and write_manifest() API are FROZEN inputs — any change they need is a defect report against M1, not a drive-by edit. Exemptions that survive must each state why (no artifact / GPU / paid). Tests offline per family (fake backends), under tmp_path.

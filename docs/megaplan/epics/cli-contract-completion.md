@@ -17,12 +17,13 @@ Every agent-facing verb obeys one CLI contract: machine output on stdout (`--jso
 - Additive flags only; default human output stays human (just stream-corrected). No verb renames.
 - `attach --json` semantics: JSON mode NEVER prompts (fail closed with a structured error naming the missing input); the `export ASTRID_SESSION_ID=...` line becomes a data field (`{"session_id": ..., "export_line": ...}`), not prose; timeline/default notices go to stderr.
 - claim.py envelope + recovery-command correctness are owned by the kernel + formalization-quickwins respectively — this epic only EXTENDS their conformance gates to the wider surface list, never re-implements them.
+- PREAMBLE (judged 2026-06-05): stays on stdout in default mode — it is agent-directed context re-injection (prohibitions for frozen runs), part of the contract, NOT noise. Add `--quiet` to suppress it; `--json` is the sole machine-contract path. Do NOT move it to stderr (breaks agents reading stdout as the instruction surface).
 - Exit-code taxonomy stays as documented in docs/error-model.md (1=bug, 2=recoverable) — this epic enforces it, doesn't redesign it.
 - The unbound-allowlist tuple and lifecycle-verb sets in gateway.py are contracts — extend via their documented mechanism only.
 
 ## Open questions (planner resolves)
 - Whether session cmd_status merges into operator_view status or stays separate with the same schema.
-- Preamble fate in default (non-json) mode: stderr vs a --quiet flag (pick one, document).
+
 
 ## Constraints
 Existing tests green incl. test_agent_cli_kernel.py and recoverability conformance; no behavior change to verb semantics; agents currently regex-parsing prose must not break before the next release — keep prose templates' content stable in default mode.
