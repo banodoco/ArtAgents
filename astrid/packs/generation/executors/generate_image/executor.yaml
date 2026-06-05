@@ -161,6 +161,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "output_result_manifest": true,
     "requires_timeline": false,
     "api_provider": "multi",
     "env": [

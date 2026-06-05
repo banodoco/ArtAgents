@@ -88,9 +88,12 @@ class TestPartialOutputManifestOnOpenAILoopFailure:
             mock_write.assert_called_once()
             (path_arg, manifest_data) = mock_write.call_args[0]
             assert path_arg == manifest_path
-            assert isinstance(manifest_data, list)
-            assert len(manifest_data) == 1, "manifest must contain exactly one partial job"
-            job0 = manifest_data[0]
+            assert isinstance(manifest_data, dict), f"expected dict, got {type(manifest_data)}"
+            assert manifest_data.get("schema_version") == 2
+            assert manifest_data.get("kind") == "generation.generate_image_openai"
+            assert "jobs" in manifest_data
+            assert len(manifest_data["jobs"]) == 1, "manifest must contain exactly one partial job"
+            job0 = manifest_data["jobs"][0]
             assert job0["prompt"] == "first prompt"
             assert len(job0["outputs"]) == 1
             assert job0["outputs"][0].startswith(str(out_dir))
@@ -253,13 +256,17 @@ class TestPartialOutputManifestOnOpenAILoopFailure:
         assert len(captured_full) == 1
         full_manifest = captured_full[0]
 
-        # --- compare shapes: both are lists with same job entry structure
-        assert isinstance(partial_manifest, list)
-        assert isinstance(full_manifest, list)
-        assert len(partial_manifest) == len(full_manifest) == 1
+        # --- compare shapes: both are v2 universal manifest dicts with same job entry structure
+        assert isinstance(partial_manifest, dict)
+        assert isinstance(full_manifest, dict)
+        assert partial_manifest.get("schema_version") == 2
+        assert full_manifest.get("schema_version") == 2
+        assert partial_manifest.get("kind") == "generation.generate_image_openai"
+        assert full_manifest.get("kind") == "generation.generate_image_openai"
+        assert len(partial_manifest["jobs"]) == len(full_manifest["jobs"]) == 1
 
-        partial_job = partial_manifest[0]
-        full_job = full_manifest[0]
+        partial_job = partial_manifest["jobs"][0]
+        full_job = full_manifest["jobs"][0]
         assert set(partial_job.keys()) == set(full_job.keys()), (
             f"partial keys {set(partial_job.keys())} != "
             f"full keys {set(full_job.keys())}"

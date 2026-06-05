@@ -36,6 +36,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "output_result_manifest": true,
     "requires_timeline": false,
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",

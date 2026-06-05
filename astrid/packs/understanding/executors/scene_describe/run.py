@@ -14,8 +14,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import GeminiClient, build_gemini_client
+from datetime import datetime, timezone
 
 SCENE_DESCRIPTIONS_VERSION = 1
 FORBIDDEN_TIME_KEYS = frozenset({"start", "end", "timestamp", "seconds", "time", "src_start", "src_end", "from", "to", "at"})
@@ -279,6 +281,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata={"model": args.model, "top_n": args.top_n},
         )
         print(out_path)
+
+        # --- universal result manifest (output-contract M1) -----------------------
+        manifest_outputs: list[dict[str, Any]] = [
+            {"path": str(out_path), "type": "file"},
+        ]
+        manifest_path = out_dir / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "understanding.scene_describe",
+            "inputs": {
+                "scenes": str(args.scenes.resolve()),
+                "triage": str(args.triage.resolve()),
+                "video": str(args.video.resolve()),
+                "model": args.model,
+                "top_n": args.top_n,
+            },
+            "outputs": manifest_outputs,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # -------------------------------------------------------------------------
+
         return 0
 
     return run_pack_main("understanding.scene_describe", _run, argv=list(argv) if argv is not None else None)

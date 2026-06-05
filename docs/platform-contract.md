@@ -119,7 +119,7 @@ These names, signatures, and top-level DTO fields are SemVer-guarded:
   `capabilities`, `packs`, `generation_backends`, `element_kinds`,
   `generation_features`, `generation_modes`
 - `InvocationResult` top-level fields: `capability_id`, `capability_type`,
-  `native_kind`, `ok`, `error`, `raw_result`
+  `native_kind`, `ok`, `error`, `manifest_path`, `raw_result`
 - `EventStreamRecord` top-level fields: `source`, `line`, `timestamp`, `kind`,
   `hash`, `payload`
 - The exported exception names and their place in the public exception family

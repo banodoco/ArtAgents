@@ -12,11 +12,13 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid._media import ffprobe_duration_seconds
 from astrid.audit import AuditContext
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 
@@ -292,6 +294,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     audit = AuditContext.from_env()
     paths, summary, metadata_path = transcribe_to_outputs(audio_path, out_dir, cache_dir, client, args.model, args.language, args.max_chunk_sec, not args.no_vad_gate, args.diarize, audit)
     print(" ".join([f"chunks={summary['chunks']}", f"skipped_silent={summary['skipped_silent']}", f"segments_kept={summary['segments_kept']}", f"segments_filtered={summary['segments_filtered']}", f"transcript_json={paths['json']}", f"metadata={metadata_path}"]))
+
+    # --- universal result manifest (output-contract M1) -----------------------
+    manifest_outputs: list[dict[str, Any]] = [
+        {"path": str(paths["json"]), "type": "file"},
+        {"path": str(paths["srt"]), "type": "file"},
+        {"path": str(paths["txt"]), "type": "file"},
+        {"path": str(metadata_path), "type": "file"},
+    ]
+    manifest_path = out_dir / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "transcript",
+        "inputs": {
+            "audio": str(audio_path),
+            "model": args.model,
+            "language": args.language,
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 if __name__ == "__main__":
     raise SystemExit(main())

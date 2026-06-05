@@ -35,6 +35,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "output_result_manifest": true,
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.reigh.executors.spatial_audio_page.run"

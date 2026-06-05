@@ -793,10 +793,113 @@ def test_invoke_executor_builds_request_and_normalizes_result(monkeypatch: pytes
         "sdk_error": "CapabilityInvocationError",
         "sdk_category": "invocation",
     }
+    assert result.manifest_path is None
     assert result.raw_result["cwd"] == "/tmp/executor"
     assert result.raw_result["payload"] == {"artifact": str(tmp_path / "artifact.json")}
     assert result.raw_result["env"] == {"ASTRID_SAMPLE": "1"}
+    assert result.to_dict()["manifest_path"] is None
     json.dumps(result.to_dict())
+
+
+def test_invoke_executor_prefers_universal_manifest_path_from_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    universal_manifest = tmp_path / "nested" / "manifest.json"
+
+    def fake_run_executor(request: Any, registry: Any) -> _FakeExecutorResult:
+        return _FakeExecutorResult(
+            executor_id=request.executor_id,
+            kind="built_in",
+            command=("python", "-m", "astrid", "executors", "run", request.executor_id),
+            cwd=Path("/tmp/executor"),
+            env=MappingProxyType({}),
+            payload=MappingProxyType({"manifest_path": str(universal_manifest)}),
+        )
+
+    monkeypatch.setattr(sdk, "run_executor", fake_run_executor)
+
+    result = astrid.invoke(
+        "editorial.arrange",
+        kind="executor",
+        include_installed=False,
+        out=tmp_path,
+        project="demo-project",
+    )
+
+    assert result.manifest_path == str(universal_manifest.resolve())
+    assert result.raw_result["payload"] == {"manifest_path": str(universal_manifest.resolve())}
+    assert result.to_dict()["manifest_path"] == str(universal_manifest.resolve())
+
+
+def test_invoke_executor_discovers_universal_manifest_from_out_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    def fake_run_executor(request: Any, registry: Any) -> _FakeExecutorResult:
+        return _FakeExecutorResult(
+            executor_id=request.executor_id,
+            kind="built_in",
+            command=("python", "-m", "astrid", "executors", "run", request.executor_id),
+            cwd=Path("/tmp/executor"),
+            env=MappingProxyType({}),
+            payload=MappingProxyType({"artifact": "artifact.json"}),
+        )
+
+    monkeypatch.setattr(sdk, "run_executor", fake_run_executor)
+
+    result = astrid.invoke(
+        "editorial.arrange",
+        kind="executor",
+        include_installed=False,
+        out=tmp_path,
+        project="demo-project",
+    )
+
+    assert result.manifest_path == str(manifest_path.resolve())
+    assert result.raw_result["payload"] == {"artifact": "artifact.json"}
+    assert result.to_dict()["manifest_path"] == str(manifest_path.resolve())
+
+
+def test_invoke_executor_ignores_domain_manifest_payload_paths(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    astrid = _import_public_module()
+    sdk = importlib.import_module("astrid.sdk")
+    universal_manifest = tmp_path / "manifest.json"
+    universal_manifest.write_text("{}", encoding="utf-8")
+    domain_manifest = tmp_path / "iteration.manifest.json"
+
+    def fake_run_executor(request: Any, registry: Any) -> _FakeExecutorResult:
+        return _FakeExecutorResult(
+            executor_id=request.executor_id,
+            kind="built_in",
+            command=("python", "-m", "astrid", "executors", "run", request.executor_id),
+            cwd=Path("/tmp/executor"),
+            env=MappingProxyType({}),
+            payload=MappingProxyType({"manifest_path": str(domain_manifest)}),
+        )
+
+    monkeypatch.setattr(sdk, "run_executor", fake_run_executor)
+
+    result = astrid.invoke(
+        "iteration.assemble",
+        kind="executor",
+        include_installed=False,
+        out=tmp_path,
+        project="demo-project",
+    )
+
+    assert result.manifest_path == str(universal_manifest.resolve())
+    assert result.raw_result["payload"] == {"manifest_path": str(domain_manifest.resolve())}
 
 
 def test_invoke_orchestrator_builds_request_and_normalizes_result(

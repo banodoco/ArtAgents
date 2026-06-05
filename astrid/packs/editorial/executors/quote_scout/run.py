@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
+from datetime import datetime, timezone
 
 QUOTE_CANDIDATES_VERSION = 1
 RESPONSE_SCHEMA = {
@@ -142,6 +144,26 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata={"model": args.model, "candidates": len(payload.get("candidates", []))},
         )
         print(out_path)
+
+        # --- universal result manifest (output-contract M1) -----------------------
+        manifest_outputs: list[dict[str, Any]] = [
+            {"path": str(out_path), "type": "file"},
+        ]
+        manifest_path = out_dir / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "quotes",
+            "inputs": {
+                "transcript": str(args.transcript.resolve()),
+                "model": args.model,
+            },
+            "outputs": manifest_outputs,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # -------------------------------------------------------------------------
+
         return 0
 
     return run_pack_main("editorial.quote_scout", _run, argv=list(argv) if argv is not None else None)

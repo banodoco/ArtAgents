@@ -102,6 +102,73 @@ def _write_prepare_outputs(tmp_path: Path, *, data_quality: float) -> Path:
     return prepare_dir
 
 
+def test_assemble_writes_universal_result_manifest(tmp_path: Path) -> None:
+    """iteration.assemble writes a universal {out}/manifest.json beside the domain iteration.manifest.json."""
+    prepare_dir = _write_prepare_outputs(tmp_path, data_quality=0.95)
+    out_dir = tmp_path / "assembled"
+
+    result = assemble.assemble_iteration(
+        prepare_dir=prepare_dir,
+        out_path=out_dir,
+        repo_root=tmp_path,
+        force=True,
+        direction="test-direction",
+        mode="chaptered",
+        theme="test-theme",
+        style_preset="test-preset",
+        audio_bed="silence-room-tone",
+    )
+
+    # Universal manifest exists
+    universal_path = out_dir / "manifest.json"
+    assert universal_path.is_file(), "universal manifest.json must exist"
+    universal = _read_json(universal_path)
+
+    # Core required fields
+    assert universal["schema_version"] == 1
+    assert universal["kind"] == "render"
+    assert isinstance(universal["created"], str)
+    assert isinstance(universal["warnings"], list)
+
+    # Inputs echo prepare/out/options
+    inputs = universal["inputs"]
+    assert inputs["prepare_dir"] == str(prepare_dir)
+    assert inputs["out"] == str(out_dir)
+    assert inputs["force"] is True
+    assert inputs["direction"] == "test-direction"
+    assert inputs["mode"] == "chaptered"
+    assert inputs["theme"] == "test-theme"
+    assert inputs["style_preset"] == "test-preset"
+    assert inputs["audio_bed"] == "silence-room-tone"
+
+    # All six declared artifacts listed as outputs
+    outputs = universal["outputs"]
+    assert len(outputs) == 6
+    output_paths = {item["path"] for item in outputs}
+    assert str(out_dir / "iteration.timeline.json") in output_paths
+    assert str(out_dir / "hype.timeline.json") in output_paths
+    assert str(out_dir / "iteration.manifest.json") in output_paths
+    assert str(out_dir / "iteration.quality.json") in output_paths
+    assert str(out_dir / "iteration.report.html") in output_paths
+    assert str(out_dir / "hype.assets.json") in output_paths
+
+    # Each output has type "file" and enriched metadata
+    for item in outputs:
+        assert item["type"] == "file"
+        assert "content_hash" in item
+        assert "bytes" in item
+        assert item["bytes"] > 0
+
+    # Domain manifest (iteration.manifest.json) is still present and unchanged
+    domain_manifest = _read_json(out_dir / "iteration.manifest.json")
+    assert "assembly" in domain_manifest
+    assert domain_manifest["assembly"]["direction_label"] == "test-direction"
+
+    # Return dict includes universal_manifest_path
+    assert "universal_manifest_path" in result
+    assert Path(result["universal_manifest_path"]) == universal_path
+
+
 def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 

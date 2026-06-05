@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
@@ -408,9 +409,11 @@ def _build_manifest(
     source_urls: list[str] | None,
     applied_features: list[str],
 ) -> dict[str, Any]:
-    """Build the canonical manifest dict (20-manifest-schema.md v2) with video fields."""
+    """Build the canonical manifest dict (20-manifest-schema.md v2) with video
+    fields and universal ``kind``/``inputs`` (output-contract M1)."""
+    requested_prompt = prompt_text or getattr(args, "prompt", None)
     request: dict[str, Any] = {
-        "prompt": prompt_text or getattr(args, "prompt", None),
+        "prompt": requested_prompt,
         "negative_prompt": getattr(args, "negative_prompt", None),
         "seed": seed,
         "count": max(1, args.count or 1),
@@ -421,8 +424,27 @@ def _build_manifest(
         "duration": getattr(args, "duration", None),
         "resolution": getattr(args, "resolution", None),
     }
+    inputs: dict[str, Any] = {
+        "model": entry.id,
+        "mode": mode_name,
+        "execution": args.execution,
+        "prompt": requested_prompt,
+        "seed": seed,
+        "count": max(1, args.count or 1),
+    }
+    for key in ("negative_prompt", "resolution", "frames", "fps", "duration",
+                "image_ref", "image_end_ref", "guidance_scale", "steps", "shift"):
+        val = getattr(args, key, None)
+        if val is not None:
+            inputs[key] = val
+    if image_ref_resolved is not None:
+        inputs["image_ref_resolved"] = image_ref_resolved
+    if image_end_ref_resolved is not None:
+        inputs["image_end_ref_resolved"] = image_end_ref_resolved
     manifest: dict[str, Any] = {
         "schema_version": 2,
+        "kind": "generation.generate_video",
+        "inputs": inputs,
         "modality": entry.modality,
         "model": entry.id,
         "mode_used": mode_name,
@@ -968,6 +990,10 @@ def generate_core(
                         all_applied_features,
                     )
                     manifest_path = out / "manifest.json"
+                    # Route output metadata through the shared contract (M1).
+                    manifest["outputs"] = complete_output_metadata(
+                        manifest["outputs"], root_dir=out,
+                    )
                     write_json_atomic(manifest_path, manifest)
                 except Exception:
                     pass
@@ -993,6 +1019,10 @@ def generate_core(
         all_applied_features,
     )
     manifest_path = out / "manifest.json"
+    # Route output metadata through the shared contract (M1).
+    manifest["outputs"] = complete_output_metadata(
+        manifest["outputs"], root_dir=out,
+    )
     write_json_atomic(manifest_path, manifest)
 
     return GenerationResult(

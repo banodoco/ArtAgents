@@ -10,8 +10,11 @@ guard_canonical_entrypoint('reigh.spatial_audio_page')
 import argparse
 import json
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from astrid.contracts.result_manifest import write_manifest
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -247,6 +250,25 @@ def main(argv: list[str] | None = None) -> int:
     (out_dir / "index.html").write_text(page, encoding="utf-8")
     print(f"wrote_page={out_dir / 'index.html'}")
     print(f"tiles={len(page_tiles)}")
+
+    # --- universal result manifest (output-contract M1) -----------------------
+    manifest_outputs: list[dict[str, Any]] = [
+        {"path": str(out_dir), "type": "directory", "tree": True},
+    ]
+    result_manifest_path = out_dir / "manifest.json"
+    result_manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "reigh.spatial_audio_page",
+        "inputs": {
+            "manifest": str(manifest_path),
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(result_manifest_path, result_manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

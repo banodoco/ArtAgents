@@ -1,0 +1,198 @@
+{
+  "schema_version": 1,
+  "description": "Committed output-result exemption list. Every executor in the default registry either writes a universal result manifest (M1-adopter, non-exempt) or appears here with a specific M2-burn-down reason. The registry conformance gate uses this list to allow non-conforming executors while making the gap visible.",
+  "last_registry_snapshot": "2026-06-05T13:37:00Z",
+  "total_executors": 57,
+  "m1_adopters": 14,
+  "exempted": 43,
+  "non_exempt": [
+    "editorial.quote_scout",
+    "editorial.scenes",
+    "editorial.shots",
+    "editorial.transcribe",
+    "generation.generate_image",
+    "generation.generate_image_openai",
+    "generation.generate_video",
+    "iteration.assemble",
+    "reigh.spatial_audio_page",
+    "training.pool_build",
+    "understanding.audio_understand",
+    "understanding.scene_describe",
+    "understanding.video_understand",
+    "understanding.visual_understand"
+  ],
+  "exemptions": {
+    "editorial.arrange": {
+      "reasons": ["unstable-artifact"],
+      "note": "Intermediate pipeline step that composes arrangement data consumed by downstream executors. Output shape is pipeline-internal and not yet a stable end-user artifact."
+    },
+    "editorial.boundary_candidates": {
+      "reasons": ["unstable-artifact"],
+      "note": "Packages candidate frames for visual boundary review. Intermediate packaging step consumed by human_review."
+    },
+    "editorial.editor_review": {
+      "reasons": ["unstable-artifact"],
+      "note": "Editorial review/approval gate executor. Produces review metadata rather than a stable output artifact."
+    },
+    "editorial.human_notes": {
+      "reasons": ["unstable-artifact"],
+      "note": "Converts human editorial notes into structured pipeline inputs. Human-input-dependent with no stable machine-produced artifact."
+    },
+    "editorial.human_review": {
+      "reasons": ["unstable-artifact"],
+      "note": "Interactive HTTP review server for human-gate approval. Interactive tool with no stable output artifact outside the HTTP session."
+    },
+    "editorial.inspect_cut": {
+      "reasons": ["unstable-artifact"],
+      "note": "Inspection tool for generated cut run directories. Read-only inspection with no produced artifact."
+    },
+    "editorial.quality_zones": {
+      "reasons": ["unstable-artifact"],
+      "note": "Quality zone analysis for source video. Intermediate analysis consumed by downstream editorial steps."
+    },
+    "editorial.refine": {
+      "reasons": ["unstable-artifact"],
+      "note": "Pipeline refinement step operating on intermediate editorial artifacts. Output is pipeline-internal."
+    },
+    "editorial.script_pipeline": {
+      "reasons": ["paid"],
+      "note": "Preset-driven creative-writing pipeline that uses LLM APIs (network=True). Requires paid API access and produces intermediate text artifacts."
+    },
+    "editorial.triage": {
+      "reasons": ["unstable-artifact"],
+      "note": "Scene triage step that classifies/ranks scenes. Intermediate pipeline artifact consumed by arrangement."
+    },
+    "editorial.validate": {
+      "reasons": ["unstable-artifact"],
+      "note": "Validates rendered video against timeline and metadata. Validation-only executor with no produced output artifact."
+    },
+    "fal.fal_foley": {
+      "reasons": ["paid", "GPU", "external-escape-hatch"],
+      "note": "fal.ai hunyuan-video-foley model. Requires FAL_KEY API token, runs on external GPU infrastructure, and outputs are controlled by the external fal.ai service."
+    },
+    "foley.foley_review": {
+      "reasons": ["unstable-artifact"],
+      "note": "Builds a static review HTML page pairing tile clips with Foley audio. Review artifact is ephemeral and human-consumption-oriented."
+    },
+    "foley.tile_video": {
+      "reasons": ["heavy"],
+      "note": "Crops video into MxN grid of overlapping spatial tiles using ffmpeg. Heavy video-processing computation with intermediate tile artifacts."
+    },
+    "hivemind.contribute": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind). Executor definition and outputs are controlled by the external pack, not the core repository."
+    },
+    "hivemind.get_item": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind). Executor definition and outputs are controlled by the external pack, not the core repository."
+    },
+    "hivemind.ingest_article": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind). Executor definition and outputs are controlled by the external pack, not the core repository."
+    },
+    "hivemind.ingest_workflow": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind). Executor definition and outputs are controlled by the external pack, not the core repository."
+    },
+    "hivemind.ingest_youtube": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind). Executor definition and outputs are controlled by the external pack, not the core repository."
+    },
+    "hivemind.search": {
+      "reasons": ["external-escape-hatch"],
+      "note": "External installed pack (hivemind). Executor definition and outputs are controlled by the external pack, not the core repository."
+    },
+    "iteration.prepare": {
+      "reasons": ["unstable-artifact"],
+      "note": "Collects thread provenance and computes quality summaries. Intermediate preparation step whose output is consumed by iteration.assemble."
+    },
+    "media.clip_extract": {
+      "reasons": ["heavy"],
+      "note": "Extracts video clip segments using ffmpeg -ss/-t with stream copy. Heavy video-processing computation producing intermediate clip files."
+    },
+    "moirae.moirae": {
+      "reasons": ["paid", "GPU", "external-escape-hatch"],
+      "note": "External Moirae screenplay-to-video tool. Requires paid API access, runs on GPU infrastructure, and outputs are controlled by the external Moirae service."
+    },
+    "reigh.open_in_reigh": {
+      "reasons": ["external-escape-hatch"],
+      "note": "Copies/prepares generated timeline/assets for Reigh handoff. External tool integration with no stable standalone artifact."
+    },
+    "reigh.publish": {
+      "reasons": ["paid", "external-escape-hatch"],
+      "note": "Publishes timeline/assets to Reigh project. Requires REIGH_USER_TOKEN and SUPABASE_URL; external service integration."
+    },
+    "reigh.reigh_data": {
+      "reasons": ["paid", "external-escape-hatch"],
+      "note": "Fetches canonical Reigh project data through reigh-data Edge Function. Requires REIGH_PAT token; external service integration."
+    },
+    "rendering.html_canvas_effect": {
+      "reasons": ["unstable-artifact"],
+      "note": "Creates user-editable Remotion HtmlInCanvas effect element. Effect component with no stable standalone output artifact."
+    },
+    "rendering.render": {
+      "reasons": ["heavy", "GPU"],
+      "note": "Renders brief timeline to video through Remotion. Heavy, GPU-accelerated rendering with Remotion as the rendering engine."
+    },
+    "rendering.sprite_sheet": {
+      "reasons": ["unstable-artifact"],
+      "note": "Generates, slices, and previews GPT Image sprite sheets. Image processing with network-dependent GPT Image generation; output artifacts are intermediate."
+    },
+    "runpod.exec": {
+      "reasons": ["paid", "GPU", "external-escape-hatch"],
+      "note": "Executes scripts on provisioned RunPod GPU pods. Requires paid RunPod account, runs on external GPU infrastructure."
+    },
+    "runpod.provision": {
+      "reasons": ["paid", "GPU", "external-escape-hatch"],
+      "note": "Provisions RunPod GPU pods. Requires paid RunPod account; infrastructure provisioning with no user-facing artifact."
+    },
+    "runpod.pull": {
+      "reasons": ["paid", "external-escape-hatch"],
+      "note": "Pulls remote artifacts from RunPod pods via SSH. Requires paid RunPod account; external infrastructure dependent."
+    },
+    "runpod.session": {
+      "reasons": ["paid", "GPU", "external-escape-hatch"],
+      "note": "Composite provision-exec-download-teardown RunPod session. Requires paid RunPod account, runs on external GPU infrastructure."
+    },
+    "runpod.teardown": {
+      "reasons": ["paid", "external-escape-hatch"],
+      "note": "Terminates RunPod pods. Requires paid RunPod account; infrastructure teardown with no user-facing artifact."
+    },
+    "training.asset_cache": {
+      "reasons": ["unstable-artifact"],
+      "note": "Manages repo-local hype asset cache. Cache management with no stable output artifact."
+    },
+    "training.pool_merge": {
+      "reasons": ["unstable-artifact"],
+      "note": "Merges training pools. Intermediate merge operation whose output is consumed by downstream training steps."
+    },
+    "training.search_loras": {
+      "reasons": ["paid"],
+      "note": "Searches Hugging Face Hub for LoRA adapters. Requires HF_TOKEN/HUGGING_FACE_HUB_TOKEN; paid HuggingFace API access."
+    },
+    "understanding.understand": {
+      "reasons": ["paid"],
+      "note": "Dispatch router that delegates to audio/visual/video understanding executors. These underlying executors require paid API access (OpenAI, etc.). The router itself produces no artifact."
+    },
+    "vibecomfy.run": {
+      "reasons": ["GPU", "external-escape-hatch"],
+      "note": "Runs VibeComfy workflows through the external VibeComfy CLI. Requires GPU, outputs are controlled by the external VibeComfy tool with no stable declared output."
+    },
+    "vibecomfy.validate": {
+      "reasons": ["external-escape-hatch"],
+      "note": "Validates VibeComfy workflows through the external VibeComfy CLI. External tool wrapper with no stable output artifact."
+    },
+    "video_editing.cut": {
+      "reasons": ["heavy"],
+      "note": "Creates Reigh-compatible timeline, assets, and metadata JSON. Heavy video-editing pipeline producing multiple intermediate artifacts."
+    },
+    "youtube.upload": {
+      "reasons": ["paid", "external-escape-hatch"],
+      "note": "Uploads finished video to YouTube via Zapier integration. Requires paid Zapier/YouTube API access; external service integration."
+    },
+    "youtube.youtube_audio": {
+      "reasons": ["paid"],
+      "note": "Wraps yt-dlp to fetch YouTube audio/video. Requires network access and may hit YouTube rate limits; intermediate media fetch."
+    }
+  }
+}

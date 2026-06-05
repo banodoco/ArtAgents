@@ -17,12 +17,14 @@ import re
 import subprocess
 import time
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.audit import AuditContext
+from astrid.contracts.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.atomic_io import write_json_atomic
 from astrid.core.util.secrets import load_api_key as _resolve_key
@@ -241,12 +243,72 @@ def _open_first_rendered(out_dir: Path) -> None:
     subprocess.run(["open", str(target)], check=False)
 
 
+def _build_openai_manifest(
+    *,
+    args: argparse.Namespace,
+    jobs: list[dict[str, Any]],
+    manifest_path: Path,
+) -> dict[str, Any]:
+    """Build a v2 universal manifest object for generate_image_openai.
+
+    Converts from the legacy bare-list format to a generation v2 universal
+    manifest with ``schema_version``, ``kind``, ``inputs``, ``outputs``,
+    ``created``, ``warnings``, and ``jobs`` fields.  Output paths are
+    resolved relative to the manifest directory and enriched through the
+    shared result-manifest contract.
+    """
+    all_output_paths: list[str] = []
+    for job in jobs:
+        all_output_paths.extend(job.get("outputs") or [])
+
+    out_dir = args.out_dir
+    outputs: list[dict[str, Any]] = []
+    for path_str in all_output_paths:
+        p = Path(path_str)
+        try:
+            rel = str(p.relative_to(out_dir))
+        except ValueError:
+            rel = p.name
+        outputs.append({"path": rel})
+
+    inputs: dict[str, Any] = {
+        "model": args.model,
+        "n": args.n,
+        "size": args.size,
+        "quality": args.quality,
+        "output_format": args.output_format,
+        "dry_run": args.dry_run,
+    }
+    for key in ("output_compression", "background", "moderation"):
+        val = getattr(args, key, None)
+        if val is not None:
+            inputs[key] = val
+
+    manifest: dict[str, Any] = {
+        "schema_version": 2,
+        "kind": "generation.generate_image_openai",
+        "inputs": inputs,
+        "outputs": outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+        "jobs": jobs,
+    }
+
+    # Route output metadata through the shared contract (M1).
+    # Output paths are relative to out_dir (where images are written),
+    # which may differ from manifest_path.parent in tests/non-default configs.
+    manifest["outputs"] = complete_output_metadata(
+        manifest["outputs"], root_dir=out_dir,
+    )
+    return manifest
+
+
 def generate(args: argparse.Namespace) -> int:
     jobs = _jobs_from_args(args)
-    api_key = None if args.dry_run else _resolve_key("OPENAI_API_KEY", args.env_file)
+    api_key = '' if args.dry_run else _resolve_key("OPENAI_API_KEY", args.env_file)
     out_dir = args.out_dir
     default_format = _normalize_format(args.output_format)
-    manifest: list[dict[str, Any]] = []
+    manifest_jobs: list[dict[str, Any]] = []
     variant_artifacts: list[dict[str, Any]] = []
     audit = AuditContext.from_env()
     run_id = os.environ.get("ASTRID_RUN_ID", "").strip()
@@ -319,7 +381,7 @@ def generate(args: argparse.Namespace) -> int:
                     outputs=output_ids,
                     metadata={"model": payload.get("model"), "n": payload.get("n"), "usage": response.get("usage")},
                 )
-            manifest.append(
+            manifest_jobs.append(
                 {
                     "prompt": prompt,
                     "request": {key: value for key, value in payload.items() if key != "prompt"},
@@ -329,22 +391,28 @@ def generate(args: argparse.Namespace) -> int:
                 }
             )
         except BaseException:
-            if manifest and args.manifest and not args.dry_run:
+            if manifest_jobs and args.manifest and not args.dry_run:
                 try:
-                    write_json_atomic(args.manifest, manifest)
+                    universal = _build_openai_manifest(
+                        args=args, jobs=manifest_jobs, manifest_path=args.manifest,
+                    )
+                    write_json_atomic(args.manifest, universal)
                 except Exception:
                     pass
             raise
 
     if args.manifest and not args.dry_run:
-        write_json_atomic(args.manifest, manifest)
+        universal = _build_openai_manifest(
+            args=args, jobs=manifest_jobs, manifest_path=args.manifest,
+        )
+        write_json_atomic(args.manifest, universal)
         if audit is not None:
             audit.register_asset(
                 kind="image_manifest",
                 path=args.manifest,
                 label="Generated image manifest",
                 stage="generate_image",
-                metadata={"jobs": len(manifest)},
+                metadata={"jobs": len(manifest_jobs)},
             )
         print(f"Wrote {args.manifest}")
     if not args.dry_run:

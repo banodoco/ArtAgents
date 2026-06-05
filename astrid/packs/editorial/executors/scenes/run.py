@@ -10,11 +10,13 @@ guard_canonical_entrypoint('editorial.scenes')
 import argparse
 import csv
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid._media import ffprobe_duration_seconds
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -137,6 +139,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     json_path, csv_path, items_path = resolve_output_paths(args.out)
     scenes = detect_scenes(video_path, args.threshold)
     write_outputs(scenes, json_path, csv_path, items_path)
+
+    # --- universal result manifest (output-contract M1) -----------------------
+    manifest_outputs: list[dict[str, Any]] = [
+        {"path": str(json_path), "type": "file"},
+        {"path": str(csv_path), "type": "file"},
+        {"path": str(items_path), "type": "file"},
+    ]
+    manifest_path = json_path.parent / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "scenes",
+        "inputs": {
+            "video": str(video_path),
+            "threshold": args.threshold,
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

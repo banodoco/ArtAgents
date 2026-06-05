@@ -16,7 +16,9 @@ from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
+from datetime import datetime, timezone
 
 AUDIO_EVENT_RE = re.compile(r"\b(applause|laughter|cheer|audience)\b", re.IGNORECASE)
 KIND_LETTER = {"dialogue": "d", "visual": "v", "reaction": "r", "applause": "a", "music": "m"}
@@ -220,6 +222,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata={"entries": len(payload.get("entries", [])), "source_slug": args.source_slug},
         )
         print(out_path)
+
+        # --- universal result manifest (output-contract M1) -----------------------
+        manifest_outputs: list[dict[str, Any]] = [
+            {"path": str(out_path), "type": "file"},
+        ]
+        manifest_path = out_dir / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "pool",
+            "inputs": {
+                "triage": str(args.triage.resolve()),
+                "scene_descriptions": str(args.scene_descriptions.resolve()),
+                "quote_candidates": str(args.quote_candidates.resolve()),
+                "transcript": str(args.transcript.resolve()),
+                "scenes": str(args.scenes.resolve()),
+                "source_slug": args.source_slug,
+            },
+            "outputs": manifest_outputs,
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # -------------------------------------------------------------------------
+
         return 0
 
     return run_pack_main("training.pool_build", _run, argv=list(argv) if argv is not None else None)

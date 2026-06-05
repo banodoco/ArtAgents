@@ -55,6 +55,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "output_result_manifest": true,
     "requires_timeline": false,
     "api_provider": "openai",
     "env": [
@@ -62,12 +63,15 @@
     ],
     "runtime_entrypoint": "main",
     "runtime_file": "run.py",
-    "runtime_module": "astrid.packs.generation.executors.generate_image_openai.run"
+    "runtime_module": "astrid.packs.generation.executors.generate_image_openai.run",
+    "manifest_version": 2,
+    "manifest_schema": "universal",
+    "manifest_note": "Writes a v2 universal manifest object with schema_version, kind, inputs, outputs, created, warnings, and jobs. Output metadata is enriched through the shared result-manifest contract (complete_output_metadata)."
   },
   "name": "Generate Image (OpenAI)",
   "outputs": [
     {
-      "description": "Manifest of generated images and API usage.",
+      "description": "JSON manifest of the generation run (v2 universal manifest object).",
       "mode": "create_or_replace",
       "name": "image_manifest",
       "path_template": "{out}/manifest.json",
@@ -75,5 +79,5 @@
     }
   ],
   "short_description": "Generate image files with OpenAI GPT Image models from a prompt file.",
-  "version": "1.0"
+  "version": "2.0"
 }

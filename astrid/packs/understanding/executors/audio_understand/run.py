@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
+from astrid.contracts.result_manifest import write_manifest
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint('understanding.audio_understand')
@@ -14,6 +15,7 @@ import json
 import shutil
 import subprocess
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -451,10 +453,12 @@ def run(args: argparse.Namespace) -> int:
         "philosophy": "Direct audio understanding is treated as listening evidence: tone, timing, room feel, sound design, and production quality are first-class signals, while transcript text remains a separate factual layer.",
     }
     if args.dry_run:
+        preview["schema_version"] = 1
+        preview["kind"] = "understanding.audio_understand"
         print(json.dumps(preview, indent=2))
         return 0
 
-    api_key = load_api_key(args.env_file)
+    api_key = load_api_key("OPENAI_API_KEY", args.env_file)
     results: list[dict[str, Any]] = []
     for model in models:
         for audio_input in audio_inputs:
@@ -488,12 +492,57 @@ def run(args: argparse.Namespace) -> int:
                 }
             results.append(result)
 
+    # --- universal result manifest (output-contract M1) -----------------------
+    manifest_outputs: list[dict[str, Any]] = []
+    for item in extracted:
+        window_path = Path(item["path"])
+        if window_path.exists():
+            manifest_outputs.append({"path": str(window_path), "type": "file"})
+    if reel_path is not None and Path(reel_path).exists():
+        manifest_outputs.append({"path": str(reel_path), "type": "file"})
+    if args.out:
+        manifest_outputs.append({"path": str(args.out), "type": "file"})
+
+    manifest_path = (args.out.parent / "manifest.json") if args.out else (out_dir / "manifest.json")
     output = {**preview, "results": results}
+    output["schema_version"] = 1
+    output["kind"] = "understanding.audio_understand"
+    output["manifest_path"] = str(manifest_path)
     text = json.dumps(output, indent=2)
-    print(text)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text + "\n", encoding="utf-8")
+
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "understanding.audio_understand",
+        "inputs": {
+            "audio": [str(p) for p in audio_sources],
+            "video": str(video_source) if video_source is not None else None,
+            "query": query,
+            "mode": args.mode,
+            "model": args.model or MODEL_PRESETS[args.mode],
+            "compare_model": args.compare_model,
+            "at": args.at,
+            "start": args.start,
+            "end": args.end,
+            "window_sec": args.window_sec,
+            "chunk_sec": args.chunk_sec,
+            "max_chunks": args.max_chunks,
+            "max_clip_sec": args.max_clip_sec,
+            "audition_reel": args.audition_reel,
+            "reel_gap_sec": args.reel_gap_sec,
+            "sample_rate": args.sample_rate,
+            "out_dir": str(out_dir),
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
+    print(text)
     return 0 if all(result["status"] == "ok" for result in results) else 1
 
 

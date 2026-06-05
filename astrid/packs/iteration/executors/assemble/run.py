@@ -15,8 +15,11 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
+from datetime import datetime, timezone
+
 from astrid import modalities, timeline
 from astrid._paths import REPO_ROOT
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.threads.schema import SCHEMA_VERSION
 
@@ -215,9 +218,40 @@ def assemble_iteration(
     _write_json(manifest_path, assembly["manifest"])
     _write_json(quality_path, assembly["quality"])
     report_path.write_text(assembly["report_html"], encoding="utf-8")
+
+    # --- universal result manifest (output-contract M1) -----------------------
+    universal_manifest_path = out_path / "manifest.json"
+    universal_manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "render",
+        "inputs": {
+            "prepare_dir": str(prepare_dir),
+            "out": str(out_path),
+            "force": force,
+            "direction": direction,
+            "mode": mode,
+            "theme": theme,
+            "style_preset": style_preset,
+            "audio_bed": audio_bed,
+        },
+        "outputs": [
+            {"path": str(timeline_path), "type": "file"},
+            {"path": str(hype_timeline_path), "type": "file"},
+            {"path": str(manifest_path), "type": "file"},
+            {"path": str(quality_path), "type": "file"},
+            {"path": str(report_path), "type": "file"},
+            {"path": str(assets_path), "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": assembly.get("diagnostics", []),
+    }
+    write_manifest(universal_manifest_path, universal_manifest)
+    # -------------------------------------------------------------------------
+
     return {
         "timeline_path": str(timeline_path),
         "manifest_path": str(manifest_path),
+        "universal_manifest_path": str(universal_manifest_path),
         "quality_path": str(quality_path),
         "report_path": str(report_path),
         "hype_timeline_path": str(hype_timeline_path),
