@@ -15,7 +15,7 @@ jobs:
   python:
     name: Python quality gates
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
 
     steps:
       - name: Check out repository
@@ -28,6 +28,11 @@ jobs:
           cache: pip
           cache-dependency-path: |
             pyproject.toml
+
+      - name: Install system media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
 
       - name: Install dependencies
         run: |

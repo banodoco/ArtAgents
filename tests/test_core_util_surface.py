@@ -21,6 +21,7 @@ def _core_function_defs() -> dict[str, list[str]]:
 
 def test_core_util_reexports_are_explicit_and_importable() -> None:
     assert core_util.__all__ == [
+        "embed_png_text",
         "sha256_file",
         "utc_now_iso",
         "utc_now_milliseconds",
