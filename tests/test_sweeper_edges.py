@@ -14,6 +14,7 @@ import json
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from astrid.core.runpod.sweeper import (
@@ -100,11 +101,14 @@ def test_sweep_async_dry_run_records_would_terminate() -> None:
 
         mock_pod = AsyncMock()
         mock_pod.is_idle = AsyncMock(return_value=True)
+        discovery = SimpleNamespace(
+            get_pod=AsyncMock(return_value=mock_pod),
+            terminate=AsyncMock(),
+        )
 
         with (
             patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
-            patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)),
-            patch("runpod_lifecycle.discovery.terminate", AsyncMock()) as mock_terminate,
+            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="default", dry_run=True))
 
@@ -118,7 +122,7 @@ def test_sweep_async_dry_run_records_would_terminate() -> None:
     assert "dry-run" in detail["reason"]
 
     # terminate() must NOT be called in dry-run mode
-    mock_terminate.assert_not_called()
+    discovery.terminate.assert_not_called()
 
 
 def test_sweep_async_dry_run_mode_hard() -> None:
@@ -129,11 +133,11 @@ def test_sweep_async_dry_run_mode_hard() -> None:
         _write_handle_tree(base, "proj", "run-02", "step-01", handle)
         # Live session attached — default mode would skip, hard mode proceeds
         _write_lease(base, "proj", "run-02", attached_session_id="ses-live-123")
+        discovery = SimpleNamespace(get_pod=AsyncMock(), terminate=AsyncMock())
 
         with (
-            patch("runpod_lifecycle.discovery.get_pod", AsyncMock()) as mock_get_pod,
-            patch("runpod_lifecycle.discovery.terminate", AsyncMock()) as mock_terminate,
-            patch("runpod_lifecycle.RunPodConfig", MagicMock()),
+            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="hard", dry_run=True))
 
@@ -145,8 +149,8 @@ def test_sweep_async_dry_run_mode_hard() -> None:
     assert detail["action"] == "would_terminate"
 
     # Hard mode must not call get_pod (idle check bypassed)
-    mock_get_pod.assert_not_called()
-    mock_terminate.assert_not_called()
+    discovery.get_pod.assert_not_called()
+    discovery.terminate.assert_not_called()
 
 
 def test_sweep_async_running_pod_fixture_default_mode_skips() -> None:
@@ -157,11 +161,11 @@ def test_sweep_async_running_pod_fixture_default_mode_skips() -> None:
         _write_handle_tree(base, "proj", "run-03", "step-01", handle)
         # Attach a live writer session — simulates a "running pod"
         _write_lease(base, "proj", "run-03", attached_session_id="ses-running-abc")
+        discovery = SimpleNamespace(get_pod=AsyncMock(), terminate=AsyncMock())
 
         with (
-            patch("runpod_lifecycle.discovery.get_pod", AsyncMock()) as mock_get_pod,
-            patch("runpod_lifecycle.discovery.terminate", AsyncMock()) as mock_terminate,
-            patch("runpod_lifecycle.RunPodConfig", MagicMock()),
+            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="default", dry_run=True))
 
@@ -174,8 +178,8 @@ def test_sweep_async_running_pod_fixture_default_mode_skips() -> None:
     assert "ses-running-abc" in detail["reason"]
 
     # No idle check or terminate when session is live
-    mock_get_pod.assert_not_called()
-    mock_terminate.assert_not_called()
+    discovery.get_pod.assert_not_called()
+    discovery.terminate.assert_not_called()
 
 
 def test_sweep_async_running_pod_fixture_hard_mode_proceeds() -> None:
@@ -185,11 +189,11 @@ def test_sweep_async_running_pod_fixture_hard_mode_proceeds() -> None:
         handle = _make_handle(pod_id="pod-running-02")
         _write_handle_tree(base, "proj", "run-04", "step-01", handle)
         _write_lease(base, "proj", "run-04", attached_session_id="ses-live-xyz")
+        discovery = SimpleNamespace(get_pod=AsyncMock(), terminate=AsyncMock())
 
         with (
-            patch("runpod_lifecycle.discovery.get_pod", AsyncMock()) as mock_get_pod,
-            patch("runpod_lifecycle.discovery.terminate", AsyncMock()) as mock_terminate,
-            patch("runpod_lifecycle.RunPodConfig", MagicMock()),
+            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="hard", dry_run=True))
 
@@ -203,8 +207,8 @@ def test_sweep_async_running_pod_fixture_hard_mode_proceeds() -> None:
     assert detail["pod_id"] == "pod-running-02"
 
     # Idle check bypassed in hard mode
-    mock_get_pod.assert_not_called()
-    mock_terminate.assert_not_called()
+    discovery.get_pod.assert_not_called()
+    discovery.terminate.assert_not_called()
 
 
 def test_sweep_async_missing_terminate_at_skips() -> None:

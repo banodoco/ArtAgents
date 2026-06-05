@@ -89,6 +89,10 @@ examples/packs/*/build/
 remotion/src/*.generated.*
 remotion/src/effects.types.*
 remotion/src/types.augmentations.*
+# …but the .d.ts is a hand-written narrowing contract (NOT generated) that
+# Root.tsx imports — a hygiene sweep once deleted it via the pattern above
+# and broke `tsc --noEmit` on every clean checkout (restored from 2823e9f).
+!remotion/src/types.augmentations.d.ts
 
 # Allow-list intentional assets that would otherwise be caught by broad globs
 !docs/assets/astrid-orchestration.png

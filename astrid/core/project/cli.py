@@ -679,11 +679,7 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
                 from astrid.core.timeline.paths import load_assembly_json_with_repair
                 load_assembly_json_with_repair(tdir)
             except Exception as exc:  # noqa: BLE001
-                import sys
-                print(
-                    f"warning: timeline repair failed for {ts.ulid}: {exc}",
-                    file=sys.stderr,
-                )
+                log_and_swallow(exc, context="project.export.timeline_repair")
 
             # Copy timeline container files
             for name in ("assembly.json", "manifest.json", "display.json"):

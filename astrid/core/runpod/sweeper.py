@@ -175,6 +175,12 @@ def _rebuild_config(handle: dict[str, Any]) -> Any:
     )
 
 
+def _runpod_discovery() -> Any:
+    from runpod_lifecycle import discovery
+
+    return discovery
+
+
 def sweep(
     projects_root: Path,
     mode: Literal["default", "hard"] = "default",
@@ -222,8 +228,6 @@ async def sweep_async(
     *,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    from runpod_lifecycle import Pod, discovery
-
     handles = collect_handles(projects_root)
     now_utc = datetime.now(timezone.utc)
 
@@ -307,7 +311,7 @@ async def sweep_async(
             # 4b. Pod idle check
             try:
                 config = _rebuild_config(handle)
-                pod: Pod = await discovery.get_pod(pod_id, config, name=handle.get("name"))
+                pod = await _runpod_discovery().get_pod(pod_id, config, name=handle.get("name"))
                 idle = await pod.is_idle(threshold_seconds=300)
             except Exception as exc:
                 # If the pod is already gone, that's fine — proceed to terminate.
@@ -344,7 +348,7 @@ async def sweep_async(
             continue
 
         try:
-            await discovery.terminate(pod_id, api_key)
+            await _runpod_discovery().terminate(pod_id, api_key)
         except Exception as exc:
             err_msg = str(exc)
             if "not found" in err_msg.lower():

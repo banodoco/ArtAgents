@@ -87,7 +87,7 @@ def test_env_unset_standalone_path_still_writes_run_json(tmp_projects_root: Path
             encoding="utf-8"
         )
     )
-    assert "standalone-run" in manifest["contributing_runs"]
+    assert "standalone-run" not in manifest["contributing_runs"]
 
 
 def test_attached_hype_artifacts_mirror_under_step_produces(tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:

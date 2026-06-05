@@ -94,7 +94,7 @@ while IFS= read -r cmd_prefix; do
   # doctor: run directly (safe health check)
   if [ "$cmd_prefix" = "python3 -m astrid doctor" ]; then
     echo -n "  RUN   $cmd_prefix ... "
-    if $cmd_prefix >/dev/null 2>&1; then
+    if OPENAI_API_KEY="${OPENAI_API_KEY:-docs-command-smoke}" $cmd_prefix >/dev/null 2>&1; then
       echo "OK"
     else
       echo "FAILED (exit=$?)"

@@ -735,9 +735,12 @@ def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
 
         now = datetime.now(dt_timezone.utc)
         cutoff = now - timedelta(days=args.older_than_days)
-    except Exception:
-        print("prune: unable to compute cutoff", file=sys.stderr)
-        return 2
+    except Exception as exc:
+        raise AstridError(
+            "prune: unable to compute cutoff",
+            recovery_command="astrid sessions prune --older-than-days <days>",
+            state_snapshot={"older_than_days": getattr(args, "older_than_days", None)},
+        ) from exc
 
     all_sessions = _list_session_files()
     if not all_sessions:
@@ -793,20 +796,26 @@ def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
 
     # Apply mode: actually delete.
     deleted = 0
-    errors = 0
+    errors: list[dict[str, str]] = []
     for s, age_days, spath in stale:
         try:
             _session_store().delete(s.id)
             deleted += 1
         except Exception as exc:
-            print(f"  error deleting {s.id}: {exc}", file=sys.stderr)
-            errors += 1
+            errors.append({"session_id": s.id, "path": str(spath), "error": str(exc)})
 
     print(file=out)
     print(f"deleted {deleted} session record(s).", file=out)
     if errors:
-        print(f"{errors} error(s) encountered; see stderr.", file=out)
-        return 2
+        print(f"{len(errors)} error(s) encountered.", file=out)
+        raise AstridError(
+            "prune: failed to delete one or more stale sessions",
+            recovery_command="astrid sessions prune --apply",
+            state_snapshot={
+                "deleted": deleted,
+                "errors": errors,
+            },
+        )
     return 0
 
 
