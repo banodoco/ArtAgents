@@ -54,6 +54,7 @@ from astrid.core.task.plan_verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.task.run_state import _run_is_complete
 from astrid.core.task.run_store import _emit_run_completed_if_needed
+from astrid.core.env_vars import ASTRID_STRICT_INSTRUCTION_SUBST
 from astrid.core.task.session_discovery import (
     _most_recent_session_slug,
     _os_environ_has_session,
@@ -289,7 +290,7 @@ def render_step_instructions(
         "ASTRID_TASK_ITERATION": str(iteration) if iteration is not None else "",
         "ASTRID_TASK_STEP_PATH": step_path_str,
     }
-    strict = _is_author_test_mode() or _os.environ.get("ASTRID_STRICT_INSTRUCTION_SUBST") == "1"
+    strict = _is_author_test_mode() or _os.environ.get(ASTRID_STRICT_INSTRUCTION_SUBST) == "1"
 
     def _sub(match):
         token = match.group(1)

@@ -8,6 +8,7 @@ import math
 from dataclasses import is_dataclass
 from typing import Any
 
+from astrid.contracts.event_hash import hash_embedded
 from .types import TimelineEvent, TimelineEventSchemaError
 
 
@@ -62,8 +63,5 @@ def sha256_hex(value: Any, *, exclude_hash: bool = False) -> str:
 
 
 def with_event_hash(event: TimelineEvent, *, prev_hash: str | None) -> TimelineEvent:
-    payload = event.to_json_obj()
-    payload["prev_hash"] = prev_hash
-    payload["hash"] = None
-    digest = sha256_hex(payload, exclude_hash=True)
+    digest = hash_embedded(prev_hash, event)
     return TimelineEvent.from_dict({**event.to_json_obj(), "prev_hash": prev_hash, "hash": digest})

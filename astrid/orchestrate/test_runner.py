@@ -22,9 +22,9 @@ from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session
 from astrid.core.session.paths import ASTRID_HOME_ENV, session_path
+from astrid.core.env_vars import ASTRID_AUTHOR_TEST
 from astrid.core.task.env import (
     ASTRID_ACTOR,
-    ASTRID_AUTHOR_TEST,
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
     TASK_PROJECT_ENV,

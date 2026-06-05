@@ -562,7 +562,7 @@ class PackValidator:
         stage = docs.get("stage", "STAGE.md") if isinstance(docs, dict) else "STAGE.md"
         stage_path = component_dir / stage
         if not stage_path.is_file():
-            self.warnings.append(f"{self._rel(stage_path)}: STAGE.md not found")
+            self.errors.append(f"{self._rel(stage_path)}: STAGE.md not found")
 
     def _validate_runtime_definition(
         self, data: dict[str, Any], manifest_kind: str, rel: str

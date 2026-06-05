@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Mapping, Sequence
 
-ASTRID_LOG_MAX_BYTES = "ASTRID_LOG_MAX_BYTES"
+from astrid.core.env_vars import ASTRID_LOG_MAX_BYTES
 DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
 
 

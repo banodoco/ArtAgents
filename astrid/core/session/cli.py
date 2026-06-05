@@ -28,7 +28,7 @@ from astrid.core.project.paths import project_dir, resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
 from astrid.core.session.binding import (
     ASTRID_SESSION_ID_ENV,
-    SESSION_FILE_NAME,
+    SESSION_FILE_NAME,  # noqa: F401 — re-export; tests patch cli.SESSION_FILE_NAME
     SessionBindingError,
     attach_session,
     resolve_current_session,
@@ -177,18 +177,6 @@ def _find_reusable_session(slug: str, agent_id: str) -> Session | None:
         return sorted(candidates, key=lambda s: s.last_used_at or "", reverse=True)[0]
     # (4) Lease held by a different actor → defer to takeover flow.
     return None
-
-
-def _write_session_pointer(slug: str, session_id: str) -> None:
-    session_file = project_dir(slug) / SESSION_FILE_NAME
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    session_file.write_text(
-        f"{ASTRID_SESSION_ID_ENV}={session_id}\n", encoding="utf-8"
-    )
-    try:
-        session_file.chmod(0o600)
-    except OSError:
-        pass
 
 
 def _make_bootstrap_session(

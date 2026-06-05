@@ -4,8 +4,8 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ## Summary
 
-- AST sites inventoried: 658 (656 `except`, 2 `assert`).
-- Grep lexical hits after the same source exclusions: 669.
+- AST sites inventoried: 656 (656 `except`, 2 `assert`).
+- Grep lexical hits after the same source exclusions: 667.
 - AST sites not present as direct grep hits: 0. These are parser-normalized multi-line handlers/asserts or sites whose keyword line differs from the AST node line; AST remains authoritative.
 
 ## Seed-File Non-Fixed Reasons
@@ -37,20 +37,20 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/audit/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 41 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/audit/context.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 52 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 56 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/audit/transport.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 58 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 95 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -58,13 +58,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/audit/util.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/contracts/capability_runner.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 116 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 126 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -73,16 +73,22 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/contracts/run_status.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 119 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 136 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 150 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 168 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
+### `astrid/contracts/schema_validators.py`
+
+| Line | Kind | Context | Status | Reason |
+| --- | --- | --- | --- | --- |
+| 22 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+
 ### `astrid/core/adapter/local.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 47 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 61 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -94,13 +100,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/adapter/manual.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 114 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/adapter/remote_artifact.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 33 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -112,13 +118,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/alias_resolver.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 71 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/dirty.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 37 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 91 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -126,13 +132,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/element/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 49 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/element/registry.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 93 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 282 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -140,27 +146,27 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/element/schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 263 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 294 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/banodoco_catalog.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 69 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 73 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 70 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 61 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/folder.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 104 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -168,27 +174,27 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/executor/install.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 170 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/registry.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 367 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/runner.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 187 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 532 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 545 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 188 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 533 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 546 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 284 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 286 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -199,7 +205,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/generation/backends/base.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 34 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 41 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -207,28 +213,28 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/generation/backends/fal.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 143 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 298 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/generation/backends/registry.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 103 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 201 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/generation/verbs.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 49 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 109 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/git_util.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 49 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 51 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -239,7 +245,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/manifest.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 30 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 37 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -247,7 +253,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/model_catalog/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 72 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 91 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -256,26 +262,26 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/model_catalog/registry.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 51 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 184 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/model_catalog/schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 318 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/orchestrator/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 64 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/orchestrator/folder.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 66 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 94 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -283,7 +289,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/orchestrator/registry.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 324 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 338 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -291,7 +297,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/orchestrator/runner.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 178 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 263 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -303,20 +309,20 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/orchestrator/schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 173 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 177 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/override.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 87 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/pack.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 324 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 1035 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -326,7 +332,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/pack_resolver.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 23 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 66 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -334,7 +340,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/pack_store.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 34 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 128 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -351,7 +357,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/project/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 65 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 67 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -366,14 +372,14 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/project/current_run.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 53 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 117 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/project/jsonio.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 29 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 31 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -382,39 +388,38 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/project/run.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 300 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 327 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 482 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 568 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 579 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 631 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 641 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 301 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 328 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 483 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 569 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 580 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 632 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 642 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/project/schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 254 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 301 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 359 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 255 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 302 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/project/sidecar.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 45 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/reigh/data_provider.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 336 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/reigh/supabase_client.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 70 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 77 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -425,7 +430,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/reigh/task_client.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 79 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 81 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -433,7 +438,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/reigh/timeline_io.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 216 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 287 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -441,7 +446,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/reigh/worker_jwt.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 61 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 72 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -450,7 +455,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/runpod/sweeper.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 60 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 77 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -465,7 +470,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/runtime/in_process.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 136 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 168 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -474,20 +479,20 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/runtime/log_capture.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 55 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 177 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/scaffold.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 126 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/session/binding.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 152 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 185 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -496,36 +501,35 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/session/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 190 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 252 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 258 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 269 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 307 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 413 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 525 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 593 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 633 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 643 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 674 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 689 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 738 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 755 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 804 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 833 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 925 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 968 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 240 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 246 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 257 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 295 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 401 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 513 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 581 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 621 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 631 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 662 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 677 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 726 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 743 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 792 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 821 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 913 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 956 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/session/config.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 28 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/session/identity.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 49 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 83 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -533,7 +537,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/session/lease.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 89 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 94 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -544,22 +548,22 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/session/lifecycle.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 299 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/session/model.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 84 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 121 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 88 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 125 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 139 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 129 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 143 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
 
 ### `astrid/core/task/claim.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 236 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 242 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -570,23 +574,23 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/command_render.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 135 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/task/events.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 185 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 187 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 250 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 294 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 296 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 310 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 334 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 336 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 338 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 186 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 188 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 251 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 295 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 297 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 311 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 335 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 337 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 339 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 886 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 917 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 919 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -595,7 +599,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/gate.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 581 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 954 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -605,7 +609,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/gate_attestation.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 66 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 77 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -613,23 +617,23 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/gate_repeat.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 103 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 209 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/task/hook.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 49 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 55 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 65 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 71 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 50 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 56 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 66 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 72 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
 
 ### `astrid/core/task/inbox.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 274 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 301 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -640,7 +644,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/lifecycle_ack.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 153 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 168 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -653,7 +657,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/lifecycle_skip.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 96 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 111 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -663,23 +667,23 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/operator_view.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 163 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 168 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 306 | `assert` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 403 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 702 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 748 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 779 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 824 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 866 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 1193 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 1200 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 164 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 169 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 307 | `assert` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 404 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 703 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 749 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 780 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 825 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 867 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 1194 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 1201 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/task/orchestrator_resolver.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 83 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 113 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -687,7 +691,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/plan.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 327 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 422 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -698,7 +702,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/plan_builder.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 263 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 268 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -713,7 +717,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/plan_verbs.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 415 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 418 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -724,7 +728,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/run_audit.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 37 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 42 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -750,7 +754,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/run_gc.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 109 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 147 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -761,7 +765,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/run_store.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 96 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 113 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -774,17 +778,17 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/task/session_discovery.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 28 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 70 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 152 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 167 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 182 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 29 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 71 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 153 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 168 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 183 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/task/validator.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 73 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 82 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -794,14 +798,14 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/_edit_helpers.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 127 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 129 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/banodoco_schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 46 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 538 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -809,7 +813,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/branch.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 166 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 168 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -818,7 +822,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 61 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 63 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -859,7 +863,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/crud.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 15 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 176 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -868,7 +872,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/erasure.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 321 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 338 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -876,7 +880,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/eventlog/local_fs.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 126 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -896,41 +900,40 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/eventlog/selector.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 372 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/eventlog/supabase.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 225 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/events/schema/types.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 124 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 342 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 845 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 1057 | `assert` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 337 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 840 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 1052 | `assert` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/integrity.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 59 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/inverses.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 828 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 945 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/migration.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 166 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 176 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -940,7 +943,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/model.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 25 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 32 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -949,7 +952,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/observability.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 97 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 148 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -959,14 +962,14 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/operations.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 283 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 404 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/timeline/paths.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 108 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 122 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -986,7 +989,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/projection.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 169 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 260 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -995,7 +998,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/repair.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 158 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 193 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1006,7 +1009,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/transfer.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 287 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 289 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1014,7 +1017,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/timeline/undo.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 193 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 285 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1024,13 +1027,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/update.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 57 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/util/atomic_io.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 28 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 92 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1042,7 +1045,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/util/http.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 127 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 134 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1051,13 +1054,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/util/log_and_swallow.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 45 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/util/png_metadata.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 55 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 92 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1065,7 +1068,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/core/worker/banodoco_worker.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 319 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 348 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1078,7 +1081,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/doctor.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 127 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 412 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1089,44 +1092,44 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/domains/hype/enriched_arrangement.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 95 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 303 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/gateway.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 126 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 128 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 157 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 193 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 226 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 323 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 551 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 645 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 780 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 801 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 819 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 838 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 884 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 229 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 326 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 554 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 648 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 783 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 804 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 822 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 841 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 887 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 890 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 894 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 936 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 1044 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
-| 1082 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 893 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 897 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 939 | `except` | `-` | `justified` | New/relocated site from formalization-quickwins refactor (PR #72); reviewed as non-pack runtime surface. |
+| 1047 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
+| 1085 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/modalities/__init__.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/orchestrate/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 112 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 119 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1143,13 +1146,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/orchestrate/compile.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 71 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/orchestrate/dsl.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 184 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 191 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1157,14 +1160,14 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/orchestrate/test_runner.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 139 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 244 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/sdk.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 565 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 613 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1189,7 +1192,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/skills/__init__.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 343 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 413 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1197,13 +1200,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/skills/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 32 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/skills/discovery.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 69 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 103 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1211,27 +1214,27 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/skills/harnesses/base.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 73 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 141 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/skills/harnesses/claude.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/skills/harnesses/codex.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 95 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 113 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/skills/harnesses/hermes.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 109 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 129 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1241,13 +1244,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/skills/state.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 48 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/structure.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 96 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 99 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1264,14 +1267,14 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/theme_schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 204 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 206 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/threads/attribute.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 144 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 228 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1287,7 +1290,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/threads/cli.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 118 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 209 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1295,7 +1298,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/threads/index.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 77 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 91 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1305,7 +1308,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/threads/provenance.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 45 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 56 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1314,7 +1317,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/threads/record.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 193 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 211 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1324,13 +1327,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/threads/schema.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 215 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/threads/variants.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 40 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 51 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1343,7 +1346,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/utilities/llm_clients.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 75 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 77 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
@@ -1354,7 +1357,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ### `astrid/verify/checks.py`
 
-| line | kind | owner | status | reason |
+| Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 74 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |
 | 89 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after m5b split; behavior unchanged and reviewed as non-pack runtime surface. |

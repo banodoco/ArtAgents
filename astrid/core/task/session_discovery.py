@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from astrid.core.env_vars import ASTRID_SESSION_ID
 from astrid.core.project.paths import (
     resolve_projects_root,
 )
@@ -110,7 +111,7 @@ def _print_next_no_run_hint(slug: str, projects_root: Optional[Path]) -> None:
 def _os_environ_has_session() -> bool:
     """True iff ASTRID_SESSION_ID is set and non-empty in os.environ."""
     import os as _os
-    return bool(_os.environ.get("ASTRID_SESSION_ID", "").strip())
+    return bool(_os.environ.get(ASTRID_SESSION_ID, "").strip())
 
 def _most_recent_session_slug(projects_root: Optional[Path]) -> str | None:
     """Find the slug whose .astrid-session file was most recently written.

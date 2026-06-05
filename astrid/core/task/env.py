@@ -5,9 +5,9 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 
+from astrid.core.env_vars import get_author_test_env
 from astrid.core.subprocess_env import (
     ASTRID_ACTOR,
-    ASTRID_AUTHOR_TEST,
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
     TASK_PROJECT_ENV,
@@ -42,7 +42,7 @@ def task_actor_env() -> str | None:
 
 
 def is_author_test_mode() -> bool:
-    return os.environ.get(ASTRID_AUTHOR_TEST) == "1"
+    return get_author_test_env() == "1"
 
 
 def is_in_task_run(slug: str | None = None) -> bool:
