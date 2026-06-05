@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import shutil
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -64,6 +65,24 @@ def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentP
     raise AssertionError(f"missing subparser {name!r}")
 
 
+def _write_fake_descriptor(root: Path, pack_id: str) -> discovery.SkillDescriptor:
+    skill_dir = root / pack_id / "skill"
+    skill_dir.mkdir(parents=True)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        f"---\nname: astrid-{pack_id}\ndescription: {pack_id} skill.\n---\nBody.\n",
+        encoding="utf-8",
+    )
+    return discovery.SkillDescriptor(
+        pack_id=pack_id,
+        name=f"astrid-{pack_id}",
+        description=f"{pack_id} skill.",
+        short_description=f"{pack_id} skill.",
+        skill_dir=skill_dir,
+        skill_md=skill_md,
+    )
+
+
 class AdapterPlanTest(unittest.TestCase):
     def test_claude_target_for_core_uses_astrid_path(self) -> None:
         fx = _Tmp()
@@ -105,6 +124,13 @@ class AdapterPlanTest(unittest.TestCase):
 
         for action in (install_harness, install_mechanism, uninstall_harness, sync_mechanism):
             self.assertIsInstance(action.choices, StaticChoices)
+
+    def test_sync_all_alias_sets_deep(self) -> None:
+        parser = skills_cli.build_parser()
+        deep_args = parser.parse_args(["sync", "--deep"])
+        all_args = parser.parse_args(["sync", "--all"])
+        self.assertTrue(deep_args.deep)
+        self.assertTrue(all_args.deep)
 
 
 class ApplyTest(unittest.TestCase):
@@ -211,6 +237,84 @@ class DoctorTest(unittest.TestCase):
             report = skills.doctor()
             failures = [r for r in report["results"] if not r["ok"] and r["pack"] == "_core"]
             self.assertTrue(failures, msg=str(report))
+        finally:
+            fx.close()
+
+
+class SyncPreservesInstalledPacksTest(unittest.TestCase):
+    def test_default_sync_preserves_and_refreshes_individual_pack_install(self) -> None:
+        fx = _Tmp()
+        try:
+            with TemporaryDirectory() as tmp:
+                md = Path(tmp) / "SKILL.md"
+                md.write_text("---\nname: astrid\n---\n\n# Astrid\n", encoding="utf-8")
+                skills.install(pack_ids=["foley"], harness_names=["claude"], state_path=fx.state_path)
+                claude = ClaudeAdapter()
+                core = next(d for d in _descriptors() if d.pack_id == "_core")
+                foley = next(d for d in _descriptors() if d.pack_id == "foley")
+                target = claude.target_for(foley)
+                target.unlink()
+                target.symlink_to(core.skill_dir)
+
+                skills.sync(skill_md_path=md, state_path=fx.state_path)
+
+                data = state.load(fx.state_path)
+                self.assertIn("foley", data["installs"]["claude"])
+                self.assertTrue(target.is_symlink())
+                self.assertEqual(target.resolve(), foley.skill_dir.resolve())
+                report = skills.check(skill_md_path=md, state_path=fx.state_path)
+                self.assertFalse(report["has_drift"], msg=str(report))
+        finally:
+            fx.close()
+
+    def test_default_sync_prunes_state_record_and_orphan_link_for_deleted_pack(self) -> None:
+        fx = _Tmp()
+        try:
+            with TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                md = tmp_path / "SKILL.md"
+                md.write_text("---\nname: astrid\n---\n\n# Astrid\n", encoding="utf-8")
+                core = next(d for d in _descriptors() if d.pack_id == "_core")
+                vanished = _write_fake_descriptor(tmp_path, "vanished")
+
+                with mock.patch("astrid.skills.list_skills", return_value=[core, vanished]):
+                    skills.install(
+                        pack_ids=["vanished"],
+                        harness_names=["claude"],
+                        state_path=fx.state_path,
+                    )
+                claude = ClaudeAdapter()
+                target = claude.target_for(vanished)
+                self.assertTrue(target.is_symlink())
+                shutil.rmtree(vanished.skill_dir.parent)
+
+                with mock.patch("astrid.skills.list_skills", return_value=[core]):
+                    skills.sync(skill_md_path=md, state_path=fx.state_path)
+
+                data = state.load(fx.state_path)
+                self.assertNotIn("vanished", data["installs"]["claude"])
+                self.assertFalse(target.exists())
+                self.assertFalse(target.is_symlink())
+        finally:
+            fx.close()
+
+    def test_check_tracks_individual_install_and_missing_link(self) -> None:
+        fx = _Tmp()
+        try:
+            with TemporaryDirectory() as tmp:
+                md = Path(tmp) / "SKILL.md"
+                md.write_text("---\nname: astrid\n---\n\n# Astrid\n", encoding="utf-8")
+                skills.install(pack_ids=["foley"], harness_names=["claude"], state_path=fx.state_path)
+                skills.sync(skill_md_path=md, state_path=fx.state_path)
+
+                clean = skills.check(skill_md_path=md, state_path=fx.state_path)
+                self.assertFalse(clean["has_drift"], msg=str(clean))
+
+                foley = next(d for d in _descriptors() if d.pack_id == "foley")
+                ClaudeAdapter().target_for(foley).unlink()
+                drift = skills.check(skill_md_path=md, state_path=fx.state_path)
+                self.assertTrue(drift["has_drift"])
+                self.assertIn({"harness": "claude", "pack": "foley"}, drift["missing"])
         finally:
             fx.close()
 

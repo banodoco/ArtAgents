@@ -71,8 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
     sync_parser.add_argument(
         "--deep",
         action="store_true",
-        help="Also link each pack's skill as astrid-<pack> (default: gateway only).",
+        help="Also link each pack's skill as astrid-<pack> (default: gateway only; alias: --all).",
     )
+    sync_parser.add_argument("--all", action="store_true", dest="deep", help="Alias for --deep.")
     sync_parser.add_argument(
         "--check",
         action="store_true",

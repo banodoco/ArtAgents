@@ -106,10 +106,6 @@ def sync(
     Orphan ``astrid-*`` installs (no longer-discovered packs) are pruned.
     """
     all_descriptors = list_skills()
-    if deep:
-        descriptors = all_descriptors
-    else:
-        descriptors = [d for d in all_descriptors if d.pack_id == "_core"]
     targets = _resolve_harnesses(None)
     current_state = state.load(state_path)
 
@@ -126,6 +122,9 @@ def sync(
     report["registry"] = {"changed": registry_changed}
 
     for harness_name, adapter in targets.items():
+        descriptors = _sync_descriptors_for_harness(
+            all_descriptors, current_state, harness_name, deep=deep
+        )
         kwargs: dict = {"force": force}
         if harness_name == "hermes":
             kwargs["mechanism"] = mechanism
@@ -172,7 +171,12 @@ def sync(
     return report
 
 
-def check(*, deep: bool = False, skill_md_path: Path | None = None) -> dict:
+def check(
+    *,
+    deep: bool = False,
+    skill_md_path: Path | None = None,
+    state_path: Path | None = None,
+) -> dict:
     """Dry-run drift report for the gateway link + registry block + per-pack links.
 
     Reports, without making any change:
@@ -192,10 +196,7 @@ def check(*, deep: bool = False, skill_md_path: Path | None = None) -> dict:
 
     all_descriptors = list_skills()
     known_ids = {d.pack_id for d in all_descriptors}
-    if deep:
-        expected = all_descriptors
-    else:
-        expected = [d for d in all_descriptors if d.pack_id == "_core"]
+    current_state = state.load(state_path)
 
     detected = {name: adapter for name, adapter in all_adapters().items() if adapter.detect()}
 
@@ -209,6 +210,9 @@ def check(*, deep: bool = False, skill_md_path: Path | None = None) -> dict:
     }
 
     for harness_name, adapter in detected.items():
+        expected = _sync_descriptors_for_harness(
+            all_descriptors, current_state, harness_name, deep=deep
+        )
         for descriptor in expected:
             ok, _msg = adapter.verify(descriptor)
             if not ok:
@@ -478,6 +482,20 @@ def _codex_after_set(
     else:
         result_ids = installed_now.difference(d.pack_id for d in changed_descriptors)
     return [available[pid] for pid in sorted(result_ids) if pid in available]
+
+
+def _sync_descriptors_for_harness(
+    all_descriptors: list[SkillDescriptor],
+    current_state: dict,
+    harness_name: str,
+    *,
+    deep: bool,
+) -> list[SkillDescriptor]:
+    if deep:
+        return all_descriptors
+    installed_ids = set(current_state["installs"].get(harness_name, {}).keys())
+    expected_ids = installed_ids | {"_core"}
+    return [descriptor for descriptor in all_descriptors if descriptor.pack_id in expected_ids]
 
 
 def _step_to_dict(step) -> dict:
