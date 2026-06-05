@@ -25,7 +25,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import bind_writer_session, setup_packs_and_compile  # noqa: E402
 
-from astrid.core.task.env import ASTRID_ACTOR, ASTRID_AUTHOR_TEST
+from astrid.core.env_vars import ASTRID_AUTHOR_TEST
+from astrid.core.task.env import ASTRID_ACTOR
 from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.lifecycle_ack import cmd_ack
