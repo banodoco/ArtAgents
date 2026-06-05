@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
+from astrid.contracts.result_manifest import write_manifest
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('foley.tile_video')
@@ -12,6 +13,7 @@ import argparse
 import json
 import re
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -232,6 +234,29 @@ def main(argv: list[str] | None = None) -> int:
         manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         print(f"wrote_tiles_manifest={manifest_path}")
         print(f"wrote_tiles={len(tiles)}")
+
+        # --- universal result manifest (output-contract M2) -----------------------
+        result_manifest_path = out_root / "manifest.json"
+        result_manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "tile_video",
+            "inputs": {
+                "video": str(video),
+                "grid": [cols, rows],
+                "overlap": args.overlap,
+                "trim": args.trim,
+            },
+            "outputs": [
+                {"path": "tiles.json", "type": "file"},
+                {"path": "tiles", "type": "directory"},
+                {"path": "frames", "type": "directory"},
+            ],
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(result_manifest_path, result_manifest)
+        # -------------------------------------------------------------------------
+
         return 0
 
     return run_pack_main("foley.tile_video", _run, argv=argv)

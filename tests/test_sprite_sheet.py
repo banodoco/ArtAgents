@@ -120,6 +120,52 @@ def test_choose_layout_for_rectangular_frames():
     assert layout["rows"] * 224 <= 3840
 
 
+def test_input_sheet_writes_result_manifest(tmp_path):
+    """Prove that non-dry-run --input-sheet flow writes a universal result manifest."""
+    # Create a minimal valid sprite sheet as input (512x512 frames, 2x2 grid
+    # yields 1024x1024 = 1,048,576 px which exceeds GPT_IMAGE_2_MIN_PIXELS).
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    guide = source_dir / "input_sheet.png"
+    write_layout_guide(guide, cols=2, rows=2, frame_width=512, frame_height=512)
+
+    out_dir = tmp_path / "out"
+    code = main(
+        [
+            "--animation", "test blink cycle",
+            "--subject", "test dot",
+            "--input-sheet", str(guide),
+            "--cols", "2",
+            "--rows", "2",
+            "--frame-width", "512",
+            "--frame-height", "512",
+            "--out-dir", str(out_dir),
+            "--key-color", "#ffffff",
+            "--no-prores",
+            "--no-web",
+            "--force",
+        ]
+    )
+
+    assert code == 0
+    manifest_path = out_dir / "manifest.json"
+    assert manifest_path.is_file(), f"universal manifest not found at {manifest_path}"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["kind"] == "sprite_sheet"
+    assert manifest["schema_version"] == 1
+    assert isinstance(manifest["inputs"], dict)
+    assert manifest["inputs"]["animation"] == "test blink cycle"
+    assert manifest["inputs"]["subject"] == "test dot"
+    assert isinstance(manifest["outputs"], list)
+    output_paths = {o["path"] for o in manifest["outputs"]}
+    assert "layout_guide.png" in output_paths
+    assert "sprite_sheet_alpha.png" in output_paths  # transparent mode on
+    assert "sprite_manifest.json" in output_paths
+    assert "frames" in output_paths
+    assert "sprite_preview.mp4" in output_paths
+    assert isinstance(manifest["warnings"], list)
+
+
 def test_rectangular_sprite_sheet_dry_run(capsys, tmp_path):
     code = main(
         [

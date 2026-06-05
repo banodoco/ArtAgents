@@ -62,6 +62,7 @@
   "kind": "built_in",
   "metadata": {
     "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",
+    "output_result_manifest": true,
     "pipeline_step": "pool_merge",
     "pipeline_step_order": 8,
     "runtime_entrypoint": "main",

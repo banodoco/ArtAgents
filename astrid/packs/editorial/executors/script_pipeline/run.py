@@ -12,12 +12,14 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.contracts.errors import AstridError, render_astrid_error
+from astrid.contracts.result_manifest import write_manifest as write_result_manifest
 
 try:
     import yaml
@@ -530,6 +532,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"selected: {manifest['selected_scene']}")
     if args.open_result:
         subprocess.run(["open", str(manifest["selected_scene"])], check=False)
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    result_manifest_path = args.produces_dir / "result_manifest.json"
+    result_manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "script_pipeline",
+        "inputs": {
+            "preset": str(args.preset),
+            "prompt": prompt,
+            "produces_dir": str(args.produces_dir),
+        },
+        "outputs": [
+            {"path": "selected_scene.md", "type": "file"},
+            {"path": "manifest.json", "type": "file"},
+            {"path": "candidates", "type": "directory"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_result_manifest(result_manifest_path, result_manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

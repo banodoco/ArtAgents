@@ -133,6 +133,51 @@ def _record(
     }
 
 
+def test_main_writes_universal_manifest_with_short_form_kind(tmp_path: Path) -> None:
+    repo = tmp_path
+    _write_run(
+        repo,
+        "root",
+        _record(ROOT_RUN_ID, thread_id=THREAD_ID, input_artifacts=[], output_artifacts=[]),
+    )
+    _write_run(
+        repo,
+        "target",
+        _record(
+            TARGET_RUN_ID,
+            thread_id=THREAD_ID,
+            parent_run_ids=[{"run_id": ROOT_RUN_ID, "kind": "causal"}],
+            input_artifacts=[],
+            output_artifacts=[],
+        ),
+    )
+    out_dir = repo / "runs" / "prepare"
+
+    code = prepare.main(
+        [
+            "--target-run-id", TARGET_RUN_ID,
+            "--out", str(out_dir),
+            "--repo-root", str(repo),
+            "--max-iterations", "10",
+        ]
+    )
+
+    assert code == 0
+    manifest_path = out_dir / "manifest.json"
+    assert manifest_path.is_file(), f"manifest not found at {manifest_path}"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["kind"] == "prepare"
+    assert manifest["schema_version"] == 1
+    assert isinstance(manifest["inputs"], dict)
+    assert manifest["inputs"]["target_run_id"] == TARGET_RUN_ID
+    assert isinstance(manifest["outputs"], list)
+    assert len(manifest["outputs"]) == 2
+    output_paths = {item["path"] for item in manifest["outputs"]}
+    assert "iteration.manifest.json" in output_paths
+    assert "iteration.quality.json" in output_paths
+    assert isinstance(manifest["warnings"], list)
+
+
 def _artifact(kind: str, sha: str, path: str | None = None) -> dict:
     artifact = {"kind": kind, "role": "other", "sha256": sha}
     if path is not None:

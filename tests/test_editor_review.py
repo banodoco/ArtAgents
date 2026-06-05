@@ -269,6 +269,20 @@ class EditorReviewTest(unittest.TestCase):
         self.assertIn(str(brief_dir.resolve()), inspect_calls[0])
         self.assertNotIn(str(run_dir.resolve()), inspect_calls[0])
 
+        # --- universal result manifest assertions ---
+        manifest_path = brief_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "editor_review")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("brief_dir", manifest["inputs"])
+        self.assertIn("run_dir", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        self.assertEqual(len(manifest["outputs"]), 1)
+        self.assertEqual(manifest["outputs"][0]["path"], "editor_review.json")
+        self.assertIsInstance(manifest["warnings"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

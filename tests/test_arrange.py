@@ -423,6 +423,20 @@ class ArrangeTest(unittest.TestCase):
         self.assertEqual(saved["pool_sha256"], hashlib.sha256(pool_path.read_bytes()).hexdigest())
         self.assertEqual(saved["brief_sha256"], hashlib.sha256(brief_path.read_bytes()).hexdigest())
 
+        # --- universal result manifest assertions ---
+        manifest_path = out_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "arrange")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("pool", manifest["inputs"])
+        self.assertIn("brief", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        self.assertEqual(len(manifest["outputs"]), 1)
+        self.assertEqual(manifest["outputs"][0]["path"], "arrangement.json")
+        self.assertIsInstance(manifest["warnings"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

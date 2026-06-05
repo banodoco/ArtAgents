@@ -61,6 +61,7 @@
     "network": false
   },
   "metadata": {
+    "output_result_manifest": true,
     "requires_timeline": false,
     "runtime_module": "astrid.packs.rendering.executors.html_canvas_effect.run",
     "runtime_file": "run.py",

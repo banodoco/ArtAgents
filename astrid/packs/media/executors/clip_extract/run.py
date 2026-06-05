@@ -14,8 +14,11 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_p
 guard_canonical_entrypoint("media.clip_extract")
 import argparse
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
+
+from astrid.contracts.result_manifest import write_manifest
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -98,6 +101,25 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess.run) -> i
                 recovery_command="verify the input file is a valid video and ffmpeg is installed, then rerun",
                 state_snapshot={"ffmpeg_stderr": result.stderr} if result.stderr else None,
             )
+
+        # --- universal result manifest (output-contract M2) -------------------
+        manifest_path = out.parent / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "clip_extract",
+            "inputs": {
+                "input": str(src),
+                "start": args.start,
+                "dur": args.dur,
+            },
+            "outputs": [
+                {"path": out.name, "type": "file"},
+            ],
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # ---------------------------------------------------------------------
 
         return 0
 

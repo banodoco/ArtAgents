@@ -10,10 +10,12 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('editorial.triage')
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 
@@ -303,6 +305,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata={"model": args.model, "grid_size": args.grid_size},
     )
     print(out_path)
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = out_dir / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "triage",
+        "inputs": {
+            "scenes": str(args.scenes.resolve()),
+            "shots": str(args.shots.resolve()),
+        },
+        "outputs": [
+            {"path": "scene_triage.json", "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

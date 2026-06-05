@@ -9,9 +9,11 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('editorial.boundary_candidates')
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
 
 VERSION = 1
@@ -284,6 +286,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"wrote={args.out} boundaries={len(payload['boundaries'])}")
     for boundary in payload["boundaries"][:5]:
         print(f"{boundary['id']} candidates={len(boundary['candidates'])}")
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = args.out.parent / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "boundary_candidates",
+        "inputs": {
+            "video": str(args.video),
+            "manifest": str(args.manifest.resolve()),
+        },
+        "outputs": [
+            {"path": args.out.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

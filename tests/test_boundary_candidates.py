@@ -75,3 +75,16 @@ def test_boundary_candidates_packages_asset_level_refs(tmp_path):
     assert boundary["kind"] == "start"
     assert any("scene_start" in item["reasons"] for item in boundary["candidates"])
     assert any("transcript_start" in item["reasons"] for item in boundary["candidates"])
+
+    manifest_path = out.parent / "manifest.json"
+    assert manifest_path.is_file(), f"manifest not found at {manifest_path}"
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_payload["kind"] == "boundary_candidates"
+    assert manifest_payload["schema_version"] == 1
+    assert isinstance(manifest_payload["inputs"], dict)
+    assert "video" in manifest_payload["inputs"]
+    assert "manifest" in manifest_payload["inputs"]
+    assert isinstance(manifest_payload["outputs"], list)
+    assert len(manifest_payload["outputs"]) == 1
+    assert manifest_payload["outputs"][0]["path"] == out.name
+    assert isinstance(manifest_payload["warnings"], list)

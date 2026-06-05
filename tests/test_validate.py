@@ -57,6 +57,21 @@ class ValidateNoAudioTest(unittest.TestCase):
         self.assertEqual(payload["summary"]["failures"], 0)
         self.assertEqual(payload["clips"], [])
 
+        # --- universal result manifest assertions ---
+        manifest_path = out_path.parent / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "validate")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("video", manifest["inputs"])
+        self.assertIn("timeline", manifest["inputs"])
+        self.assertIn("metadata", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        self.assertEqual(len(manifest["outputs"]), 1)
+        self.assertEqual(manifest["outputs"][0]["path"], out_path.name)
+        self.assertIsInstance(manifest["warnings"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

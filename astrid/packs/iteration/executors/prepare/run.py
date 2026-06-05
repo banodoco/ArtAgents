@@ -16,11 +16,13 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from astrid import modalities
 from astrid._paths import REPO_ROOT
+from astrid.contracts.result_manifest import write_manifest
 from astrid.threads.ids import is_ulid
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.record import sha256_file
@@ -79,6 +81,26 @@ def main(argv: list[str] | None = None) -> int:
                 recovery_command="verify the target run id is a valid 26-character Crockford ULID and exists, or raise --max-iterations for the summarization cap, then retry",
             ) from exc
         print(json.dumps({"manifest": result["manifest_path"], "quality": result["quality_path"]}, sort_keys=True))
+
+        # --- universal result manifest (output-contract M2) -------------------
+        out_dir = Path(args.out).resolve()
+        manifest_path = out_dir / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "prepare",
+            "inputs": {
+                "target_run_id": args.target_run_id,
+            },
+            "outputs": [
+                {"path": "iteration.manifest.json", "type": "file"},
+                {"path": "iteration.quality.json", "type": "file"},
+            ],
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # ---------------------------------------------------------------------
+
         return 0
 
     return run_pack_main("iteration.prepare", _run, argv=argv)

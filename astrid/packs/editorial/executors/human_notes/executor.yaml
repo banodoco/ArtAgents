@@ -36,6 +36,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "output_result_manifest": true,
     "runtime_file": "run.py",
     "runtime_module": "astrid.packs.editorial.executors.human_notes.run"
   },

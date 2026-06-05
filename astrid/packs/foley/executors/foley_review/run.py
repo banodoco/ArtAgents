@@ -11,8 +11,11 @@ import argparse
 import html
 import json
 import os
+from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path
 from typing import Any
+
+from astrid.contracts.result_manifest import write_manifest  # noqa: E402
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -169,6 +172,24 @@ def main(argv: list[str] | None = None) -> int:
     )
     out_path.write_text(page, encoding="utf-8")
     print(f"wrote_review={out_path}")
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    result_manifest_path = out_path.parent / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "foley_review",
+        "inputs": {
+            "manifest": str(manifest_path),
+        },
+        "outputs": [
+            {"path": out_path.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(result_manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 
