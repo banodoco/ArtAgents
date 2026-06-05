@@ -587,6 +587,21 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
     for run_id in selected_run_ids:
         events = read_events(runs_dir / run_id / "events.jsonl")
         cost_summary = _cost_by_source(events)
+
+        # Ledger fallback: when events provide no usable cost, read
+        # cost_usd from run.json metadata (set during finalization).
+        if not cost_summary:
+            run_json = _read_run_json_for_cost(runs_dir / run_id / "run.json")
+            ledger_cost = _extract_ledger_cost_usd(run_json)
+            if ledger_cost is not None:
+                cost_summary = {
+                    "ledger": {
+                        "amount": ledger_cost,
+                        "currency": "USD",
+                        "source": "ledger",
+                    }
+                }
+
         grand_total += _merge_project_cost_summaries(by_source, cost_summary)
 
     if json_out:
@@ -663,8 +678,12 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
             try:
                 from astrid.core.timeline.paths import load_assembly_json_with_repair
                 load_assembly_json_with_repair(tdir)
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                import sys
+                print(
+                    f"warning: timeline repair failed for {ts.ulid}: {exc}",
+                    file=sys.stderr,
+                )
 
             # Copy timeline container files
             for name in ("assembly.json", "manifest.json", "display.json"):
@@ -737,6 +756,27 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
             run_json = run_root / "run.json"
             if run_json.is_file():
                 _add_file(run_json, f"runs/{run_id}/run.json")
+
+            # Bundle the executor manifest. Prefer the path recorded in
+            # run.json (manifest_path) when it points to a valid file;
+            # otherwise fall back to manifest.json under the run root.
+            manifest_src: Path | None = None
+            if run_json.is_file():
+                try:
+                    run_record = json.loads(run_json.read_text(encoding="utf-8"))
+                except Exception:
+                    run_record = {}
+                mp = run_record.get("manifest_path")
+                if isinstance(mp, str) and mp:
+                    candidate = Path(mp).expanduser().resolve()
+                    if candidate.is_file():
+                        manifest_src = candidate
+            if manifest_src is None:
+                fallback = run_root / "manifest.json"
+                if fallback.is_file():
+                    manifest_src = fallback
+            if manifest_src is not None:
+                _add_file(manifest_src, f"runs/{run_id}/manifest.json")
 
         # Write MANIFEST.txt
         manifest_txt = tmpdir / "MANIFEST.txt"
@@ -825,6 +865,29 @@ def _merge_project_cost_summaries(
         bucket["source"] = source
         added_total += amount
     return added_total
+
+
+def _read_run_json_for_cost(path: Path) -> dict[str, Any]:
+    """Read a run.json file for cost fallback purposes."""
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                return loaded
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def _extract_ledger_cost_usd(record: dict[str, Any]) -> float | None:
+    """Extract a numeric ``cost_usd`` from run record metadata."""
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get("cost_usd")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
 
 
 def _print_project_header(slug: str) -> None:

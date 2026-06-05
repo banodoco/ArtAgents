@@ -20,6 +20,7 @@ from astrid.core.generation.features import (
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.model_catalog.schema import (
     CANONICAL_IMAGE_MODES,
+    Price,
     validate_registry,
     validate_registry_with_backends,
 )
@@ -816,6 +817,75 @@ class TestShippedRegistry:
 
         flux_schnell = registry.get("flux-schnell")
         assert set(flux_schnell.modes.keys()) == {"t2i"}
+
+
+class TestBackendPrices:
+    def test_price_object_must_match_exact_shape(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "cloud": {
+                            "endpoint": "fal-ai/test",
+                            "price": {"unit": "image", "usd": 0.025, "currency": "USD"},
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="exactly 'unit' and 'usd'"):
+            validate_registry(raw)
+
+    def test_price_unit_must_be_supported(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "cloud": {
+                            "endpoint": "fal-ai/test",
+                            "price": {"unit": "megapixel", "usd": 0.025},
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="unsupported price unit"):
+            validate_registry(raw)
+
+    def test_price_usd_must_be_non_negative(self) -> None:
+        raw = _make_v2_payload(
+            modes={
+                "t2i": {
+                    "supports": ["prompt"],
+                    "requires": ["prompt"],
+                    "backends": {
+                        "cloud": {
+                            "endpoint": "fal-ai/test",
+                            "price": {"unit": "image", "usd": -0.01},
+                            "param_map": {"prompt": "prompt"},
+                        }
+                    },
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="non-negative finite number"):
+            validate_registry(raw)
+
+    def test_shipped_registry_deserializes_typed_backend_price(self) -> None:
+        registry = ModelRegistry.load_default()
+        _, mode_spec = registry.get_by_mode("flux-dev", "t2i")
+        assert mode_spec.backends["cloud"].price == Price(usd=0.025, unit="image")
+
+    def test_unpriced_shipped_backend_preserves_none(self) -> None:
+        registry = ModelRegistry.load_default()
+        _, mode_spec = registry.get_by_mode("qwen-image-2512", "t2i")
+        assert mode_spec.backends["cloud"].price is None
 
 
 # ---------------------------------------------------------------------------

@@ -506,6 +506,16 @@ class TestScratchRun:
         - Gateway return code matches subprocess (0)
         """
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
+        from astrid.core.session.lifecycle import create_session
+        from astrid.core.session.paths import sessions_dir
+
+        create_session(
+            project_slug="default",
+            agent_id="test-agent",
+            projects_root=projects_root,
+            session_root=sessions_dir(),
+            session_id="S-SCRATCH-OK",
+        )
 
         script = tmp_path / "success.py"
         script.write_text("import sys; print('ok'); sys.exit(0)", encoding="utf-8")
@@ -521,6 +531,7 @@ class TestScratchRun:
             timeout=30,
             env={
                 **{k: v for k, v in os.environ.items() if k not in ("ASTRID_SESSION_ID",)},
+                "ASTRID_SESSION_ID": "S-SCRATCH-OK",
                 project_paths.PROJECTS_ROOT_ENV: str(projects_root),
                 "PYTHONPATH": _worktree_root,
             },
@@ -548,6 +559,9 @@ class TestScratchRun:
         assert record.get("status") == "completed", (
             f"Expected status='completed', got {record.get('status')!r}"
         )
+        assert record.get("session_id") == "S-SCRATCH-OK"
+        assert record.get("auto_bound") is True
+        assert record.get("invocation") == "scratch"
 
         # No timeline requirement
         assert record.get("timeline_id") is None, (
@@ -626,6 +640,8 @@ class TestScratchRun:
         assert record.get("status") == "failed", (
             f"Expected status='failed', got {record.get('status')!r}"
         )
+        assert record.get("auto_bound") is True
+        assert record.get("invocation") == "scratch"
 
         # No timeline requirement
         assert record.get("timeline_id") is None, (

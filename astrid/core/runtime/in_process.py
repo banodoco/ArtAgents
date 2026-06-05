@@ -6,10 +6,10 @@ import importlib
 import importlib.util
 import os
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping
+from typing import IO, Any, Callable, Iterator, Mapping
 
 from astrid.core.pack_resolver import (
     CallableNotFoundError,
@@ -20,6 +20,7 @@ from astrid.core.subprocess_env import ASTRID_INTERNAL_INVOCATION, build_child_s
 from astrid.packs._canonical_entrypoint import canonical_runtime_entrypoint
 
 from ._normalize import _system_exit_code, normalize_python_runtime_result
+from .log_capture import TeeWriter
 
 
 class InProcessInvocationError(RuntimeError):
@@ -104,8 +105,15 @@ def invoke_in_process_command(
     env: Mapping[str, str] | None = None,
     base_env: Mapping[str, str] | None = None,
     parent_env: Mapping[str, str] | None = None,
+    stdout_log: IO[str] | None = None,
+    stderr_log: IO[str] | None = None,
 ) -> InProcessResult:
-    """Execute a pack runtime command in-process under scoped argv/cwd/env overlays."""
+    """Execute a pack runtime command in-process under scoped argv/cwd/env overlays.
+
+    When log streams are supplied, stdout/stderr are tee'd only around the
+    runtime entrypoint call. This uses process-global Python redirection, so it
+    is intended for Astrid's serialized in-process execution paths.
+    """
 
     command = classify_in_process_command(argv, metadata=metadata, owner_id=owner_id)
     base = os.environ if base_env is None else base_env
@@ -123,7 +131,8 @@ def invoke_in_process_command(
         with canonical_runtime_entrypoint(owner_id), _scoped_cwd(cwd), _scoped_environ(
             effective_env
         ), _scoped_argv((command.module, *command.module_argv)):
-            raw_result = target(list(command.module_argv))
+            with _scoped_stdio_capture(stdout_log=stdout_log, stderr_log=stderr_log):
+                raw_result = target(list(command.module_argv))
     except SystemExit as exc:
         raw_result = exc
     return normalize_in_process_result(
@@ -272,6 +281,34 @@ def _scoped_argv(argv: tuple[str, ...] | list[str]) -> Iterator[None]:
         yield
     finally:
         sys.argv = previous
+
+
+@contextmanager
+def _scoped_stdio_capture(
+    *,
+    stdout_log: IO[str] | None,
+    stderr_log: IO[str] | None,
+) -> Iterator[None]:
+    """Mirror runtime output to logs without swallowing live terminal output.
+
+    ``redirect_stdout``/``redirect_stderr`` mutate process-global state, so this
+    helper is safe only for the current serialized in-process execution model.
+    Keep the scope tight around the runtime entrypoint and do not widen it to
+    module import or caller setup.
+    """
+
+    stdout_cm = (
+        redirect_stdout(TeeWriter(sys.stdout, stdout_log))
+        if stdout_log is not None
+        else nullcontext()
+    )
+    stderr_cm = (
+        redirect_stderr(TeeWriter(sys.stderr, stderr_log))
+        if stderr_log is not None
+        else nullcontext()
+    )
+    with stdout_cm, stderr_cm:
+        yield
 
 
 __all__ = [

@@ -26,6 +26,7 @@ SOURCE_SCHEMA_VERSION = 1
 RUN_SCHEMA_VERSION = 1
 SOURCE_KINDS = {"audio", "image", "other", "video"}
 RUN_STATUSES = {status.value for status in RunStatus}
+RUN_INVOCATIONS = {"cli", "sdk", "scratch", "task"}
 
 
 class ProjectValidationError(AstridError, ValueError):
@@ -94,6 +95,9 @@ def build_run_record(
     metadata: dict[str, Any] | None = None,
     artifacts: dict[str, Any] | None = None,
     created_at: str | None = None,
+    session_id: str | None = None,
+    auto_bound: bool | None = None,
+    invocation: str = "cli",
     timeline_id: str | None = None,
     timeline_slug: str | None = None,
     timeline_event_stream_id: str | None = None,
@@ -101,6 +105,11 @@ def build_run_record(
 ) -> dict[str, Any]:
     now = created_at or utc_now_seconds()
     merged_metadata = dict(metadata or {})
+    legacy_auto_bound = merged_metadata.get("project_was_auto_resolved")
+    if auto_bound is None and legacy_auto_bound is not None:
+        auto_bound = _require_bool(legacy_auto_bound, "run.metadata.project_was_auto_resolved")
+    elif auto_bound is not None:
+        merged_metadata.pop("project_was_auto_resolved", None)
     if timeline_slug is not None:
         merged_metadata["timeline_slug"] = timeline_slug
     if timeline_event_stream_id is not None:
@@ -108,12 +117,15 @@ def build_run_record(
     if timeline_binding_mode is not None:
         merged_metadata["timeline_binding_mode"] = timeline_binding_mode
     payload: dict[str, Any] = {
+        "auto_bound": bool(auto_bound) if auto_bound is not None else False,
         "artifacts": dict(artifacts or {}),
         "created_at": now,
+        "invocation": _validate_run_invocation(invocation),
         "metadata": merged_metadata,
         "project_slug": validate_project_slug(project_slug),
         "run_id": validate_run_id(run_id),
         "schema_version": RUN_SCHEMA_VERSION,
+        "session_id": _optional_string(session_id, "run.session_id"),
         "status": _normalize_run_record_status(status),
         "updated_at": now,
     }
@@ -176,13 +188,21 @@ def validate_run_record(raw: Any) -> dict[str, Any]:
     _require_version(data, RUN_SCHEMA_VERSION, "run")
     status = _normalize_run_record_status(data.get("status"))
     payload = dict(data)
+    metadata = _optional_mapping(data.get("metadata", {}), "run.metadata")
+    legacy_auto_bound = metadata.get("project_was_auto_resolved")
+    auto_bound = data.get("auto_bound")
+    if auto_bound is None and legacy_auto_bound is not None:
+        auto_bound = _require_bool(legacy_auto_bound, "run.metadata.project_was_auto_resolved")
     payload.update(
         {
+            "auto_bound": _require_bool(auto_bound if auto_bound is not None else False, "run.auto_bound"),
             "artifacts": _optional_mapping(data.get("artifacts", {}), "run.artifacts"),
-            "metadata": _optional_mapping(data.get("metadata", {}), "run.metadata"),
+            "invocation": _validate_run_invocation(data.get("invocation", "cli")),
+            "metadata": metadata,
             "project_slug": validate_project_slug(_require_string(data.get("project_slug"), "run.project_slug")),
             "run_id": validate_run_id(_require_string(data.get("run_id"), "run.run_id")),
             "schema_version": RUN_SCHEMA_VERSION,
+            "session_id": _optional_string(data.get("session_id"), "run.session_id"),
             "status": status,
         }
     )
@@ -309,6 +329,25 @@ def _require_number(raw: Any, path: str) -> int | float:
     if not isinstance(raw, (int, float)) or isinstance(raw, bool):
         raise ProjectValidationError(f"{path} must be a number")
     return raw
+
+
+def _require_bool(raw: Any, path: str) -> bool:
+    if not isinstance(raw, bool):
+        raise ProjectValidationError(f"{path} must be a boolean")
+    return raw
+
+
+def _optional_string(raw: Any, path: str) -> str | None:
+    if raw is None:
+        return None
+    return _require_string(raw, path)
+
+
+def _validate_run_invocation(raw: Any) -> str:
+    invocation = _require_string(raw, "run.invocation")
+    if invocation not in RUN_INVOCATIONS:
+        raise ProjectValidationError(f"run.invocation must be one of {sorted(RUN_INVOCATIONS)}")
+    return invocation
 
 
 def _require_uuid_str(value: object, field: str) -> str:

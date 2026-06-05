@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from importlib import import_module
@@ -35,6 +36,10 @@ from astrid.core.runtime import (
     InProcessExecutionPreconditionError,
     InProcessInvocationError,
     invoke_in_process_command,
+)
+from astrid.core.runtime.log_capture import (
+    open_run_log_capture,
+    run_subprocess_with_capture,
 )
 from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
@@ -98,6 +103,8 @@ class ExecutorRunRequest:
     argv: tuple[str, ...] = ()
     execution_mode: Literal["subprocess", "in_process"] = "subprocess"
     project_was_auto_resolved: bool = False
+    invocation: str = "cli"
+    run_root: Path | str | None = None
 
 
 @dataclass(frozen=True)
@@ -461,12 +468,25 @@ def _run_explicit_command_executor(
             cwd=cwd,
             env=env,
         )
-    completed = subprocess.run(
-        list(command),
-        cwd=cwd,
-        env=_command_subprocess_env(executor, request, env),
-        check=False,
-    )
+    effective_env = _command_subprocess_env(executor, request, env)
+    run_root = request.run_root
+    if run_root is not None and not request.project_was_auto_resolved:
+        with open_run_log_capture(run_root) as logs:
+            returncode = run_subprocess_with_capture(
+                list(command),
+                cwd=cwd,
+                env=effective_env,
+                stdout_log=logs.stdout,
+                stderr_log=logs.stderr,
+            )
+    else:
+        completed = subprocess.run(
+            list(command),
+            cwd=cwd,
+            env=effective_env,
+            check=False,
+        )
+        returncode = completed.returncode
     return ExecutorRunResult(
         executor_id=executor.id,
         kind=executor.kind,
@@ -476,11 +496,11 @@ def _run_explicit_command_executor(
         payload={
             "executor_id": executor.id,
             "missing_binaries": [],
-            "returncode": completed.returncode,
+            "returncode": returncode,
             "skipped": False,
             "skipped_reason": "",
         },
-        returncode=completed.returncode,
+        returncode=returncode,
     )
 
 
@@ -492,15 +512,23 @@ def _run_in_process_executor_command(
     cwd: str | None,
     env: Mapping[str, str],
 ) -> ExecutorRunResult:
+    log_capture = (
+        open_run_log_capture(request.run_root)
+        if request.run_root is not None and not request.project_was_auto_resolved
+        else None
+    )
     try:
-        result = invoke_in_process_command(
-            command,
-            metadata=executor.metadata,
-            owner_id=executor.id,
-            cwd=cwd,
-            env=env,
-            parent_env=os.environ,
-        )
+        with log_capture or nullcontext():
+            result = invoke_in_process_command(
+                command,
+                metadata=executor.metadata,
+                owner_id=executor.id,
+                cwd=cwd,
+                env=env,
+                parent_env=os.environ,
+                stdout_log=None if log_capture is None else log_capture.stdout,
+                stderr_log=None if log_capture is None else log_capture.stderr,
+            )
     except InProcessExecutionPreconditionError as exc:
         return _in_process_executor_error_result(
             executor,
@@ -726,9 +754,10 @@ def _prepare_project_request(
         },
         record_out=record_out,
         requires_timeline=False if request.project_was_auto_resolved else None,
+        invocation=request.invocation,
     )
     effective_out = request.out if record_out is not None else context.run_root
-    return context, replace(request, out=effective_out)
+    return context, replace(request, out=effective_out, run_root=context.run_root)
 
 
 def _project_argv(request: ExecutorRunRequest) -> list[str]:

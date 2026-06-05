@@ -216,3 +216,72 @@ def test_status_no_args(monkeypatch: pytest.MonkeyPatch) -> None:
     rc = session_cli.main(["status"])
     assert rc == 0
     assert seen["args"].command == "status"
+
+
+# ---------------------------------------------------------------------------
+# prune subcommand tests
+# ---------------------------------------------------------------------------
+
+
+def test_prune_help_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        session_cli.main(["prune", "--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "--older-than-days" in captured.out
+    assert "--apply" in captured.out
+
+
+def test_prune_no_sessions(capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(session_cli, "_list_session_files", lambda: [])
+    rc = session_cli.main(["prune"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "no session records found" in captured.out
+
+
+def test_prune_dry_run_default(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """Verify that prune defaults to dry-run: dispatches handler with apply=False."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_prune(args: argparse.Namespace, *, out=None) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(session_cli, "cmd_sessions_prune", fake_prune)
+
+    rc = session_cli.main(["prune"])
+    assert rc == 0
+    assert seen["args"].apply is False
+    assert seen["args"].older_than_days == 30
+
+
+def test_prune_apply_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify --apply flag sets apply=True and dispatches handler."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_prune(args: argparse.Namespace, *, out=None) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(session_cli, "cmd_sessions_prune", fake_prune)
+
+    rc = session_cli.main(["prune", "--apply"])
+    assert rc == 0
+    assert seen["args"].apply is True
+
+
+def test_prune_custom_older_than_days(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify --older-than-days accepts custom values."""
+    seen: dict[str, argparse.Namespace] = {}
+
+    def fake_prune(args: argparse.Namespace, *, out=None) -> int:
+        seen["args"] = args
+        return 0
+
+    monkeypatch.setattr(session_cli, "cmd_sessions_prune", fake_prune)
+
+    rc = session_cli.main(["prune", "--older-than-days", "7"])
+    assert rc == 0
+    assert seen["args"].older_than_days == 7
+    assert seen["args"].apply is False
