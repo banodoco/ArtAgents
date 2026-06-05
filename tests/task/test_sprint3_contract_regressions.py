@@ -960,8 +960,9 @@ def test_lifecycle_next_and_status_surface_cursor_rewind_and_iteration_failed_re
 
     assert next_rc == 0, next_err
     assert "missing verdict key" in next_out
-    assert status_rc == 0, status_err
-    assert "missing verdict key" in status_out
+    assert status_rc == 0
+    assert "missing verdict key" not in status_out
+    assert "missing verdict key" in status_err
 
     events_path.write_text("", encoding="utf-8")
     append_event(
@@ -986,8 +987,9 @@ def test_lifecycle_next_and_status_surface_cursor_rewind_and_iteration_failed_re
 
     assert next_rc == 0, next_err
     assert "repeat.until unresolved: invalid JSON" in next_out
-    assert status_rc == 0, status_err
-    assert "repeat.until unresolved: invalid JSON" in status_out
+    assert status_rc == 0
+    assert "repeat.until unresolved: invalid JSON" not in status_out
+    assert "repeat.until unresolved: invalid JSON" in status_err
 
 
 def test_repeat_until_gate_error_propagates_and_preserves_mutation_order(

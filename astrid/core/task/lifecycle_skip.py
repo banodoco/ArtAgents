@@ -9,18 +9,23 @@ Refuses to skip arbitrary future steps — the target path must match the
 top-of-cursor's pending step. For group steps with ``optional=True`` the
 skip is operative on the un-traversed cursor (no ``nested_entered``); the
 cursor advances past the whole subtree on the next replay.
+
+``--json`` emits a single JSON object with shared lifecycle fields plus
+``step_path``, ``kind`` (step_skipped or item_skipped), ``actor_kind``,
+``actor_id``, ``reason`` (when given), and ``next_command``.
 """
 
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.session.writer import writer_context_for_project
+from astrid.core.task.cli_contract import emit_lifecycle_json, exit_with_astrid_error
 from astrid.core.task.events import (
     EventLogError,
     StaleEpochError,
@@ -37,8 +42,15 @@ from astrid.core.task.plan import (
 )
 
 
-def _print_err(msg: str) -> None:
-    print(msg, file=sys.stderr)
+def _exit_recoverable(cause: str, *, recovery: str = "", **snapshot: object) -> int:
+    """Exit with a recoverable validation failure via the shared error envelope."""
+    return exit_with_astrid_error(
+        AstridError(
+            cause,
+            recovery_command=recovery,
+            state_snapshot=snapshot if snapshot else None,
+        )
+    )
 
 
 def _resolve_frontier_step(plan, events):
@@ -91,14 +103,18 @@ def cmd_skip(
         default=None,
         help="human name (mutually exclusive with --agent)",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exactly one machine-readable skip object on stdout",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
         return int(exc.code or 2)
 
     if sum(value is not None for value in (args.agent, args.human)) > 1:
-        _print_err("skip: --agent and --human are mutually exclusive")
-        return 1
+        return _exit_recoverable("skip: --agent and --human are mutually exclusive")
     if args.agent is not None:
         actor_kind, actor_id = "agent", args.agent
     elif args.human is not None:
@@ -109,16 +125,14 @@ def cmd_skip(
     try:
         slug = validate_project_slug(args.project)
     except Exception as exc:
-        _print_err(f"skip: {exc}")
-        return 1
+        return _exit_recoverable(f"skip: {exc}")
 
     active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
-        _print_err(
-            f"skip: no active run for project {slug!r}; "
-            f"recovery: astrid start <orchestrator-id> --project {slug}"
+        return _exit_recoverable(
+            f"skip: no active run for project {slug!r}",
+            recovery=f"astrid start <orchestrator-id> --project {slug}",
         )
-        return 1
 
     run_id = active_run["run_id"]
     proj_root = project_dir(slug, root=projects_root)
@@ -133,29 +147,27 @@ def cmd_skip(
 
     step, path_tuple = _resolve_frontier_step(plan, events)
     if step is None:
-        _print_err(
-            f"skip: run is exhausted; recovery: astrid abort --project {slug}"
+        return _exit_recoverable(
+            f"skip: run is exhausted",
+            recovery=f"astrid abort --project {slug}",
         )
-        return 1
 
     expected_path = STEP_PATH_SEP.join(path_tuple)
     if args.step != expected_path:
-        _print_err(
+        return _exit_recoverable(
             f"skip: step path {args.step!r} does not match cursor frontier "
-            f"{expected_path!r}; only the current step may be skipped. "
-            f"Run `astrid next --project {slug}` to see the active step."
+            f"{expected_path!r}; only the current step may be skipped.",
+            recovery=f"astrid next --project {slug}",
         )
-        return 1
 
     # --item: validate that the host has repeat.for_each and the item exists.
     if args.item is not None:
         repeat = getattr(step, "repeat", None)
         if not isinstance(repeat, RepeatForEach):
-            _print_err(
+            return _exit_recoverable(
                 f"skip: --item requires a step with repeat.for_each, "
-                f"step {expected_path!r} has none"
+                f"step {expected_path!r} has none",
             )
-            return 1
         # If the body step itself is required (optional=False on the host),
         # we still allow per-item skip — the spec calls out:
         #   "for_each parent with optional=False, item-level skip via --item:
@@ -163,11 +175,10 @@ def cmd_skip(
         # So we do NOT require step.optional=True for --item skip.
     else:
         if not step.optional:
-            _print_err(
+            return _exit_recoverable(
                 f"skip: step {expected_path!r} is not optional "
-                f"(set optional=True in plan.json to allow skipping)"
+                f"(set optional=True in plan.json to allow skipping)",
             )
-            return 1
 
     # Build the event.
     if args.item is not None:
@@ -188,24 +199,46 @@ def cmd_skip(
             step_version=step.version,
         )
 
+    json_mode = bool(getattr(args, "json", False))
+
     try:
         with writer_context_for_project(slug, root=projects_root) as writer:
             writer.append(event)
     except StaleEpochError as exc:
-        _print_err(
+        return _exit_recoverable(
             f"skip: stale writer_epoch ({exc}); re-run after the active "
-            f"writer releases the lease"
+            f"writer releases the lease",
         )
-        return 1
     except StaleTailError as exc:
-        _print_err(
+        return _exit_recoverable(
             f"skip: stale events tail ({exc}); another writer appended "
-            f"under us — re-run"
+            f"under us — re-run",
         )
-        return 1
     except EventLogError as exc:
-        _print_err(f"skip: {exc}")
-        return 1
+        return _exit_recoverable(f"skip: {exc}")
+
+    if json_mode:
+        json_fields: dict = {
+            "step_path": expected_path,
+            "actor_kind": actor_kind,
+            "actor_id": actor_id,
+        }
+        if args.item is not None:
+            json_fields["kind"] = "item_skipped"
+            json_fields["item_id"] = args.item
+        else:
+            json_fields["kind"] = "step_skipped"
+        if args.reason:
+            json_fields["reason"] = args.reason
+        json_fields["step_version"] = step.version
+        json_fields["next_command"] = f"astrid next --project {slug}"
+
+        return emit_lifecycle_json(
+            project=slug,
+            run_id=run_id,
+            state="skipped",
+            **json_fields,
+        )
 
     if args.item is not None:
         print(f"skipped item {args.item} of {expected_path}")

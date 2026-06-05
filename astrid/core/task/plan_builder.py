@@ -48,6 +48,7 @@ from astrid.core.task.orchestrator_resolver import (
     _qualified_split,
     _resolve_packs_root,
 )
+from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.plan import (
     compute_plan_hash,
     load_plan,
@@ -258,6 +259,11 @@ def cmd_start(
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--name", default=None, help="optional run id (slug-validated)")
     parser.add_argument("--timeline", default=None, help="timeline slug")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exactly one machine-readable start object on stdout",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -456,6 +462,18 @@ def cmd_start(
         timeline_id=timeline_id,
     )
     (run_dir / "AGENT.md").write_text(agent_md, encoding="utf-8")
+
+    json_mode = bool(args.json)
+    if json_mode:
+        return emit_lifecycle_json(
+            project=slug,
+            run_id=run_id,
+            state="started",
+            orchestrator_id=resolved_orchestrator_id,
+            timeline_slug=timeline_slug,
+            plan_hash=plan_hash,
+            next_command=f"astrid next --project {slug}",
+        )
 
     print(f"started {resolved_orchestrator_id}")
     print(f"  project:   {slug}")

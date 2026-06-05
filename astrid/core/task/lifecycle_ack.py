@@ -34,9 +34,11 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
+from astrid.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.session.writer import NoRunBoundError, writer_context_for_project
+from astrid.core.task.cli_contract import emit_lifecycle_json, exit_with_astrid_error
 from astrid.core.task.events import (
     EventLogError,
     make_cursor_rewind_event,
@@ -72,6 +74,16 @@ def _print_err(msg: str) -> None:
 def _system_exit_code(exc: SystemExit) -> int:
     return int(exc.code) if isinstance(exc.code, int) else 2
 
+
+def _exit_recoverable(cause: str, *, recovery: str = "", **snapshot: object) -> int:
+    """Exit with a recoverable validation failure via the shared error envelope."""
+    return exit_with_astrid_error(
+        AstridError(
+            cause,
+            recovery_command=recovery,
+            state_snapshot=snapshot if snapshot else None,
+        )
+    )
 
 
 def _latest_event_for_path(events, path_tuple, *, step_version: int | None = None):
@@ -125,8 +137,13 @@ def cmd_ack(
         if proj is None:
             _print_err("ack: --project is required for abort")
             return 1
+        # Forward --json when present so abort can emit structured output.
+        has_json = "--json" in argv_list
         from astrid.core.task.run_store import cmd_abort
-        return cmd_abort(["--project", proj], projects_root=projects_root)
+        abort_argv = ["--project", proj]
+        if has_json:
+            abort_argv.append("--json")
+        return cmd_abort(abort_argv, projects_root=projects_root)
 
     parser = argparse.ArgumentParser(prog="astrid ack", add_help=True)
     parser.add_argument("step", help="STEP_PATH_SEP-joined plan step path (e.g. 'review' or 'outer/inner')")
@@ -148,6 +165,11 @@ def cmd_ack(
     identity.add_argument("--human", default=None, help="human name (mutually exclusive with --agent)")
     parser.add_argument("--feedback", default=None, help="iterate feedback (required for --decision=iterate)")
     parser.add_argument("--item", default=None, help="for_each item id")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exactly one machine-readable ack object on stdout",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -157,25 +179,22 @@ def cmd_ack(
     # argparse `required=True` catches the CLI case. This assertion catches
     # Python callers that synthesize Namespace(agent=None, human=None) directly.
     if args.agent is None and args.human is None:
-        _print_err(
+        return _exit_recoverable(
             "ack: --agent <id> or --human <name> is required "
             "(no anonymous acks — Sprint 3 T16)"
         )
-        return 1
 
     try:
         slug = validate_project_slug(args.project)
     except Exception as exc:
-        _print_err(f"ack: {exc}")
-        return 1
+        return _exit_recoverable(f"ack: {exc}")
 
     active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
-        _print_err(
-            f"ack: no active run for project {slug!r}; "
-            f"recovery: astrid start <orchestrator-id> --project {slug}"
+        return _exit_recoverable(
+            f"ack: no active run for project {slug!r}",
+            recovery=f"astrid start <orchestrator-id> --project {slug}",
         )
-        return 1
 
     run_id = active_run["run_id"]
     proj_root = project_dir(slug, root=projects_root)
@@ -188,18 +207,17 @@ def cmd_ack(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
     if peek.exhausted or peek.step is None:
-        _print_err(
-            f"ack: run is exhausted; recovery: astrid abort --project {slug}"
+        return _exit_recoverable(
+            f"ack: run is exhausted",
+            recovery=f"astrid abort --project {slug}",
         )
-        return 1
 
     expected_path = STEP_PATH_SEP.join(peek.path_tuple)
     if args.step != expected_path:
-        _print_err(
-            f"ack: step path {args.step!r} does not match cursor {expected_path!r}; "
-            f"run `astrid next --project {slug}` to see the current step"
+        return _exit_recoverable(
+            f"ack: step path {args.step!r} does not match cursor {expected_path!r}",
+            recovery=f"astrid next --project {slug}",
         )
-        return 1
 
     try:
         if args.decision == "approve":
@@ -215,25 +233,24 @@ def cmd_ack(
     except Exception as exc:
         from astrid.core.task.events import StaleEpochError, StaleTailError
         if isinstance(exc, (StaleEpochError, StaleTailError)):
-            _print_err(f"ack: stale — {exc}; the run lease has changed under you. "
-                        f"Re-run the ack to pick up the new writer_epoch.")
-            return 1
+            return _exit_recoverable(
+                f"ack: stale — {exc}; the run lease has changed under you. "
+                f"Re-run the ack to pick up the new writer_epoch."
+            )
         raise
     # argparse choices=... already constrains this; defensive only.
-    _print_err(f"ack: unknown decision {args.decision!r}")
-    return 1
+    return _exit_recoverable(f"ack: unknown decision {args.decision!r}")
 
 
 def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
+    json_mode = bool(getattr(args, "json", False))
     if is_code_kind(peek.step):
-        _print_err(
+        return _exit_recoverable(
             "ack: approve is invalid for code steps. code steps advance via "
             f"subprocess; just run the printed command (astrid next --project {slug})."
         )
-        return 1
     if not is_attested_kind(peek.step):
-        _print_err("ack: cannot approve non-attested step")
-        return 1
+        return _exit_recoverable("ack: cannot approve non-attested step")
 
     # FLAG-P5-001: synthesize the incoming command as step.command +
     # identity/evidence/item tokens, NOT 'ack --step ...'. step.command may
@@ -254,8 +271,9 @@ def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
     try:
         decision = gate_command(slug, incoming, [], root=projects_root)
     except TaskRunGateError as exc:
-        _print_err(f"ack: {exc.reason}; recovery: {exc.recovery}")
-        return 1
+        return _exit_recoverable(
+            f"ack: {exc.reason}", recovery=exc.recovery
+        )
 
     # Attested step is "complete" at attestation; the gate already wrote
     # step_attested + ran inline produces checks. record_dispatch_complete
@@ -302,17 +320,26 @@ def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
         _print_err(msg)
         return 2
 
-    print(f"acknowledged {STEP_PATH_SEP.join(peek.path_tuple)}")
+    step_path = STEP_PATH_SEP.join(peek.path_tuple)
+    if json_mode:
+        return emit_lifecycle_json(
+            project=slug,
+            run_id=decision.run_id or "",
+            state="acknowledged",
+            step_path=step_path,
+            decision="approve",
+        )
+    print(f"acknowledged {step_path}")
     return 0
 
 
 def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -> int:
+    json_mode = bool(getattr(args, "json", False))
     if not is_attested_kind(peek.step):
-        _print_err(
+        return _exit_recoverable(
             "ack: retry is only valid on attested steps. Code steps "
             "redispatch implicitly when you re-run the printed argv."
         )
-        return 1
 
     # FLAG-P5-002: validate identity BEFORE mutating events.
     attested_args = AttestedArgs(
@@ -329,17 +356,17 @@ def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -
             run_started_actor=_run_started_actor(events),
         )
     except TaskRunGateError as exc:
-        _print_err(f"ack retry: {exc.reason}; recovery: {exc.recovery}")
-        return 1
+        return _exit_recoverable(
+            f"ack retry: {exc.reason}", recovery=exc.recovery
+        )
 
     latest = _latest_event_for_path(events, peek.path_tuple, step_version=peek.step.version)
     if not isinstance(latest, dict) or latest.get("kind") != "produces_check_failed":
-        _print_err(
+        return _exit_recoverable(
             "ack retry: only valid after a verifier failure (the latest event "
             f"for {STEP_PATH_SEP.join(peek.path_tuple)} must be "
             "produces_check_failed)."
         )
-        return 1
 
     try:
         with writer_context_for_project(slug, root=proj_root.parent) as writer:
@@ -356,17 +383,25 @@ def _ack_retry(args, slug, peek, plan, events, events_path, run_id, proj_root) -
     except (EventLogError, NoRunBoundError, RuntimeError) as exc:
         _print_err(f"ack retry: event append failed: {exc}")
         return 1
-    print(f"retry queued for {STEP_PATH_SEP.join(peek.path_tuple)}")
+    step_path = STEP_PATH_SEP.join(peek.path_tuple)
+    if json_mode:
+        return emit_lifecycle_json(
+            project=slug,
+            run_id=run_id,
+            state="retry_queued",
+            step_path=step_path,
+            decision="retry",
+        )
+    print(f"retry queued for {step_path}")
     return 0
 
 
 def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root) -> int:
+    json_mode = bool(getattr(args, "json", False))
     if not is_attested_kind(peek.step):
-        _print_err("ack: iterate is only valid on attested steps")
-        return 1
+        return _exit_recoverable("ack: iterate is only valid on attested steps")
     if not args.feedback or not args.feedback.strip():
-        _print_err("ack iterate: --feedback is required and must be non-empty")
-        return 1
+        return _exit_recoverable("ack iterate: --feedback is required and must be non-empty")
 
     # FLAG-P5-002: validate identity BEFORE mutating events.
     attested_args = AttestedArgs(
@@ -383,8 +418,9 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
             run_started_actor=_run_started_actor(events),
         )
     except TaskRunGateError as exc:
-        _print_err(f"ack iterate: {exc.reason}; recovery: {exc.recovery}")
-        return 1
+        return _exit_recoverable(
+            f"ack iterate: {exc.reason}", recovery=exc.recovery
+        )
 
     # Find the host step in the plan (peek.step has repeat stripped because
     # it is the body of an iteration frame). peek.path_tuple == host path
@@ -402,14 +438,12 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
             if isinstance(host_repeat, RepeatUntil)
             else "<no repeat>"
         )
-        _print_err(
+        return _exit_recoverable(
             "ack iterate: only valid for legacy repeat.until.condition='user_approves' "
             f"(host condition={condition!r})"
         )
-        return 1
     if peek.iteration is None:
-        _print_err("ack iterate: cursor is not inside an iteration frame")
-        return 1
+        return _exit_recoverable("ack iterate: cursor is not inside an iteration frame")
 
     decision = GateDecision(
         active=True,
@@ -435,9 +469,20 @@ def _ack_iterate(args, slug, peek, plan, events, events_path, run_id, proj_root)
     except (EventLogError, NoRunBoundError, RuntimeError) as exc:
         _print_err(f"ack iterate: event append failed: {exc}")
         return 1
+    step_path = STEP_PATH_SEP.join(peek.path_tuple)
+    if json_mode:
+        return emit_lifecycle_json(
+            project=slug,
+            run_id=run_id,
+            state="iteration_failed",
+            step_path=step_path,
+            decision="iterate",
+            iteration=peek.iteration,
+            feedback=args.feedback.strip(),
+        )
     print(
         f"iteration {peek.iteration} marked failed; feedback recorded for "
-        f"{STEP_PATH_SEP.join(peek.path_tuple)}"
+        f"{step_path}"
     )
     return 0
 

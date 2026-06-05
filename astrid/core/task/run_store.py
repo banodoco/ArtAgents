@@ -40,6 +40,7 @@ from astrid.core.task.events import (
     make_step_failed_event,
     read_events,
 )
+from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     find_step_by_path,
@@ -108,6 +109,11 @@ def cmd_abort(
     parser = argparse.ArgumentParser(prog="astrid abort", add_help=True)
     parser.add_argument("--project", required=True, help="project slug")
     parser.add_argument("--reason", default=None, help="optional human-readable reason")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exactly one machine-readable abort object on stdout",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -119,9 +125,16 @@ def cmd_abort(
         _print_err(f"abort: {exc}")
         return 1
 
+    json_mode = bool(args.json)
     run_id = read_current_run(slug, root=projects_root)
     if run_id is None:
         # Idempotent — Phase 6 Stop-hook may invoke abort defensively.
+        if json_mode:
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=None,
+                state="no_active_run",
+            )
         return 0
 
     run_dir = project_dir(slug, root=projects_root) / "runs" / run_id
@@ -135,6 +148,12 @@ def cmd_abort(
         release_writer_lease(run_dir)
     except FileNotFoundError:
         pass
+    if json_mode:
+        return emit_lifecycle_json(
+            project=slug,
+            run_id=run_id,
+            state="aborted",
+        )
     print(f"aborted {run_id}")
     return 0
 
