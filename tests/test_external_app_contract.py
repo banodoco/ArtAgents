@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -10,6 +11,8 @@ from textwrap import dedent
 from typing import Any
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # ---------------------------------------------------------------------------
 # External app script source -- must only use `import astrid` + stdlib.
@@ -126,6 +129,12 @@ def test_external_app_runs_from_outside_repo() -> None:
             capture_output=True,
             text=True,
             cwd=str(tmp_path),
+            env={
+                **os.environ,
+                "PYTHONPATH": str(ROOT)
+                if not os.environ.get("PYTHONPATH")
+                else f"{ROOT}{os.pathsep}{os.environ['PYTHONPATH']}",
+            },
             timeout=60,
         )
 

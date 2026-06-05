@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import unittest
@@ -22,9 +23,11 @@ class OnboardingDocsTest(unittest.TestCase):
         )
 
     def run_astrid(self, *args: str) -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY", "docs-command-smoke")}
         return subprocess.run(
             [sys.executable, "-m", "astrid", *args],
             cwd=ROOT,
+            env=env,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,

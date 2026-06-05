@@ -266,6 +266,19 @@ def _seed_identity_and_session(
     return sess, proj_root
 
 
+def _clear_task_env() -> None:
+    """Scrub raw task-run env that tests may mutate outside monkeypatch."""
+
+    for name in (
+        TASK_RUN_ID_ENV,
+        TASK_PROJECT_ENV,
+        TASK_STEP_ID_ENV,
+        TASK_ITEM_ID_ENV,
+        TASK_ITERATION_ENV,
+    ):
+        os.environ.pop(name, None)
+
+
 @pytest.fixture(autouse=True)
 def _autouse_session_seed(
     tmp_path_factory: pytest.TempPathFactory,
@@ -279,6 +292,7 @@ def _autouse_session_seed(
     pipeline-dispatch tests pass the CLI gate without per-file migration.
     """
 
+    _clear_task_env()
     astrid_home = tmp_path_factory.mktemp("astrid_home_autouse")
     projects_root = tmp_path_factory.mktemp("astrid_projects_autouse")
     monkeypatch.setenv("ASTRID_HOME", str(astrid_home))
@@ -289,7 +303,8 @@ def _autouse_session_seed(
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
     sess, _ = _seed_identity_and_session(astrid_home)
     monkeypatch.setenv("ASTRID_SESSION_ID", sess.id)
-    return astrid_home
+    yield astrid_home
+    _clear_task_env()
 
 
 @pytest.fixture

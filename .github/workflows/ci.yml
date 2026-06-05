@@ -29,6 +29,11 @@ jobs:
           cache-dependency-path: |
             pyproject.toml
 
+      - name: Install system media tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
