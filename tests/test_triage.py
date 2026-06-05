@@ -3,6 +3,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from astrid.packs.editorial.executors.triage import run as triage
 
@@ -73,6 +74,51 @@ class TriageTest(unittest.TestCase):
 
         self.assertEqual(len(client.calls), 1)
         self.assertFalse(has_forbidden_time_keys(client.calls[0]["response_schema"], triage.FORBIDDEN_TIME_KEYS))
+
+    def test_main_writes_manifest_with_short_form_kind(self) -> None:
+        tmp_dir = self.make_tempdir()
+        scenes_path = tmp_dir / "scenes.json"
+        shots_path = tmp_dir / "shots.json"
+        shots_dir = tmp_dir / "shots"
+        shots_dir.mkdir()
+        frame = shots_dir / "scene001_k1.jpg"
+        self.write_frame(frame)
+        out_dir = tmp_dir / "out"
+        scenes_path.write_text(
+            json.dumps([{"index": 1, "start": 0.0, "end": 1.0, "duration": 1.0}]),
+            encoding="utf-8",
+        )
+        shots_path.write_text(
+            json.dumps([{"scene_index": 1, "frames": [{"path": str(frame), "timestamp": 0.5}]}]),
+            encoding="utf-8",
+        )
+
+        stub_client = StubClaudeClient(
+            {"entries": [{"scene_id": "scene_001", "triage_score": 3, "triage_tag": "motion"}]}
+        )
+        with mock.patch.object(triage, "build_claude_client", return_value=stub_client):
+            code = triage.main(
+                [
+                    "--scenes", str(scenes_path),
+                    "--shots", str(shots_path),
+                    "--shots-dir", str(shots_dir),
+                    "--out", str(out_dir),
+                ]
+            )
+
+        self.assertEqual(code, 0)
+        manifest_path = out_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "triage")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("scenes", manifest["inputs"])
+        self.assertIn("shots", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        self.assertEqual(len(manifest["outputs"]), 1)
+        self.assertEqual(manifest["outputs"][0]["path"], "scene_triage.json")
+        self.assertIsInstance(manifest["warnings"], list)
 
 
 if __name__ == "__main__":

@@ -22,11 +22,13 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from astrid._paths import executor_argv
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.domains.hype.text_match import (
     segments_in_range,
     token_set_similarity,
@@ -127,6 +129,26 @@ def main() -> int:
             metadata={"skipped_no_audio": True},
         )
         print("validate: skipped because timeline has no audio track")
+
+        # --- universal result manifest (output-contract M2) -----------------------
+        manifest_path = out_path.parent / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "validate",
+            "inputs": {
+                "video": str(video),
+                "timeline": str(timeline_path),
+                "metadata": str(metadata_path),
+            },
+            "outputs": [
+                {"path": out_path.name, "type": "file"},
+            ],
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # -------------------------------------------------------------------------
+
         return 0
 
     validate_dir = video_dir / "_validate"
@@ -242,6 +264,26 @@ def main() -> int:
                 f"expected={entry['expected'][:60]!r} actual={entry['actual'][:60]!r}{note}",
                 flush=True,
             )
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = out_path.parent / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "validate",
+        "inputs": {
+            "video": str(video),
+            "timeline": str(timeline_path),
+            "metadata": str(metadata_path),
+        },
+        "outputs": [
+            {"path": out_path.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0 if fails == 0 else 1
 
 

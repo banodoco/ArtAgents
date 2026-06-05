@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
+from astrid.contracts.result_manifest import write_manifest
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.cut')
@@ -20,6 +21,7 @@ import csv
 import hashlib
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -1082,6 +1084,26 @@ def run_resume_mode(args: argparse.Namespace) -> int:
         metadata={"mode": "timeline_resume", "render": bool(args.render), "renderer": args.renderer},
         rendered_path=out_dir / "hype.mp4" if args.render else None,
     )
+    # --- universal result manifest (output-contract M2) -------------------
+    manifest_outputs = [
+        {"path": "hype.timeline.json", "type": "file"},
+        {"path": "hype.assets.json", "type": "file"},
+        {"path": "hype.metadata.json", "type": "file"},
+    ]
+    if args.render:
+        manifest_outputs.append({"path": "hype.mp4", "type": "file"})
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "cut",
+        "inputs": {
+            "timeline": str(timeline_path),
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(out_dir / "manifest.json", manifest)
+    # ---------------------------------------------------------------------
     print(f"wrote {summary}")
     return 0
 
@@ -1309,6 +1331,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata={"clips": len(timeline.get("clips", [])), "render": bool(args.render), "renderer": args.renderer},
         rendered_path=rendered_path,
     )
+    # --- universal result manifest (output-contract M2) -------------------
+    manifest_outputs = [
+        {"path": "hype.edl.csv", "type": "file"},
+        {"path": "hype.timeline.json", "type": "file"},
+        {"path": "hype.assets.json", "type": "file"},
+        {"path": "hype.metadata.json", "type": "file"},
+    ]
+    if rendered_path is not None:
+        manifest_outputs.append({"path": rendered_path.name, "type": "file"})
+    manifest_inputs: dict[str, Any] = {
+        "arrangement": str(arrangement_path),
+        "pool": str(pool_path),
+        "brief": str(brief_path),
+    }
+    if args.video is not None:
+        manifest_inputs["video"] = str(args.video)
+    if args.audio is not None:
+        manifest_inputs["audio"] = str(args.audio)
+    if args.theme is not None:
+        manifest_inputs["theme"] = str(args.theme)
+    if args.transcript is not None:
+        manifest_inputs["transcript"] = str(args.transcript.resolve())
+    if args.scenes is not None:
+        manifest_inputs["scenes"] = str(scenes_path)
+    if args.shots is not None:
+        manifest_inputs["shots"] = str(args.shots.resolve())
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "cut",
+        "inputs": manifest_inputs,
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(out_dir / "manifest.json", manifest)
+    # ---------------------------------------------------------------------
     return 0
 
 

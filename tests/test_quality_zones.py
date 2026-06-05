@@ -46,6 +46,17 @@ class QualityZonesTest(unittest.TestCase):
                 self.assertEqual(quality_zones.main([str(source_path), "--out", str(out_path)]), 0)
             self.assertEqual(json.loads(out_path.read_text(encoding="utf-8")), cached)
 
+            manifest_path = out_path.parent / "manifest.json"
+            self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["kind"], "quality_zones")
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertIsInstance(manifest["inputs"], dict)
+            self.assertIsInstance(manifest["outputs"], list)
+            self.assertEqual(len(manifest["outputs"]), 1)
+            self.assertEqual(manifest["outputs"][0]["path"], out_path.name)
+            self.assertIsInstance(manifest["warnings"], list)
+
 
 if __name__ == "__main__":
     unittest.main()

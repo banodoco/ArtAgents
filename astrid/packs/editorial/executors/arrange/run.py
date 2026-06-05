@@ -12,11 +12,13 @@ import argparse
 import hashlib
 import json
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid._paths import WORKSPACE_ROOT
 from astrid.audit import AuditContext
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
 from astrid.theme_schema import load_theme
 from astrid.core.timeline import (
@@ -850,6 +852,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         audit.register_node(stage="arrange", label="Build arrangement", parents=[pool_id, brief_id], outputs=[arrangement_id])
     print(out_path)
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = out_dir / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "arrange",
+        "inputs": {
+            "pool": str(pool_path),
+            "brief": str(brief_path),
+        },
+        "outputs": [
+            {"path": out_path.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

@@ -12,8 +12,11 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
+
+from astrid.contracts.result_manifest import write_manifest
 
 from astrid._paths import executor_argv
 from astrid.packs.editorial.executors.arrange.run import pool_digest
@@ -296,6 +299,26 @@ def main(argv: Sequence[str] | None = None, *, client: ClaudeClient | None = Non
     out_path = args.out / "editor_review.json"
     out_path.write_text(json.dumps(response, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(out_path)
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = args.out / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "human_notes",
+        "inputs": {
+            "instructions": str(args.instructions),
+            "arrangement": str(args.arrangement),
+            "pool": str(args.pool),
+        },
+        "outputs": [
+            {"path": "editor_review.json", "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     if args.apply:
         keep_env = os.environ.get("HYPE_KEEP_DOWNLOADS", "").strip().lower() in {"1", "true", "yes"}
         session_enabled = not (bool(getattr(args, "keep_downloads", False)) or keep_env)

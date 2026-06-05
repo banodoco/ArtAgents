@@ -173,7 +173,7 @@ def test_output_result_registry_conformance_covers_default_registry() -> None:
     assert payload["m1_adopters"] == len(non_exempt_ids)
     assert payload["exempted"] == len(exempted_ids)
 
-    allowed_reasons = {"paid", "GPU", "heavy", "unstable-artifact", "external-escape-hatch"}
+    allowed_reasons = {"paid", "GPU", "external-escape-hatch", "no-artifact"}
     for definition in registry.list():
         if definition.id in non_exempt_ids:
             assert definition.metadata.get("output_result_manifest") is True

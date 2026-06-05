@@ -13,10 +13,12 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.domains.hype import enriched_arrangement
 
 sys.modules.setdefault("quality_zones", sys.modules[__name__])
@@ -134,6 +136,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata={"zones": len(payload.get("zones", [])), "cached": cached is not None},
     )
     print(f"zones={len(payload['zones'])} cached={str(cached is not None).lower()} out={out_path}")
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = out_path.parent / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "quality_zones",
+        "inputs": {
+            "source_path": str(source_path),
+        },
+        "outputs": [
+            {"path": out_path.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

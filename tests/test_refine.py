@@ -439,6 +439,23 @@ class RefineTest(unittest.TestCase):
         self.assertEqual(clip_report["similarity_after"], 1.0)
         self.assertEqual(report["per_clip"], report["auto_fixes"]["audio_boundary"])
 
+        # --- universal result manifest assertions ---
+        manifest_path = Path(case["brief_out"]) / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "refine")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("arrangement", manifest["inputs"])
+        self.assertIn("pool", manifest["inputs"])
+        self.assertIn("timeline", manifest["inputs"])
+        self.assertIn("transcript", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        self.assertGreaterEqual(len(manifest["outputs"]), 1)
+        output_paths = [entry["path"] for entry in manifest["outputs"]]
+        self.assertIn("refine.json", output_paths)
+        self.assertIsInstance(manifest["warnings"], list)
+
     def test_refine_loop_bails_on_iteration_cap(self) -> None:
         case = self.build_case(
             durations=[4.0] + [8.5] * 8,

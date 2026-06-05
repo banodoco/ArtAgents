@@ -11,10 +11,13 @@ import argparse
 import shutil
 import subprocess
 import sys
+from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path
+from typing import Any
 
-from astrid.core.cli_choices import add_choice_arg
-from astrid.packs._canonical_entrypoint import run_pack_main
+from astrid.contracts.result_manifest import write_manifest  # noqa: E402
+from astrid.core.cli_choices import add_choice_arg  # noqa: E402
+from astrid.packs._canonical_entrypoint import run_pack_main  # noqa: E402
 
 
 def _die(msg: str, code: int = 2) -> None:
@@ -113,6 +116,25 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         print(f"Downloaded: {out} ({out.stat().st_size:,} bytes)", file=sys.stderr)
+
+        # --- universal result manifest (output-contract M2) -----------------------
+        manifest_path = out.parent / "manifest.json"
+        manifest: dict[str, Any] = {
+            "schema_version": 1,
+            "kind": "youtube_audio",
+            "inputs": {
+                "target": target,
+                "mode": args.mode,
+            },
+            "outputs": [
+                {"path": out.name, "type": "file"},
+            ],
+            "created": datetime.now(timezone.utc).isoformat(),
+            "warnings": [],
+        }
+        write_manifest(manifest_path, manifest)
+        # -------------------------------------------------------------------------
+
         return 0
 
     return run_pack_main("youtube.youtube_audio", _run, argv=argv)

@@ -3,7 +3,7 @@
 
 
 from __future__ import annotations
-
+from __future__ import annotations
 
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('editorial.refine')
@@ -12,11 +12,13 @@ import json
 import copy
 import subprocess
 import tempfile
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.util.hash import sha256_file
 from astrid.domains.hype import enriched_arrangement
@@ -674,6 +676,31 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
             "audio_boundary_fixes": len(report.get("auto_fixes", {}).get("audio_boundary", [])),
         },
     )
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = args.out / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "refine",
+        "inputs": {
+            "arrangement": str(args.arrangement),
+            "pool": str(args.pool),
+            "timeline": str(args.timeline),
+            "assets": str(args.assets),
+            "metadata": str(args.metadata),
+            "transcript": str(args.transcript),
+        },
+        "outputs": [
+            {"path": "refine.json", "type": "file"},
+            {"path": args.arrangement.name, "type": "file"},
+            {"path": args.timeline.name, "type": "file"},
+            {"path": args.metadata.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
 
 
 def main(argv: Sequence[str] | None = None, *, transcriber: SnippetTranscriber | None = None) -> int:

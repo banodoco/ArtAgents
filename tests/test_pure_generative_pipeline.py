@@ -1,11 +1,9 @@
 import argparse
 import json
-import subprocess
 import tempfile
 import unittest
 import wave
 from pathlib import Path
-from unittest import mock
 
 from astrid import timeline
 from astrid.contracts.errors import AstridError
@@ -113,7 +111,6 @@ class PureGenerativePipelineTest(unittest.TestCase):
         self.assertNotIn("--allow-generative-effects", arrange_cmd)
 
     def test_pool_merge_is_idempotent(self) -> None:
-        tmp = self.make_tempdir()
         pool = {"version": timeline.POOL_VERSION, "generated_at": "2026-04-21T12:00:00Z", "entries": []}
         first = pool_merge.merge_pool(pool)
         second = pool_merge.merge_pool(first)
@@ -233,6 +230,31 @@ class PureGenerativePipelineTest(unittest.TestCase):
         source_arrangement["target_duration_sec"] = 10.0
         with self.assertRaises(timeline.ArrangementDurationError):
             timeline.validate_arrangement_duration_window(source_arrangement)
+
+
+    def test_pool_merge_main_writes_universal_manifest(self) -> None:
+        tmp = self.make_tempdir()
+        pool_path = tmp / "input_pool.json"
+        out_path = tmp / "out" / "pool.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pool_path.write_text(
+            json.dumps({"version": timeline.POOL_VERSION, "generated_at": "2026-04-21T12:00:00Z", "entries": []}),
+            encoding="utf-8",
+        )
+
+        code = pool_merge.main(["--pool", str(pool_path), "--out", str(out_path)])
+
+        self.assertEqual(code, 0)
+        manifest_path = out_path.parent / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "pool_merge")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIsInstance(manifest["outputs"], list)
+        self.assertEqual(len(manifest["outputs"]), 1)
+        self.assertEqual(manifest["outputs"][0]["path"], "pool.json")
+        self.assertIsInstance(manifest["warnings"], list)
 
 
 if __name__ == "__main__":

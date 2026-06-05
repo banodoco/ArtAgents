@@ -69,6 +69,42 @@ class HtmlCanvasEffectExecutorTest(unittest.TestCase):
             with self.assertRaisesRegex(AstridError, "kebab-case"):
                 main(["--effect-id", "Bad_ID", "--project-root", tmp, "--out", str(Path(tmp) / "report.json")])
 
+    def test_main_writes_result_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project = Path(tmp) / "project"
+            report_path = project / "runs" / "effect" / "report.json"
+            timeline_path = project / "runs" / "effect" / "timeline.json"
+            assets_path = project / "runs" / "effect" / "assets.json"
+
+            result = main(
+                [
+                    "--effect-id", "glass-product-card",
+                    "--label", "Glass Product Card",
+                    "--description", "A test effect.",
+                    "--project-root", str(project),
+                    "--out", str(report_path),
+                    "--timeline", str(timeline_path),
+                    "--assets", str(assets_path),
+                ]
+            )
+
+            self.assertEqual(result, 0)
+            manifest_path = report_path.parent / "manifest.json"
+            self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["kind"], "html_canvas_effect")
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertIsInstance(manifest["inputs"], dict)
+            self.assertIn("effect_id", manifest["inputs"])
+            self.assertEqual(manifest["inputs"]["effect_id"], "glass-product-card")
+            self.assertIsInstance(manifest["outputs"], list)
+            output_paths = {o["path"] for o in manifest["outputs"]}
+            self.assertIn(report_path.name, output_paths)
+            # element_root is relative to manifest dir, so it uses ../
+            self.assertTrue(any("glass-product-card" in p for p in output_paths),
+                            f"element_root path not found in {output_paths}")
+            self.assertIsInstance(manifest["warnings"], list)
+
     def test_canonical_cli_dry_run_uses_executor_runtime(self) -> None:
         stdout = io.StringIO()
         stderr = io.StringIO()

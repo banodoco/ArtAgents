@@ -75,6 +75,7 @@
   },
   "metadata": {
     "runtime_module": "astrid.packs.editorial.executors.script_pipeline.run",
-    "runtime_file": "run.py"
+    "runtime_file": "run.py",
+    "output_result_manifest": true
   }
 }

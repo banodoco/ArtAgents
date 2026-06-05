@@ -50,6 +50,22 @@ def test_fake_mode_writes_candidates_selected_and_manifest(tmp_path: Path) -> No
     assert "Fake judge selected" in manifest["judge_reason"]
     assert "Candidate 1" in selected.read_text(encoding="utf-8")
 
+    # --- universal result manifest (output-contract M2) -------------------
+    result_manifest_path = produces / "result_manifest.json"
+    assert result_manifest_path.is_file(), "universal result manifest not written"
+    result = json.loads(result_manifest_path.read_text(encoding="utf-8"))
+    assert result["schema_version"] == 1
+    assert result["kind"] == "script_pipeline"
+    assert set(result["inputs"].keys()) == {"preset", "prompt", "produces_dir"}
+    assert result["inputs"]["preset"] == "seinfeld"
+    assert isinstance(result["outputs"], list)
+    assert len(result["outputs"]) == 3
+    output_paths = {entry["path"] for entry in result["outputs"]}
+    assert output_paths == {"selected_scene.md", "manifest.json", "candidates"}
+    assert isinstance(result["warnings"], list)
+    assert result["warnings"] == []
+    # ---------------------------------------------------------------------
+
 
 def test_config_loading_keeps_provider_model_in_preset_data(tmp_path: Path) -> None:
     preset = yaml.safe_load((script_run.PRESETS_DIR / "seinfeld.yaml").read_text(encoding="utf-8"))
@@ -120,3 +136,13 @@ def test_always_sunny_fake_mode_uses_preset_metadata(tmp_path: Path) -> None:
     assert manifest["preset"] == "always_sunny"
     assert manifest["provider"] == {"name": "deepseek", "model": "deepseek-v4-pro"}
     assert Path(manifest["selected_scene"]).is_file()
+
+    # --- universal result manifest (output-contract M2) -------------------
+    result_manifest_path = produces / "result_manifest.json"
+    assert result_manifest_path.is_file(), "universal result manifest not written"
+    result = json.loads(result_manifest_path.read_text(encoding="utf-8"))
+    assert result["kind"] == "script_pipeline"
+    assert result["inputs"]["preset"] == "always_sunny"
+    assert isinstance(result["outputs"], list)
+    assert isinstance(result["warnings"], list)
+    # ---------------------------------------------------------------------

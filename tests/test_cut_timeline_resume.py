@@ -53,6 +53,22 @@ class CutTimelineResumeTest(unittest.TestCase):
         self.assertEqual(assets_path.read_bytes(), original_assets)
         self.assertFalse((source_dir / "hype.edl.csv").exists())
 
+        # --- universal result manifest assertions ---
+        manifest_path = source_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "cut")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("timeline", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        output_paths = {o["path"] for o in manifest["outputs"]}
+        self.assertIn("hype.timeline.json", output_paths)
+        self.assertIn("hype.assets.json", output_paths)
+        self.assertIn("hype.metadata.json", output_paths)
+        self.assertNotIn("hype.mp4", output_paths)  # no render
+        self.assertIsInstance(manifest["warnings"], list)
+
     def test_different_out_rebases_registry_paths(self) -> None:
         source_dir = self.copy_examples()
         timeline_path = source_dir / "hype.timeline.json"
@@ -83,6 +99,22 @@ class CutTimelineResumeTest(unittest.TestCase):
         )
         self.assertTrue(Path(registry["assets"]["main"]["file"]).is_absolute())
         self.assertFalse((out_dir / "hype.edl.csv").exists())
+
+        # --- universal result manifest assertions ---
+        manifest_path = out_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "cut")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("timeline", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        output_paths = {o["path"] for o in manifest["outputs"]}
+        self.assertIn("hype.timeline.json", output_paths)
+        self.assertIn("hype.assets.json", output_paths)
+        self.assertIn("hype.metadata.json", output_paths)
+        self.assertNotIn("hype.mp4", output_paths)  # no render
+        self.assertIsInstance(manifest["warnings"], list)
 
     def test_conflicting_flags_are_rejected(self) -> None:
         source_dir = self.copy_examples()
@@ -162,6 +194,22 @@ class CutTimelineResumeTest(unittest.TestCase):
         self.assertNotEqual(updated["generated_at"], metadata["generated_at"])
         self.assertEqual(updated["pipeline"]["config_snapshot"]["mode"], "timeline_resume")
 
+        # --- universal result manifest assertions ---
+        manifest_path = out_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "cut")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("timeline", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        output_paths = {o["path"] for o in manifest["outputs"]}
+        self.assertIn("hype.timeline.json", output_paths)
+        self.assertIn("hype.assets.json", output_paths)
+        self.assertIn("hype.metadata.json", output_paths)
+        self.assertNotIn("hype.mp4", output_paths)  # no render
+        self.assertIsInstance(manifest["warnings"], list)
+
     def test_resume_mode_render_smoke(self) -> None:
         if shutil.which("ffmpeg") is None or shutil.which("npx") is None or not REMOTION_NODE_MODULES.exists():
             self.skipTest("ffmpeg, npx, and remotion/node_modules are required for the render smoke")
@@ -191,6 +239,22 @@ class CutTimelineResumeTest(unittest.TestCase):
         output = out_dir / "hype.mp4"
         self.assertTrue(output.exists())
         self.assertGreater(output.stat().st_size, 0)
+
+        # --- universal result manifest assertions ---
+        manifest_path = out_dir / "manifest.json"
+        self.assertTrue(manifest_path.is_file(), f"manifest not found at {manifest_path}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.assertEqual(manifest["kind"], "cut")
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertIsInstance(manifest["inputs"], dict)
+        self.assertIn("timeline", manifest["inputs"])
+        self.assertIsInstance(manifest["outputs"], list)
+        output_paths = {o["path"] for o in manifest["outputs"]}
+        self.assertIn("hype.timeline.json", output_paths)
+        self.assertIn("hype.assets.json", output_paths)
+        self.assertIn("hype.metadata.json", output_paths)
+        self.assertIn("hype.mp4", output_paths)  # render enabled
+        self.assertIsInstance(manifest["warnings"], list)
 
 
 if __name__ == "__main__":

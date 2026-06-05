@@ -10,11 +10,13 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('training.pool_merge')
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.element import catalog as effects_catalog
 from astrid.core.util.time import utc_now_seconds
 
@@ -106,6 +108,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata={"entries": len(merged.get("entries", [])), "theme": args.theme},
     )
     print(args.out)
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    out_file = args.out.resolve()
+    manifest_path = out_file.parent / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "pool_merge",
+        "inputs": {
+            "pool": str(args.pool.resolve()) if args.pool.exists() else None,
+            "theme": args.theme,
+        },
+        "outputs": [
+            {"path": out_file.name, "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

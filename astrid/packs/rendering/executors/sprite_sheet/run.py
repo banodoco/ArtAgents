@@ -23,6 +23,9 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from datetime import datetime, timezone
+
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
 from astrid.packs.generation.executors.generate_image_openai.run import (
@@ -1393,6 +1396,48 @@ def build(args: argparse.Namespace) -> int:
     }
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Wrote {manifest_path}")
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    universal_outputs: list[dict[str, Any]] = [
+        {"path": "layout_guide.png", "type": "file"},
+        {"path": "sprite_manifest.json", "type": "file"},
+        {"path": "frames", "type": "directory"},
+        {"path": "sprite_preview.mp4", "type": "file"},
+    ]
+    if input_sheet is None:
+        universal_outputs.append({"path": "sprite_sheet.png", "type": "file"})
+    if args.transparent:
+        universal_outputs.append({"path": "sprite_sheet_alpha.png", "type": "file"})
+    if args.prores:
+        universal_outputs.append({"path": "sprite_preview_prores.mov", "type": "file", "optional": True})
+    if final_sheet_path is not None:
+        universal_outputs.append({"path": "sprite_sheet_processed.png", "type": "file"})
+    if args.normalize_frames and normalized_frame_paths:
+        universal_outputs.append({"path": "frames_normalized", "type": "directory"})
+    if upscaled_frames:
+        universal_outputs.append({"path": "frames_upscaled", "type": "directory"})
+    if ai_upscaled_frames:
+        universal_outputs.append({"path": "frames_ai_upscaled", "type": "directory"})
+    if args.web:
+        universal_outputs.append({"path": "web", "type": "directory"})
+
+    universal_manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "sprite_sheet",
+        "inputs": {
+            "animation": args.animation,
+            "subject": args.subject,
+            "model": args.model,
+            "reference_image": str(reference_image) if reference_image is not None else None,
+            "input_sheet": str(input_sheet) if input_sheet is not None else None,
+        },
+        "outputs": universal_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(args.out_dir / "manifest.json", universal_manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

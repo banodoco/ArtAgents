@@ -1,16 +1,15 @@
 """Tests for the media.clip_extract executor.
 
 Covers validation, command construction, successful runner invocation,
-output directory behavior, and failure propagation.
+output directory behavior, failure propagation, and universal result manifest.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
-import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -20,7 +19,6 @@ from astrid.packs.media.executors.clip_extract.run import (
     main,
     validate_args,
 )
-
 
 # ── parser / argparse ──────────────────────────────────────────────────
 
@@ -120,6 +118,8 @@ def test_main_successful_runner_invocation(tmp_path: Path) -> None:
         assert cmd[0] == "ffmpeg"
         # Assert the output file path is included.
         assert str(out.resolve()) in cmd
+        out.resolve().parent.mkdir(parents=True, exist_ok=True)
+        out.resolve().write_text("fake-clip")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     rc = main(
@@ -139,6 +139,7 @@ def test_main_output_directory_created(tmp_path: Path) -> None:
     assert not out.parent.exists()
 
     def fake_runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        out.resolve().write_text("fake-clip")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     rc = main(
@@ -195,6 +196,7 @@ def test_main_runner_receives_check_false(tmp_path: Path) -> None:
 
     def fake_runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         received_kwargs.update(kwargs)
+        out.resolve().write_text("fake-clip")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     main(
@@ -212,6 +214,7 @@ def test_main_empty_stderr_on_success(tmp_path: Path) -> None:
     out = tmp_path / "out.mp4"
 
     def fake_runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        out.resolve().write_text("fake-clip")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     rc = main(
@@ -252,6 +255,7 @@ def test_main_resolves_relative_paths(tmp_path: Path, monkeypatch: pytest.Monkey
     def fake_runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
         # The resolved absolute path should appear in the ffmpeg command.
         assert str(out_rel.resolve()) in cmd
+        out_rel.resolve().write_text("fake-clip")
         return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
 
     rc = main(
@@ -259,3 +263,39 @@ def test_main_resolves_relative_paths(tmp_path: Path, monkeypatch: pytest.Monkey
         runner=fake_runner,
     )
     assert rc == 0
+
+
+# ── universal result manifest ──────────────────────────────────────────
+
+def test_main_writes_result_manifest(tmp_path: Path) -> None:
+    """Prove manifest creation through the fake runner success path without ffmpeg."""
+    src = tmp_path / "src.mp4"
+    src.write_text("fake-video")
+    out = tmp_path / "clip_output.mp4"
+
+    def fake_runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        out.resolve().write_text("fake-clip")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    rc = main(
+        ["--input", str(src), "--start", "2.5", "--dur", "10.0", "--output", str(out)],
+        runner=fake_runner,
+    )
+    assert rc == 0
+
+    manifest_path = out.parent / "manifest.json"
+    assert manifest_path.is_file(), f"manifest not found at {manifest_path}"
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["kind"] == "clip_extract"
+    assert manifest["schema_version"] == 1
+    assert isinstance(manifest["inputs"], dict)
+    assert manifest["inputs"]["input"] == str(src.resolve())
+    assert manifest["inputs"]["start"] == 2.5
+    assert manifest["inputs"]["dur"] == 10.0
+    assert isinstance(manifest["outputs"], list)
+    assert len(manifest["outputs"]) == 1
+    assert manifest["outputs"][0]["path"] == out.name
+    assert manifest["outputs"][0]["type"] == "file"
+    assert isinstance(manifest["warnings"], list)
+    assert manifest["warnings"] == []

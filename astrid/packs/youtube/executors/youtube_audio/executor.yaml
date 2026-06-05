@@ -79,6 +79,7 @@
     ]
   },
   "metadata": {
+    "output_result_manifest": true,
     "runtime_module": "astrid.packs.youtube.executors.youtube_audio.run",
     "runtime_file": "run.py"
   }

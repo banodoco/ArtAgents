@@ -10,11 +10,15 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('rendering.html_canvas_effect')
 import argparse
 import json
+import os
 import re
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 from astrid._paths import REPO_ROOT
+from astrid.contracts.result_manifest import write_manifest
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"
@@ -206,6 +210,32 @@ def main(argv: list[str] | None = None) -> int:
         )
     except (FileExistsError, OSError, ValueError) as exc:
         raise AstridError(str(exc), recovery_command="check the effect id, file paths, and permissions, then rerun") from exc
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    out_file = args.out.resolve()
+    manifest_path = out_file.parent / "manifest.json"
+    manifest_dir = manifest_path.parent
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "html_canvas_effect",
+        "inputs": {
+            "effect_id": args.effect_id,
+            "label": args.label,
+            "description": args.description,
+            "project_root": str(args.project_root.resolve()),
+        },
+        "outputs": [
+            {"path": out_file.name, "type": "file"},
+            {"path": os.path.relpath(Path(report["element_root"]).resolve(), manifest_dir), "type": "directory"},
+            {"path": os.path.relpath(Path(report["preview_timeline"]).resolve(), manifest_dir), "type": "file"},
+            {"path": os.path.relpath(Path(report["preview_assets"]).resolve(), manifest_dir), "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     print(f"html-canvas-effect: wrote {report['element_root']}")
     print(f"html-canvas-effect: report {args.out}")
     return 0

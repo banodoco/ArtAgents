@@ -13,12 +13,14 @@ import json
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid._media import ffprobe_duration_seconds
 from astrid._paths import executor_argv
 from astrid.audit import AuditContext
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.timeline import load_arrangement, load_metadata, load_pool
 from astrid.utilities.llm_clients import build_claude_client
 
@@ -820,6 +822,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         audit.register_node(stage="editor_review", label="Review rendered cut", outputs=[review_id])
     print(out_path)
+
+    # --- universal result manifest (output-contract M2) -----------------------
+    manifest_path = out_dir / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "editor_review",
+        "inputs": {
+            "brief_dir": str(brief_dir),
+            "run_dir": str(run_dir),
+        },
+        "outputs": [
+            {"path": "editor_review.json", "type": "file"},
+        ],
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 
