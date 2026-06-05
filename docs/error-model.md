@@ -6,6 +6,63 @@ the Astrid harness. It is derived from existing good patterns in
 `astrid/core/task/events.py`, `astrid/core/session/writer.py`, and the task
 runtime under `astrid/core/task/`.
 
+## Canonical Exit-Code Taxonomy
+
+Every Astrid CLI invocation returns exactly one of three exit codes.  This
+taxonomy is the contract for operators, agents, and test harnesses:
+
+| Exit Code | Meaning | When |
+|---|---|---|
+| **0** | Success | The command completed without error.  Output on stdout is the instruction surface (preamble, status text, JSON). |
+| **1** | Degraded / internal bug | An unexpected Python exception escaped the outermost catch-all and was wrapped as a degraded `AstridError` with `degraded=True`.  The operator sees `unstructured - this is a bug.` on stderr.  Exit code 1 means **this should not happen in normal operation** — it is a defect, not a user mistake. |
+| **2** | Expected recoverable failure | A known, structured failure (invalid input, missing session, bad project slug, parser error, gate rejection, missing binary, etc.) was raised as an `AstridError` with `degraded=False`.  The operator sees actionable stderr with `valid options:` and/or `recovery:` lines.  Exit code 2 means **the operator or agent can recover by following the printed instructions**. |
+
+### Lifecycle Verb Exit-Code Migration (1 → 2)
+
+Lifecycle verbs (`next`, `abort`, `ack`, `skip`, `status`, `claim`, `unclaim`,
+`start`) historically returned exit code **1** for recoverable failures (invalid
+project, no active run, gate rejections, etc.).  This was incorrect per the
+contract above: exit code **1** is reserved for degraded/internal bugs, and
+lifecycle-verb failures are almost always **recoverable operator/environment
+issues** that should return exit code **2**.
+
+**Migration rule:** Any lifecycle verb that currently `return 1` for a
+recoverable operator-facing failure (bad project slug, missing session, no
+active run, gate rejection, unknown step, invalid ack target, etc.) **must**
+instead raise an `AstridError` (with the appropriate `valid_options` and
+`recovery_command`) or return `2` directly when the call path does not unwind
+through `pipeline.main()`.  The `render_astrid_error()` function already returns
+`2` for non-degraded `AstridError` instances, so code that raises `AstridError`
+automatically gets the correct exit code.
+
+Lifecycle verbs that return `0` for success are already correct and do not need
+to change.  Lifecycle verbs that legitimately trap unexpected Python exceptions
+and intentionally degrade them (wrapping in a degraded `AstridError`) may still
+return `1`, but this should be rare — most lifecycle error paths are known
+recoverable conditions.
+
+### Recovery-Command Expectations
+
+When an `AstridError` carries a `recovery_command`, that string is the **exact
+next command the operator or agent should run** to resolve the failure.  The
+recovery command is printed on stderr as:
+
+```
+recovery: <command text>
+```
+
+Agents MUST treat the recovery command as the canonical next action.  They
+should:
+
+1. Parse `recovery:` from stderr.
+2. Execute the recovery command exactly as printed (possibly after resolving
+   placeholders like project slugs).
+3. Re-run the original command only if the recovery command says to retry.
+
+When an `AstridError` has no `recovery_command` (empty string), the recovery
+instruction is not known — agents should fall back to the `valid options:` list
+or report the failure.
+
 ## Boundary Rules
 
 - CLI boundaries catch named domain exception tuples, print actionable stderr,

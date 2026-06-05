@@ -30,6 +30,7 @@ from astrid.core.project.paths import (
 )
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.claim import active_claims_by_step
+from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.command_render import render_task_command
 from astrid.core.task.events import (
     EventLogError,
@@ -152,6 +153,67 @@ def _emit_for_each_autoclose_audit(plan, events: Sequence[dict]) -> None:
             file=sys.stderr,
         )
 
+def _status_json(
+    *,
+    slug: str,
+    run_id: str,
+    plan,
+    events: Sequence[dict],
+    peek,
+    claims: dict[str, str],
+    completed: int,
+    total: int,
+    proj_root: Path,
+) -> int:
+    """Emit the ``cmd_status --json`` payload via the shared lifecycle helper."""
+    run_state = RunStatus.from_run_events(events).value
+    payload: dict[str, Any] = {
+        "progress_completed": completed,
+        "progress_total": total,
+        "current_step": None,
+        "current_step_kind": None,
+        "current_step_version": None,
+        "current_step_iteration": None,
+        "current_step_item_id": None,
+        "inbox_pending": pending_count(proj_root / "runs" / run_id),
+    }
+    if not (peek.exhausted or peek.step is None):
+        path_str = STEP_PATH_SEP.join(peek.path_tuple)
+        payload["current_step"] = path_str
+        payload["current_step_kind"] = (
+            "nested" if is_group_step(peek.step)
+            else "attested" if is_attested_kind(peek.step)
+            else "code"
+        )
+        payload["current_step_version"] = peek.step.version
+        payload["current_step_iteration"] = peek.iteration
+        payload["current_step_item_id"] = peek.item_id
+        claimed_identity = claims.get(path_str)
+        if peek.step.assignee != "system" or claimed_identity is not None:
+            payload["owner_assignee"] = getattr(peek.step, "assignee", "system")
+            payload["owner_claimed"] = claimed_identity
+
+    # Mirror the same diagnostics that the human path surfaces — packed into
+    # the JSON payload as structured fields rather than prose.
+    inline_failure = _inline_failure_tail(events)
+    if inline_failure is not None:
+        payload["blocked_reason"] = f"produces check failed: {_format_inline_failure_tail(inline_failure)}"
+        payload["blocked_step"] = STEP_PATH_SEP.join(inline_failure.path) if inline_failure.path else None
+    elif events and isinstance(events[-1], dict) and events[-1].get("kind") in {"cursor_rewind", "iteration_failed"}:
+        reason = events[-1].get("reason")
+        if reason:
+            payload["blocked_reason"] = reason
+            blocked_path = _path_tuple_from_event(events[-1])
+            payload["blocked_step"] = STEP_PATH_SEP.join(blocked_path) if blocked_path else None
+
+    return emit_lifecycle_json(
+        project=slug,
+        run_id=run_id,
+        state=run_state,
+        **payload,
+    )
+
+
 def cmd_status(
     argv: Sequence[str],
     *,
@@ -159,6 +221,11 @@ def cmd_status(
 ) -> int:
     parser = argparse.ArgumentParser(prog="astrid status", add_help=True)
     parser.add_argument("--project", required=True, help="project slug")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exactly one machine-readable status object on stdout",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
@@ -170,12 +237,22 @@ def cmd_status(
         _print_err(f"status: {exc}")
         return 1
 
+    json_mode = bool(args.json)
+
     active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
-        _print_err(
+        msg = (
             f"status: no active run for project {slug!r}; "
             f"recovery: astrid start <orchestrator-id> --project {slug}"
         )
+        if json_mode:
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=None,
+                state="no_active_run",
+                error=msg,
+            )
+        _print_err(msg)
         return 1
 
     run_id = active_run["run_id"]
@@ -191,9 +268,24 @@ def cmd_status(
         plan, events, slug, project_root=proj_root, run_id=run_id
     )
 
+    completed, total = _leaf_progress(plan, events)
+
+    if json_mode:
+        return _status_json(
+            slug=slug,
+            run_id=run_id,
+            plan=plan,
+            events=events,
+            peek=peek,
+            claims=claims,
+            completed=completed,
+            total=total,
+            proj_root=proj_root,
+        )
+
+    # ---- default human-readable stdout path ----
     print(f"run-id:    {run_id}")
     print(f"plan-hash: {plan_hash}")
-    completed, total = _leaf_progress(plan, events)
     print(f"progress:  {completed} of {total} steps complete")
     _emit_for_each_autoclose_audit(plan, events)
     if peek.exhausted or peek.step is None:
@@ -220,20 +312,23 @@ def cmd_status(
     if pending > 0:
         print(f"inbox:     {pending} pending")
 
+    # Diagnostics: produces-check failures and cursor-rewind errors go to stderr
     inline_failure = _inline_failure_tail(events)
     if inline_failure is not None:
         path_str = STEP_PATH_SEP.join(inline_failure.path)
         print(
             f"{RunStatus.BLOCKED.value}:   produces check failed"
             f"{f' for {path_str}' if path_str else ''}: "
-            f"{_format_inline_failure_tail(inline_failure)}"
+            f"{_format_inline_failure_tail(inline_failure)}",
+            file=sys.stderr,
         )
     elif events and isinstance(events[-1], dict) and events[-1].get("kind") in {"cursor_rewind", "iteration_failed"}:
         reason = events[-1].get("reason")
         if reason:
             path_str = STEP_PATH_SEP.join(_path_tuple_from_event(events[-1]))
             print(
-                f"{RunStatus.BLOCKED.value}:   {f'{path_str}: ' if path_str else ''}{reason}"
+                f"{RunStatus.BLOCKED.value}:   {f'{path_str}: ' if path_str else ''}{reason}",
+                file=sys.stderr,
             )
 
     print("recent events:")
@@ -439,38 +534,8 @@ NEXT_JSON_SCHEMA: dict[str, str] = {
 
 
 @dataclass(frozen=True)
-class _NextJson:
-    project: str | None
-    run_id: str | None
-    state: str
-    action: str | None
-    command: str | None
-    step: str | None
-    blocked: bool
-    reason: str | None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": 1,
-            "project": self.project,
-            "run_id": self.run_id,
-            "state": self.state,
-            "action": self.action,
-            "command": self.command,
-            "step": self.step,
-            "blocked": self.blocked,
-            "reason": self.reason,
-        }
-
-
-@dataclass(frozen=True)
 class _AckTemplate:
     command: str
-
-
-def _emit_next_json(payload: _NextJson) -> int:
-    print(json.dumps(payload.to_dict(), sort_keys=True))
-    return 0
 
 def _has_host_step_attested(events, host_path_tuple) -> bool:
     path_str = STEP_PATH_SEP.join(host_path_tuple)
@@ -698,13 +763,18 @@ def cmd_next(
         action="store_true",
         help="emit exactly one machine-readable next-action object on stdout",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="suppress the prohibition preamble and separator; keep actionable prose",
+    )
     try:
         args = parser.parse_args(list(argv))
     except SystemExit as exc:
         return _system_exit_code(exc)
 
     json_mode = bool(args.json)
-    if not json_mode:
+    if not json_mode and not args.quiet:
         # Always print preamble first, verbatim, every call (SD-023) — even on
         # error / exhausted paths so Stop-hook context re-injection is consistent.
         print(PROHIBITION_PREAMBLE)
@@ -755,17 +825,15 @@ def cmd_next(
     if session is None:
         if json_mode:
             command = f"astrid attach {slug}" if slug and explicit_project else "astrid status"
-            return _emit_next_json(
-                _NextJson(
-                    project=slug if explicit_project else None,
-                    run_id=None,
-                    state="unbound",
-                    action="attach" if slug and explicit_project else "none",
-                    command=command,
-                    step=None,
-                    blocked=False,
-                    reason="no session bound",
-                )
+            return emit_lifecycle_json(
+                project=slug if explicit_project else None,
+                run_id=None,
+                state="unbound",
+                action="attach" if slug and explicit_project else "none",
+                command=command,
+                step=None,
+                blocked=False,
+                reason="no session bound",
             )
         _print_next_unbound_hint(
             projects_root,
@@ -784,17 +852,15 @@ def cmd_next(
     active_run = read_current_run_state(slug, root=projects_root)
     if active_run is None:
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=None,
-                    state="no_active_run",
-                    action="start",
-                    command=f"astrid start <orchestrator-id> --project {slug}",
-                    step=None,
-                    blocked=False,
-                    reason="session bound but no active task run",
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=None,
+                state="no_active_run",
+                action="start",
+                command=f"astrid start <orchestrator-id> --project {slug}",
+                step=None,
+                blocked=False,
+                reason="session bound but no active task run",
             )
         # SESSION BOUND, NO RUN: print orchestrator suggestions + the
         # exact `astrid start` template the agent should type next.
@@ -836,17 +902,15 @@ def cmd_next(
         and not is_writer_for(_session, run_dir)
     ):
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=run_id,
-                    state="reader",
-                    action="claim",
-                    command=f"astrid sessions takeover {run_id}",
-                    step=None,
-                    blocked=True,
-                    reason="attached as reader; another session holds the writer lease",
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=run_id,
+                state="reader",
+                action="claim",
+                command=f"astrid sessions takeover {run_id}",
+                step=None,
+                blocked=True,
+                reason="attached as reader; another session holds the writer lease",
             )
         print(f"attached to {slug!r} as reader — another session holds the writer lease.")
         print()
@@ -899,17 +963,15 @@ def cmd_next(
     if isinstance(tail_action, _RewindRetry):
         path_str = STEP_PATH_SEP.join(tail_action.path) if tail_action.path else ""
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=run_id,
-                    state="blocked",
-                    action="ack",
-                    command=None,
-                    step=path_str or None,
-                    blocked=True,
-                    reason=f"previous attempt rejected: {tail_action.reason}",
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=run_id,
+                state="blocked",
+                action="ack",
+                command=None,
+                step=path_str or None,
+                blocked=True,
+                reason=f"previous attempt rejected: {tail_action.reason}",
             )
         msg = (
             f"Previous attempt rejected: {tail_action.reason}. "
@@ -924,17 +986,15 @@ def cmd_next(
             f"--agent <id> --evidence ..."
         )
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=run_id,
-                    state="ready",
-                    action="ack",
-                    command=command,
-                    step=host_path_str,
-                    blocked=False,
-                    reason="all for_each items complete; close the host step",
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=run_id,
+                state="ready",
+                action="ack",
+                command=command,
+                step=host_path_str,
+                blocked=False,
+                reason="all for_each items complete; close the host step",
             )
         msg = (
             f"All items complete. Close the host with `{command}` (omit --item)."
@@ -946,17 +1006,15 @@ def cmd_next(
         return 0
     if isinstance(tail_action, _RunComplete):
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=run_id,
-                    state="complete",
-                    action="none",
-                    command=None,
-                    step=None,
-                    blocked=False,
-                    reason="run complete",
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=run_id,
+                state="complete",
+                action="none",
+                command=None,
+                step=None,
+                blocked=False,
+                reason="run complete",
             )
         print(render_step_instructions(
             "Run complete. Nothing to do.",
@@ -1001,7 +1059,8 @@ def cmd_next(
             )
             with writer_context_for_project(slug, root=projects_root) as writer:
                 writer.append(skip_event)
-            print(f"skipped {STEP_PATH_SEP.join(peek.path_tuple)}")
+            if not json_mode:
+                print(f"skipped {STEP_PATH_SEP.join(peek.path_tuple)}")
             events = read_events(events_path)
             peek = peek_current_step(
                 plan, events, slug, project_root=proj_root, run_id=run_id
@@ -1011,6 +1070,17 @@ def cmd_next(
                 plan, events, events_path, run_id,
                 slug=slug, projects_root=projects_root,
             )
+            if json_mode:
+                return emit_lifecycle_json(
+                    project=slug,
+                    run_id=run_id,
+                    state="complete",
+                    action="none",
+                    command=None,
+                    step=None,
+                    blocked=False,
+                    reason="run complete (all optional steps skipped)",
+                )
             return 0
         # Fall through into normal print of the now-non-optional step.
 
@@ -1020,17 +1090,15 @@ def cmd_next(
             slug=slug, projects_root=projects_root,
         ):
             if json_mode:
-                return _emit_next_json(
-                    _NextJson(
-                        project=slug,
-                        run_id=run_id,
-                        state="complete",
-                        action="none",
-                        command=None,
-                        step=None,
-                        blocked=False,
-                        reason="run complete",
-                    )
+                return emit_lifecycle_json(
+                    project=slug,
+                    run_id=run_id,
+                    state="complete",
+                    action="none",
+                    command=None,
+                    step=None,
+                    blocked=False,
+                    reason="run complete",
                 )
             print(render_step_instructions(
                 "Run complete. Nothing to do.",
@@ -1054,17 +1122,15 @@ def cmd_next(
         else:
             if json_mode:
                 parked = STEP_PATH_SEP.join(peek.path_tuple) if peek.path_tuple else "<root>"
-                return _emit_next_json(
-                    _NextJson(
-                        project=slug,
-                        run_id=run_id,
-                        state="blocked",
-                        action="none",
-                        command=None,
-                        step=parked,
-                        blocked=True,
-                        reason="cursor parked with no legal action",
-                    )
+                return emit_lifecycle_json(
+                    project=slug,
+                    run_id=run_id,
+                    state="blocked",
+                    action="none",
+                    command=None,
+                    step=parked,
+                    blocked=True,
+                    reason="cursor parked with no legal action",
                 )
             parked = STEP_PATH_SEP.join(peek.path_tuple) if peek.path_tuple else "<root>"
             print(
@@ -1101,17 +1167,15 @@ def cmd_next(
         )
         command = render_step_instructions(rendered.display_command, **_render_kwargs)
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=run_id,
-                    state="ready",
-                    action="run",
-                    command=command,
-                    step=path_str,
-                    blocked=False,
-                    reason=None,
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=run_id,
+                state="ready",
+                action="run",
+                command=command,
+                step=path_str,
+                blocked=False,
+                reason=None,
             )
         print(f"run: {command}")
         if not _command_has_project_arg(rendered.canonical_command):
@@ -1142,17 +1206,15 @@ def cmd_next(
             has_repeat_for_each=host_has_for_each,
         )
         if json_mode:
-            return _emit_next_json(
-                _NextJson(
-                    project=slug,
-                    run_id=run_id,
-                    state="ready",
-                    action="ack",
-                    command=ack_template.command,
-                    step=path_str,
-                    blocked=False,
-                    reason=None,
-                )
+            return emit_lifecycle_json(
+                project=slug,
+                run_id=run_id,
+                state="ready",
+                action="ack",
+                command=ack_template.command,
+                step=path_str,
+                blocked=False,
+                reason=None,
             )
         print(render_step_instructions(
             peek.step.instructions or peek.step.command or "",

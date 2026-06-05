@@ -57,11 +57,13 @@ from astrid.core.session.model import (
     SessionRecordNotFoundError,
     SessionRole,
     SessionStore,
+    SessionStoreError,
 )
 from astrid.core.session.paths import (
     session_path,
     sessions_dir,
 )
+from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.events import EVENTS_FILENAME, read_events
 from astrid.core.timeline import crud as timeline_crud
 from astrid.core.timeline.defaults import read_project_default
@@ -99,7 +101,9 @@ def _parse_agent_override(raw: str) -> str:
     return validate_agent_slug(raw[len("agent:") :])
 
 
-def _ensure_identity(*, prompt: Any = None, out: Any = None) -> Identity:
+def _ensure_identity(
+    *, prompt: Any = None, out: Any = None, allow_prompt: bool = True
+) -> Identity:
     """Return the on-disk identity, triggering first-run bootstrap if absent.
 
     ``prompt`` is forwarded to :func:`bootstrap_identity`; ``None`` lets
@@ -111,6 +115,11 @@ def _ensure_identity(*, prompt: Any = None, out: Any = None) -> Identity:
     existing = read_identity()
     if existing is not None:
         return existing
+    if not allow_prompt:
+        raise IdentityError(
+            "agent identity is not configured; run `astrid attach` without "
+            "`--json` first to bootstrap identity"
+        )
     print(FIRST_RUN_PROMPT_HEADER, file=out)
     return bootstrap_identity(prompt=prompt)
 
@@ -227,18 +236,76 @@ def _is_target_warm(run_dir: Path) -> bool:
     return age < STUCK_NO_EVENT_SECONDS
 
 
+def _json_mode(args: argparse.Namespace) -> bool:
+    return bool(getattr(args, "json", False))
+
+
+def _emit_notice(message: str, *, json_mode: bool, out: Any) -> None:
+    print(message, file=sys.stderr if json_mode else out)
+
+
+def _emit_attach_json(
+    *,
+    project: str,
+    run_id: str | None,
+    session_id: str,
+    agent_id: str,
+    timeline: str | None,
+    role: SessionRole,
+    attach_kind: str,
+    out: Any,
+) -> int:
+    return emit_lifecycle_json(
+        project=project,
+        run_id=run_id,
+        state="attached",
+        stream=out,
+        session_id=session_id,
+        agent_id=agent_id,
+        timeline=timeline,
+        role=role,
+        export_line=EXPORT_LINE_TEMPLATE.format(sid=session_id),
+        attach_kind=attach_kind,
+    )
+
+
+def _status_state_for(role: str, run_id: str | None) -> str:
+    if run_id is None:
+        return "session_bound"
+    if role == "lease-error":
+        return "lease_error"
+    return role.replace("-", "_")
+
+
+def _compact_recent_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    recent: list[dict[str, Any]] = []
+    for ev in events[-5:]:
+        recent.append(
+            {
+                "kind": str(ev.get("kind", "?")),
+                "ts": str(ev.get("ts", "")),
+            }
+        )
+    return recent
+
+
 # ----- cmd_attach -------------------------------------------------------
 
 
 def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
     if out is None:
         out = sys.stdout
+    json_mode = _json_mode(args)
     projects_root = resolve_projects_root()
     session_root = sessions_dir()
     try:
-        identity = _ensure_identity(out=out)
+        identity = _ensure_identity(out=out, allow_prompt=not json_mode)
     except IdentityError as exc:
-        raise AstridError(f"attach: {exc}", recovery_command="astrid status") from exc
+        project_hint = getattr(args, "project", None) or "<project>"
+        raise AstridError(
+            f"attach: {exc}",
+            recovery_command=f"astrid attach {project_hint}",
+        ) from exc
     agent_id = identity.agent_id
     if args.as_agent:
         try:
@@ -274,6 +341,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
         # Resumed sessions: use the stored timeline info; do NOT backfill.
         resolved_timeline_slug = session.timeline
         resolved_timeline_id = session.timeline_id
+        attach_kind = "resumed"
     else:
         explicit_project = args.project is not None
         slug = args.project or resolve_default_project()
@@ -336,6 +404,17 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                 opened_at=utc_now_iso(),
                 write_project_pointer=True,
             ).session
+            if json_mode:
+                return _emit_attach_json(
+                    project=refreshed.project,
+                    run_id=refreshed.run_id,
+                    session_id=refreshed.id,
+                    agent_id=refreshed.agent_id,
+                    timeline=refreshed.timeline,
+                    role=refreshed.role,
+                    attach_kind="reused",
+                    out=out,
+                )
             print(ATTACH_HEADER_REUSED, file=out)
             print(f"export ASTRID_SESSION_ID={refreshed.id}", file=out)
             print(f"project: {refreshed.project}", file=out)
@@ -367,10 +446,11 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                 if default_slug is not None:
                     resolved_timeline_id = default_ulid
                     resolved_timeline_slug = default_slug
-                    print(
+                    _emit_notice(
                         f"Using default timeline: {default_slug}. "
                         f"Use --timeline to override.",
-                        file=out,
+                        json_mode=json_mode,
+                        out=out,
                     )
                 else:
                     resolved_timeline_slug = None
@@ -385,13 +465,21 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                 if not available:
                     # Bootstrap case: no timelines at all.  Proceed without one;
                     # the user can create timelines once attached.
-                    print(
+                    _emit_notice(
                         f"attach: no timelines exist for project '{slug}' yet; "
                         "session bound without a timeline. "
                         "Run `astrid timelines create <slug>` to make one.",
-                        file=out,
+                        json_mode=json_mode,
+                        out=out,
                     )
                     resolved_timeline_slug = None
+                elif json_mode:
+                    raise AstridError(
+                        "attach: no default timeline; pass --timeline <slug>",
+                        valid_options=[t.slug for t in available],
+                        recovery_command=f"astrid attach {slug} --timeline <slug>",
+                        state_snapshot={"project": slug},
+                    )
                 elif sys.stdin.isatty():
                     print("Available timelines:", file=out)
                     for t in available:
@@ -431,6 +519,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
             write_project_pointer=True,
         ).session
         sid = session.id
+        attach_kind = "fresh"
         if getattr(args, "set_default", False):
             set_default_project(
                 slug,
@@ -453,11 +542,22 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
                 writer=attached, run_id=on_disk_run_id
             )
 
+    if json_mode:
+        return _emit_attach_json(
+            project=slug,
+            run_id=on_disk_run_id,
+            session_id=sid,
+            agent_id=session.agent_id,
+            timeline=resolved_timeline_slug,
+            role=role,
+            attach_kind=attach_kind,
+            out=out,
+        )
     print(ATTACH_HEADER, file=out)
     if not args.session and getattr(args, "set_default", False):
         scope = "user" if getattr(args, "user_default", False) else "workspace"
         label = "saved default project" if explicit_project else "using default project"
-        print(f"{label} ({scope}): {slug}", file=out)
+        _emit_notice(f"{label} ({scope}): {slug}", json_mode=json_mode, out=out)
     print(EXPORT_LINE_TEMPLATE.format(sid=sid), file=out)
     print(f"project: {slug}", file=out)
     print(f"timeline: {resolved_timeline_slug or NONE_PLACEHOLDER}", file=out)
@@ -719,7 +819,8 @@ def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
     if out is None:
         out = sys.stdout
     try:
-        from datetime import datetime, timedelta, timezone as dt_timezone
+        from datetime import datetime, timedelta
+        from datetime import timezone as dt_timezone
 
         now = datetime.now(dt_timezone.utc)
         cutoff = now - timedelta(days=args.older_than_days)
@@ -789,7 +890,7 @@ def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
         try:
             _session_store().delete(s.id)
             deleted += 1
-        except Exception as exc:
+        except (OSError, SessionStoreError) as exc:
             errors.append({"session_id": s.id, "path": str(spath), "error": str(exc)})
 
     print(file=out)
@@ -822,7 +923,11 @@ def cmd_status(args: argparse.Namespace, *, out: Any = None) -> int:
         raise AstridError(f"status: {exc}", recovery_command="astrid status") from exc
 
     if session is None:
+        if _json_mode(args):
+            return _render_unbound_status_json(out=out)
         return _render_unbound_status(out=out)
+    if _json_mode(args):
+        return _render_bound_status_json(session, out=out)
     return _render_bound_status(session, out=out)
 
 
@@ -860,6 +965,31 @@ def _render_unbound_status(*, out: Any) -> int:
     print("after attach:", file=out)
     _print_discovery_hints(out=out)
     return 0
+
+
+def _render_unbound_status_json(*, out: Any) -> int:
+    default = resolve_default_project()
+    projects = discover_projects()
+    default_is_available = bool(default and default in projects)
+    if default_is_available:
+        next_command = "astrid attach"
+    elif len(projects) == 1:
+        next_command = f"astrid attach {projects[0]}"
+    elif projects:
+        next_command = "astrid attach <project>"
+    else:
+        next_command = "astrid projects create <slug>"
+    return emit_lifecycle_json(
+        project=None,
+        run_id=None,
+        state="no_session_bound",
+        stream=out,
+        session_id=None,
+        default_project=default,
+        default_project_available=default_is_available,
+        discovered_projects=projects,
+        next_command=next_command,
+    )
 
 
 def _print_discovery_hints(*, out: Any) -> None:
@@ -997,6 +1127,101 @@ def _render_bound_status(session: Session, *, out: Any) -> int:
     return 0
 
 
+def _render_bound_status_json(session: Session, *, out: Any) -> int:
+    agent_id = session.agent_id
+    if not agent_id:
+        identity = read_identity()
+        agent_id = identity.agent_id if identity else session.agent_id
+
+    on_disk_run_id = read_current_run(session.project)
+    run_id = on_disk_run_id or session.run_id
+
+    timeline_slug = session.timeline
+    timeline_final_count = 0
+    if timeline_slug is None and session.timeline_id is None:
+        default_ulid = read_project_default(session.project)
+        if default_ulid is not None:
+            default_slug = find_timeline_slug_for_ulid(session.project, default_ulid)
+            if default_slug is not None:
+                timeline_slug = default_slug
+    if timeline_slug is None and session.timeline_id is not None:
+        timeline_slug = find_timeline_slug_for_ulid(session.project, session.timeline_id)
+    if timeline_slug is not None:
+        try:
+            data = timeline_crud.show_timeline(session.project, timeline_slug)
+            if data is not None:
+                timeline_final_count = len(data["manifest"].final_outputs)
+        except Exception as exc:  # noqa: BLE001
+            log_and_swallow(exc, context="session.cli.status.timeline_count")
+
+    current_step = NONE_PLACEHOLDER
+    recent_events: list[dict[str, Any]] = []
+    inbox_count = 0
+    role = str(session.role)
+    takeover_hint: str | None = None
+    lease_error: str | None = None
+
+    if run_id is not None:
+        run_dir = project_dir(session.project) / "runs" / run_id
+        events_path = run_dir / EVENTS_FILENAME
+        if events_path.exists():
+            events = read_events(events_path)
+            recent_events = _compact_recent_events(events)
+            for ev in reversed(events):
+                if ev.get("kind") == "step_dispatched":
+                    current_step = str(ev.get("plan_step_id") or ev.get("kind"))
+                    break
+            else:
+                if events:
+                    current_step = str(events[-1].get("kind", NONE_PLACEHOLDER))
+        inbox_dir = run_dir / "inbox"
+        if inbox_dir.exists():
+            inbox_count = sum(1 for p in inbox_dir.iterdir() if p.is_file())
+        try:
+            lease = read_lease(run_dir)
+        except LeaseError as exc:
+            lease = {"attached_session_id": None}
+            lease_error = str(exc)
+        attached = lease.get("attached_session_id")
+        if lease_error is not None:
+            role = "lease-error"
+            takeover_hint = (
+                f"lease error: {lease_error}; recovery: inspect {run_id}/lease.json "
+                "or migrate legacy active_run.json before writing"
+            )
+        elif attached is None:
+            role = "orphan-pending"
+            takeover_hint = TAKEOVER_HINT_ORPHAN.format(run_id=run_id)
+        elif attached != session.id:
+            role = "reader"
+            takeover_hint = TAKEOVER_HINT_READER.format(writer=attached, run_id=run_id)
+        else:
+            role = "writer"
+
+    task_command = (
+        f"astrid next --project {session.project}"
+        if run_id is not None
+        else f"astrid start <orchestrator-id> --project {session.project}"
+    )
+    return emit_lifecycle_json(
+        project=session.project,
+        run_id=run_id,
+        state=_status_state_for(role, run_id),
+        stream=out,
+        session_id=session.id,
+        agent_id=agent_id,
+        timeline=timeline_slug,
+        timeline_final_output_count=timeline_final_count,
+        current_step=current_step,
+        recent_events=recent_events,
+        inbox_count=inbox_count,
+        role=role,
+        takeover_hint=takeover_hint,
+        task_command=task_command,
+        lease_error=lease_error,
+    )
+
+
 # ----- argparse glue ----------------------------------------------------
 
 
@@ -1030,6 +1255,7 @@ def build_parser() -> argparse.ArgumentParser:
             "reuses prior sessions; --fresh opts out."
         ),
     )
+    attach.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     attach.set_defaults(handler=cmd_attach)
 
     ls = sub.add_parser("ls", aliases=["list"], help="List sessions in ~/.astrid/sessions/.")
@@ -1059,6 +1285,7 @@ def build_parser() -> argparse.ArgumentParser:
     prune.set_defaults(handler=cmd_sessions_prune)
 
     status = sub.add_parser("status", help="Print the current session breadcrumb.")
+    status.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     status.set_defaults(handler=cmd_status)
 
     return parser

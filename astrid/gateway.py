@@ -351,7 +351,7 @@ def _dispatch_status(args: list[str]) -> int:
     from .core.session.cli import build_parser
     from .core.session.cli import cmd_status as session_status
 
-    status_args = ["status", *[arg for arg in args if arg in {"-h", "--help"}]]
+    status_args = ["status", *[arg for arg in args if arg in {"-h", "--help", "--json"}]]
     parsed = build_parser().parse_args(status_args)
     return int(session_status(parsed))
 
