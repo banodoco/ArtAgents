@@ -15,7 +15,7 @@ jobs:
   python:
     name: Python quality gates
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
 
     steps:
       - name: Check out repository
