@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from astrid.contracts.run_status import RunStatus
+from astrid.core.env_vars import ASTRID_SESSION_ID
 from astrid.core.task import env as task_env
 from astrid.core.task.plan import step_dir_for
 from astrid.core.util.time import utc_now_seconds
@@ -141,7 +142,7 @@ def prepare_project_run(
     base_metadata.setdefault("pid", os.getpid())
     base_metadata.setdefault("prepared_at", prepared_at)
     base_metadata.setdefault("process_platform", sys.platform)
-    effective_session_id = session_id or os.environ.get("ASTRID_SESSION_ID")
+    effective_session_id = session_id or os.environ.get(ASTRID_SESSION_ID)
     if auto_bound is not None:
         base_metadata.pop("project_was_auto_resolved", None)
     parent_run_id = task_env.task_run_id_env()

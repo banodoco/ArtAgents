@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from astrid.core.env_vars import ASTRID_BANODOCO_CATALOG_URL
 from .install import GitExecutorSource, fetch_git_executor_manifest
 from .schema import ExecutorDefinition, ExecutorValidationError, validate_executor_definition
 
@@ -34,7 +35,7 @@ class BanodocoCatalogConfig:
         cache_var = "ASTRID_BANODOCO_EXECUTOR_CACHE"
         return cls(
             enabled=_env_bool(enabled_var, default=False),
-            catalog_url=os.environ.get("ASTRID_BANODOCO_CATALOG_URL"),
+            catalog_url=os.environ.get(ASTRID_BANODOCO_CATALOG_URL),
             include_defaults=_env_bool("ASTRID_BANODOCO_DEFAULT_EXECUTORS", default=True),
             include_mandatory=_env_bool("ASTRID_BANODOCO_MANDATORY_EXECUTORS", default=True),
             cache_dir=Path(os.environ[cache_var]).expanduser()

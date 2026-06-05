@@ -46,6 +46,10 @@ class Session:
     agent_id: str
     attached_at: str
     last_used_at: str
+    # Snapshot/hint only — the on-disk session role records what the session
+    # believed at write time. The writer lease is AUTHORITATIVE for the live
+    # role; readers needing truth must consult the lease (see
+    # lifecycle._derive_role_and_run_id and cli.cmd_status's lease correction).
     role: SessionRole
     timeline: str | None = None
     timeline_id: str | None = None

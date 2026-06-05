@@ -191,9 +191,11 @@ def _main_impl(raw: list[str]) -> int:
                 projects_root=resolve_projects_root(),
             )
         except SessionBindingError as exc:
+            _project_hint = _extract_project_slug(raw)
+            _recovery_cmd = f"astrid attach {_project_hint}" if _project_hint else "astrid status"
             raise AstridError(
                 f"session: {exc}",
-                recovery_command="astrid status",
+                recovery_command=_recovery_cmd,
                 state_snapshot={"argv": raw},
             ) from exc
         if session is None:
@@ -205,10 +207,11 @@ def _main_impl(raw: list[str]) -> int:
                 if project_hint
                 else "`astrid attach <project>`"
             )
+            recovery_cmd = f"astrid attach {project_hint}" if project_hint else "astrid status"
             raise AstridError(
                 f"no session bound — run `astrid status` to list projects, then {attach_hint} "
                 "(or `astrid attach` if a default project is configured)",
-                recovery_command="astrid status",
+                recovery_command=recovery_cmd,
                 state_snapshot={"argv": raw, "project": project_hint},
             )
 

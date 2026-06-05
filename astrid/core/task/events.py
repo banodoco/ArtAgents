@@ -42,6 +42,7 @@ import os
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from astrid.contracts.event_hash import hash_prepended
 from astrid.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.util.time import utc_now_iso
 
@@ -825,8 +826,7 @@ def make_cursor_rewind_event(
 
 
 def _event_hash(prev_hash: str, event: dict[str, Any]) -> str:
-    digest = hashlib.sha256((prev_hash + canonical_event_json(event)).encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
+    return hash_prepended(prev_hash, event)
 
 
 def _read_tail_hash(handle) -> str:

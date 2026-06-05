@@ -923,16 +923,19 @@ class TestMissingDocsAndFiles(MinimalPackTestCase):
             f"Expected entrypoint not found error, got: {errors}",
         )
 
-    def test_missing_stage_md_warns(self) -> None:
+    def test_missing_stage_md_errors(self) -> None:
         root = self.make_pack_root()
         self.write_valid_pack(root)
         self.write_valid_executor(root)
         (root / "executors" / "test_exec" / "STAGE.md").unlink()
         errors, warnings = validate_pack(root)
-        self.assertEqual(errors, [])
         self.assertTrue(
+            any("STAGE.md" in e for e in errors),
+            f"Expected STAGE.md error, got errors={errors}, warnings={warnings}",
+        )
+        self.assertFalse(
             any("STAGE.md" in w for w in warnings),
-            f"Expected STAGE.md warning, got: {warnings}",
+            f"STAGE.md should not appear in warnings: {warnings}",
         )
 
     def test_missing_pack_yaml(self) -> None:

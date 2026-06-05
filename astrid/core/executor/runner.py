@@ -18,6 +18,7 @@ from typing import Any, Literal, Mapping
 
 from astrid._paths import REPO_ROOT
 from astrid.contracts.capability_runner import CapabilityRunner
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.contracts.exec_error import (
     ExecError,
     error_from_missing_binaries,
@@ -243,7 +244,7 @@ def _request_argv_for_gate(request: ExecutorRunRequest) -> tuple[str, ...]:
             return request.argv
         if request.argv[0] == "run":
             argv = _canonicalize_runner_argv_paths(request.argv)
-            if request.project or os.environ.get("ASTRID_INTERNAL_INVOCATION") != "1":
+            if request.project or os.environ.get(ASTRID_INTERNAL_INVOCATION) != "1":
                 return ("executors", *argv)
             return ("python3", "-m", "astrid", "executors", *argv)
         return ("executors", *request.argv)

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
+from astrid.contracts.schema_validators import require_uuid_str
 from astrid.core.timeline.kinds import (
     normalize_event_clip_kind,
     normalize_track_kind,
@@ -117,13 +118,7 @@ def is_event_ulid(value: object) -> bool:
 
 
 def _require_uuid_str(value: object, field: str) -> str:
-    if not isinstance(value, str):
-        raise TimelineEventSchemaError(f"{field} must be a UUID string")
-    try:
-        UUID(value)
-    except ValueError as exc:
-        raise TimelineEventSchemaError(f"{field} must be a UUID string") from exc
-    return value
+    return require_uuid_str(value, field, TimelineEventSchemaError)
 
 
 def _require_ulid_str(value: object, field: str) -> str:

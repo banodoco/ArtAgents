@@ -107,7 +107,9 @@ def test_every_gated_verb_errors_without_session(
     assert rc == 2
     assert stderr.splitlines()[0].startswith("no session bound")
     assert "no session bound" in stderr
-    assert "recovery: astrid status" in stderr
+    # After T5 fix: recovery is 'astrid attach <project>' when --project is in
+    # argv, else 'astrid status'. Both forms start with 'astrid'.
+    assert "recovery: astrid" in stderr
     assert "astrid attach" in stderr
 
 

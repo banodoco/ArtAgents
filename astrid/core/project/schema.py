@@ -17,6 +17,7 @@ from uuid import UUID
 
 from astrid.contracts.errors import AstridError
 from astrid.contracts.run_status import RunStatus
+from astrid.contracts.schema_validators import require_uuid_str
 from astrid.core.util.time import utc_now_seconds
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id
@@ -351,11 +352,4 @@ def _validate_run_invocation(raw: Any) -> str:
 
 
 def _require_uuid_str(value: object, field: str) -> str:
-    """Validate that *value* is a valid UUID string."""
-    if not isinstance(value, str):
-        raise ProjectValidationError(f"{field} must be a UUID string")
-    try:
-        UUID(value)
-    except ValueError as exc:
-        raise ProjectValidationError(f"{field} must be a UUID string") from exc
-    return value
+    return require_uuid_str(value, field, ProjectValidationError)
