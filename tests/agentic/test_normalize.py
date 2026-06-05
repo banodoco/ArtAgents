@@ -13,7 +13,7 @@ from tests.agentic.normalize import (
     normalize_scenario,
 )
 
-EXPECTED_PRODUCTION_SCENARIOS = 45  # 36 M3/M4 + 6 M5 + 3 reconciled (midstream_shrink, abandon_and_return_changed_intent, advanced_assemble_sequence)
+EXPECTED_PRODUCTION_SCENARIOS = 49  # 36 M3/M4 + 6 M5 + 3 reconciled + 4 scenario-tier additions (ae5d09a); pin = production yamls under tests/agentic/scenarios/ minus _schema.yaml
 M4_SCENARIO_NAMES = frozenset(
     [
         "artifact_pipeline",
