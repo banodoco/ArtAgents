@@ -28,6 +28,7 @@ from astrid.core.project.paths import project_dir, resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
 from astrid.core.session.binding import (
     ASTRID_SESSION_ID_ENV,
+    SESSION_FILE_NAME,  # noqa: F401 — re-export; tests patch cli.SESSION_FILE_NAME
     SessionBindingError,
     attach_session,
     resolve_current_session,
