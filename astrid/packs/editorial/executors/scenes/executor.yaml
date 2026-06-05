@@ -52,6 +52,7 @@
   ],
   "kind": "built_in",
   "metadata": {
+    "output_result_manifest": true,
     "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",
     "pipeline_step": "scenes",
     "pipeline_step_order": 1,

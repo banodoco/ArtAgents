@@ -137,12 +137,14 @@ with tempfile.TemporaryDirectory(prefix="astrid-tutorial-") as tmp_out:
 print(f"ok:       {result.ok}")
 print(f"dry_run:  {result.raw_result.get('dry_run')}")
 print(f"command:  {result.raw_result.get('command')}")
+print(f"manifest: {result.manifest_path}")
 ```
 
 `invoke(dry_run=True)` returns an `InvocationResult` with `ok`,
-`error`, `capability_id`, `capability_type`, `native_kind`, and
-`raw_result`.  The `raw_result` mapping carries the normalized
-command, working directory, environment, and dry-run metadata.
+`error`, `capability_id`, `capability_type`, `native_kind`,
+optional `manifest_path`, and `raw_result`.  The `raw_result`
+mapping carries the normalized command, working directory,
+environment, and dry-run metadata.
 
 ### Error handling: missing inputs and invocation failures
 

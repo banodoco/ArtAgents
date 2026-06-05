@@ -179,22 +179,39 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
 
     def _run_cmd_run(self, command, payload, use_json):
         import io, sys
+        from types import MappingProxyType
         from unittest.mock import MagicMock, patch
         import astrid.core.executor.cli as cli_mod
         import astrid.core.executor.runner as runner_mod
 
         fake_result = MagicMock()
+        fake_result.executor_id = "some.executor"
+        fake_result.kind = "built_in"
+        fake_result.cwd = Path("/tmp/executor")
+        fake_result.env = MappingProxyType({"ASTRID_SAMPLE": "1"})
         fake_result.missing_binaries = []
         fake_result.skipped = False
+        fake_result.skipped_reason = ""
         fake_result.command = command
         fake_result.payload = payload
         fake_result.returncode = 0
+        fake_result.dry_run = False
+        fake_result.error = None
+        fake_result.ok = True
 
         fake_args = MagicMock()
         fake_args.executor_id = "some.executor"
         fake_args.project = None
+        fake_args.out = str(ROOT / "tmp-gateway-out")
+        fake_args.brief = None
+        fake_args.check_binaries = False
+        fake_args.python_exec = None
+        fake_args.verbose = False
+        fake_args.timeline_id = None
+        fake_args.input = []
         fake_args.dry_run = False
         fake_args.json = use_json
+        fake_args._raw_argv = ("run", "some.executor", "--out", fake_args.out)
 
         fake_registry = MagicMock()
 
@@ -221,12 +238,66 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
 
     def test_run_json_flag_suppresses_command_echo(self):
         """--json flag must suppress the command echo entirely (no stderr echo)."""
-        from unittest.mock import MagicMock
         stdout, stderr = self._run_cmd_run(
-            command=["echo", "hello"], payload=MagicMock(), use_json=True
+            command=["echo", "hello"], payload={"artifact": "artifact.json"}, use_json=True
         )
         self.assertNotIn("echo hello", stdout)
         self.assertNotIn("echo hello", stderr)
+
+    def test_run_json_flag_emits_sdk_invocation_envelope(self):
+        """--json emits the SDK InvocationResult envelope with nested raw_result payload."""
+        import json as json_mod
+
+        import astrid.sdk as sdk
+
+        manifest_path = str((ROOT / "tmp-gateway-out" / "manifest.json").resolve())
+        payload = {
+            "artifact": "artifact.json",
+            "manifest_path": manifest_path,
+        }
+
+        stdout, stderr = self._run_cmd_run(
+            command=["echo", "hello"],
+            payload=payload,
+            use_json=True,
+        )
+
+        raw_result = sdk._normalize_executor_result(
+            type(
+                "FakeResult",
+                (),
+                {
+                    "executor_id": "some.executor",
+                    "kind": "built_in",
+                    "command": ["echo", "hello"],
+                    "cwd": Path("/tmp/executor"),
+                    "env": {"ASTRID_SAMPLE": "1"},
+                    "payload": payload,
+                    "returncode": 0,
+                    "dry_run": False,
+                    "skipped": False,
+                    "skipped_reason": "",
+                    "missing_binaries": [],
+                    "error": None,
+                    "ok": True,
+                },
+            )()
+        )
+        expected = sdk.InvocationResult(
+            capability_id="some.executor",
+            capability_type="executor",
+            native_kind="built_in",
+            ok=True,
+            error=None,
+            manifest_path=sdk._discover_invocation_manifest_path(
+                raw_result,
+                out=Path(ROOT / "tmp-gateway-out"),
+            ),
+            raw_result=raw_result,
+        ).to_dict()
+
+        self.assertEqual(json_mod.loads(stdout), expected)
+        self.assertEqual(stderr, "")
 
     def test_run_uses_gateway_resolved_project_without_mutating_raw_argv(self):
         from unittest.mock import MagicMock, patch

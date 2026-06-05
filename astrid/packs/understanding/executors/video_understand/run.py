@@ -12,11 +12,13 @@ import json
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from astrid._media import ffprobe_duration_seconds
 from astrid.contracts.errors import AstridError
+from astrid.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.utilities.llm_clients import build_gemini_client
 
@@ -231,6 +233,8 @@ def run(args: argparse.Namespace) -> int:
         "philosophy": "Direct video understanding is treated as synchronized sight-and-sound evidence. Use visual_understand.py for cheap frame/contact-sheet reads, audio_understand.py for isolated listening judgment, and transcribe.py for exact words.",
     }
     if args.dry_run:
+        preview["schema_version"] = 1
+        preview["kind"] = "understanding.video_understand"
         print(json.dumps(preview, indent=2))
         return 0
 
@@ -294,12 +298,52 @@ def run(args: argparse.Namespace) -> int:
             results.append(result)
 
     output = {**preview, "results": results}
+
+    # --- universal result manifest (output-contract M1) -----------------------
+    manifest_outputs: list[dict[str, Any]] = []
+    for window in extracted:
+        window_path = Path(window["path"])
+        if window_path.exists():
+            manifest_outputs.append({"path": str(window_path), "type": "file"})
+    if args.out:
+        manifest_outputs.append({"path": str(args.out), "type": "file"})
+
+    manifest_path = (args.out.parent / "manifest.json") if args.out else (out_dir / "manifest.json")
+    output["schema_version"] = 1
+    output["kind"] = "understanding.video_understand"
+    output["manifest_path"] = str(manifest_path)
     text = json.dumps(output, indent=2)
-    print(text)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text + "\n", encoding="utf-8")
         print(f"wrote={args.out}", file=sys.stderr)
+
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "understanding.video_understand",
+        "inputs": {
+            "video": str(video_source),
+            "query": args.query,
+            "mode": args.mode,
+            "model": args.model or MODEL_PRESETS[args.mode],
+            "compare_model": args.compare_model,
+            "at": args.at,
+            "start": args.start,
+            "end": args.end,
+            "window_sec": args.window_sec,
+            "chunk_sec": args.chunk_sec,
+            "max_chunks": args.max_chunks,
+            "max_width": args.max_width,
+            "out_dir": str(out_dir),
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
+    print(text)
     return 0 if all(result["status"] == "ok" for result in results) else 1
 
 

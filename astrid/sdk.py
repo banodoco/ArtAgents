@@ -311,6 +311,7 @@ class InvocationResult:
     native_kind: str
     ok: bool
     error: Mapping[str, Any] | None = None
+    manifest_path: str | None = None
     raw_result: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -321,6 +322,7 @@ class InvocationResult:
                 "native_kind": self.native_kind,
                 "ok": self.ok,
                 "error": self.error,
+                "manifest_path": self.manifest_path,
                 "raw_result": self.raw_result,
             }
         )
@@ -1644,6 +1646,34 @@ def _normalize_orchestrator_result(result: Any) -> dict[str, Any]:
     return _json_safe_mapping(result.to_dict())
 
 
+def _payload_manifest_path(raw_result: Mapping[str, Any]) -> str | None:
+    payload = raw_result.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    for key in ("manifest_path", "manifest"):
+        value = payload.get(key)
+        if not isinstance(value, str):
+            continue
+        path = Path(value).expanduser().resolve()
+        if path.name == "manifest.json":
+            return str(path)
+    return None
+
+
+def _discover_invocation_manifest_path(
+    raw_result: Mapping[str, Any],
+    *,
+    out: Path | str | None,
+) -> str | None:
+    manifest_path = _payload_manifest_path(raw_result)
+    if manifest_path is not None:
+        return manifest_path
+    if out in (None, ""):
+        return None
+    candidate = Path(out).expanduser().resolve() / "manifest.json"
+    return str(candidate) if candidate.is_file() else None
+
+
 def invoke(
     capability_id: str,
     *,
@@ -1752,12 +1782,14 @@ def invoke(
 
     internal_error = _internal_error_from_result(result)
     error = _error_payload_from_internal_error(internal_error) if internal_error is not None else None
+    manifest_path = _discover_invocation_manifest_path(raw_result, out=out)
     return InvocationResult(
         capability_id=capability.id,
         capability_type=capability.capability_type,
         native_kind=capability.native_kind,
         ok=bool(getattr(result, "ok", False)),
         error=error,
+        manifest_path=manifest_path,
         raw_result=raw_result,
     )
 

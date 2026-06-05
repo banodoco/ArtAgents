@@ -10,10 +10,12 @@ guard_canonical_entrypoint('editorial.shots')
 import argparse
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.audit import register_outputs
+from astrid.contracts.result_manifest import write_manifest
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,6 +118,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         metadata={"scenes": len(shots), "frames": sum(len(item.get("frames", [])) for item in shots)},
     )
     print(f"wrote_shots={len(shots)} shots_json={shots_path}")
+
+    # --- universal result manifest (output-contract M1) -----------------------
+    manifest_outputs: list[dict[str, Any]] = [
+        {"path": str(shots_path), "type": "file"},
+    ]
+    manifest_path = out_dir / "manifest.json"
+    manifest: dict[str, Any] = {
+        "schema_version": 1,
+        "kind": "shots",
+        "inputs": {
+            "video": str(video_path),
+            "scenes": str(scenes_path),
+        },
+        "outputs": manifest_outputs,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "warnings": [],
+    }
+    write_manifest(manifest_path, manifest)
+    # -------------------------------------------------------------------------
+
     return 0
 
 

@@ -339,6 +339,7 @@ class InvocationResult:
     native_kind: str
     ok: bool
     error: Mapping[str, Any] | None
+    manifest_path: str | None
     raw_result: Mapping[str, Any]
 ```
 
@@ -351,6 +352,37 @@ dicts. Dataclasses are converted via their `to_dict()` method.
 
 `error` is a JSON-safe mapping derived from the result's `ExecError`, or
 `None` on success. `ok` is `True` when `error` is `None`.
+
+`manifest_path` is an additive optional pointer to a universal
+`manifest.json` emitted by the invoked capability. When present it is an
+absolute path. The SDK derives it from the normalized payload when the payload
+already exposes a universal manifest pointer, otherwise it falls back to
+discovering `{out}/manifest.json`.
+
+The discovery follows a two-step fallback:
+
+1. **Payload preference**: If the executor's stdout `payload` includes a
+   `manifest_path` or `manifest` key pointing to a file named `manifest.json`,
+   that path is used directly.
+2. **Output-directory fallback**: Otherwise, the SDK checks whether
+   `{out}/manifest.json` exists on disk and returns its absolute path.
+
+When neither source yields a `manifest.json` file, `manifest_path` is `None`.
+
+Refer to the [output/result contract](output-result-contract.md) for the
+universal manifest schema, the kind vocabulary, file and directory hashing
+semantics, partial-output optionality, and domain-manifest coexistence rules.
+
+```python
+import astrid
+
+result = astrid.invoke("editorial.transcribe", kind="executor", out="/tmp/transcribe-out")
+if result.manifest_path:
+    import json
+    with open(result.manifest_path) as fh:
+        manifest = json.load(fh)
+    print(f"kind={manifest['kind']}, outputs={len(manifest['outputs'])}")
+```
 
 ## Stability Tiers
 
@@ -373,7 +405,7 @@ version bump. Breaking changes require a deprecation cycle.
 | `Capability` | Top-level fields: `id`, `capability_type`, `native_kind`, `handle`, `inputs`, `outputs`, `schema`, `defaults`, `definition` |
 | `CapabilityHandle` | Existence as a field of `Capability` and its own exported name |
 | `DiscoveryResult` | Top-level fields: `executors`, `orchestrators`, `elements`, `capabilities` |
-| `InvocationResult` | Top-level fields: `capability_id`, `capability_type`, `native_kind`, `ok`, `error`, `raw_result` |
+| `InvocationResult` | Top-level fields: `capability_id`, `capability_type`, `native_kind`, `ok`, `error`, `manifest_path`, `raw_result` |
 | `read_events()` | Signature and return type (`tuple[EventStreamRecord, ...]`) |
 | `subscribe_events()` | Signature as a generator function |
 | `EventStreamRecord` | Top-level fields: `source`, `line`, `timestamp`, `kind`, `hash`, `payload` |

@@ -25,6 +25,7 @@ from .schema import (
     Provenance,
     SafetyDeclaration,
 )
+from .result_manifest import complete_output_metadata, write_manifest
 
 __all__ = [
     "CACHE_MODES",
@@ -45,7 +46,9 @@ __all__ = [
     "Output",
     "Port",
     "Provenance",
+    "complete_output_metadata",
     "render_astrid_error",
     "SafetyDeclaration",
+    "write_manifest",
     "wrap_degraded_error",
 ]

@@ -31,6 +31,7 @@ from astrid.core.generation.backends import (
     load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry
+from astrid.contracts.result_manifest import complete_output_metadata
 from astrid.core.util.atomic_io import write_json_atomic
 from astrid.core.util.png_metadata import embed_png_text
 
@@ -257,17 +258,35 @@ def _build_manifest(
     source_urls: list[str] | None,
     applied_features: list[str],
 ) -> dict[str, Any]:
-    """Build the canonical manifest dict (20-manifest-schema.md v2)."""
+    """Build the canonical manifest dict (20-manifest-schema.md v2) with
+    universal ``kind`` and ``inputs`` fields (output-contract M1)."""
+    requested_prompt = prompt_text or getattr(args, "prompt", None)
     request: dict[str, Any] = {
-        "prompt": prompt_text or getattr(args, "prompt", None),
+        "prompt": requested_prompt,
         "negative_prompt": getattr(args, "negative_prompt", None),
         "seed": seed,
         "count": max(1, args.count or 1),
         "size": getattr(args, "size", None),
         "image_ref_resolved": image_ref_resolved,
     }
+    inputs: dict[str, Any] = {
+        "model": entry.id,
+        "mode": mode_name,
+        "execution": args.execution,
+        "prompt": requested_prompt,
+        "seed": seed,
+        "count": max(1, args.count or 1),
+    }
+    for key in ("negative_prompt", "size", "image_ref", "strength", "guidance_scale", "steps"):
+        val = getattr(args, key, None)
+        if val is not None:
+            inputs[key] = val
+    if image_ref_resolved is not None:
+        inputs["image_ref_resolved"] = image_ref_resolved
     manifest: dict[str, Any] = {
         "schema_version": 2,
+        "kind": "generation.generate_image",
+        "inputs": inputs,
         "modality": entry.modality,
         "model": entry.id,
         "mode_used": mode_name,
@@ -762,6 +781,10 @@ def generate_core(
                     manifest_path = out / "manifest.json"
                     if loras_parsed:
                         manifest["loras"] = loras_parsed
+                    # Route output metadata through the shared contract (M1).
+                    manifest["outputs"] = complete_output_metadata(
+                        manifest["outputs"], root_dir=out,
+                    )
                     write_json_atomic(manifest_path, manifest)
                 except Exception:
                     pass
@@ -788,6 +811,10 @@ def generate_core(
     manifest_path = out / "manifest.json"
     if loras_parsed:
         manifest["loras"] = loras_parsed
+    # Route output metadata through the shared contract (M1).
+    manifest["outputs"] = complete_output_metadata(
+        manifest["outputs"], root_dir=out,
+    )
     write_json_atomic(manifest_path, manifest)
 
     generation_result = GenerationResult(

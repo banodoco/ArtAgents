@@ -635,7 +635,37 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     emit_json = bool(getattr(args, "json", False))
     if result.command and not emit_json:
         _eprint(shlex.join(result.command))
-    if result.payload:
+    if emit_json:
+        from astrid.sdk import (
+            InvocationResult,
+            _discover_invocation_manifest_path,
+            _error_payload_from_internal_error,
+            _internal_error_from_result,
+            _normalize_executor_result,
+        )
+
+        raw_result = _normalize_executor_result(result)
+        internal_error = _internal_error_from_result(result)
+        error = (
+            _error_payload_from_internal_error(internal_error)
+            if internal_error is not None
+            else None
+        )
+        manifest_path = _discover_invocation_manifest_path(
+            raw_result,
+            out=request.out or None,
+        )
+        payload = InvocationResult(
+            capability_id=args.executor_id,
+            capability_type="executor",
+            native_kind=result.kind,
+            ok=bool(result.ok),
+            error=error,
+            manifest_path=manifest_path,
+            raw_result=raw_result,
+        ).to_dict()
+        print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    elif result.payload:
         print(json.dumps(dict(result.payload), separators=(",", ":"), sort_keys=True))
     # Success/failure flows through ``ok``/``error`` (returncode is descriptive).
     if not result.ok:

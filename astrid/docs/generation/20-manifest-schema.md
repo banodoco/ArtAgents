@@ -4,14 +4,27 @@ Every generation invocation emits a **manifest** — a JSON artifact that
 records what was requested, what was produced, and any warnings or errors
 encountered.  Manifests are the canonical record of a generation run.
 
-Schema v2 adds `mode_used`, `model_actual`, `applied_features`,
-`dropped_features`, `duration_ms`, `cost_usd`, and `request_id`.
+Schema v2 is a **superset of the universal result manifest** contract
+(`docs/output-result-contract.md`). It carries the universal core fields
+(`kind`, `inputs`, `outputs`, `created`, `warnings`) plus
+generation-specific fields. Schema v2 adds `mode_used`, `model_actual`,
+`applied_features`, `dropped_features`, `duration_ms`, `cost_usd`, and
+`request_id`.
 
 ## Top-level shape
 
 ```json
 {
   "schema_version": 2,
+  "kind": "generation.generate_image",
+  "inputs": {
+    "model": "flux-dev",
+    "mode": "t2i",
+    "execution": "cloud",
+    "prompt": "a serene mountain lake at dawn",
+    "seed": 42,
+    "count": 1
+  },
   "modality": "image",
   "model": "flux-dev",
   "mode_used": "t2i",
@@ -52,6 +65,8 @@ Schema v2 adds `mode_used`, `model_actual`, `applied_features`,
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schema_version` | `integer` | yes | Always `2` for this schema version. |
+| `kind` | `string` | yes | Universal executor kind identifier (e.g. `"generation.generate_image"`, `"generation.generate_image_openai"`). See [output-result-contract.md](../../../docs/output-result-contract.md#kind-vocabulary). Added in M1. |
+| `inputs` | `object` | yes | Arbitrary key/value map recording the executor's resolved inputs. Added in M1. |
 | `modality` | `string` | yes | `"image"`, `"video"`, or `"audio"`. |
 | `model` | `string` | yes | The model ID used (from the registry). |
 | `mode_used` | `string` | yes | Canonical mode name (e.g. `"t2i"`, `"i2i"`, `"edit"`). Added in v2. |
@@ -119,6 +134,15 @@ The `request` object for image modality includes:
 ```json
 {
   "schema_version": 2,
+  "kind": "generation.generate_image",
+  "inputs": {
+    "model": "flux-dev",
+    "mode": "t2i",
+    "execution": "cloud",
+    "prompt": "a cat wearing a spacesuit",
+    "seed": 1678901234,
+    "count": 1
+  },
   "modality": "image",
   "model": "flux-dev",
   "mode_used": "t2i",
@@ -156,6 +180,15 @@ The `request` object for image modality includes:
 ```json
 {
   "schema_version": 2,
+  "kind": "generation.generate_image",
+  "inputs": {
+    "model": "flux-dev",
+    "mode": "t2i",
+    "execution": "cloud",
+    "prompt": "a serene mountain lake",
+    "seed": 42,
+    "count": 1
+  },
   "modality": "image",
   "model": "flux-dev",
   "mode_used": "t2i",
