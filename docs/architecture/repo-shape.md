@@ -1,10 +1,17 @@
-# Astrid Repository Shape — M0 Canonical Contract
+# Astrid Repository Shape — M2 Canonical Contract
 
-This document is the **M0 architecture map** for the Astrid repository. It
+This document is the **M2 architecture map** for the Astrid repository. It
 classifies every top-level surface, documents the enforcement model, and
 records settled milestone decisions that shape the current checkout. It is
-normative for M0 and should be updated when later milestones reclassify a
+normative for M2 and should be updated when later milestones reclassify a
 surface.
+
+**M2 key rule**: New internal code belongs under `astrid/core/*`. New pack
+machinery (discovery, resolver, store, manifest, override, alias resolution,
+validation, CLI, installation, entrypoint, agent indexing, gitignore filtering,
+schemas) belongs under `astrid/core/pack/*`. `astrid/packs/` is for pack data
+only — executors, orchestrators, elements, `pack.yaml`, `skill/` — plus thin
+backward-compatibility re-export shims at the top level.
 
 ## 1. Public Facades
 
@@ -61,6 +68,8 @@ and their purposes:
 | `core/lineage/` | Run lineage variant tracking |
 | `core/model_catalog/` | Model registry, schema, CLI |
 | `core/orchestrator/` | Orchestrator schema, registry, runner, folder loader, CLI, plan template |
+| `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
+| `core/pack_machinery/` | **Thin compatibility shims** (M2): cli.py, validate.py, agent_index.py, gitignore.py, install.py are re-export shims pointing into `core/pack/`. Deprecated schemas/ copy retained for reference. |
 | `core/project/` | Project schema, paths, run management, sidecar, JSON I/O, CLI |
 | `core/reigh/` | Reigh data provider, Supabase client, task client, timeline I/O, worker JWT |
 | `core/runpod/` | RunPod sweeper and storage |
@@ -70,6 +79,23 @@ and their purposes:
 | `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, pool, track, transition), erasure, integrity, migration, projection, undo, observability, event log (local FS, Supabase, projector), banodoco schema |
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
 | `core/worker/` | Worker machinery |
+
+Loose `.py` files at `astrid/core/` that are pack-machinery shims (all thin
+re-exports pointing into `astrid/core/pack/`):
+
+| File | Canonical home |
+| --- | --- |
+| `core/pack_discovery.py` | `core/pack/discovery.py` |
+| `core/pack_resolver.py` | `core/pack/resolver.py` |
+| `core/pack_store.py` | `core/pack/store.py` |
+| `core/manifest.py` | `core/pack/manifest.py` |
+| `core/override.py` | `core/pack/override.py` |
+| `core/alias_resolver.py` | `core/pack/alias_resolver.py` |
+
+Other loose `.py` files at `astrid/core/` are non-pack kernel modules
+(`scaffold.py`, `search.py`, `_search.py`, `git_util.py`, `cli_choices.py`,
+`theme_cli.py`, `dirty.py`). `_search.py` is additionally listed in
+`_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` as an intentional thin re-export.
 
 **Anti-coupling rules enforced by `validate_import_layering()`**:
 
@@ -164,8 +190,13 @@ target. This is an intentional thin re-export surface.
 ## 5. `astrid/packs` — Capability Surface
 
 `astrid/packs` is the **capability surface** — every executor, orchestrator, and
-element ships in a pack under `astrid/packs/<pack>/`. The kernel (`astrid/core`)
-provides the framework; packs provide the capabilities.
+element ships in a pack under `astrid/packs/<pack>/`. The pack machinery kernel
+(`astrid/core/pack/`) provides the framework; packs provide the capabilities.
+
+**M2 rule**: `astrid/packs/` is for pack data only. The top-level `.py` files
+are thin backward-compatibility re-export shims whose canonical implementations
+live in `astrid/core/pack/`. New pack machinery must go under
+`astrid/core/pack/*`, not under `astrid/packs/`.
 
 ### 5.1 Pack Layout
 
@@ -183,17 +214,50 @@ contain:
 
 The shipped packs are: `rendering`, `understanding`, `generation`, `editorial`,
 `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`,
-`runpod`, `moirae`, `iteration`, and `media`.
+`runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, and
+`text_analysis`.
 
 A gitignored `local` pack at `astrid/packs/local/` is created on first
 `elements fork` and holds user-editable copies.
 
-### 5.3 ID Qualification Rules
+The `builtin` pack is a **hidden compatibility shell** (`visibility: hidden`,
+`status: deprecated`) that preserves backward-compatible pack-level aliases
+mapping legacy `builtin.*` capability ids to canonical homes. It also contains
+`agent_probe.py` (a legacy DSL orchestrator shim used by 16+ regression tests)
+and `fixtures/`/`golden/` test infrastructure. It is not a capability-producing
+pack.
+
+The `_core/` directory is a **skill-only shell** — it contains only
+`skill/SKILL.md` (the root Astrid gateway skill), has no `pack.yaml`, and is
+not a runtime pack. It is coupled to `astrid/skills/` and treated as a
+permanent visible exception.
+
+### 5.3 Top-Level Pack Shims
+
+The following `.py` files directly under `astrid/packs/` are thin
+backward-compatibility re-export shims. Their canonical implementations live
+in `astrid/core/pack/`:
+
+| File | Classification | Canonical home |
+| --- | --- | --- |
+| `__init__.py` | Package init | (package marker) |
+| `cli.py` | Compatibility re-export shim | `astrid/core/pack/cli.py` |
+| `validate.py` | Compatibility re-export shim | `astrid/core/pack/validate.py` |
+| `agent_index.py` | Compatibility re-export shim | `astrid/core/pack/agent_index.py` |
+| `gitignore.py` | Compatibility re-export shim | `astrid/core/pack/gitignore.py` |
+| `install.py` | sys.modules alias shim | `astrid/core/pack/install.py` |
+| `_canonical_entrypoint.py` | Compatibility re-export shim | `astrid/core/pack/entrypoint.py` |
+
+These shims are enforced by `_validate_packs_top_level_modules()` in
+`astrid/structure.py` (added M2 T13). Any new `.py` file under `astrid/packs/`
+must be a documented compatibility shim with ≤12 meaningful lines.
+
+### 5.4 ID Qualification Rules
 
 - Executor and orchestrator IDs are always qualified: `<pack>.<name>` (e.g., `video_editing.cut`). Bare lookups are rejected.
 - Element IDs stay bare and are scoped by `kind`, so `animation/fade` and `transition/fade` coexist without collision.
 
-### 5.4 Structure Enforcement
+### 5.5 Structure Enforcement
 
 `validate_repo_structure()` enforces:
 - Executor folders must contain `executor.yaml`, `run.py`, `STAGE.md`
@@ -202,6 +266,7 @@ A gitignored `local` pack at `astrid/packs/local/` is created on first
 - Executor folders must not contain orchestrator metadata and vice versa
 - The qualified ID's first segment must equal the pack ID
 - Custom element kinds declared in `pack.yaml` extensions are accepted
+- Top-level `.py` files under `astrid/packs/` must be documented compatibility shims (added M2 T13)
 
 ## 6. `astrid/elements/` — Planned-Absent Canonical Concept
 
@@ -248,14 +313,30 @@ structure enforcement. It tests:
 - Compatibility shim detection and exemptions
 - Timeline facade exemption guards (TODO(m5b) marker requirements)
 - Thread wrapper removal regression (m5a)
+- Packs top-level module enforcement (M2 T13): thin documented shims allowed, active implementations rejected
 - Synthetic violation cases before real-repo smoke tests
 
-### 7.3 Public Surface Tests
+### 7.3 Public Surface and Pack Machinery Tests
 
 `tests/test_m5b_baseline_public_surface.py` — baseline public surface contract
 verification.
 
 `tests/test_m5b_end_state_regression.py` — end-state regression guards.
+
+`tests/test_m2_public_surface.py` — M2 public surface characterization (39 tests
+across 12 test classes: root imports, pipeline-gateway identity, pipeline patch
+seams, deprecated CLI aliases, __main__ delegation, Banodoco integration imports,
+paths/_paths identity, media/_media identity, theme_schema import, thread import
+surface, timeline re-export surface, SDK public surface).
+
+`tests/test_m2_pack_machinery.py` — M2 pack machinery characterization (46 tests
+across 11 test classes: core.pack exports, core.pack_machinery submodules,
+packs shim resolution, packs.install canonical surface, machinery-shim identity,
+loose-module shim completeness, core.pack submodule exports, discovery pipeline,
+resolver pipeline, store pipeline, schema-root relocation).
+
+`tests/test_pack_layout_contract.py` — pack layout contract verification
+(updated M2 T10 for schema relocation to `astrid/core/pack/schemas/v1/`).
 
 ### 7.4 Test Relocation Map (M3)
 
@@ -330,6 +411,7 @@ document:
 | Timeline compatibility re-exports (m5b) | **Complete** | §3.4 — Timeline shims |
 | Internal threads lineage (m5a) | **Complete** | §4 — Threads subsystem with removed wrapper symbols |
 | Public compatibility shims (m13-targeted) | **Complete** | §3.1–3.3 — `_media.py`, `_paths.py`, `pipeline.py` |
+| Top-level module rationalization (M2) | **Complete** | §2 — `core/pack/` canonical pack machinery; §5 — `packs/` as pack data only; §5.3 — top-level shim classification; §5.5 — structure enforcement; `docs/architecture/top-level-inventory.json` — updated M2 inventory |
 
 ## 11. Soft Boundary Conventions (Not Hard-Gated in M0)
 

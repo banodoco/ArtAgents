@@ -18,7 +18,7 @@ from astrid.core._search import (
     search as run_search,
 )
 from astrid.core.dirty import detect_local_edits
-from astrid.core.override import OverrideStore, OverrideStoreError
+from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.update import update_apply, update_check
 
 from .install import install_element

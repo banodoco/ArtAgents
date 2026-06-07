@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from astrid.core.alias_resolver import (
+from astrid.core.pack.alias_resolver import (
     _register_pack_aliases,
     create_shared_alias_resolver,
     extract_pack_aliases,

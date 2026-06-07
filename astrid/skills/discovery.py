@@ -137,7 +137,7 @@ def _scan_discovered_packs(descriptors: list[SkillDescriptor]) -> None:
     same roots and priority ordering as the executor/orchestrator/element
     registries. Source packs win on id collision (they were appended first).
     """
-    from astrid.core.pack_discovery import discover_pack_metadata
+    from astrid.core.pack.discovery import discover_pack_metadata
 
     seen_ids = {descriptor.pack_id for descriptor in descriptors}
     for discovered in discover_pack_metadata(include_installed=True):

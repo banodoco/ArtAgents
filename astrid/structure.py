@@ -77,6 +77,8 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
     errors.extend(validate_import_layering(repo_root))
     # Migration-completion drift is a blocking structure violation, not a warning.
     errors.extend(validate_migration_completion(repo_root))
+    # Top-level astrid/packs/ modules must be thin documented shims only.
+    errors.extend(_validate_packs_top_level_modules(repo_root / "astrid" / "packs"))
     return StructureReport(errors=tuple(errors), warnings=tuple(warnings))
 
 
@@ -491,6 +493,50 @@ def _literal_all_exports(tree: ast.AST) -> set[str]:
             if isinstance(item, ast.Constant) and isinstance(item.value, str):
                 exports.add(item.value)
     return exports
+
+
+def _validate_packs_top_level_modules(packs_root: Path) -> list[str]:
+    """Validate that every top-level ``.py`` file directly inside
+    ``astrid/packs/`` is either the package ``__init__.py`` or a
+    documented thin compatibility/re-export shim.
+
+    Active implementation modules at the top level of ``astrid/packs/``
+    are rejected.  Shims must:
+
+    * declare themselves as a compatibility or re-export shim in their
+      module docstring, and
+    * be thin (no more than 12 meaningful lines of code).
+
+    Pack data directories (subdirectories like ``builtin/``,
+    ``stream_content/``, etc.) are not checked here.
+    """
+    if not packs_root.is_dir():
+        return []
+
+    errors: list[str] = []
+    repo_root = packs_root.parents[1]
+
+    for child in sorted(packs_root.iterdir()):
+        if not child.is_file() or child.suffix != ".py":
+            continue
+        if child.name == "__init__.py":
+            # Package namespace — allowed even though it has real imports.
+            continue
+
+        rel = _repo_rel(child, repo_root)
+        try:
+            text = child.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            errors.append(f"{rel}: could not read top-level packs module: {exc}")
+            continue
+
+        if not _looks_like_compatibility_shim(text):
+            errors.append(
+                f"{rel}: top-level astrid/packs/ module is not a documented "
+                f"thin compatibility shim"
+            )
+
+    return errors
 
 
 def _looks_like_compatibility_shim(text: str) -> bool:

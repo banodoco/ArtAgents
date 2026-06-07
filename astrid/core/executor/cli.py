@@ -20,7 +20,7 @@ from astrid.core._search import (
 )
 
 from astrid.core.dirty import detect_local_edits
-from astrid.core.override import OverrideStore, OverrideStoreError
+from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.scaffold import (
     TEST_RUN_PY_TEMPLATE as _TEST_RUN_PY_TEMPLATE,
     scaffold_component as _scaffold_component,

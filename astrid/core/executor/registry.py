@@ -10,29 +10,29 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid._paths import REPO_ROOT
-from astrid.core.alias_resolver import (
+from astrid.core.pack.alias_resolver import (
     AliasResolver,
     _register_pack_aliases,
     create_shared_alias_resolver,
     extract_pack_aliases,
 )
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
-from astrid.core.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
+from astrid.core.pack.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,
     iter_executor_roots,
     validate_content_id_in_pack,
 )
-from astrid.core.pack_discovery import discover_packs_ordered
-from astrid.core.pack_resolver import PackResolver
+from astrid.core.pack.discovery import discover_packs_ordered
+from astrid.core.pack.resolver import PackResolver
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors
 from .schema import ExecutorDefinition, ExecutorValidationError, validate_executor_definition
 
 if TYPE_CHECKING:
-    from astrid.core.override import OverrideStore
+    from astrid.core.pack.override import OverrideStore
 
 BUILTIN_STEP_ORDER: tuple[str, ...] = (
     "transcribe",

@@ -424,7 +424,7 @@ class PackDefinition:
 
 
 def packs_root() -> Path:
-    return Path(__file__).resolve().parents[1] / "packs"
+    return Path(__file__).resolve().parents[2] / "packs"
 
 
 DEFAULT_PACKS_ROOT = packs_root()

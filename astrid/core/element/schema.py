@@ -14,7 +14,7 @@ from astrid.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
 )
 from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
-from astrid.core.manifest import ManifestParseError, load_manifest_mapping
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
     ELEMENT_KINDS as ELEMENT_KINDS,
     ELEMENT_KIND_REGISTRY,

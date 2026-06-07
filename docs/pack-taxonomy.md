@@ -40,7 +40,8 @@ expresses the pack's *purpose* — what it does. The `origin` field tells you
 Controls whether the pack is installed by default or must be opted into.
 
 - `core` — Always present. Cannot be uninstalled. (Currently: `builtin`,
-  `external`, `iteration`, `media`, `upload`.)
+  `iteration`, `media`.) The `_core` skill directory is not a pack — it is a
+  skill-only shell with no `pack.yaml` (see §Visibility and Hidden Packs).
 - `default` — Installed by default but can be removed. Most scaffolded packs.
 - `optional` — Must be explicitly installed.
 - `bundled` — Shipped with the distribution but selectively enabled.
@@ -54,7 +55,7 @@ Describes the pack's structural role:
 - `bundle` — A meta-pack that groups other packs under a single install surface.
   Bundles do not contain their own capabilities; they declare dependencies.
 - `adapter` — A pack whose primary purpose is connecting Astrid to an external
-  service or tool (e.g., `external`).
+  service or tool (e.g., `fal`, `vibecomfy`, `runpod`, `moirae`).
 - `product_surface` — A pack that exposes a complete product-level feature
   (e.g., the built-in render pipeline).
 
@@ -71,7 +72,7 @@ Current shipped domains:
 | `integration` | `reigh`, `youtube`, `fal`, `vibecomfy`, `moirae` — connections to external services |
 | `development` | `iteration`, `training` — author-test-iterate tooling and model training |
 | `infrastructure` | `runpod` — GPU provisioning and execution |
-| `system` | `builtin` (shell, hidden), `external` (shell, hidden), `upload` (shell, hidden) — legacy namespace shells |
+| `system` | `builtin` (compatibility shell, hidden) — legacy namespace shell that preserves backward-compatible pack-level aliases; `_core` is a skill-only shell (no `pack.yaml`, no capabilities) classified under §Shells and Hidden Packs |
 | `general` | scaffolded packs, local scratch pack |
 
 **`hype` is not a domain.** The `video_editing.hype` orchestrator lives inside the
@@ -255,7 +256,7 @@ python3 -m astrid packs list --show-hidden
 python3 -m astrid packs status --show-hidden
 
 # Inspect always works for any pack (hidden or visible)
-python3 -m astrid packs inspect upload
+python3 -m astrid packs inspect builtin
 ```
 
 ### Example Packs vs. Runtime Packs
@@ -265,10 +266,12 @@ Not every pack directory in the repository is a runtime-discovered pack:
 - **`astrid/packs/`** — Runtime packs. Discovered by `packs list`, `packs status`,
   and capability searches. Currently: `rendering`, `understanding`, `generation`,
   `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`,
-  `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, plus the
-  dynamically-created `local` scratch pack. The legacy `builtin`, `external`,
-  and `upload` packs are hidden shells that preserve backward compatibility
-  through pack-level aliases.
+  `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `comfy_wrap`,
+  `stream_content`, `text_analysis`, plus the dynamically-created `local` scratch
+  pack. The legacy `builtin` pack is a hidden compatibility shell that preserves
+  backward-compatible pack-level aliases (see §Shells and Hidden Packs). The
+  `_core` directory is a skill-only shell — it contains only `skill/SKILL.md`
+  and is not a pack (no `pack.yaml`).
 
 - **`examples/packs/`** — Teaching packs. These are committed reference examples
   that demonstrate pack authoring patterns (multi-step pipelines, agent-attested
@@ -285,6 +288,74 @@ Not every pack directory in the repository is a runtime-discovered pack:
   `media` (pack with elements and schemas), `file_summarizer` (multi-step text
   pipeline), `text_digest` (agent-in-the-loop text pipelines), and `text_review`
   (machine summary + agent verdict workflow).
+
+### Shells and Hidden Packs
+
+M2 classifies three directory types under `astrid/packs/` that are not
+ordinary capability packs:
+
+#### `_core` — Skill-Only Shell
+
+`astrid/packs/_core/` is **not a pack**. It is an internal skill-only shell
+— a directory containing only `skill/SKILL.md` (the root Astrid gateway
+skill). It has no `pack.yaml`, no executors, no orchestrators, no elements,
+and is not discovered by `packs list` or `packs status`.
+
+`_core` is coupled to several internal subsystems:
+
+- **`astrid/skills/registry.py`** — writes the auto-managed pack registry
+  block into `_core/skill/SKILL.md` via `CORE_SKILL_MD`.
+- **`astrid/skills/discovery.py`** — explicitly skips `_core` during skill
+  descriptor discovery since it is manifest-less.
+- **`astrid/skills/harnesses/`** (base, claude, codex, hermes) — all
+  recognize `pack_id == "_core"` as the gateway skill and handle it
+  specially (e.g., symlinking as `astrid` rather than by pack name).
+- **`astrid/skills/__init__.py`** — installs `_core` by default as the
+  gateway skill, filters it from the pack list, and uses it as the fallback
+  when no other packs are installed.
+- **`astrid/core/pack/validate.py`** — `INTERNAL_PACK_DIRS` excludes
+  `_core` from pack structure validation because it has no manifest.
+
+M2 treats `_core` as a **permanent visible exception** — it is not moved
+under `_shells/` because the coupled paths above depend on its location.
+
+#### `builtin` — Compatibility Shell
+
+`astrid/packs/builtin/` is a **hidden compatibility shell** (`visibility:
+hidden`, `status: deprecated`). It serves three purposes in M2:
+
+1. **Pack-level aliases** — `pack.yaml` declares 15+ aliases mapping legacy
+   `builtin.*` capability ids to their canonical homes (e.g.,
+   `builtin.transcribe` → `editorial.transcribe`). These aliases keep
+   historical `builtin.*` references working without duplicating
+   implementation.
+
+2. **Agent probe** — `agent_probe.py` is a legacy DSL orchestrator shim
+   (`@orchestrator("builtin.agent_probe")`) used by 16+ regression test
+   files. It remains in `builtin/` under a documented exception deferred to
+   M2; migration to `orchestrators/agent_probe/` is a follow-up task.
+
+3. **Fixtures and golden data** — `fixtures/smoke/` and
+   `golden/smoke.events.jsonl` are test infrastructure artifacts.
+
+The `builtin` pack is **not** moved under `_shells/` in M2. Its
+classification as a visible compatibility shell preserves the pack id
+`builtin`, the aliases it declares, and the test references to
+`agent_probe.py`.
+
+#### `stream_content`, `comfy_wrap`, `text_analysis` — Real Shipped Packs
+
+These three packs are **real shipped pack data** with stable pack and
+capability IDs:
+
+| Pack | Type | Capabilities | Taxonomy |
+|---|---|---|---|
+| `stream_content` | Mixed executor+orchestrator | `stream_content.clip_candidates`, `stream_content.segment_map`, `stream_content.distill` | origin=`builtin`, domain=`media`, install_tier=`default` |
+| `comfy_wrap` | Executor pack | `comfy_wrap.run` | origin=`external`, domain=`integration`, install_tier=`default` |
+| `text_analysis` | Orchestrator pack | `text_analysis.summarize` | origin=`external`, domain=`general`, install_tier=`default` |
+
+They are discovered, listed, and inspected through the normal pack CLI
+surface. Their pack ids and capability ids are **stable** across M2.
 
 ### Canonical Clip Extraction
 

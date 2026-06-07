@@ -1,8 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "M0 top-level inventory of every file and directory directly under astrid/. Classifications align with astrid/structure.py constants TOP_LEVEL_ASTRID_FILES and TOP_LEVEL_ASTRID_DIRS. This is a documentation artifact — not a runtime input.",
-  "milestone": "M0",
+  "description": "M2 top-level inventory of every file and directory directly under astrid/. Classifications align with astrid/structure.py constants TOP_LEVEL_ASTRID_FILES and TOP_LEVEL_ASTRID_DIRS. Updated post M2 Top-Level Module Rationalization to reflect the final physical layout: pack machinery has moved to astrid/core/pack/, compatibility shims remain at old paths, and astrid/packs/ is pack data only (with documented thin re-export shims). This is a documentation artifact — not a runtime input.",
+  "milestone": "M2",
   "generated_at": "2026-06-07",
+  "updated_at": "2026-06-07T22:30:00Z",
   "source_root": "astrid/",
   "classification_categories": {
     "public_facade": "Part of the public SDK contract (directly or via lazy facade).",
@@ -15,7 +16,10 @@
     "planned_absent": "Canonical concept allowed by constants but not materialized on disk in M0.",
     "generated_ignored": "Build artifact or runtime cache — ignored by structure enforcement.",
     "docs": "Package-level documentation within astrid/.",
-    "soft_boundary_convention": "Convention documented for awareness, not hard-gated in M0."
+    "soft_boundary_convention": "Convention documented for awareness, not hard-gated in M0.",
+    "pack_machinery_shim": "M2 shim — canonical implementation lives in astrid/core/pack/. This file exists only for backward-compatible imports and patch targets.",
+    "skill_only_shell": "Directory under packs/ that contains only skill/SKILL.md — no pack.yaml, no capabilities. Not a runtime pack.",
+    "pack_compatibility_shell": "Hidden pack under packs/ that preserves backward-compatible pack-level aliases and test infrastructure. Not a capability-producing pack."
   },
   "top_level_files": [
     {
@@ -121,7 +125,7 @@
     {
       "name": "core",
       "classification": "internal_kernel",
-      "notes": "Internal kernel — framework machinery. Contains adapter, element, executor, generation, lineage, model_catalog, orchestrator, project, reigh, runpod, runtime, session, task, timeline, util, worker subdirectories. Anti-coupling rules enforced: core must not import from packs, orchestrate, or audit (with named exemptions).",
+      "notes": "Internal kernel — framework machinery. Contains adapter, element, executor, generation, lineage, model_catalog, orchestrator, pack (canonical pack machinery: discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/), project, reigh, runpod, runtime, session, task, timeline, util, worker subdirectories. Also contains pack_machinery/ (thin compatibility shims) and loose pack_*.py / manifest.py / override.py / alias_resolver.py files (all thin re-export shims pointing into astrid/core/pack/). Anti-coupling rules enforced: core must not import from packs, orchestrate, or audit (with named exemptions). New internal code belongs under astrid/core/*; new pack machinery belongs under astrid/core/pack/*.",
       "in_structure_py_constant": true
     },
     {
@@ -158,7 +162,7 @@
     {
       "name": "packs",
       "classification": "pack_capability_surface",
-      "notes": "Capability surface — every executor, orchestrator, and element ships in a pack under astrid/packs/<pack>/. The kernel provides the framework; packs provide the capabilities. Contains 21 pack directories plus internal _core/ and schemas/. Detailed inventory in pack-layout-variants.json.",
+      "notes": "Capability surface — every executor, orchestrator, and element ships in a pack under astrid/packs/<pack>/. The kernel (astrid/core/pack/) provides the framework; packs provide the capabilities. Contains 19 shipped pack directories plus internal _core/ (skill-only shell, no pack.yaml) and schemas/ (legacy reference only; canonical schemas moved to astrid/core/pack/schemas/v1/ in M2 T10). Top-level .py files (cli.py, validate.py, agent_index.py, gitignore.py, install.py, _canonical_entrypoint.py) are all thin compatibility re-export shims — their canonical implementations live in astrid/core/pack/. Enforced by _validate_packs_top_level_modules() in structure.py (added M2 T13). Detailed inventory in pack-layout-variants.json.",
       "in_structure_py_constant": true
     },
     {
@@ -212,6 +216,26 @@
       "__pycache__ directories at all levels",
       ".pyc files throughout the tree"
     ],
-    "planned_absent_entries": ["elements"]
+    "planned_absent_entries": ["elements"],
+    "m2_pack_machinery_layout": {
+      "canonical_home": "astrid/core/pack/",
+      "canonical_modules": ["__init__.py", "discovery.py", "resolver.py", "store.py", "manifest.py", "override.py", "alias_resolver.py", "validate.py", "cli.py", "install.py", "entrypoint.py", "agent_index.py", "gitignore.py", "schemas/v1/"],
+      "shim_locations": {
+        "astrid/core/pack_machinery/": "Thin re-export shims for cli, validate, agent_index, gitignore, install (plus deprecated schemas/ copy)",
+        "astrid/core/pack_discovery.py": "Thin re-export shim → astrid/core/pack/discovery.py",
+        "astrid/core/pack_resolver.py": "Thin re-export shim → astrid/core/pack/resolver.py",
+        "astrid/core/pack_store.py": "Thin re-export shim → astrid/core/pack/store.py",
+        "astrid/core/manifest.py": "Thin re-export shim → astrid/core/pack/manifest.py",
+        "astrid/core/override.py": "Thin re-export shim → astrid/core/pack/override.py",
+        "astrid/core/alias_resolver.py": "Thin re-export shim → astrid/core/pack/alias_resolver.py",
+        "astrid/packs/cli.py": "Thin re-export shim → astrid/core/pack_machinery/cli.py → astrid/core/pack/cli.py",
+        "astrid/packs/validate.py": "Thin re-export shim → astrid/core/pack_machinery/validate.py → astrid/core/pack/validate.py",
+        "astrid/packs/agent_index.py": "Thin re-export shim → astrid/core/pack_machinery/agent_index.py → astrid/core/pack/agent_index.py",
+        "astrid/packs/gitignore.py": "Thin re-export shim → astrid/core/pack_machinery/gitignore.py → astrid/core/pack/gitignore.py",
+        "astrid/packs/install.py": "Thin sys.modules alias shim → astrid/core/pack/install.py",
+        "astrid/packs/_canonical_entrypoint.py": "Thin re-export shim → astrid/core/pack/entrypoint.py"
+      },
+      "rule": "New pack machinery belongs in astrid/core/pack/*. New internal code belongs in astrid/core/*. astrid/packs/ is for pack data (executors, orchestrators, elements, pack.yaml, skill/) — not for implementation."
+    }
   }
 }

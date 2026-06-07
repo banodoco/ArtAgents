@@ -11,12 +11,12 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Iterable
 
 from astrid._paths import REPO_ROOT
-from astrid.core.alias_resolver import (
+from astrid.core.pack.alias_resolver import (
     AliasResolver,
     _register_pack_aliases,
     create_shared_alias_resolver,
 )
-from astrid.core.manifest import dump_manifest_payload, load_manifest_mapping
+from astrid.core.pack.manifest import dump_manifest_payload, load_manifest_mapping
 from astrid.core.pack import (
     ELEMENT_KIND_REGISTRY,
     ElementKindRegistry,
@@ -28,7 +28,7 @@ from astrid.core.pack import (
     pack_element_kind_descriptors,
     validate_element_pack_id,
 )
-from astrid.core.pack_discovery import discover_pack_metadata
+from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
 
 from .schema import (
@@ -39,7 +39,7 @@ from .schema import (
 )
 
 if TYPE_CHECKING:
-    from astrid.core.override import OverrideStore
+    from astrid.core.pack.override import OverrideStore
 
 
 class ElementRegistryError(ElementValidationError):
