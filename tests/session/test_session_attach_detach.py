@@ -124,6 +124,7 @@ def test_attach_without_project_rejects_missing_default(
     monkeypatch.chdir(workspace)
     seed_project(env["projects"], "demo")
     (workspace / ".astrid").mkdir()
+    monkeypatch.setenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, str(workspace / ".astrid"))
     (workspace / ".astrid" / "config.json").write_text(
         json.dumps({"default_project": "missing"}), encoding="utf-8"
     )
@@ -157,6 +158,7 @@ def test_attach_with_default_flag_writes_workspace_default(
     seed_project,
 ) -> None:
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, str(tmp_path / ".astrid"))
     seed_project(env["projects"], "demo")
     buf = StringIO()
     rc = cli.cmd_attach(_args(set_default=True), out=buf)

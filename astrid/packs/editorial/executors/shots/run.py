@@ -97,7 +97,7 @@ def build_shots(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    from ..asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+    from astrid.packs.training.executors.asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
 
     video_path = args.video.resolve()
     scenes_path = args.scenes.resolve()

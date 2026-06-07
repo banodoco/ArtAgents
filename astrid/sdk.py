@@ -483,8 +483,9 @@ def _resolve_execution(
     * If *explicit_execution* is given it is validated against the
       backends declared for the mode.
     * If *explicit_execution* is ``None`` it is inferred **only** when
-      exactly one backend is declared; otherwise a clear diagnostic is
-      raised asking the caller to choose.
+      exactly one non-Codex backend is declared; Codex is explicit-only for
+      automatic inference so adding it does not change existing cloud/local
+      defaults. Otherwise a clear diagnostic asks the caller to choose.
     """
     mode_spec = model_entry.modes.get(mode)
     if mode_spec is None:
@@ -509,8 +510,11 @@ def _resolve_execution(
             )
         return explicit_execution
 
-    if len(backend_ids) == 1:
-        return backend_ids[0]
+    inference_backend_ids = [
+        backend_id for backend_id in backend_ids if backend_id != "codex"
+    ] or backend_ids
+    if len(inference_backend_ids) == 1:
+        return inference_backend_ids[0]
 
     raise CapabilityValidationError(
         f"Ambiguous execution for model {model!r} mode {mode!r}. "

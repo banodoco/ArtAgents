@@ -244,6 +244,9 @@ def test_generate_image_auto_forwards_prompt_and_numeric_inputs(tmp_path: Path) 
                 "steps": "30",
                 "negative_prompt": "blurry",
                 "guidance_scale": "7.5",
+                "quality": "low",
+                "background": "transparent",
+                "timeout": "123",
             },
             python_exec="/opt/python",
         ),
@@ -257,6 +260,9 @@ def test_generate_image_auto_forwards_prompt_and_numeric_inputs(tmp_path: Path) 
     assert command[command.index("--steps") + 1] == "30"
     assert command[command.index("--negative-prompt") + 1] == "blurry"
     assert command[command.index("--guidance-scale") + 1] == "7.5"
+    assert command[command.index("--quality") + 1] == "low"
+    assert command[command.index("--background") + 1] == "transparent"
+    assert command[command.index("--timeout") + 1] == "123"
     # Templated inputs are passed exactly once (not double-forwarded).
     for flag in ("--model", "--mode", "--execution", "--out"):
         assert command.count(flag) == 1

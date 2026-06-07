@@ -1,0 +1,23 @@
+# stream_content.distill
+
+Use this orchestrator for long recordings from events, streams, panels, demos,
+or webinars that need to become reviewable publishing material.
+
+```bash
+python3 -m astrid orchestrators run stream_content.distill -- \
+  --video sources/event.mp4 \
+  --transcript runs/transcript.json \
+  --brief brief.md \
+  --out runs/stream-content
+```
+
+Outputs:
+
+- `segment_map.json`: gapless holding/dead/content/screening timeline.
+- `segments/`: extracted `content` and `screening` files plus `segments.json`.
+- `candidates.json`: scored candidate clips.
+- `review.html`: static self-contained review page.
+
+Use `--dry-run` to emit `plan.json` only. Use `--no-scenes` to skip scene
+detection.
+

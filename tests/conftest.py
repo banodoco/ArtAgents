@@ -295,7 +295,9 @@ def _autouse_session_seed(
     _clear_task_env()
     astrid_home = tmp_path_factory.mktemp("astrid_home_autouse")
     projects_root = tmp_path_factory.mktemp("astrid_projects_autouse")
+    workspace_config_dir = tmp_path_factory.mktemp("astrid_workspace_config_autouse")
     monkeypatch.setenv("ASTRID_HOME", str(astrid_home))
+    monkeypatch.setenv("ASTRID_WORKSPACE_CONFIG_DIR", str(workspace_config_dir))
     # Seed PROJECTS_ROOT to a tmp dir so the autouse seed-project does NOT
     # write into the user's real ~/Documents/.../astrid-projects/. Tests
     # that need their own projects-root (via tmp_projects_root) override

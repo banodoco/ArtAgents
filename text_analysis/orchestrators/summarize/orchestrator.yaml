@@ -1,0 +1,11 @@
+schema_version: 1
+id: text_analysis.summarize
+name: summarize
+kind: built_in
+version: 0.1.0
+description: "TODO: describe what this orchestrator does."
+
+runtime:
+  kind: python
+  module: run
+  function: main

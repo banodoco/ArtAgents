@@ -10,15 +10,19 @@ survives.
 
 from __future__ import annotations
 
+import hashlib
+import mimetypes
+import os
 from pathlib import Path
 from typing import Any
 
 from astrid.contracts.errors import AstridError
+from astrid.core.theme import load_theme_by_id
 from astrid.core.util.time import utc_now_seconds
 
 from . import paths
 from .jsonio import read_json, write_json_atomic
-from .schema import build_project, validate_project
+from .schema import build_project, build_source, validate_project
 
 # Skeleton for the per-project plan.md — a human/agent-readable working notes
 # doc at the project root.  This is DISTINCT from <project>/runs/<run-id>/plan.json
@@ -133,17 +137,145 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
     """
 
     project = require_project(slug, root=root)
-    source_root = paths.sources_dir(slug, root=root)
     run_root = paths.runs_dir(slug, root=root)
-    sources = sorted(path.name for path in source_root.iterdir() if (path / "source.json").exists()) if source_root.exists() else []
     runs = sorted(path.name for path in run_root.iterdir() if (path / "run.json").exists()) if run_root.exists() else []
     return {
         "project": project,
         "project_id": project.get("project_id"),
         "root": str(paths.project_dir(slug, root=root)),
         "runs": runs,
-        "sources": sources,
+        "sources": list_project_sources(slug, root=root),
+        "theme": project.get("theme"),
     }
+
+
+def set_project_theme(
+    slug: str,
+    theme: str | None,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    payload = require_project(slug, root=root)
+    if theme is None:
+        payload.pop("theme", None)
+    else:
+        theme_slug = paths.validate_project_slug(theme)
+        load_theme_by_id(theme_slug)
+        payload["theme"] = theme_slug
+    payload["updated_at"] = utc_now_seconds()
+    payload = validate_project(payload)
+    write_json_atomic(paths.project_json_path(slug, root=root), payload)
+    return payload
+
+
+def get_project_theme(slug: str, *, root: str | Path | None = None) -> str | None:
+    payload = require_project(slug, root=root)
+    theme = payload.get("theme")
+    return theme if isinstance(theme, str) else None
+
+
+def list_project_sources(slug: str, *, root: str | Path | None = None) -> list[dict[str, Any]]:
+    require_project(slug, root=root)
+    source_root = paths.sources_dir(slug, root=root)
+    if not source_root.exists():
+        return []
+    entries: list[dict[str, Any]] = []
+    for child in sorted(source_root.iterdir(), key=lambda item: item.name):
+        if child.is_dir() and (child / "source.json").exists():
+            valid, reason = _source_id_validity(child.name)
+            entry: dict[str, Any] = {
+                "kind": "registered",
+                "source_id": child.name,
+                "valid": valid,
+                "path": str(child),
+            }
+            if reason:
+                entry["validation_error"] = reason
+            entries.append(entry)
+        elif child.is_file():
+            valid, reason = _source_id_validity(child.name)
+            stat = child.stat()
+            entry = {
+                "kind": "file",
+                "source_id": child.name,
+                "filename": child.name,
+                "valid": valid,
+                "path": str(child),
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+            }
+            if reason:
+                entry["validation_error"] = reason
+            entries.append(entry)
+    return entries
+
+
+def register_source_file(
+    slug: str,
+    filename: str,
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any]:
+    require_project(slug, root=root)
+    if Path(filename).name != filename:
+        raise ProjectError("source filename must be a bare filename under sources/")
+    source_id = paths.validate_source_id(filename)
+    source_root = paths.sources_dir(slug, root=root)
+    bare_path = source_root / filename
+    if not bare_path.is_file():
+        raise FileNotFoundError(f"bare source file not found: {filename}")
+    source_dir = paths.source_dir(slug, source_id, root=root)
+    if source_dir.exists() and not source_dir.is_file():
+        raise ProjectError(f"source already exists: {source_id}")
+
+    stat = bare_path.stat()
+    digest = _sha256_file(bare_path)
+    mime_type, _encoding = mimetypes.guess_type(filename)
+    temp_path = source_root / f".{filename}.registering"
+    if temp_path.exists():
+        raise ProjectError(f"temporary registration path already exists: {temp_path.name}")
+    os.replace(bare_path, temp_path)
+    try:
+        source_dir.mkdir(parents=True)
+        target_path = source_dir / filename
+        os.replace(temp_path, target_path)
+        asset: dict[str, Any] = {"file": str(target_path)}
+        if mime_type:
+            asset["type"] = mime_type
+        payload = build_source(
+            slug,
+            source_id,
+            asset=asset,
+            metadata={
+                "original_filename": filename,
+                "size": stat.st_size,
+                "mtime": stat.st_mtime,
+                "sha256": digest,
+            },
+        )
+        write_json_atomic(source_dir / "source.json", payload)
+        (source_dir / "analysis").mkdir(exist_ok=True)
+        return payload
+    except Exception:
+        if temp_path.exists() and not bare_path.exists():
+            os.replace(temp_path, bare_path)
+        raise
+
+
+def _source_id_validity(source_id: str) -> tuple[bool, str | None]:
+    try:
+        paths.validate_source_id(source_id)
+    except ValueError as exc:
+        return False, str(exc)
+    return True, None
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _touch_project(slug: str, *, root: str | Path | None = None) -> None:

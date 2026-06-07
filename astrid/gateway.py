@@ -11,7 +11,8 @@ bound session (this also lets a fresh checkout verify documented commands).
 The settled Sprint 1 allowlist is recorded in
 ``SPRINT1_UNBOUND_ALLOWLIST_CONTRACT`` below: help/version, ``status``,
 ``next``, ``attach``, ``projects ls``, ``projects create``,
-``projects default``, ``sessions ls``, ``sessions takeover``, and ``doctor``
+``projects default``, ``projects theme``, ``themes ls``, ``sessions ls``,
+``sessions takeover``, and ``doctor``
 (a diagnostic that must run before any session exists). Unbound
 ``sessions takeover`` is legal only because it must bootstrap or select a
 concrete caller session before it mutates the target lease; anonymous takeover
@@ -92,6 +93,8 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("projects", "ls"),
     ("projects", "create"),
     ("projects", "default"),
+    ("projects", "theme"),
+    ("themes", "ls"),
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),
@@ -435,6 +438,12 @@ def _dispatch_projects(args: list[str]) -> int:
     return projects_cli.main(args)
 
 
+def _dispatch_themes(args: list[str]) -> int:
+    from .core import theme_cli
+
+    return theme_cli.main(args)
+
+
 def _dispatch_timelines(args: list[str]) -> int:
     from .core.timeline import cli as timelines_cli
 
@@ -620,6 +629,7 @@ _TOP_LEVEL_HANDLERS = {
     "models": _dispatch_models,
     "elements": _dispatch_elements,
     "projects": _dispatch_projects,
+    "themes": _dispatch_themes,
     "timelines": _dispatch_timelines,
     "modalities": _dispatch_modalities,
     "runpod": lambda args: _dispatch_runpod(args),
@@ -1141,7 +1151,8 @@ Start here:
     # elements — reusable building blocks
   python3 -m astrid elements {{list,inspect,fork,install}} ...
     # projects — project CRUD
-  python3 -m astrid projects {{ls,default,create,show,source}} ...
+  python3 -m astrid projects {{ls,default,create,show,theme,source}} ...
+  python3 -m astrid themes ls
     # timelines -- timeline management
   python3 -m astrid timelines {{ls,create,show,rename,finalize,tombstone,purge,set-default}} ...
     # models -- model catalog discovery

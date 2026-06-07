@@ -18,6 +18,7 @@ from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestr
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.project import paths
 from astrid.core.project.project import create_project
+from astrid.core.project.run import resolve_record_path
 from astrid.core.timeline.crud import create_timeline
 from astrid.packs.video_editing.orchestrators.hype import run as hype
 
@@ -44,7 +45,7 @@ def test_executor_project_runs_finalize_success_error_skip_and_avoid_thread_coll
     assert [record["status"] for record in records] == ["completed", "failed", "skipped"]
     assert records[1]["metadata"]["returncode"] == -1
     assert records[1]["metadata"]["error"] == str(excinfo.value)
-    writer_out = Path(records[0]["out"])
+    writer_out = resolve_record_path(records[0]["out"], records[0]["project_slug"])
     assert (writer_out / "env.txt").read_text(encoding="utf-8") == "1"
     assert (writer_out / "run.json").exists()
     assert not (repo / ".astrid" / "threads.json").exists()
@@ -88,7 +89,7 @@ def test_orchestrator_project_run_injects_hype_out_and_command_runtime_env(tmp_p
     record = _project_records(projects_root)[0]
     assert record["status"] == "completed"
     assert record["tool_id"] == "test.orch"
-    assert (Path(record["out"]) / "orch-env.txt").read_text(encoding="utf-8") == "1"
+    assert (resolve_record_path(record["out"], record["project_slug"]) / "orch-env.txt").read_text(encoding="utf-8") == "1"
 
     hype_registry = OrchestratorRegistry([_hype_command_orchestrator()])
     dry = run_orchestrator(
@@ -163,7 +164,8 @@ def test_direct_hype_project_validation_error_and_nested_artifact_mirroring(tmp_
     assert success_record["status"] == "completed"
     assert sorted(success_record["artifacts"]) == ["assets", "metadata", "timeline"]
     assert success_record["artifacts"]["timeline"]["source_path"].endswith("briefs/brief-a/hype.timeline.json")
-    assert (Path(success_record["out"]) / "timeline.json").exists()
+    assert not Path(success_record["artifacts"]["timeline"]["path"]).is_absolute()
+    assert (resolve_record_path(success_record["out"], success_record["project_slug"]) / "timeline.json").exists()
 
 
 def test_project_run_rejects_project_plus_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -193,7 +195,7 @@ def test_project_run_allows_implicit_out_when_project_supplied(tmp_path: Path, m
     assert result.returncode == 0
     records = _project_records(projects_root)
     assert [record["status"] for record in records] == ["completed"]
-    writer_out = Path(records[0]["out"])
+    writer_out = resolve_record_path(records[0]["out"], records[0]["project_slug"])
     assert writer_out.exists()
     assert (writer_out / "env.txt").read_text(encoding="utf-8") == "1"
 
@@ -218,7 +220,9 @@ def test_prepare_project_run_skips_timeline_when_requires_timeline_false(
     )
 
     assert "timeline_id" not in context.record
-    assert (Path(context.record["out"]) / "run.json").exists() or context.run_json_path.exists()
+    assert (
+        resolve_record_path(context.record["out"], context.project_slug, root=projects_root) / "run.json"
+    ).exists() or context.run_json_path.exists()
     on_disk = _read_json(context.run_json_path)
     assert "timeline_id" not in on_disk
 
@@ -492,6 +496,39 @@ def test_load_run_record_normalizes_legacy_status_without_rewriting_disk(
 
     assert loaded["status"] == RunStatus.RUNNING.value
     assert legacy_path.read_text(encoding="utf-8") == encoded
+    assert resolve_record_path(loaded["out"], "demo") == legacy_path.parent.resolve()
+
+
+def test_project_internal_record_paths_are_stored_project_relative(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.project.run import finalize_project_run, prepare_project_run
+
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    _clear_thread_env(monkeypatch)
+    create_project("demo")
+    create_timeline("demo", "main", is_default=True)
+
+    context = prepare_project_run("demo", tool_id="test.writer", kind="executor")
+    run_out = resolve_record_path(context.record["out"], context.project_slug, root=projects_root)
+    (run_out / "manifest.json").write_text(
+        json.dumps({"outputs": [{"path": "image_001.png", "type": "image/png"}]}),
+        encoding="utf-8",
+    )
+    (run_out / "hype.timeline.json").write_text(json.dumps({"clips": []}), encoding="utf-8")
+    (run_out / "hype.assets.json").write_text(json.dumps({"assets": {}}), encoding="utf-8")
+    (run_out / "hype.metadata.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    finalize_project_run(context, status=RunStatus.COMPLETED, returncode=0)
+
+    on_disk = _read_json(context.run_json_path)
+    assert on_disk["out"] == f"runs/{context.run_id}"
+    assert on_disk["manifest_path"] == f"runs/{context.run_id}/manifest.json"
+    for artifact in on_disk["artifacts"].values():
+        assert not Path(artifact["path"]).is_absolute()
+        assert not Path(artifact["source_path"]).is_absolute()
+        assert resolve_record_path(artifact["path"], "demo").exists()
 
 
 def _writer_executor(executor_id: str) -> ExecutorDefinition:
@@ -935,7 +972,7 @@ def test_finalize_preserves_hype_artifact_precedence_over_manifest_fallback(
     create_timeline("demo", "main", is_default=True)
 
     context = prepare_project_run("demo", tool_id="test.stateless", kind="executor")
-    run_out = Path(context.record["out"])
+    run_out = resolve_record_path(context.record["out"], context.project_slug, root=projects_root)
     (run_out / "manifest.json").write_text(
         json.dumps({"outputs": [{"path": "image_001.png", "type": "image/png"}]}),
         encoding="utf-8",
@@ -946,7 +983,7 @@ def test_finalize_preserves_hype_artifact_precedence_over_manifest_fallback(
 
     record = finalize_project_run(context, status=RunStatus.COMPLETED, returncode=0)
 
-    assert record["manifest_path"] == str((run_out / "manifest.json").resolve())
+    assert record["manifest_path"] == "runs/{}/manifest.json".format(context.run_id)
     assert sorted(record["artifacts"]) == ["assets", "metadata", "timeline"]
     assert "outputs" not in record["artifacts"]
 

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "id": "comfy_wrap.run",
+  "name": "Comfy Workflow Run",
+  "kind": "external",
+  "version": "0.1.0",
+  "short_description": "Generate an image by injecting a prompt into a ComfyUI workflow JSON and running it via vibecomfy.",
+  "description": "Loads a ComfyUI workflow JSON file at run-time, injects a user-supplied text prompt into the positive CLIPTextEncode node, executes the workflow through vibecomfy (the existing Astrid ComfyUI wrapping surface), and copies the resulting image to the specified output path.",
+  "keywords": [
+    "comfyui",
+    "vibecomfy",
+    "workflow",
+    "generate",
+    "image",
+    "prompt",
+    "txt2img",
+    "sdxl"
+  ],
+  "inputs": [
+    {
+      "name": "prompt",
+      "type": "string",
+      "required": true,
+      "description": "Text prompt describing the desired image (injected into the positive CLIPTextEncode node)."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "generated_image",
+      "type": "file",
+      "path_template": "{out}/output.png",
+      "description": "The generated image file."
+    }
+  ],
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.comfy_wrap.executors.run.run",
+      "--prompt",
+      "{prompt}",
+      "--out",
+      "{out}"
+    ]
+  },
+  "cache": {
+    "mode": "none"
+  },
+  "conditions": [
+    {
+      "input": "prompt",
+      "kind": "requires_input"
+    }
+  ],
+  "graph": {
+    "consumes": [
+      "prompt"
+    ],
+    "provides": [
+      "generated_image"
+    ]
+  },
+  "isolation": {
+    "mode": "subprocess",
+    "network": true,
+    "requirements": [
+      "vibecomfy"
+    ]
+  },
+  "metadata": {
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.comfy_wrap.executors.run.run",
+    "requirements_source": "requirements.txt",
+    "workflow_source": "/tmp/example_comfy.json",
+    "prompt_node_id": "6",
+    "prompt_node_field": "text",
+    "prompt_node_type": "CLIPTextEncode"
+  }
+}

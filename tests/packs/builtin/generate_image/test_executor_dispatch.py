@@ -239,7 +239,7 @@ class TestExecutorDispatchWithSyntheticRegistry:
         )
 
         out = tmp_path / "out"
-        # flux-dev t2i supports only cloud.
+        # flux-dev t2i supports cloud and codex; this test exercises cloud.
         # Generation will fail (no real FAL_KEY), but dispatch must pass.
         try:
             run_mod.main(
@@ -306,7 +306,7 @@ class TestExecutorDispatchWithSyntheticRegistry:
         ARE available for the pair."""
         from astrid.packs.generation.executors.generate_image import run as run_mod
 
-        # flux-dev t2i is cloud-only in the model catalog.
+        # flux-dev t2i has cloud/codex but still no local backend.
         registry = _synthetic_registry("cloud", "local")
         monkeypatch.setattr(
             run_mod, "load_default_generation_backend_registry", lambda: registry
@@ -325,7 +325,7 @@ class TestExecutorDispatchWithSyntheticRegistry:
             ),
             "model 'flux-dev' mode 't2i' has no 'local' backend",
         )
-        assert error.valid_options == ("cloud",)
+        assert error.valid_options == ("cloud", "codex")
 
     # -- No raw KeyError leakage -------------------------------------------
 

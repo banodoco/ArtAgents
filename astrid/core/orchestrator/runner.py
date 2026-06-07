@@ -674,7 +674,7 @@ def _finalize_project_orchestrator(
 
 
 def _project_subprocess_env(request: OrchestratorRunRequest) -> dict[str, str]:
-    return project_run_env() if request.project else {}
+    return project_run_env(request.project) if request.project else {}
 
 
 def _resolve_project_request(

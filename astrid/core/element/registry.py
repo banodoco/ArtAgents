@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Iterable
 
 from astrid._paths import REPO_ROOT
+from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
 from astrid.core.alias_resolver import (
     AliasResolver,
     _register_pack_aliases,
@@ -328,12 +329,5 @@ def _load_pack_elements_from_packs(
 
 
 def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
-    raw = os.environ.get("HYPE_ACTIVE_THEME") if theme is None else theme
-    if not raw:
-        return None
-    candidate = Path(raw).expanduser()
-    if candidate.name == "theme.json":
-        return candidate.parent.resolve()
-    if candidate.exists():
-        return (candidate if candidate.is_dir() else candidate.parent).resolve()
-    return (REPO_ROOT.parent / "themes" / str(raw)).resolve()
+    raw = os.environ.get(ACTIVE_THEME_ENV) if theme is None else theme
+    return resolve_theme_dir(raw)

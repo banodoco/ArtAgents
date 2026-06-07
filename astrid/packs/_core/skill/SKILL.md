@@ -397,6 +397,7 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 
 | id | short_description |
 | --- | --- |
+| `comfy_wrap.run` | Generate an image by injecting a prompt into a ComfyUI workflow JSON and running it via vibecomfy. |
 | `editorial.arrange` | Compose a brief-specific shot arrangement from the source clip pool. |
 | `editorial.boundary_candidates` | Package candidate video frames for visual scene-boundary review. |
 | `editorial.editor_review` | Run heuristic editorial reviewers over an arrangement and emit notes. |
@@ -415,9 +416,15 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `fal.fal_foley` | Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model. |
 | `foley.foley_review` | Build a static review.html pairing each tile clip with its generated Foley audio for sense-checking. |
 | `foley.tile_video` | Crop a video into an MxN grid of overlapping spatial tiles plus first-frame PNGs. |
-| `generation.generate_image` | Generate images from text prompts via local or cloud backends. v2: model→mode→backend. |
+| `generation.generate_image` | Generate images from text prompts via local, cloud, or Codex backends. v2: model→mode→backend. |
 | `generation.generate_image_openai` | Generate image files with OpenAI GPT Image models from a prompt file. |
 | `generation.generate_video` | Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes. |
+| `hivemind.contribute` | Submit a resource or distillation to the Hivemind corpus via the contribute edge function. |
+| `hivemind.get_item` | Fetch a single full row from the Hivemind corpus by kind and id. |
+| `hivemind.ingest_article` | Fetch a web article, extract readable text, and submit as a resource. |
+| `hivemind.ingest_workflow` | Parse a ComfyUI workflow JSON and submit as a resource with model metadata. |
+| `hivemind.ingest_youtube` | Extract YouTube captions via yt-dlp and submit as a transcript resource. |
+| `hivemind.search` | Search the Hivemind unified corpus with distillations-first merging. |
 | `iteration.assemble` | Adapt prepared iteration data into canonical iteration artifacts and render-ready hype inputs. |
 | `iteration.prepare` | Collect thread provenance, quality scores, and candidate runs into iteration prepare artifacts. |
 | `media.clip_extract` | Extract a clip segment from a video using ffmpeg stream copy. |
@@ -434,6 +441,8 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | `runpod.pull` | Pull artifacts from an existing RunPod pod into local storage. |
 | `runpod.session` | Composite provision → exec → teardown session with guaranteed cleanup. |
 | `runpod.teardown` | Terminate a RunPod pod. Idempotent. |
+| `stream_content.clip_candidates` | Score transcript windows as publishable stream clip candidates. |
+| `stream_content.segment_map` | Fuse OCR, transcript density, and scene cuts into a complete stream timeline. |
 | `training.asset_cache` | Manage the repo-local hype asset cache (download, prune, list). |
 | `training.pool_build` | Build the candidate clip pool from triaged source-video scenes. |
 | `training.pool_merge` | Merge multiple candidate clip pools into a unified pool for arrangement. |
@@ -454,6 +463,7 @@ Every project has a `plan.md` at its root — a per-project markdown doc for liv
 | id | short_description |
 | --- | --- |
 | `foley.foley_map` | Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer. |
+| `stream_content.distill` | Distill a long event stream into segments, extracted blocks, candidates, and a review page. |
 | `training.dataset_build` | Build a generic reviewed video training dataset from configured sources. |
 | `training.training_run` | Run a generic LoRA training job from a prepared dataset manifest. |
 | `video_editing.animate_image` | Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2. |

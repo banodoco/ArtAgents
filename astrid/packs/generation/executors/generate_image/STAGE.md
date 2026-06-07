@@ -4,20 +4,27 @@
 **Modality**: image (`schema_version: 2`)  
 **Status**: implemented (Sprint 02 — v2 model → mode → backend taxonomy)
 
-Generates images from text prompts (or prompt files) using local (vibecomfy)
-or cloud (fal) backends.  A single executor dispatches through `BackendAdapter`
-(SD-004) — callers pick a model, a mode, and a backend; the executor does
-the rest.  **`--mode` is required** (SD-005).
+Generates images from text prompts (or prompt files) using local (vibecomfy),
+cloud (fal), or Codex `image_generation` backends.  A single executor
+dispatches through `BackendAdapter` (SD-004) — callers pick a model, a mode,
+and a backend; the executor does the rest.  **`--mode` is required** (SD-005).
 
 ## Starting models (Tier-1)
 
-| Model               | Modes wired       | Local template(s)              | Cloud endpoint(s)                     |
-|---------------------|-------------------|--------------------------------|---------------------------------------|
-| `z-image`           | t2i, i2i          | `image/z_image`, `image/z_image_img2img` | `fal-ai/z-image/turbo`, `fal-ai/z-image/turbo/image-to-image` |
-| `qwen-image-2512`   | t2i               | `image/qwen_image_2512`       | `fal-ai/qwen-image`                  |
-| `qwen-image-edit`   | edit              | `edit/qwen_image_edit`        | `fal-ai/qwen-image-edit`             |
-| `flux-dev`          | t2i, i2i (cloud-only) | — (cloud-only per SD-001) | `fal-ai/flux/dev`, `fal-ai/flux/dev/image-to-image` |
-| `flux-schnell`      | t2i (cloud-only)  | — (cloud-only per SD-001)     | `fal-ai/flux/schnell`                |
+| Model               | Modes wired       | Local template(s)              | Cloud endpoint(s)                     | Codex |
+|---------------------|-------------------|--------------------------------|---------------------------------------|-------|
+| `z-image`           | t2i, i2i          | `image/z_image`, `image/z_image_img2img` | `fal-ai/z-image/turbo`, `fal-ai/z-image/turbo/image-to-image` | yes |
+| `qwen-image-2512`   | t2i               | `image/qwen_image_2512`       | `fal-ai/qwen-image`                  | yes |
+| `qwen-image-edit`   | edit              | `edit/qwen_image_edit`        | `fal-ai/qwen-image-edit`             | yes |
+| `flux-dev`          | t2i, i2i          | — (no local template per SD-001) | `fal-ai/flux/dev`, `fal-ai/flux/dev/image-to-image` | yes |
+| `flux-schnell`      | t2i               | — (no local template per SD-001) | `fal-ai/flux/schnell`                | yes |
+
+The `codex` backend is also wired for image modes above. It runs
+`codex exec` and forces Codex's built-in `image_generation` tool by prompt
+contract. The PNG is expected under `~/.codex/generated_images/<session-id>/`
+as `ig_*.png`; the adapter copies fresh files into `{out}/images` with
+deterministic `codex_NNN.png` names. If Codex reports success but no fresh
+`ig_*.png` appears, the executor hard-fails.
 
 All entries are registered in `astrid/core/model_catalog/models.yaml` under
 `schema_version: 2`.  Each entry declares per-mode `supports: [...]`,
@@ -44,6 +51,25 @@ No fal SDK required (SD-009).
 
 Requires `FAL_KEY` to be resolvable via the candidate-env-file walk
 (see `astrid/core/util/secrets.py`).
+
+### Codex (`--execution codex`)
+
+Dispatches through `CodexBackend`.  This path needs **no `OPENAI_API_KEY`** and
+does not read OpenAI API key files. It uses the Codex CLI's own ChatGPT auth at
+`~/.codex/auth.json`, so the cheap readiness check is:
+
+1. `codex` binary is on `PATH`
+2. `~/.codex/auth.json` exists
+
+If `--execution codex` is requested and either check fails, the executor falls
+back to `--execution cloud` when the selected model/mode has a cloud backend,
+and prints a warning naming the reason. This is a preflight fallback only; a
+real Codex generation failure does not silently switch backends.
+
+`--size`, `--quality`, and `--background` are hints for Codex, not structured
+API parameters. The adapter folds them into natural language (for example,
+wide 3:2, high fidelity, transparent background). Aspect ratio is often
+honored, but exact pixels and true alpha are not guaranteed.
 
 ## Escape hatch
 
@@ -92,6 +118,11 @@ python -m astrid.packs.generation.executors.generate_image.run \
 python -m astrid.packs.generation.executors.generate_image.run \
   --model flux-schnell --mode t2i --execution cloud \
   --prompt "cyberpunk city" --count 3 --seed 42 --out ./out
+
+# Codex text-to-image (no OpenAI API key)
+python -m astrid.packs.generation.executors.generate_image.run \
+  --model flux-dev --mode t2i --execution codex \
+  --prompt "a tiny blue teapot" --size 1024x1024 --quality low --out ./out
 ```
 
 ## Prompts file (JSONL)
@@ -116,7 +147,8 @@ rejected at argparse.
 1. **Missing `--mode`** → rejected at argparse (required argument, SD-005).
 2. **Missing `requires`** (e.g. `flux-dev --mode i2i` without `--image-ref`)
    → hard-fail BEFORE any HTTP call or vibecomfy import.
-3. **`--execution` must be `local` or `cloud`** — rejected at argparse.
+3. **`--execution` must name a registered backend** such as `local`, `cloud`,
+   or `codex`.
 4. **Unsupported features** (e.g. `--negative-prompt` on `flux-dev --mode t2i` cloud) →
    dropped with a `Warning` in the manifest; never hard-fail (SD-004).
 5. **Per-entry mode mismatch**: If a prompts-file entry overrides `model`

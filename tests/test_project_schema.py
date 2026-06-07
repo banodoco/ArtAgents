@@ -15,7 +15,13 @@ import pytest
 
 from astrid.contracts.run_status import RunStatus
 from astrid.core.project import paths
-from astrid.core.project.project import create_project, show_project
+from astrid.core.project.project import (
+    create_project,
+    get_project_theme,
+    register_source_file,
+    set_project_theme,
+    show_project,
+)
 from astrid.core.project.schema import (
     PROJECT_SCHEMA_VERSION,
     ProjectValidationError,
@@ -30,6 +36,30 @@ from astrid.core.project.schema import (
     validate_source,
 )
 from astrid.core.project.source import add_source, require_source
+
+
+def _write_theme(theme_dir: Path, *, theme_id: str | None = None) -> None:
+    theme_dir.mkdir(parents=True)
+    theme_id = theme_id or theme_dir.name
+    (theme_dir / "theme.json").write_text(
+        json.dumps(
+            {
+                "id": theme_id,
+                "visual": {
+                    "color": {"fg": "#fff", "bg": "#000", "accent": "#f00"},
+                    "type": {
+                        "families": {"heading": "Inter", "body": "Inter"},
+                        "size": {"base": 16, "small": 12, "large": 32},
+                        "weight": {"normal": 400, "bold": 700},
+                        "lineHeight": 1.2,
+                    },
+                    "motion": {"fadeMs": 120},
+                    "canvas": {"width": 1920, "height": 1080, "fps": 30},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_project_helpers_resolve_env_root_and_write_deterministic_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,7 +78,58 @@ def test_project_helpers_resolve_env_root_and_write_deterministic_json(tmp_path:
     assert project_json.read_text(encoding="utf-8").endswith("\n")
     assert source["asset"]["file"] == str(media.resolve())
     assert source["kind"] == "video"
-    assert show_project("demo")["sources"] == ["intro"]
+    assert show_project("demo")["sources"] == [
+        {
+            "kind": "registered",
+            "path": str(projects_root / "demo" / "sources" / "intro"),
+            "source_id": "intro",
+            "valid": True,
+        }
+    ]
+
+
+def test_project_sources_include_bare_files_and_flag_invalid_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    create_project("demo")
+    source_root = projects_root / "demo" / "sources"
+    (source_root / "placeholder.mp4").write_bytes(b"video")
+    (source_root / "bad name.mp4").write_bytes(b"bad")
+
+    sources = show_project("demo")["sources"]
+
+    by_id = {source["source_id"]: source for source in sources}
+    assert by_id["placeholder.mp4"]["kind"] == "file"
+    assert by_id["placeholder.mp4"]["valid"] is True
+    assert by_id["bad name.mp4"]["kind"] == "file"
+    assert by_id["bad name.mp4"]["valid"] is False
+    assert "validation_error" in by_id["bad name.mp4"]
+
+
+def test_register_source_file_promotes_bare_file_to_registered_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    create_project("demo")
+    source_root = projects_root / "demo" / "sources"
+    bare = source_root / "placeholder.mp4"
+    bare.write_bytes(b"video")
+
+    source = register_source_file("demo", "placeholder.mp4")
+
+    registered_file = source_root / "placeholder.mp4" / "placeholder.mp4"
+    assert not bare.is_file()
+    assert registered_file.read_bytes() == b"video"
+    assert (source_root / "placeholder.mp4" / "source.json").is_file()
+    assert source["source_id"] == "placeholder.mp4"
+    assert source["kind"] == "video"
+    assert source["metadata"]["original_filename"] == "placeholder.mp4"
+    assert source["metadata"]["size"] == 5
+    assert len(source["metadata"]["sha256"]) == 64
+    assert show_project("demo")["sources"][0]["kind"] == "registered"
 
 
 def test_create_project_does_not_write_timeline_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,6 +160,61 @@ def test_project_id_field_is_optional_opaque_in_project_json(
     # Empty / non-string project_id -> validation error.
     with pytest.raises(ProjectValidationError, match="project_id"):
         validate_project({**with_id, "project_id": ""})
+
+
+def test_project_theme_set_get_clear_and_show(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    projects_root = tmp_path / "projects"
+    themes_root = tmp_path / "themes"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.setenv("ASTRID_THEMES_ROOT", str(themes_root))
+    monkeypatch.delenv("HYPE_ACTIVE_THEME", raising=False)
+    _write_theme(themes_root / "demo-theme")
+    create_project("demo")
+
+    updated = set_project_theme("demo", "demo-theme")
+
+    assert updated["theme"] == "demo-theme"
+    assert get_project_theme("demo") == "demo-theme"
+    assert show_project("demo")["theme"] == "demo-theme"
+
+    cleared = set_project_theme("demo", None)
+    assert "theme" not in cleared
+    assert get_project_theme("demo") is None
+
+
+def test_project_theme_rejects_missing_theme(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    monkeypatch.setenv("ASTRID_THEMES_ROOT", str(tmp_path / "themes"))
+    create_project("demo")
+
+    with pytest.raises(ValueError, match="theme not found"):
+        set_project_theme("demo", "missing-theme")
+
+
+def test_active_theme_resolution_prefers_env_over_project_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from astrid.core.element.catalog import resolve_active_theme, set_active_theme
+
+    projects_root = tmp_path / "projects"
+    themes_root = tmp_path / "themes"
+    monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.setenv("ASTRID_THEMES_ROOT", str(themes_root))
+    monkeypatch.delenv("HYPE_ACTIVE_THEME", raising=False)
+    set_active_theme(None)
+    _write_theme(themes_root / "project-theme")
+    _write_theme(themes_root / "env-theme")
+    create_project("demo")
+    set_project_theme("demo", "project-theme")
+
+    assert resolve_active_theme(project_slug="demo") == (themes_root / "project-theme").resolve()
+
+    monkeypatch.setenv("HYPE_ACTIVE_THEME", "env-theme")
+    assert resolve_active_theme(project_slug="demo") == (themes_root / "env-theme").resolve()
 
 
 def test_source_validation_rejects_bad_state(

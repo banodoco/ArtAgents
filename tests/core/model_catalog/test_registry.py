@@ -609,15 +609,17 @@ class TestBackendAvailable:
         assert reg.backend_available("z-image", "t2i", "cloud") is True
 
     def test_local_only_mode(self) -> None:
-        """flux-dev is cloud-only for t2i."""
+        """flux-dev has cloud/codex for t2i and no local backend."""
         reg = ModelRegistry.load_default()
         assert reg.backend_available("flux-dev", "t2i", "cloud") is True
+        assert reg.backend_available("flux-dev", "t2i", "codex") is True
         assert reg.backend_available("flux-dev", "t2i", "local") is False
 
     def test_cloud_only_mode(self) -> None:
-        """flux-schnell is cloud-only for t2i."""
+        """flux-schnell has cloud/codex for t2i and no local backend."""
         reg = ModelRegistry.load_default()
         assert reg.backend_available("flux-schnell", "t2i", "cloud") is True
+        assert reg.backend_available("flux-schnell", "t2i", "codex") is True
         assert reg.backend_available("flux-schnell", "t2i", "local") is False
 
 
@@ -634,6 +636,7 @@ class TestGetByMode:
         assert "prompt" in mode_spec.supports
         assert "local" in mode_spec.backends
         assert "cloud" in mode_spec.backends
+        assert "codex" in mode_spec.backends
 
     def test_get_by_mode_i2i(self) -> None:
         reg = ModelRegistry.load_default()
@@ -731,7 +734,7 @@ class TestSD001ModelIdentity:
             f"expected 'fal-ai/z-image/turbo/image-to-image'"
         )
 
-    def test_flux_dev_cloud_only_no_local_alias(self) -> None:
+    def test_flux_dev_no_local_alias(self) -> None:
         """flux-dev MUST NOT have a local backend (v1 silently aliased to Z-Image)."""
         reg = ModelRegistry.load_default()
         entry, mode_spec = reg.get_by_mode("flux-dev", "t2i")
@@ -740,7 +743,7 @@ class TestSD001ModelIdentity:
             "there is no Flux Dev local template"
         )
 
-    def test_flux_schnell_cloud_only(self) -> None:
+    def test_flux_schnell_no_local_backend(self) -> None:
         """flux-schnell MUST NOT have a local backend."""
         reg = ModelRegistry.load_default()
         entry, mode_spec = reg.get_by_mode("flux-schnell", "t2i")
@@ -782,6 +785,7 @@ class TestShippedRegistry:
         "flux2-klein-4b",
         "wan-2.2",
         "ltx-2.3",
+        "ltx-2.3-pro",
     }
 
     def test_load_default_succeeds(self) -> None:
@@ -912,7 +916,7 @@ class TestListByModalityV2:
     def test_video_returns_expected_entries(self) -> None:
         registry = ModelRegistry.load_default()
         video_models = registry.list_by_modality("video")
-        assert {m.id for m in video_models} == {"wan-2.2", "ltx-2.3"}
+        assert {m.id for m in video_models} == {"wan-2.2", "ltx-2.3", "ltx-2.3-pro"}
 
     def test_audio_returns_empty(self) -> None:
         registry = ModelRegistry.load_default()
@@ -1260,7 +1264,7 @@ class TestValidateRegistryWithBackends:
             validate_registry_with_backends(raw)
 
     def test_empty_allowed_ids_falls_back_to_builtins(self) -> None:
-        """An empty tuple ``()`` is falsy and falls back to ``("local", "cloud")``.
+        """An empty tuple ``()`` is falsy and falls back to built-in backends.
 
         This means ``"local"`` is accepted (it's in the fallback set) but
         a synthetic id like ``"studio"`` is still rejected.
@@ -1276,7 +1280,7 @@ class TestValidateRegistryWithBackends:
         raw_studio = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
         with pytest.raises(
             ValueError,
-            match="unknown backend key; available backend ids: cloud, local",
+            match="unknown backend key; available backend ids: cloud, codex, local",
         ):
             validate_registry_with_backends(raw_studio, allowed_backend_ids=())
 
@@ -1351,7 +1355,7 @@ class TestValidateRegistryWithBackends:
         raw = self._raw_with_backend(self.SYNTHETIC_BACKEND_ID)
         with pytest.raises(
             ValueError,
-            match="unknown backend key; available backend ids: cloud, local",
+            match="unknown backend key; available backend ids: cloud, codex, local",
         ):
             validate_registry_with_backends(raw)
 
@@ -1470,7 +1474,7 @@ class TestValidateRegistryWithGenerationTaxonomy:
         )
         # taxonomy_registry with only built-in backends — "studio" is undeclared
         registry = GenerationTaxonomyRegistry()
-        with pytest.raises(ValueError, match="unknown backend key; available backend ids: cloud, local"):
+        with pytest.raises(ValueError, match="unknown backend key; available backend ids: cloud, codex, local"):
             validate_registry_with_backends(raw, taxonomy_registry=registry)
 
     def test_declared_backend_passes_via_taxonomy_registry(self) -> None:

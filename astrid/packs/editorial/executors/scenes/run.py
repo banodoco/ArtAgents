@@ -128,7 +128,7 @@ def write_outputs(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    from ..asset_cache import run as asset_cache
+    from astrid.packs.training.executors.asset_cache import run as asset_cache
 
     args.video = Path(asset_cache.resolve_input(args.video, want="path"))
 

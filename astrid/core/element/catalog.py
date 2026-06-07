@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 from astrid.core.element.registry import (
     ElementRegistry,
     ElementSource,
@@ -18,14 +19,14 @@ from astrid.core.element.registry import (
 from astrid.core.element.schema import ElementKind
 
 TOOLS_DIR = REPO_ROOT
-THEMES_ROOT = WORKSPACE_ROOT / "themes"
+THEMES_ROOT = resolve_themes_root()
 
 
 def _initial_active_theme() -> Path | None:
-    raw = os.environ.get("HYPE_ACTIVE_THEME")
+    raw = os.environ.get(ACTIVE_THEME_ENV)
     if not raw:
         return None
-    return _resolve_theme_dir(raw)
+    return resolve_theme_dir(raw)
 
 
 _ACTIVE_THEME_DIR: Path | None = None
@@ -52,14 +53,7 @@ def _validate_kind(kind: str) -> ElementKind:
 
 
 def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
-    if theme is None:
-        return None
-    candidate = Path(theme)
-    if candidate.name == "theme.json":
-        return candidate.parent.resolve()
-    if candidate.exists():
-        return (candidate if candidate.is_dir() else candidate.parent).resolve()
-    return (THEMES_ROOT / str(theme)).resolve()
+    return resolve_theme_dir(theme)
 
 
 def set_active_theme(theme: str | Path | None) -> None:
@@ -74,8 +68,23 @@ def _active_theme_dir(theme: str | Path | None = None) -> Path | None:
     return _resolve_theme_dir(theme) if theme is not None else _ACTIVE_THEME_DIR
 
 
-def _registry(theme: str | Path | None = None) -> ElementRegistry:
-    theme_dir = _active_theme_dir(theme)
+def resolve_active_theme(project_slug: str | None = None) -> Path | None:
+    if project_slug is None and _ACTIVE_THEME_DIR is not None:
+        return _ACTIVE_THEME_DIR
+    raw = os.environ.get(ACTIVE_THEME_ENV)
+    if raw:
+        return resolve_theme_dir(raw)
+    if project_slug:
+        from astrid.core.project.project import get_project_theme
+
+        theme = get_project_theme(project_slug)
+        if theme:
+            return resolve_theme_dir(theme)
+    return _ACTIVE_THEME_DIR
+
+
+def _registry(theme: str | Path | None = None, *, project_slug: str | None = None) -> ElementRegistry:
+    theme_dir = _resolve_theme_dir(theme) if theme is not None else resolve_active_theme(project_slug)
     registry = load_default_registry(active_theme=theme_dir, project_root=TOOLS_DIR)
     legacy_root = WORKSPACE_ROOT
     if legacy_root.exists():
@@ -109,15 +118,26 @@ def _theme_name_for_element(element: Any) -> str:
     return element.root.parent.parent.name
 
 
-def list_element_ids(kind: ElementKind, theme: str | Path | None = None) -> list[str]:
-    registry = _registry(theme)
+def list_element_ids(
+    kind: ElementKind,
+    theme: str | Path | None = None,
+    *,
+    project_slug: str | None = None,
+) -> list[str]:
+    registry = _registry(theme, project_slug=project_slug)
     normalized_kind = registry.element_kind_registry.normalize(kind)
     _warn_conflicts(registry, kind=normalized_kind)
     return [element.id for element in registry.list(kind=normalized_kind)]
 
 
-def _element(element_id: str, *, kind: ElementKind, theme: str | Path | None = None):
-    return _registry(theme).get(kind, element_id)
+def _element(
+    element_id: str,
+    *,
+    kind: ElementKind,
+    theme: str | Path | None = None,
+    project_slug: str | None = None,
+):
+    return _registry(theme, project_slug=project_slug).get(kind, element_id)
 
 
 def read_element_schema(

@@ -38,6 +38,7 @@ from astrid.core import timeline
 from astrid._paths import WORKSPACE_ROOT, executor_argv
 from astrid.audit import PARENT_IDS_ENV, AuditContext
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_BINDING_MODE,
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
@@ -108,16 +109,14 @@ def usage_error(message: str) -> None:
 
 
 def _resolve_theme_arg(value: object) -> Path:
-    """Resolve --theme as either a theme.json path, a theme directory, or a workspace theme slug."""
+    """Resolve --theme as either a theme.json path, a theme directory, or a theme slug."""
+    theme_dir = resolve_theme_dir(value)
+    if theme_dir is None:
+        return (resolve_themes_root() / "banodoco-default" / "theme.json").resolve()
     candidate = Path(str(value)).expanduser()
-    if candidate.name == "theme.json":
+    if candidate.name == "theme.json" or (candidate.exists() and candidate.is_file()):
         return candidate.resolve()
-    if candidate.exists():
-        if candidate.is_dir():
-            return (candidate / "theme.json").resolve()
-        return candidate.resolve()
-    workspace_themes = WORKSPACE_ROOT / "themes"
-    return (workspace_themes / str(value) / "theme.json").resolve()
+    return (theme_dir / "theme.json").resolve()
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -361,13 +360,13 @@ def resolve_args(argv: list[str] | None = None) -> argparse.Namespace:
     args.no_audit = bool(getattr(args, "no_audit", False))
     args.allow_generative_effects = bool(getattr(args, "allow_generative_effects", False))
     args.dry_run = bool(getattr(args, "dry_run", False))
-    default_theme = WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json"
+    default_theme = resolve_themes_root() / "banodoco-default" / "theme.json"
     theme_value = getattr(args, "theme", default_theme)
     args.theme = _resolve_theme_arg(theme_value)
     # Thread the active theme to every subprocess so element catalog can
     # discover theme-scoped effects/animations/transitions without each
     # child script having to plumb --theme into its catalog calls.
-    os.environ["HYPE_ACTIVE_THEME"] = str(args.theme)
+    os.environ[ACTIVE_THEME_ENV] = str(args.theme)
     args.verbose = bool(getattr(args, "verbose", False))
     raw_editor_passes = int(getattr(args, "max_editor_passes", 2))
     if not 1 <= raw_editor_passes <= 2:

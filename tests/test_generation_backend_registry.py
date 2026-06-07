@@ -42,6 +42,7 @@ def test_registry_lists_builtins_without_importing_third_party_modules(
 
     assert [descriptor.backend_id for descriptor in descriptors] == [
         "cloud",
+        "codex",
         "local",
         "third-party",
     ]
@@ -56,9 +57,13 @@ def test_registry_creates_builtin_backends_via_standard_factory_signature(
 
     local_backend = registry.create("local", env_file=env_file)
     cloud_backend = registry.create("cloud", env_file=env_file)
+    codex_backend = registry.create("codex", env_file=env_file)
 
     assert isinstance(local_backend, VibeComfyBackend)
     assert isinstance(cloud_backend, FalBackend)
+    from astrid.core.generation.backends.codex import CodexBackend
+
+    assert isinstance(codex_backend, CodexBackend)
     assert cloud_backend._env_file == env_file
 
 
@@ -145,7 +150,7 @@ def test_builtin_descriptors_have_correct_metadata() -> None:
     and labels without requiring backend instantiation."""
     registry = GenerationBackendRegistry()
 
-    builtin_ids = {"cloud", "local"}
+    builtin_ids = {"cloud", "codex", "local"}
     seen: set[str] = set()
     for descriptor in registry.descriptors():
         if descriptor.backend_id in builtin_ids:
@@ -155,6 +160,10 @@ def test_builtin_descriptors_have_correct_metadata() -> None:
             assert descriptor.module == "astrid.core.generation.backends.fal"
             assert descriptor.class_name == "FalBackend"
             assert descriptor.label == "Cloud (fal)"
+        elif descriptor.backend_id == "codex":
+            assert descriptor.module == "astrid.core.generation.backends.codex"
+            assert descriptor.class_name == "CodexBackend"
+            assert descriptor.label == "Codex image_generation"
         elif descriptor.backend_id == "local":
             assert descriptor.module == "astrid.core.generation.backends.vibecomfy"
             assert descriptor.class_name == "VibeComfyBackend"

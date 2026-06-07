@@ -26,6 +26,7 @@ VIDEO_MODALITY = "video"
 
 LOCAL_BACKEND_ID = "local"
 CLOUD_BACKEND_ID = "cloud"
+CODEX_BACKEND_ID = "codex"
 
 IMAGE_FEATURES: tuple[Feature, ...] = (
     "prompt",
@@ -80,6 +81,7 @@ CANONICAL_VIDEO_MODES: tuple[str, ...] = (
 
 BUILTIN_GENERATION_BACKEND_IDS: tuple[str, ...] = (
     CLOUD_BACKEND_ID,
+    CODEX_BACKEND_ID,
     LOCAL_BACKEND_ID,
 )
 

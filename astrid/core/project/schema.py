@@ -40,6 +40,7 @@ def build_project(
     *,
     name: str | None = None,
     project_id: str | None = None,
+    theme: str | None = None,
     created_at: str | None = None,
     default_timeline_id: str | None = None,
 ) -> dict[str, Any]:
@@ -58,6 +59,8 @@ def build_project(
     }
     if project_id is not None:
         payload["project_id"] = _require_string(project_id, "project.project_id")
+    if theme is not None:
+        payload["theme"] = validate_project_slug(theme)
     return payload
 
 
@@ -158,6 +161,11 @@ def validate_project(raw: Any) -> dict[str, Any]:
             payload.pop("project_id")
         else:
             payload["project_id"] = _require_string(payload["project_id"], "project.project_id")
+    if "theme" in payload:
+        if payload["theme"] is None:
+            payload.pop("theme")
+        else:
+            payload["theme"] = validate_project_slug(_require_string(payload["theme"], "project.theme"))
     if "default_timeline_id" in payload:
         payload["default_timeline_id"] = _validate_default_timeline_id(
             payload["default_timeline_id"]

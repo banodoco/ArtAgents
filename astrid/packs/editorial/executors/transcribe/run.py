@@ -282,7 +282,7 @@ def transcribe_to_outputs(audio_path: Path, out_dir: Path, cache_dir: Path, clie
     return write_transcripts(out_dir, segments, audit), summary, metadata_path
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    from ..asset_cache import run as asset_cache
+    from astrid.packs.training.executors.asset_cache import run as asset_cache
 
     args.audio = Path(asset_cache.resolve_input(args.audio, want="path"))
     audio_path = args.audio.resolve()

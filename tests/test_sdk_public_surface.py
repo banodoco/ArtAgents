@@ -2225,7 +2225,7 @@ def test_image_execution_inference_single_backend(
     fake_invoke, seen = _make_success_invoke(astrid, tmp_path)
     monkeypatch.setattr(sdk, "invoke", fake_invoke)
 
-    # flux-dev t2i only has cloud backend
+    # flux-dev t2i has cloud plus explicit-only codex; auto-inference keeps cloud.
     result = astrid.generate.image(
         model="flux-dev",
         out=tmp_path,
@@ -2280,7 +2280,7 @@ def test_image_explicit_execution_rejected_when_unavailable(
     a clear error."""
     astrid = _import_public_module()
 
-    # flux-dev t2i only has cloud, not local
+    # flux-dev t2i has cloud/codex, not local.
     with pytest.raises(
         astrid.CapabilityValidationError,
         match="is not available for",

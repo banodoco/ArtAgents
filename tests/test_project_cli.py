@@ -19,6 +19,8 @@ T11 reinstated `list <project_id>` / `edit <project_id>` over reigh-app
 from __future__ import annotations
 
 import argparse
+from contextlib import redirect_stdout
+from io import StringIO
 import json
 import shutil
 import tempfile
@@ -32,6 +34,7 @@ from astrid.core.cli_choices import StaticChoices
 from astrid.core.project import paths
 from astrid.core.project import cli as project_cli
 from astrid.core.project.project import ProjectError
+from astrid.core import theme_cli
 from astrid.core.reigh import data_provider as dp_mod
 from astrid.core.reigh import timeline_io as tio
 from astrid.core.reigh.errors import TimelineVersionConflictError
@@ -39,6 +42,29 @@ from astrid.core.reigh.supabase_client import SupabaseHTTPError
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_theme(theme_dir: Path, *, valid: bool = True) -> None:
+    theme_dir.mkdir(parents=True)
+    payload: dict[str, Any] = (
+        {
+            "id": theme_dir.name,
+            "visual": {
+                "color": {"fg": "#fff", "bg": "#000", "accent": "#f00"},
+                "type": {
+                    "families": {"heading": "Inter", "body": "Inter"},
+                    "size": {"base": 16, "small": 12, "large": 32},
+                    "weight": {"normal": 400, "bold": 700},
+                    "lineHeight": 1.2,
+                },
+                "motion": {"fadeMs": 120},
+                "canvas": {"width": 1920, "height": 1080, "fps": 30},
+            },
+        }
+        if valid
+        else {"id": theme_dir.name}
+    )
+    (theme_dir / "theme.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
@@ -118,6 +144,68 @@ class CreateShowSourceCLITest(unittest.TestCase):
 
         self.assertIsInstance(kind_action.choices, StaticChoices)
         self.assertEqual(kind_action.choices.valid_options, tuple(sorted(project_cli.SOURCE_KINDS)))
+
+    def test_register_source_promotes_bare_file(self) -> None:
+        project_cli.main(["create", "demo"])
+        source_root = self.root.tmp / "demo" / "sources"
+        (source_root / "placeholder.mp4").write_bytes(b"video")
+
+        out = StringIO()
+        with redirect_stdout(out):
+            rc = project_cli.main(
+                ["register-source", "placeholder.mp4", "--project", "demo", "--json"]
+            )
+
+        self.assertEqual(rc, 0)
+        payload = json.loads(out.getvalue())
+        self.assertEqual(payload["source"]["source_id"], "placeholder.mp4")
+        self.assertFalse((source_root / "placeholder.mp4").is_file())
+        self.assertTrue((source_root / "placeholder.mp4" / "source.json").is_file())
+
+    def test_project_theme_set_show_clear(self) -> None:
+        themes_root = self.root.tmp / "themes"
+        _write_theme(themes_root / "demo-theme")
+        with patch.dict("os.environ", {"ASTRID_THEMES_ROOT": str(themes_root)}, clear=False):
+            project_cli.main(["create", "demo"])
+
+            out = StringIO()
+            with redirect_stdout(out):
+                rc = project_cli.main(["theme", "demo", "--set", "demo-theme"])
+
+            self.assertEqual(rc, 0)
+            self.assertIn("theme: demo-theme", out.getvalue())
+
+            out = StringIO()
+            with redirect_stdout(out):
+                rc = project_cli.main(["theme", "demo"])
+            self.assertEqual(rc, 0)
+            self.assertIn("theme: demo-theme", out.getvalue())
+
+            out = StringIO()
+            with redirect_stdout(out):
+                rc = project_cli.main(["ls"])
+            self.assertEqual(rc, 0)
+            self.assertIn("demo  (theme: demo-theme)", out.getvalue())
+
+            out = StringIO()
+            with redirect_stdout(out):
+                rc = project_cli.main(["theme", "demo", "--clear"])
+            self.assertEqual(rc, 0)
+            self.assertIn("theme: (none)", out.getvalue())
+
+    def test_themes_ls_reports_validity(self) -> None:
+        themes_root = self.root.tmp / "themes"
+        _write_theme(themes_root / "valid-theme")
+        _write_theme(themes_root / "bad-theme", valid=False)
+        with patch.dict("os.environ", {"ASTRID_THEMES_ROOT": str(themes_root)}, clear=False):
+            out = StringIO()
+            with redirect_stdout(out):
+                rc = theme_cli.main(["ls"])
+
+        self.assertEqual(rc, 0)
+        output = out.getvalue()
+        self.assertIn("valid-theme  valid", output)
+        self.assertIn("bad-theme  invalid:", output)
 
 
 class ListCLITest(unittest.TestCase):

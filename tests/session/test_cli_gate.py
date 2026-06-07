@@ -19,7 +19,7 @@ from astrid.core.session.identity import Identity, write_identity
 # Settled Sprint 1 unbound contract. The implementation may temporarily carry
 # compatibility exceptions during migration, but the final gate must match this
 # list exactly: help/version, status, next, attach, pack management,
-# projects ls/create/default, sessions ls, sessions takeover, and doctor.
+# projects ls/create/default/theme, themes ls, sessions ls, sessions takeover, and doctor.
 # `doctor` is a diagnostic that must run before any session exists (you run it
 # precisely to debug an unconfigured workspace), so it is unbound-allowlisted.
 EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
@@ -33,6 +33,8 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
     ("projects", "ls"),
     ("projects", "create"),
     ("projects", "default"),
+    ("projects", "theme"),
+    ("themes", "ls"),
     ("sessions", "ls"),
     ("sessions", "takeover"),
     ("packs",),

@@ -1,0 +1,24 @@
+schema_version: 1
+id: text_analysis
+name: Text Analysis
+version: 0.1.0
+# One-line summary shown in `packs list` and search results. Make it specific.
+description: A pack for Text Analysis.
+origin: external
+install_tier: core
+pack_type: capability
+domain: development
+stability: stable
+support: core
+# Search/selection metadata: agents find and choose packs by these. Fill them in.
+keywords: []          # search terms an agent would type, e.g. [video, editing, ffmpeg]
+capabilities: []      # concrete things this pack can do, e.g. [trim_clip, concat, add_subtitles]
+content:
+  executors: executors
+  orchestrators: orchestrators
+  elements: elements
+agent:
+  purpose: "TODO: describe what this pack is for"
+  do_not_use_for: "TODO: when an agent should NOT pick this pack"
+  normal_entrypoints: []   # orchestrator/executor ids an agent should start with
+  required_context: []     # inputs/secrets an agent must have before using this pack

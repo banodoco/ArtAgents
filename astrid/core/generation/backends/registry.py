@@ -15,7 +15,11 @@ from typing import Any, Mapping
 
 from astrid._paths import REPO_ROOT
 from astrid.core.generation.backends.base import BackendAdapter
-from astrid.core.generation.features import CLOUD_BACKEND_ID, LOCAL_BACKEND_ID
+from astrid.core.generation.features import (
+    CLOUD_BACKEND_ID,
+    CODEX_BACKEND_ID,
+    LOCAL_BACKEND_ID,
+)
 from astrid.core.pack import PackDefinition, discover_packs
 from astrid.core.pack_discovery import discover_pack_metadata
 
@@ -185,6 +189,12 @@ def _builtin_generation_backend_descriptors() -> tuple[GenerationBackendDescript
             module="astrid.core.generation.backends.fal",
             class_name="FalBackend",
             label="Cloud (fal)",
+        ),
+        GenerationBackendDescriptor(
+            backend_id=CODEX_BACKEND_ID,
+            module="astrid.core.generation.backends.codex",
+            class_name="CodexBackend",
+            label="Codex image_generation",
         ),
         GenerationBackendDescriptor(
             backend_id=LOCAL_BACKEND_ID,

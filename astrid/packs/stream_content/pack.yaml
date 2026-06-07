@@ -1,0 +1,27 @@
+schema_version: 1
+id: stream_content
+name: Astrid Stream Content
+version: 1.0.0
+origin: builtin
+install_tier: core
+pack_type: capability
+domain: media
+stability: experimental
+support: core
+visibility: visible
+permissions:
+  - id: subprocess
+    reason: Runs ffmpeg, ffprobe, and optional tesseract OCR while analyzing and extracting stream media.
+  - id: project_files
+    reason: Reads source recordings and transcript artifacts, then writes segment maps, clips, candidates, and review pages.
+description: Distill long event or stream recordings into labeled content segments, extracted segment files, and scored publishable clip candidates.
+keywords: [stream, event, transcript, clips, segments, review, ocr, highlights]
+capabilities: [map_stream_segments, score_clip_candidates, distill_stream_content]
+agent:
+  purpose: "Use to turn long event or stream recordings into reviewable content: identify holding/dead/content spans, extract main blocks, and rank clips worth publishing."
+  do_not_use_for: "Do not use for short single-clip trimming without transcript analysis; call media.clip_extract directly."
+  normal_entrypoints:
+    - stream_content.distill
+content:
+  executors: executors
+  orchestrators: orchestrators

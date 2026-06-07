@@ -1,4 +1,4 @@
-"""Generation backend adapters — local (vibecomfy) and cloud (fal).
+"""Generation backend adapters — local, cloud, and Codex.
 
 SD-004: Backend dispatch goes through this package.  The executor imports
 the adapter classes from here and calls ``.generate()`` without any
@@ -6,6 +6,7 @@ backend-specific branching.
 """
 
 from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
+from astrid.core.generation.backends.codex import CodexBackend
 from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.registry import (
     GenerationBackendDescriptor,
@@ -21,6 +22,7 @@ from astrid.core.generation.backends.registry import (
 
 __all__ = [
     "BackendAdapter",
+    "CodexBackend",
     "discover_generation_backend_descriptors",
     "FalBackend",
     "GenerationBackendDescriptor",

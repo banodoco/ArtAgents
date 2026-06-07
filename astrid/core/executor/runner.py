@@ -363,6 +363,8 @@ def check_executor_binaries(executor: ExecutorDefinition) -> tuple[str, ...]:
 
 def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefinition | None = None) -> argparse.Namespace:
     pipeline = _pipeline_module()
+    from astrid.core.element.catalog import resolve_active_theme
+
     values = _request_values(request)
     out = Path(request.out).expanduser().resolve()
     brief = _optional_path(values.get("brief") or request.brief)
@@ -375,7 +377,8 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
     env_file = _optional_path(values.get("env_file"))
     theme_raw = values.get("theme")
     theme_explicit = theme_raw is not None
-    theme = pipeline._resolve_theme_arg(theme_raw) if theme_explicit else pipeline._resolve_theme_arg(pipeline.WORKSPACE_ROOT / "themes" / "banodoco-default" / "theme.json")
+    active_theme = resolve_active_theme(project_slug=request.project)
+    theme = pipeline._resolve_theme_arg(theme_raw) if theme_explicit else active_theme
     brief_slug = str(values.get("brief_slug") or _default_brief_slug(brief, out))
     brief_out = (out / "briefs" / brief_slug).resolve()
     skip = _as_string_list(values.get("skip"))
@@ -830,7 +833,7 @@ def _prepare_dry_run_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
 
 
 def _project_subprocess_env(request: ExecutorRunRequest) -> dict[str, str]:
-    return project_run_env() if request.project else {}
+    return project_run_env(request.project) if request.project else {}
 
 
 def _command_subprocess_env(

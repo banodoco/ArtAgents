@@ -32,7 +32,7 @@
       "kind": "requires_input"
     }
   ],
-  "description": "Generate images from text prompts using local (vibecomfy) or cloud (fal) backends. v2: model\u2192mode\u2192backend taxonomy with required --mode.",
+  "description": "Generate images from text prompts using local (vibecomfy), cloud (fal), or Codex image_generation backends. v2: model\u2192mode\u2192backend taxonomy with required --mode.",
   "graph": {
     "consumes": [
       "prompt_or_prompts_file",
@@ -79,7 +79,7 @@
       "type": "string"
     },
     {
-      "description": "Execution backend: 'local' (vibecomfy) or 'cloud' (fal).",
+      "description": "Execution backend: 'local' (vibecomfy), 'cloud' (fal), or 'codex' (Codex image_generation).",
       "name": "execution",
       "required": true,
       "type": "string"
@@ -111,6 +111,27 @@
       "name": "size",
       "required": false,
       "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Codex quality hint folded into the natural-language prompt: low, medium, high, or auto.",
+      "name": "quality",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "",
+      "description": "Codex background hint folded into the natural-language prompt: transparent, opaque, or auto.",
+      "name": "background",
+      "required": false,
+      "type": "string"
+    },
+    {
+      "default": "300",
+      "description": "Codex per-image timeout in seconds.",
+      "name": "timeout",
+      "required": false,
+      "type": "integer"
     },
     {
       "default": "",
@@ -149,10 +170,10 @@
     "image",
     "generate",
     "flux",
-    "sdxl",
     "fal",
+    "codex",
+    "gpt-image",
     "vibecomfy",
-    "img2img",
     "i2i",
     "t2i",
     "edit",
@@ -189,6 +210,6 @@
       "type": "file"
     }
   ],
-  "short_description": "Generate images from text prompts via local or cloud backends. v2: model\u2192mode\u2192backend.",
+  "short_description": "Generate images from text prompts via local, cloud, or Codex backends. v2: model\u2192mode\u2192backend.",
   "version": "2.0"
 }

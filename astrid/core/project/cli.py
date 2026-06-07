@@ -43,7 +43,15 @@ from astrid.core.session.discovery import discover_projects
 from astrid.core.util.log_and_swallow import log_and_swallow
 
 from . import paths
-from .project import ProjectError, create_project, require_project, show_project
+from .project import (
+    ProjectError,
+    create_project,
+    get_project_theme,
+    register_source_file,
+    require_project,
+    set_project_theme,
+    show_project,
+)
 from .schema import SOURCE_KINDS
 from .source import add_source
 
@@ -101,10 +109,27 @@ def build_parser() -> argparse.ArgumentParser:
     default_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     default_parser.set_defaults(handler=_cmd_default)
 
+    theme_parser = subparsers.add_parser("theme", help="Show, set, or clear a project's bound theme.")
+    theme_parser.add_argument("slug", nargs="?", help="Project slug; defaults to the bound session project.")
+    theme_action = theme_parser.add_mutually_exclusive_group()
+    theme_action.add_argument("--set", dest="theme", help="Theme id to bind to this project.")
+    theme_action.add_argument("--clear", action="store_true", help="Clear the bound theme.")
+    theme_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    theme_parser.set_defaults(handler=_cmd_theme)
+
     show_parser = subparsers.add_parser("show", help="Show a project tree.")
     _add_project_arg(show_parser)
     show_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
     show_parser.set_defaults(handler=_cmd_show)
+
+    register_source_parser = subparsers.add_parser(
+        "register-source",
+        help="Promote a bare file in sources/ into a registered source.",
+    )
+    register_source_parser.add_argument("filename", help="Bare filename under the project's sources/ directory.")
+    register_source_parser.add_argument("--project", help="Project slug; defaults to the bound session project.")
+    register_source_parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
+    register_source_parser.set_defaults(handler=_cmd_register_source)
 
     source_parser = subparsers.add_parser("source", help="Manage project sources.")
     source_subparsers = source_parser.add_subparsers(dest="source_command", required=True)
@@ -217,6 +242,7 @@ def _cmd_ls(args: argparse.Namespace) -> int:
                 "default_project": default,
                 "default_available": default_is_available,
                 "projects": projects,
+                "project_themes": {slug: get_project_theme(slug) for slug in projects},
             }
         )
         return 0
@@ -231,7 +257,7 @@ def _cmd_ls(args: argparse.Namespace) -> int:
     print("projects:")
     for slug in projects:
         marker = " *" if slug == default and default_is_available else ""
-        print(f"  {slug}{marker}")
+        print(f"  {slug}{_project_theme_suffix(slug)}{marker}")
     print("attach:")
     if default_is_available:
         print("  python3 -m astrid attach")
@@ -292,6 +318,26 @@ def _cmd_default(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_theme(args: argparse.Namespace) -> int:
+    slug = args.slug or _bound_project_slug()
+    if slug is None:
+        raise ValueError("project slug is required when no session is bound")
+    require_project(slug)
+    if args.clear:
+        project = set_project_theme(slug, None)
+    elif args.theme is not None:
+        project = set_project_theme(slug, args.theme)
+    else:
+        project = require_project(slug)
+    theme = project.get("theme")
+    if args.json:
+        _print_json({"project": slug, "theme": theme})
+        return 0
+    print(f"project: {slug}")
+    print(f"theme: {theme or '(none)'}")
+    return 0
+
+
 def _cmd_show(args: argparse.Namespace) -> int:
     project = require_project(args.project)
     payload = show_project(args.project)
@@ -319,6 +365,22 @@ def _cmd_source_add(args: argparse.Namespace) -> int:
         _print_json({"source": source})
         return 0
     _print_project_header(args.project)
+    print(f"source: {source['source_id']}")
+    return 0
+
+
+def _cmd_register_source(args: argparse.Namespace) -> int:
+    project_slug = args.project
+    if not project_slug:
+        session = resolve_current_session()
+        if session is None:
+            raise ValueError("--project is required when no session is bound")
+        project_slug = session.project
+    source = register_source_file(project_slug, args.filename)
+    if args.json:
+        _print_json({"source": source})
+        return 0
+    _print_project_header(project_slug)
     print(f"source: {source['source_id']}")
     return 0
 
@@ -819,6 +881,19 @@ def _require_project_session(project_slug: str) -> None:
         raise SessionBindingError(_SESSION_GATE_HINT)
 
 
+def _bound_project_slug() -> str | None:
+    session = resolve_current_session()
+    return session.project if session is not None else None
+
+
+def _project_theme_suffix(slug: str) -> str:
+    try:
+        theme = get_project_theme(slug)
+    except Exception:  # noqa: BLE001
+        return ""
+    return f"  (theme: {theme})" if theme else ""
+
+
 def _project_selected_runs(
     runs_dir: Path,
     run_ids: list[str],
@@ -895,11 +970,24 @@ def _print_project_tree(payload: dict[str, Any]) -> None:
     project = payload["project"]
     print(f"{project['slug']}/")
     print("  project.json")
+    if project.get("theme"):
+        print(f"  theme: {project['theme']}")
     print("  sources/")
-    for source_id in payload.get("sources", []):
-        print(f"    {source_id}/")
-        print("      source.json")
-        print("      analysis/")
+    for source in payload.get("sources", []):
+        if isinstance(source, dict):
+            source_id = source.get("source_id", "")
+            if source.get("kind") == "registered":
+                suffix = "" if source.get("valid", True) else "  [invalid id]"
+                print(f"    {source_id}/{suffix}")
+                print("      source.json")
+                print("      analysis/")
+            else:
+                suffix = "" if source.get("valid", True) else "  [invalid id]"
+                print(f"    {source_id}  [file]{suffix}")
+        else:
+            print(f"    {source}/")
+            print("      source.json")
+            print("      analysis/")
     print("  runs/")
     for run_id in payload.get("runs", []):
         print(f"    {run_id}/")

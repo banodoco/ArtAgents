@@ -7,7 +7,18 @@ import re
 from pathlib import Path
 
 PROJECTS_ROOT_ENV = "ASTRID_PROJECTS_ROOT"
-DEFAULT_PROJECTS_ROOT = Path("~/Documents/reigh-workspace/astrid-projects")
+
+
+def _default_projects_root() -> Path:
+    # paths.py lives at astrid/core/project/paths.py -> parents[3] is the repo root.
+    repo_root = Path(__file__).resolve().parents[3]
+    if (repo_root / "pyproject.toml").is_file() or (repo_root / ".git").exists():
+        return repo_root / "projects"
+    # Installed outside a source checkout: fall back to a stable home location.
+    return Path("~/.astrid/projects").expanduser()
+
+
+DEFAULT_PROJECTS_ROOT = _default_projects_root()
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")

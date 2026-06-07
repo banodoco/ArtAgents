@@ -97,8 +97,48 @@ def reject_project_with_out(project: str | None, out: str | Path | None) -> None
         raise ProjectRunError("--project cannot be combined with --out; project runs own their output directory")
 
 
-def project_run_env() -> dict[str, str]:
-    return {PROJECT_RUN_ENV: "1"}
+def project_run_env(project_slug: str | None = None) -> dict[str, str]:
+    env = {PROJECT_RUN_ENV: "1"}
+    if project_slug:
+        from astrid.core.element.catalog import resolve_active_theme
+        from astrid.core.theme import ACTIVE_THEME_ENV
+
+        theme_dir = resolve_active_theme(project_slug=project_slug)
+        if theme_dir is not None:
+            env[ACTIVE_THEME_ENV] = str(theme_dir)
+    return env
+
+
+def record_path_value(
+    value: str | Path,
+    project_slug: str,
+    *,
+    root: str | Path | None = None,
+) -> str:
+    """Serialize a record path, using project-relative values when possible."""
+
+    project_root = paths.project_dir(project_slug, root=root).resolve()
+    raw_path = Path(value).expanduser()
+    absolute = raw_path.resolve() if raw_path.is_absolute() else (Path.cwd() / raw_path).resolve()
+    try:
+        relative = absolute.relative_to(project_root)
+    except ValueError:
+        return str(absolute)
+    return relative.as_posix() or "."
+
+
+def resolve_record_path(
+    value: str | Path,
+    project_slug: str,
+    *,
+    root: str | Path | None = None,
+) -> Path:
+    """Resolve a run-record path against a project root when it is relative."""
+
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (paths.project_dir(project_slug, root=root) / path).resolve()
 
 
 def prepare_project_run(
@@ -170,7 +210,7 @@ def prepare_project_run(
             "created_at": now,
             "invocation": "task",
             "metadata": run_metadata,
-            "out": str(run_root),
+            "out": record_path_value(run_root, project_slug, root=projects_root),
             "project_slug": project_slug,
             "run_id": parent_run_id,
             "schema_version": 1,
@@ -217,7 +257,11 @@ def prepare_project_run(
         tool_id=tool_id,
         kind=kind,
         status=RunStatus.RUNNING,
-        out=record_out if record_out not in (None, "") else run_root,
+        out=record_path_value(
+            record_out if record_out not in (None, "") else run_root,
+            project_slug,
+            root=projects_root,
+        ),
         argv=redact_cli_args(list(argv or ())),
         metadata=dict(base_metadata),
         session_id=effective_session_id,
@@ -371,9 +415,19 @@ def finalize_project_run(
     attached_to_task_run = bool(merged_metadata.get("attached_to_task_run"))
     record["status"] = _normalize_status(status, returncode=returncode)
     record["updated_at"] = utc_now_seconds()
-    manifest_path = discover_manifest_path(record.get("out"), fallback_root=context.run_root)
+    record_out = record.get("out")
+    resolved_out = (
+        resolve_record_path(record_out, context.project_slug, root=context.root)
+        if isinstance(record_out, (str, Path)) and str(record_out)
+        else None
+    )
+    manifest_path = discover_manifest_path(resolved_out, fallback_root=context.run_root)
     if manifest_path is not None:
-        record["manifest_path"] = str(manifest_path)
+        record["manifest_path"] = record_path_value(
+            manifest_path,
+            context.project_slug,
+            root=context.root,
+        )
         # Copy numeric manifest cost_usd into run metadata for ledger fallback
         manifest_cost = _read_manifest_cost_usd(manifest_path)
         if manifest_cost is not None:
@@ -383,7 +437,12 @@ def finalize_project_run(
     artifacts = dict(record.get("artifacts", {}))
     mirror_dest = context.run_root / "produces" if attached_to_task_run else None
     mirrored_artifacts = mirror_hype_artifacts(
-        context.run_root, brief_slug=brief_slug, artifact_roots=artifact_roots, dest_root=mirror_dest
+        context.run_root,
+        brief_slug=brief_slug,
+        artifact_roots=artifact_roots,
+        dest_root=mirror_dest,
+        project_slug=context.project_slug,
+        root=context.root,
     )
     artifacts.update(mirrored_artifacts)
     if not mirrored_artifacts and manifest_path is not None:
@@ -414,7 +473,16 @@ def write_run_record(
     run_root.mkdir(parents=True, exist_ok=True)
     if "argv" in fields and fields["argv"] is not None:
         fields["argv"] = redact_cli_args(list(fields["argv"]))
-    payload = build_run_record(project_slug, run_id, out=run_root, **fields)
+    if "out" in fields and fields["out"] is not None:
+        fields["out"] = record_path_value(fields["out"], project_slug, root=root)
+    if "manifest_path" in fields and fields["manifest_path"] is not None:
+        fields["manifest_path"] = record_path_value(fields["manifest_path"], project_slug, root=root)
+    payload = build_run_record(
+        project_slug,
+        run_id,
+        out=fields.pop("out", record_path_value(run_root, project_slug, root=root)),
+        **fields,
+    )
     write_json_atomic(paths.run_json_path(project_slug, run_id, root=root), payload)
     return payload
 
@@ -438,6 +506,10 @@ def update_run_record(project_slug: str, run_id: str, updates: dict[str, Any], *
     payload["updated_at"] = utc_now_seconds()
     if "argv" in payload and payload["argv"] is not None:
         payload["argv"] = redact_cli_args(list(payload["argv"]))
+    if "out" in payload and payload["out"] is not None:
+        payload["out"] = record_path_value(payload["out"], project_slug, root=root)
+    if "manifest_path" in payload and payload["manifest_path"] is not None:
+        payload["manifest_path"] = record_path_value(payload["manifest_path"], project_slug, root=root)
     normalized = validate_run_record(payload)
     write_json_atomic(paths.run_json_path(project_slug, run_id, root=root), normalized)
     return normalized
@@ -530,6 +602,8 @@ def mirror_hype_artifacts(
     brief_slug: str | None = None,
     artifact_roots: Iterable[str | Path] = (),
     dest_root: str | Path | None = None,
+    project_slug: str | None = None,
+    root: str | Path | None = None,
 ) -> dict[str, Any]:
     run_path = Path(run_root).expanduser().resolve()
     source = discover_hype_artifact_root(run_path, brief_slug=brief_slug, artifact_roots=artifact_roots)
@@ -542,7 +616,13 @@ def mirror_hype_artifacts(
         source_path = source / source_name
         dest_path = dest_path_root / dest_name
         shutil.copy2(source_path, dest_path)
-        mirrored[key] = {"path": str(dest_path), "source_path": str(source_path)}
+        if project_slug is None:
+            mirrored[key] = {"path": str(dest_path), "source_path": str(source_path)}
+        else:
+            mirrored[key] = {
+                "path": record_path_value(dest_path, project_slug, root=root),
+                "source_path": record_path_value(source_path, project_slug, root=root),
+            }
     return mirrored
 
 
@@ -684,9 +764,11 @@ __all__ = [
     "mirror_hype_artifacts",
     "prepare_project_run",
     "project_run_env",
+    "record_path_value",
     "redact_cli_args",
     "reject_project_with_out",
     "require_run_record",
+    "resolve_record_path",
     "update_run_record",
     "write_run_record",
 ]

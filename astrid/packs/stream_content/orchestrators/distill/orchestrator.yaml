@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "id": "stream_content.distill",
+  "name": "Stream Content Distill",
+  "kind": "built_in",
+  "version": "1.0",
+  "short_description": "Distill a long event stream into segments, extracted blocks, candidates, and a review page.",
+  "description": "Compose transcription, scene detection, segment mapping, content-segment extraction, clip-candidate scoring, and static HTML review for long stream recordings.",
+  "keywords": ["stream", "event", "review", "clips", "segments", "orchestrator"],
+  "inputs": [
+    {"name": "video", "type": "file", "required": true, "description": "Source stream recording."},
+    {"name": "transcript", "type": "file", "required": false, "description": "Existing transcript.json; skips transcription when present."},
+    {"name": "brief", "type": "file", "required": false, "description": "Optional markdown brief for clip scoring."}
+  ],
+  "outputs": [
+    {"name": "segment_map", "type": "file", "path_template": "{out}/segment_map.json"},
+    {"name": "segments_manifest", "type": "file", "path_template": "{out}/segments/segments.json"},
+    {"name": "candidates", "type": "file", "path_template": "{out}/candidates.json"},
+    {"name": "review", "type": "file", "path_template": "{out}/review.html"}
+  ],
+  "child_executors": [
+    "editorial.transcribe",
+    "editorial.scenes",
+    "stream_content.segment_map",
+    "media.clip_extract",
+    "stream_content.clip_candidates"
+  ],
+  "child_orchestrators": [],
+  "runtime": {
+    "kind": "command",
+    "command": {
+      "argv": [
+        "{python_exec}",
+        "-m",
+        "astrid.packs.stream_content.orchestrators.distill.run",
+        "--video",
+        "{video}",
+        "--transcript",
+        "{transcript}",
+        "--brief",
+        "{brief}",
+        "--out",
+        "{out}",
+        "{orchestrator_args}"
+      ]
+    }
+  },
+  "cache": {"mode": "none"},
+  "isolation": {
+    "mode": "subprocess",
+    "network": false,
+    "binaries": ["ffmpeg", "ffprobe", "tesseract"]
+  },
+  "metadata": {
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.stream_content.orchestrators.distill.run"
+  }
+}

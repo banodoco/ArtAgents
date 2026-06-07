@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 ASTRID_HOME_ENV = "ASTRID_HOME"
+ASTRID_WORKSPACE_CONFIG_DIR_ENV = "ASTRID_WORKSPACE_CONFIG_DIR"
 _DEFAULT_ASTRID_HOME = Path("~/.astrid")
 
 SESSIONS_DIRNAME = "sessions"
@@ -45,6 +46,9 @@ def user_config_path() -> Path:
 
 
 def workspace_config_path(cwd: str | Path | None = None) -> Path:
+    override = os.environ.get(ASTRID_WORKSPACE_CONFIG_DIR_ENV)
+    if override and cwd is None:
+        return Path(override).expanduser().resolve() / WORKSPACE_CONFIG_FILENAME
     base = Path(cwd) if cwd is not None else Path.cwd()
     return base / WORKSPACE_CONFIG_DIRNAME / WORKSPACE_CONFIG_FILENAME
 

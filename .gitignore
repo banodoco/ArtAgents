@@ -35,6 +35,8 @@ remotion/build/
 remotion/out/
 
 # Generated runtime artifacts
+# projects root -- source media + generated runs, never committed
+/projects/
 runs/
 cache/
 .astrid/

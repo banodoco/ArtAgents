@@ -57,6 +57,16 @@ models:
               size: image_size
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              negative_prompt: negative_prompt
+              seed: seed
+              count: count
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
 
       i2i:
         supports:
@@ -92,6 +102,16 @@ models:
               strength: strength
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              image_ref: image_ref
+              size: size
+              strength: strength
+              guidance_scale: guidance_scale
+              steps: steps
 
   # =========================================================================
   # qwen-image-2512 — Qwen Image 2512 (Lightning 4-step) text-to-image
@@ -144,6 +164,16 @@ models:
               size: image_size
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              negative_prompt: negative_prompt
+              seed: seed
+              count: count
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
 
   # =========================================================================
   # qwen-image-edit — Qwen Image Edit (instruction-guided) edit mode only
@@ -196,13 +226,23 @@ models:
               size: image_size
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              count: count
+              image_ref: image_ref
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
 
   # =========================================================================
-  # flux-dev — Flux Dev (text-to-image + image-to-image) CLOUD-ONLY
+  # flux-dev — Flux Dev (text-to-image + image-to-image; no local template)
   #
   # No local vibecomfy template for actual Flux Dev checkpoint exists.
   # The v1 entry (mis)mapped flux-dev local → image/z_image (Z Image Turbo,
-  # a different model).  SD-001 forbids that — flux-dev is cloud-only.
+  # a different model).  SD-001 forbids that — flux-dev has no local backend.
   #
   # Cloud endpoints (fal):
   #   t2i: fal-ai/flux/dev — confirmed.
@@ -240,6 +280,15 @@ models:
               size: image_size
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              count: count
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
 
       i2i:
         supports:
@@ -266,6 +315,17 @@ models:
               strength: strength
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              count: count
+              image_ref: image_ref
+              size: size
+              strength: strength
+              guidance_scale: guidance_scale
+              steps: steps
 
   # =========================================================================
   # flux-schnell — Flux Schnell (text-to-image) CLOUD-ONLY
@@ -302,6 +362,15 @@ models:
               size: image_size
               guidance_scale: guidance_scale
               steps: num_inference_steps
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              count: count
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
 
   # =========================================================================
   # flux2-klein-9b — BFL Flux 2 Klein 9B (Flux 2 family flagship)
@@ -334,6 +403,15 @@ models:
               guidance_scale: guidance_scale
               steps: num_inference_steps
               negative_prompt: negative_prompt
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
+              negative_prompt: negative_prompt
 
   # =========================================================================
   # flux2-klein-4b — BFL Flux 2 Klein 4B (smaller, faster Flux 2 variant)
@@ -364,6 +442,15 @@ models:
               size: image_size
               guidance_scale: guidance_scale
               steps: num_inference_steps
+              negative_prompt: negative_prompt
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              size: size
+              guidance_scale: guidance_scale
+              steps: steps
               negative_prompt: negative_prompt
 
   # =========================================================================
@@ -653,3 +740,74 @@ models:
               resolution: resolution
               frames: frames
               fps: fps
+
+  # =========================================================================
+  # ltx-2.3-pro — LTX-2.3 pro endpoints (cloud-only t2v + i2v)
+  # =========================================================================
+  - id: ltx-2.3-pro
+    modality: video
+    modes:
+      t2v:
+        supports:
+          - prompt
+          - negative_prompt
+          - seed
+          - resolution
+          - frames
+          - fps
+          - guidance_scale
+          - steps
+          - shift
+          - loras
+          - enable_safety_checker
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: fal-ai/ltx-2.3/text-to-video
+            param_map:
+              prompt: prompt
+              negative_prompt: negative_prompt
+              seed: seed
+              resolution: aspect_ratio
+              frames: num_frames
+              fps: fps
+              guidance_scale: guidance_scale
+              steps: num_inference_steps
+              shift: shift
+              loras: loras
+              enable_safety_checker: enable_safety_checker
+
+      i2v:
+        supports:
+          - prompt
+          - negative_prompt
+          - seed
+          - image_ref
+          - resolution
+          - frames
+          - fps
+          - guidance_scale
+          - steps
+          - shift
+          - loras
+          - enable_safety_checker
+        requires:
+          - prompt
+          - image_ref
+        backends:
+          cloud:
+            endpoint: fal-ai/ltx-2.3/image-to-video
+            param_map:
+              prompt: prompt
+              negative_prompt: negative_prompt
+              seed: seed
+              image_ref: image_url
+              resolution: aspect_ratio
+              frames: num_frames
+              fps: fps
+              guidance_scale: guidance_scale
+              steps: num_inference_steps
+              shift: shift
+              loras: loras
+              enable_safety_checker: enable_safety_checker

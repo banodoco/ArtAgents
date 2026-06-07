@@ -44,6 +44,12 @@ ASTRID_PROJECT_RUN = "ASTRID_PROJECT_RUN"
 """Set to ``1`` inside a project-run subprocess to signal that the process was
 launched by Astrid's run machinery (not a bare CLI invocation)."""
 
+ASTRID_THEMES_ROOT = "ASTRID_THEMES_ROOT"
+"""Override for the repository/theme asset root. Read by theme resolution helpers."""
+
+HYPE_ACTIVE_THEME = "HYPE_ACTIVE_THEME"
+"""Absolute active theme directory propagated into hype/theme-aware subprocesses."""
+
 # ---------------------------------------------------------------------------
 # Task run context (propagated into subprocess env by build_child_subprocess_env)
 # ---------------------------------------------------------------------------
@@ -199,5 +205,7 @@ __all__ = [
     "ASTRID_TASK_PROJECT",
     "ASTRID_TASK_RUN_ID",
     "ASTRID_TASK_STEP_ID",
+    "ASTRID_THEMES_ROOT",
     "get_author_test_env",
+    "HYPE_ACTIVE_THEME",
 ]

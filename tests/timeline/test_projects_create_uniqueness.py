@@ -140,6 +140,7 @@ def test_projects_default_warns_when_configured_default_is_missing(
     workspace.mkdir()
     monkeypatch.chdir(workspace)
     (workspace / ".astrid").mkdir()
+    monkeypatch.setenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, str(workspace / ".astrid"))
     (workspace / ".astrid" / "config.json").write_text('{"default_project": "missing"}', encoding="utf-8")
     create_project("demo")
 

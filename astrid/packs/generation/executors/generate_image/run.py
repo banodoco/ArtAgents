@@ -18,12 +18,14 @@ import hashlib
 import json
 import logging
 import random
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
+from astrid.core.generation.backends.codex import codex_unavailable_reason
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationBackendRegistry,
@@ -36,6 +38,9 @@ from astrid.core.util.atomic_io import write_json_atomic
 from astrid.core.util.png_metadata import embed_png_text
 
 logger = logging.getLogger(__name__)
+
+CODEX_BACKEND_ID = "codex"
+CLOUD_BACKEND_ID = "cloud"
 
 _IMAGE_CLI_FEATURES: tuple[str, ...] = (
     "prompt",
@@ -369,6 +374,33 @@ def _create_backend_adapter(
         ) from exc
 
 
+def _resolve_execution_with_codex_fallback(
+    args: argparse.Namespace,
+    mode_spec: Any,
+) -> dict[str, str] | None:
+    """Fallback from requested Codex to cloud when local Codex is unavailable."""
+    if args.execution != CODEX_BACKEND_ID:
+        return None
+    reason = codex_unavailable_reason()
+    if reason is None:
+        return None
+    if CLOUD_BACKEND_ID not in mode_spec.backends:
+        available = ", ".join(_available_backend_ids(mode_spec))
+        raise AstridError(
+            f"codex backend requested but unavailable ({reason}) and no cloud fallback is declared",
+            valid_options=list(_available_backend_ids(mode_spec)),
+            recovery_command=f"install/login to Codex or retry with one of: {available}",
+        )
+    args.execution = CLOUD_BACKEND_ID
+    message = (
+        f"codex backend requested but unavailable ({reason}); "
+        "falling back to cloud backend"
+    )
+    logger.warning(message)
+    print(f"Warning: {message}", file=sys.stderr)
+    return {"feature": CODEX_BACKEND_ID, "reason": message}
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -434,6 +466,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output dimensions, e.g. '1024x1024' or fal size preset.",
     )
     p.add_argument(
+        "--quality",
+        choices=("low", "medium", "high", "auto"),
+        default=None,
+        help="Codex quality hint folded into the prompt (hint only).",
+    )
+    p.add_argument(
+        "--background",
+        choices=("transparent", "opaque", "auto"),
+        default=None,
+        help="Codex background hint folded into the prompt (hint only).",
+    )
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Codex per-image timeout seconds (default 300).",
+    )
+    p.add_argument(
         "--strength",
         type=float,
         default=None,
@@ -487,6 +537,9 @@ def _request_to_argv(request: Any) -> list[str]:
         "seed",
         "negative_prompt",
         "size",
+        "quality",
+        "background",
+        "timeout",
         "strength",
         "guidance_scale",
         "steps",
@@ -569,6 +622,12 @@ def generate_core(
             recovery_command="check available models and modes with --help and retry with a valid (model, mode) pair",
         ) from exc
 
+    warnings: list[dict[str, str]] = []
+    dropped_features: list[str] = []
+    fallback_warning = _resolve_execution_with_codex_fallback(args, mode_spec)
+    if fallback_warning is not None:
+        warnings.append(fallback_warning)
+
     # --- check backend availability for --execution --------------------------
     if not registry.backend_available(args.model, mode_name, args.execution):
         available = ", ".join(_available_backend_ids(mode_spec))
@@ -578,9 +637,6 @@ def generate_core(
             valid_options=list(_available_backend_ids(mode_spec)),
             recovery_command=f"choose one of the available backends: {available}",
         )
-
-    warnings: list[dict[str, str]] = []
-    dropped_features: list[str] = []
 
     # --- setup output directory ----------------------------------------------
     out = args.out.expanduser().resolve()
@@ -710,6 +766,12 @@ def generate_core(
         params["count"] = 1  # N=1 per loop iteration
         if loras_parsed:
             params["loras"] = loras_parsed
+        if args.execution == CODEX_BACKEND_ID:
+            params["timeout"] = args.timeout
+            if args.quality:
+                params["quality"] = args.quality
+            if args.background:
+                params["background"] = args.background
 
         # --- dispatch to adapter (SD-004) ------------------------------------
         try:

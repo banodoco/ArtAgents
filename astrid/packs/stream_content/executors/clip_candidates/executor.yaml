@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "stream_content.clip_candidates",
+  "name": "Stream Clip Candidates",
+  "kind": "built_in",
+  "version": "1.0",
+  "short_description": "Score transcript windows as publishable stream clip candidates.",
+  "description": "Find 20-90 second clip windows from a transcript, scoring quotable lines, reactions, Q&A exchanges, and optional brief topic matches.",
+  "keywords": ["stream", "clips", "candidates", "transcript", "quotes", "highlights"],
+  "inputs": [
+    {"name": "transcript", "type": "file", "required": true, "description": "Whisper transcript.json."},
+    {"name": "segment_map", "type": "file", "required": false, "description": "Optional stream_content.segment_map output."},
+    {"name": "brief", "type": "file", "required": false, "description": "Optional freeform markdown topics or angles to boost."}
+  ],
+  "outputs": [
+    {"name": "candidates", "type": "file", "path_template": "{out}/candidates.json", "description": "Ranked clip candidates."}
+  ],
+  "command": {
+    "argv": [
+      "{python_exec}",
+      "-m",
+      "astrid.packs.stream_content.executors.clip_candidates.run",
+      "--transcript",
+      "{transcript}",
+      "--out",
+      "{out}/candidates.json"
+    ],
+    "input_args": [
+      {"input": "segment_map", "flag": "--segment-map", "optional": true},
+      {"input": "brief", "flag": "--brief", "optional": true}
+    ]
+  },
+  "cache": {"mode": "none"},
+  "isolation": {"mode": "subprocess", "network": false},
+  "metadata": {
+    "runtime_entrypoint": "main",
+    "runtime_file": "run.py",
+    "runtime_module": "astrid.packs.stream_content.executors.clip_candidates.run"
+  }
+}
+

@@ -111,9 +111,9 @@ def test_manifest_loads() -> None:
     assert manifest.kind == "built_in"
     assert manifest.version == "2.0"
     assert manifest.metadata["runtime_entrypoint"] == "run_sdk"
-    # v2 executor has 14 inputs: mode, prompt, prompts_file, model, image_ref,
-    # execution, count, seed, negative_prompt, size, strength, guidance_scale, steps, loras
-    assert len(manifest.inputs) == 14
+    # v2 executor inputs include backend controls for Codex in addition to
+    # core model/mode generation fields.
+    assert len(manifest.inputs) == 17
     assert len(manifest.outputs) == 2  # generated_images, image_manifest
 
 
@@ -240,6 +240,7 @@ def test_run_sdk_and_main_preserve_in_process_and_cli_contracts(
     assert payload["returncode"] == 0
     assert payload[GENERATION_RESULT_KEY] is result
 
+    monkeypatch.setenv("ASTRID_PROJECT_RUN", "test-run")
     code = run_mod.main(["--model", "flux-dev"])
     captured = capsys.readouterr()
 
@@ -295,7 +296,7 @@ def test_execution_invalid_value_lists_pair_specific_backends(
         ),
         "model 'flux-dev' mode 't2i' has no 'local' backend",
     )
-    assert error.valid_options == ("cloud",)
+    assert error.valid_options == ("cloud", "codex")
 
 
 def test_registry_lookup_failure_is_reported_as_cli_error(
