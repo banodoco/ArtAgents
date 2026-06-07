@@ -42,6 +42,43 @@ def test_validate_import_layering_flags_absolute_and_relative_core_pack_imports(
     assert not any("dynamic_ok.py" in violation for violation in violations)
 
 
+def test_validate_import_layering_flags_core_audit_imports(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "astrid/core/bad_audit.py",
+        "from astrid.audit.recorder import record_event\n",
+    )
+
+    violations = validate_import_layering(tmp_path)
+
+    assert "astrid/core/bad_audit.py:1 imports forbidden module 'astrid.audit.recorder'" in violations
+
+
+def test_validate_import_layering_exempts_only_event_stream_audit_import(tmp_path: Path) -> None:
+    # event_stream.py's audit import is exempt per the documented
+    # file-level _IMPORT_LAYERING_EXEMPT_REL entry (SD2).
+    _write(
+        tmp_path,
+        "astrid/core/task/event_stream.py",
+        "from astrid.audit.recorder import read_events\n",
+    )
+    # Another core file importing audit is NOT exempt.
+    _write(
+        tmp_path,
+        "astrid/core/other_audit.py",
+        "from astrid.audit.recorder import record_event\n",
+    )
+
+    violations = validate_import_layering(tmp_path)
+
+    assert not any(
+        "event_stream.py" in v for v in violations
+    ), f"event_stream.py should be exempt but was flagged: {[v for v in violations if 'event_stream.py' in v]}"
+    assert any(
+        "other_audit.py" in v for v in violations
+    ), f"other_audit.py should be flagged but wasn't: {violations}"
+
+
 def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_path: Path) -> None:
     _bootstrap_structure_root(tmp_path)
     _write(
@@ -208,6 +245,24 @@ def test_validate_repo_structure_flags_non_exempt_sys_modules_injection_as_error
     assert report.errors == (
         "astrid/core/sys_modules_alias.py: sys.modules injection remains outside tests",
     )
+
+
+def test_validate_repo_structure_exempts_pipeline_sys_modules_injection(tmp_path: Path) -> None:
+    """pipeline.py is an approved compatibility shim (SD1) and must not be
+    flagged by the sys.modules injection guard."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/pipeline.py",
+        "import sys\n"
+        "sys.modules['astrid.gateway'] = sys.modules[__name__]\n",
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert not any(
+        "sys.modules injection remains" in err for err in report.errors
+    ), f"pipeline.py should be exempt from sys.modules guard but was flagged: {report.errors}"
 
 
 def test_validate_repo_structure_flags_dangling_all_alias_as_error(tmp_path: Path) -> None:
@@ -699,3 +754,303 @@ def test_run_record_status_boundary_accepts_empty_root(tmp_path: Path) -> None:
     """An empty or non-existent astrid directory produces zero advisories."""
     advisories = validate_run_record_status_boundary(tmp_path)
     assert advisories == []
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# M0 real-repo smoke — T6
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_real_repo_top_level_matches_structure_constants() -> None:
+    """M0 real-repo smoke: on-disk ``astrid/`` layout matches
+    ``TOP_LEVEL_ASTRID_FILES`` and ``TOP_LEVEL_ASTRID_DIRS`` with the
+    same filtering as ``_validate_top_level_astrid()``.
+
+    * Every named file must exist on disk.
+    * Every named directory must exist **or** be ``elements`` (the single
+      planned-absent canonical concept per SD3).
+    * ``__pycache__`` is allowed but not required (runtime-generated).
+    * No unexpected ``.py`` files or directories may be present on disk
+      (dotfiles are skipped, matching the validator filter).
+    """
+    from astrid._paths import REPO_ROOT
+    from astrid.structure import TOP_LEVEL_ASTRID_DIRS, TOP_LEVEL_ASTRID_FILES
+
+    astrid_root = REPO_ROOT / "astrid"
+    assert astrid_root.is_dir(), "astrid/ directory must exist on disk"
+
+    # Canonical planned-absent entry (SD3).
+    PLANNED_ABSENT_DIRS: frozenset[str] = frozenset({"elements"})
+    # Generated artifact — optional.
+    GENERATED_OPTIONAL: frozenset[str] = frozenset({"__pycache__"})
+
+    # ── constants → disk ──────────────────────────────────────────────
+
+    for fname in sorted(TOP_LEVEL_ASTRID_FILES):
+        fpath = astrid_root / fname
+        assert fpath.is_file(), (
+            f"TOP_LEVEL_ASTRID_FILES entry 'astrid/{fname}' missing from disk"
+        )
+
+    for dname in sorted(TOP_LEVEL_ASTRID_DIRS):
+        dpath = astrid_root / dname
+        if dname in PLANNED_ABSENT_DIRS:
+            assert not dpath.exists(), (
+                f"Planned-absent directory 'astrid/{dname}' "
+                f"must NOT exist on disk in M0"
+            )
+        elif dname in GENERATED_OPTIONAL:
+            # __pycache__ may or may not be present.
+            pass
+        else:
+            assert dpath.is_dir(), (
+                f"TOP_LEVEL_ASTRID_DIRS entry 'astrid/{dname}' "
+                f"missing from disk"
+            )
+
+    # ── disk → constants (validator filter) ───────────────────────────
+
+    for child in sorted(astrid_root.iterdir()):
+        # Skip dotfiles (same filter as _validate_top_level_astrid).
+        if child.name.startswith("."):
+            continue
+        if child.is_file() and child.suffix == ".py":
+            assert child.name in TOP_LEVEL_ASTRID_FILES, (
+                f"Unexpected top-level .py file: astrid/{child.name}"
+            )
+        if child.is_dir():
+            assert child.name in TOP_LEVEL_ASTRID_DIRS, (
+                f"Unexpected top-level directory: astrid/{child.name}"
+            )
+
+
+def test_architecture_inventories_parse_and_have_required_structure() -> None:
+    """M0 real-repo smoke: all four architecture inventories parse as valid
+    JSON and contain the expected structural keys.
+
+    The four inventories are:
+
+    1. ``docs/architecture/top-level-inventory.json``
+    2. ``docs/architecture/pack-layout-variants.json``
+    3. ``docs/architecture/test-relocation-map.json``
+    4. ``docs/architecture/giant-file-split-candidates.json``
+    """
+    import json
+
+    from astrid._paths import REPO_ROOT
+
+    arch_dir = REPO_ROOT / "docs" / "architecture"
+
+    # ── 1. top-level-inventory.json ───────────────────────────────────
+
+    tli_path = arch_dir / "top-level-inventory.json"
+    assert tli_path.is_file(), f"Missing: {tli_path}"
+    tli = json.loads(tli_path.read_text(encoding="utf-8"))
+
+    assert isinstance(tli.get("top_level_files"), list), (
+        "top-level-inventory.json: 'top_level_files' must be a list"
+    )
+    assert len(tli["top_level_files"]) >= 10, (
+        f"Expected >= 10 top-level files; got {len(tli['top_level_files'])}"
+    )
+    for entry in tli["top_level_files"]:
+        assert "name" in entry, f"File entry missing 'name': {entry}"
+        assert "classification" in entry, (
+            f"File entry missing 'classification': {entry}"
+        )
+
+    assert isinstance(tli.get("top_level_directories"), list), (
+        "top-level-inventory.json: 'top_level_directories' must be a list"
+    )
+    assert len(tli["top_level_directories"]) >= 10, (
+        f"Expected >= 10 top-level dirs; got {len(tli['top_level_directories'])}"
+    )
+    for entry in tli["top_level_directories"]:
+        assert "name" in entry, f"Dir entry missing 'name': {entry}"
+        assert "classification" in entry, (
+            f"Dir entry missing 'classification': {entry}"
+        )
+
+    # Confirm the planned-absent entry is recorded.
+    elements_entries = [
+        e for e in tli["top_level_directories"]
+        if e["name"] == "elements"
+    ]
+    assert elements_entries, (
+        "top-level-inventory.json: 'elements' must appear in "
+        "top_level_directories"
+    )
+    assert elements_entries[0]["classification"] == "planned_absent", (
+        f"elements classification must be 'planned_absent'; "
+        f"got {elements_entries[0]['classification']!r}"
+    )
+
+    # ── 2. pack-layout-variants.json ──────────────────────────────────
+
+    plv_path = arch_dir / "pack-layout-variants.json"
+    assert plv_path.is_file(), f"Missing: {plv_path}"
+    plv = json.loads(plv_path.read_text(encoding="utf-8"))
+
+    assert isinstance(plv.get("packs"), list), (
+        "pack-layout-variants.json: 'packs' must be a list"
+    )
+    assert len(plv["packs"]) >= 10, (
+        f"Expected >= 10 packs; got {len(plv['packs'])}"
+    )
+    for entry in plv["packs"]:
+        assert "id" in entry, f"Pack entry missing 'id': {entry}"
+        assert "variant" in entry, f"Pack entry missing 'variant': {entry}"
+
+    assert isinstance(plv.get("internal_directories"), dict), (
+        "pack-layout-variants.json: 'internal_directories' must be a dict"
+    )
+
+    # ── 3. test-relocation-map.json ───────────────────────────────────
+
+    trm_path = arch_dir / "test-relocation-map.json"
+    assert trm_path.is_file(), f"Missing: {trm_path}"
+    trm = json.loads(trm_path.read_text(encoding="utf-8"))
+
+    assert isinstance(trm.get("relocations"), list), (
+        "test-relocation-map.json: 'relocations' must be a list"
+    )
+    assert len(trm["relocations"]) >= 100, (
+        f"Expected >= 100 relocation entries; got {len(trm['relocations'])}"
+    )
+    for entry in trm["relocations"]:
+        assert "file" in entry, f"Relocation entry missing 'file': {entry}"
+        assert "target" in entry, f"Relocation entry missing 'target': {entry}"
+        assert "confidence" in entry, (
+            f"Relocation entry missing 'confidence': {entry}"
+        )
+
+    # ── 4. giant-file-split-candidates.json ───────────────────────────
+
+    gfs_path = arch_dir / "giant-file-split-candidates.json"
+    assert gfs_path.is_file(), f"Missing: {gfs_path}"
+    gfs = json.loads(gfs_path.read_text(encoding="utf-8"))
+
+    required = gfs.get("required_starting_set")
+    assert isinstance(required, dict), (
+        "giant-file-split-candidates.json: 'required_starting_set' must be a dict"
+    )
+    candidates = required.get("candidates")
+    assert isinstance(candidates, list), (
+        "giant-file-split-candidates.json: "
+        "'required_starting_set.candidates' must be a list"
+    )
+    assert len(candidates) >= 4, (
+        f"Expected >= 4 required starting-set candidates; got {len(candidates)}"
+    )
+    for entry in candidates:
+        assert "file" in entry, f"Giant candidate missing 'file': {entry}"
+        assert "lines" in entry, f"Giant candidate missing 'lines': {entry}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# M0 public import and compatibility-shim smoke — T7
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def test_public_import_and_shim_smoke() -> None:
+    """M0 public import smoke (T7): ``import astrid`` resolves and exposes
+    representative public SDK facade symbols; stable compatibility shims
+    ``astrid._media``, ``astrid._paths``, and ``astrid.pipeline`` are
+    importable.
+
+    ``astrid.pipeline`` aliases itself to ``astrid.gateway`` via
+    ``sys.modules`` so assertions are order-insensitive and do not require
+    object identity.
+    """
+    import sys
+
+    import astrid
+
+    # ── Representative public SDK facade symbols (subset of _SDK_EXPORTS) ──
+    _REPRESENTATIVE_SDK_SYMBOLS: frozenset[str] = frozenset(
+        {
+            # Functions
+            "discover",
+            "invoke",
+            "generate",
+            "read_events",
+            "subscribe_events",
+            # DTOs / data classes
+            "Capability",
+            "DiscoveryResult",
+            "InvocationResult",
+            "EventStreamRecord",
+            # Exceptions
+            "AstridSDKError",
+            "CapabilityNotFoundError",
+            # Contracts
+            "CapabilityHandle",
+            "Port",
+            "Output",
+            "ExecError",
+        }
+    )
+
+    for sym in sorted(_REPRESENTATIVE_SDK_SYMBOLS):
+        assert hasattr(astrid, sym), (
+            f"astrid.{sym} must be accessible as a public SDK symbol"
+        )
+
+    # Verify __all__ contains the representative symbols.
+    astrid_all = set(astrid.__all__)
+    missing_from_all = _REPRESENTATIVE_SDK_SYMBOLS - astrid_all
+    assert not missing_from_all, (
+        f"Representative symbols missing from astrid.__all__: "
+        f"{sorted(missing_from_all)}"
+    )
+
+    # ── Compatibility shims ────────────────────────────────────────────
+
+    # _media and _paths are thin re-export shims.
+    import astrid._media  # noqa: F401
+    import astrid._paths  # noqa: F401
+
+    # pipeline aliases itself to astrid.gateway via sys.modules.
+    # Only assert importability — do NOT rely on object identity.
+    import astrid.pipeline  # noqa: F401
+
+    assert "astrid._media" in sys.modules, (
+        "astrid._media must be registered in sys.modules"
+    )
+    assert "astrid._paths" in sys.modules, (
+        "astrid._paths must be registered in sys.modules"
+    )
+    assert "astrid.pipeline" in sys.modules, (
+        "astrid.pipeline must be registered in sys.modules"
+    )
+
+
+def test_reigh_smoke_imports() -> None:
+    """Import every direct Python submodule under astrid.core.reigh.
+
+    The test is import-only: it must not resolve environment variables,
+    secrets, or network connections.  No Reigh behavior is exercised.
+    """
+    # Direct submodules listed in the M0 architecture gate (T8).
+    import astrid.core.reigh.data_provider  # noqa: F401
+    import astrid.core.reigh.env  # noqa: F401
+    import astrid.core.reigh.errors  # noqa: F401
+    import astrid.core.reigh.supabase_client  # noqa: F401
+    import astrid.core.reigh.task_client  # noqa: F401
+    import astrid.core.reigh.timeline_io  # noqa: F401
+    import astrid.core.reigh.worker_jwt  # noqa: F401
+
+    # Prove every listed submodule landed in sys.modules.
+    import sys
+
+    expected = {
+        "astrid.core.reigh.data_provider",
+        "astrid.core.reigh.env",
+        "astrid.core.reigh.errors",
+        "astrid.core.reigh.supabase_client",
+        "astrid.core.reigh.task_client",
+        "astrid.core.reigh.timeline_io",
+        "astrid.core.reigh.worker_jwt",
+    }
+    missing = expected - set(sys.modules)
+    assert not missing, f"Reigh submodules not in sys.modules: {sorted(missing)}"

@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "M0 top-level inventory of every file and directory directly under astrid/. Classifications align with astrid/structure.py constants TOP_LEVEL_ASTRID_FILES and TOP_LEVEL_ASTRID_DIRS. This is a documentation artifact — not a runtime input.",
+  "milestone": "M0",
+  "generated_at": "2026-06-07",
+  "source_root": "astrid/",
+  "classification_categories": {
+    "public_facade": "Part of the public SDK contract (directly or via lazy facade).",
+    "cli_entrypoint": "Executable CLI surface.",
+    "stable_compatibility_shim": "Intentional backward-compatibility shim, not stale migration debt.",
+    "internal_kernel": "Framework machinery under astrid/core — not public contract.",
+    "shared_library": "Shared library/utility, not part of public SDK but used across subsystems.",
+    "domain_library": "Domain-specific shared logic.",
+    "pack_capability_surface": "Capability surface — packs ship here.",
+    "planned_absent": "Canonical concept allowed by constants but not materialized on disk in M0.",
+    "generated_ignored": "Build artifact or runtime cache — ignored by structure enforcement.",
+    "docs": "Package-level documentation within astrid/.",
+    "soft_boundary_convention": "Convention documented for awareness, not hard-gated in M0."
+  },
+  "top_level_files": [
+    {
+      "name": "__init__.py",
+      "classification": "public_facade",
+      "notes": "Lazy-loads 27 names from astrid/sdk.py via __getattr__. The normative v1 contract is docs/platform-contract.md.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "__main__.py",
+      "classification": "cli_entrypoint",
+      "notes": "Executable package gateway — delegates to astrid.gateway.main().",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "_media.py",
+      "classification": "stable_compatibility_shim",
+      "notes": "Backward-compatibility shim for astrid._media. Star-re-exports from astrid.media. Listed in _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS with TODO(m13) removal target.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "_paths.py",
+      "classification": "stable_compatibility_shim",
+      "notes": "Backward-compatibility shim for astrid._paths. Star-re-exports from astrid.paths plus explicit re-exports. Listed in _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS with TODO(m13) removal target.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "doctor.py",
+      "classification": "cli_entrypoint",
+      "notes": "Repo health diagnostic — consumes validate_repo_structure().",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "gateway.py",
+      "classification": "cli_entrypoint",
+      "notes": "Subcommand router — session gate, command dispatch, brief/video fall-through to video_editing.hype. 1,215 lines; a giant-file split candidate for M4.",
+      "line_count": 1215,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "media.py",
+      "classification": "shared_library",
+      "notes": "Canonical media module. _media.py shims to this.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "paths.py",
+      "classification": "shared_library",
+      "notes": "Repository and workspace path resolution. _paths.py shims to this.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "pipeline.py",
+      "classification": "stable_compatibility_shim",
+      "notes": "Backward-compatibility shim — astrid.pipeline is astrid.gateway. Uses sys.modules[__name__] = sys.modules['astrid.gateway'] to alias itself. Listed in both _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS and _SYS_MODULES_INJECTION_EXEMPTIONS (SD1).",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "sdk.py",
+      "classification": "public_facade",
+      "notes": "Public SDK implementation — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. 1,833 lines; a giant-file split candidate for M4.",
+      "line_count": 1833,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "setup_cli.py",
+      "classification": "shared_library",
+      "notes": "Setup CLI support.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "structure.py",
+      "classification": "internal_kernel",
+      "notes": "Single source of truth for repository structure enforcement. Exposes validate_repo_structure(), validate_import_layering(), validate_migration_completion(). Contains all exemption lists.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "theme_schema.py",
+      "classification": "soft_boundary_convention",
+      "notes": "Theme schema validation helpers. Soft boundary — convention in M0.",
+      "in_structure_py_constant": true
+    }
+  ],
+  "top_level_directories": [
+    {
+      "name": "__pycache__",
+      "classification": "generated_ignored",
+      "notes": "CPython bytecode cache. Ignored by structure enforcement.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "audit",
+      "classification": "shared_library",
+      "notes": "Run-local provenance ledger, graph, transport, and HTML report. Contains __main__.py, cli.py, context.py, graph.py, report.py, transport.py, util.py.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "contracts",
+      "classification": "shared_library",
+      "notes": "Common schema dataclasses: ports, outputs, cache, commands, isolation, errors, run status, capability schema, event hash, result manifest.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "core",
+      "classification": "internal_kernel",
+      "notes": "Internal kernel — framework machinery. Contains adapter, element, executor, generation, lineage, model_catalog, orchestrator, project, reigh, runpod, runtime, session, task, timeline, util, worker subdirectories. Anti-coupling rules enforced: core must not import from packs, orchestrate, or audit (with named exemptions).",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "docs",
+      "classification": "docs",
+      "notes": "Package-level documentation within the astrid package. Contains generation/ subdirectory with feature and contract docs.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "domains",
+      "classification": "domain_library",
+      "notes": "Domain-specific shared logic. Currently contains domains/hype/ for arrangement rules, enriched arrangements, and text matching.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "elements",
+      "classification": "planned_absent",
+      "notes": "Planned-but-not-materialized canonical concept. TOP_LEVEL_ASTRID_DIRS includes 'elements' but no astrid/elements/ directory exists on disk. M0 does not create it (SD3). Source-layout smoke tests treat elements/ as the only allowed planned-absent canonical directory.",
+      "in_structure_py_constant": true,
+      "exists_on_disk": false
+    },
+    {
+      "name": "modalities",
+      "classification": "shared_library",
+      "notes": "Modality-specific support code: audio_waveform, image_grid, generic_card.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "orchestrate",
+      "classification": "shared_library",
+      "notes": "Plan compilation and test running: DSL, compile, test_runner, CLI. Top-level subsystem, not part of astrid/core.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "packs",
+      "classification": "pack_capability_surface",
+      "notes": "Capability surface — every executor, orchestrator, and element ships in a pack under astrid/packs/<pack>/. The kernel provides the framework; packs provide the capabilities. Contains 21 pack directories plus internal _core/ and schemas/. Detailed inventory in pack-layout-variants.json.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "skills",
+      "classification": "shared_library",
+      "notes": "Agent skill discovery, registry, and harness runtimes (base, codex, claude, hermes).",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "threads",
+      "classification": "shared_library",
+      "notes": "Lineage and thread management. Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in astrid.threads.__all__.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "timeline",
+      "classification": "stable_compatibility_shim",
+      "notes": "Thin public re-export surface for the canonical core timeline API. Callers import from astrid.timeline while implementation lives in astrid.core.timeline. Guarded by _MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS with TODO(m5b) marker requirement.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "utilities",
+      "classification": "shared_library",
+      "notes": "Generic helpers: LLM client construction, environment handling.",
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "verify",
+      "classification": "soft_boundary_convention",
+      "notes": "Verification helpers. Soft boundary — currently a convention, not a hard gate in M0.",
+      "in_structure_py_constant": true
+    }
+  ],
+  "structure_constants_reference": {
+    "TOP_LEVEL_ASTRID_FILES": [
+      "__init__.py", "__main__.py", "_media.py", "_paths.py",
+      "doctor.py", "gateway.py", "media.py", "paths.py",
+      "pipeline.py", "sdk.py", "setup_cli.py", "structure.py", "theme_schema.py"
+    ],
+    "TOP_LEVEL_ASTRID_DIRS": [
+      "__pycache__", "audit", "contracts", "core", "docs", "domains",
+      "elements", "modalities", "orchestrate", "packs", "skills",
+      "threads", "timeline", "utilities", "verify"
+    ],
+    "source_file": "astrid/structure.py"
+  },
+  "coverage_notes": {
+    "all_files_accounted": true,
+    "all_dirs_accounted": true,
+    "generated_artifacts_excluded": [
+      "__pycache__ directories at all levels",
+      ".pyc files throughout the tree"
+    ],
+    "planned_absent_entries": ["elements"]
+  }
+}

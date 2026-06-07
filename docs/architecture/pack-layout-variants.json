@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "M0 catalog of every pack variant under astrid/packs/. Classifies packs by the capability types they ship (executors, orchestrators, elements). Aligns with INTERNAL_PACK_DIRS constant in astrid/structure.py. This is a documentation artifact — not a runtime input.",
+  "milestone": "M0",
+  "generated_at": "2026-06-07",
+  "source_root": "astrid/packs/",
+  "variant_classifications": {
+    "manifest_only": "Has pack.yaml but no executors/, orchestrators/, or elements/ directories with capability subdirectories.",
+    "executor_pack": "Ships executor capabilities only.",
+    "orchestrator_pack": "Ships orchestrator capabilities only.",
+    "element_pack": "Ships element capabilities only.",
+    "mixed_executor_orchestrator": "Ships both executor and orchestrator capabilities.",
+    "mixed_executor_element": "Ships both executor and element capabilities.",
+    "mixed_full": "Ships executor, orchestrator, and element capabilities.",
+    "internal": "Infrastructure directory under packs/, not a shipped pack (no pack.yaml).",
+    "schemas": "Schema definitions, not a pack."
+  },
+  "internal_directories": {
+    "__pycache__": {
+      "classification": "generated_ignored",
+      "notes": "CPython bytecode cache — ignored by structure enforcement."
+    },
+    "_core": {
+      "classification": "internal",
+      "notes": "Internal pack infrastructure directory. Contains __init__.py and skill/. No pack.yaml.",
+      "has_pack_yaml": false,
+      "contents": ["__init__.py", "skill/"]
+    },
+    "schemas": {
+      "classification": "schemas",
+      "notes": "JSON Schema definitions for pack manifests. Contains v1/ with executor.json, orchestrator.json, element.json, pack.json, _defs.json.",
+      "has_pack_yaml": false,
+      "contents": ["v1/"]
+    }
+  },
+  "packs": [
+    {
+      "id": "builtin",
+      "variant": "manifest_only",
+      "has_pack_yaml": true,
+      "executor_count": 0,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": true,
+      "notes": "Empty scaffold directories for executors/ and orchestrators/ exist but contain only __init__.py files — no capability subdirectories. Serves as a structural placeholder pack with agent_probe.py, fixtures/, and golden/.",
+      "extra_contents": ["agent_probe.py", "fixtures/", "golden/"]
+    },
+    {
+      "id": "comfy_wrap",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 1,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Single-executor pack for ComfyUI wrapping."
+    },
+    {
+      "id": "editorial",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 15,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Large executor-only pack with 15 executors. Includes skill/ for agent-facing documentation."
+    },
+    {
+      "id": "fal",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 1,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Single-executor pack for fal.ai integration."
+    },
+    {
+      "id": "foley",
+      "variant": "mixed_executor_orchestrator",
+      "has_pack_yaml": true,
+      "executor_count": 2,
+      "orchestrator_count": 1,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Mixed pack with 2 executors and 1 orchestrator (foley_map). Includes skill/."
+    },
+    {
+      "id": "generation",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 3,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Executor pack with 3 generation executors (generate_image, generate_video, generate_audio or similar). Includes skill/ and golden/ test fixtures."
+    },
+    {
+      "id": "iteration",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 2,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": true,
+      "notes": "Executor pack with 2 executors (assemble, prepare). Has __init__.py."
+    },
+    {
+      "id": "media",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 1,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": true,
+      "has_init_py": false,
+      "notes": "Single-executor pack (clip_extract). Has AGENTS.md, README.md, and STAGE.md at pack level."
+    },
+    {
+      "id": "moirae",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 1,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Single-executor pack for Moirae integration."
+    },
+    {
+      "id": "reigh",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 4,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Executor pack with 4 executors for Reigh data platform integration. Includes skill/."
+    },
+    {
+      "id": "rendering",
+      "variant": "mixed_executor_element",
+      "has_pack_yaml": true,
+      "executor_count": 3,
+      "orchestrator_count": 0,
+      "element_count": 9,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Mixed pack with 3 executors and 9 elements. The only pack currently shipping elements. Includes skill/."
+    },
+    {
+      "id": "runpod",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 5,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Executor pack with 5 executors for RunPod serverless GPU integration (session, exec, etc.)."
+    },
+    {
+      "id": "stream_content",
+      "variant": "mixed_executor_orchestrator",
+      "has_pack_yaml": true,
+      "executor_count": 2,
+      "orchestrator_count": 1,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": true,
+      "notes": "Mixed pack with 2 executors and 1 orchestrator. Has __init__.py, STAGE.md, and skill/."
+    },
+    {
+      "id": "text_analysis",
+      "variant": "manifest_only",
+      "has_pack_yaml": true,
+      "executor_count": 0,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Minimal manifest-only pack. Contains summarize.py (standalone script), sample.txt, fixtures/, and golden/. No executor/orchestrator/element directories.",
+      "extra_contents": ["summarize.py", "sample.txt", "fixtures/", "golden/"]
+    },
+    {
+      "id": "training",
+      "variant": "mixed_executor_orchestrator",
+      "has_pack_yaml": true,
+      "executor_count": 4,
+      "orchestrator_count": 2,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Mixed pack with 4 executors and 2 orchestrators for model training workflows."
+    },
+    {
+      "id": "understanding",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 5,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Executor pack with 5 executors for media understanding (visual, audio, video analysis). Includes skill/."
+    },
+    {
+      "id": "vibecomfy",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 2,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Executor pack with 2 executors (run, validate) for VibeComfy integration."
+    },
+    {
+      "id": "video_editing",
+      "variant": "mixed_executor_orchestrator",
+      "has_pack_yaml": true,
+      "executor_count": 1,
+      "orchestrator_count": 7,
+      "element_count": 0,
+      "has_skill": true,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Orchestrator-heavy pack with 1 executor and 7 orchestrators for video editing workflows. Includes skill/ and hype.py.",
+      "extra_contents": ["hype.py"]
+    },
+    {
+      "id": "youtube",
+      "variant": "executor_pack",
+      "has_pack_yaml": true,
+      "executor_count": 2,
+      "orchestrator_count": 0,
+      "element_count": 0,
+      "has_skill": false,
+      "has_agents_md": false,
+      "has_init_py": false,
+      "notes": "Executor pack with 2 executors for YouTube integration."
+    }
+  ],
+  "top_level_pack_files": {
+    "description": "Python modules directly under astrid/packs/ (not in pack subdirectories).",
+    "files": [
+      {
+        "name": "__init__.py",
+        "classification": "pack_system",
+        "notes": "Package init for astrid.packs."
+      },
+      {
+        "name": "cli.py",
+        "classification": "pack_system",
+        "notes": "Pack CLI. 1,761 lines; a giant-file split candidate for M4.",
+        "line_count": 1761
+      },
+      {
+        "name": "install.py",
+        "classification": "pack_system",
+        "notes": "Pack installation logic. 1,930 lines; a giant-file split candidate for M4.",
+        "line_count": 1930
+      },
+      {
+        "name": "validate.py",
+        "classification": "pack_system",
+        "notes": "Pack validation logic."
+      },
+      {
+        "name": "gitignore.py",
+        "classification": "pack_system",
+        "notes": "Gitignore filtering for packs."
+      }
+    ]
+  },
+  "variant_summary": {
+    "manifest_only": ["builtin", "text_analysis"],
+    "executor_pack": ["comfy_wrap", "editorial", "fal", "generation", "iteration", "media", "moirae", "reigh", "runpod", "understanding", "vibecomfy", "youtube"],
+    "mixed_executor_orchestrator": ["foley", "stream_content", "training", "video_editing"],
+    "mixed_executor_element": ["rendering"],
+    "mixed_full": [],
+    "total_shipped_packs": 20
+  },
+  "structure_constants_reference": {
+    "INTERNAL_PACK_DIRS": ["__pycache__", "schemas"],
+    "source_file": "astrid/structure.py"
+  }
+}

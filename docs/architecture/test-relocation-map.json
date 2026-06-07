@@ -1,0 +1,1674 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "M0 test relocation map for root-level tests/test_*.py files. Maps each file to a recommended target domain directory for M3 relocation. Low-confidence mappings are marked explicitly — M3 owner must review. This is a documentation artifact consumed by M3, not a runtime input.",
+  "milestone": "M0",
+  "generated_at": "2026-06-07",
+  "source_root": "tests/",
+  "consumed_by": "M3",
+  "target_directories": {
+    "tests/agentic/": "Agentic scenario and UX tests.",
+    "tests/audit/": "Audit subsystem tests.",
+    "tests/core/": "Core kernel tests (generation, model_catalog, runtime, task, util, project, executor, element).",
+    "tests/fixtures/": "Test fixtures and fixture-related tests.",
+    "tests/orchestrate/": "Orchestrate DSL, compile, and test-runner tests.",
+    "tests/packs/": "Pack-specific tests. Subdirectories exist for builtin, editorial, event_talks, external, foley, hype, runpod, stream_content, thumbnail_maker.",
+    "tests/session/": "Session lifecycle tests.",
+    "tests/task/": "Task kernel tests.",
+    "tests/timeline/": "Timeline tests.",
+    "tests/spikes/": "Spike/exploratory tests."
+  },
+  "stay_root_rationale": "Tests that are cross-cutting contracts, structure enforcement, platform contracts, SDK surface verification, or have no clear single domain should stay at tests/ root.",
+  "confidence_levels": {
+    "high": "Test file name and content clearly map to a single domain subsystem with an existing target directory.",
+    "medium": "Reasonable domain assignment but could fit multiple targets; M3 owner should confirm.",
+    "low": "Ambiguous domain; multiple plausible targets or cross-cutting concerns. M3 owner must decide."
+  },
+  "relocations": [
+    {
+      "file": "test_agent_discovery_scenario.py",
+      "lines": 121,
+      "target": "tests/agentic/",
+      "confidence": "high",
+      "rationale": "Agent discovery scenario test."
+    },
+    {
+      "file": "test_agent_probe_regression.py",
+      "lines": 535,
+      "target": "tests/agentic/",
+      "confidence": "medium",
+      "rationale": "Agent probe regression; could also fit tests/core/ or stay root."
+    },
+    {
+      "file": "test_agentic_ux_example.py",
+      "lines": 487,
+      "target": "tests/agentic/",
+      "confidence": "high",
+      "rationale": "Agentic UX example test."
+    },
+    {
+      "file": "test_arrange.py",
+      "lines": 442,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Arrangement tests for video_editing pack."
+    },
+    {
+      "file": "test_arrange_revise.py",
+      "lines": 227,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Arrange revise tests for video_editing pack."
+    },
+    {
+      "file": "test_arrange_voice_injection.py",
+      "lines": 98,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Voice injection tests for video_editing pack."
+    },
+    {
+      "file": "test_arrangement_schema.py",
+      "lines": 160,
+      "target": "tests/packs/",
+      "confidence": "medium",
+      "rationale": "Arrangement schema; could fit tests/core/ or tests/packs/."
+    },
+    {
+      "file": "test_asset_cache.py",
+      "lines": 276,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Asset cache tests; likely core infrastructure."
+    },
+    {
+      "file": "test_audio_render.py",
+      "lines": 167,
+      "target": "tests/packs/",
+      "confidence": "medium",
+      "rationale": "Audio render; could be packs/ or timeline/."
+    },
+    {
+      "file": "test_audio_understand.py",
+      "lines": 117,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Audio understanding tests for understanding pack."
+    },
+    {
+      "file": "test_audit.py",
+      "lines": 484,
+      "target": "tests/audit/",
+      "confidence": "high",
+      "rationale": "Audit subsystem tests."
+    },
+    {
+      "file": "test_author_cli.py",
+      "lines": 247,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Author CLI tests for orchestrate subsystem."
+    },
+    {
+      "file": "test_author_explain.py",
+      "lines": 59,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Author explain tests."
+    },
+    {
+      "file": "test_author_test_auto_approval.py",
+      "lines": 201,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Author test auto-approval."
+    },
+    {
+      "file": "test_author_test_drift.py",
+      "lines": 41,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Author test drift."
+    },
+    {
+      "file": "test_author_test_pass.py",
+      "lines": 22,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Author test pass."
+    },
+    {
+      "file": "test_author_test_regenerate.py",
+      "lines": 40,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Author test regenerate."
+    },
+    {
+      "file": "test_banodoco_baseline.py",
+      "lines": 157,
+      "target": "tests/timeline/",
+      "confidence": "medium",
+      "rationale": "Banodoco baseline; could fit timeline/ or task/."
+    },
+    {
+      "file": "test_banodoco_claim_loop.py",
+      "lines": 355,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Banodoco claim loop; involves task kernel and timeline. M3 owner should decide."
+    },
+    {
+      "file": "test_banodoco_worker.py",
+      "lines": 358,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Banodoco worker; involves task kernel. Could also be tests/core/."
+    },
+    {
+      "file": "test_brief_frontmatter.py",
+      "lines": 205,
+      "target": "tests/orchestrate/",
+      "confidence": "medium",
+      "rationale": "Brief frontmatter parsing; likely orchestrate-related."
+    },
+    {
+      "file": "test_builtin_pack_validate_mixed_layout.py",
+      "lines": 301,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Builtin pack validation tests."
+    },
+    {
+      "file": "test_cas_intern.py",
+      "lines": 62,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "CAS (content-addressable storage) internals."
+    },
+    {
+      "file": "test_cas_per_project.py",
+      "lines": 85,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "CAS per-project tests."
+    },
+    {
+      "file": "test_cas_symlink.py",
+      "lines": 88,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "CAS symlink tests."
+    },
+    {
+      "file": "test_cmd_next_tail_dispatch.py",
+      "lines": 285,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Command next/tail dispatch for task kernel."
+    },
+    {
+      "file": "test_component_manifest_parser_parity.py",
+      "lines": 148,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Component manifest parser parity; could be core/ or packs/."
+    },
+    {
+      "file": "test_composition_elements.py",
+      "lines": 110,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Composition elements tests for rendering pack."
+    },
+    {
+      "file": "test_core_util_surface.py",
+      "lines": 46,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Core util surface test."
+    },
+    {
+      "file": "test_create_project_plan_md.py",
+      "lines": 53,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Project plan creation; core/project/."
+    },
+    {
+      "file": "test_current_run.py",
+      "lines": 60,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Current run tracking for task kernel."
+    },
+    {
+      "file": "test_cut_timeline_resume.py",
+      "lines": 261,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Cut timeline resume tests."
+    },
+    {
+      "file": "test_default_registry_scopes.py",
+      "lines": 74,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Default registry scopes."
+    },
+    {
+      "file": "test_dirty_detection.py",
+      "lines": 195,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Dirty detection for core infrastructure."
+    },
+    {
+      "file": "test_dirty_fallback.py",
+      "lines": 136,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Dirty fallback tests."
+    },
+    {
+      "file": "test_edit_helpers.py",
+      "lines": 405,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Edit helpers for timeline operations."
+    },
+    {
+      "file": "test_editor_review.py",
+      "lines": 218,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Editor review tests for editorial pack."
+    },
+    {
+      "file": "test_effects_catalog.py",
+      "lines": 84,
+      "target": "tests/timeline/",
+      "confidence": "medium",
+      "rationale": "Effects catalog; could be timeline/ or packs/."
+    },
+    {
+      "file": "test_element_kind_registry.py",
+      "lines": 82,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Element kind registry in core/element/."
+    },
+    {
+      "file": "test_elements_cli.py",
+      "lines": 133,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Elements CLI; could be core/ or packs/."
+    },
+    {
+      "file": "test_elements_install.py",
+      "lines": 102,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Elements install; could be core/ or packs/."
+    },
+    {
+      "file": "test_elements_registry.py",
+      "lines": 222,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Elements registry; could be core/ or packs/."
+    },
+    {
+      "file": "test_enriched_arrangement.py",
+      "lines": 143,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Enriched arrangement for video_editing pack."
+    },
+    {
+      "file": "test_executor_cli.py",
+      "lines": 124,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Executor CLI tests for core/executor/."
+    },
+    {
+      "file": "test_executor_runner_errors.py",
+      "lines": 1239,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Executor runner error handling."
+    },
+    {
+      "file": "test_executor_schema_capabilities.py",
+      "lines": 518,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Executor schema capabilities."
+    },
+    {
+      "file": "test_folder_metadata_env.py",
+      "lines": 215,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Folder metadata environment handling."
+    },
+    {
+      "file": "test_foley_review.py",
+      "lines": 108,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Foley review tests for foley pack."
+    },
+    {
+      "file": "test_for_each_autoclose.py",
+      "lines": 211,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "For-each autoclose task kernel test."
+    },
+    {
+      "file": "test_fork_executor_orchestrator.py",
+      "lines": 303,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Fork executor/orchestrator; could be core/ or packs/."
+    },
+    {
+      "file": "test_generate_image_openai.py",
+      "lines": 98,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "OpenAI image generation for generation pack."
+    },
+    {
+      "file": "test_generate_image_openai_partial_manifest.py",
+      "lines": 106,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Partial manifest for generation pack."
+    },
+    {
+      "file": "test_generate_image_partial_manifest.py",
+      "lines": 215,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Partial manifest for generation pack."
+    },
+    {
+      "file": "test_generate_video_partial_manifest.py",
+      "lines": 518,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Partial manifest for generation pack."
+    },
+    {
+      "file": "test_generation_backend_registry.py",
+      "lines": 50,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Generation backend registry."
+    },
+    {
+      "file": "test_generation_manifest_atomic_write.py",
+      "lines": 61,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Generation manifest atomic write."
+    },
+    {
+      "file": "test_generation_taxonomy_registry.py",
+      "lines": 32,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Generation taxonomy registry."
+    },
+    {
+      "file": "test_git_pack_install.py",
+      "lines": 78,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Git pack installation tests."
+    },
+    {
+      "file": "test_html_canvas_effect.py",
+      "lines": 230,
+      "target": "tests/timeline/",
+      "confidence": "medium",
+      "rationale": "HTML canvas effect; could be timeline/ or packs/."
+    },
+    {
+      "file": "test_human_notes.py",
+      "lines": 261,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Human notes; could be task/ or session/."
+    },
+    {
+      "file": "test_human_review_server.py",
+      "lines": 188,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Human review server; could be task/ or session/."
+    },
+    {
+      "file": "test_hype_cut_invariants.py",
+      "lines": 269,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Hype cut invariants for video_editing pack."
+    },
+    {
+      "file": "test_inbox_consume.py",
+      "lines": 512,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Inbox consume for task kernel."
+    },
+    {
+      "file": "test_inbox_scan.py",
+      "lines": 195,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Inbox scan for task kernel."
+    },
+    {
+      "file": "test_inbox_stale.py",
+      "lines": 175,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Inbox stale detection."
+    },
+    {
+      "file": "test_inline_check_ack.py",
+      "lines": 176,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Inline check ack for task kernel."
+    },
+    {
+      "file": "test_inspect_cut.py",
+      "lines": 334,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Inspect cut for timeline."
+    },
+    {
+      "file": "test_isolation_env_passthrough_schema.py",
+      "lines": 161,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Isolation env passthrough schema."
+    },
+    {
+      "file": "test_iteration_assemble.py",
+      "lines": 193,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration assemble for iteration pack."
+    },
+    {
+      "file": "test_iteration_prepare_cache.py",
+      "lines": 155,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration prepare cache."
+    },
+    {
+      "file": "test_iteration_prepare_collect.py",
+      "lines": 367,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration prepare collect."
+    },
+    {
+      "file": "test_iteration_quality.py",
+      "lines": 121,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration quality tests."
+    },
+    {
+      "file": "test_iteration_video.py",
+      "lines": 1073,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration video tests."
+    },
+    {
+      "file": "test_iteration_video_dogfood_fixture.py",
+      "lines": 430,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration video dogfood fixture."
+    },
+    {
+      "file": "test_iteration_video_fallback.py",
+      "lines": 120,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Iteration video fallback."
+    },
+    {
+      "file": "test_lifecycle_abort.py",
+      "lines": 304,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle abort for task kernel."
+    },
+    {
+      "file": "test_lifecycle_abort_json.py",
+      "lines": 121,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle abort JSON."
+    },
+    {
+      "file": "test_lifecycle_ack.py",
+      "lines": 245,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle ack."
+    },
+    {
+      "file": "test_lifecycle_ack_json.py",
+      "lines": 101,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle ack JSON."
+    },
+    {
+      "file": "test_lifecycle_help.py",
+      "lines": 56,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle help."
+    },
+    {
+      "file": "test_lifecycle_next.py",
+      "lines": 168,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle next."
+    },
+    {
+      "file": "test_lifecycle_peek.py",
+      "lines": 296,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle peek."
+    },
+    {
+      "file": "test_lifecycle_runs_ls.py",
+      "lines": 76,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle runs ls."
+    },
+    {
+      "file": "test_lifecycle_skip_json.py",
+      "lines": 162,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle skip JSON."
+    },
+    {
+      "file": "test_lifecycle_start.py",
+      "lines": 476,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle start."
+    },
+    {
+      "file": "test_lifecycle_start_json.py",
+      "lines": 126,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle start JSON."
+    },
+    {
+      "file": "test_lifecycle_status.py",
+      "lines": 138,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Lifecycle status."
+    },
+    {
+      "file": "test_log_and_swallow.py",
+      "lines": 44,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Log-and-swallow util test."
+    },
+    {
+      "file": "test_managed_write_paths.py",
+      "lines": 153,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Managed write paths; could be task/ or core/."
+    },
+    {
+      "file": "test_media_clip_extract.py",
+      "lines": 104,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Media clip extract for media pack."
+    },
+    {
+      "file": "test_mixed_mode_cut.py",
+      "lines": 478,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Mixed mode cut for timeline."
+    },
+    {
+      "file": "test_modalities_registry.py",
+      "lines": 9,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Modalities registry."
+    },
+    {
+      "file": "test_multitrack_cut.py",
+      "lines": 446,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Multitrack cut for timeline."
+    },
+    {
+      "file": "test_no_duplicate_http.py",
+      "lines": 49,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "No duplicate HTTP utility test."
+    },
+    {
+      "file": "test_open_in_reigh.py",
+      "lines": 38,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Open in Reigh for reigh pack."
+    },
+    {
+      "file": "test_orchestrate_dsl.py",
+      "lines": 221,
+      "target": "tests/orchestrate/",
+      "confidence": "high",
+      "rationale": "Orchestrate DSL tests."
+    },
+    {
+      "file": "test_orchestrator_cli.py",
+      "lines": 75,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Orchestrator CLI; could be core/ or orchestrate/."
+    },
+    {
+      "file": "test_orchestrator_manifest_schema.py",
+      "lines": 317,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Orchestrator manifest schema."
+    },
+    {
+      "file": "test_orchestrator_plan_template_builders.py",
+      "lines": 47,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Orchestrator plan template builders; could be core/ or orchestrate/."
+    },
+    {
+      "file": "test_orchestrator_runner_errors.py",
+      "lines": 292,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Orchestrator runner errors."
+    },
+    {
+      "file": "test_override.py",
+      "lines": 79,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Override mechanism for core."
+    },
+    {
+      "file": "test_pack_discovery.py",
+      "lines": 312,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack discovery."
+    },
+    {
+      "file": "test_pack_discovery_canonical.py",
+      "lines": 130,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack discovery canonical."
+    },
+    {
+      "file": "test_pack_discovery_excludes_ai_toolkit.py",
+      "lines": 67,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack discovery exclusions."
+    },
+    {
+      "file": "test_pack_discovery_metadata.py",
+      "lines": 97,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack discovery metadata."
+    },
+    {
+      "file": "test_pack_enum_recoverability.py",
+      "lines": 31,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack enum recoverability."
+    },
+    {
+      "file": "test_pack_install.py",
+      "lines": 1162,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack installation tests."
+    },
+    {
+      "file": "test_pack_local_priority.py",
+      "lines": 457,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack local priority."
+    },
+    {
+      "file": "test_pack_migration_m4_shells.py",
+      "lines": 155,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack migration M4 shells."
+    },
+    {
+      "file": "test_pack_parser_binding.py",
+      "lines": 133,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack parser binding."
+    },
+    {
+      "file": "test_pack_resolver.py",
+      "lines": 829,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack resolver."
+    },
+    {
+      "file": "test_pack_run_cli_choices.py",
+      "lines": 61,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack run CLI choices."
+    },
+    {
+      "file": "test_pack_store_rollback.py",
+      "lines": 212,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack store rollback."
+    },
+    {
+      "file": "test_pack_yaml_schema.py",
+      "lines": 2269,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pack YAML schema validation. Large file (2,269 lines)."
+    },
+    {
+      "file": "test_packs_cli.py",
+      "lines": 1274,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Packs CLI tests."
+    },
+    {
+      "file": "test_packs_gitignore_filter.py",
+      "lines": 249,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Packs gitignore filter."
+    },
+    {
+      "file": "test_packs_shipped_ids.py",
+      "lines": 113,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Packs shipped IDs."
+    },
+    {
+      "file": "test_packs_validate.py",
+      "lines": 2304,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Packs validate. Large file (2,304 lines)."
+    },
+    {
+      "file": "test_png_metadata.py",
+      "lines": 72,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "PNG metadata for core/util/."
+    },
+    {
+      "file": "test_pool_build.py",
+      "lines": 210,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pool build for video_editing pack."
+    },
+    {
+      "file": "test_pool_schema.py",
+      "lines": 166,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Pool schema for video_editing pack."
+    },
+    {
+      "file": "test_preamble_and_gate_coverage.py",
+      "lines": 534,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Preamble and gate coverage for task kernel."
+    },
+    {
+      "file": "test_project_cli.py",
+      "lines": 51,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Project CLI for core/project/."
+    },
+    {
+      "file": "test_project_runs.py",
+      "lines": 421,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Project runs."
+    },
+    {
+      "file": "test_project_schema.py",
+      "lines": 79,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Project schema."
+    },
+    {
+      "file": "test_qualified_id_enforcement.py",
+      "lines": 199,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Qualified ID enforcement for core."
+    },
+    {
+      "file": "test_quality_floor.py",
+      "lines": 178,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Quality floor; could be task/ or core/."
+    },
+    {
+      "file": "test_quality_zones.py",
+      "lines": 120,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Quality zones; could be task/ or core/."
+    },
+    {
+      "file": "test_refine.py",
+      "lines": 203,
+      "target": "tests/task/",
+      "confidence": "medium",
+      "rationale": "Refine operation; could be task/ or packs/."
+    },
+    {
+      "file": "test_registry_lookup_semantics.py",
+      "lines": 376,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Registry lookup semantics."
+    },
+    {
+      "file": "test_reigh_data.py",
+      "lines": 726,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Reigh data tests for reigh pack."
+    },
+    {
+      "file": "test_reigh_integration.py",
+      "lines": 498,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Reigh integration tests."
+    },
+    {
+      "file": "test_remotion_element_generation.py",
+      "lines": 123,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Remotion element generation for rendering pack."
+    },
+    {
+      "file": "test_remotion_render_contract.py",
+      "lines": 76,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Remotion render contract."
+    },
+    {
+      "file": "test_render_remotion_registry.py",
+      "lines": 70,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Render remotion registry."
+    },
+    {
+      "file": "test_renderer_parity.py",
+      "lines": 134,
+      "target": "tests/packs/",
+      "confidence": "medium",
+      "rationale": "Renderer parity; could be packs/ or core/."
+    },
+    {
+      "file": "test_scene_describe.py",
+      "lines": 184,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Scene describe for understanding pack."
+    },
+    {
+      "file": "test_session_cli.py",
+      "lines": 185,
+      "target": "tests/session/",
+      "confidence": "high",
+      "rationale": "Session CLI tests."
+    },
+    {
+      "file": "test_session_pointer_conformance.py",
+      "lines": 439,
+      "target": "tests/session/",
+      "confidence": "high",
+      "rationale": "Session pointer conformance."
+    },
+    {
+      "file": "test_sprite_sheet.py",
+      "lines": 78,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Sprite sheet for rendering pack."
+    },
+    {
+      "file": "test_step_dir_path.py",
+      "lines": 79,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Step directory path for core."
+    },
+    {
+      "file": "test_styledoc_schema.py",
+      "lines": 99,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Styledoc schema; could be core/ or stay root."
+    },
+    {
+      "file": "test_subprocess_env_policy.py",
+      "lines": 145,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Subprocess env policy for core."
+    },
+    {
+      "file": "test_supabase_data_provider.py",
+      "lines": 245,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Supabase data provider; could be core/ or packs/reigh."
+    },
+    {
+      "file": "test_sweeper_async.py",
+      "lines": 68,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Sweeper async for core/runpod/."
+    },
+    {
+      "file": "test_sweeper_edges.py",
+      "lines": 244,
+      "target": "tests/core/",
+      "confidence": "high",
+      "rationale": "Sweeper edge cases."
+    },
+    {
+      "file": "test_task_client.py",
+      "lines": 161,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task client for task kernel."
+    },
+    {
+      "file": "test_task_env_contract.py",
+      "lines": 189,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task env contract."
+    },
+    {
+      "file": "test_task_gate_command_match.py",
+      "lines": 186,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task gate command match."
+    },
+    {
+      "file": "test_task_gate_modules.py",
+      "lines": 203,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task gate modules."
+    },
+    {
+      "file": "test_task_hook_stop.py",
+      "lines": 161,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task hook stop."
+    },
+    {
+      "file": "test_task_inline_checks.py",
+      "lines": 263,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task inline checks."
+    },
+    {
+      "file": "test_task_kernel_dispatch.py",
+      "lines": 185,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task kernel dispatch."
+    },
+    {
+      "file": "test_task_kernel_e2e.py",
+      "lines": 96,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task kernel E2E."
+    },
+    {
+      "file": "test_task_kernel_events.py",
+      "lines": 100,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task kernel events."
+    },
+    {
+      "file": "test_task_kernel_gate.py",
+      "lines": 174,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task kernel gate."
+    },
+    {
+      "file": "test_task_next_preamble.py",
+      "lines": 67,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task next preamble."
+    },
+    {
+      "file": "test_task_next_quiet_json.py",
+      "lines": 164,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task next quiet JSON."
+    },
+    {
+      "file": "test_task_plan_schema.py",
+      "lines": 43,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task plan schema."
+    },
+    {
+      "file": "test_task_preamble.py",
+      "lines": 34,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task preamble."
+    },
+    {
+      "file": "test_task_repeat_for_each.py",
+      "lines": 206,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task repeat for-each."
+    },
+    {
+      "file": "test_task_repeat_until.py",
+      "lines": 347,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task repeat until."
+    },
+    {
+      "file": "test_task_status_json.py",
+      "lines": 171,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task status JSON."
+    },
+    {
+      "file": "test_task_step_lookup.py",
+      "lines": 96,
+      "target": "tests/task/",
+      "confidence": "high",
+      "rationale": "Task step lookup."
+    },
+    {
+      "file": "test_text_card_render.py",
+      "lines": 44,
+      "target": "tests/packs/",
+      "confidence": "medium",
+      "rationale": "Text card render; could be packs/ or timeline/."
+    },
+    {
+      "file": "test_third_party_fixtures.py",
+      "lines": 473,
+      "target": "tests/fixtures/",
+      "confidence": "high",
+      "rationale": "Third-party fixture tests."
+    },
+    {
+      "file": "test_thumbnail_maker.py",
+      "lines": 18,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Thumbnail maker for packs."
+    },
+    {
+      "file": "test_timeline_characterization.py",
+      "lines": 514,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline characterization."
+    },
+    {
+      "file": "test_timeline_cli.py",
+      "lines": 2733,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline CLI tests. Large file (2,733 lines)."
+    },
+    {
+      "file": "test_timeline_elements_catalog.py",
+      "lines": 131,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline elements catalog."
+    },
+    {
+      "file": "test_timeline_event_schema.py",
+      "lines": 1754,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline event schema. Large file (1,754 lines)."
+    },
+    {
+      "file": "test_timeline_kernel_kinds.py",
+      "lines": 398,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline kernel kinds."
+    },
+    {
+      "file": "test_timeline_projection_str.py",
+      "lines": 36,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline projection string."
+    },
+    {
+      "file": "test_timeline_roundtrip_fixture.py",
+      "lines": 202,
+      "target": "tests/timeline/",
+      "confidence": "high",
+      "rationale": "Timeline roundtrip fixture."
+    },
+    {
+      "file": "test_update_report.py",
+      "lines": 363,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Update report; could be core/ or stay root."
+    },
+    {
+      "file": "test_variants_png_atomic.py",
+      "lines": 263,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Variants PNG atomic; could be core/ or task/."
+    },
+    {
+      "file": "test_vary_grid.py",
+      "lines": 161,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Vary grid for generation pack."
+    },
+    {
+      "file": "test_verify_helpers.py",
+      "lines": 207,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Verify helpers; could be core/ or stay root."
+    },
+    {
+      "file": "test_vibecomfy_metadata.py",
+      "lines": 117,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "VibeComfy metadata for vibecomfy pack."
+    },
+    {
+      "file": "test_video_understand.py",
+      "lines": 142,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Video understand for understanding pack."
+    },
+    {
+      "file": "test_visual_understand.py",
+      "lines": 136,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "Visual understand for understanding pack."
+    },
+    {
+      "file": "test_worker_jwt.py",
+      "lines": 123,
+      "target": "tests/core/",
+      "confidence": "medium",
+      "rationale": "Worker JWT; could be core/ or task/."
+    },
+    {
+      "file": "test_youtube_audio.py",
+      "lines": 76,
+      "target": "tests/packs/",
+      "confidence": "high",
+      "rationale": "YouTube audio for youtube pack."
+    }
+  ],
+  "stay_root": [
+    {
+      "file": "test_agent_cli_contract.py",
+      "lines": 252,
+      "rationale": "Cross-cutting agent CLI contract — applies to multiple subsystems."
+    },
+    {
+      "file": "test_agent_cli_kernel.py",
+      "lines": 243,
+      "rationale": "Cross-cutting agent CLI kernel contract."
+    },
+    {
+      "file": "test_alias_resolver_cycles.py",
+      "lines": 100,
+      "rationale": "Cross-cutting alias resolution cycles."
+    },
+    {
+      "file": "test_astrid_error_contract.py",
+      "lines": 392,
+      "rationale": "Cross-cutting error contract — applies to SDK and all subsystems."
+    },
+    {
+      "file": "test_boundary_candidates.py",
+      "lines": 90,
+      "rationale": "Structure boundary analysis — belongs with structure contracts."
+    },
+    {
+      "file": "test_canonical_aliases.py",
+      "lines": 46,
+      "rationale": "Canonical alias verification — cross-cutting."
+    },
+    {
+      "file": "test_canonical_cli.py",
+      "lines": 341,
+      "rationale": "Canonical CLI contract — cross-cutting."
+    },
+    {
+      "file": "test_canonical_entrypoint.py",
+      "lines": 66,
+      "rationale": "Canonical entrypoint verification — cross-cutting."
+    },
+    {
+      "file": "test_capability_alias_resolver.py",
+      "lines": 1949,
+      "rationale": "Cross-cutting capability alias resolution. Large file (1,949 lines)."
+    },
+    {
+      "file": "test_capability_handle.py",
+      "lines": 533,
+      "rationale": "SDK capability handle — public surface test."
+    },
+    {
+      "file": "test_capability_runner.py",
+      "lines": 327,
+      "rationale": "SDK capability runner — public surface test."
+    },
+    {
+      "file": "test_capability_schema.py",
+      "lines": 283,
+      "rationale": "SDK capability schema — public surface test."
+    },
+    {
+      "file": "test_cli_choices.py",
+      "lines": 297,
+      "rationale": "CLI choices — cross-cutting CLI infrastructure."
+    },
+    {
+      "file": "test_doctor_setup.py",
+      "lines": 453,
+      "rationale": "Doctor/setup diagnostic — repo-level health check."
+    },
+    {
+      "file": "test_env_vars_conformance.py",
+      "lines": 166,
+      "rationale": "Environment variables conformance — cross-cutting contract."
+    },
+    {
+      "file": "test_event_hash_conformance.py",
+      "lines": 112,
+      "rationale": "Event hash conformance — cross-cutting contract."
+    },
+    {
+      "file": "test_exec_error_contract.py",
+      "lines": 119,
+      "rationale": "Exec error contract — cross-cutting."
+    },
+    {
+      "file": "test_external_app_contract.py",
+      "lines": 392,
+      "rationale": "External app contract — cross-cutting integration contract."
+    },
+    {
+      "file": "test_external_pack_contract.py",
+      "lines": 322,
+      "rationale": "External pack contract — cross-cutting integration contract."
+    },
+    {
+      "file": "test_gateway_status_routing.py",
+      "lines": 118,
+      "rationale": "Gateway status routing — top-level gateway."
+    },
+    {
+      "file": "test_logo_ideas.py",
+      "lines": 98,
+      "rationale": "Logo ideas — miscellaneous, no clear domain."
+    },
+    {
+      "file": "test_m5b_baseline_public_surface.py",
+      "lines": 1233,
+      "rationale": "M5b baseline public surface — milestone contract verification."
+    },
+    {
+      "file": "test_m5b_end_state_regression.py",
+      "lines": 110,
+      "rationale": "M5b end state regression — milestone contract verification."
+    },
+    {
+      "file": "test_onboarding_docs.py",
+      "lines": 230,
+      "rationale": "Onboarding docs — cross-cutting documentation verification."
+    },
+    {
+      "file": "test_onboarding_parity.py",
+      "lines": 212,
+      "rationale": "Onboarding parity — cross-cutting."
+    },
+    {
+      "file": "test_pipeline_caching.py",
+      "lines": 133,
+      "rationale": "Pipeline caching — top-level gateway/pipeline concern."
+    },
+    {
+      "file": "test_pipeline_dispatch_aliases.py",
+      "lines": 68,
+      "rationale": "Pipeline dispatch aliases — top-level gateway/pipeline concern."
+    },
+    {
+      "file": "test_pipeline_editor_loop.py",
+      "lines": 495,
+      "rationale": "Pipeline editor loop — top-level gateway/pipeline concern."
+    },
+    {
+      "file": "test_pipeline_error_rendering.py",
+      "lines": 249,
+      "rationale": "Pipeline error rendering — top-level gateway/pipeline concern."
+    },
+    {
+      "file": "test_platform_contract.py",
+      "lines": 743,
+      "rationale": "Platform contract — normative v1 contract verification."
+    },
+    {
+      "file": "test_provenance_fields.py",
+      "lines": 109,
+      "rationale": "Provenance fields — cross-cutting threads/lineage concern."
+    },
+    {
+      "file": "test_publish.py",
+      "lines": 174,
+      "rationale": "Publish — cross-cutting, no single domain."
+    },
+    {
+      "file": "test_pure_generative_pipeline.py",
+      "lines": 34,
+      "rationale": "Pure generative pipeline — top-level pipeline concern."
+    },
+    {
+      "file": "test_quote_scout.py",
+      "lines": 21,
+      "rationale": "Quote scout — miscellaneous, no clear domain."
+    },
+    {
+      "file": "test_recoverability_conformance.py",
+      "lines": 787,
+      "rationale": "Recoverability conformance — cross-cutting contract."
+    },
+    {
+      "file": "test_recovery_command_conformance.py",
+      "lines": 274,
+      "rationale": "Recovery command conformance — cross-cutting contract."
+    },
+    {
+      "file": "test_result_manifest.py",
+      "lines": 300,
+      "rationale": "Result manifest — SDK/public surface."
+    },
+    {
+      "file": "test_reviewers.py",
+      "lines": 170,
+      "rationale": "Reviewers — cross-cutting, no single domain."
+    },
+    {
+      "file": "test_run_ledger_conformance.py",
+      "lines": 388,
+      "rationale": "Run ledger conformance — cross-cutting contract."
+    },
+    {
+      "file": "test_run_status_contract.py",
+      "lines": 486,
+      "rationale": "Run status contract — cross-cutting."
+    },
+    {
+      "file": "test_runtime_correctness_inventory.py",
+      "lines": 75,
+      "rationale": "Runtime correctness inventory — repo-level scan, not domain-specific."
+    },
+    {
+      "file": "test_schema_contract.py",
+      "lines": 431,
+      "rationale": "Schema contract — cross-cutting."
+    },
+    {
+      "file": "test_sdk_public_surface.py",
+      "lines": 3422,
+      "rationale": "SDK public surface — normative public API verification. Large file (3,422 lines)."
+    },
+    {
+      "file": "test_skills.py",
+      "lines": 158,
+      "rationale": "Skills — cross-cutting skills infrastructure."
+    },
+    {
+      "file": "test_skills_sync_registry.py",
+      "lines": 34,
+      "rationale": "Skills sync registry — cross-cutting."
+    },
+    {
+      "file": "test_social_publish.py",
+      "lines": 77,
+      "rationale": "Social publish — cross-cutting."
+    },
+    {
+      "file": "test_sprint1_regression.py",
+      "lines": 805,
+      "rationale": "Sprint 1 regression — broad regression guard."
+    },
+    {
+      "file": "test_stream_discipline.py",
+      "lines": 209,
+      "rationale": "Stream discipline — cross-cutting CLI contract."
+    },
+    {
+      "file": "test_structure_contracts.py",
+      "lines": 838,
+      "rationale": "Structure contracts — primary structure enforcement test file."
+    },
+    {
+      "file": "test_third_party_integration.py",
+      "lines": 153,
+      "rationale": "Third-party integration — cross-cutting."
+    },
+    {
+      "file": "test_threads_attribute.py",
+      "lines": 147,
+      "rationale": "Threads attribute — threads subsystem, no threads/ test dir exists."
+    },
+    {
+      "file": "test_threads_cli.py",
+      "lines": 168,
+      "rationale": "Threads CLI — threads subsystem."
+    },
+    {
+      "file": "test_threads_dependencies.py",
+      "lines": 16,
+      "rationale": "Threads dependencies."
+    },
+    {
+      "file": "test_threads_docs_skill_inspect.py",
+      "lines": 77,
+      "rationale": "Threads docs skill inspect."
+    },
+    {
+      "file": "test_threads_ids.py",
+      "lines": 17,
+      "rationale": "Threads IDs."
+    },
+    {
+      "file": "test_threads_index.py",
+      "lines": 170,
+      "rationale": "Threads index."
+    },
+    {
+      "file": "test_threads_prefix.py",
+      "lines": 25,
+      "rationale": "Threads prefix."
+    },
+    {
+      "file": "test_threads_producer_optins.py",
+      "lines": 57,
+      "rationale": "Threads producer opt-ins."
+    },
+    {
+      "file": "test_threads_provenance.py",
+      "lines": 163,
+      "rationale": "Threads provenance."
+    },
+    {
+      "file": "test_threads_reaper.py",
+      "lines": 65,
+      "rationale": "Threads reaper."
+    },
+    {
+      "file": "test_threads_record.py",
+      "lines": 294,
+      "rationale": "Threads record."
+    },
+    {
+      "file": "test_threads_variants.py",
+      "lines": 162,
+      "rationale": "Threads variants."
+    },
+    {
+      "file": "test_threads_variants_help.py",
+      "lines": 13,
+      "rationale": "Threads variants help."
+    },
+    {
+      "file": "test_triage.py",
+      "lines": 125,
+      "rationale": "Triage — cross-cutting."
+    },
+    {
+      "file": "test_url_pipeline_smoke.py",
+      "lines": 177,
+      "rationale": "URL pipeline smoke — top-level pipeline concern."
+    },
+    {
+      "file": "test_uuid_str_conformance.py",
+      "lines": 99,
+      "rationale": "UUID string conformance — cross-cutting contract."
+    },
+    {
+      "file": "test_validate.py",
+      "lines": 77,
+      "rationale": "Validate — cross-cutting validation."
+    }
+  ],
+  "summary": {
+    "total_root_test_files": 193,
+    "recommended_relocations": 126,
+    "stay_root": 67,
+    "by_confidence": {
+      "high": 107,
+      "medium": 19,
+      "low": 0
+    },
+    "by_target": {
+      "tests/agentic/": 3,
+      "tests/audit/": 1,
+      "tests/core/": 36,
+      "tests/fixtures/": 1,
+      "tests/orchestrate/": 7,
+      "tests/packs/": 55,
+      "tests/session/": 2,
+      "tests/task/": 33,
+      "tests/timeline/": 14
+    },
+    "notes": [
+      "No low-confidence relocations — all ambiguous files are kept at root (stay_root).",
+      "M3 owner should review medium-confidence mappings before executing moves.",
+      "Threads tests stay at root because no tests/threads/ directory exists. M3 may create one.",
+      "Build system and import paths must be updated alongside file moves in M3.",
+      "Some target directories (tests/packs/) may need subdirectory creation (e.g., tests/packs/editorial/, tests/packs/generation/)."
+    ]
+  }
+}
