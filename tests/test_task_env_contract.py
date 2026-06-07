@@ -105,7 +105,10 @@ def test_attached_hype_artifacts_mirror_under_step_produces(tmp_projects_root: P
     assert not context.run_json_path.exists()
     produces = context.run_root / "produces"
     assert sorted(path.name for path in produces.iterdir()) == ["assets.json", "metadata.json", "timeline.json"]
-    assert all(Path(value["path"]).parent == produces for value in record["artifacts"].values())
+    assert all(
+        (tmp_projects_root / "demo" / value["path"]).parent == produces
+        for value in record["artifacts"].values()
+    )
 
 
 def test_prepare_project_run_is_central_chokepoint_for_project_callers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -157,7 +157,7 @@ def test_generate_image_codex_preflight_falls_back_to_cloud(
     )
 
     captured = capsys.readouterr()
-    assert "falling back to cloud backend" in captured.err
+    assert captured.err == ""
     assert result.model_actual == "fal-ai/flux/dev"
     manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["execution"] == "cloud"

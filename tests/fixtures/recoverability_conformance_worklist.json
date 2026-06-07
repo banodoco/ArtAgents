@@ -2739,7 +2739,7 @@
     },
     {
       "builder": "build_parser",
-      "enum_arg_count": 1,
+      "enum_arg_count": 3,
       "module": "astrid.core.project.cli",
       "path": "astrid/core/project/cli.py",
       "prog": "python3 -m astrid projects"
@@ -2907,7 +2907,7 @@
     },
     {
       "builder": "build_parser",
-      "enum_arg_count": 1,
+      "enum_arg_count": 3,
       "module": "astrid.packs.generation.executors.generate_image.run",
       "path": "astrid/packs/generation/executors/generate_image/run.py",
       "prog": "-c"

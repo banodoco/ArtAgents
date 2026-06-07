@@ -272,7 +272,7 @@ class PipelineCachingTest(unittest.TestCase):
                 "--out",
                 str((out_dir / "briefs" / "out" / "hype.mp4").resolve()),
                 "--theme",
-                str((ROOT.parent / "themes" / "banodoco-default" / "theme.json").resolve()),
+                str((ROOT / "themes" / "banodoco-default" / "theme.json").resolve()),
             ],
         )
 
@@ -495,7 +495,7 @@ class PipelineCachingTest(unittest.TestCase):
                 "--out",
                 str((second_dir / "hype.mp4").resolve()),
                 "--theme",
-                str((ROOT.parent / "themes" / "banodoco-default" / "theme.json").resolve()),
+                str((ROOT / "themes" / "banodoco-default" / "theme.json").resolve()),
             ],
         )
         self.assertEqual(

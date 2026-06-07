@@ -28,6 +28,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 # The public SDK's invoke() path for built-in executors (e.g. editorial.arrange)
 # may import pack runtime modules that carry a guard against direct invocation.
 # Setting ASTRID_INTERNAL_INVOCATION tells the guard "this is a legitimate

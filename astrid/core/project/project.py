@@ -10,7 +10,6 @@ survives.
 
 from __future__ import annotations
 
-import hashlib
 import mimetypes
 import os
 from pathlib import Path
@@ -18,6 +17,7 @@ from typing import Any
 
 from astrid.contracts.errors import AstridError
 from astrid.core.theme import load_theme_by_id
+from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_seconds
 
 from . import paths
@@ -229,7 +229,7 @@ def register_source_file(
         raise ProjectError(f"source already exists: {source_id}")
 
     stat = bare_path.stat()
-    digest = _sha256_file(bare_path)
+    digest = sha256_file(bare_path).removeprefix("sha256:")
     mime_type, _encoding = mimetypes.guess_type(filename)
     temp_path = source_root / f".{filename}.registering"
     if temp_path.exists():
@@ -268,14 +268,6 @@ def _source_id_validity(source_id: str) -> tuple[bool, str | None]:
     except ValueError as exc:
         return False, str(exc)
     return True, None
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _touch_project(slug: str, *, root: str | Path | None = None) -> None:
