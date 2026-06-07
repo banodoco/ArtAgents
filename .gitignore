@@ -99,6 +99,15 @@ remotion/src/types.augmentations.*
 # Allow-list intentional assets that would otherwise be caught by broad globs
 !docs/assets/astrid-orchestration.png
 
+# Theme examples: keep the curated sample theme in-repo, but ignore ad-hoc
+# theme drops and large local media by default.
+themes/*
+!themes/ados-paris-2026/
+!themes/ados-paris-2026/**
+themes/**/video/
+themes/**/*.mp4
+themes/**/*.mov
+
 # Megaplan working state
 plan_revision.json
 
