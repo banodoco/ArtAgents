@@ -126,6 +126,9 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         # a controlled, necessary pattern to guarantee source-level freshness
         # without subprocess isolation.
         "astrid/core/runtime/in_process.py",
+        # SD1: pipeline.py is an approved compatibility shim that aliases the
+        # canonical gateway module through sys.modules on purpose.
+        "astrid/pipeline.py",
     }
 )
 _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
@@ -399,8 +402,13 @@ def _resolve_import_from_module(node: ast.ImportFrom, *, module_name: str) -> st
 
 
 def _is_forbidden_core_import(module: str) -> bool:
-    return module == "astrid.packs" or module.startswith("astrid.packs.") or module == "astrid.orchestrate" or module.startswith(
-        "astrid.orchestrate."
+    return (
+        module == "astrid.packs"
+        or module.startswith("astrid.packs.")
+        or module == "astrid.orchestrate"
+        or module.startswith("astrid.orchestrate.")
+        or module == "astrid.audit"
+        or module.startswith("astrid.audit.")
     )
 
 
@@ -411,6 +419,11 @@ def _is_forbidden_core_import(module: str) -> bool:
 _IMPORT_LAYERING_EXEMPT_REL = frozenset(
     {
         "astrid/core/runtime/in_process.py",
+        # SD2: event_stream.py still imports from astrid.audit to provide a
+        # single task/audit event reader.  The current exemption mechanism is
+        # file-level, so this bypasses the packs/orchestrate/audit checks for
+        # the whole file until finer-grained mechanics exist.
+        "astrid/core/task/event_stream.py",
     }
 )
 

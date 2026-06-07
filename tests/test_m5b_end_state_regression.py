@@ -328,9 +328,9 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
             v for v in violations
             if v.startswith("astrid/core/")
         ]
-        # The only allowed forbidden imports in core are... none after the refactor.
-        # But we need to be realistic: currently lifecycle.py has them.
-        # This test verifies there's no hidden exemption for ANY core file.
+        # The only allowed forbidden imports in core are the documented
+        # astrid/core/task/event_stream.py file-level audit-import exemption.
+        # This test verifies there's no hidden exemption for lifecycle.py.
         exempted_paths = {
             v.split(":")[0] for v in violations
             if "lifecycle.py" in v
@@ -342,8 +342,9 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
         )
 
     def test_validate_import_layering_exemption_is_removed(self) -> None:
-        """The ``_is_import_layering_exempt`` function no longer returns True for any
-        concrete file in the repo (it should only be a stub for future use)."""
+        """The ``_is_import_layering_exempt`` function no longer returns True for
+        lifecycle-related files.  The only remaining file-level exemption is the
+        documented ``astrid/core/task/event_stream.py`` audit-import exemption."""
         from astrid.structure import _is_import_layering_exempt
 
         for relpath in (
@@ -354,8 +355,15 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
             path = _REPO_ROOT / relpath
             self.assertFalse(
                 _is_import_layering_exempt(path, _REPO_ROOT),
-                f"No file should be exempt — {relpath} must be checked normally",
+                f"Lifecycle-related file should not be exempt — {relpath} must be checked normally",
             )
+
+        # Verify the documented event_stream.py exemption is in place.
+        event_stream_path = _REPO_ROOT / "astrid" / "core" / "task" / "event_stream.py"
+        self.assertTrue(
+            _is_import_layering_exempt(event_stream_path, _REPO_ROOT),
+            "event_stream.py must remain exempt per the documented file-level audit-import exemption",
+        )
 
     def test_forbidden_imports_from_packs_are_flagged(self) -> None:
         """A core file importing from astrid.packs.* is flagged."""
