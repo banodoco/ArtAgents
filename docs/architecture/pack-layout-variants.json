@@ -1,8 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "M0 catalog of every pack variant under astrid/packs/. Classifies packs by the capability types they ship (executors, orchestrators, elements). Aligns with INTERNAL_PACK_DIRS constant in astrid/structure.py. This is a documentation artifact — not a runtime input.",
-  "milestone": "M0",
+  "description": "M1 catalog of every pack variant under astrid/packs/. Classifies packs by the capability types they ship (executors, orchestrators, elements). Aligns with INTERNAL_PACK_DIRS constant in astrid/structure.py. Updated post M1 Pack Layout Normalization to reflect final normalized state and documented exceptions.",
+  "milestone": "M1",
   "generated_at": "2026-06-07",
+  "updated_at": "2026-06-07",
   "source_root": "astrid/packs/",
   "variant_classifications": {
     "manifest_only": "Has pack.yaml but no executors/, orchestrators/, or elements/ directories with capability subdirectories.",
@@ -12,25 +13,18 @@
     "mixed_executor_orchestrator": "Ships both executor and orchestrator capabilities.",
     "mixed_executor_element": "Ships both executor and element capabilities.",
     "mixed_full": "Ships executor, orchestrator, and element capabilities.",
-    "internal": "Infrastructure directory under packs/, not a shipped pack (no pack.yaml).",
-    "schemas": "Schema definitions, not a pack."
+    "internal": "Infrastructure directory under packs/, not a shipped pack (no pack.yaml)."
   },
   "internal_directories": {
     "__pycache__": {
       "classification": "generated_ignored",
-      "notes": "CPython bytecode cache — ignored by structure enforcement."
+      "notes": "CPython bytecode cache — removed from pack tree in M1 (T11); gitignore prevents regeneration."
     },
     "_core": {
       "classification": "internal",
-      "notes": "Internal pack infrastructure directory. Contains __init__.py and skill/. No pack.yaml.",
+      "notes": "Internal pack infrastructure directory. Contains skill/ with SKILL.md only. No __init__.py (removed in M1 T14), no pack.yaml.",
       "has_pack_yaml": false,
-      "contents": ["__init__.py", "skill/"]
-    },
-    "schemas": {
-      "classification": "schemas",
-      "notes": "JSON Schema definitions for pack manifests. Contains v1/ with executor.json, orchestrator.json, element.json, pack.json, _defs.json.",
-      "has_pack_yaml": false,
-      "contents": ["v1/"]
+      "contents": ["skill/"]
     }
   },
   "packs": [
@@ -43,8 +37,8 @@
       "element_count": 0,
       "has_skill": false,
       "has_agents_md": false,
-      "has_init_py": true,
-      "notes": "Empty scaffold directories for executors/ and orchestrators/ exist but contain only __init__.py files — no capability subdirectories. Serves as a structural placeholder pack with agent_probe.py, fixtures/, and golden/.",
+      "has_init_py": false,
+      "notes": "Empty scaffold directories for executors/ and orchestrators/ exist but contain only __init__.py files — no capability subdirectories. Serves as a structural placeholder pack with agent_probe.py (dsl_orchestrator_shim, M2-deferred), fixtures/, and golden/.",
       "extra_contents": ["agent_probe.py", "fixtures/", "golden/"]
     },
     {
@@ -116,8 +110,8 @@
       "element_count": 0,
       "has_skill": false,
       "has_agents_md": false,
-      "has_init_py": true,
-      "notes": "Executor pack with 2 executors (assemble, prepare). Has __init__.py."
+      "has_init_py": false,
+      "notes": "Executor pack with 2 executors (assemble, prepare). __init__.py removed in M1 T14 (not needed for sub-package imports)."
     },
     {
       "id": "media",
@@ -126,10 +120,10 @@
       "executor_count": 1,
       "orchestrator_count": 0,
       "element_count": 0,
-      "has_skill": false,
-      "has_agents_md": true,
+      "has_skill": true,
+      "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Single-executor pack (clip_extract). Has AGENTS.md, README.md, and STAGE.md at pack level."
+      "notes": "Single-executor pack (clip_extract). AGENTS.md migrated to skill/SKILL.md in M1 T3; README.md and STAGE.md removed in M1 T17."
     },
     {
       "id": "moirae",
@@ -161,11 +155,11 @@
       "has_pack_yaml": true,
       "executor_count": 3,
       "orchestrator_count": 0,
-      "element_count": 9,
+      "element_count": 4,
       "has_skill": true,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Mixed pack with 3 executors and 9 elements. The only pack currently shipping elements. Includes skill/."
+      "notes": "Mixed pack with 3 executors and 4 element kinds (animations, effects, transitions, plus _shared contracts). The only pack currently shipping elements. Includes skill/."
     },
     {
       "id": "runpod",
@@ -189,20 +183,20 @@
       "has_skill": true,
       "has_agents_md": false,
       "has_init_py": true,
-      "notes": "Mixed pack with 2 executors and 1 orchestrator. Has __init__.py, STAGE.md, and skill/."
+      "notes": "Mixed pack with 2 executors and 1 orchestrator. Has __init__.py (legacy_public_shim, M2-deferred — preserved for sub-package imports by 6 call sites) and skill/."
     },
     {
       "id": "text_analysis",
-      "variant": "manifest_only",
+      "variant": "orchestrator_pack",
       "has_pack_yaml": true,
       "executor_count": 0,
-      "orchestrator_count": 0,
+      "orchestrator_count": 1,
       "element_count": 0,
       "has_skill": false,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Minimal manifest-only pack. Contains summarize.py (standalone script), sample.txt, fixtures/, and golden/. No executor/orchestrator/element directories.",
-      "extra_contents": ["summarize.py", "sample.txt", "fixtures/", "golden/"]
+      "notes": "Orchestrator pack with 1 DSL orchestrator (summarize, migrated to orchestrators/summarize/run.py in M1 T13). Contains summarize.py (legacy_public_shim, M2-deferred), fixtures/ (including sample.txt), and golden/.",
+      "extra_contents": ["summarize.py", "fixtures/", "golden/"]
     },
     {
       "id": "training",
@@ -250,7 +244,7 @@
       "has_skill": true,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Orchestrator-heavy pack with 1 executor and 7 orchestrators for video editing workflows. Includes skill/ and hype.py.",
+      "notes": "Orchestrator-heavy pack with 1 executor and 7 orchestrators for video editing workflows. Includes skill/ and hype.py (legacy_public_shim, M2-deferred).",
       "extra_contents": ["hype.py"]
     },
     {
@@ -267,7 +261,7 @@
     }
   ],
   "top_level_pack_files": {
-    "description": "Python modules directly under astrid/packs/ (not in pack subdirectories).",
+    "description": "Python modules directly under astrid/packs/ (not in pack subdirectories). In M1 these are all compatibility re-export shims whose canonical implementations live in astrid/core/pack_machinery/.",
     "files": [
       {
         "name": "__init__.py",
@@ -277,37 +271,98 @@
       {
         "name": "cli.py",
         "classification": "pack_system",
-        "notes": "Pack CLI. 1,761 lines; a giant-file split candidate for M4.",
-        "line_count": 1761
+        "notes": "Pack CLI compatibility re-export shim. Canonical implementation moved to astrid/core/pack_machinery/cli.py in M1 T8.",
+        "line_count": 9
       },
       {
         "name": "install.py",
         "classification": "pack_system",
-        "notes": "Pack installation logic. 1,930 lines; a giant-file split candidate for M4.",
+        "notes": "Pack installation logic. Canonical implementation; machinery re-export shim exists at astrid/core/pack_machinery/install.py. Full relocation deferred to M2.",
         "line_count": 1930
       },
       {
         "name": "validate.py",
         "classification": "pack_system",
-        "notes": "Pack validation logic."
+        "notes": "Pack validation compatibility re-export shim. Canonical implementation moved to astrid/core/pack_machinery/validate.py in M1 T6."
       },
       {
         "name": "gitignore.py",
         "classification": "pack_system",
-        "notes": "Gitignore filtering for packs."
+        "notes": "Gitignore filtering compatibility re-export shim. Canonical implementation moved to astrid/core/pack_machinery/gitignore.py in M1 T5."
+      },
+      {
+        "name": "agent_index.py",
+        "classification": "pack_system",
+        "notes": "Agent index compatibility re-export shim. Canonical implementation moved to astrid/core/pack_machinery/agent_index.py in M1 T7."
+      },
+      {
+        "name": "_canonical_entrypoint.py",
+        "classification": "machinery_shim",
+        "notes": "Canonical entrypoint machinery. Not relocated during M1 (50+ import sites). Documented as machinery_shim exception with defer_to: M2."
       }
     ]
   },
   "variant_summary": {
-    "manifest_only": ["builtin", "text_analysis"],
+    "manifest_only": ["builtin"],
     "executor_pack": ["comfy_wrap", "editorial", "fal", "generation", "iteration", "media", "moirae", "reigh", "runpod", "understanding", "vibecomfy", "youtube"],
+    "orchestrator_pack": ["text_analysis"],
     "mixed_executor_orchestrator": ["foley", "stream_content", "training", "video_editing"],
     "mixed_executor_element": ["rendering"],
     "mixed_full": [],
-    "total_shipped_packs": 20
+    "total_shipped_packs": 19
+  },
+  "documented_exceptions": {
+    "description": "Every layout exception that keeps the pack tree from being purely canonical. All are declared in their respective pack.yaml metadata.layout.exceptions and cross-referenced here.",
+    "exceptions": [
+      {
+        "pack": "builtin",
+        "path": "agent_probe.py",
+        "class": "dsl_orchestrator_shim",
+        "defer_to": "M2",
+        "reason": "DSL @orchestrator definition with 16+ test-file references. Not a canonical executor. Migration to orchestrators/ deferred to M2."
+      },
+      {
+        "pack": "video_editing",
+        "path": "hype.py",
+        "class": "legacy_public_shim",
+        "defer_to": "M2",
+        "reason": "Legacy author-test DSL shim that duplicates video_editing.hype (canonically at orchestrators/hype/run.py). Kept for backward compatibility."
+      },
+      {
+        "pack": "text_analysis",
+        "path": "summarize.py",
+        "class": "legacy_public_shim",
+        "defer_to": "M2",
+        "reason": "Compatibility re-export preserving astrid.packs.text_analysis.summarize while the canonical implementation lives at orchestrators/summarize/run.py."
+      },
+      {
+        "pack": "stream_content",
+        "path": "__init__.py",
+        "class": "legacy_public_shim",
+        "defer_to": "M2",
+        "reason": "Preserved helper-package marker required for sub-package imports (6 call sites)."
+      }
+    ],
+    "machinery_shims": [
+      {
+        "path": "astrid/packs/_canonical_entrypoint.py",
+        "class": "machinery_shim",
+        "defer_to": "M2",
+        "reason": "50+ import sites across pack run.py files, in_process.py, and test files."
+      }
+    ],
+    "special_directories": [
+      {
+        "path": "_core/",
+        "class": "skill_only_shell",
+        "defer_to": "permanent",
+        "reason": "Contains only skill/SKILL.md providing the root Astrid skill description. No pack.yaml, executors, or orchestrators."
+      }
+    ]
   },
   "structure_constants_reference": {
     "INTERNAL_PACK_DIRS": ["__pycache__", "schemas"],
-    "source_file": "astrid/structure.py"
+    "source_file": "astrid/structure.py",
+    "note": "The shared pack manifest schemas moved out of astrid/packs/ in M1 and now live under astrid/core/pack_machinery/schemas/. The 'schemas' entry in INTERNAL_PACK_DIRS is a legacy reference to per-pack content roots only."
   }
 }

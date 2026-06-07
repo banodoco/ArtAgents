@@ -20,3 +20,10 @@ agent:
   do_not_use_for: Do not use for video/audio/image processing.
   normal_entrypoints: [text_analysis.summarize]
   required_context: []
+metadata:
+  layout:
+    exceptions:
+      - path: summarize.py
+        class: legacy_public_shim
+        reason: "Compatibility re-export preserving astrid.packs.text_analysis.summarize while the canonical implementation lives at orchestrators/summarize/run.py."
+        defer_to: M2

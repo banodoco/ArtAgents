@@ -15,7 +15,7 @@ python3 -m astrid packs new my_tools
 #   executors/          — your executors go here
 #   orchestrators/      — your orchestrators go here
 #   elements/           — your elements go here
-#   AGENTS.md / STAGE.md / README.md  — documentation stubs
+#   skill/SKILL.md / README.md  — documentation stubs
 ```
 
 The `astrid/packs/local/` pack is pre-shipped as the conventional scratch space

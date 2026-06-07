@@ -38,6 +38,7 @@ _EXAMPLE_PACKS = {
     "text_digest": _REPO_ROOT / "examples" / "packs" / "text_digest",
     "text_review": _REPO_ROOT / "examples" / "packs" / "text_review",
 }
+_FIRST_PARTY_PACKS_ROOT = _REPO_ROOT / "astrid" / "packs"
 
 
 def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
@@ -83,6 +84,13 @@ class ScratchPackFixture:
     def __exit__(self, *args: object) -> None:
         if self._tmp is not None:
             shutil.rmtree(self._tmp, ignore_errors=True)
+
+
+def _mirror_first_party_packs_root(dest: Path) -> None:
+    for child in sorted(_FIRST_PARTY_PACKS_ROOT.iterdir()):
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        (dest / child.name).symlink_to(child, target_is_directory=True)
 
 
 def _astrid_env() -> dict:
@@ -159,6 +167,34 @@ class TestPacksValidateCLI(unittest.TestCase):
                 result = _run_packs("validate", str(pack_root), cwd=str(_REPO_ROOT))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("valid:", result.stdout)
+
+    def test_validate_first_party_packs_root_exits_zero(self) -> None:
+        result = _run_packs("validate", str(_FIRST_PARTY_PACKS_ROOT), cwd=str(_REPO_ROOT))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("(19 first-party packs)", result.stdout)
+
+    def test_validate_first_party_packs_root_reports_internal_schema_and_layout(self) -> None:
+        with ScratchPackFixture(self) as tmp:
+            packs_root = tmp / "packs"
+            packs_root.mkdir()
+            _mirror_first_party_packs_root(packs_root)
+            (packs_root / "builtin").unlink()
+            (packs_root / "builtin").mkdir()
+            (packs_root / "builtin" / "pack.yaml").write_text(
+                "id: builtin\nname: Builtin\nversion: 0.1.0\nagent:\n  purpose: Broken fixture\n",
+                encoding="utf-8",
+            )
+            (packs_root / "rogue").mkdir()
+
+            result = _run_packs("validate", str(packs_root), cwd=str(_REPO_ROOT))
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("first-party pack validation failed", result.stderr)
+            self.assertIn("[internal-schema] unexpected top-level directory: rogue", result.stderr)
+            self.assertIn(
+                "[layout] builtin: pack.yaml: missing required field schema_version",
+                result.stderr,
+            )
 
     def test_packs_list_inspect_and_status_subcommands(self) -> None:
         list_result = _run_packs("list", "--json", cwd=str(_REPO_ROOT))
@@ -257,9 +293,8 @@ class TestPacksValidateCLI(unittest.TestCase):
             """),
             encoding="utf-8",
         )
-        (root / "AGENTS.md").write_text("# Test Pack\n\nAgent guide.\n")
-        (root / "README.md").write_text("# Test Pack\n\nUser docs.\n")
-        (root / "STAGE.md").write_text("## Purpose\n\nTesting.\n")
+        (root / "skill").mkdir(parents=True, exist_ok=True)
+        (root / "skill" / "SKILL.md").write_text("# Test Pack\n\nAgent guide.\n")
         (root / "executors").mkdir(parents=True, exist_ok=True)
         (root / "orchestrators").mkdir(parents=True, exist_ok=True)
 
@@ -273,8 +308,6 @@ class TestPacksValidateBrokenPack(unittest.TestCase):
                 "id: broken_pack\nname: Broken\nversion: 0.1.0\nagent:\n  purpose: Test\n",
                 encoding="utf-8",
             )
-            (tmp / "AGENTS.md").write_text("# Broken\n")
-            (tmp / "README.md").write_text("# Broken\n")
             result = _run_packs("validate", str(tmp), cwd=str(tmp))
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("pack.yaml", result.stderr)
@@ -306,9 +339,6 @@ class TestPacksValidateBrokenPack(unittest.TestCase):
                 """),
                 encoding="utf-8",
             )
-            (tmp / "AGENTS.md").write_text("# Broken\n")
-            (tmp / "README.md").write_text("# Broken\n")
-            (tmp / "STAGE.md").write_text("## Purpose\n\nBroken.\n")
             (tmp / "executors").mkdir(parents=True)
             exec_dir = tmp / "executors" / "no_run"
             exec_dir.mkdir(parents=True)
@@ -346,12 +376,7 @@ class TestScaffoldAndValidateRoundTrip(unittest.TestCase):
             pack_root = tmp / "my_pack"
             self.assertTrue(pack_root.is_dir(), f"Expected {pack_root} to exist")
             self.assertTrue((pack_root / "pack.yaml").is_file())
-            self.assertTrue((pack_root / "AGENTS.md").is_file())
-            self.assertTrue((pack_root / "README.md").is_file())
-            self.assertTrue((pack_root / "STAGE.md").is_file())
-            self.assertTrue((pack_root / "executors").is_dir())
-            self.assertTrue((pack_root / "orchestrators").is_dir())
-            self.assertTrue((pack_root / "elements").is_dir())
+            self.assertTrue((pack_root / "skill" / "SKILL.md").is_file())
 
             # 2. executors new (must be run from the pack root to find pack.yaml)
             result = _run_executors(
@@ -533,15 +558,9 @@ class TestScaffoldFixture(unittest.TestCase):
 
     EXPECTED_PACK_FILES = {
         "pack.yaml",
-        "AGENTS.md",
-        "README.md",
-        "STAGE.md",
+        "skill/SKILL.md",
     }
-    EXPECTED_PACK_DIRS = {
-        "executors",
-        "orchestrators",
-        "elements",
-    }
+    EXPECTED_PACK_DIRS = set()
     EXPECTED_EXECUTOR_FILES = {
         "executor.yaml",
         "run.py",

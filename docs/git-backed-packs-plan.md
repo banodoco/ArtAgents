@@ -43,7 +43,8 @@ The target user story is:
 my-project-pack/
   pack.yaml
   README.md
-  AGENTS.md
+  skill/
+    SKILL.md
   executors/
     ingest_assets/
       executor.yaml
@@ -122,7 +123,7 @@ agent:
 
 docs:
   user: README.md
-  agent: AGENTS.md
+  agent: skill/SKILL.md
 
 dependencies:
   python:
@@ -164,7 +165,7 @@ able to read one and understand what the component does, and an agent should be
 able to inspect one and decide whether the component fits a task.
 
 The structured manifest fields are authoritative for agent behavior. Markdown
-docs such as `README.md`, `AGENTS.md`, and `STAGE.md` are supplemental prose.
+docs such as `README.md`, `skill/SKILL.md`, and `STAGE.md` are supplemental prose.
 They can explain nuance and examples, but they should not be the only source for
 normal entrypoints, required inputs, secrets, or "do not use for" guidance.
 
@@ -809,7 +810,7 @@ Deliverables:
 
 - Implement `packs agent-index`.
 - Improve `inspect --json` output for pack components.
-- Add guidance for writing pack-level `AGENTS.md`.
+- Add guidance for writing pack-level `skill/SKILL.md`.
 - Generate or assemble a compact summary from `pack.yaml`, component manifests,
   `STAGE.md`, and pack-level docs.
 - Add docs for secrets, dependencies, and when to use orchestrators versus

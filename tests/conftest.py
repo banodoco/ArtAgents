@@ -4,6 +4,7 @@ import atexit
 import json
 import os
 import shutil
+import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -11,6 +12,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.dont_write_bytecode = True
+if sys.pycache_prefix is None:
+    _pycache_prefix = Path(tempfile.mkdtemp(prefix="astrid-pycache-"))
+    sys.pycache_prefix = str(_pycache_prefix)
+    os.environ.setdefault("PYTHONPYCACHEPREFIX", str(_pycache_prefix))
+    atexit.register(lambda: shutil.rmtree(_pycache_prefix, ignore_errors=True))
 
 from astrid.core.project import paths
 from astrid.core.task.env import (

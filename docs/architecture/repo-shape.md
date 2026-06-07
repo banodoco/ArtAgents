@@ -178,7 +178,6 @@ contain:
 | `orchestrators/<name>/` | `orchestrator.yaml`, `run.py`, `STAGE.md`, optional local `src/` |
 | `elements/<kind>/<id>/` | `component.tsx`, `element.yaml` |
 | `skill/` | `SKILL.md` for agent-facing skill documentation |
-| `AGENTS.md` | Pack-level agent guidance |
 
 ### 5.2 Current Shipped Packs
 
