@@ -21,7 +21,7 @@ from astrid.core.generation.features import (
     LOCAL_BACKEND_ID,
 )
 from astrid.core.pack import PackDefinition, discover_packs
-from astrid.core.pack_discovery import discover_pack_metadata
+from astrid.core.pack.discovery import discover_pack_metadata
 
 
 @dataclass(frozen=True)

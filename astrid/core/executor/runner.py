@@ -25,7 +25,7 @@ from astrid.contracts.exec_error import (
 )
 from astrid.contracts.run_status import RunStatus
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
-from astrid.core.pack_resolver import resolve_callable_from_metadata
+from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.run import (
     ProjectRunContext,
     finalize_project_run,

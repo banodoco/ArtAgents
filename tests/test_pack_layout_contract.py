@@ -260,24 +260,24 @@ def test_core_only_contains_skill_directory() -> None:
 
 def test_schemas_directory_absent_from_pack_tree() -> None:
     """``astrid/packs/schemas/`` was relocated to
-    ``astrid/core/pack_machinery/schemas/`` in T10 and must remain absent
+    ``astrid/core/pack/schemas/`` in M2 T10 and must remain absent
     from the pack tree."""
     schemas_in_packs = _PACKS_ROOT / "schemas"
     assert not schemas_in_packs.exists(), (
         f"astrid/packs/schemas/ should have been relocated to "
-        f"astrid/core/pack_machinery/schemas/ but still exists at "
+        f"astrid/core/pack/schemas/ but still exists at "
         f"{schemas_in_packs}"
     )
 
 
-def test_schemas_relocated_to_machinery() -> None:
+def test_schemas_relocated_to_pack() -> None:
     """The relocated schemas must exist under
-    ``astrid/core/pack_machinery/schemas/v1/``."""
-    machinery_schemas = (
-        _REPO_ROOT / "astrid" / "core" / "pack_machinery" / "schemas" / "v1"
+    ``astrid/core/pack/schemas/v1/`` (M2 T10)."""
+    pack_schemas = (
+        _REPO_ROOT / "astrid" / "core" / "pack" / "schemas" / "v1"
     )
-    assert machinery_schemas.is_dir(), (
-        f"Schemas not found at expected machinery location {machinery_schemas}"
+    assert pack_schemas.is_dir(), (
+        f"Schemas not found at expected pack location {pack_schemas}"
     )
     # At minimum, the five shared v1 manifest schemas must be present.
     required_schemas = (
@@ -288,8 +288,8 @@ def test_schemas_relocated_to_machinery() -> None:
         "pack.json",
     )
     for schema_file in required_schemas:
-        assert (machinery_schemas / schema_file).is_file(), (
-            f"Missing relocated schema file: {schema_file} in {machinery_schemas}"
+        assert (pack_schemas / schema_file).is_file(), (
+            f"Missing relocated schema file: {schema_file} in {pack_schemas}"
         )
 
 

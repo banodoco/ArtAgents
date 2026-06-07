@@ -756,6 +756,138 @@ def test_run_record_status_boundary_accepts_empty_root(tmp_path: Path) -> None:
     assert advisories == []
 
 
+# ── M2 T13: top-level astrid/packs/ module shim enforcement ─────────────
+
+
+def test_packs_top_level_allows_documented_thin_compatibility_shim(
+    tmp_path: Path,
+) -> None:
+    """A thin documented compatibility/re-export shim at the top level of
+    ``astrid/packs/`` must not produce any structure error."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/validate.py",
+        '\"\"\"Compatibility re-export shim for astrid.packs.validate.\\n'
+        'The canonical implementation lives at astrid.core.pack.validate.\\n'
+        '\"\"\"\\n'
+        'from astrid.core.pack.validate import *  # noqa\\n',
+    )
+    report = validate_repo_structure(tmp_path)
+    assert not any(
+        "top-level astrid/packs/ module is not a documented thin compatibility shim" in err
+        for err in report.errors
+    ), f"Thin documented shim was flagged: {report.errors}"
+
+
+def test_packs_top_level_allows_backward_compatibility_shim(
+    tmp_path: Path,
+) -> None:
+    """A module marked as a backward-compatibility shim (not containing the
+    exact phrase 'compatibility shim') must still be recognized and allowed."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/install.py",
+        '\"\"\"Backward-compatibility shim for astrid.packs.install.\\n'
+        'The implementation lives at astrid.core.pack.install.\\n'
+        '\"\"\"\\n'
+        'import sys as _sys\\n'
+        '_sys.modules[__name__] = _sys.modules["astrid.core.pack.install"]\\n',
+    )
+    report = validate_repo_structure(tmp_path)
+    assert not any(
+        "top-level astrid/packs/ module is not a documented thin compatibility shim" in err
+        for err in report.errors
+    ), f"Backward-compatibility shim was flagged: {report.errors}"
+
+
+def test_packs_top_level_allows_init_py(
+    tmp_path: Path,
+) -> None:
+    """``astrid/packs/__init__.py`` is the package namespace and must never
+    be flagged, even though it contains real imports and does not look like
+    a compatibility shim."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/__init__.py",
+        '\"\"\"Astrid pack content (executors, orchestrators, elements).\"\"\"\\n'
+        'from .agent_index import build_agent_index\\n'
+        'from .validate import validate_pack\\n\\n'
+        '__all__ = ["build_agent_index", "validate_pack"]\\n',
+    )
+    report = validate_repo_structure(tmp_path)
+    assert not any(
+        "top-level astrid/packs/ module is not a documented thin compatibility shim" in err
+        for err in report.errors
+    ), f"__init__.py was incorrectly flagged: {report.errors}"
+
+
+def test_packs_top_level_rejects_active_implementation_module(
+    tmp_path: Path,
+) -> None:
+    """A top-level ``astrid/packs/*.py`` file that is an active implementation
+    module (not a thin compatibility/re-export shim) must be flagged as an
+    error."""
+    _bootstrap_structure_root(tmp_path)
+    _write(
+        tmp_path,
+        "astrid/packs/my_feature.py",
+        '\"\"\"Active implementation of MyFeature.\\n'
+        'This is real runtime logic, not a pass-through adapter.\\n'
+        '\"\"\"\\n'
+        'import os\\n\\n'
+        'DEFAULT_TIMEOUT = 30\\n\\n'
+        'def run_feature(path: str) -> dict:\\n'
+        '    \"\"\"Execute the feature pipeline.\"\"\"\\n'
+        '    with open(path) as f:\\n'
+        '        data = f.read()\\n'
+        '    return {"result": data}\\n',
+    )
+    report = validate_repo_structure(tmp_path)
+    errs = [
+        e for e in report.errors
+        if "top-level astrid/packs/ module is not a documented thin compatibility shim" in e
+    ]
+    assert len(errs) == 1, (
+        f"Expected exactly 1 pack top-level error; got {len(errs)}: {report.errors}"
+    )
+    assert "astrid/packs/my_feature.py" in errs[0], (
+        f"Error should reference my_feature.py: {errs[0]}"
+    )
+
+
+def test_packs_top_level_rejects_oversized_shim(
+    tmp_path: Path,
+) -> None:
+    """A module that claims to be a compatibility shim but exceeds the
+    meaningful-line threshold (12 lines) must still be flagged — it is
+    not a thin shim."""
+    _bootstrap_structure_root(tmp_path)
+    # Build a module with a shim docstring but 15 meaningful lines.
+    body_lines = [
+        '\"\"\"Compatibility re-export shim for legacy imports.\\n'
+        'This should be thin but is not.\\n'
+        '\"\"\"',
+    ]
+    # Add 15 meaningful non-comment non-docstring lines.
+    for i in range(15):
+        body_lines.append(f"_VAR_{i} = {i}")
+    _write(tmp_path, "astrid/packs/fat_shim.py", "\n".join(body_lines) + "\n")
+    report = validate_repo_structure(tmp_path)
+    errs = [
+        e for e in report.errors
+        if "top-level astrid/packs/ module is not a documented thin compatibility shim" in e
+    ]
+    assert len(errs) == 1, (
+        f"Expected exactly 1 oversized-shim error; got {len(errs)}: {report.errors}"
+    )
+    assert "astrid/packs/fat_shim.py" in errs[0], (
+        f"Error should reference fat_shim.py: {errs[0]}"
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # M0 real-repo smoke — T6
 # ═══════════════════════════════════════════════════════════════════════════

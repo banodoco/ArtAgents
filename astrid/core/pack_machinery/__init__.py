@@ -1,8 +1,6 @@
-"""Pack machinery — internal implementation modules for pack operations.
+"""Pack machinery compatibility namespace.
 
-These are the canonical homes for pack-operation machinery moved from
-``astrid/packs/`` during M1 Pack Layout Normalization (Plan v1.0).
-
-Public APIs are re-exported through thin compatibility shims in
-``astrid/packs/`` for backward compatibility until M2 clean-up.
+The canonical implementations now live under ``astrid.core.pack``.
+Modules in ``astrid.core.pack_machinery`` remain as thin shims so older
+imports and patch targets keep working during the M2 transition.
 """

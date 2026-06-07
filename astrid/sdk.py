@@ -999,7 +999,7 @@ def _discover_pack_inventory(
     extra_pack_roots: tuple[str, ...] = (),
     include_installed: bool = True,
 ) -> tuple[Any, ...]:
-    from astrid.core.pack_discovery import discover_pack_metadata
+    from astrid.core.pack.discovery import discover_pack_metadata
 
     return discover_pack_metadata(
         **_registry_load_kwargs(
@@ -1012,7 +1012,7 @@ def _discover_pack_inventory(
 
 def _pack_record(discovered_pack: Any) -> dict[str, Any]:
     payload = discovered_pack.pack.to_dict()
-    from astrid.packs.validate import extract_trust_summary
+    from astrid.core.pack.validate import extract_trust_summary
 
     trust_summary = extract_trust_summary(discovered_pack.pack.root)
     if "permissions" in trust_summary:

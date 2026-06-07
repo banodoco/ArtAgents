@@ -1,9 +1,7 @@
-"""Thin re-export shim (M1 Pack Layout Normalization).
+"""Backward-compatibility shim for ``astrid.core.pack_machinery.install``."""
 
-The canonical public API surface lives in ``astrid.packs.install``
-until M2, when the implementation relocates here and test mocks are
-updated.  This module re-exports everything to satisfy
-``astrid.core.pack_machinery`` import conventions established during M1.
-"""
+import sys as _sys
 
-from astrid.packs.install import *  # noqa: F401, F403
+from astrid.core.pack import install as _install  # noqa: E402, F401
+
+_sys.modules[__name__] = _sys.modules["astrid.core.pack.install"]

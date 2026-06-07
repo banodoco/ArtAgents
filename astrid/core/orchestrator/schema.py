@@ -41,7 +41,7 @@ from astrid.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
-from astrid.core.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
 
 OrchestratorKind = _Literal["built_in", "external"]
 RuntimeKind = _Literal["python", "command"]

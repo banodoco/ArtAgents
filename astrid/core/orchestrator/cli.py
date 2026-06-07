@@ -20,7 +20,7 @@ from astrid.core._search import (
 )
 from astrid.core.dirty import detect_local_edits
 from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
-from astrid.core.override import OverrideStore, OverrideStoreError
+from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
 from astrid.core.scaffold import (
     QID_RE as _QID_RE,

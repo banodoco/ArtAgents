@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from astrid._paths import REPO_ROOT
 from astrid.core.pack import discover_packs
-from astrid.core.pack_discovery import discover_pack_metadata
+from astrid.core.pack.discovery import discover_pack_metadata
 
 if TYPE_CHECKING:
     from astrid.core.pack import PackDefinition
