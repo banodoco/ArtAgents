@@ -1,0 +1,144 @@
+# Astrid Beauty Epic
+#
+# Purpose: make the repository shape self-explanatory and elegant without
+# changing product behavior. This is an architecture-cleanup chain, not a new
+# feature roadmap.
+#
+# Recommended launch:
+#   megaplan chain start --spec .megaplan/briefs/astrid-beauty/chain.yaml --in-worktree astrid-beauty --clean-worktree --one
+#
+# Drive one milestone at a time. Each milestone must leave main green and may
+# only merge behavior-preserving changes guarded by tests or explicit
+# characterization.
+#
+# Relationship to astrid-roadmap:
+# The astrid-roadmap chain is complete. Beauty starts from its outputs rather
+# than superseding or re-running it:
+# - M11 left `astrid/timeline` as compatibility re-exports over core timeline.
+# - M12/M5a left `astrid/threads` as a contract-locked internal lineage library,
+#   not a user-facing thread runtime.
+# - M13 left `_paths.py`, `_media.py`, `core/_search.py`, and `pipeline.py` as
+#   compatibility shims over the canonical public modules.
+# - Other known compatibility surfaces include deprecated `astrid run` /
+#   `astrid author` CLI aliases, `ASTRID_AUTHOR_TEST_LEGACY`,
+#   `ASTRID_ALLOW_LEGACY_APPEND_EVENT`, `LEGACY_ASSIGNEES`, legacy
+#   migration helpers, and Banodoco-era canonical module names that may or may
+#   not be product-specific.
+# - The pack/capability cleanup target is explicit: `astrid/packs/` is the
+#   first-party pack data surface, and `astrid/core/pack/` is the implementation
+#   home for machinery that reads, validates, installs, resolves, executes, or
+#   documents that data contract.
+# Beauty may improve layout around those surfaces, but must preserve the
+# roadmap contracts, shims, and golden/public-surface gates unless a later
+# milestone explicitly characterizes and updates the contract.
+#
+# Launch preconditions:
+# - Start from clean origin/main in the named `astrid-beauty` worktree.
+# - Do not launch while another megaplan/codex wave is actively editing the same
+#   files or package surfaces.
+# - Any milestone that touches public imports must include public-import and
+#   Reigh-import smoke coverage before movement.
+# - M0 must create or identify the public-import smoke gate used by later
+#   milestones. It should cover at least `astrid._paths`, `astrid._media`,
+#   `astrid.core._search`, `astrid.pipeline`, `astrid.timeline`,
+#   `astrid.threads`, and `astrid.core.reigh`.
+
+base_branch: main
+merge_policy: auto
+
+milestones:
+  - label: m0-architecture-map-and-gates
+    idea: .megaplan/briefs/astrid-beauty/m0-architecture-map-and-gates.md
+    branch: megaplan/astrid-beauty-m0-architecture-map-and-gates
+    profile: partnered
+    vendor: codex
+    robustness: full
+    depth: medium
+    with_prep: true
+    prep_direction: >
+      Survey astrid/ top-level modules, astrid/core subsystem imports,
+      astrid/packs layout variants, root-level tests, docs split, and the
+      largest files. Produce a concrete architecture map and dependency/boundary
+      inventory. Do not propose identity unification work.
+    notes: >
+      This is the only milestone whose main job is deciding the cleanup order.
+      It freezes a repo-shape contract and installs objective gates before
+      behavior-preserving movement begins.
+
+  - label: m1-pack-layout-normalization
+    idea: .megaplan/briefs/astrid-beauty/m1-pack-layout-normalization.md
+    branch: megaplan/astrid-beauty-m1-pack-layout-normalization
+    profile: directed
+    vendor: codex
+    robustness: full
+    notes: >
+      Mostly mechanical pack convention work behind pack validation and author
+      tests. Keep behavior stable; do not redesign the pack system.
+
+  - label: m2-top-level-module-rationalization
+    idea: .megaplan/briefs/astrid-beauty/m2-top-level-module-rationalization.md
+    branch: megaplan/astrid-beauty-m2-top-level-module-rationalization
+    profile: partnered
+    vendor: codex
+    robustness: full
+    depth: medium
+    notes: >
+      Clarifies which astrid/ modules are public facades and which are internal
+      compatibility shims. Mostly behavior-preserving renames/moves with
+      re-export shims and public-surface tests.
+
+  - label: m4-giant-file-decomposition
+    idea: .megaplan/briefs/astrid-beauty/m4-giant-file-decomposition.md
+    branch: megaplan/astrid-beauty-m4-giant-file-decomposition
+    profile: partnered
+    vendor: codex
+    robustness: full
+    depth: high
+    notes: >
+      Behavior-preserving splits of the largest modules. Premium planning is
+      warranted for sequencing; execution should remain complexity-routed.
+      Timeline/render-adjacent changes must preserve roadmap M11 golden gates.
+      This intentionally runs before m3-test-and-doc-layout so tests move once
+      to the final module shape.
+
+  - label: m3-test-and-doc-layout
+    idea: .megaplan/briefs/astrid-beauty/m3-test-and-doc-layout.md
+    branch: megaplan/astrid-beauty-m3-test-and-doc-layout
+    profile: directed
+    vendor: codex
+    robustness: full
+    notes: >
+      Mechanical organization of tests/docs after the giant-file splits, so
+      tests mirror the final source layout rather than a pre-split shape.
+      Separates user docs from operational history and keeps all existing
+      checks green.
+
+  - label: m5-boundary-enforcement-and-final-polish
+    idea: .megaplan/briefs/astrid-beauty/m5-boundary-enforcement-and-final-polish.md
+    branch: megaplan/astrid-beauty-m5-boundary-enforcement-and-final-polish
+    profile: partnered
+    vendor: codex
+    robustness: full
+    depth: high
+    with_prep: true
+    prep_direction: >
+      Re-scan the post-m1-m4 tree for remaining boundary violations, public API
+      ambiguity, accidental pack-to-core coupling, stale compatibility shims,
+      and elegance regressions. Use the m0 architecture contract as the target.
+    notes: >
+      Final pass turns conventions into enforceable tests/docs and retires
+      temporary shims only where compatibility coverage proves it is safe.
+
+on_failure:
+  abort: stop_chain
+on_escalate:
+  abort: stop_chain
+
+driver:
+  robustness: full
+  auto_approve: true
+  on_escalate: abort
+  stall_threshold: 5
+  max_iterations: 120
+  phase_timeout: 3600
+  status_timeout: 60
