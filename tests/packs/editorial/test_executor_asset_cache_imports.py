@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-
 EXECUTOR_MODULES = (
     "astrid.packs.editorial.executors.transcribe.run",
     "astrid.packs.editorial.executors.scenes.run",

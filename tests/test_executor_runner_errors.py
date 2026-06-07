@@ -23,20 +23,18 @@ import pytest
 import astrid.packs
 from astrid._paths import executor_argv, resolve_executor_runtime_module
 from astrid.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
-from astrid.core.executor.cli import main as executor_cli_main
-from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor import runner as executor_runner
+from astrid.core.executor.cli import main as executor_cli_main
+from astrid.core.executor.registry import ExecutorRegistry, load_default_registry
 from astrid.core.executor.runner import (
-    ExecutorRunRequest,
     ExecutorRunnerError,
+    ExecutorRunRequest,
     build_executor_command,
     evaluate_conditions,
     run_executor,
 )
-from astrid.core.executor.registry import load_default_registry
-from astrid.core.pack_resolver import PackResolverError
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
-
+from astrid.core.pack_resolver import PackResolverError
 
 # ---------------------------------------------------------------------------
 # Factory helpers

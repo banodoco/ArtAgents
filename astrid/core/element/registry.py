@@ -11,7 +11,6 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Iterable
 
 from astrid._paths import REPO_ROOT
-from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
 from astrid.core.alias_resolver import (
     AliasResolver,
     _register_pack_aliases,
@@ -30,6 +29,7 @@ from astrid.core.pack import (
     validate_element_pack_id,
 )
 from astrid.core.pack_discovery import discover_pack_metadata
+from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
 
 from .schema import (
     ElementDefinition,

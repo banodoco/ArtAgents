@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 from astrid.core.element.registry import (
     ElementRegistry,
     ElementSource,
@@ -17,6 +16,7 @@ from astrid.core.element.registry import (
     load_source_elements,
 )
 from astrid.core.element.schema import ElementKind
+from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 
 TOOLS_DIR = REPO_ROOT
 THEMES_ROOT = resolve_themes_root()

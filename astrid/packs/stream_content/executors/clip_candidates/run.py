@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
@@ -10,7 +12,10 @@ guard_canonical_entrypoint("stream_content.clip_candidates")
 import argparse
 from pathlib import Path
 
-from astrid.packs.stream_content.executors.clip_candidates.scoring import build_candidates, write_candidates
+from astrid.packs.stream_content.executors.clip_candidates.scoring import (
+    build_candidates,
+    write_candidates,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,4 +50,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

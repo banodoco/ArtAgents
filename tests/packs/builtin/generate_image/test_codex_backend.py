@@ -10,7 +10,6 @@ from astrid.core.generation.backends import GenerationResult
 from astrid.core.generation.backends.codex import CodexBackend
 from astrid.core.model_catalog.registry import ModelRegistry
 
-
 PNG_BYTES = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f"

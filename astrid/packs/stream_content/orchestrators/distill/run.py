@@ -18,8 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.task.plan import compute_plan_hash
-from astrid.packs.stream_content.orchestrators.distill.plan_template import build_plan_v2, emit_plan_json
-
+from astrid.packs.stream_content.orchestrators.distill.plan_template import (
+    build_plan_v2,
+    emit_plan_json,
+)
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">

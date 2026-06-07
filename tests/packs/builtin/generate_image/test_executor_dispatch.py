@@ -13,6 +13,7 @@ Covers:
 """
 
 from __future__ import annotations
+
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,6 @@ from astrid.core.generation.backends.registry import (
     GenerationBackendRegistry,
 )
 from astrid.core.generation.backends.vibecomfy import VibeComfyBackend
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers

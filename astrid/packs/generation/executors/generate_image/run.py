@@ -18,22 +18,21 @@ import hashlib
 import json
 import logging
 import random
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
-from astrid.core.generation.backends.codex import codex_unavailable_reason
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationBackendRegistry,
     GenerationResult,
     load_default_generation_backend_registry,
 )
+from astrid.core.generation.backends.codex import codex_unavailable_reason
 from astrid.core.model_catalog.registry import ModelRegistry
-from astrid.contracts.result_manifest import complete_output_metadata
 from astrid.core.util.atomic_io import write_json_atomic
 from astrid.core.util.png_metadata import embed_png_text
 
@@ -397,7 +396,6 @@ def _resolve_execution_with_codex_fallback(
         "falling back to cloud backend"
     )
     logger.warning(message)
-    print(f"Warning: {message}", file=sys.stderr)
     return {"feature": CODEX_BACKEND_ID, "reason": message}
 
 
@@ -465,15 +463,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--size",
         help="Output dimensions, e.g. '1024x1024' or fal size preset.",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--quality",
-        choices=("low", "medium", "high", "auto"),
+        values=("low", "medium", "high", "auto"),
+        catalog="generation-codex-quality",
         default=None,
         help="Codex quality hint folded into the prompt (hint only).",
     )
-    p.add_argument(
+    add_choice_arg(
+        p,
         "--background",
-        choices=("transparent", "opaque", "auto"),
+        values=("transparent", "opaque", "auto"),
+        catalog="generation-codex-background",
         default=None,
         help="Codex background hint folded into the prompt (hint only).",
     )

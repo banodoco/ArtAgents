@@ -1660,8 +1660,7 @@ class TestLoraRegistryLoad:
 
     def test_load_default_loras(self) -> None:
         """The shipped loras.yaml loads with model_ids validation."""
-        from astrid.core.model_catalog.registry import LoraRegistry
-        from astrid.core.model_catalog.registry import ModelRegistry
+        from astrid.core.model_catalog.registry import LoraRegistry, ModelRegistry
 
         model_registry = ModelRegistry.load_default()
         model_ids = frozenset(e.id for e in model_registry.list_all())
@@ -1673,8 +1672,7 @@ class TestLoraRegistryLoad:
 
     def test_get_by_id(self) -> None:
         """LoRA lookup by id returns the correct entry."""
-        from astrid.core.model_catalog.registry import LoraRegistry
-        from astrid.core.model_catalog.registry import ModelRegistry
+        from astrid.core.model_catalog.registry import LoraRegistry, ModelRegistry
 
         model_registry = ModelRegistry.load_default()
         model_ids = frozenset(e.id for e in model_registry.list_all())
@@ -1687,8 +1685,7 @@ class TestLoraRegistryLoad:
 
     def test_list_by_base_model(self) -> None:
         """list_by_base_model filters correctly."""
-        from astrid.core.model_catalog.registry import LoraRegistry
-        from astrid.core.model_catalog.registry import ModelRegistry
+        from astrid.core.model_catalog.registry import LoraRegistry, ModelRegistry
 
         model_registry = ModelRegistry.load_default()
         model_ids = frozenset(e.id for e in model_registry.list_all())
@@ -1699,8 +1696,7 @@ class TestLoraRegistryLoad:
 
     def test_unknown_lora_raises_keyerror(self) -> None:
         """Unknown LoRA id raises KeyError listing available."""
-        from astrid.core.model_catalog.registry import LoraRegistry
-        from astrid.core.model_catalog.registry import ModelRegistry
+        from astrid.core.model_catalog.registry import LoraRegistry, ModelRegistry
 
         model_registry = ModelRegistry.load_default()
         model_ids = frozenset(e.id for e in model_registry.list_all())

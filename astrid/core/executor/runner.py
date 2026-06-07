@@ -14,17 +14,17 @@ from functools import lru_cache
 from importlib import import_module
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Sequence
 
 from astrid._paths import REPO_ROOT
 from astrid.contracts.capability_runner import CapabilityRunner
-from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.contracts.exec_error import (
     ExecError,
     error_from_missing_binaries,
     error_from_returncode,
 )
 from astrid.contracts.run_status import RunStatus
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.pack_resolver import resolve_callable_from_metadata
 from astrid.core.project.run import (
     ProjectRunContext,

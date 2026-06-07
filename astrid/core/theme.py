@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.env_vars import ASTRID_THEMES_ROOT as THEMES_ROOT_ENV
-from astrid.core.env_vars import HYPE_ACTIVE_THEME as ACTIVE_THEME_ENV
+from astrid.core.env_vars import HYPE_ACTIVE_THEME
 from astrid.theme_schema import ThemeValidationError, load_theme
+
+ACTIVE_THEME_ENV = HYPE_ACTIVE_THEME
 
 
 def _default_themes_root() -> Path:

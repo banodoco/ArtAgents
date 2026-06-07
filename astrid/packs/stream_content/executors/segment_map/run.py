@@ -10,7 +10,10 @@ guard_canonical_entrypoint("stream_content.segment_map")
 import argparse
 from pathlib import Path
 
-from astrid.packs.stream_content.executors.segment_map.core import build_segment_map, write_segment_map
+from astrid.packs.stream_content.executors.segment_map.core import (
+    build_segment_map,
+    write_segment_map,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:

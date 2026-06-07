@@ -24,16 +24,14 @@ from astrid.core.project.project import (
 )
 from astrid.core.project.schema import (
     PROJECT_SCHEMA_VERSION,
-    ProjectValidationError,
+    RUN_SCHEMA_VERSION,
     SOURCE_KINDS,
     SOURCE_SCHEMA_VERSION,
-    RUN_SCHEMA_VERSION,
+    ProjectValidationError,
     build_project,
     build_run_record,
-    build_source,
     validate_project,
     validate_run_record,
-    validate_source,
 )
 from astrid.core.project.source import add_source, require_source
 
@@ -72,7 +70,6 @@ def test_project_helpers_resolve_env_root_and_write_deterministic_json(tmp_path:
     source = add_source("demo", "intro", asset={"file": str(media), "type": "video/mp4"})
 
     project_json = projects_root / "demo" / "project.json"
-    source_json = projects_root / "demo" / "sources" / "intro" / "source.json"
     assert project["slug"] == "demo"
     assert json.loads(project_json.read_text(encoding="utf-8"))["name"] == "Demo"
     assert project_json.read_text(encoding="utf-8").endswith("\n")
@@ -437,8 +434,9 @@ def test_managed_binding_metadata_round_trip() -> None:
 def test_managed_binding_metadata_with_timeline_id_round_trip() -> None:
     """Both timeline_id (ULID) and binding metadata coexist correctly."""
 
-    from astrid.threads.ids import generate_ulid
     from uuid import uuid4
+
+    from astrid.threads.ids import generate_ulid
 
     ulid = generate_ulid()
     event_stream_id = str(uuid4())
@@ -520,6 +518,7 @@ def test_managed_binding_slug_must_be_valid() -> None:
     """timeline_slug must pass validate_timeline_slug."""
 
     from uuid import uuid4
+
     from astrid.core.project.paths import ProjectPathError
 
     record = build_run_record("demo", "01HXYZ")

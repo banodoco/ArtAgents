@@ -19,27 +19,26 @@ T11 reinstated `list <project_id>` / `edit <project_id>` over reigh-app
 from __future__ import annotations
 
 import argparse
-from contextlib import redirect_stdout
-from io import StringIO
 import json
 import shutil
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from astrid.contracts.errors import AstridError
-from astrid.core.cli_choices import StaticChoices
-from astrid.core.project import paths
-from astrid.core.project import cli as project_cli
-from astrid.core.project.project import ProjectError
 from astrid.core import theme_cli
+from astrid.core.cli_choices import StaticChoices
+from astrid.core.project import cli as project_cli
+from astrid.core.project import paths
+from astrid.core.project.project import ProjectError
 from astrid.core.reigh import data_provider as dp_mod
 from astrid.core.reigh import timeline_io as tio
 from astrid.core.reigh.errors import TimelineVersionConflictError
 from astrid.core.reigh.supabase_client import SupabaseHTTPError
-
 
 ROOT = Path(__file__).resolve().parents[1]
 

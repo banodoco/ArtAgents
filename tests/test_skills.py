@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import json
 import shutil
 import unittest
 from pathlib import Path

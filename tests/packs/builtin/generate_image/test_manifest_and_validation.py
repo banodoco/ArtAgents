@@ -16,17 +16,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
 from astrid.contracts.errors import AstridError
-from astrid.core.generation.backends import GenerationResult
 from astrid.core.executor.schema import load_executor_manifest
+from astrid.core.generation.backends import GenerationResult
 from astrid.core.model_catalog.schema import ModeSpec
-from astrid.core.util.http import Transport
 
 
 @pytest.fixture(autouse=True)
@@ -302,8 +299,8 @@ def test_registry_lookup_failure_is_reported_as_cli_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Missing registry entries surface as clear CLI errors, not raw exceptions."""
-    from astrid.packs.generation.executors.generate_image import run as run_mod
     from astrid.core.generation.backends.registry import GenerationBackendRegistry
+    from astrid.packs.generation.executors.generate_image import run as run_mod
 
     class EmptyBackendRegistry(GenerationBackendRegistry):
         def __init__(self) -> None:
@@ -341,7 +338,6 @@ def test_requires_violation_no_http(tmp_path: Path) -> None:
     We inject a transport that records every call and assert the log is empty.
     """
     from astrid.packs.generation.executors.generate_image.run import main
-    from astrid.core.util.http import default_client
 
     class CallLog:
         def __init__(self) -> None:
@@ -424,9 +420,8 @@ def test_v1_model_id_rejected(tmp_path: Path) -> None:
 
 def test_edit_mode_rejects_negative_prompt(tmp_path: Path) -> None:
     """qwen-image-edit in edit mode drops --negative-prompt as unsupported (SD-003)."""
-    from astrid.packs.generation.executors.generate_image.run import main
-
     import astrid.core.util.http as http_mod
+    from astrid.packs.generation.executors.generate_image.run import main
 
     original_default = http_mod._default_client
     instrumented = http_mod.HttpClient(transport=_logging_transport_with_upload)
@@ -474,9 +469,8 @@ def test_edit_mode_rejects_negative_prompt(tmp_path: Path) -> None:
 
 def test_edit_mode_rejects_strength(tmp_path: Path) -> None:
     """qwen-image-edit in edit mode drops --strength as unsupported (SD-003)."""
-    from astrid.packs.generation.executors.generate_image.run import main
-
     import astrid.core.util.http as http_mod
+    from astrid.packs.generation.executors.generate_image.run import main
 
     original_default = http_mod._default_client
     instrumented = http_mod.HttpClient(transport=_logging_transport_with_upload)

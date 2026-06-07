@@ -10,6 +10,7 @@ guard_canonical_entrypoint('understanding.scene_describe')
 import argparse
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,7 +18,6 @@ from astrid.audit import register_outputs
 from astrid.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
 from astrid.utilities.llm_clients import GeminiClient, build_gemini_client
-from datetime import datetime, timezone
 
 SCENE_DESCRIPTIONS_VERSION = 1
 FORBIDDEN_TIME_KEYS = frozenset({"start", "end", "timestamp", "seconds", "time", "src_start", "src_end", "from", "to", "at"})
@@ -259,7 +259,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     def _run() -> int:
         parser = build_parser()
         args = parser.parse_args(argv)
-        from astrid.packs.training.executors.asset_cache import run as asset_cache; args.video = Path(asset_cache.resolve_input(args.video, want="path"))
+        from astrid.packs.training.executors.asset_cache import run as asset_cache
+
+        args.video = Path(asset_cache.resolve_input(args.video, want="path"))
         scenes = json.loads(args.scenes.read_text(encoding="utf-8"))
         triage = json.loads(args.triage.read_text(encoding="utf-8"))
         out_dir = args.out.resolve()

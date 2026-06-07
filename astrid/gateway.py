@@ -38,11 +38,11 @@ from astrid.contracts.errors import (
     render_astrid_error,
     wrap_degraded_error,
 )
-from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
 )
+from astrid.core.util.log_and_swallow import log_and_swallow
 
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
 # of main(): for these verbs the --project flag identifies the run, NOT a
@@ -552,8 +552,8 @@ def _dispatch_scratch(args: list[str]) -> int:
     project_slug = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
     if not project_slug:
         try:
-            from astrid.core.session.binding import resolve_current_session_with_fs_fallback
             from astrid.core.project.paths import resolve_projects_root
+            from astrid.core.session.binding import resolve_current_session_with_fs_fallback
 
             session = resolve_current_session_with_fs_fallback(
                 projects_root=resolve_projects_root(),
@@ -671,7 +671,6 @@ def _dispatch_runs(args: list[str]) -> int:
     """Dispatch ``astrid runs {ls,show,artifacts,trace,cost,gc}`` sub-verbs."""
     import argparse
 
-    from .core.task.lifecycle import cmd_runs_ls
     from astrid.core.task.run_audit import (
         cmd_run_artifacts,
         cmd_run_cost,
@@ -679,6 +678,8 @@ def _dispatch_runs(args: list[str]) -> int:
         cmd_run_trace,
     )
     from astrid.core.task.run_gc import cmd_runs_gc
+
+    from .core.task.lifecycle import cmd_runs_ls
 
     parser = argparse.ArgumentParser(prog="astrid runs")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1026,8 +1027,8 @@ def _auto_bind_default_project_session(raw: list[str]) -> Any:
     if not _invocation_is_auto_bindable_run(raw):
         return None
     try:
-        from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
         from astrid.core.project.paths import resolve_projects_root
+        from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
         from astrid.core.session.config import resolve_default_project_for_sdk
         from astrid.core.session.identity import read_identity
         from astrid.core.session.lifecycle import create_session

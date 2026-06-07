@@ -8,6 +8,8 @@ Astrid surface that wraps ComfyUI), and copies the result to ``--out``.
 
 from __future__ import annotations
 
+# ruff: noqa: E402
+
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint("comfy_wrap.run")
@@ -117,13 +119,13 @@ def _run_workflow(workflow_dict: dict[str, Any]) -> list[Path]:
     rather than a fresh HTTP client.
     """
     # Lazy-import vibecomfy so it is only loaded when this backend is used.
-    import vibecomfy
-    from vibecomfy.runtime.run import run_sync
-
     # Build a VibeWorkflow from the modified JSON dict.
     # vibecomfy.workflow_from_file expects a path, so we write the modified
     # JSON to a temp file for loading.  This also serves as a run record.
     import tempfile
+
+    import vibecomfy
+    from vibecomfy.runtime.run import run_sync
 
     tmp_path = Path(tempfile.mktemp(suffix=".json", prefix="comfy_wrap_"))
     tmp_path.write_text(json.dumps(workflow_dict, indent=2), encoding="utf-8")

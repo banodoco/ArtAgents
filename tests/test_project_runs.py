@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import sys
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -11,7 +11,7 @@ import pytest
 from astrid.contracts.run_status import RunStatus
 from astrid.contracts.schema import CommandSpec, Port
 from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
+from astrid.core.executor.runner import ExecutorRunnerError, ExecutorRunRequest, run_executor
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
@@ -660,13 +660,14 @@ def test_hype_prepare_project_main_writes_slug_and_uuid_to_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main writes timeline_slug and timeline_event_stream_id to run.metadata."""
-    from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
-    from astrid.core.project.run import (
-        METADATA_KEY_TIMELINE_SLUG,
-        METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
-        METADATA_KEY_TIMELINE_BINDING_MODE,
-    )
     import uuid as _uuid
+
+    from astrid.core.project.run import (
+        METADATA_KEY_TIMELINE_BINDING_MODE,
+        METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
+        METADATA_KEY_TIMELINE_SLUG,
+    )
+    from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -723,8 +724,8 @@ def test_hype_prepare_project_main_derives_slug_from_brief_stem(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main derives slug from brief stem when not generic."""
-    from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
     from astrid.core.project.run import METADATA_KEY_TIMELINE_SLUG
+    from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -749,8 +750,8 @@ def test_hype_prepare_project_main_falls_back_to_project_slug(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Prove _prepare_project_main falls back to project slug when brief has generic name."""
-    from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
     from astrid.core.project.run import METADATA_KEY_TIMELINE_SLUG
+    from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))

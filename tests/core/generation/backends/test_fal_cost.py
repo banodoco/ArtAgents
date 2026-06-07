@@ -19,7 +19,6 @@ import pytest
 from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry, ModeSpec, Price
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------

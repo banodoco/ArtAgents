@@ -34,11 +34,10 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     yaml = None
 
-from astrid.core import timeline
-from astrid._paths import WORKSPACE_ROOT, executor_argv
+from astrid._paths import executor_argv
 from astrid.audit import PARENT_IDS_ENV, AuditContext
+from astrid.core import timeline
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_BINDING_MODE,
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
@@ -53,6 +52,7 @@ from astrid.core.project.run import (
 )
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
+from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
 from astrid.core.util.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 

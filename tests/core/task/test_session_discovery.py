@@ -10,8 +10,9 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.session import config
+from astrid.core.session import paths as session_paths
 from astrid.core.task.session_discovery import _most_recent_session_slug
-from astrid.core.session import config, paths as session_paths
 
 
 def _make_project(projects_root: Path, slug: str, session_id: str) -> None:

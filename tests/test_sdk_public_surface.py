@@ -15,13 +15,12 @@ from typing import Any
 
 import pytest
 
-from tests._sdk_contract import EXPECTED_PUBLIC_NAMES, HEAVY_MODULES
 from astrid.contracts.event_log_error import EventLogError
 from astrid.core.executor.schema import ExecutorValidationError
 from astrid.core.orchestrator.runner import OrchestratorRunError
 from astrid.core.session.lease import LeaseError
 from astrid.core.task.events import NotWriterError, StaleEpochError, StaleTailError
-
+from tests._sdk_contract import EXPECTED_PUBLIC_NAMES
 
 SDK_MODULE_MISSING = importlib.util.find_spec("astrid.sdk") is None
 
@@ -1996,9 +1995,9 @@ def test_generate_facade_handles_error_generation_result(
     it without raising."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
+    from astrid.contracts.exec_error import ExecError
     from astrid.core.generation import GENERATION_RESULT_KEY
     from astrid.core.generation.backends.base import GenerationResult
-    from astrid.contracts.exec_error import ExecError
 
     error_result = GenerationResult(
         image_paths=[],
@@ -3170,7 +3169,6 @@ def test_register_and_resolve_synthetic_verb() -> None:
     """A synthetic verb registered via ``register_verb`` is reachable
     through ``astrid.generate.<name>``."""
     import astrid
-
     from astrid.core.generation.verbs import register_verb
 
     def _dummy_handler(**kwargs: Any) -> dict[str, Any]:
@@ -3313,7 +3311,6 @@ def test_verb_accessible_via_dot_attribute_on_facade() -> None:
     """A registered verb is reachable through ``astrid.generate.<name>``
     dot-attribute access, not just explicit ``__getattr__``."""
     import astrid
-
     from astrid.core.generation.verbs import register_verb
 
     def _handler(**kwargs: Any) -> dict[str, Any]:
@@ -3337,7 +3334,6 @@ def test_getattr_on_facade_triggers_lazy_plugin_loading(
     """The first ``__getattr__`` call on the facade triggers
     ``load_generation_verb_plugins``, flipping ``_plugins_loaded`` to True."""
     import astrid
-
     from astrid.core.generation import verbs as verbs_mod
     from astrid.core.generation.verbs import register_verb
 

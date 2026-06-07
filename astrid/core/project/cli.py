@@ -55,7 +55,6 @@ from .project import (
 from .schema import SOURCE_KINDS
 from .source import add_source
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPS_HELPER = REPO_ROOT / "scripts" / "node" / "ops_helper.mjs"
 
@@ -267,7 +266,10 @@ def _cmd_ls(args: argparse.Namespace) -> int:
 
 def _cmd_default(args: argparse.Namespace) -> int:
     if args.clear and args.slug:
-        raise ValueError("pass either a project slug or --clear, not both")
+        raise AstridError(
+            "pass either a project slug or --clear, not both",
+            recovery_command="python3 -m astrid projects default --help",
+        )
     scope = "user" if args.user else "workspace"
     if args.clear:
         path = set_default_project(None, scope=scope)
@@ -321,7 +323,10 @@ def _cmd_default(args: argparse.Namespace) -> int:
 def _cmd_theme(args: argparse.Namespace) -> int:
     slug = args.slug or _bound_project_slug()
     if slug is None:
-        raise ValueError("project slug is required when no session is bound")
+        raise AstridError(
+            "project slug is required when no session is bound",
+            recovery_command="python3 -m astrid projects theme --project <slug>",
+        )
     require_project(slug)
     if args.clear:
         project = set_project_theme(slug, None)
@@ -374,7 +379,10 @@ def _cmd_register_source(args: argparse.Namespace) -> int:
     if not project_slug:
         session = resolve_current_session()
         if session is None:
-            raise ValueError("--project is required when no session is bound")
+            raise AstridError(
+                "--project is required when no session is bound",
+                recovery_command="python3 -m astrid projects source register --project <slug> <file>",
+            )
         project_slug = session.project
     source = register_source_file(project_slug, args.filename)
     if args.json:
@@ -491,9 +499,15 @@ def _build_op_args(args: argparse.Namespace, op: str) -> dict[str, Any]:
         try:
             clip = json.loads(args.clip_json)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"--clip-json must be valid JSON: {exc.msg}") from exc
+            raise AstridError(
+                f"--clip-json must be valid JSON: {exc.msg}",
+                recovery_command="python3 -m astrid projects edit --help",
+            ) from exc
         if not isinstance(clip, dict):
-            raise ValueError("--clip-json must decode to a JSON object")
+            raise AstridError(
+                "--clip-json must decode to a JSON object",
+                recovery_command="python3 -m astrid projects edit --help",
+            )
         body: dict[str, Any] = {"clip": clip}
         if args.position is not None:
             body["position"] = args.position
@@ -502,7 +516,10 @@ def _build_op_args(args: argparse.Namespace, op: str) -> dict[str, Any]:
         return {"clipId": args.clip_id, "newPosition": args.new_position}
     if op == "set-theme":
         return {"themeId": args.theme_id}
-    raise ValueError(f"unsupported edit op: {op}")
+    raise AstridError(
+        f"unsupported edit op: {op}",
+        recovery_command="python3 -m astrid projects edit --help",
+    )
 
 
 def _run_ops_helper(
@@ -603,7 +620,7 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
 
     from astrid.core.project.paths import project_dir
     from astrid.core.task.events import read_events
-    from astrid.core.task.run_audit import _cost_by_source, _run_status
+    from astrid.core.task.run_audit import _cost_by_source
     from astrid.core.timeline.crud import list_timelines
 
     include_aborted = bool(getattr(args, "include_aborted", False))
@@ -701,8 +718,6 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
     _require_project_session(args.project)
 
     from astrid.core.project.paths import project_dir
-    from astrid.core.task.events import read_events
-    from astrid.core.task.run_audit import _run_status
     from astrid.core.timeline.crud import list_timelines
 
     include_aborted = bool(getattr(args, "include_aborted", False))

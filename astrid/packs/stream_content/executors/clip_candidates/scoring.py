@@ -9,7 +9,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.packs.stream_content.executors.segment_map.core import TranscriptSegment, normalize_transcript_segments
+from astrid.packs.stream_content.executors.segment_map.core import (
+    TranscriptSegment,
+    normalize_transcript_segments,
+)
 
 CANDIDATES_VERSION = 1
 TARGET_MIN_SEC = 20.0
