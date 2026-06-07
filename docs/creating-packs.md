@@ -38,9 +38,9 @@ example below shows the canonical layout:
 ```text
 my_video_tools/
   pack.yaml            # Pack manifest (required)
-  AGENTS.md            # Agent-facing instructions
   README.md            # Human-facing docs
-  STAGE.md             # Pack-level staging notes
+  skill/
+    SKILL.md           # Agent-facing skill guidance
   executors/
     transcribe/
       executor.yaml    # Executor manifest (required)
@@ -107,13 +107,13 @@ as JSON Schema documents in the repository:
 
 | Manifest | Schema |
 |---|---|
-| `pack.yaml` | `astrid/packs/schemas/v1/pack.json` |
-| `executor.yaml` | `astrid/packs/schemas/v1/executor.json` |
-| `orchestrator.yaml` | `astrid/packs/schemas/v1/orchestrator.json` |
-| `element.yaml` | `astrid/packs/schemas/v1/element.json` |
+| `pack.yaml` | `astrid/core/pack_machinery/schemas/v1/pack.json` |
+| `executor.yaml` | `astrid/core/pack_machinery/schemas/v1/executor.json` |
+| `orchestrator.yaml` | `astrid/core/pack_machinery/schemas/v1/orchestrator.json` |
+| `element.yaml` | `astrid/core/pack_machinery/schemas/v1/element.json` |
 
 Shared constraints (id patterns, version format, runtime shape, etc.)
-are defined in `astrid/packs/schemas/v1/_defs.json`.
+are defined in `astrid/core/pack_machinery/schemas/v1/_defs.json`.
 
 All v1 manifests require a `schema_version: 1` field. Validation
 rejects unknown schema versions with a clear error message. This
@@ -131,7 +131,7 @@ The pack manifest declares:
   manifests (e.g., `executors: executors`).
 - **Agent instructions**: `purpose`, `normal_entrypoints`,
   `do_not_use_for`, `required_context`.
-- **Documentation references**: paths to `AGENTS.md`, `README.md`, etc.
+- **Documentation references**: paths to `README.md`, `skill/SKILL.md`, etc.
 - **Aliases**: alternate public ids that route to executor or orchestrator
   capabilities in this pack. See
   [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) for
@@ -303,7 +303,7 @@ Refer to `orchestrator.json` for the full field list.
 The recommended workflow for creating a pack:
 
 1. **`packs new <id>`** — Creates the pack skeleton: `pack.yaml`,
-   `AGENTS.md`, `README.md`, `STAGE.md`, and empty `executors/`,
+   `README.md`, `skill/SKILL.md`, and empty `executors/`,
    `orchestrators/`, `elements/` directories. The scaffolded pack
    passes `packs validate` immediately.
 
@@ -430,7 +430,7 @@ After creating and validating your pack:
 1. Implement the `run.py` entrypoints for your executors and
    orchestrators.
 2. Add tests in a `tests/` directory beside each component.
-3. Document your pack's capabilities in `AGENTS.md`.
+3. Document your pack's capabilities in `skill/SKILL.md`.
 4. Share your pack as a Git repository for others to install (Git
    install is planned for Sprint 2).
 

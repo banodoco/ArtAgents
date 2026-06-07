@@ -19,7 +19,7 @@ The v1 contract is defined by:
 
 - The exact top-level names exported by `astrid.__all__`
 - The documented signatures and DTO categories reachable from `import astrid`
-- The v1 manifest schema files under `astrid/packs/schemas/v1/`
+- The v1 manifest schema files under `astrid/core/pack_machinery/schemas/v1/`
 - The disclosure-only trust/install rules in this document
 
 The v1 contract is **not** defined by internal module layout, lazy-loader
@@ -171,7 +171,7 @@ Astrid v1 recognizes these manifest families:
 - Element manifests: `element.yaml`, `element.yml`, or `element.json`
 
 The schema contract for those manifests is defined by the JSON Schema files
-under `astrid/packs/schemas/v1/`.
+under `astrid/core/pack_machinery/schemas/v1/`.
 
 ### Normative v1 Schema Files
 
@@ -179,11 +179,11 @@ All v1 manifest schema files are part of the contract:
 
 | File | Role |
 |---|---|
-| `astrid/packs/schemas/v1/pack.json` | Validates pack manifests and pack-level declarations |
-| `astrid/packs/schemas/v1/executor.json` | Validates executor manifests |
-| `astrid/packs/schemas/v1/orchestrator.json` | Validates orchestrator manifests |
-| `astrid/packs/schemas/v1/element.json` | Validates element manifests |
-| `astrid/packs/schemas/v1/_defs.json` | Shared schema definitions referenced by the manifest schemas above |
+| `astrid/core/pack_machinery/schemas/v1/pack.json` | Validates pack manifests and pack-level declarations |
+| `astrid/core/pack_machinery/schemas/v1/executor.json` | Validates executor manifests |
+| `astrid/core/pack_machinery/schemas/v1/orchestrator.json` | Validates orchestrator manifests |
+| `astrid/core/pack_machinery/schemas/v1/element.json` | Validates element manifests |
+| `astrid/core/pack_machinery/schemas/v1/_defs.json` | Shared schema definitions referenced by the manifest schemas above |
 
 The v1 contract covers the existence and intended roles of these files. It does
 not promise byte-for-byte immutability of schema internals; backward-compatible
@@ -226,7 +226,7 @@ Packs may declare generation extensions under:
 The stable v1 contract for generation extensions is:
 
 - These fields are valid pack-manifest fields under
-  `astrid/packs/schemas/v1/pack.json`.
+  `astrid/core/pack_machinery/schemas/v1/pack.json`.
 - `generation.backends` entries declare inert backend descriptors with `id`,
   `module`, `class`, optional `label`, and optional `init_kwargs`.
 - `generation.features` and `generation.modes` entries may be strings or
@@ -266,7 +266,7 @@ Packs may declare element-kind extensions under
 The stable v1 contract for element extensions is:
 
 - `pack.extensions.elements.kinds` is a valid pack-manifest field under
-  `astrid/packs/schemas/v1/pack.json`.
+  `astrid/core/pack_machinery/schemas/v1/pack.json`.
 - External packs loaded through `ASTRID_PACKS_PATH` can declare element kinds
   and elements using those kinds.
 - `astrid.discover()` exposes normalized element-kind records through
@@ -328,7 +328,7 @@ The `permissions` field in the pack manifest:
 - Requires `id` and `reason`
 - Allows optional `access` and `services`
 - Rejects unknown keys
-- Is validated by `astrid/packs/schemas/v1/pack.json`
+- Is validated by `astrid/core/pack_machinery/schemas/v1/pack.json`
 
 Permissions are disclosure metadata. They do **not**:
 
@@ -396,6 +396,6 @@ that a pack behaves safely or only does what its declarations describe.
 - `astrid/__init__.py` — top-level public export list
 - `astrid/sdk.py` — public SDK DTOs and function entrypoints
 - `astrid/contracts/schema.py` — shared DTO field types
-- `astrid/packs/schemas/v1/` — normative v1 manifest schema files
+- `astrid/core/pack_machinery/schemas/v1/` — normative v1 manifest schema files
 - `astrid/packs/validate.py` — trust summary extraction and trust block source
 - `astrid/packs/install.py` — trust acknowledgement/install behavior

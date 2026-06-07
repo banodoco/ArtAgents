@@ -395,7 +395,7 @@ def _dispatch_skills(args: list[str]) -> int:
 
 
 def _dispatch_packs(args: list[str]) -> int:
-    from .packs import cli as packs_cli
+    from .core.pack_machinery import cli as packs_cli
 
     return packs_cli.main(args)
 
@@ -1086,7 +1086,7 @@ def _packs_subcommand_list() -> str:
     try:
         import argparse
 
-        from .packs.cli import build_parser as packs_build_parser
+        from .core.pack_machinery.cli import build_parser as packs_build_parser
 
         packs_parser = packs_build_parser()
         # Extract subcommand names from the parser's subparsers action.

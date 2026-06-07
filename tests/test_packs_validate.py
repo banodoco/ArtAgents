@@ -18,12 +18,26 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.pack import PackValidationError
-from astrid.packs.validate import PackValidator, validate_pack
+from astrid.packs.validate import (
+    PackValidator,
+    validate_first_party_packs_root,
+    validate_pack,
+)
+
+
+_FIRST_PARTY_PACKS_ROOT = Path(__file__).resolve().parents[1] / "astrid" / "packs"
 
 
 def _write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def _mirror_first_party_packs_root(dest: Path) -> None:
+    for child in sorted(_FIRST_PARTY_PACKS_ROOT.iterdir()):
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        (dest / child.name).symlink_to(child, target_is_directory=True)
 
 
 class MinimalPackTestCase(unittest.TestCase):
@@ -50,9 +64,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test Pack\n\nAgent guide.")
-        _write(root / "README.md", "# Test Pack\n\nUser docs.")
-        _write(root / "STAGE.md", "## Purpose\n\nTesting.")
+        _write(root / "skill" / "SKILL.md", "# Test Pack\n\nAgent guide.")
         (root / "executors").mkdir(parents=True, exist_ok=True)
         (root / "orchestrators").mkdir(parents=True, exist_ok=True)
 
@@ -153,8 +165,6 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test")
-        _write(root / "README.md", "# Test")
         errors, warnings = validate_pack(root)
         # Missing content roots should only produce warnings, not errors
         # (content roots are optional in the schema)
@@ -254,8 +264,7 @@ content:
   elements: elements
 """,
         )
-        _write(root / "AGENTS.md", "# Builtin\n")
-        _write(root / "README.md", "# Builtin\n")
+        _write(root / "skill" / "SKILL.md", "# Builtin\n")
 
         template_pairs = (
             ("docs/templates/executor/executor.yaml", "executors/example/executor.yaml"),
@@ -324,8 +333,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test Pack\n")
-        _write(root / "README.md", "# Test Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Test Pack\n")
         self.write_valid_executor(
             root,
             "capability_roots/executors/test_exec",
@@ -464,8 +472,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test Pack\n")
-        _write(root / "README.md", "# Test Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Test Pack\n")
         self.write_valid_executor(root, "executors/test_exec", "test_pack.test_exec")
         self.write_valid_orchestrator(root, "orchestrators/test_orch", "test_pack.test_orch")
         self.write_valid_element(
@@ -494,8 +501,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test Pack\n")
-        _write(root / "README.md", "# Test Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Test Pack\n")
         _write(
             root / "elements" / "widgets" / "glow" / "element.yaml",
             """schema_version: 1
@@ -542,8 +548,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test Pack\n")
-        _write(root / "README.md", "# Test Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Test Pack\n")
         _write(
             root / "elements" / "widgets" / "glow" / "element.yaml",
             """schema_version: 1
@@ -632,8 +637,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Other Pack\n")
-        _write(root / "README.md", "# Other Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Other Pack\n")
         # Write executor with a qualified id whose pack prefix is test_pack, not other_pack
         self.write_valid_executor(root, "executors/wrong_pack", "test_pack.some_exec")
 
@@ -660,8 +664,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Other Pack\n")
-        _write(root / "README.md", "# Other Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Other Pack\n")
         self.write_valid_orchestrator(
             root, "orchestrators/foreign_orch", "video_editing.hype"
         )
@@ -688,8 +691,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Other Pack\n")
-        _write(root / "README.md", "# Other Pack\n")
+        _write(root / "skill" / "SKILL.md", "# Other Pack\n")
         self.write_valid_element(
             root, "elements/effects/wrong_elem", element_id="wrong_elem", pack_id="rendering"
         )
@@ -889,26 +891,27 @@ version: 0.1.0
 class TestMissingDocsAndFiles(MinimalPackTestCase):
     """Missing docs, STAGE.md, and runtime files should be flagged."""
 
-    def test_missing_agents_md_warns(self) -> None:
+    def test_missing_agents_md_is_no_longer_warned(self) -> None:
+        """T3 removed root AGENTS.md warnings; skill/SKILL.md is the canonical doc."""
         root = self.make_pack_root()
         self.write_valid_pack(root)
-        (root / "AGENTS.md").unlink()
+        (root / "skill" / "SKILL.md").unlink()
         errors, warnings = validate_pack(root)
         self.assertEqual(errors, [])
-        self.assertTrue(
+        self.assertFalse(
             any("AGENTS.md" in w for w in warnings),
-            f"Expected AGENTS.md warning, got: {warnings}",
+            f"AGENTS.md should not appear in warnings after T3: {warnings}",
         )
 
-    def test_missing_readme_md_warns(self) -> None:
+    def test_missing_readme_md_is_no_longer_warned(self) -> None:
+        """T3 removed root README.md warnings; skill/SKILL.md is the canonical doc."""
         root = self.make_pack_root()
         self.write_valid_pack(root)
-        (root / "README.md").unlink()
         errors, warnings = validate_pack(root)
         self.assertEqual(errors, [])
-        self.assertTrue(
+        self.assertFalse(
             any("README.md" in w for w in warnings),
-            f"Expected README.md warning, got: {warnings}",
+            f"README.md should not appear in warnings after T3: {warnings}",
         )
 
     def test_missing_runtime_entrypoint_file(self) -> None:
@@ -923,19 +926,20 @@ class TestMissingDocsAndFiles(MinimalPackTestCase):
             f"Expected entrypoint not found error, got: {errors}",
         )
 
-    def test_missing_stage_md_errors(self) -> None:
+    def test_missing_stage_md_now_warns(self) -> None:
+        """T3 downgraded component STAGE.md missing from error to warning."""
         root = self.make_pack_root()
         self.write_valid_pack(root)
         self.write_valid_executor(root)
         (root / "executors" / "test_exec" / "STAGE.md").unlink()
         errors, warnings = validate_pack(root)
         self.assertTrue(
-            any("STAGE.md" in e for e in errors),
-            f"Expected STAGE.md error, got errors={errors}, warnings={warnings}",
+            any("STAGE.md" in w for w in warnings),
+            f"Expected STAGE.md warning, got errors={errors}, warnings={warnings}",
         )
         self.assertFalse(
-            any("STAGE.md" in w for w in warnings),
-            f"STAGE.md should not appear in warnings: {warnings}",
+            any("STAGE.md" in e for e in errors),
+            f"STAGE.md should not appear in errors after T3: {errors}",
         )
 
     def test_missing_pack_yaml(self) -> None:
@@ -962,8 +966,7 @@ agent:
   purpose: Testing
 """,
         )
-        _write(root / "AGENTS.md", "# Test")
-        _write(root / "README.md", "# Test")
+        _write(root / "skill" / "SKILL.md", "# Test")
         errors, warnings = validate_pack(root)
         self.assertEqual(errors, [])
         self.assertTrue(
@@ -1179,6 +1182,153 @@ class TestPackValidatorClass(MinimalPackTestCase):
         root = self.make_pack_root()
         errors, warnings = validate_pack("/nonexistent/path")
         self.assertGreater(len(errors), 0)
+
+
+class TestLayoutContractExceptions(MinimalPackTestCase):
+    """Declared layout exceptions are parsed and surfaced as one aggregate failure."""
+
+    def test_temporary_layout_exception_with_lifecycle_passes(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(root / "legacy.py", "# legacy shim\n")
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+metadata:
+  layout:
+    exceptions:
+      - path: legacy.py
+        class: legacy_public_shim
+        reason: Preserves legacy import path until M2.
+        defer_to: M2
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+
+    def test_layout_exceptions_fail_under_single_aggregate_surface(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        self.write_valid_executor(root)
+        _write(root / "legacy.py", "# legacy shim\n")
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+metadata:
+  layout:
+    exceptions:
+      - path: legacy.py
+        class: legacy_public_shim
+        reason: Temporary shim without lifecycle.
+      - path: executors/test_exec/run.py
+        class: domain_exception
+        reason: This path is already canonical.
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertGreaterEqual(len(errors), 3, errors)
+        self.assertEqual(errors[0], "pack layout contract failed (2 issues)")
+        self.assertTrue(
+            any("legacy.py" in error and "defer_to is required" in error for error in errors[1:]),
+            errors,
+        )
+        self.assertTrue(
+            any(
+                "executors/test_exec/run.py" in error
+                and "already matches the canonical pack layout" in error
+                for error in errors[1:]
+            ),
+            errors,
+        )
+
+
+class TestFirstPartyPacksRootValidation(MinimalPackTestCase):
+    """The first-party packs root is validated as one aggregate surface."""
+
+    def test_repo_first_party_packs_root_validates_cleanly(self) -> None:
+        errors, warnings = validate_first_party_packs_root(_FIRST_PARTY_PACKS_ROOT)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertIsInstance(warnings, list)
+
+    def test_inventory_and_layout_fail_under_one_aggregate_surface(self) -> None:
+        root = self.make_pack_root() / "packs"
+        root.mkdir()
+        _mirror_first_party_packs_root(root)
+        (root / "builtin").unlink()
+        _write(
+            root / "builtin" / "pack.yaml",
+            """id: builtin
+name: Builtin
+version: 0.1.0
+agent:
+  purpose: Broken test fixture
+""",
+        )
+        (root / "rogue").mkdir()
+
+        errors, _warnings = validate_first_party_packs_root(root)
+
+        self.assertGreaterEqual(len(errors), 3, errors)
+        self.assertEqual(
+            errors[0],
+            "first-party pack validation failed (2 issues)",
+        )
+        self.assertIn(
+            "[internal-schema] unexpected top-level directory: rogue",
+            errors,
+        )
+        self.assertTrue(
+            any(
+                line.startswith("[layout] builtin: pack.yaml: missing required field schema_version")
+                for line in errors[1:]
+            ),
+            errors,
+        )
+
+    def test_non_temporary_layout_exception_cannot_defer_to_future_milestone(self) -> None:
+        root = self.make_pack_root()
+        self.write_valid_pack(root)
+        _write(root / "domain.txt", "domain-specific note\n")
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  executors: executors
+  orchestrators: orchestrators
+agent:
+  purpose: Testing
+metadata:
+  layout:
+    exceptions:
+      - path: domain.txt
+        class: domain_exception
+        reason: Domain-specific top-level asset.
+        defer_to: M1
+""",
+        )
+        errors, _warnings = validate_pack(root)
+        self.assertEqual(errors[0], "pack layout contract failed (1 issue)")
+        self.assertIn("domain.txt", errors[1])
+        self.assertIn("must be permanent", errors[1])
 
 
 class TestInvalidPackIdPattern(MinimalPackTestCase):
@@ -1449,8 +1599,7 @@ aliases:
     deprecation_message: Moved
 """,
         )
-        _write(root / "AGENTS.md", "# Test")
-        _write(root / "README.md", "# Test")
+        _write(root / "skill" / "SKILL.md", "# Test")
         validator = PackValidator(root)
         validator._pack_data = validator._load_yaml(root / "pack.yaml")
         pack = validator._pack_definition_for_discovery({"executors": "executors"})
@@ -1569,8 +1718,7 @@ extensions:
       version: 1
 """,
         )
-        _write(root / "AGENTS.md", "# Test")
-        _write(root / "README.md", "# Test")
+        _write(root / "skill" / "SKILL.md", "# Test")
         validator = PackValidator(root)
         validator._pack_data = validator._load_yaml(root / "pack.yaml")
         pack = validator._pack_definition_for_discovery({"executors": "executors"})

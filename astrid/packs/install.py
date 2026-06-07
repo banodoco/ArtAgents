@@ -1,5 +1,10 @@
 """``packs install`` / ``packs uninstall`` / ``packs update`` commands.
 
+**Canonical public API surface** (M1 Pack Layout Normalization — Plan v1.0).
+The implementation remains here for mock-compatibility with existing tests;
+``astrid.core.pack_machinery.install`` re-exports everything as a thin shim.
+Relocation to machinery is deferred to M2 when tests can be updated.
+
 ``packs install <path-or-git-url>`` installs a pack from a local directory
 or a Git URL.  Git installs are pinned to a concrete commit SHA so that
 updates never silently swap executable code.
@@ -13,6 +18,43 @@ without mutating any state.
 """
 
 from __future__ import annotations
+
+__all__ = [
+    # Public API
+    "cmd_install",
+    "cmd_rollback",
+    "cmd_uninstall",
+    "cmd_update",
+    "install_pack",
+    "rollback_pack",
+    "uninstall_pack",
+    "update_pack",
+    # Command entry points (used by cli.py)
+    "_run_install_command",
+    "_run_rollback_command",
+    "_run_uninstall_command",
+    "_run_update_command",
+    # Git helpers (used by tests)
+    "_check_git_available",
+    "_clone_git_pack",
+    "_find_pack_root_in_checkout",
+    "_is_git_url",
+    "_resolve_git_ref",
+    "_run_git",
+    # Internal helpers (used by tests / cross-module)
+    "_confirm",
+    "_confirm_trust",
+    "_diff_component_inventories",
+    "_do_install",
+    "_format_permission",
+    "_format_trust_summary",
+    "_format_update_diff",
+    "_install_from_git",
+    "_normalized_summary_permissions",
+    "_trust_block",
+    "_trust_missing_error",
+    "_update_git_pack",
+]
 
 import argparse
 import hashlib
@@ -32,8 +74,8 @@ from astrid.core.pack_store import (
     _revision_timestamp,
 )
 from astrid.core.util.time import utc_now_seconds
-from astrid.packs.gitignore import gitignore_filter
-from astrid.packs.validate import V1_TRUST_BLOCK, extract_trust_summary, validate_pack
+from astrid.core.pack_machinery.gitignore import gitignore_filter
+from astrid.core.pack_machinery.validate import V1_TRUST_BLOCK, extract_trust_summary, validate_pack
 
 # ---------------------------------------------------------------------------
 # Pretty-printing helpers
@@ -1903,28 +1945,3 @@ def cmd_rollback(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
     return _run_rollback_command(args)
-
-
-__all__ = [
-    "install_pack",
-    "uninstall_pack",
-    "update_pack",
-    "rollback_pack",
-    "cmd_install",
-    "cmd_update",
-    "cmd_uninstall",
-    "cmd_rollback",
-    "_run_install_command",
-    "_run_update_command",
-    "_run_uninstall_command",
-    "_run_rollback_command",
-    "_install_from_git",
-    "_update_git_pack",
-    "_diff_component_inventories",
-    "_is_git_url",
-    "_check_git_available",
-    "_run_git",
-    "_clone_git_pack",
-    "_resolve_git_ref",
-    "_find_pack_root_in_checkout",
-]

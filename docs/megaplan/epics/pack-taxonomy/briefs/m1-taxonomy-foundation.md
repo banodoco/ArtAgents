@@ -41,7 +41,7 @@ Out:
 ## Touchpoints
 
 - `astrid/core/pack.py`
-- `astrid/packs/schemas/v1/pack.json`
+- `astrid/core/pack_machinery/schemas/v1/pack.json`
 - `astrid/packs/cli.py`
 - `astrid/packs/*/pack.yaml`
 - `docs/creating-packs.md`
