@@ -313,6 +313,9 @@ branch list, and stash list are clean.
 **B8 — deferred by decision.** The PR #8 operational-substrate port is a ~2–3 day project; a full spec
 is at `docs/megaplan/epics/pack-system/pr8-substrate-port-spec.md`. **PR #8 stays open** until then.
 
+**2026-06-07 cleanup note:** that deferred PR #8 port was subsequently completed by PR #38
+(`pack-system-pr8-port`, merged 2026-05-25). PR #8 is now superseded archaeology rather than active work.
+
 **Phase C — delete (done, all positive-evidence):** removed 4 worktrees (dirty payloads verified
 identical-or-older vs main, `not_on_main=0`), 6 local + 4 remote branches (epic deliverables confirmed on
 main), and all 7 stashes. **Held:** `chain-setup`, `pack-system-run`, `feature/per-project-plan-md` (PR #26),
