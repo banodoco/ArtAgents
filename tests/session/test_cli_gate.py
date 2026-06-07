@@ -47,6 +47,7 @@ EXPECTED_SPRINT1_UNBOUND_ALLOWLIST = (
 def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))
+    monkeypatch.setenv("ASTRID_NO_NUDGE", "1")
     (tmp_path / "home").mkdir()
     write_identity(Identity(agent_id="claude-1", created_at="2026-05-11T00:00:00Z"))
     return {"home": tmp_path / "home", "projects": tmp_path / "projects"}

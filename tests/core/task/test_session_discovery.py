@@ -59,6 +59,7 @@ def test_multiple_candidates_default_present_resolves_to_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.delenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, raising=False)
 
     projects_root = tmp_path / "projects"
     _make_project(projects_root, "alpha", "S-ALPHA")
@@ -100,6 +101,7 @@ def test_multiple_candidates_only_two_default_among_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.delenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, raising=False)
 
     projects_root = tmp_path / "projects"
     _make_project(projects_root, "alpha", "S-ALPHA")
@@ -144,6 +146,7 @@ def test_multiple_candidates_default_not_among_candidates_refuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(session_paths.ASTRID_HOME_ENV, str(tmp_path / "home"))
+    monkeypatch.delenv(session_paths.ASTRID_WORKSPACE_CONFIG_DIR_ENV, raising=False)
 
     projects_root = tmp_path / "projects"
     _make_project(projects_root, "alpha", "S-ALPHA")

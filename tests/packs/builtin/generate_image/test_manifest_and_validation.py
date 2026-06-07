@@ -245,10 +245,7 @@ def test_run_sdk_and_main_preserve_in_process_and_cli_contracts(
     captured = capsys.readouterr()
 
     assert code == 0
-    assert (
-        captured.err
-        == "[astrid] running unledgered — invoke through executors run or the SDK to persist a run record\n"
-    )
+    assert captured.err == ""
     assert captured.out == f"manifest={result.run_dir / 'manifest.json'}\n"
 
 
