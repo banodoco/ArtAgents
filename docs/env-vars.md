@@ -54,7 +54,7 @@ These are propagated into subprocess env by `build_child_subprocess_env`.
 
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
-| `ASTRID_PACKS_PATH` | `ASTRID_PACKS_PATH` | User / CI | `core/pack_discovery.py` | Colon-separated list of additional pack search directories. |
+| `ASTRID_PACKS_PATH` | `ASTRID_PACKS_PATH` | User / CI | `core/pack/discovery.py` | Colon-separated list of additional pack search directories. |
 
 ## Logging
 

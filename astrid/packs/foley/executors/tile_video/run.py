@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
 from astrid.contracts.result_manifest import write_manifest
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('foley.tile_video')
 import argparse
@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.packs._canonical_entrypoint import run_pack_main
+from astrid.core.pack.entrypoint import run_pack_main
 
 
 def _die(message: str) -> None:

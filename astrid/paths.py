@@ -1,8 +1,7 @@
 """Canonical root-path constants and executor runtime resolution.
 
 This module is the public surface for PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT,
-and the executor-argv utilities.  Internal helpers that previously lived under
-``astrid._paths`` now live here.
+and the executor-argv utilities.
 """
 
 from __future__ import annotations

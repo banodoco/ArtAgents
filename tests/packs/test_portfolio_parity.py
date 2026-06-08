@@ -39,7 +39,7 @@ import yaml
 
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.pack import discover_packs
-from astrid.packs.validate import validate_pack
+from astrid.core.pack.validate import validate_pack
 
 # ---------------------------------------------------------------------------
 # Fixtures + helpers
@@ -186,8 +186,8 @@ def test_component_manifests_v1_compliant(pack_id: str) -> None:
 def _install_pack_into(astrid_home: Path, pack_id: str) -> None:
     """Install ``astrid/packs/<pack_id>`` into the given ASTRID_HOME."""
     # InstalledPackStore writes under ``ASTRID_HOME/packs/<pack_id>/``.
-    from astrid.core.pack_store import InstalledPackStore
-    from astrid.packs.install import install_pack
+    from astrid.core.pack.store import InstalledPackStore
+    from astrid.core.pack.install import install_pack
 
     store = InstalledPackStore(packs_home=astrid_home / "packs")
     rc = install_pack(

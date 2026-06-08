@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from astrid.packs.validate import PackValidator, validate_pack
+from astrid.core.pack.validate import PackValidator, validate_pack
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BUILTIN_PACK_ROOT = REPO_ROOT / "astrid" / "packs" / "builtin"

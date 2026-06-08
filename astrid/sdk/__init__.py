@@ -92,8 +92,6 @@ from .generation import (
 # Discovery
 # ---------------------------------------------------------------------------
 from .discovery import (
-    discover,
-    get_capability,
     _apply_pack_permission_ids,
     _build_discovery_metadata,
     _candidate_label,
@@ -126,6 +124,8 @@ from .discovery import (
 # Invocation
 # ---------------------------------------------------------------------------
 from .invocation import (
+    discover,
+    get_capability,
     invoke,
     run_executor,
     run_orchestrator,

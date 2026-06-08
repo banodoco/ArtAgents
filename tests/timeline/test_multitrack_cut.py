@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.packs.video_editing.executors.cut import run as cut
-from astrid import timeline
+from astrid.core import timeline
 from astrid.packs.editorial.executors.validate import run as validate
 from astrid.domains.hype.arrangement_rules import ROLE_DURATION_BOUNDS
 

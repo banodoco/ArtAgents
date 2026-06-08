@@ -5,7 +5,7 @@ from argparse import Namespace
 from pathlib import Path
 
 from astrid.packs.video_editing.executors.cut import run as cut
-from astrid import timeline
+from astrid.core import timeline
 
 
 def make_brief_case(testcase, *, quality_zones=None, refine_report=None):

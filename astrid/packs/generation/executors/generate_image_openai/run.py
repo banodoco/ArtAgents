@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main, warn_if_unledgered
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main, warn_if_unledgered
 
 guard_canonical_entrypoint('generation.generate_image_openai')
 import argparse

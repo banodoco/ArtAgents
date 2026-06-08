@@ -33,7 +33,7 @@ from astrid.core.executor.runner import (
     run_executor,
 )
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
-from astrid.core.pack_resolver import PackResolverError
+from astrid.core.pack.resolver import PackResolverError
 from astrid.paths import executor_argv, resolve_executor_runtime_module
 
 # ---------------------------------------------------------------------------
@@ -894,7 +894,7 @@ def test_external_executor_in_process_mode_captures_logs_and_preserves_terminal_
             [
                 "from __future__ import annotations",
                 "import sys",
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "guard_canonical_entrypoint('test.in_process_chatty')",
                 "",
                 "def main(argv=None):",

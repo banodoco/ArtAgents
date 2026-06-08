@@ -44,7 +44,7 @@ def _write_runtime_module(
                 "import json",
                 "import os",
                 "import sys",
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "",
                 "guard_canonical_entrypoint('demo.capability')",
                 "",
@@ -278,7 +278,7 @@ def test_invoke_rejects_non_callable_attribute(
     module_path.write_text(
         "\n".join(
             [
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "guard_canonical_entrypoint('demo.capability')",
                 "main = 'not_callable'",
             ]
@@ -314,7 +314,7 @@ def test_invoke_rejects_missing_main_callable(
     module_path.write_text(
         "\n".join(
             [
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "guard_canonical_entrypoint('demo.capability')",
             ]
         ),
@@ -388,7 +388,7 @@ def test_repeated_invocation_does_not_leak_module_state(
         "\n".join(
             [
                 "from __future__ import annotations",
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "guard_canonical_entrypoint('demo.capability')",
                 "",
                 "_SEEN: list[str] = []",
@@ -439,7 +439,7 @@ def test_invoke_capture_wraps_only_runtime_entrypoint_and_preserves_live_output(
             [
                 "from __future__ import annotations",
                 "import sys",
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "print('import stdout line')",
                 "print('import stderr line', file=sys.stderr)",
                 "guard_canonical_entrypoint('demo.capability')",

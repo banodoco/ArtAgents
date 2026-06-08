@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.animate_image')
 import argparse
@@ -597,7 +597,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    from astrid.packs._canonical_entrypoint import run_pack_main
+    from astrid.core.pack.entrypoint import run_pack_main
 
     raise SystemExit(
         run_pack_main(

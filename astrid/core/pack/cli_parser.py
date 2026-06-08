@@ -40,7 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     M4 T14 documented compatibility case: all command handlers are imported
     through the .cli facade rather than from their canonical modules so that
     existing imports of handlers from ``astrid.core.pack.cli`` (and the
-    ``astrid.packs.cli`` / ``astrid.core.pack_machinery.cli`` compatibility
+    ``astrid.core.pack.cli`` / ``astrid.core.pack.cli`` compatibility
     shims) keep resolving correctly.  The facade module re-exports the
     canonical definitions.
     """

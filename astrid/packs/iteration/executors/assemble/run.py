@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint('iteration.assemble')
 import argparse
@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid import modalities, timeline
+from astrid import modalities
+from astrid.core import timeline
 from astrid.contracts.result_manifest import write_manifest
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.paths import REPO_ROOT

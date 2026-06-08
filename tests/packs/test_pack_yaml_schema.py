@@ -1630,7 +1630,7 @@ aliases:
     def test_aliases_preserved_through_discovery_path(self) -> None:
         """Verify _pack_definition_for_discovery preserves identical aliases."""
         with tempfile.TemporaryDirectory() as tmp:
-            from astrid.packs.validate import PackValidator
+            from astrid.core.pack.validate import PackValidator
 
             pack_root = self._write_pack(
                 Path(tmp),
@@ -1656,7 +1656,7 @@ aliases:
 
     def test_permissions_preserved_through_discovery_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            from astrid.packs.validate import PackValidator
+            from astrid.core.pack.validate import PackValidator
 
             pack_root = self._write_pack(
                 Path(tmp),

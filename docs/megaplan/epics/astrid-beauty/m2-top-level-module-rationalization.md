@@ -90,7 +90,7 @@ placement rather than tribal knowledge.
 - Treat `astrid/pipeline.py` as a special compatibility surface because it uses
   a `sys.modules` identity swap with `astrid.gateway`, not an ordinary re-export
   shim. Any gateway move or split must preserve attribute access through
-  `astrid.pipeline`, including test `mock.patch("astrid.pipeline...")` targets.
+  `astrid.gateway`, including test `mock.patch("astrid.gateway...")` targets.
 - Do not treat `astrid/threads` as dead code. It is a contract-locked internal
   lineage library retained after the roadmap. Any movement must preserve the
   lineage surface or explicitly update the structure contract.
@@ -120,7 +120,7 @@ placement rather than tribal knowledge.
 ## Constraints
 - Public-surface tests must run before and after moves.
 - Before moving gateway or pipeline-adjacent code, add public-import/attribute
-  characterization for `astrid.pipeline`, `astrid.gateway`, deprecated CLI
+  characterization for `astrid.gateway`, `astrid.gateway`, deprecated CLI
   aliases, and known Reigh imports.
 - Avoid touching feature logic while moving modules.
 - Keep import cycles from increasing.

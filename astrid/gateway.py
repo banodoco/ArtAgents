@@ -166,7 +166,7 @@ _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
 # Project resolution constants and helpers live in gateway_project.py.
 # They are re-exported here so the gateway facade remains the canonical
-# access point for all callers (including astrid.pipeline).
+# access point for all callers (including astrid.gateway).
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -333,7 +333,7 @@ def _dispatch(raw: list[str]) -> int:
 # _dispatch_with_resolved_project, _has_cli_option,
 # _invocation_is_auto_bindable_run, and _auto_bind_default_project_session
 # are now defined in gateway_project.py and re-exported at the top of this
-# module so callers (including astrid.pipeline) continue to resolve them
+# module so callers (including astrid.gateway) continue to resolve them
 # through the gateway facade unchanged.
 
 
@@ -359,7 +359,7 @@ def _run_default_brief_orchestrator(argv: list[str]) -> int:
 
 # _packs_subcommand_list and _print_entrypoint_help are now defined in
 # gateway_help.py and re-exported at the top of this module so callers
-# (including gateway_dispatch._dispatch and astrid.pipeline) continue to
+# (including gateway_dispatch._dispatch and astrid.gateway) continue to
 # resolve them through the gateway facade unchanged.
 
 

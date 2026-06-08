@@ -19,19 +19,19 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-from astrid.core.pack_store import (
+from astrid.core.pack.store import (
     InstalledPackStore,
 )
-from astrid.packs import cli as packs_cli
-from astrid.packs.install import (
+from astrid.core.pack import cli as packs_cli
+from astrid.core.pack.install import (
     cmd_install,
     cmd_update,
     install_pack,
     uninstall_pack,
     update_pack,
 )
-from astrid.packs.cli import cmd_list, cmd_inspect
-from astrid.packs.validate import extract_trust_summary, validate_pack
+from astrid.core.pack.cli import cmd_list, cmd_inspect
+from astrid.core.pack.validate import extract_trust_summary, validate_pack
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +68,7 @@ def _make_minimal_pack(root: Path, pack_id: str = "test_pack") -> Path:
     (root / "STAGE.md").write_text("## Purpose\n\nTesting.\n")
     for sub in ("executors", "orchestrators", "elements"):
         (root / sub).mkdir(parents=True, exist_ok=True)
+        (root / sub / ".gitkeep").write_text("", encoding="utf-8")
     return root
 
 
@@ -330,8 +331,8 @@ class TestInstallTrustGate(InstallTestBase):
         store = self._store()
 
         with (
-            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
-            mock.patch("astrid.packs.install._confirm", return_value=False) as confirm_mock,
+            mock.patch("astrid.core.pack.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.core.pack.install._confirm", return_value=False) as confirm_mock,
         ):
             rc = install_pack(src, store=store, trust_acknowledged=True)
 
@@ -343,8 +344,8 @@ class TestInstallTrustGate(InstallTestBase):
         _, store = self._prepare_update("trust_update_flag")
 
         with (
-            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
-            mock.patch("astrid.packs.install._confirm", return_value=False) as confirm_mock,
+            mock.patch("astrid.core.pack.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.core.pack.install._confirm", return_value=False) as confirm_mock,
         ):
             rc = update_pack(
                 "trust_update_flag",
@@ -364,8 +365,8 @@ class TestInstallTrustGate(InstallTestBase):
         store = self._store()
 
         with (
-            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
-            mock.patch("astrid.packs.install._confirm", side_effect=AssertionError("ordinary confirmation should be skipped")),
+            mock.patch("astrid.core.pack.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.core.pack.install._confirm", side_effect=AssertionError("ordinary confirmation should be skipped")),
         ):
             rc = install_pack(
                 src,
@@ -441,8 +442,8 @@ class TestInstallTrustGate(InstallTestBase):
         _, store = self._prepare_update("trust_update_yes_and_trust")
 
         with (
-            mock.patch("astrid.packs.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
-            mock.patch("astrid.packs.install._confirm", side_effect=AssertionError("ordinary confirmation should be skipped")),
+            mock.patch("astrid.core.pack.install._confirm_trust", side_effect=AssertionError("trust prompt should be skipped")),
+            mock.patch("astrid.core.pack.install._confirm", side_effect=AssertionError("ordinary confirmation should be skipped")),
         ):
             rc = update_pack(
                 "trust_update_yes_and_trust",
@@ -517,14 +518,14 @@ class TestInstallTrustGate(InstallTestBase):
     def test_install_update_standalone_parsers_thread_trust_flag(self) -> None:
         src = self._temp_pack("parser_trust")
 
-        with mock.patch("astrid.packs.install.install_pack", return_value=0) as install_mock:
+        with mock.patch("astrid.core.pack.install.install_pack", return_value=0) as install_mock:
             self.assertEqual(cmd_install([str(src), "--yes", "--trust"]), 0)
         self.assertTrue(install_mock.call_args.kwargs["skip_confirm"])
         self.assertTrue(install_mock.call_args.kwargs["trust_acknowledged"])
         self.assertEqual(install_mock.call_args.kwargs["trust_method"], "cli_flag")
         self.assertEqual(install_mock.call_args.kwargs["trust_actor"], "cli")
 
-        with mock.patch("astrid.packs.install.update_pack", return_value=0) as update_mock:
+        with mock.patch("astrid.core.pack.install.update_pack", return_value=0) as update_mock:
             self.assertEqual(cmd_update(["parser_trust", "--yes", "--trust"]), 0)
         self.assertTrue(update_mock.call_args.kwargs["skip_confirm"])
         self.assertTrue(update_mock.call_args.kwargs["trust_acknowledged"])
@@ -534,7 +535,7 @@ class TestInstallTrustGate(InstallTestBase):
     def test_public_pack_cli_threads_trust_flag(self) -> None:
         src = self._temp_pack("public_parser_trust")
 
-        with mock.patch("astrid.packs.install.install_pack", return_value=0) as install_mock:
+        with mock.patch("astrid.core.pack.install.install_pack", return_value=0) as install_mock:
             self.assertEqual(
                 packs_cli.main(["install", str(src), "--yes", "--trust"]),
                 0,
@@ -544,7 +545,7 @@ class TestInstallTrustGate(InstallTestBase):
         self.assertEqual(install_mock.call_args.kwargs["trust_method"], "cli_flag")
         self.assertEqual(install_mock.call_args.kwargs["trust_actor"], "cli")
 
-        with mock.patch("astrid.packs.install.update_pack", return_value=0) as update_mock:
+        with mock.patch("astrid.core.pack.install.update_pack", return_value=0) as update_mock:
             self.assertEqual(
                 packs_cli.main(["update", "public_parser_trust", "--yes", "--trust"]),
                 0,

@@ -22,8 +22,8 @@ compatibility ambiguities, and no obvious layout drift.
   internal threads lineage, public compatibility shims, and docs/current-vs-
   historical framing.
 - Migrate all first-party internal importers off compatibility shim paths such
-  as `astrid._paths`, `astrid._media`, `astrid.core._search`,
-  `astrid.pipeline`, and `astrid.timeline` where a canonical module exists.
+  as `astrid._paths`, `astrid._media`, `astrid.core.search`,
+  `astrid.gateway`, and `astrid.timeline` where a canonical module exists.
 - Remove migration escape hatches that M2 classifies as no-longer-needed, such
   as `ASTRID_AUTHOR_TEST_LEGACY`, `ASTRID_ALLOW_LEGACY_APPEND_EVENT`,
   migration-only legacy decoders, and `LEGACY_ASSIGNEES`, after confirming no

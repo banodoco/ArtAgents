@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Push a locally-materialized hype timeline into a reigh-app row.
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('reigh.open_in_reigh')
 
 
@@ -30,7 +30,7 @@ import shutil
 from pathlib import Path
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import run_pack_main
+from astrid.core.pack.entrypoint import run_pack_main
 from astrid.core.timeline import Timeline
 
 DEFAULT_REIGH_APP = Path("/Users/peteromalley/Documents/reigh-workspace/reigh-app")

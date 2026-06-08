@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid import timeline
+from astrid.core import timeline
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "reshape" / "hype_regression"
 REQUIRED_SMALL_FIXTURES = (

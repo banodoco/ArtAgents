@@ -277,7 +277,7 @@ class TestCLIDispatchRegression(unittest.TestCase):
     """Verify CLI dispatch still works for all critical verbs."""
 
     def test_orchestrators_list_dispatch_works(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
         stdout = io.StringIO()
         import contextlib
         with (
@@ -291,7 +291,7 @@ class TestCLIDispatchRegression(unittest.TestCase):
         self.assertEqual(rc, 0)
 
     def test_executors_list_dispatch_works(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
         stdout = io.StringIO()
         import contextlib
         with (
@@ -305,7 +305,7 @@ class TestCLIDispatchRegression(unittest.TestCase):
         self.assertEqual(rc, 0)
 
     def test_packs_validate_dispatch_works(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
         examples_minimal = Path(__file__).resolve().parent.parent / "examples" / "packs" / "minimal"
         with mock.patch(
             "astrid.core.session.binding.resolve_current_session_with_fs_fallback",

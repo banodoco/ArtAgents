@@ -500,7 +500,6 @@ def _assemble_pack_entry(
 
 __all__ = [
     "build_agent_index",
-    # Re-exported for backward compatibility — used by tests that mock
-    # through the astrid.packs.agent_index shim path.
+    # Re-exported — used by tests that mock through astrid.core.pack.agent_index.
     "_assemble_pack_entry",
 ]

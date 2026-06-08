@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from astrid.packs.rendering.executors.render import run as render_remotion
-from astrid import timeline
+from astrid.core import timeline
 
 
 @pytest.mark.slow

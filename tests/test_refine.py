@@ -7,7 +7,7 @@ from pathlib import Path
 
 from astrid.packs.video_editing.executors.cut import run as cut
 from astrid.packs.editorial.executors.refine import run as refine
-from astrid import timeline
+from astrid.core import timeline
 from astrid.packs.editorial.executors.validate import run as validate
 from astrid.domains.hype.arrangement_rules import TRIM_BOUND_EXTENSION_SEC
 

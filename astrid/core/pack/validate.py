@@ -1112,8 +1112,7 @@ __all__ = [
     "json_loads",
     "validate_first_party_packs_root",
     "validate_pack",
-    # Re-exported for backward compatibility — used by tests that mock
-    # through the astrid.packs.validate shim path.
+    # Re-exported — used by tests that mock through astrid.core.pack.validate.
     "iter_executor_roots",
     "iter_orchestrator_roots",
     "iter_element_roots",

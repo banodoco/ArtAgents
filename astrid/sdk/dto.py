@@ -1,4 +1,4 @@
-"""Public SDK DTOs, result types, and schema record re-exports.
+"""Public SDK DTOs, result types, and schema records.
 
 Consolidates the lightweight data-transfer objects that ``import astrid``
 exposes without loading execution machinery.
@@ -18,7 +18,7 @@ from astrid.contracts.schema import (
 from astrid.core.task.event_stream import (
     EventStreamRecord,
 )
-from astrid.sdk_results import (
+from .results import (
     Capability,
     CapabilityType,
     DiscoveryResult,

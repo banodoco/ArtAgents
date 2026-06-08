@@ -76,7 +76,7 @@ def _make_orchestrator(**overrides) -> OrchestratorDefinition:
         name="Pipeline Orchestrator",
         kind="built_in",
         version="2.0.0",
-        runtime=RuntimeSpec(kind="python", module="astrid.pipeline", function="run"),
+        runtime=RuntimeSpec(kind="python", module="astrid.gateway", function="run"),
         description="Runs the full pipeline",
         short_description="Pipeline runner",
         keywords=("pipeline",),

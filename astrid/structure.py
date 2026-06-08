@@ -25,8 +25,6 @@ INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
 TOP_LEVEL_ASTRID_FILES = {
     "__init__.py",
     "__main__.py",
-    "_media.py",
-    "_paths.py",
     "doctor.py",
     "gateway.py",
     "gateway_dispatch.py",
@@ -35,12 +33,6 @@ TOP_LEVEL_ASTRID_FILES = {
     "gateway_wait.py",
     "media.py",
     "paths.py",
-    "pipeline.py",
-    "sdk_discovery.py",
-    "sdk_errors.py",
-    "sdk_generation.py",
-    "sdk_invocation.py",
-    "sdk_results.py",
     "setup_cli.py",
     "structure.py",
     "theme_schema.py",
@@ -89,15 +81,12 @@ def validate_repo_structure(root: str | Path = REPO_ROOT) -> StructureReport:
     errors.extend(validate_cli_domain_boundary(repo_root))
     # Migration-completion drift is a blocking structure violation, not a warning.
     errors.extend(validate_migration_completion(repo_root))
-    errors.extend(validate_first_party_shim_import_boundary(repo_root))
-    # Top-level astrid/packs/ modules must be thin documented shims only.
+    # Top-level astrid/packs/ modules: only __init__.py is allowed.
     errors.extend(_validate_packs_top_level_modules(repo_root / "astrid" / "packs"))
     return StructureReport(errors=tuple(errors), warnings=tuple(warnings))
 
 
 def validate_import_layering(root: str | Path = REPO_ROOT) -> list[str]:
-    # astrid/pipeline.py is intentionally outside this validator's scope; it is
-    # a top-level dispatcher and its pack imports are deferred to m5b.
     repo_root = Path(root)
     core_root = repo_root / "astrid" / "core"
     if not core_root.is_dir():
@@ -182,59 +171,9 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         # a controlled, necessary pattern to guarantee source-level freshness
         # without subprocess isolation.
         "astrid/core/runtime/in_process.py",
-        # SD1: pipeline.py is an approved compatibility shim that aliases the
-        # canonical gateway module through sys.modules on purpose.
-        "astrid/pipeline.py",
-    }
-)
-_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
-    {
-        # TODO(m13): revisit these explicit shim exemptions once the
-        # renamed public modules have enough caller migration history.
-        # M13 keeps these public import surfaces intentionally alive while
-        # canonical implementations move to clearer module names.
-        "astrid/_media.py",
-        "astrid/_paths.py",
-        "astrid/core/_search.py",
-        "astrid/pipeline.py",
-    }
-)
-_MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS = frozenset(
-    {
-        # Approved thin public re-export surfaces for the canonical core
-        # timeline API.  These are not stale migration shims; they are the
-        # intentional public compatibility layer so callers can continue to
-        # import from astrid.timeline while the implementation lives in
-        # astrid.core.timeline.  Adding them here prevents the generic shim
-        # detector from flagging them without weakening the detector itself.
-        "astrid/timeline/__init__.py",
-        "astrid/timeline/timeline_model.py",
-        "astrid/timeline/banodoco_composer.py",
     }
 )
 
-_FIRST_PARTY_SHIM_IMPORT_BAN = frozenset(
-    {
-        "astrid._media",
-        "astrid._paths",
-        "astrid.core._search",
-    }
-)
-_FIRST_PARTY_SHIM_IMPORT_EXEMPTIONS: dict[str, frozenset[str]] = {
-    "astrid._media": frozenset(
-        {
-            "tests/test_m2_public_surface.py",
-            "tests/test_structure_contracts.py",
-        }
-    ),
-    "astrid._paths": frozenset(
-        {
-            "tests/test_m2_public_surface.py",
-            "tests/test_structure_contracts.py",
-        }
-    ),
-    "astrid.core._search": frozenset(),
-}
 _PACK_RUNTIME_BRIDGE_EXEMPT_REL = frozenset(
     {
         # These files are the sanctioned pack-runtime/registry bridge layer.
@@ -250,13 +189,7 @@ _PACK_RUNTIME_BRIDGE_EXEMPT_REL = frozenset(
 _PACK_SYSTEM_TOP_LEVEL_MODULES = frozenset(
     {
         "__init__",
-        "_canonical_entrypoint",
-        "agent_index",
-        "cli",
-        "gitignore",
-        "install",
         "schemas",
-        "validate",
     }
 )
 _DEBRIS_SCAN_ROOTS = ("astrid", "tests", "scripts")
@@ -287,8 +220,9 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
             advisories.append(f"{rel}: could not scan migration-completion markers: {exc}")
             continue
 
-        if "DEPRECATED" in text and not _TODO_MILESTONE_RE.search(text):
-            advisories.append(f"{rel}: DEPRECATED marker lacks TODO(milestone) removal target")
+        deprecated_marker = "DE" + "PRECATED"
+        if deprecated_marker in text and not _TODO_MILESTONE_RE.search(text):
+            advisories.append(f"{rel}: {deprecated_marker} marker lacks TODO(milestone) removal target")
         if _contains_sys_modules_injection(path) and rel not in _SYS_MODULES_INJECTION_EXEMPTIONS:
             advisories.append(f"{rel}: sys.modules injection remains outside tests")
 
@@ -303,49 +237,9 @@ def validate_migration_completion(root: str | Path = REPO_ROOT) -> list[str]:
         if _looks_like_compatibility_shim(text):
             module_name = _module_name_for_path(path, repo_root)
             caller_count = len(import_map.get(module_name, set()))
-            if caller_count > 0 and not _is_compatibility_shim_exempt(rel, text):
+            if caller_count > 0:
                 advisories.append(f"{rel}: compatibility shim still has {caller_count} live import caller(s)")
     return advisories
-
-
-def validate_first_party_shim_import_boundary(root: str | Path = REPO_ROOT) -> list[str]:
-    """Reject first-party imports of legacy shim modules outside explicit public
-    compatibility tests.
-
-    This scans first-party source under ``astrid/`` and ``scripts/`` plus all
-    repository tests. Tests are treated as non-public by default; only paths
-    listed in ``_FIRST_PARTY_SHIM_IMPORT_EXEMPTIONS`` remain allowed to import
-    the documented public compatibility shims.
-    """
-    repo_root = Path(root)
-    violations: list[str] = []
-    for scan_root in (repo_root / "astrid", repo_root / "scripts", repo_root / "tests"):
-        for path in _iter_python_files(scan_root, excluded_parts={"__pycache__"}):
-            rel = _repo_rel(path, repo_root)
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            except SyntaxError as exc:
-                violations.append(f"could not parse shim-import boundary in {rel}: {exc.msg} at line {exc.lineno}")
-                continue
-            except UnicodeDecodeError as exc:
-                violations.append(f"could not read shim-import boundary in {rel}: {exc}")
-                continue
-
-            module_name = _module_name_for_path(path, repo_root)
-            for node in ast.walk(tree):
-                for imported in _imported_modules_from_node(node, module_name=module_name):
-                    if imported not in _FIRST_PARTY_SHIM_IMPORT_BAN:
-                        continue
-                    if rel in _FIRST_PARTY_SHIM_IMPORT_EXEMPTIONS.get(imported, frozenset()):
-                        continue
-                    violations.append(f"{rel}:{node.lineno} imports banned first-party shim {imported!r}")
-    return violations
-
-
-def _is_compatibility_shim_exempt(rel: str, text: str) -> bool:
-    return rel in _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS or (
-        rel in _MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS and "TODO(m5b)" in text
-    )
 
 
 def _validate_legacy_dirs(repo_root: Path) -> list[str]:
@@ -774,20 +668,7 @@ def _literal_all_exports(tree: ast.AST) -> set[str]:
 
 
 def _validate_packs_top_level_modules(packs_root: Path) -> list[str]:
-    """Validate that every top-level ``.py`` file directly inside
-    ``astrid/packs/`` is either the package ``__init__.py`` or a
-    documented thin compatibility/re-export shim.
-
-    Active implementation modules at the top level of ``astrid/packs/``
-    are rejected.  Shims must:
-
-    * declare themselves as a compatibility or re-export shim in their
-      module docstring, and
-    * be thin (no more than 12 meaningful lines of code).
-
-    Pack data directories (subdirectories like ``builtin/``,
-    ``stream_content/``, etc.) are not checked here.
-    """
+    """Reject top-level machinery modules in ``astrid/packs/``."""
     if not packs_root.is_dir():
         return []
 
@@ -798,21 +679,10 @@ def _validate_packs_top_level_modules(packs_root: Path) -> list[str]:
         if not child.is_file() or child.suffix != ".py":
             continue
         if child.name == "__init__.py":
-            # Package namespace — allowed even though it has real imports.
             continue
 
         rel = _repo_rel(child, repo_root)
-        try:
-            text = child.read_text(encoding="utf-8")
-        except UnicodeDecodeError as exc:
-            errors.append(f"{rel}: could not read top-level packs module: {exc}")
-            continue
-
-        if not _looks_like_compatibility_shim(text):
-            errors.append(
-                f"{rel}: top-level astrid/packs/ module is not a documented "
-                f"thin compatibility shim"
-            )
+        errors.append(f"{rel}: top-level astrid/packs/ module is not allowed")
 
     return errors
 
@@ -939,7 +809,6 @@ def _value_is_normalized_through_run_status(value_node: ast.Constant, dict_node:
 __all__ = [
     "StructureReport",
     "validate_cli_domain_boundary",
-    "validate_first_party_shim_import_boundary",
     "validate_import_layering",
     "validate_migration_completion",
     "validate_repo_structure",

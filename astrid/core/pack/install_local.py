@@ -1,8 +1,7 @@
 """Local install, uninstall, update, and rollback orchestration.
 
-Extracted from ``install.py`` (M4 T20).  ``install.py`` retains
-Git-specific helpers and re-exports these names for backward
-compatibility.
+Extracted from ``install.py`` (M4 T20).  ``install.py`` re-exports
+these names for callers.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ import yaml
 
 from astrid.core.pack import pack_manifest_path
 # Trust helpers are imported via late imports from .install inside each
-# function so that mock.patch("astrid.packs.install._confirm") and similar
+# function so that mock.patch("astrid.core.pack.install._confirm") and similar
 # monkeypatch seams continue to work (M4 T20 / SD3).
 from astrid.core.pack.store import (
     InstalledPackStore,

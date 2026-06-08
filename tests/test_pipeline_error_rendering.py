@@ -7,7 +7,7 @@ import sys
 import textwrap
 from unittest import mock
 
-from astrid import pipeline
+from astrid import gateway
 from astrid.contracts.errors import AstridError
 from astrid.core.project.project import ProjectError
 from astrid.core.project.schema import ProjectValidationError
@@ -147,7 +147,7 @@ def test_subprocess_module_entry_to_renderer_no_traceback() -> None:
     code = textwrap.dedent("""\
         import sys
         from unittest import mock
-        from astrid.pipeline import main
+        from astrid.gateway import main
 
         from astrid.contracts.errors import AstridError
 
@@ -157,7 +157,7 @@ def test_subprocess_module_entry_to_renderer_no_traceback() -> None:
             recovery_command="astrid timelines transition set --kind cross-fade",
             state_snapshot={"project": "demo"},
         )
-        with mock.patch("astrid.pipeline._dispatch", side_effect=err):
+        with mock.patch("astrid.gateway._dispatch", side_effect=err):
             sys.exit(main(["doctor"]))
     """)
     result = subprocess.run(
@@ -180,9 +180,9 @@ def test_subprocess_degraded_bug_envelope_no_traceback() -> None:
     code = textwrap.dedent("""\
         import sys
         from unittest import mock
-        from astrid.pipeline import main
+        from astrid.gateway import main
 
-        with mock.patch("astrid.pipeline._dispatch", side_effect=ValueError("boom")):
+        with mock.patch("astrid.gateway._dispatch", side_effect=ValueError("boom")):
             sys.exit(main(["doctor"]))
     """)
     result = subprocess.run(

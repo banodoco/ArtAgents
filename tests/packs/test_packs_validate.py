@@ -18,7 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.pack import PackValidationError
-from astrid.packs.validate import (
+from astrid.core.pack.validate import (
     PackValidator,
     validate_first_party_packs_root,
     validate_pack,

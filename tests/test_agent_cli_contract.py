@@ -18,7 +18,7 @@ from _lifecycle_fixtures import (  # noqa: E402
     setup_run,
 )
 
-from astrid import pipeline  # noqa: E402
+from astrid import gateway  # noqa: E402
 from astrid.core.project import paths as project_paths  # noqa: E402
 from astrid.core.project.project import create_project  # noqa: E402
 from astrid.core.session import paths as session_paths  # noqa: E402

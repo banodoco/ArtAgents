@@ -217,6 +217,8 @@ def _create_pack_skeleton(pack_id: str) -> int:
     description = f"A pack for {pack_name}."
 
     target.mkdir(parents=False)
+    for dirname in ("executors", "orchestrators", "elements"):
+        (target / dirname).mkdir(parents=False)
 
     pack_yaml = target / "pack.yaml"
     pack_yaml.write_text(
@@ -258,6 +260,9 @@ agent:
 
     created = [
         "pack.yaml",
+        "executors/",
+        "orchestrators/",
+        "elements/",
         "skill/SKILL.md",
     ]
     for rel in created:

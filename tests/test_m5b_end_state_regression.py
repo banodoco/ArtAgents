@@ -408,7 +408,7 @@ class DefaultBriefRoutingIsExplicitTest(unittest.TestCase):
         """Arbitrary unknown argv must NOT invoke default hype."""
         import io
 
-        from astrid import pipeline as pipeline_mod
+        from astrid import gateway as pipeline_mod
 
         # Simulate an unrecognized verb.
         stdout = io.StringIO()

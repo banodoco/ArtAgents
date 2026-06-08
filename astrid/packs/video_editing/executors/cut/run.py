@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 from astrid.contracts.result_manifest import write_manifest
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.cut')
 import argparse

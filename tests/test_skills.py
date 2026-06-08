@@ -580,7 +580,7 @@ class InstalledDiscoveryTest(unittest.TestCase):
         with TemporaryDirectory() as tmp:
             pack_root = self._write_installed_pack(Path(tmp), "installed_demo")
             with mock.patch(
-                "astrid.core.pack_store.installed_pack_roots",
+                "astrid.core.pack.store.installed_pack_roots",
                 return_value=(pack_root,),
             ):
                 descriptors = discovery.list_skills()
@@ -598,7 +598,7 @@ class InstalledDiscoveryTest(unittest.TestCase):
             scan_dir = root / "scan"
             scan_dir.mkdir()
             with mock.patch(
-                "astrid.core.pack_store.installed_pack_roots",
+                "astrid.core.pack.store.installed_pack_roots",
                 return_value=(pack_root,),
             ):
                 descriptors = discovery.list_skills(scan_dir)

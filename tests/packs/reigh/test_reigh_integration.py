@@ -47,7 +47,7 @@ import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from astrid import timeline as timeline_mod
+from astrid.core import timeline as timeline_mod
 from astrid.core.reigh import worker_jwt
 from astrid.core.reigh.data_provider import SupabaseDataProvider
 from astrid.core.reigh.errors import (

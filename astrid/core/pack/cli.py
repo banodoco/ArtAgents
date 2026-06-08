@@ -4,15 +4,11 @@ This is the canonical home for the ``astrid packs`` CLI machinery,
 moved from ``astrid/packs/cli.py`` during M1 Pack Layout Normalization
 (Plan v1.0).
 
-The ``astrid.core.pack_machinery.cli`` and ``astrid.packs.cli`` modules
-are now thin compatibility re-export shims. All new imports should
-target this module directly.
-
 M4 giant-file split: ``build_parser`` moved to ``.cli_parser``,
 validate/new/list/status handlers moved to ``.cli_basic``, inspect helpers
 moved to ``.cli_inspect``, and agent-index/search handlers moved to
-``.cli_search``.  This module remains a facade that re-exports the
-canonical definitions.
+``.cli_search``.  This module re-exports the canonical definitions from
+each split module.
 """
 
 from __future__ import annotations
@@ -29,9 +25,8 @@ from astrid.core.pack import PackDefinition
 # Basic handlers (validate, new, list, status) are now defined in cli_basic.
 # Inspect helpers are now defined in cli_inspect.
 # Agent-index and search handlers are now defined in cli_search.
-# Everything is re-exported here so that ``astrid.packs.cli`` and
-# ``astrid.core.pack_machinery.cli`` compatibility shims (which use
-# ``from astrid.core.pack.cli import *``) continue to resolve correctly.
+# Everything is re-exported here so that callers can import from the single
+# ``astrid.core.pack.cli`` namespace.
 from .cli_parser import build_parser, _add_taxonomy_filter_args  # noqa: E402, F401
 from .cli_basic import (  # noqa: E402, F401
     _create_pack_skeleton,
@@ -81,7 +76,7 @@ from .cli_search import (  # noqa: E402, F401
     _SEARCH_FIELD_WEIGHTS,
 )
 
-# ── Re-exports for backward compatibility — tests access via cli namespace ──
+# ── Re-exports from validate — tests access via cli namespace ──
 from astrid.core.pack.validate import (  # noqa: E402, F401
     extract_trust_summary,
     validate_pack,
@@ -193,8 +188,7 @@ __all__ = [
     "cmd_new",
     "cmd_validate",
     "main",
-    # Re-exported for backward compatibility — used by tests that mock
-    # through the astrid.packs.cli shim path.
+    # Re-exported — used by tests that mock through the astrid.core.pack.cli path.
     "extract_trust_summary",  # imported from validate, tests access via cli
     "validate_pack",  # imported from validate, available via cli namespace
     "_PACK_ID_RE",

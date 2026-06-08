@@ -11,7 +11,7 @@ from astrid.core.generation.backends.registry import (
     load_default_generation_backend_registry,
 )
 from astrid.core.model_catalog.registry import ModelRegistry
-from astrid.core.pack_discovery import ASTRID_PACKS_PATH_ENV
+from astrid.core.pack.discovery import ASTRID_PACKS_PATH_ENV
 from tests.fixtures.third_party_helpers import (
     SYNTHETIC_BACKEND_CLASS,
     SYNTHETIC_BACKEND_ID,

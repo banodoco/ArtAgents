@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from astrid.orchestrate import code, json_file, orchestrator
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint("text_analysis.summarize")
 

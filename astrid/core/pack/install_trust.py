@@ -2,7 +2,7 @@
 
 Extracted from ``astrid.core.pack.install`` during M4 giant-file
 decomposition.  Public names remain importable from ``install.py``
-so that existing ``mock.patch`` seams on ``astrid.packs.install.*``
+so that existing ``mock.patch`` seams on ``astrid.core.pack.install.*``
 continue to work.
 """
 

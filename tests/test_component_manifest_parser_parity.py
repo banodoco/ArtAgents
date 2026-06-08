@@ -9,12 +9,12 @@ from astrid.core.element.registry import load_default_registry as load_default_e
 from astrid.core.element.schema import load_element_definition
 from astrid.core.executor.registry import load_default_registry as load_default_executor_registry
 from astrid.core.executor.schema import load_executor_manifest
-from astrid.core.manifest import load_manifest_mapping
+from astrid.core.pack.manifest import load_manifest_mapping
 from astrid.core.orchestrator.registry import (
     load_default_registry as load_default_orchestrator_registry,
 )
 from astrid.core.orchestrator.schema import load_orchestrator_manifest
-from astrid.packs.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
+from astrid.core.pack.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
 from astrid.paths import REPO_ROOT
 
 PACKS_ROOT = REPO_ROOT / "astrid" / "packs"

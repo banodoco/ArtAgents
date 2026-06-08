@@ -10,7 +10,7 @@ Features are validated per-mode (SD-003).
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, warn_if_unledgered
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint, warn_if_unledgered
 
 guard_canonical_entrypoint('generation.generate_image')
 import argparse

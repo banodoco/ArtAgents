@@ -21,7 +21,7 @@ from typing import Any
 
 import pytest
 
-from astrid import timeline as timeline_contract
+from astrid.core import timeline as timeline_contract
 from astrid.core.project import paths as project_paths
 from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import create_project

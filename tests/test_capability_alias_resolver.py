@@ -15,7 +15,7 @@ import pytest
 
 from astrid.core import AliasResolutionError as AliasResolutionErrorFromCore
 from astrid.core import AliasResolver as AliasResolverFromCore
-from astrid.core.alias_resolver import (
+from astrid.core.pack.alias_resolver import (
     AliasResolutionError,
     AliasResolver,
     _register_pack_aliases,

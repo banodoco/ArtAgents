@@ -3391,7 +3391,7 @@ astrid = importlib.import_module("astrid")
 heavy = (
     "astrid.sdk",
     "astrid.core.pack",
-    "astrid.core.pack_discovery",
+    "astrid.core.pack.discovery",
     "astrid.core.generation.verbs",
 )
 for mod in heavy:
@@ -3424,7 +3424,7 @@ print(f"PLUGINS_LOADED={_v._plugins_loaded}")
         f"astrid.core.pack loaded eagerly: {stdout!r}"
     )
     assert "MOD_astrid_core_pack_discovery=False" in stdout, (
-        f"astrid.core.pack_discovery loaded eagerly: {stdout!r}"
+        f"astrid.core.pack.discovery loaded eagerly: {stdout!r}"
     )
     assert "PLUGINS_LOADED=False" in stdout, (
         f"Plugins loaded eagerly: {stdout!r}"

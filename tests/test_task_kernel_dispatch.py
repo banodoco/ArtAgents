@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid import pipeline
+from astrid import gateway
 from astrid.contracts.errors import AstridError
 from astrid.core.adapter import DispatchResult
 from astrid.core.adapter import local as local_adapter_module
@@ -140,7 +140,7 @@ def _setup_active_plan(tmp_projects_root: Path, *, command: str) -> None:
     )
     from astrid.core.project.jsonio import write_json_atomic
     from astrid.core.project.schema import build_run_record
-    from astrid import timeline as timeline_contract
+    from astrid.core import timeline as timeline_contract
     from astrid.threads.ids import generate_ulid
 
     timeline_id = generate_ulid()

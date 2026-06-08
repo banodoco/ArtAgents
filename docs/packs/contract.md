@@ -135,7 +135,7 @@ move capabilities, add alias manifests, or implement alias resolution.
 This section describes what exists today. It is intentionally broader than the
 target discovery contract below.
 
-- `astrid/core/pack.py` loads every immediate child of `astrid/packs/` with a
+- `astrid/core/pack/discovery.py` loads every immediate child of `astrid/packs/` with a
   `pack.yaml`, `pack.yml`, or `pack.json` manifest. It validates the pack id and
   folder-name match, but it does not enforce the richer v1 authoring schema or
   content-root declarations.
@@ -203,11 +203,11 @@ enforcement.
 
 The current system has two related but different pack paths:
 
-- `astrid/core/pack.py`: permissive runtime loading. It should keep current
+- `astrid/core/pack/discovery.py`: permissive runtime loading. It should keep current
   in-repo packs working while later milestones teach it the richer contract.
   Its job is to find loadable pack manifests and provide normalized runtime
   pack definitions; it should not become the authoring linter or policy manual.
-- `astrid/packs/validate.py`: author-facing static validation. It should own
+- `astrid/core/pack/validate.py`: author-facing static validation. It should own
   schema-version checks, declared content-root checks, doc/entrypoint existence
   checks, and clear builder-facing errors without importing or running pack
   code.

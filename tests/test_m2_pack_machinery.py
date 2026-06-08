@@ -1,9 +1,8 @@
 """M2 pack-machinery characterization tests.
 
-Captures the pre-M2 pack import surface, module identity contracts,
-``astrid.packs`` shim resolution, patch seams (install, validate),
-and the ``astrid/packs/`` data-tree layout so that M2 structural
-changes can be verified against a known baseline.
+Captures the canonical pack import surface, module contracts,
+patch seams (install), and the ``astrid/packs/`` data-tree layout
+so that structural changes can be verified against a known baseline.
 
 These are characterization tests — they test current behavior without
 changing it.  No assertion here should be a "fix."
@@ -158,15 +157,14 @@ class PackCoreExportsTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.core.pack and astrid.core.pack_machinery submodule imports
+# astrid.core.pack submodule imports (canonical paths)
 # ---------------------------------------------------------------------------
 
-class PackMachineryModulesTest(unittest.TestCase):
-    """Canonical pack modules and pack_machinery shims must be importable."""
+class PackSubmoduleImportsTest(unittest.TestCase):
+    """Canonical pack submodules must be importable."""
 
     def test_cli_importable(self) -> None:
-        import astrid.core.pack.cli as canonical
-        import astrid.core.pack_machinery.cli as cli
+        import astrid.core.pack.cli as cli
 
         for name in (
             "build_parser",
@@ -178,13 +176,11 @@ class PackMachineryModulesTest(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(cli, name), f"cli missing {name}")
-                self.assertIs(getattr(cli, name), getattr(canonical, name))
 
         self.assertTrue(callable(cli.build_parser))
 
     def test_validate_importable(self) -> None:
-        import astrid.core.pack.validate as canonical
-        import astrid.core.pack_machinery.validate as v
+        import astrid.core.pack.validate as v
 
         for name in (
             "PackValidator",
@@ -210,231 +206,46 @@ class PackMachineryModulesTest(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(v, name), f"validate missing {name}")
-                self.assertIs(getattr(v, name), getattr(canonical, name))
 
     def test_agent_index_importable(self) -> None:
-        import astrid.core.pack.agent_index as canonical
-        import astrid.core.pack_machinery.agent_index as ai
+        import astrid.core.pack.agent_index as ai
 
         self.assertTrue(hasattr(ai, "build_agent_index"))
         self.assertTrue(callable(ai.build_agent_index))
         self.assertTrue(hasattr(ai, "_assemble_pack_entry"))
-        self.assertIs(ai.build_agent_index, canonical.build_agent_index)
-        self.assertIs(ai._assemble_pack_entry, canonical._assemble_pack_entry)
 
     def test_gitignore_importable(self) -> None:
-        import astrid.core.pack.gitignore as canonical
-        import astrid.core.pack_machinery.gitignore as gi
+        import astrid.core.pack.gitignore as gi
 
         self.assertTrue(hasattr(gi, "GitIgnoreFilter"))
         self.assertTrue(hasattr(gi, "gitignore_filter"))
         self.assertTrue(callable(gi.gitignore_filter))
-        self.assertIs(gi.GitIgnoreFilter, canonical.GitIgnoreFilter)
-        self.assertIs(gi.gitignore_filter, canonical.gitignore_filter)
 
-    def test_install_shim_importable(self) -> None:
-        """pack_machinery.install is now an alias to astrid.core.pack.install."""
-        import astrid.core.pack.install as canonical
-        import astrid.core.pack_machinery.install as inst
+    def test_install_importable(self) -> None:
+        """astrid.core.pack.install is the canonical install module."""
+        import astrid.core.pack.install as inst
 
-        self.assertIs(inst, canonical)
+        self.assertIsNotNone(inst)
 
-    def test_machinery_init_empty(self) -> None:
-        """pack_machinery/__init__.py is deliberately empty (docs-only)."""
-        import astrid.core.pack_machinery
+    def test_pack_module_is_a_package(self) -> None:
+        """astrid.core.pack is a package namespace."""
+        import astrid.core.pack
 
-        # It should exist but with no substantive exports
-        self.assertIsNotNone(astrid.core.pack_machinery)
-
-
-# ---------------------------------------------------------------------------
-# astrid.packs shim resolution — each shim delegates to pack_machinery
-# ---------------------------------------------------------------------------
-
-class PacksShimResolutionTest(unittest.TestCase):
-    """Each ``astrid.packs.*`` shim must delegate to its core.pack canonical (through pack_machinery)."""
-
-    def test_cli_shim_delegates_to_machinery(self) -> None:
-        import astrid.core.pack_machinery.cli as machinery
-        import astrid.packs.cli as shim
-
-        # The shim imports from ``astrid.core.pack.cli``; machinery also
-        # delegates there, so key public names should be the same object.
-        for name in ("build_parser", "cmd_new", "cmd_validate", "main"):
-            with self.subTest(name=name):
-                self.assertIs(
-                    getattr(shim, name),
-                    getattr(machinery, name),
-                    f"astrid.packs.cli.{name} must be the same as "
-                    f"astrid.core.pack_machinery.cli.{name}",
-                )
-
-    def test_validate_shim_delegates_to_machinery(self) -> None:
-        import astrid.core.pack_machinery.validate as machinery
-        import astrid.packs.validate as shim
-
-        for name in (
-            "PackValidator",
-            "PackLayoutContractError",
-            "PackLayoutException",
-            "LayoutValidationIssue",
-            "ValidationError",
-            "V1_TRUST_BLOCK",
-            "extract_trust_summary",
-            "validate_pack",
-            "validate_first_party_packs_root",
-        ):
-            with self.subTest(name=name):
-                self.assertIs(
-                    getattr(shim, name),
-                    getattr(machinery, name),
-                    f"astrid.packs.validate.{name} must be the same as "
-                    f"astrid.core.pack_machinery.validate.{name}",
-                )
-
-    def test_agent_index_shim_delegates_to_machinery(self) -> None:
-        import astrid.core.pack_machinery.agent_index as machinery
-        import astrid.packs.agent_index as shim
-
-        self.assertIs(
-            shim.build_agent_index,
-            machinery.build_agent_index,
-            "astrid.packs.agent_index.build_agent_index must be the same as "
-            "astrid.core.pack_machinery.agent_index.build_agent_index",
-        )
-        self.assertIs(
-            shim._assemble_pack_entry,
-            machinery._assemble_pack_entry,
-            "astrid.packs.agent_index._assemble_pack_entry must be the same as "
-            "astrid.core.pack_machinery.agent_index._assemble_pack_entry",
+        self.assertIsNotNone(
+            getattr(astrid.core.pack, "__path__", None),
+            "astrid.core.pack should expose a package path for submodules",
         )
 
-    def test_gitignore_shim_delegates_to_machinery(self) -> None:
-        import astrid.core.pack_machinery.gitignore as machinery
-        import astrid.packs.gitignore as shim
-
-        self.assertIs(
-            shim.GitIgnoreFilter,
-            machinery.GitIgnoreFilter,
-            "astrid.packs.gitignore.GitIgnoreFilter must be the same as "
-            "astrid.core.pack_machinery.gitignore.GitIgnoreFilter",
-        )
-        self.assertIs(
-            shim.gitignore_filter,
-            machinery.gitignore_filter,
-            "astrid.packs.gitignore.gitignore_filter must be the same as "
-            "astrid.core.pack_machinery.gitignore.gitignore_filter",
-        )
-
-    def test_install_shims_delegate_to_canonical_module(self) -> None:
-        """Legacy install paths alias the canonical core.pack module."""
-        import astrid.core.pack.install as canonical
-        import astrid.core.pack_machinery.install as machinery_reexport
-        import astrid.packs.install as public_shim
-
-        self.assertIs(machinery_reexport, canonical)
-        self.assertIs(public_shim, canonical)
-
-        for name in (
-            "cmd_install",
-            "cmd_update",
-            "cmd_uninstall",
-            "cmd_rollback",
-            "install_pack",
-            "update_pack",
-            "uninstall_pack",
-            "rollback_pack",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(
-                    hasattr(canonical, name),
-                    f"astrid.core.pack.install missing {name}",
-                )
-                self.assertIs(getattr(public_shim, name), getattr(canonical, name))
-                self.assertIs(getattr(machinery_reexport, name), getattr(canonical, name))
-
 
 # ---------------------------------------------------------------------------
-# astrid.packs.__init__ shim exports
+# astrid.core.pack sub-submodules (discovery, resolver, store)
 # ---------------------------------------------------------------------------
 
-class PacksInitShimTest(unittest.TestCase):
-    """``astrid.packs.__init__`` must re-export selected public names."""
-
-    def test_init_all_exports(self) -> None:
-        import astrid.packs
-
-        expected = {
-            "GitIgnoreFilter",
-            "build_agent_index",
-            "cmd_install",
-            "cmd_rollback",
-            "cmd_uninstall",
-            "cmd_update",
-            "gitignore_filter",
-            "install_pack",
-            "rollback_pack",
-            "uninstall_pack",
-            "update_pack",
-        }
-        for name in expected:
-            with self.subTest(name=name):
-                self.assertTrue(
-                    hasattr(astrid.packs, name),
-                    f"astrid.packs missing {name}",
-                )
-
-    def test_init_exports_are_callable_or_usable(self) -> None:
-        import astrid.packs
-
-        # install functions
-        for name in (
-            "cmd_install",
-            "cmd_rollback",
-            "cmd_uninstall",
-            "cmd_update",
-            "install_pack",
-            "rollback_pack",
-            "uninstall_pack",
-            "update_pack",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(
-                    callable(getattr(astrid.packs, name)),
-                    f"astrid.packs.{name} must be callable",
-                )
-
-        # build_agent_index
-        self.assertTrue(callable(astrid.packs.build_agent_index))
-
-        # GitIgnoreFilter is a class
-        self.assertTrue(isinstance(astrid.packs.GitIgnoreFilter, type))
-
-    def test_same_object_as_source_module(self) -> None:
-        """Confirm the re-export is the same object, not a copy."""
-        import astrid.packs
-        from astrid.core.pack_machinery.agent_index import build_agent_index as ai_bi
-        from astrid.core.pack_machinery.gitignore import (
-            GitIgnoreFilter as gi_GIF,
-            gitignore_filter as gi_gf,
-        )
-        from astrid.packs.install import install_pack as inst_ip
-
-        self.assertIs(astrid.packs.build_agent_index, ai_bi)
-        self.assertIs(astrid.packs.GitIgnoreFilter, gi_GIF)
-        self.assertIs(astrid.packs.gitignore_filter, gi_gf)
-        self.assertIs(astrid.packs.install_pack, inst_ip)
-
-
-# ---------------------------------------------------------------------------
-# Loose pack modules (astrid.core.pack_discovery, pack_resolver, pack_store)
-# ---------------------------------------------------------------------------
-
-class LoosePackModulesTest(unittest.TestCase):
-    """The loose ``astrid.core.pack_*`` modules must be importable pre-M2."""
+class PackSubSubmodulesTest(unittest.TestCase):
+    """Canonical ``astrid.core.pack.*`` sub-submodules must be importable."""
 
     def test_pack_discovery_importable(self) -> None:
-        import astrid.core.pack_discovery as pd
+        import astrid.core.pack.discovery as pd
 
         for name in (
             "DiscoveredPack",
@@ -445,13 +256,13 @@ class LoosePackModulesTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(
                     hasattr(pd, name),
-                    f"astrid.core.pack_discovery missing {name}",
+                    f"astrid.core.pack.discovery missing {name}",
                 )
 
         self.assertTrue(callable(pd.discover_pack_metadata))
 
     def test_pack_resolver_importable(self) -> None:
-        import astrid.core.pack_resolver as pr
+        import astrid.core.pack.resolver as pr
 
         for name in (
             "PackResolverError",
@@ -462,197 +273,131 @@ class LoosePackModulesTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(
                     hasattr(pr, name),
-                    f"astrid.core.pack_resolver missing {name}",
+                    f"astrid.core.pack.resolver missing {name}",
                 )
 
         self.assertTrue(issubclass(pr.PackResolverError, RuntimeError))
         self.assertTrue(issubclass(pr.CallableNotFoundError, pr.PackResolverError))
 
     def test_pack_store_importable(self) -> None:
-        import astrid.core.pack_store as ps
+        import astrid.core.pack.store as ps
 
         for name in ("InstallRecord", "InstalledPackStore"):
             with self.subTest(name=name):
                 self.assertTrue(
                     hasattr(ps, name),
-                    f"astrid.core.pack_store missing {name}",
+                    f"astrid.core.pack.store missing {name}",
                 )
 
-    def test_loose_modules_are_not_packages(self) -> None:
-        """Pre-M2, the loose pack_* modules are .py files, not packages."""
+    def test_submodules_importable_as_modules(self) -> None:
+        """discovery, resolver, store are importable under astrid.core.pack."""
         for module_path in (
-            "astrid.core.pack_discovery",
-            "astrid.core.pack_resolver",
-            "astrid.core.pack_store",
+            "astrid.core.pack.discovery",
+            "astrid.core.pack.resolver",
+            "astrid.core.pack.store",
         ):
             with self.subTest(module=module_path):
                 mod = __import__(module_path, fromlist=["__path__"])
-                self.assertIsNone(
-                    getattr(mod, "__path__", None),
-                    f"Pre-M2: {module_path} must be a module, not a package",
-                )
+                self.assertIsNotNone(mod)
 
 
 # ---------------------------------------------------------------------------
-# Patch seams — install
+# Patch seams — install (canonical)
 # ---------------------------------------------------------------------------
 
 class PackInstallPatchSeamsTest(unittest.TestCase):
-    """``mock.patch('astrid.packs.install.*')`` targets must resolve."""
+    """``mock.patch('astrid.core.pack.install.*')`` targets must resolve."""
 
     def test_patch_install_confirm_trust_resolves(self) -> None:
-        """Patching _confirm_trust through astrid.packs.install must work."""
-        import astrid.packs.install
+        """Patching _confirm_trust through astrid.core.pack.install must work."""
+        import astrid.core.pack.install
 
         self.assertTrue(
-            hasattr(astrid.packs.install, "_confirm_trust"),
-            "_confirm_trust must exist on astrid.packs.install",
+            hasattr(astrid.core.pack.install, "_confirm_trust"),
+            "_confirm_trust must exist on astrid.core.pack.install",
         )
-        self.assertTrue(callable(astrid.packs.install._confirm_trust))
+        self.assertTrue(callable(astrid.core.pack.install._confirm_trust))
 
         with mock.patch(
-            "astrid.packs.install._confirm_trust",
+            "astrid.core.pack.install._confirm_trust",
             return_value=True,
         ) as patched:
-            result = astrid.packs.install._confirm_trust("dummy")
+            result = astrid.core.pack.install._confirm_trust("dummy")
             self.assertTrue(result)
             patched.assert_called_once_with("dummy")
 
     def test_patch_install_confirm_resolves(self) -> None:
-        """Patching _confirm through astrid.packs.install must work."""
-        import astrid.packs.install
+        """Patching _confirm through astrid.core.pack.install must work."""
+        import astrid.core.pack.install
 
         self.assertTrue(
-            hasattr(astrid.packs.install, "_confirm"),
-            "_confirm must exist on astrid.packs.install",
+            hasattr(astrid.core.pack.install, "_confirm"),
+            "_confirm must exist on astrid.core.pack.install",
         )
 
         with mock.patch(
-            "astrid.packs.install._confirm",
+            "astrid.core.pack.install._confirm",
             return_value=True,
         ) as patched:
-            result = astrid.packs.install._confirm("prompt")
+            result = astrid.core.pack.install._confirm("prompt")
             self.assertTrue(result)
             patched.assert_called_once_with("prompt")
 
     def test_patch_install_pack_resolves(self) -> None:
-        """Patching install_pack through astrid.packs.install must work."""
-        import astrid.packs.install
+        """Patching install_pack through astrid.core.pack.install must work."""
+        import astrid.core.pack.install
 
         with mock.patch(
-            "astrid.packs.install.install_pack",
+            "astrid.core.pack.install.install_pack",
             return_value=0,
         ) as patched:
-            result = astrid.packs.install.install_pack(Path("/tmp"))
+            result = astrid.core.pack.install.install_pack(Path("/tmp"))
             self.assertEqual(result, 0)
             patched.assert_called_once_with(Path("/tmp"))
 
     def test_patch_update_pack_resolves(self) -> None:
-        """Patching update_pack through astrid.packs.install must work."""
-        import astrid.packs.install
+        """Patching update_pack through astrid.core.pack.install must work."""
+        import astrid.core.pack.install
 
         with mock.patch(
-            "astrid.packs.install.update_pack",
+            "astrid.core.pack.install.update_pack",
             return_value=0,
         ) as patched:
-            result = astrid.packs.install.update_pack("test_pack")
+            result = astrid.core.pack.install.update_pack("test_pack")
             self.assertEqual(result, 0)
             patched.assert_called_once_with("test_pack")
 
 
 # ---------------------------------------------------------------------------
-# Patch seams — validate
-# ---------------------------------------------------------------------------
-
-class PackValidatePatchSeamsTest(unittest.TestCase):
-    """``astrid.packs.validate.iter_*_roots`` must be patchable pre-M2."""
-
-    def test_iter_executor_roots_through_validate_shim(self) -> None:
-        """iter_executor_roots is re-exported by validate for patch compatibility."""
-        import astrid.packs.validate
-
-        self.assertTrue(
-            hasattr(astrid.packs.validate, "iter_executor_roots"),
-            "iter_executor_roots must be on astrid.packs.validate for "
-            "backward compatibility with tests that patch through the shim",
-        )
-
-        from astrid.core.pack import iter_executor_roots as canonical
-
-        self.assertIs(
-            astrid.packs.validate.iter_executor_roots,
-            canonical,
-            "astrid.packs.validate.iter_executor_roots must be the same as "
-            "astrid.core.pack.iter_executor_roots",
-        )
-
-    def test_iter_orchestrator_roots_through_validate_shim(self) -> None:
-        import astrid.packs.validate
-
-        self.assertTrue(hasattr(astrid.packs.validate, "iter_orchestrator_roots"))
-
-        from astrid.core.pack import iter_orchestrator_roots as canonical
-
-        self.assertIs(
-            astrid.packs.validate.iter_orchestrator_roots,
-            canonical,
-        )
-
-    def test_iter_element_roots_through_validate_shim(self) -> None:
-        import astrid.packs.validate
-
-        self.assertTrue(hasattr(astrid.packs.validate, "iter_element_roots"))
-
-        from astrid.core.pack import iter_element_roots as canonical
-
-        self.assertIs(
-            astrid.packs.validate.iter_element_roots,
-            canonical,
-        )
-
-    def test_validate_pack_patchable(self) -> None:
-        """Patching validate_pack through astrid.packs.validate must work."""
-        import astrid.packs.validate
-
-        with mock.patch(
-            "astrid.packs.validate.validate_pack",
-            return_value=("ok", []),
-        ) as patched:
-            result = astrid.packs.validate.validate_pack(Path("/tmp"))
-            self.assertEqual(result, ("ok", []))
-            patched.assert_called_once_with(Path("/tmp"))
-
-
-# ---------------------------------------------------------------------------
-# astrid.packs._canonical_entrypoint shim
+# astrid.core.pack.entrypoint shim
 # ---------------------------------------------------------------------------
 
 class CanonicalEntrypointShimTest(unittest.TestCase):
-    """``astrid.packs._canonical_entrypoint`` must export guard helpers."""
+    """``astrid.core.pack.entrypoint`` must export guard helpers."""
 
     def test_guard_canonical_entrypoint_importable(self) -> None:
-        from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+        from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
         self.assertTrue(callable(guard_canonical_entrypoint))
 
     def test_run_pack_main_importable(self) -> None:
-        from astrid.packs._canonical_entrypoint import run_pack_main
+        from astrid.core.pack.entrypoint import run_pack_main
 
         self.assertTrue(callable(run_pack_main))
 
     def test_warn_if_unledgered_importable(self) -> None:
-        from astrid.packs._canonical_entrypoint import warn_if_unledgered
+        from astrid.core.pack.entrypoint import warn_if_unledgered
 
         self.assertTrue(callable(warn_if_unledgered))
 
     def test_canonical_runtime_entrypoint_importable(self) -> None:
-        from astrid.packs._canonical_entrypoint import canonical_runtime_entrypoint
+        from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 
         self.assertTrue(callable(canonical_runtime_entrypoint))
 
     def test_guard_canonical_entrypoint_allows_internal_invocation(self) -> None:
         """When ASTRID_INTERNAL_INVOCATION is set, the guard passes silently."""
-        from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+        from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
         with mock.patch.dict(os.environ, {"ASTRID_INTERNAL_INVOCATION": "1"}):
             # Should not raise or exit
@@ -660,7 +405,7 @@ class CanonicalEntrypointShimTest(unittest.TestCase):
 
     def test_guard_canonical_entrypoint_rejects_direct_invocation(self) -> None:
         """Without ASTRID_INTERNAL_INVOCATION, the guard should exit(2)."""
-        from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+        from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaises(SystemExit) as ctx:
@@ -699,24 +444,6 @@ class PacksDataTreeTest(unittest.TestCase):
                     f"astrid/packs/{pack_id} must exist as a pack data directory",
                 )
 
-    def test_implementation_shim_modules_exist(self) -> None:
-        """The compatibility shim .py files must exist in astrid/packs/."""
-        for name in (
-            "__init__.py",
-            "cli.py",
-            "validate.py",
-            "agent_index.py",
-            "install.py",
-            "gitignore.py",
-            "_canonical_entrypoint.py",
-        ):
-            shim_path = self._PACKS_ROOT / name
-            with self.subTest(shim=name):
-                self.assertTrue(
-                    shim_path.is_file(),
-                    f"astrid/packs/{name} must exist as a compatibility shim",
-                )
-
     def test_pack_manifests_exist_in_shipped_packs(self) -> None:
         """Shipped pack directories must each contain a pack manifest."""
         for pack_id in ("stream_content", "comfy_wrap", "text_analysis"):
@@ -753,7 +480,7 @@ class PackSchemasAccessTest(unittest.TestCase):
     """Validate module must expose KNOWN_SCHEMA_VERSIONS and schema constants."""
 
     def test_known_schema_versions_available(self) -> None:
-        from astrid.core.pack_machinery.validate import KNOWN_SCHEMA_VERSIONS
+        from astrid.core.pack.validate import KNOWN_SCHEMA_VERSIONS
 
         # KNOWN_SCHEMA_VERSIONS maps version int → dict of schema name → Path.
         # We characterise the container type and key presence here.
@@ -767,7 +494,7 @@ class PackSchemasAccessTest(unittest.TestCase):
                 self.assertIn(key, v1_schemas)
 
     def test_canonical_layout_rules_exist(self) -> None:
-        from astrid.core.pack_machinery.validate import (
+        from astrid.core.pack.validate import (
             CANONICAL_PACK_LAYOUT_RULES,
             CanonicalLayoutRule,
         )
@@ -780,7 +507,7 @@ class PackSchemasAccessTest(unittest.TestCase):
                 self.assertIsInstance(rule, CanonicalLayoutRule)
 
     def test_v1_trust_block_available(self) -> None:
-        from astrid.core.pack_machinery.validate import V1_TRUST_BLOCK
+        from astrid.core.pack.validate import V1_TRUST_BLOCK
 
         # V1_TRUST_BLOCK is a dict mapping trust metadata keys to values.
         self.assertIsInstance(V1_TRUST_BLOCK, dict)

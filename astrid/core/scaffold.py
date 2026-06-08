@@ -7,7 +7,7 @@ that logic is identical; it lives here so neither CLI has to import private
 symbols across the executor/orchestrator package boundary (which previously
 forced a circular-import workaround in ``orchestrator/cli.py``).
 
-The pack-validation step imports :mod:`astrid.packs.validate` lazily inside
+The pack-validation step imports :mod:`astrid.core.pack.validate` lazily inside
 :func:`scaffold_component` so that ``astrid.core`` keeps its import-layering
 contract (no top-level ``astrid.packs`` import from ``core``) and so scaffold
 commands never load the built-in registry or pack code at import time.
@@ -91,7 +91,7 @@ def scaffold_component(
         Exit code (0 on success, non-zero on failure).
     """
     from importlib import import_module as _import_module
-    validate_pack = _import_module('astrid.packs.validate').validate_pack
+    validate_pack = _import_module('astrid.core.pack.validate').validate_pack
 
     # Derive the correct CLI prefix for error messages.
     _cli_prefix = f"{component_type}s new"

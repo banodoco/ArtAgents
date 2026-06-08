@@ -1,8 +1,6 @@
 """``packs install`` / ``packs uninstall`` / ``packs update`` commands.
 
 Canonical implementation lives here under ``astrid.core.pack``.
-``astrid.packs.install`` and ``astrid.core.pack_machinery.install`` are
-compatibility aliases that preserve existing import and ``mock.patch`` seams.
 
 ``packs install <path-or-git-url>`` installs a pack from a local directory
 or a Git URL.  Git installs are pinned to a concrete commit SHA so that
@@ -56,7 +54,7 @@ __all__ = [
 ]
 
 # Trust helpers extracted to install_trust.py (M4 T18); re-exported here
-# so existing mock.patch seams on astrid.packs.install.* continue to work.
+# so existing mock.patch seams on astrid.core.pack.install.* continue to work.
 from astrid.core.pack.install_trust import (  # noqa: E402
     _confirm,
     _confirm_trust,
@@ -69,7 +67,7 @@ from astrid.core.pack.install_trust import (  # noqa: E402
 
 # Local install / uninstall / update / rollback orchestration extracted
 # to install_local.py (M4 T20); re-exported here so existing mock.patch
-# seams on astrid.packs.install.* continue to work.
+# seams on astrid.core.pack.install.* continue to work.
 from astrid.core.pack.install_local import (  # noqa: E402
     _diff_component_inventories,
     _do_install,
@@ -81,7 +79,7 @@ from astrid.core.pack.install_local import (  # noqa: E402
 )
 
 # Git-specific helpers extracted to install_git.py (M4 T22); re-exported
-# here so existing mock.patch seams on astrid.packs.install.* and
+# here so existing mock.patch seams on astrid.core.pack.install.* and
 # late-import paths in install_local.py continue to work.
 from astrid.core.pack.install_git import (  # noqa: E402
     _check_git_available,
@@ -95,7 +93,7 @@ from astrid.core.pack.install_git import (  # noqa: E402
 )
 
 # CLI wrapper functions extracted to install_cli.py (M4 T24); re-exported
-# here so existing mock.patch seams on astrid.packs.install.* and late-import
+# here so existing mock.patch seams on astrid.core.pack.install.* and late-import
 # paths in cli.py (_handle_install, _handle_update, ...) continue to work.
 from astrid.core.pack.install_cli import (  # noqa: E402
     _run_install_command,

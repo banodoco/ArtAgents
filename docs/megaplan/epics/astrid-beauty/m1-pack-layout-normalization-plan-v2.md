@@ -62,9 +62,9 @@ The fundamental fix is to make the layout contract explicit in code first, then 
 **Complexity: 2**
 1. Create `astrid/core/pack_machinery/` package with `__init__.py`.
 2. Move `astrid/packs/gitignore.py` → `astrid/core/pack_machinery/gitignore.py`.
-3. Update `astrid/packs/install.py` (line 35) to import from new location: `from astrid.core.pack_machinery.gitignore import gitignore_filter`.
+3. Update `astrid/packs/install.py` (line 35) to import from new location: `from astrid.core.pack.gitignore import gitignore_filter`.
 4. Leave `astrid/packs/_canonical_entrypoint.py` **in place** for M1. Document it as an M2-deferred machinery exception in the layout contract (class: `machinery_shim`, `defer_to: M2`). This avoids updating 50+ pack `run.py` import sites, `astrid/core/runtime/in_process.py`, `tests/test_canonical_entrypoint.py`, and `tests/core/runtime/test_in_process.py` in M1.
-5. Leave thin compatibility shim at `astrid/packs/gitignore.py` that re-exports from `astrid.core.pack_machinery.gitignore`.
+5. Leave thin compatibility shim at `astrid/packs/gitignore.py` that re-exports from `astrid.core.pack.gitignore`.
 
 ### Step 6: Move `validate.py` and `agent_index.py` (`astrid/core/pack_machinery/`)
 **Scope:** Medium  
@@ -80,7 +80,7 @@ The fundamental fix is to make the layout contract explicit in code first, then 
 **Complexity: 3**
 1. Move `astrid/packs/cli.py` (1761 lines) → `astrid/core/pack_machinery/cli.py`.
 2. Move `astrid/packs/install.py` (1930 lines) → `astrid/core/pack_machinery/install.py`.
-3. Update `astrid/gateway.py` imports (lines 398–400 and 1089) to use the new machinery path: `from astrid.core.pack_machinery import cli as packs_cli` and `from astrid.core.pack_machinery.cli import build_parser`.
+3. Update `astrid/gateway.py` imports (lines 398–400 and 1089) to use the new machinery path: `from astrid.core.pack import cli as packs_cli` and `from astrid.core.pack.cli import build_parser`.
 4. Leave thin compatibility shims at `astrid/packs/cli.py` and `astrid/packs/install.py`.
 
 ## Phase 4: Relocate Schemas

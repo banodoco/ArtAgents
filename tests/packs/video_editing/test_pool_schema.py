@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid import timeline
+from astrid.core import timeline
 
 
 ROOT = Path(__file__).resolve().parents[1]

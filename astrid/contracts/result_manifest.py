@@ -167,7 +167,7 @@ def build_manifest(
 
     Centralizes common boilerplate so executors don't repeat the same
     dict literal.  Callers supply domain-specific fields; the helper fills
-    in defaults for *schema_version* and *warnings*, and preserves any
+    in defaults for *schema_version* and *warnings*, and carries any
     extra keyword arguments as top-level passthrough fields.
     """
     manifest: dict[str, Any] = {

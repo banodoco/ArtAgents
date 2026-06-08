@@ -11,7 +11,7 @@ import copy
 import json
 from typing import Any
 
-from astrid import timeline
+from astrid.core import timeline
 
 
 class LegacyDecodeError(ValueError):

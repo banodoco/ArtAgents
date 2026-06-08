@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from astrid.contracts.errors import AstridError
-from astrid import pipeline
+from astrid import gateway
 
 
 # ---------------------------------------------------------------------------

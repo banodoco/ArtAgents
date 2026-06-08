@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from astrid.core.element import catalog as effects_catalog
-from astrid import timeline
+from astrid.core import timeline
 
 
 ROOT = Path(__file__).resolve().parents[2]

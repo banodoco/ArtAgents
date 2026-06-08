@@ -5,7 +5,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from astrid.packs.gitignore import GitIgnoreFilter, gitignore_filter
+from astrid.core.pack.gitignore import GitIgnoreFilter, gitignore_filter
 
 
 def _make_tree(root: Path, files: dict[str, str]) -> None:

@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid import timeline
+from astrid.core import timeline
 from astrid.packs.rendering.executors.render import run as render_remotion
 
 ROOT = Path(__file__).resolve().parents[3]

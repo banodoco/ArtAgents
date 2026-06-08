@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest import mock
 
-from astrid import pipeline
+from astrid import gateway
 
 
 class PipelineDispatchAliasTest(unittest.TestCase):
@@ -88,7 +88,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ),
             mock.patch("astrid.core.executor.registry.load_default_registry", return_value=registry),
             mock.patch(
-                "astrid.core.pack_resolver.resolve_callable_from_metadata",
+                "astrid.core.pack.resolver.resolve_callable_from_metadata",
                 side_effect=[
                     publish_entrypoint,
                     youtube_entrypoint,
@@ -202,7 +202,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=42,
             ) as mock_fallback,
         ):
@@ -233,11 +233,11 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertIn("effects\ttext-card", stdout.getvalue())
 
     def test_patch_dispatch_seam_through_pipeline_direct_call(self) -> None:
-        """Characterize: _dispatch_elements patched through astrid.pipeline
+        """Characterize: _dispatch_elements patched through astrid.gateway
         IS intercepted when called directly (not via main(), which captures
         references in _TOP_LEVEL_HANDLERS at import time)."""
         with mock.patch(
-            "astrid.pipeline._dispatch_elements",
+            "astrid.gateway._dispatch_elements",
             return_value=55,
         ) as patched_dispatch:
             result = pipeline._dispatch_elements(["list"])
@@ -257,7 +257,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertIs(original, astrid.gateway._dispatch_elements)
 
         with mock.patch(
-            "astrid.pipeline._dispatch_elements",
+            "astrid.gateway._dispatch_elements",
             return_value=999,
         ):
             # The handler dict still holds the original reference

@@ -7,7 +7,7 @@ import unittest
 from unittest import mock
 from pathlib import Path
 
-from astrid import timeline
+from astrid.core import timeline
 from astrid.core.timeline import banodoco_schema
 
 ROOT = Path(__file__).resolve().parents[1]

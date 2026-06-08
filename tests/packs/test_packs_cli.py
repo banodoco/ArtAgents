@@ -24,10 +24,10 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.cli_choices import StaticChoices
-from astrid.packs import cli as packs_cli
-from astrid.packs.validate import validate_pack, extract_trust_summary, V1_TRUST_BLOCK
-from astrid.packs.agent_index import _assemble_pack_entry
-from astrid.core.pack_store import InstallRecord
+from astrid.core.pack import cli as packs_cli
+from astrid.core.pack.validate import validate_pack, extract_trust_summary, V1_TRUST_BLOCK
+from astrid.core.pack.agent_index import _assemble_pack_entry
+from astrid.core.pack.store import InstallRecord
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -560,7 +560,11 @@ class TestScaffoldFixture(unittest.TestCase):
         "pack.yaml",
         "skill/SKILL.md",
     }
-    EXPECTED_PACK_DIRS = set()
+    EXPECTED_PACK_DIRS = {
+        "executors",
+        "orchestrators",
+        "elements",
+    }
     EXPECTED_EXECUTOR_FILES = {
         "executor.yaml",
         "run.py",
@@ -1236,10 +1240,10 @@ class TestAgentIndexAndInspectWiring(unittest.TestCase):
             install_root=str(gen_root),
         )
         with mock.patch(
-            "astrid.core.pack_store.InstalledPackStore.get_active",
+            "astrid.core.pack.store.InstalledPackStore.get_active",
             return_value=record,
         ), mock.patch(
-            "astrid.core.pack_store.InstalledPackStore.active_revision_path",
+            "astrid.core.pack.store.InstalledPackStore.active_revision_path",
             return_value=gen_root,
         ):
             buf = io.StringIO()

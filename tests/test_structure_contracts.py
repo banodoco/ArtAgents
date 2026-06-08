@@ -7,7 +7,6 @@ import astrid.structure as structure
 from astrid.structure import (
     StructureReport,
     validate_cli_domain_boundary,
-    validate_first_party_shim_import_boundary,
     validate_import_layering,
     validate_migration_completion,
     validate_repo_structure,
@@ -115,36 +114,6 @@ def test_validate_import_layering_flags_dynamic_concrete_pack_imports_and_respec
     }
 
 
-def test_validate_first_party_shim_import_boundary_flags_source_script_and_non_public_tests(
-    tmp_path: Path,
-) -> None:
-    _write(
-        tmp_path,
-        "astrid/internal_source.py",
-        "from astrid._paths import REPO_ROOT\n"
-        "from astrid.pipeline import main as pipeline_main\n",
-    )
-    _write(
-        tmp_path,
-        "scripts/internal_script.py",
-        "from astrid._media import ffprobe_duration_seconds\n"
-        "from astrid.timeline import Timeline\n",
-    )
-    _write(
-        tmp_path,
-        "tests/test_internal_shim_usage.py",
-        "from astrid.core._search import search\n",
-    )
-
-    violations = validate_first_party_shim_import_boundary(tmp_path)
-
-    assert set(violations) == {
-        "astrid/internal_source.py:1 imports banned first-party shim 'astrid._paths'",
-        "scripts/internal_script.py:1 imports banned first-party shim 'astrid._media'",
-        "tests/test_internal_shim_usage.py:1 imports banned first-party shim 'astrid.core._search'",
-    }
-
-
 def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_path: Path) -> None:
     _write(
         tmp_path,
@@ -162,34 +131,6 @@ def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_pa
     assert set(violations) == {
         "astrid/domains/hype/rules.py:1 imports CLI module 'astrid.core.pack.cli'; move CLI-only logic to a cli.py entrypoint or shared helper"
     }
-
-
-def test_validate_first_party_shim_import_boundary_allows_only_documented_public_exemptions(
-    tmp_path: Path,
-) -> None:
-    _write(
-        tmp_path,
-        "tests/test_structure_contracts.py",
-        "import astrid._media\n"
-        "import astrid._paths\n",
-    )
-    _write(
-        tmp_path,
-        "tests/test_m2_public_surface.py",
-        "import astrid._media\n"
-        "import astrid._paths\n",
-    )
-    _write(
-        tmp_path,
-        "tests/test_structure_contracts_extra.py",
-        "from astrid.core._search import search\n",
-    )
-
-    violations = validate_first_party_shim_import_boundary(tmp_path)
-
-    assert violations == [
-        "tests/test_structure_contracts_extra.py:1 imports banned first-party shim 'astrid.core._search'"
-    ]
 
 
 def test_validate_repo_structure_flags_generated_debris_and_non_golden_build_dirs(tmp_path: Path) -> None:
@@ -520,24 +461,6 @@ def test_validate_repo_structure_flags_non_exempt_sys_modules_injection_as_error
     )
 
 
-def test_validate_repo_structure_exempts_pipeline_sys_modules_injection(tmp_path: Path) -> None:
-    """pipeline.py is an approved compatibility shim (SD1) and must not be
-    flagged by the sys.modules injection guard."""
-    _bootstrap_structure_root(tmp_path)
-    _write(
-        tmp_path,
-        "astrid/pipeline.py",
-        "import sys\n"
-        "sys.modules['astrid.gateway'] = sys.modules[__name__]\n",
-    )
-
-    report = validate_repo_structure(tmp_path)
-
-    assert not any(
-        "sys.modules injection remains" in err for err in report.errors
-    ), f"pipeline.py should be exempt from sys.modules guard but was flagged: {report.errors}"
-
-
 def test_validate_repo_structure_flags_dangling_all_alias_as_error(tmp_path: Path) -> None:
     _bootstrap_structure_root(tmp_path)
     _write(
@@ -614,80 +537,7 @@ def test_structure_report_ok_tracks_errors_only() -> None:
     assert StructureReport(errors=("error",), warnings=()).ok is False
 
 
-# ── m5b compatibility-shim exemption guards for thin re-export facade ─────
-
-
-def test_validate_repo_structure_exempts_timeline_facade_with_todo_m5b_marker(
-    tmp_path: Path,
-) -> None:
-    """An exempted timeline facade file with ``TODO(m5b)`` must NOT be flagged
-    as a compatibility shim, even when it looks like one and has live callers."""
-    _bootstrap_structure_root(tmp_path)
-    # The three approved facade files live at astrid/timeline/*
-    _write(
-        tmp_path,
-        "astrid/timeline/__init__.py",
-        '\"\"\"Compatibility shim TODO(m5b) — approved thin public re-export.\"\"\"\n'
-        "from astrid.core.timeline import Timeline\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/core/timeline/__init__.py",
-        "from astrid.core.timeline.banodoco_schema import Timeline\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/core/timeline/banodoco_schema.py",
-        "Timeline = object\n",
-    )
-    # A live caller in core ensures the shim detector sees real callers
-    _write(
-        tmp_path,
-        "astrid/core/shim_caller.py",
-        "from astrid.timeline import Timeline\n",
-    )
-
-    report = validate_repo_structure(tmp_path)
-
-    assert not any(
-        "compatibility shim still has" in err for err in report.errors
-    ), f"Exempted facade was flagged: {report.errors}"
-
-
-def test_validate_repo_structure_flags_timeline_facade_without_todo_m5b_marker(
-    tmp_path: Path,
-) -> None:
-    """An exempted-*path* file that lacks ``TODO(m5b)`` must still be flagged.
-    The exemption requires both the path match *and* the marker string."""
-    _bootstrap_structure_root(tmp_path)
-    _write(
-        tmp_path,
-        "astrid/timeline/timeline_model.py",
-        '\"\"\"Compatibility shim for older imports.\"\"\"\n'
-        "from astrid.core.timeline.banodoco_schema import Timeline\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/core/timeline/__init__.py",
-        "",
-    )
-    _write(
-        tmp_path,
-        "astrid/core/timeline/banodoco_schema.py",
-        "Timeline = object\n",
-    )
-    _write(
-        tmp_path,
-        "astrid/core/shim_caller.py",
-        "from astrid.timeline.timeline_model import Timeline\n",
-    )
-
-    report = validate_repo_structure(tmp_path)
-
-    assert any(
-        "compatibility shim still has" in err for err in report.errors
-    ), f"Exempted-path shim without TODO(m5b) was NOT flagged: {report.errors}"
-
+# ── compatibility shim detection (no exemptions) ───────────────────────────
 
 def test_validate_repo_structure_still_flags_non_exempt_compatibility_shim(
     tmp_path: Path,
@@ -717,17 +567,15 @@ def test_validate_repo_structure_still_flags_non_exempt_compatibility_shim(
 
 
 def test_timeline_facade_files_are_strictly_thin_re_exports() -> None:
-    """The three real ``astrid/timeline/`` facade files must be thin
-    re-export modules: no runtime logic, no ``_sync_private_hooks``, and
+    """The ``astrid/core/timeline/__init__.py`` public surface module must be a
+    thin re-export: no runtime logic, no ``_sync_private_hooks``, and
     no function/class definitions."""
     import ast
 
     from astrid.paths import REPO_ROOT
 
     facade_files = (
-        REPO_ROOT / "astrid" / "timeline" / "__init__.py",
-        REPO_ROOT / "astrid" / "timeline" / "timeline_model.py",
-        REPO_ROOT / "astrid" / "timeline" / "banodoco_composer.py",
+        REPO_ROOT / "astrid" / "core" / "timeline" / "__init__.py",
     )
 
     for path in facade_files:
@@ -751,6 +599,11 @@ def test_timeline_facade_files_are_strictly_thin_re_exports() -> None:
             # Regular imports and from-imports
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 continue
+            # Allow __all__ assignment
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+                if len(targets) == 1 and isinstance(targets[0], ast.Name) and targets[0].id == "__all__":
+                    continue
             # Fail on any other top-level statement (function def, class def,
             # assignment other than __all__, etc.)
             assert False, (
@@ -1027,58 +880,57 @@ def test_run_record_status_boundary_accepts_empty_root(tmp_path: Path) -> None:
     assert advisories == []
 
 
-# ── M2 T13: top-level astrid/packs/ module shim enforcement ─────────────
+# ── M2 T13: top-level astrid/packs/ module enforcement (zero shims) ──────
 
 
-def test_packs_top_level_allows_documented_thin_compatibility_shim(
+def test_packs_top_level_rejects_thin_compatibility_shim(
     tmp_path: Path,
 ) -> None:
     """A thin documented compatibility/re-export shim at the top level of
-    ``astrid/packs/`` must not produce any structure error."""
+    ``astrid/packs/`` must be flagged as an error — zero shims allowed."""
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
         "astrid/packs/validate.py",
-        '\"\"\"Compatibility re-export shim for astrid.packs.validate.\\n'
+        '\"\"\"Compatibility re-export shim for astrid.core.pack.validate.\\n'
         'The canonical implementation lives at astrid.core.pack.validate.\\n'
         '\"\"\"\\n'
         'from astrid.core.pack.validate import *  # noqa\\n',
     )
     report = validate_repo_structure(tmp_path)
-    assert not any(
-        "top-level astrid/packs/ module is not a documented thin compatibility shim" in err
+    assert any(
+        "top-level astrid/packs/ module is not allowed" in err
         for err in report.errors
-    ), f"Thin documented shim was flagged: {report.errors}"
+    ), f"Thin documented shim should have been flagged but wasn't: {report.errors}"
 
 
-def test_packs_top_level_allows_backward_compatibility_shim(
+def test_packs_top_level_rejects_backward_compatibility_shim(
     tmp_path: Path,
 ) -> None:
-    """A module marked as a backward-compatibility shim (not containing the
-    exact phrase 'compatibility shim') must still be recognized and allowed."""
+    """A module marked as a backward-compatibility shim must be rejected —
+    zero shims allowed at astrid/packs/."""
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
         "astrid/packs/install.py",
-        '\"\"\"Backward-compatibility shim for astrid.packs.install.\\n'
+        '\"\"\"Backward-compatibility shim for astrid.core.pack.install.\\n'
         'The implementation lives at astrid.core.pack.install.\\n'
         '\"\"\"\\n'
         'import sys as _sys\\n'
         '_sys.modules[__name__] = _sys.modules["astrid.core.pack.install"]\\n',
     )
     report = validate_repo_structure(tmp_path)
-    assert not any(
-        "top-level astrid/packs/ module is not a documented thin compatibility shim" in err
+    assert any(
+        "top-level astrid/packs/ module is not allowed" in err
         for err in report.errors
-    ), f"Backward-compatibility shim was flagged: {report.errors}"
+    ), f"Backward-compatibility shim should have been flagged but wasn't: {report.errors}"
 
 
 def test_packs_top_level_allows_init_py(
     tmp_path: Path,
 ) -> None:
     """``astrid/packs/__init__.py`` is the package namespace and must never
-    be flagged, even though it contains real imports and does not look like
-    a compatibility shim."""
+    be flagged, even though it contains real imports."""
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
@@ -1090,7 +942,7 @@ def test_packs_top_level_allows_init_py(
     )
     report = validate_repo_structure(tmp_path)
     assert not any(
-        "top-level astrid/packs/ module is not a documented thin compatibility shim" in err
+        "top-level astrid/packs/ module is not allowed" in err
         for err in report.errors
     ), f"__init__.py was incorrectly flagged: {report.errors}"
 
@@ -1099,8 +951,7 @@ def test_packs_top_level_rejects_active_implementation_module(
     tmp_path: Path,
 ) -> None:
     """A top-level ``astrid/packs/*.py`` file that is an active implementation
-    module (not a thin compatibility/re-export shim) must be flagged as an
-    error."""
+    module must be flagged as an error."""
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
@@ -1119,7 +970,7 @@ def test_packs_top_level_rejects_active_implementation_module(
     report = validate_repo_structure(tmp_path)
     errs = [
         e for e in report.errors
-        if "top-level astrid/packs/ module is not a documented thin compatibility shim" in e
+        if "top-level astrid/packs/ module is not allowed" in e
     ]
     assert len(errs) == 1, (
         f"Expected exactly 1 pack top-level error; got {len(errs)}: {report.errors}"
@@ -1133,8 +984,8 @@ def test_packs_top_level_rejects_oversized_shim(
     tmp_path: Path,
 ) -> None:
     """A module that claims to be a compatibility shim but exceeds the
-    meaningful-line threshold (12 lines) must still be flagged — it is
-    not a thin shim."""
+    meaningful-line threshold must still be flagged — it is not a thin shim
+    and no shims are allowed anyway."""
     _bootstrap_structure_root(tmp_path)
     # Build a module with a shim docstring but 15 meaningful lines.
     body_lines = [
@@ -1149,7 +1000,7 @@ def test_packs_top_level_rejects_oversized_shim(
     report = validate_repo_structure(tmp_path)
     errs = [
         e for e in report.errors
-        if "top-level astrid/packs/ module is not a documented thin compatibility shim" in e
+        if "top-level astrid/packs/ module is not allowed" in e
     ]
     assert len(errs) == 1, (
         f"Expected exactly 1 oversized-shim error; got {len(errs)}: {report.errors}"
@@ -1352,11 +1203,10 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
 
 def test_public_import_and_shim_smoke() -> None:
     """M0 public import smoke (T7): ``import astrid`` resolves and exposes
-    representative public SDK facade symbols; stable compatibility shims
-    ``astrid._media``, ``astrid._paths``, and ``astrid.pipeline`` are
-    importable.
+    representative public SDK facade symbols; the stable ``astrid.gateway``
+    public import surface remains importable.
 
-    ``astrid.pipeline`` aliases itself to ``astrid.gateway`` via
+    ``astrid.gateway`` aliases itself to ``astrid.gateway`` via
     ``sys.modules`` so assertions are order-insensitive and do not require
     object identity.
     """
@@ -1402,24 +1252,12 @@ def test_public_import_and_shim_smoke() -> None:
         f"{sorted(missing_from_all)}"
     )
 
-    # ── Compatibility shims ────────────────────────────────────────────
-
-    # _media and _paths are thin re-export shims.
-    import astrid._media  # noqa: F401
-    import astrid._paths  # noqa: F401
-
     # pipeline aliases itself to astrid.gateway via sys.modules.
     # Only assert importability — do NOT rely on object identity.
-    import astrid.pipeline  # noqa: F401
+    import astrid.gateway  # noqa: F401
 
-    assert "astrid._media" in sys.modules, (
-        "astrid._media must be registered in sys.modules"
-    )
-    assert "astrid._paths" in sys.modules, (
-        "astrid._paths must be registered in sys.modules"
-    )
-    assert "astrid.pipeline" in sys.modules, (
-        "astrid.pipeline must be registered in sys.modules"
+    assert "astrid.gateway" in sys.modules, (
+        "astrid.gateway must be registered in sys.modules"
     )
 
 

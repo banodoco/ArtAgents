@@ -4,17 +4,13 @@ Parsed-args-to-orchestration adapters that bridge the pack CLI parser
 (``astrid.core.pack.cli``) and the focused install modules
 (``install_local``, ``install_git``, ``install_trust``).
 
-Extracted from ``install.py`` during M4 T24 so that ``install.py`` can be
-a pure facade that re-exports names from every focused install module.
-
 .. note::
 
     The ``_run_*`` functions use **late imports** from
     ``astrid.core.pack.install`` (via ``.install``) so that
-    ``mock.patch("astrid.packs.install.install_pack")`` still intercepts
-    the call through the ``sys.modules`` compatibility shim.  Module-level
-    imports from ``install_local`` would capture the real function object
-    before the mock can replace it.
+    ``mock.patch(\"astrid.core.pack.install.install_pack\")`` still intercepts
+    the call.  Module-level imports from ``install_local`` would capture the
+    real function object before the mock can replace it.
 """
 from __future__ import annotations
 
@@ -43,7 +39,7 @@ from astrid.core.pack.install_git import _is_git_url  # noqa: E402
 
 def _run_install_command(args) -> int:
     """Execute the parsed ``packs install`` command."""
-    # Late import so mock.patch("astrid.packs.install.install_pack") works.
+    # Late import so mock.patch("astrid.core.pack.install.install_pack") works.
     from astrid.core.pack.install import install_pack  # noqa: E402
 
     if _is_git_url(args.source):
@@ -78,7 +74,7 @@ def _run_install_command(args) -> int:
 
 def _run_update_command(args) -> int:
     """Execute the parsed ``packs update`` command."""
-    # Late import so mock.patch("astrid.packs.install.update_pack") works.
+    # Late import so mock.patch("astrid.core.pack.install.update_pack") works.
     from astrid.core.pack.install import update_pack  # noqa: E402
 
     return update_pack(
@@ -93,7 +89,7 @@ def _run_update_command(args) -> int:
 
 def _run_uninstall_command(args) -> int:
     """Execute the parsed ``packs uninstall`` command."""
-    # Late import so mock.patch("astrid.packs.install.uninstall_pack") works.
+    # Late import so mock.patch("astrid.core.pack.install.uninstall_pack") works.
     from astrid.core.pack.install import uninstall_pack  # noqa: E402
 
     return uninstall_pack(
@@ -105,7 +101,7 @@ def _run_uninstall_command(args) -> int:
 
 def _run_rollback_command(args) -> int:
     """Execute the parsed ``packs rollback`` command."""
-    # Late import so mock.patch("astrid.packs.install.rollback_pack") works.
+    # Late import so mock.patch("astrid.core.pack.install.rollback_pack") works.
     from astrid.core.pack.install import rollback_pack  # noqa: E402
 
     return rollback_pack(

@@ -50,7 +50,7 @@ def _load_shared_schema() -> dict | None:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from astrid.timeline import (  # noqa: E402
+from astrid.core.timeline import (  # noqa: E402
     _CLIP_ALLOWED,
     _TIMELINE_TOP_ALLOWED,
     _TRACK_ALLOWED,

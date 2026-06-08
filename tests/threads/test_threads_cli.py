@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid import pipeline
+from astrid import gateway
 from astrid.contracts.run_status import RunStatus
 from astrid.threads import cli
 from astrid.threads.ids import generate_run_id, generate_thread_id
@@ -18,7 +18,7 @@ def test_thread_cli_lifecycle_show_no_content_and_route(tmp_path: Path, monkeypa
     """Threads internal-library lifecycle exercised through astrid.threads.cli.
 
     Sprint 1 / T12 retired the user-facing ``astrid thread`` CLI verb from
-    ``astrid.pipeline``. The internal library (DEC-001) is retained; this
+    ``astrid.gateway``. The internal library (DEC-001) is retained; this
     test now exercises only the library-level CLI, not the pipeline route.
     """
 

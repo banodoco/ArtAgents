@@ -17,7 +17,7 @@ v2v and video-edit are not wired this sprint.
 from __future__ import annotations
 
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, warn_if_unledgered
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint, warn_if_unledgered
 guard_canonical_entrypoint('generation.generate_video')
 import argparse
 

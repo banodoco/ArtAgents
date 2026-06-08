@@ -63,7 +63,7 @@ Multiple aliases can point to the same canonical id, and aliases are resolved
 transitively — chains of aliases are flattened to the ultimate canonical target.
 Cycle detection runs at registration time and rejects invalid alias graphs.
 
-**How it works:** The `AliasResolver` (in `astrid/core/alias_resolver.py`)
+**How it works:** The `AliasResolver` (in `astrid/core/pack/alias_resolver.py`)
 maintains a registry of `alias → canonical_id` mappings. Aliases are loaded from
 `PackDefinition.aliases` during registry construction, filtered by `kind`, and
 registered with their deprecation metadata and source pack id preserved. Both

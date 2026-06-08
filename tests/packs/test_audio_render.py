@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from astrid.packs.rendering.executors.render import run as render_remotion
-from astrid import timeline
+from astrid.core import timeline
 
 
 ROOT = Path(__file__).resolve().parents[2]

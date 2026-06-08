@@ -1,11 +1,7 @@
 """Git-specific install helpers for ``packs install`` / ``packs update``.
 
 These functions are extracted from ``install.py`` (M4 T22) to keep the
-facade module focused on CLI entry points and re-exports.
-
-``astrid.packs.install`` and ``astrid.core.pack_machinery.install``
-compatibility shims work without change because all public names are
-re-exported from ``install.py``.
+module focused. All public names are re-exported from ``install.py``.
 """
 
 from __future__ import annotations

@@ -148,7 +148,7 @@ def discover_pack_metadata(
         if include_installed:
             from astrid.core.pack import load_pack_manifest
             from astrid.core.pack import pack_manifest_path as _pmp
-            from astrid.core.pack_store import installed_pack_roots
+            from astrid.core.pack.store import installed_pack_roots
 
             for installed_root in installed_pack_roots():
                 if installed_root.is_dir():

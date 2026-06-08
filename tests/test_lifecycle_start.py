@@ -411,7 +411,7 @@ def test_canonical_step_reentry_records_completion_and_events_verify_bypasses_ga
     ]
     assert any(event["kind"] == "step_completed" for event in events)
 
-    from astrid.pipeline import main as astrid_main
+    from astrid.gateway import main as astrid_main
 
     os.environ["ASTRID_TASK_PROJECT"] = slug
     os.environ["ASTRID_TASK_RUN_ID"] = run_id

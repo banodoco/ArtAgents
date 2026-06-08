@@ -1,8 +1,8 @@
 """M2 public-surface characterization tests.
 
-Captures the pre-M2 import surface, module identity contracts, deprecated
-CLI alias routing, pipeline patch seams, and Banodoco integration imports
-so that M2 structural changes can be verified against a known baseline.
+Captures the canonical import surface, deprecated CLI alias routing,
+and Banodoco integration imports so that structural changes can be
+verified against a known baseline.
 
 These are characterization tests — they test current behavior without
 changing it.  No assertion here should be a "fix."
@@ -10,7 +10,6 @@ changing it.  No assertion here should be a "fix."
 
 from __future__ import annotations
 
-import sys
 import unittest
 from unittest import mock
 
@@ -25,10 +24,6 @@ class RootModuleImportTest(unittest.TestCase):
         import astrid.gateway
         self.assertIsNotNone(astrid.gateway)
 
-    def test_pipeline_importable(self) -> None:
-        import astrid.pipeline
-        self.assertIsNotNone(astrid.pipeline)
-
     def test_sdk_importable(self) -> None:
         import astrid.sdk
         self.assertIsNotNone(astrid.sdk)
@@ -37,17 +32,9 @@ class RootModuleImportTest(unittest.TestCase):
         import astrid.paths
         self.assertIsNotNone(astrid.paths)
 
-    def test_underscore_paths_importable(self) -> None:
-        import astrid._paths
-        self.assertIsNotNone(astrid._paths)
-
     def test_media_importable(self) -> None:
         import astrid.media
         self.assertIsNotNone(astrid.media)
-
-    def test_underscore_media_importable(self) -> None:
-        import astrid._media
-        self.assertIsNotNone(astrid._media)
 
     def test_theme_schema_importable(self) -> None:
         import astrid.theme_schema
@@ -62,144 +49,13 @@ class RootModuleImportTest(unittest.TestCase):
         self.assertIsNotNone(astrid.threads)
 
     def test_timeline_importable(self) -> None:
-        import astrid.timeline
-        self.assertIsNotNone(astrid.timeline)
+        import astrid.core.timeline
+        self.assertIsNotNone(astrid.core.timeline)
 
     def test_main_importable(self) -> None:
         """__main__ is the package entry point that delegates to gateway."""
         import astrid.__main__
         self.assertIsNotNone(astrid.__main__)
-
-
-# ---------------------------------------------------------------------------
-# Module identity — astrid.pipeline *is* astrid.gateway
-# ---------------------------------------------------------------------------
-
-class PipelineGatewayIdentityTest(unittest.TestCase):
-    """`astrid.pipeline` must alias `astrid.gateway` by module identity."""
-
-    def test_pipeline_is_gateway_by_identity(self) -> None:
-        import astrid.gateway
-        import astrid.pipeline
-
-        self.assertIs(astrid.pipeline, astrid.gateway,
-                      "astrid.pipeline must be the same module object as astrid.gateway")
-
-    def test_pipeline_in_sys_modules_is_gateway(self) -> None:
-        """Verify sys.modules entry points to the gateway."""
-        self.assertIs(
-            sys.modules.get("astrid.pipeline"),
-            sys.modules.get("astrid.gateway"),
-            "sys.modules['astrid.pipeline'] must equal sys.modules['astrid.gateway']",
-        )
-
-    def test_import_pipeline_gives_gateway(self) -> None:
-        """`from astrid import pipeline` should yield the gateway module."""
-        from astrid import gateway, pipeline
-        self.assertIs(pipeline, gateway)
-
-
-# ---------------------------------------------------------------------------
-# Pipeline patch seams — mock.patch targets must resolve through pipeline
-# ---------------------------------------------------------------------------
-
-class PipelinePatchSeamTest(unittest.TestCase):
-    """mock.patch('astrid.pipeline.*') targets must work because
-    astrid.pipeline is astrid.gateway and _run_default_brief_orchestrator
-    lives on gateway."""
-
-    def test_patch_pipeline_run_default_brief_orchestrator(self) -> None:
-        """Patching via the pipeline alias must intercept the gateway function."""
-        import astrid.gateway
-
-        # Verify the function actually exists on gateway (it's defined there)
-        self.assertTrue(
-            hasattr(astrid.gateway, "_run_default_brief_orchestrator"),
-            "_run_default_brief_orchestrator must be an attribute of astrid.gateway",
-        )
-        self.assertTrue(callable(astrid.gateway._run_default_brief_orchestrator))
-
-        # Patch through the pipeline alias — it must work transparently
-        with mock.patch(
-            "astrid.pipeline._run_default_brief_orchestrator",
-            return_value=42,
-        ) as patched:
-            from astrid import pipeline
-            result = pipeline._run_default_brief_orchestrator(["dummy"])
-            self.assertEqual(result, 42)
-            patched.assert_called_once_with(["dummy"])
-
-    def test_patch_gateway_direct_also_works(self) -> None:
-        """Patching through the canonical gateway path also works."""
-        with mock.patch(
-            "astrid.gateway._run_default_brief_orchestrator",
-            return_value=99,
-        ) as patched:
-            import astrid.gateway
-            result = astrid.gateway._run_default_brief_orchestrator(["dummy"])
-            self.assertEqual(result, 99)
-            patched.assert_called_once_with(["dummy"])
-
-    def test_gateway_attributes_on_pipeline(self) -> None:
-        """Key gateway attributes must be reachable from astrid.pipeline."""
-        import astrid.gateway
-        import astrid.pipeline
-
-        for name in (
-            "main",
-            "_run_default_brief_orchestrator",
-            "_dispatch",
-            "_build_dispatch_parser",
-            "_TOP_LEVEL_HANDLERS",
-            "_dispatch_elements",
-            "_dispatch_skills",
-            "_dispatch_packs",
-            "_dispatch_executors",
-            "LIFECYCLE_VERBS",
-            "SPRINT1_UNBOUND_ALLOWLIST_CONTRACT",
-        ):
-            with self.subTest(name=name):
-                gateway_attr = getattr(astrid.gateway, name)
-                pipeline_attr = getattr(astrid.pipeline, name)
-                self.assertIs(
-                    gateway_attr, pipeline_attr,
-                    f"astrid.gateway.{name} and astrid.pipeline.{name} must be "
-                    f"the same object",
-                )
-
-    def test_patch_dispatch_through_pipeline(self) -> None:
-        """Patching _dispatch via astrid.pipeline must intercept at the gateway."""
-        import astrid.gateway
-
-        self.assertTrue(
-            hasattr(astrid.gateway, "_dispatch"),
-            "_dispatch must be an attribute of astrid.gateway",
-        )
-        self.assertTrue(callable(astrid.gateway._dispatch))
-
-        with mock.patch(
-            "astrid.pipeline._dispatch",
-            return_value=77,
-        ) as patched:
-            from astrid import pipeline
-            result = pipeline._dispatch(["status"])
-            self.assertEqual(result, 77)
-            patched.assert_called_once_with(["status"])
-
-    def test_patch_dispatch_elements_through_pipeline(self) -> None:
-        """Patching _dispatch_elements via astrid.pipeline must intercept."""
-        import astrid.gateway
-
-        self.assertTrue(callable(astrid.gateway._dispatch_elements))
-
-        with mock.patch(
-            "astrid.pipeline._dispatch_elements",
-            return_value=88,
-        ) as patched:
-            from astrid import pipeline
-            result = pipeline._dispatch_elements(["list"])
-            self.assertEqual(result, 88)
-            patched.assert_called_once_with(["list"])
 
 
 # ---------------------------------------------------------------------------
@@ -314,18 +170,13 @@ class BanodocoIntegrationImportTest(unittest.TestCase):
         import astrid.core.timeline.banodoco_composer
         self.assertIsNotNone(astrid.core.timeline.banodoco_composer)
 
-    def test_timeline_banodoco_composer_shim_importable(self) -> None:
-        """The astrid.timeline.banodoco_composer compatibility re-export."""
-        import astrid.timeline.banodoco_composer
-        self.assertIsNotNone(astrid.timeline.banodoco_composer)
-
 
 # ---------------------------------------------------------------------------
-# astrid.paths and astrid._paths namespace
+# astrid.paths namespace
 # ---------------------------------------------------------------------------
 
 class PathsModuleTest(unittest.TestCase):
-    """Both astrid.paths and astrid._paths must export canonical path constants."""
+    """astrid.paths must export canonical path constants."""
 
     def test_paths_constants_importable(self) -> None:
         import astrid.paths
@@ -334,21 +185,6 @@ class PathsModuleTest(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(astrid.paths, name),
                                 f"astrid.paths missing {name}")
-
-    def test_underscore_paths_re_exports(self) -> None:
-        """astrid._paths must re-export from astrid.paths as a compatibility shim."""
-        import astrid._paths
-        import astrid.paths
-
-        for name in ("PACKAGE_ROOT", "REPO_ROOT", "WORKSPACE_ROOT"):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(astrid._paths, name),
-                                f"astrid._paths missing {name}")
-                self.assertEqual(
-                    getattr(astrid._paths, name),
-                    getattr(astrid.paths, name),
-                    f"astrid._paths.{name} != astrid.paths.{name}",
-                )
 
     def test_paths_functions_importable(self) -> None:
         import astrid.paths
@@ -359,11 +195,11 @@ class PathsModuleTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.media and astrid._media namespace
+# astrid.media namespace
 # ---------------------------------------------------------------------------
 
 class MediaModuleTest(unittest.TestCase):
-    """Both astrid.media and astrid._media must export media-probing helpers."""
+    """astrid.media must export media-probing helpers."""
 
     def test_media_importable(self) -> None:
         import astrid.media
@@ -371,20 +207,6 @@ class MediaModuleTest(unittest.TestCase):
         self.assertTrue(hasattr(astrid.media, "ffprobe_duration_seconds"),
                         "astrid.media missing ffprobe_duration_seconds")
         self.assertTrue(callable(astrid.media.ffprobe_duration_seconds))
-
-    def test_underscore_media_re_exports(self) -> None:
-        """astrid._media must re-export from astrid.media as a compatibility shim."""
-        import astrid._media
-        import astrid.media
-
-        self.assertTrue(hasattr(astrid._media, "ffprobe_duration_seconds"))
-        self.assertEqual(
-            astrid._media.ffprobe_duration_seconds,
-            astrid.media.ffprobe_duration_seconds,
-            "astrid._media.ffprobe_duration_seconds must be the same as "
-            "astrid.media.ffprobe_duration_seconds",
-        )
-
 
 # ---------------------------------------------------------------------------
 # astrid.theme_schema validation surface
@@ -448,14 +270,14 @@ class ThreadsModuleTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.timeline public compatibility re-exports
+# astrid.core.timeline public surface
 # ---------------------------------------------------------------------------
 
 class TimelinePublicSurfaceTest(unittest.TestCase):
-    """The public names of `astrid.timeline` must remain importable."""
+    """The public names of `astrid.core.timeline` must remain importable."""
 
     def test_timeline_core_types_importable(self) -> None:
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         for name in (
             "TimelineClip",
@@ -473,14 +295,14 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
                 self.assertTrue(hasattr(t, name), f"missing {name}")
 
     def test_timeline_constants_importable(self) -> None:
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         for name in ("ARRANGEMENT_VERSION", "METADATA_VERSION", "POOL_VERSION"):
             with self.subTest(name=name):
                 self.assertTrue(hasattr(t, name), f"missing {name}")
 
     def test_timeline_functions_importable(self) -> None:
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         for name in (
             "materialize_output",
@@ -498,8 +320,6 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
 
 # ---------------------------------------------------------------------------
 # Deliberately not covered here (handled by test_m5b_baseline_public_surface.py):
-#   - Deep timeline_model re-export surface (test_m5b already covers)
-#   - banodoco_composer deep re-export surface (test_m5b already covers)
 #   - timeline render views, track types, clip entrance/exit, pool types,
 #     arrangement types, pipeline metadata, etc. (test_m5b already covers)
 # ---------------------------------------------------------------------------

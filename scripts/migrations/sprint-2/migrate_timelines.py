@@ -59,7 +59,7 @@ from astrid.core.timeline.model import (
     Display,
     Manifest,
 )
-from astrid import timeline as timeline_contract
+from astrid.core import timeline as timeline_contract
 from astrid.core.timeline.paths import (
     timeline_dir,
     timelines_dir,

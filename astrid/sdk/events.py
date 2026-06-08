@@ -1,6 +1,6 @@
 """Public event-stream read and subscribe endpoints.
 
-These functions bridge the SDK facade to the core task event infrastructure.
+These functions adapt SDK calls to the core task event infrastructure.
 They resolve internal helpers through ``astrid.sdk`` so monkeypatch seams
 applied to the package namespace are visible at call time.
 """

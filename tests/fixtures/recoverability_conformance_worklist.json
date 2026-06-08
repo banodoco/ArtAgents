@@ -2430,7 +2430,7 @@
     },
     {
       "builder": "build_parser",
-      "module": "astrid.packs.cli",
+      "module": "astrid.core.pack.cli",
       "path": "astrid/packs/cli.py"
     },
     {
@@ -2775,7 +2775,7 @@
     {
       "builder": "build_parser",
       "enum_arg_count": 6,
-      "module": "astrid.packs.cli",
+      "module": "astrid.core.pack.cli",
       "path": "astrid/packs/cli.py",
       "prog": "python3 -m astrid packs"
     },

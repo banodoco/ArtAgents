@@ -19,10 +19,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-from astrid.core.pack_store import (
+from astrid.core.pack.store import (
     InstalledPackStore,
 )
-from astrid.packs.install import (
+from astrid.core.pack.install import (
     _check_git_available,
     _diff_component_inventories,
     _find_pack_root_in_checkout,
@@ -35,7 +35,7 @@ from astrid.packs.install import (
     rollback_pack,
     update_pack,
 )
-from astrid.packs.cli import cmd_inspect
+from astrid.core.pack.cli import cmd_inspect
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +76,7 @@ def _make_minimal_pack(root: Path, pack_id: str = "test_pack") -> Path:
     (root / "STAGE.md").write_text("## Purpose\n\nTesting.\n")
     for sub in ("executors", "orchestrators", "elements"):
         (root / sub).mkdir(parents=True, exist_ok=True)
+        (root / sub / ".gitkeep").write_text("", encoding="utf-8")
     return root
 
 

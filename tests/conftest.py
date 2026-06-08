@@ -111,7 +111,7 @@ def seed_project() -> Callable[[Path, str], Path]:
     """Return a callable that seeds the shared session project fixture shape."""
 
     def _seed_project(projects_root: Path, slug: str) -> Path:
-        from astrid import timeline as timeline_contract
+        from astrid.core import timeline as timeline_contract
         from astrid.threads.ids import generate_ulid
 
         pdir = projects_root / slug

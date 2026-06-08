@@ -15,7 +15,7 @@ Exits non-zero when any non-skipped clip fails the similarity threshold.
 
 from __future__ import annotations
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('editorial.validate')
 import argparse

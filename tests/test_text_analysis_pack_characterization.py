@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 
 from astrid.core.orchestrator.registry import load_default_registry
-from astrid.packs._canonical_entrypoint import canonical_runtime_entrypoint
+from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 
 
 def test_text_analysis_summarize_resolves_to_canonical_runtime_module() -> None:

@@ -12,7 +12,7 @@ TOOLS_ROOT = Path(__file__).resolve().parents[3]
 if str(TOOLS_ROOT) not in sys.path:
     sys.path.insert(0, str(TOOLS_ROOT))
 
-from astrid import timeline  # noqa: E402
+from astrid.core import timeline  # noqa: E402
 
 
 def pytest_configure(config: pytest.Config) -> None:

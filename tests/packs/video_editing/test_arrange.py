@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.packs.editorial.executors.arrange import run as arrange
-from astrid import timeline
+from astrid.core import timeline
 
 
 def has_forbidden_time_keys(value, forbidden) -> bool:

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "M2 catalog of every pack variant under astrid/packs/. Classifies packs by the capability types they ship (executors, orchestrators, elements). Aligns with INTERNAL_PACK_DIRS constant in astrid/structure.py. Updated post M2 Top-Level Module Rationalization to reflect current pack taxonomy, documented shell exceptions, and stable pack/capability IDs.",
-  "milestone": "M2",
+  "description": "Current catalog of every pack variant under astrid/packs/. Classifies packs by the capability types they ship (executors, orchestrators, elements).",
+  "milestone": "current",
   "generated_at": "2026-06-07",
-  "updated_at": "2026-06-07T22:00:00Z",
+  "updated_at": "2026-06-08",
   "source_root": "astrid/packs/",
   "variant_classifications": {
     "manifest_only": "Has pack.yaml but no executors/, orchestrators/, or elements/ directories with capability subdirectories.",
@@ -261,44 +261,12 @@
     }
   ],
   "top_level_pack_files": {
-    "description": "Python modules directly under astrid/packs/ (not in pack subdirectories). In M2 these are all compatibility re-export shims whose canonical implementations live in astrid/core/pack/. The astrid/core/pack_machinery/ directory retains thin shims for backward compatibility.",
+    "description": "Python modules directly under astrid/packs/ are rejected except the package marker.",
     "files": [
       {
         "name": "__init__.py",
         "classification": "pack_system",
         "notes": "Package init for astrid.packs."
-      },
-      {
-        "name": "cli.py",
-        "classification": "pack_system",
-        "notes": "Pack CLI compatibility re-export shim. Canonical implementation moved to astrid/core/pack/cli.py in M2 T7 (was astrid/core/pack_machinery/cli.py in M1 T8).",
-        "line_count": 9
-      },
-      {
-        "name": "install.py",
-        "classification": "pack_system",
-        "notes": "Pack installation compatibility re-export shim. Canonical implementation relocated to astrid/core/pack/install.py in M2 T8. This file is now a thin sys.modules alias shim.",
-        "line_count": 1930
-      },
-      {
-        "name": "validate.py",
-        "classification": "pack_system",
-        "notes": "Pack validation compatibility re-export shim. Canonical implementation moved to astrid/core/pack/validate.py in M2 T7 (was astrid/core/pack_machinery/validate.py in M1 T6)."
-      },
-      {
-        "name": "gitignore.py",
-        "classification": "pack_system",
-        "notes": "Gitignore filtering compatibility re-export shim. Canonical implementation moved to astrid/core/pack/gitignore.py in M2 T7 (was astrid/core/pack_machinery/gitignore.py in M1 T5)."
-      },
-      {
-        "name": "agent_index.py",
-        "classification": "pack_system",
-        "notes": "Agent index compatibility re-export shim. Canonical implementation moved to astrid/core/pack/agent_index.py in M2 T7 (was astrid/core/pack_machinery/agent_index.py in M1 T7)."
-      },
-      {
-        "name": "_canonical_entrypoint.py",
-        "classification": "machinery_shim",
-        "notes": "Canonical entrypoint compatibility re-export shim. Canonical implementation relocated to astrid/core/pack/entrypoint.py in M2 T11. Preserved as a thin public compatibility import path for third-party pack authors."
       }
     ]
   },
@@ -322,35 +290,14 @@
         "reason": "DSL @orchestrator definition with 16+ test-file references. Not a canonical executor. Classified in M2 as a documented compatibility shell exception. Migration to orchestrators/agent_probe/ deferred to follow-up milestone."
       },
       {
-        "pack": "video_editing",
-        "path": "hype.py",
-        "class": "legacy_public_shim",
-        "defer_to": "M2 (classified)",
-        "reason": "Legacy author-test DSL shim that duplicates video_editing.hype (canonically at orchestrators/hype/run.py). Classified in M2; kept for backward compatibility."
-      },
-      {
-        "pack": "text_analysis",
-        "path": "summarize.py",
-        "class": "legacy_public_shim",
-        "defer_to": "M2 (classified)",
-        "reason": "Compatibility re-export preserving astrid.packs.text_analysis.summarize while the canonical implementation lives at orchestrators/summarize/run.py. Classified in M2."
-      },
-      {
         "pack": "stream_content",
         "path": "__init__.py",
-        "class": "legacy_public_shim",
-        "defer_to": "M2 (classified)",
-        "reason": "Preserved helper-package marker required for sub-package imports (6 call sites). Classified in M2."
+        "class": "package_marker",
+        "defer_to": "permanent",
+        "reason": "Package marker for nested modules."
       }
     ],
-    "machinery_shims": [
-      {
-        "path": "astrid/packs/_canonical_entrypoint.py",
-        "class": "machinery_shim",
-        "defer_to": "M2 (relocated)",
-        "reason": "Canonical implementation relocated to astrid/core/pack/entrypoint.py in M2 T11. This file is now a thin re-export shim preserving compatibility for 50+ pack run.py import sites. Treated as a documented public compatibility import path for third-party pack authors."
-      }
-    ],
+    "machinery_shims": [],
     "special_directories": [
       {
         "path": "_core/",
@@ -363,6 +310,6 @@
   "structure_constants_reference": {
     "INTERNAL_PACK_DIRS": ["__pycache__", "schemas"],
     "source_file": "astrid/structure.py",
-    "note": "The shared pack manifest schemas moved out of astrid/packs/ in M1 and relocated from astrid/core/pack_machinery/schemas/ to astrid/core/pack/schemas/v1/ in M2 T10. The 'schemas' entry in INTERNAL_PACK_DIRS is a legacy reference to per-pack content roots only."
+    "note": "The shared pack manifest schemas live at astrid/core/pack/schemas/v1/. The 'schemas' entry in INTERNAL_PACK_DIRS is a legacy reference to per-pack content roots only."
   }
 }

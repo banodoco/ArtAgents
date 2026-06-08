@@ -1,6 +1,6 @@
 """Parity tests for the consolidated pack discovery helper (Step 12).
 
-These exercise the shared ``astrid.core.pack_discovery`` module that the
+These exercise the shared ``astrid.core.pack.discovery`` module that the
 executor, orchestrator, and element registries now delegate to. The focus is
 the four-layer walk (source / local / extra / installed) and that every
 registry observes identical ordering, plus that skills discovery can consume
@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
-from astrid.core.pack_discovery import (
+from astrid.core.pack.discovery import (
     ASTRID_PACKS_PATH_ENV,
     SOURCE_KINDS,
     DiscoveredPack,
@@ -223,7 +223,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: relative_env_root}, clear=False):
                 with mock.patch(
-                    "astrid.core.pack_store.installed_pack_roots",
+                    "astrid.core.pack.store.installed_pack_roots",
                     return_value=[installed_root],
                 ):
                     discovered = discover_pack_metadata(
@@ -255,7 +255,7 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
                 return ()
 
             with mock.patch(
-                "astrid.core.pack_store.installed_pack_roots",
+                "astrid.core.pack.store.installed_pack_roots",
                 return_value=[installed_pack_root],
             ):
                 discovered = discover_pack_metadata(

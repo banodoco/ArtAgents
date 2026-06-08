@@ -36,13 +36,11 @@ and do not require rationale entries.
 > The original module is now 1,117 lines and is below the 1,200-line threshold —
 > no longer listed here.
 >
-> **Fully decomposed:** `astrid/sdk.py` (originally 1,530 lines) has been split
-> across M4 batches 27, 29, and 31:
-> `sdk_errors.py` (T28, 148 lines), `sdk_results.py` (T28, 213 lines),
-> `sdk_generation.py` (T30, 329 lines), `sdk_discovery.py` (T32, 620 lines),
-> `sdk_invocation.py` (T34).
-> The original module is now below the 1,200-line threshold —
-> no longer listed here.
+> **Fully decomposed:** `astrid/sdk.py` (originally 1,530 lines) was split during
+> M4 and has since been folded into the `astrid/sdk/` package:
+> `exceptions.py`, `results.py`, `generation.py`, `discovery.py`,
+> `invocation.py`, `dto.py`, and `events.py`.
+> The monolithic module no longer exists and is no longer listed here.
 >
 > **Fully decomposed:** `astrid/gateway.py` (originally 1,215 lines) has been
 > split during M4 batches 35-39, 41:
@@ -55,7 +53,7 @@ and do not require rationale entries.
 > `gateway_help.py` (T42, ~128 lines) owns the entrypoint help rendering
 > (``_print_entrypoint_help``, ``_packs_subcommand_list``).  The original
 > module remains the canonical gateway facade (now below 365 lines) and
-> preserves the `astrid.pipeline is astrid.gateway` patching surface while
+> preserves the `astrid.gateway is astrid.gateway` patching surface while
 > staying well below the 1,200-line threshold.
 
 | # | File | Lines | Classification | Rationale |

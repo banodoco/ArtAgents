@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from astrid.packs._canonical_entrypoint import canonical_runtime_entrypoint
+from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 
 
 def _write_guarded_module(path: Path) -> None:
     path.write_text(
         "\n".join(
             [
-                "from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint",
+                "from astrid.core.pack.entrypoint import guard_canonical_entrypoint",
                 "guard_canonical_entrypoint('demo.capability')",
                 "def main(argv=None):",
                 "    return argv if argv is not None else 0",

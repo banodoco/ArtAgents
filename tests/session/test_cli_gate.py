@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid import pipeline
+from astrid import gateway
 from astrid.core.project import paths as project_paths
 from astrid.core.project.project import create_project
 from astrid.core.session import paths as session_paths
@@ -207,7 +207,7 @@ def test_allowlist_attach_runs_without_session(
     create_project("demo")
 
     # Seed a default timeline so Sprint 2 resolution works.
-    from astrid import timeline as timeline_contract
+    from astrid.core import timeline as timeline_contract
     from astrid.threads.ids import generate_ulid
 
     timeline_ulid = generate_ulid()

@@ -13,7 +13,7 @@ from unittest import mock
 
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.packs.video_editing.executors.cut import run as cut
-from astrid import timeline
+from astrid.core import timeline
 from astrid.packs.rendering.executors.render.run import _RangeHTTPRequestHandler
 
 

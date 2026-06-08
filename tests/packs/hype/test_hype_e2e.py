@@ -141,7 +141,7 @@ def _bind_hype_session(projects_root: Path, slug: str, run_id: str, sid: str) ->
 
 
 def _seed_default_timeline(projects_root: Path, slug: str) -> str:
-    from astrid import timeline as timeline_contract
+    from astrid.core import timeline as timeline_contract
     from astrid.threads.ids import generate_ulid
 
     timeline_ulid = generate_ulid()

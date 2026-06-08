@@ -9,7 +9,7 @@ and shells out to ffmpeg.
 from __future__ import annotations
 
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, run_pack_main
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint("media.clip_extract")
 import argparse

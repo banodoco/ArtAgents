@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from astrid import timeline as timeline_contract
+from astrid.core import timeline as timeline_contract
 from astrid.core.project import paths as project_paths
 from astrid.core.project.project import create_project
 from astrid.core.timeline._edit_helpers import pack_write_gateway, PackWriteResult
@@ -420,8 +420,8 @@ class UnmanagedArtifactModeTest(unittest.TestCase):
             )
 
     def test_unmanaged_timeline_save_timeline_still_works(self):
-        """save_timeline from astrid.timeline still writes files directly (unmanaged mode)."""
-        from astrid import timeline as tl
+        """save_timeline from astrid.core.timeline still writes files directly (unmanaged mode)."""
+        from astrid.core import timeline as tl
 
         out_dir = Path(tempfile.mkdtemp(prefix="unmgd-out-", dir=self.tmp_root))
         self.addCleanup(shutil.rmtree, out_dir, ignore_errors=True)

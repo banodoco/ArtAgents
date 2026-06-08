@@ -9,7 +9,8 @@ from typing import Any, Literal
 
 from astrid.contracts.exec_error import ExecError
 from astrid.contracts.schema import CapabilityHandle, Output, Port
-from astrid.sdk_errors import (
+
+from .exceptions import (
     AstridSDKError,
     CapabilityEventLogError,
     CapabilityInvocationError,
@@ -210,4 +211,3 @@ def _reconstruct_generation_result(result: InvocationResult) -> Any:
     if not isinstance(reconstructed, generation_result_type):
         raise CapabilityRuntimeError("GenerationResult.from_dict returned an unexpected type")
     return reconstructed
-

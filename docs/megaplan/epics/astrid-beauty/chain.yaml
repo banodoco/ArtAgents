@@ -40,7 +40,7 @@
 #   Reigh-import smoke coverage before movement.
 # - M0 must create or identify the public-import smoke gate used by later
 #   milestones. It should cover at least `astrid._paths`, `astrid._media`,
-#   `astrid.core._search`, `astrid.pipeline`, `astrid.timeline`,
+#   `astrid.core.search`, `astrid.gateway`, `astrid.timeline`,
 #   `astrid.threads`, and `astrid.core.reigh`.
 
 base_branch: main

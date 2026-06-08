@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.element import catalog as effects_catalog
-from astrid import timeline
+from astrid.core import timeline
 
 
 class TimelineElementsCatalogTest(unittest.TestCase):

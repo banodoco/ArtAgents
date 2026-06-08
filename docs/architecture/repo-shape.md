@@ -10,11 +10,10 @@ surface.
 machinery (discovery, resolver, store, manifest, override, alias resolution,
 validation, CLI, installation, entrypoint, agent indexing, gitignore filtering,
 schemas) belongs under `astrid/core/pack/*`. `astrid/packs/` is for pack data
-only — executors, orchestrators, elements, `pack.yaml`, `skill/` — plus thin
-backward-compatibility re-export shims at the top level. Gateway subcommand
-logic lives in `astrid/gateway_*.py` split modules; the root `gateway.py` is
-the router/facade. SDK implementation lives in `astrid/sdk_*.py` split modules;
-`sdk.py` is the aggregation facade.
+only — executors, orchestrators, elements, `pack.yaml`, `skill/` — with no
+top-level Python machinery except `__init__.py`. Gateway subcommand logic lives
+in `astrid/gateway_*.py` split modules; the root `gateway.py` is the
+router/facade. SDK implementation lives in the `astrid/sdk/` package.
 
 ## 1. Public Facades
 
@@ -22,8 +21,8 @@ the router/facade. SDK implementation lives in `astrid/sdk_*.py` split modules;
 
 | Surface | File | Classification |
 | --- | --- | --- |
-| `import astrid` | `astrid/__init__.py` | **Public SDK facade** — lazy-loads 27 names from `astrid/sdk.py` via `__getattr__`. The normative v1 contract is [docs/platform-contract.md](../platform-contract.md). |
-| `astrid.sdk` | `astrid/sdk.py` | **Public SDK aggregation facade** (651 lines) — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. Implementation split across `sdk_discovery.py` (620 lines), `sdk_errors.py` (148 lines), `sdk_generation.py` (330 lines), `sdk_invocation.py` (323 lines), `sdk_results.py` (213 lines). Direct imports of `astrid.sdk` are out of contract for v1. |
+| `import astrid` | `astrid/__init__.py` | **Public SDK facade** — lazy-loads the v1 SDK names via `__getattr__`. The normative v1 contract is [docs/platform-contract.md](../platform-contract.md). |
+| `astrid.sdk` | `astrid/sdk/` | **Public SDK package** — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. Direct imports of private SDK implementation modules are out of contract for v1. |
 
 The 27 names in `astrid.__all__` are:
 
@@ -73,7 +72,6 @@ and their purposes:
 | `core/model_catalog/` | Model registry, schema, CLI |
 | `core/orchestrator/` | Orchestrator schema, registry, runner, folder loader, CLI, plan template |
 | `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
-| `core/pack_machinery/` | **Thin compatibility shims** (M2): cli.py, validate.py, agent_index.py, gitignore.py, install.py are re-export shims pointing into `core/pack/`. Deprecated schemas/ copy retained for reference. Retained for M5; removal deferred to M6+. |
 | `core/project/` | Project schema, paths, run management, sidecar, JSON I/O, CLI |
 | `core/reigh/` | Reigh data provider, Supabase client, task client, timeline I/O, worker JWT |
 | `core/runpod/` | RunPod sweeper and storage |
@@ -84,22 +82,10 @@ and their purposes:
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
 | `core/worker/` | Worker machinery |
 
-Loose `.py` files at `astrid/core/` that are pack-machinery shims (all thin
-re-exports pointing into `astrid/core/pack/`):
-
-| File | Canonical home |
-| --- | --- |
-| `core/pack_discovery.py` | `core/pack/discovery.py` |
-| `core/pack_resolver.py` | `core/pack/resolver.py` |
-| `core/pack_store.py` | `core/pack/store.py` |
-| `core/manifest.py` | `core/pack/manifest.py` |
-| `core/override.py` | `core/pack/override.py` |
-| `core/alias_resolver.py` | `core/pack/alias_resolver.py` |
-
-Other loose `.py` files at `astrid/core/` are non-pack kernel modules
-(`scaffold.py`, `search.py`, `_search.py`, `git_util.py`, `cli_choices.py`,
-`theme_cli.py`, `dirty.py`). `_search.py` is additionally listed in
-`_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` as an intentional thin re-export.
+Loose `.py` files at `astrid/core/` are kernel helpers such as `scaffold.py`,
+`search.py`, `git_util.py`, `cli_choices.py`, `theme_cli.py`, and `dirty.py`.
+Pack machinery does not live in loose root-level core modules; it belongs under
+`astrid/core/pack/`.
 
 **Anti-coupling rules enforced by `validate_import_layering()`**:
 
@@ -123,7 +109,7 @@ When adding new code to the repository, follow these placement rules:
 - **New pack machinery**: `astrid/core/pack/*` (discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore)
 - **New internal framework code**: `astrid/core/<domain>/*`
 - **New pack data** (executors, orchestrators, elements, skills): `astrid/packs/<pack>/`
-- **New public SDK surface**: add to `astrid/sdk.py` (aggregation facade) and the appropriate `astrid/sdk_*.py` split module
+- **New public SDK surface**: add to the `astrid/sdk/` package and expose it through the package facade only when it is part of the v1 contract
 - **New gateway subcommands**: add to the appropriate `astrid/gateway_*.py` split module or create a new one; register the dispatch in `gateway_dispatch.py`
 - **New domain libraries**: `astrid/domains/<domain>/`
 - **New shared utilities**: `astrid/utilities/`
@@ -131,66 +117,25 @@ When adding new code to the repository, follow these placement rules:
 
 **Do not** add new `.py` files directly under `astrid/` — they must be listed in `TOP_LEVEL_ASTRID_FILES` in `astrid/structure.py` and approved as canonical top-level modules. Adding a new top-level module requires updating `TOP_LEVEL_ASTRID_FILES` in `structure.py` and this document.
 
-## 3. Stable Compatibility Shims
+## 3. Retired Compatibility Surfaces
 
-Stable compatibility shims keep legacy import paths alive while canonical
-implementations live in renamed modules. These are NOT stale migration shims
-that need removal — they are the intentional public compatibility layer.
+The current checkout has no live Python compatibility shim modules. The old
+top-level aliases for `_media`, `_paths`, `pipeline`, timeline re-exports,
+pack machinery, and SDK split modules were retired in favor of canonical
+imports. Historical milestone briefs may still mention those transitions, but
+live architecture docs and tests should point at the canonical modules.
 
-### 3.1 `astrid/_media.py`
+Canonical homes:
 
-Backward-compatibility shim for `astrid._media`. All public names now live in
-`astrid.media`. This module star-re-exports everything from `astrid.media`.
-
-- **Exemption**: Listed in `_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` with a `TODO(m13)` removal target.
-
-### 3.2 `astrid/_paths.py`
-
-Backward-compatibility shim for `astrid._paths`. All public names now live in
-`astrid.paths`. This module star-re-exports everything from `astrid.paths` plus
-explicit belt-and-suspenders re-exports of `PACKAGE_ROOT`, `REPO_ROOT`,
-`WORKSPACE_ROOT`, `executor_argv`, and `resolve_executor_runtime_module`.
-
-- **Exemption**: Listed in `_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` with a `TODO(m13)` removal target.
-
-### 3.3 `astrid/pipeline.py`
-
-Backward-compatibility shim — `astrid.pipeline` is `astrid.gateway`. This
-module uses `sys.modules[__name__] = sys.modules["astrid.gateway"]` to alias
-itself to the canonical gateway module so every `import astrid.pipeline` and
-every `mock.patch("astrid.pipeline.…")` target transparently resolves through
-to the gateway. No re-export lists to maintain — the gateway *is* the pipeline.
-
-- **Disposition**: **Retained permanently (SD1)**. Pipeline is a permanent public compatibility surface with zero internal callers.
-- **Sys.modules injection**: Because `pipeline.py` mutates `sys.modules`, it triggers the migration-completion `sys.modules` guard in `validate_migration_completion()`. It is listed in both `_SYS_MODULES_INJECTION_EXEMPTIONS` and `_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS`.
-- **Why two exemptions are needed**: `_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` suppresses the "compatibility shim still has N live import callers" advisory. `_SYS_MODULES_INJECTION_EXEMPTIONS` suppresses the "sys.modules injection remains outside tests" advisory. `pipeline.py` triggers both and needs both.
-- **Preferred pattern**: This module's sys.modules aliasing is the **preferred approach** for gateway-level compatibility shims — it avoids fragile re-export lists and guarantees `isinstance` checks pass through. Future shims of this shape should follow the same pattern and be added to both exemption lists.
-
-### 3.4 Timeline Compatibility Re-Export Shims (M5b-Deferred)
-
-Three files form the thin public re-export surface for the canonical core
-timeline API. Callers can continue to import from `astrid.timeline` while the
-implementation lives in `astrid.core.timeline`. Removal requires broader
-Banodoco integration work outside M5 scope.
-
-| File | Re-exports from |
+| Old surface | Canonical surface |
 | --- | --- |
-| `astrid/timeline/__init__.py` | `astrid.core.timeline` |
-| `astrid/timeline/timeline_model.py` | `astrid.core.timeline` |
-| `astrid/timeline/banodoco_composer.py` | `astrid.core.timeline` |
-
-These are guarded by `_MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS` — the exemption
-requires both the path match AND a `TODO(m5b)` marker string in the file. Tests
-in `tests/test_structure_contracts.py` enforce that these files are strictly
-thin re-exports (no runtime logic, no function/class definitions, no
-`_sync_private_hooks`).
-
-- **Disposition**: **Deferred to M5b.** The enforcement gate does not ban `astrid.timeline` imports. Public tests may keep importing it.
-
-### 3.5 `astrid/core/_search.py`
-
-Listed in `_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` with a `TODO(m13)` removal
-target. This is an intentional thin re-export surface.
+| `astrid._media` | `astrid.media` |
+| `astrid._paths` | `astrid.paths` |
+| `astrid.pipeline` | `astrid.gateway` |
+| `astrid.timeline.*` | `astrid.core.timeline.*` |
+| `astrid.core.pack_*`, `astrid.core.manifest`, `astrid.core.alias_resolver` | `astrid.core.pack.*` |
+| `astrid.packs.{cli,validate,agent_index,gitignore,install,_canonical_entrypoint}` | `astrid.core.pack.*` |
+| `astrid.sdk_*`, `astrid.sdk_results` | `astrid.sdk.*` |
 
 ## 4. Domain Subsystems
 
@@ -228,10 +173,9 @@ These rules are enforced by `validate_import_layering()` in `astrid/structure.py
 element ships in a pack under `astrid/packs/<pack>/`. The pack machinery kernel
 (`astrid/core/pack/`) provides the framework; packs provide the capabilities.
 
-**M5 rule**: `astrid/packs/` is for pack data only. The top-level `.py` files
-are thin backward-compatibility re-export shims whose canonical implementations
-live in `astrid/core/pack/`. New pack machinery must go under
-`astrid/core/pack/*`, not under `astrid/packs/`.
+**M5 rule**: `astrid/packs/` is for pack data only. Top-level Python files are
+not allowed under `astrid/packs/` except `__init__.py`. New pack machinery must
+go under `astrid/core/pack/*`, not under `astrid/packs/`.
 
 ### 5.1 Pack Layout
 
@@ -255,37 +199,25 @@ The shipped packs are: `rendering`, `understanding`, `generation`, `editorial`,
 A gitignored `local` pack at `astrid/packs/local/` is created on first
 `elements fork` and holds user-editable copies.
 
-The `builtin` pack is a **hidden compatibility shell** (`visibility: hidden`,
-`status: deprecated`) that preserves backward-compatible pack-level aliases
-mapping legacy `builtin.*` capability ids to canonical homes. It also contains
-`agent_probe.py` (a legacy DSL orchestrator shim used by 16+ regression tests)
-and `fixtures/`/`golden/` test infrastructure. It is not a capability-producing
-pack.
+The `builtin` pack is hidden and deprecated. It remains only for legacy test
+fixtures and historical pack-level aliases; new capability work should use the
+canonical shipped packs.
 
 The `_core/` directory is a **skill-only shell** — it contains only
 `skill/SKILL.md` (the root Astrid gateway skill), has no `pack.yaml`, and is
 not a runtime pack. It is coupled to `astrid/skills/` and treated as a
 permanent visible exception.
 
-### 5.3 Top-Level Pack Shims
+### 5.3 Top-Level Pack Files
 
-The following `.py` files directly under `astrid/packs/` are thin
-backward-compatibility re-export shims. Their canonical implementations live
-in `astrid/core/pack/`:
+The only Python file directly under `astrid/packs/` is the package marker:
 
-| File | Classification | Canonical home |
+| File | Classification |
 | --- | --- | --- |
-| `__init__.py` | Package init | (package marker) |
-| `cli.py` | Compatibility re-export shim | `astrid/core/pack/cli.py` |
-| `validate.py` | Compatibility re-export shim | `astrid/core/pack/validate.py` |
-| `agent_index.py` | Compatibility re-export shim | `astrid/core/pack/agent_index.py` |
-| `gitignore.py` | Compatibility re-export shim | `astrid/core/pack/gitignore.py` |
-| `install.py` | sys.modules alias shim | `astrid/core/pack/install.py` |
-| `_canonical_entrypoint.py` | Compatibility re-export shim | `astrid/core/pack/entrypoint.py` |
+| `__init__.py` | Package init |
 
-These shims are enforced by `_validate_packs_top_level_modules()` in
-`astrid/structure.py` (added M2 T13). Any new `.py` file under `astrid/packs/`
-must be a documented compatibility shim with ≤12 meaningful lines.
+`_validate_packs_top_level_modules()` in `astrid/structure.py` rejects any other
+top-level module under `astrid/packs/`.
 
 ### 5.4 ID Qualification Rules
 
@@ -301,7 +233,7 @@ must be a documented compatibility shim with ≤12 meaningful lines.
 - Executor folders must not contain orchestrator metadata and vice versa
 - The qualified ID's first segment must equal the pack ID
 - Custom element kinds declared in `pack.yaml` extensions are accepted
-- Top-level `.py` files under `astrid/packs/` must be documented compatibility shims (added M2 T13)
+- Top-level `.py` files under `astrid/packs/` are rejected except `__init__.py`
 
 ## 6. `astrid/elements/` — Planned-Absent Canonical Concept
 
@@ -358,17 +290,12 @@ verification.
 
 `tests/test_m5b_end_state_regression.py` — end-state regression guards.
 
-`tests/test_m2_public_surface.py` — M2 public surface characterization (39 tests
-across 12 test classes: root imports, pipeline-gateway identity, pipeline patch
-seams, deprecated CLI aliases, __main__ delegation, Banodoco integration imports,
-paths/_paths identity, media/_media identity, theme_schema import, thread import
-surface, timeline re-export surface, SDK public surface).
+`tests/test_m2_public_surface.py` — public surface characterization updated to
+the canonical gateway, paths, media, timeline, thread, and SDK surfaces.
 
-`tests/test_m2_pack_machinery.py` — M2 pack machinery characterization (46 tests
-across 11 test classes: core.pack exports, core.pack_machinery submodules,
-packs shim resolution, packs.install canonical surface, machinery-shim identity,
-loose-module shim completeness, core.pack submodule exports, discovery pipeline,
-resolver pipeline, store pipeline, schema-root relocation).
+`tests/test_m2_pack_machinery.py` — pack machinery characterization updated to
+the canonical `astrid.core.pack.*` layout: exports, CLI/install surfaces,
+discovery, resolver, store, schema-root relocation, and no-shim enforcement.
 
 `tests/test_pack_layout_contract.py` — pack layout contract verification
 (updated M2 T10 for schema relocation to `astrid/core/pack/schemas/v1/`).
@@ -394,8 +321,8 @@ contract documents:
 | `docs/architecture/pack-layout-variants.json` | Machine-readable pack variant catalog |
 | `docs/architecture/test-relocation-map.json` | Test relocation target map (consumed by M3) |
 | `docs/architecture/giant-file-split-candidates.json` | Giant-file split candidates with line counts (consumed by M4, now completed) |
-| `docs/architecture/shim-legacy-audit.md` | M5 shim and legacy surface audit with retention metadata |
-| `docs/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). Note: this M2-era document references `pack_machinery/schemas/v1/` as the canonical schema path; canonical schemas now live at `astrid/core/pack/schemas/v1/`. A future milestone should refresh this document. |
+| `docs/architecture/shim-legacy-audit.md` | Current no-shim audit and retired-surface map |
+| `docs/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
 | `docs/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
 | `docs/sdk.md` | User-facing SDK walkthrough |
 | `docs/run-ledger-contract.md` | Run ledger contract |
@@ -412,9 +339,11 @@ the following splits:
 | File | Pre-Split Lines | Post-Split Lines | Result |
 | --- | --- | --- | --- |
 | `astrid/gateway.py` | 1,215 | 367 | Split into `gateway.py` (router, 367), `gateway_dispatch.py` (578), `gateway_help.py` (139), `gateway_project.py` (155), `gateway_wait.py` (115) |
-| `astrid/sdk.py` | 1,833 | 651 | Split into `sdk.py` (facade, 651), `sdk_discovery.py` (620), `sdk_errors.py` (148), `sdk_generation.py` (330), `sdk_invocation.py` (323), `sdk_results.py` (213) |
+| `astrid/sdk.py` | 1,833 | Package | Folded into the `astrid/sdk/` package (`discovery.py`, `dto.py`, `events.py`, `exceptions.py`, `generation.py`, `invocation.py`, `results.py`) |
 
-The split modules are listed in `TOP_LEVEL_ASTRID_FILES` in `astrid/structure.py`.
+Gateway split modules are listed in `TOP_LEVEL_ASTRID_FILES` in
+`astrid/structure.py`; SDK implementation now lives in the `astrid/sdk/`
+package.
 
 ### 9.2 Test Relocation Candidates (M3)
 
@@ -440,12 +369,11 @@ document:
 | Run ledger contract (`docs/run-ledger-contract.md`) | **Complete** | §4 — Audit subsystem |
 | Integration contracts (`docs/integration_contracts.md`) | **Complete** | §5 — Pack capability surface |
 | Output result contract (`docs/output-result-contract.md`) | **Complete** | §1.1 — SDK DTOs |
-| Timeline compatibility re-exports (m5b) | **Deferred to M5b** | §3.4 — Timeline shims |
+| Timeline canonicalization | **Complete** | §3 — retired timeline re-export surfaces |
 | Internal threads lineage (m5a) | **Complete** | §4 — Threads subsystem with removed wrapper symbols |
-| Public compatibility shims (m13-targeted) | **Complete** | §3.1–3.3 — `_media.py`, `_paths.py`, `pipeline.py` |
-| Top-level module rationalization (M2) | **Complete** | §2 — `core/pack/` canonical pack machinery; §5 — `packs/` as pack data only; §5.3 — top-level shim classification; §5.5 — structure enforcement |
-| Giant-file split (M4) | **Complete** | §9.1 — Gateway split into 4 sub-modules; SDK split into 5 sub-modules |
-| Pipeline as permanent SD1 | **Complete** | §3.3 — Pipeline retained permanently as public compatibility surface |
+| Public compatibility shim removal | **Complete** | §3 — retired surface map |
+| Top-level module rationalization (M2) | **Complete** | §2 — `core/pack/` canonical pack machinery; §5 — `packs/` as pack data only; §5.3 — no top-level pack modules; §5.5 — structure enforcement |
+| Giant-file split (M4) | **Complete** | §9.1 — Gateway split into 4 sub-modules; SDK folded into `astrid/sdk/` package |
 | M5 boundary enforcement | **Complete** | §2.2 — Contributor placement guidance; §4.1 — CLI/domain/import-layering convention; §12.1 — Structure enforcement model |
 | Shim and legacy surface audit (M5) | **Complete** | `docs/architecture/shim-legacy-audit.md` — M5 dispositions with retention metadata |
 
@@ -457,7 +385,6 @@ not enforced with hard gates:
 | Boundary | Notes |
 | --- | --- |
 | `threads.ids` | Should not be imported outside the threads package; currently a convention |
-| `_paths` | Underscore-prefixed module; callers should prefer `paths` |
 | `verify` | Verification helpers should not depend on packs or orchestrate |
 | `theme_schema` | Theme schema validation should remain a leaf utility |
 
@@ -481,12 +408,9 @@ All exemptions are colocated in `astrid/structure.py`:
 
 | Constant | Purpose |
 | --- | --- |
-| `TOP_LEVEL_ASTRID_FILES` | Allowed top-level `.py` files under `astrid/` (22 files including gateway/sdk split modules) |
-| `TOP_LEVEL_ASTRID_DIRS` | Allowed top-level directories under `astrid/` (15 dirs including `elements` as planned-absent) |
+| `TOP_LEVEL_ASTRID_FILES` | Allowed top-level `.py` files under `astrid/` |
+| `TOP_LEVEL_ASTRID_DIRS` | Allowed top-level directories under `astrid/` including `elements` as planned-absent |
 | `_IMPORT_LAYERING_EXEMPT_REL` | Files exempt from core import-layering rules (2 files) |
-| `_SYS_MODULES_INJECTION_EXEMPTIONS` | Files exempt from sys.modules injection guard (3 files: compile.py, in_process.py, pipeline.py) |
-| `_STABLE_COMPATIBILITY_SHIM_EXEMPTIONS` | Stable shims exempt from shim-with-live-callers advisory (4 files: `_media.py`, `_paths.py`, `_search.py`, `pipeline.py`) |
-| `_MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS` | Milestone-gated shims (require TODO marker + path match; 3 timeline files) |
 
 ### 12.3 Consumption
 

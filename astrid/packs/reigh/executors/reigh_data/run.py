@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 
-from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('reigh.reigh_data')
 import argparse
 import json
@@ -27,7 +27,7 @@ from astrid.core.reigh.env import (
     resolve_task_status_update_url,
 )
 from astrid.contracts.errors import AstridError
-from astrid.packs._canonical_entrypoint import run_pack_main
+from astrid.core.pack.entrypoint import run_pack_main
 
 
 def fetch_reigh_data(

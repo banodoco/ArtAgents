@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid import timeline
+from astrid.core import timeline
 
 
 class ArrangementSchemaTest(unittest.TestCase):

@@ -106,13 +106,13 @@ as JSON Schema documents in the repository:
 
 | Manifest | Schema |
 |---|---|
-| `pack.yaml` | `astrid/core/pack_machinery/schemas/v1/pack.json` |
-| `executor.yaml` | `astrid/core/pack_machinery/schemas/v1/executor.json` |
-| `orchestrator.yaml` | `astrid/core/pack_machinery/schemas/v1/orchestrator.json` |
-| `element.yaml` | `astrid/core/pack_machinery/schemas/v1/element.json` |
+| `pack.yaml` | `astrid/core/pack/schemas/v1/pack.json` |
+| `executor.yaml` | `astrid/core/pack/schemas/v1/executor.json` |
+| `orchestrator.yaml` | `astrid/core/pack/schemas/v1/orchestrator.json` |
+| `element.yaml` | `astrid/core/pack/schemas/v1/element.json` |
 
 Shared constraints (id patterns, version format, runtime shape, etc.)
-are defined in `astrid/core/pack_machinery/schemas/v1/_defs.json`.
+are defined in `astrid/core/pack/schemas/v1/_defs.json`.
 
 All v1 manifests require a `schema_version: 1` field. Validation
 rejects unknown schema versions with a clear error message. This

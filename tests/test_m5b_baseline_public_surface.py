@@ -1,6 +1,6 @@
 """Baseline public-surface guardrail tests for m5b god-module splits.
 
-Captures the pre-split public import surface of ``astrid.timeline`` and
+Captures the pre-split public import surface of ``astrid.core.timeline`` and
 ``astrid.core.task.lifecycle``, plus CLI behavior guardrails for default
 brief routing, unknown top-level commands, and documented lifecycle command
 parsing.  These tests must continue to pass after the splits; only the
@@ -21,22 +21,20 @@ from unittest import mock
 
 
 # ---------------------------------------------------------------------------
-# astrid.timeline public import surface
+# astrid.core.timeline public import surface
 # ---------------------------------------------------------------------------
 
 class TimelinePublicSurfaceTest(unittest.TestCase):
-    """The pre-split public names of ``astrid.timeline`` must remain importable.
+    """The pre-split public names of ``astrid.core.timeline`` must remain importable.
 
     These are the names that external callers (conftest.py, project seeders,
-    element catalog tests, etc.) import directly from the module.  After the
-    split into ``astrid/timeline/__init__.py`` (compatibility shim) +
-    ``timeline_model.py`` + ``banodoco_composer.py``, every name below must
-    still resolve from ``import astrid.timeline`` or ``from astrid.timeline
-    import ...``.
+    element catalog tests, etc.) import directly from the module.  Every
+    name below must resolve from ``import astrid.core.timeline`` or
+    ``from astrid.core.timeline import ...``.
     """
 
     def test_public_names_importable(self) -> None:
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         # Re-exports from banodoco_timeline_schema (or fallback TypedDicts)
         for name in (
@@ -51,17 +49,17 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
                 self.assertTrue(hasattr(t, name), f"missing {name}")
 
     def test_materialize_output_importable(self) -> None:
-        from astrid.timeline import materialize_output
+        from astrid.core.timeline import materialize_output
 
         self.assertTrue(callable(materialize_output))
 
     def test_timeline_effect_types_importable(self) -> None:
-        from astrid.timeline import TimelineEffect
+        from astrid.core.timeline import TimelineEffect
 
         self.assertIsNotNone(TimelineEffect)
 
     def test_animation_types_importable(self) -> None:
-        from astrid.timeline import (
+        from astrid.core.timeline import (
             AnimationReference,
             AnimationReferenceList,
             AnimationReferenceObject,
@@ -72,7 +70,7 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
         self.assertIsNotNone(AnimationReferenceObject)
 
     def test_parameter_types_importable(self) -> None:
-        from astrid.timeline import (
+        from astrid.core.timeline import (
             ParameterDefinition,
             ParameterOption,
             ParameterType,
@@ -83,7 +81,7 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
         self.assertIsNotNone(ParameterType)
 
     def test_track_types_importable(self) -> None:
-        from astrid.timeline import (
+        from astrid.core.timeline import (
             TrackBlendMode,
             TrackDefinition,
             TrackFit,
@@ -96,7 +94,7 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
         self.assertIsNotNone(TrackKind)
 
     def test_clip_entrance_exit_types_importable(self) -> None:
-        from astrid.timeline import (
+        from astrid.core.timeline import (
             ClipContinuous,
             ClipEntrance,
             ClipExit,
@@ -111,19 +109,19 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
         self.assertIsNotNone(ClipTransitionReference)
 
     def test_text_clip_data_importable(self) -> None:
-        from astrid.timeline import TextAlignment, TextClipData
+        from astrid.core.timeline import TextAlignment, TextClipData
 
         self.assertIsNotNone(TextAlignment)
         self.assertIsNotNone(TextClipData)
 
     def test_asset_registry_types_importable(self) -> None:
-        from astrid.timeline import AssetRegistry, AssetRegistryEntry
+        from astrid.core.timeline import AssetRegistry, AssetRegistryEntry
 
         self.assertIsNotNone(AssetRegistry)
         self.assertIsNotNone(AssetRegistryEntry)
 
     def test_pool_types_importable(self) -> None:
-        from astrid.timeline import (
+        from astrid.core.timeline import (
             Pool,
             PoolCategory,
             PoolEntry,
@@ -138,7 +136,7 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
         self.assertIsNotNone(PoolScores)
 
     def test_arrangement_types_importable(self) -> None:
-        from astrid.timeline import (
+        from astrid.core.timeline import (
             Arrangement,
             ArrangementAudioSource,
             ArrangementClip,
@@ -155,43 +153,43 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
         self.assertIsNotNone(ArrangementVisualSource)
 
     def test_pipeline_metadata_types_importable(self) -> None:
-        from astrid.timeline import PipelineMetadata, PipelineMetadataClipEntry
+        from astrid.core.timeline import PipelineMetadata, PipelineMetadataClipEntry
 
         self.assertIsNotNone(PipelineMetadata)
         self.assertIsNotNone(PipelineMetadataClipEntry)
 
     def test_clip_classified_kind_importable(self) -> None:
-        from astrid.timeline import ClipClassifiedKind
+        from astrid.core.timeline import ClipClassifiedKind
 
         self.assertIsNotNone(ClipClassifiedKind)
 
     def test_canonical_empty_timeline_importable(self) -> None:
-        from astrid.timeline import canonical_empty_timeline
+        from astrid.core.timeline import canonical_empty_timeline
 
         self.assertTrue(callable(canonical_empty_timeline))
 
     def test_validate_timeline_config_for_container_importable(self) -> None:
-        from astrid.timeline import validate_timeline_config_for_container
+        from astrid.core.timeline import validate_timeline_config_for_container
 
         self.assertTrue(callable(validate_timeline_config_for_container))
 
     def test_canonical_timeline_config_importable(self) -> None:
-        from astrid.timeline import canonical_timeline_config
+        from astrid.core.timeline import canonical_timeline_config
 
         self.assertTrue(callable(canonical_timeline_config))
 
     def test_timeline_config_digest_importable(self) -> None:
-        from astrid.timeline import timeline_config_digest
+        from astrid.core.timeline import timeline_config_digest
 
         self.assertTrue(callable(timeline_config_digest))
 
     def test_timeline_configs_equal_importable(self) -> None:
-        from astrid.timeline import timeline_configs_equal
+        from astrid.core.timeline import timeline_configs_equal
 
         self.assertTrue(callable(timeline_configs_equal))
 
     def test_load_save_functions_importable(self) -> None:
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         for name in (
             "load_timeline",
@@ -215,83 +213,83 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
                 self.assertTrue(callable(getattr(t, name)), f"{name} not callable")
 
     def test_validate_arrangement_duration_window_importable(self) -> None:
-        from astrid.timeline import validate_arrangement_duration_window
+        from astrid.core.timeline import validate_arrangement_duration_window
 
         self.assertTrue(callable(validate_arrangement_duration_window))
 
     def test_resolve_timeline_theme_importable(self) -> None:
-        from astrid.timeline import resolve_timeline_theme
+        from astrid.core.timeline import resolve_timeline_theme
 
         self.assertTrue(callable(resolve_timeline_theme))
 
     def test_merge_generation_importable(self) -> None:
-        from astrid.timeline import merge_generation
+        from astrid.core.timeline import merge_generation
 
         self.assertTrue(callable(merge_generation))
 
     def test_is_all_generative_arrangement_importable(self) -> None:
-        from astrid.timeline import is_all_generative_arrangement
+        from astrid.core.timeline import is_all_generative_arrangement
 
         self.assertTrue(callable(is_all_generative_arrangement))
 
     def test_timeline_render_view_importable(self) -> None:
-        from astrid.timeline import TimelineRenderView
+        from astrid.core.timeline import TimelineRenderView
 
         self.assertIsNotNone(TimelineRenderView)
 
     def test_timeline_clip_view_importable(self) -> None:
-        from astrid.timeline import TimelineClipView
+        from astrid.core.timeline import TimelineClipView
 
         self.assertIsNotNone(TimelineClipView)
 
     def test_timeline_class_importable(self) -> None:
         """The Timeline dataclass is the main runtime timeline container."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         self.assertIsNotNone(Timeline)
 
     def test_builtin_clip_types_importable(self) -> None:
-        from astrid.timeline import BUILTIN_CLIP_TYPES, ClipType
+        from astrid.core.timeline import BUILTIN_CLIP_TYPES, ClipType
 
         self.assertIsNotNone(BUILTIN_CLIP_TYPES)
         self.assertIsNotNone(ClipType)
 
     def test_audio_binding_importable(self) -> None:
-        from astrid.timeline import AudioBindingSource, AudioBindingValue
+        from astrid.core.timeline import AudioBindingSource, AudioBindingValue
 
         self.assertIsNotNone(AudioBindingSource)
         self.assertIsNotNone(AudioBindingValue)
 
     def test_source_ids_importable(self) -> None:
-        from astrid.timeline import SourceIds
+        from astrid.core.timeline import SourceIds
 
         self.assertIsNotNone(SourceIds)
 
     def test_pipeline_pool_kind_importable(self) -> None:
-        from astrid.timeline import PipelinePoolKind
+        from astrid.core.timeline import PipelinePoolKind
 
         self.assertIsNotNone(PipelinePoolKind)
 
     def test_version_constants_importable(self) -> None:
-        from astrid.timeline import ARRANGEMENT_VERSION, METADATA_VERSION, POOL_VERSION
+        from astrid.core.timeline import ARRANGEMENT_VERSION, METADATA_VERSION, POOL_VERSION
 
         self.assertIsNotNone(ARRANGEMENT_VERSION)
         self.assertIsNotNone(METADATA_VERSION)
         self.assertIsNotNone(POOL_VERSION)
 
     def test_carry_forward_source_fields_importable(self) -> None:
-        from astrid.timeline import CARRY_FORWARD_SOURCE_FIELDS
+        from astrid.core.timeline import CARRY_FORWARD_SOURCE_FIELDS
 
         self.assertIsNotNone(CARRY_FORWARD_SOURCE_FIELDS)
 
     def test_arrangement_duration_error_importable(self) -> None:
-        from astrid.timeline import ArrangementDurationError
+        from astrid.core.timeline import ArrangementDurationError
 
         self.assertIsNotNone(ArrangementDurationError)
 
     def test_fallback_shared_types_importable(self) -> None:
         """The fallback TypedDicts used when banodoco_timeline_schema is absent."""
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         for name in (
             "SharedAssetEntry",
@@ -306,302 +304,19 @@ class TimelinePublicSurfaceTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.timeline.timeline_model deep re-export surface
-# ---------------------------------------------------------------------------
-
-class TimelineModelReExportTest(unittest.TestCase):
-    """The legacy deep import ``astrid.timeline.timeline_model`` must keep
-    exposing the same Banodoco schema names, re-exported from canonical core.
-
-    After the split the module is a thin re-export over
-    ``astrid.core.timeline.banodoco_schema``.  Historical importers that use
-    the legacy module path must continue to resolve every name.
-    """
-
-    def test_schema_type_names_importable(self) -> None:
-        import astrid.timeline.timeline_model as tm
-
-        for name in (
-            "TimelineClip",
-            "TimelineConfig",
-            "ThemeOverrides",
-            "TimelineOutput",
-            "AssetEntry",
-            "Theme",
-            "AnimationReference",
-            "AnimationReferenceList",
-            "AnimationReferenceObject",
-            "ParameterDefinition",
-            "ParameterOption",
-            "ParameterType",
-            "TrackBlendMode",
-            "TrackDefinition",
-            "TrackFit",
-            "TrackKind",
-            "ClipContinuous",
-            "ClipEntrance",
-            "ClipExit",
-            "ClipTransition",
-            "ClipTransitionReference",
-            "TextAlignment",
-            "TextClipData",
-            "AssetRegistry",
-            "AssetRegistryEntry",
-            "Pool",
-            "PoolCategory",
-            "PoolEntry",
-            "PoolKind",
-            "PoolScores",
-            "Arrangement",
-            "ArrangementAudioSource",
-            "ArrangementClip",
-            "ArrangementTextOverlay",
-            "ArrangementVisualRole",
-            "ArrangementVisualSource",
-            "PipelineMetadata",
-            "PipelineMetadataClipEntry",
-            "PipelinePoolKind",
-            "SourceIds",
-            "AudioBindingSource",
-            "AudioBindingValue",
-            "ClipClassifiedKind",
-            "ClipType",
-            "TimelineEffect",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(tm, name), f"missing {name}")
-
-    def test_fallback_shared_types_importable(self) -> None:
-        import astrid.timeline.timeline_model as tm
-
-        for name in (
-            "SharedAssetEntry",
-            "SharedTheme",
-            "SharedThemeOverrides",
-            "SharedTimelineClip",
-            "SharedTimelineConfig",
-            "SharedTimelineOutput",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(tm, name), f"missing {name}")
-
-    def test_constants_importable(self) -> None:
-        import astrid.timeline.timeline_model as tm
-
-        for name in (
-            "ARRANGEMENT_VERSION",
-            "METADATA_VERSION",
-            "POOL_VERSION",
-            "CARRY_FORWARD_SOURCE_FIELDS",
-            "BUILTIN_CLIP_TYPES",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(tm, name), f"missing {name}")
-
-    def test_validation_functions_importable(self) -> None:
-        import astrid.timeline.timeline_model as tm
-
-        for name in (
-            "validate_arrangement",
-            "validate_arrangement_duration_window",
-            "validate_metadata",
-            "validate_pool",
-            "validate_registry",
-            "validate_timeline",
-            "validate_timeline_config_for_container",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(tm, name), f"missing {name}")
-                self.assertTrue(
-                    callable(getattr(tm, name)), f"{name} not callable"
-                )
-
-    def test_schema_functions_importable(self) -> None:
-        import astrid.timeline.timeline_model as tm
-
-        for name in (
-            "canonical_empty_timeline",
-            "canonical_timeline_config",
-            "materialize_output",
-            "timeline_config_digest",
-            "timeline_configs_equal",
-            "is_all_generative_arrangement",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(tm, name), f"missing {name}")
-                self.assertTrue(
-                    callable(getattr(tm, name)), f"{name} not callable"
-                )
-
-    def test_private_catalog_hooks_importable(self) -> None:
-        import astrid.timeline.timeline_model as tm
-
-        for name in (
-            "_animation_ids",
-            "_animation_meta",
-            "_effect_ids",
-            "_normalize_clip_for_validation",
-            "_transition_ids",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(tm, name), f"missing {name}")
-
-    def test_error_types_importable(self) -> None:
-        from astrid.timeline.timeline_model import ArrangementDurationError
-
-        self.assertIsNotNone(ArrangementDurationError)
-
-    def test_canonical_source_is_banodoco_schema(self) -> None:
-        """Sample names from ``astrid.timeline.timeline_model`` must resolve
-        to ``astrid.core.timeline.banodoco_schema`` as their implementation
-        module (or the external package for TypedDict types depending on
-        Python version), confirming the re-export is canonical core, not the
-        facade."""
-        import astrid.timeline.timeline_model as tm
-
-        # Functions and classes *defined* in banodoco_schema → strict check
-        strict_checks: list[tuple[str, str]] = [
-            ("validate_timeline", "astrid.core.timeline.banodoco_schema"),
-            ("canonical_timeline_config", "astrid.core.timeline.banodoco_schema"),
-            ("ArrangementDurationError", "astrid.core.timeline.banodoco_schema"),
-            ("_effect_ids", "astrid.core.timeline.banodoco_schema"),
-        ]
-        for name, expected_module in strict_checks:
-            with self.subTest(kind="strict", name=name):
-                obj = getattr(tm, name)
-                self.assertEqual(
-                    getattr(obj, "__module__", None),
-                    expected_module,
-                    f"{name}.__module__ is {getattr(obj, '__module__', None)!r}, "
-                    f"expected {expected_module!r}",
-                )
-
-        # TypedDict types may resolve to external banodoco_timeline_schema
-        # on Python < 3.12; verify they resolve to either canonical core or
-        # the external package (both are correct — the facade re-exports).
-        typed_dict_names = ("TimelineClip", "TimelineConfig")
-        for name in typed_dict_names:
-            with self.subTest(kind="typed-dict", name=name):
-                obj = getattr(tm, name)
-                actual_module = getattr(obj, "__module__", None)
-                self.assertIn(
-                    actual_module,
-                    (
-                        "astrid.core.timeline.banodoco_schema",
-                        "banodoco_timeline_schema.generated",
-                    ),
-                    f"{name}.__module__ is {actual_module!r}, expected one of "
-                    "('astrid.core.timeline.banodoco_schema', "
-                    "'banodoco_timeline_schema.generated')",
-                )
-
-
-# ---------------------------------------------------------------------------
-# astrid.timeline.banodoco_composer deep re-export surface
-# ---------------------------------------------------------------------------
-
-class BanodocoComposerReExportTest(unittest.TestCase):
-    """The legacy deep import ``astrid.timeline.banodoco_composer`` must keep
-    exposing the Banodoco composer class and its load/save helpers, re-exported
-    from canonical core.
-
-    After the split the module is a thin re-export over
-    ``astrid.core.timeline.banodoco_composer``.
-    """
-
-    def test_composer_class_importable(self) -> None:
-        from astrid.timeline.banodoco_composer import Timeline
-
-        self.assertIsNotNone(Timeline)
-
-    def test_composer_view_types_importable(self) -> None:
-        from astrid.timeline.banodoco_composer import (
-            TimelineClipView,
-            TimelineRenderView,
-        )
-
-        self.assertIsNotNone(TimelineClipView)
-        self.assertIsNotNone(TimelineRenderView)
-
-    def test_load_functions_importable(self) -> None:
-        import astrid.timeline.banodoco_composer as bc
-
-        for name in (
-            "load_arrangement",
-            "load_metadata",
-            "load_pool",
-            "load_registry",
-            "load_timeline",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(bc, name), f"missing {name}")
-                self.assertTrue(
-                    callable(getattr(bc, name)), f"{name} not callable"
-                )
-
-    def test_save_functions_importable(self) -> None:
-        import astrid.timeline.banodoco_composer as bc
-
-        for name in (
-            "save_arrangement",
-            "save_metadata",
-            "save_pool",
-            "save_registry",
-            "save_timeline",
-        ):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(bc, name), f"missing {name}")
-                self.assertTrue(
-                    callable(getattr(bc, name)), f"{name} not callable"
-                )
-
-    def test_composer_helpers_importable(self) -> None:
-        import astrid.timeline.banodoco_composer as bc
-
-        for name in ("merge_generation", "resolve_timeline_theme"):
-            with self.subTest(name=name):
-                self.assertTrue(hasattr(bc, name), f"missing {name}")
-                self.assertTrue(
-                    callable(getattr(bc, name)), f"{name} not callable"
-                )
-
-    def test_canonical_source_is_banodoco_composer(self) -> None:
-        """Sample names from ``astrid.timeline.banodoco_composer`` must
-        resolve to ``astrid.core.timeline.banodoco_composer`` as their
-        implementation module."""
-        import astrid.timeline.banodoco_composer as bc
-
-        checks: list[tuple[str, str]] = [
-            ("Timeline", "astrid.core.timeline.banodoco_composer"),
-            ("save_timeline", "astrid.core.timeline.banodoco_composer"),
-            ("load_timeline", "astrid.core.timeline.banodoco_composer"),
-        ]
-        for name, expected_module in checks:
-            with self.subTest(name=name):
-                obj = getattr(bc, name)
-                self.assertEqual(
-                    getattr(obj, "__module__", None),
-                    expected_module,
-                    f"{name}.__module__ is {getattr(obj, '__module__', None)!r}, "
-                    f"expected {expected_module!r}",
-                )
-
-
-# ---------------------------------------------------------------------------
-# astrid.timeline canonical-source verification
+# astrid.core.timeline canonical-source verification
 # ---------------------------------------------------------------------------
 
 class TimelineCanonicalSourceTest(unittest.TestCase):
-    """The public ``astrid.timeline`` facade must expose every required name
-    and each name's ``__module__`` must point to canonical core, not to the
-    compatibility facade itself.
+    """The public ``astrid.core.timeline`` module must expose every required name
+    and each name's ``__module__`` must point to the canonical source submodule.
 
-    This confirms that ``astrid.timeline`` is a thin public re-export and the
-    implementation source lives in ``astrid.core.timeline``.
+    This confirms the implementation source resolution within the canonical
+    ``astrid.core.timeline`` package.
     """
 
     def test_top_level_names_resolve_to_canonical_core(self) -> None:
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         # Functions and classes *defined* in our canonical core → strict check
         strict_schema_checks: list[tuple[str, str]] = [
@@ -672,46 +387,22 @@ class TimelineCanonicalSourceTest(unittest.TestCase):
                     f"{name}.__module__ = {actual!r} not in {typing_ok}",
                 )
 
-    def test_no_private_logic_in_facade(self) -> None:
-        """The ``astrid.timeline`` compat module must not define private hooks
-        or validation wrappers — it is a pure re-export surface."""
-        import astrid.timeline
+    def test_no_private_hooks_in_timeline_package(self) -> None:
+        """The ``astrid.core.timeline`` package must not define private hooks
+        or validation wrappers — its ``__init__.py`` is the public surface."""
+        import astrid.core.timeline
 
-        facade_file = astrid.timeline.__file__
-        self.assertIsNotNone(facade_file)
-        self.assertIn("__init__.py", str(facade_file))
+        init_file = astrid.core.timeline.__file__
+        self.assertIsNotNone(init_file)
+        self.assertIn("__init__.py", str(init_file))
 
-        # _sync_private_hooks must not exist anywhere in the facade
+        # _sync_private_hooks must not exist anywhere in the public surface
         self.assertFalse(
-            hasattr(astrid.timeline, "_sync_private_hooks"),
-            "astrid.timeline must not expose _sync_private_hooks",
+            hasattr(astrid.core.timeline, "_sync_private_hooks"),
+            "astrid.core.timeline must not expose _sync_private_hooks",
         )
 
-    def test_timeline_model_is_thin_reexport(self) -> None:
-        """``astrid.timeline.timeline_model`` must not define its own symbols;
-        every name is re-exported from canonical core."""
-        import astrid.timeline.timeline_model as tm
 
-        tm_file = tm.__file__ if hasattr(tm, "__file__") else None
-        self.assertIsNotNone(tm_file)
-        # The module must not contain _sync_private_hooks
-        self.assertFalse(
-            hasattr(tm, "_sync_private_hooks"),
-            "timeline_model must not expose _sync_private_hooks",
-        )
-
-    def test_banodoco_composer_is_thin_reexport(self) -> None:
-        """``astrid.timeline.banodoco_composer`` must not define its own symbols;
-        every name is re-exported from canonical core."""
-        import astrid.timeline.banodoco_composer as bc
-
-        bc_file = bc.__file__ if hasattr(bc, "__file__") else None
-        self.assertIsNotNone(bc_file)
-        # The module must not contain _sync_private_hooks
-        self.assertFalse(
-            hasattr(bc, "_sync_private_hooks"),
-            "banodoco_composer must not expose _sync_private_hooks",
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -847,13 +538,13 @@ class LifecyclePublicSurfaceTest(unittest.TestCase):
 class UnknownCommandGuardrailTest(unittest.TestCase):
     """Unknown top-level non-option subcommands must exit nonzero.
 
-    The pipeline MUST NOT silently route unknown commands into the default
+    The gateway MUST NOT silently route unknown commands into the default
     hype orchestrator.  The error must be printed to stderr and the exit
     code must be 2.
     """
 
     def test_unknown_top_level_command_exits_2(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         with mock.patch(
             "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
@@ -861,14 +552,14 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                exit_code = pipeline.main(["nonexistentcmd123"])
+                exit_code = gateway.main(["nonexistentcmd123"])
             self.assertEqual(exit_code, 2)
             self.assertIn("unknown command", stderr.getvalue())
             self.assertIn("nonexistentcmd123", stderr.getvalue())
 
     def test_multiple_unknown_commands(self) -> None:
         """A spread of non-existent commands all produce the same guardrail."""
-        from astrid import pipeline
+        from astrid import gateway
 
         bogus = ["xyzzy", "floob", "gargleblaster", "notarealthing"]
         with mock.patch(
@@ -879,13 +570,13 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
                 with self.subTest(cmd=cmd):
                     stderr = io.StringIO()
                     with contextlib.redirect_stderr(stderr):
-                        exit_code = pipeline.main([cmd])
+                        exit_code = gateway.main([cmd])
                     self.assertEqual(exit_code, 2)
                     self.assertIn(f"unknown command '{cmd}'", stderr.getvalue())
 
     def test_unknown_command_with_args(self) -> None:
         """Unknown command followed by extra args still exits 2."""
-        from astrid import pipeline
+        from astrid import gateway
 
         with mock.patch(
             "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
@@ -893,13 +584,13 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                exit_code = pipeline.main(["flarg", "--unknown-arg"])
+                exit_code = gateway.main(["flarg", "--unknown-arg"])
             self.assertEqual(exit_code, 2)
             self.assertIn("unknown command", stderr.getvalue())
 
     def test_unknown_command_never_routes_to_default_orchestrator(self) -> None:
         """Verify that an unknown command does NOT invoke the default orchestrator."""
-        from astrid import pipeline
+        from astrid import gateway
 
         with (
             mock.patch(
@@ -907,12 +598,12 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
             ) as mock_fallback,
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                exit_code = pipeline.main(["boguscmd"])
+                exit_code = gateway.main(["boguscmd"])
             self.assertEqual(exit_code, 2)
             mock_fallback.assert_not_called()
 
@@ -924,13 +615,13 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
 class DefaultBriefRoutingTest(unittest.TestCase):
     """Top-level brief/--video flags must route to the default orchestrator.
 
-    The pre-unification pipeline routes flag-style invocations (those whose
-    first token starts with ``--``) to ``_run_default_brief_orchestrator``,
-    which resolves ``video_editing.hype`` via the orchestrator registry.
+    The gateway routes flag-style invocations (those whose first token
+    starts with ``--``) to ``_run_default_brief_orchestrator``, which
+    resolves ``video_editing.hype`` via the orchestrator registry.
     """
 
     def test_double_dash_brief_routes_to_default(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         with (
             mock.patch(
@@ -938,16 +629,16 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=42,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(["--brief", "test brief content"])
+            exit_code = gateway.main(["--brief", "test brief content"])
             self.assertEqual(exit_code, 42)
             mock_fallback.assert_called_once_with(["--brief", "test brief content"])
 
     def test_double_dash_video_routes_to_default(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         with (
             mock.patch(
@@ -955,18 +646,18 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=43,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(["--video", "some/video.mp4", "--brief", "desc"])
+            exit_code = gateway.main(["--video", "some/video.mp4", "--brief", "desc"])
             self.assertEqual(exit_code, 43)
             mock_fallback.assert_called_once_with(
                 ["--video", "some/video.mp4", "--brief", "desc"]
             )
 
     def test_flag_style_out_routes_to_default(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         with (
             mock.patch(
@@ -974,16 +665,16 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=44,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(["--out", "runs/testrun", "--brief", "b"])
+            exit_code = gateway.main(["--out", "runs/testrun", "--brief", "b"])
             self.assertEqual(exit_code, 44)
             mock_fallback.assert_called_once()
 
     def test_double_dash_render_routes_to_default(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         with (
             mock.patch(
@@ -991,18 +682,18 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=45,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(
+            exit_code = gateway.main(
                 ["--brief", "hello", "--out", "runs/x", "--render"]
             )
             self.assertEqual(exit_code, 45)
             mock_fallback.assert_called_once()
 
     def test_target_duration_flag_routes_to_default(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         with (
             mock.patch(
@@ -1010,11 +701,11 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=46,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(
+            exit_code = gateway.main(
                 ["--brief", "x", "--out", "runs/y", "--target-duration", "60"]
             )
             self.assertEqual(exit_code, 46)
@@ -1022,7 +713,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
 
     def test_default_routing_preserves_all_args(self) -> None:
         """The complete argv is forwarded to the default orchestrator."""
-        from astrid import pipeline
+        from astrid import gateway
 
         argv = [
             "--video",
@@ -1041,11 +732,11 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.pipeline._run_default_brief_orchestrator",
+                "astrid.gateway._run_default_brief_orchestrator",
                 return_value=47,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(argv)
+            exit_code = gateway.main(argv)
             self.assertEqual(exit_code, 47)
             mock_fallback.assert_called_once_with(argv)
 
@@ -1167,7 +858,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
         NOTE: ``skip`` is intentionally omitted from the top-level help in the
         pre-split state — it is documented in ``cmd_skip``'s own --help output.
         """
-        from astrid.pipeline import _print_entrypoint_help
+        from astrid.gateway import _print_entrypoint_help
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -1190,7 +881,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
 
     def test_entrypoint_help_lists_runs_and_claim(self) -> None:
         """Top-level help mentions the 'runs ls' and 'claim' verbs."""
-        from astrid.pipeline import _print_entrypoint_help
+        from astrid.gateway import _print_entrypoint_help
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -1202,29 +893,29 @@ class LifecycleCommandParsingTest(unittest.TestCase):
 
     def test_top_level_help_exits_0(self) -> None:
         """python3 -m astrid --help exits 0."""
-        from astrid import pipeline
+        from astrid import gateway
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            result = pipeline.main(["--help"])
+            result = gateway.main(["--help"])
         self.assertEqual(result, 0)
 
     def test_top_level_help_mentions_canonical_gateway(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            pipeline.main(["--help"])
+            gateway.main(["--help"])
         help_text = stdout.getvalue()
         self.assertIn("Astrid command gateway", help_text)
         self.assertIn("python3 -m astrid", help_text)
 
     def test_top_level_h_flag_exits_0(self) -> None:
-        from astrid import pipeline
+        from astrid import gateway
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            result = pipeline.main(["-h"])
+            result = gateway.main(["-h"])
         self.assertEqual(result, 0)
         self.assertIn("Astrid command gateway", stdout.getvalue())
 

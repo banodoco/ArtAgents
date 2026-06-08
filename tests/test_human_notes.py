@@ -10,7 +10,7 @@ from astrid.contracts.errors import AstridError
 from astrid.packs.editorial.executors.arrange import run as arrange
 from astrid.packs.editorial.executors.editor_review import run as editor_review
 from astrid.packs.editorial.executors.human_notes import run as human_notes
-from astrid import timeline
+from astrid.core import timeline
 
 
 class FakeClaudeClient:

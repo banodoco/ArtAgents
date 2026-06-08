@@ -1,4 +1,4 @@
-"""Characterization test for ``astrid.timeline`` before structural migration.
+"""Characterization test for ``astrid.core.timeline`` before structural migration.
 
 Pins current behavior of:
 1. The full public ``__all__`` import surface
@@ -27,10 +27,10 @@ FIXTURE_PATH = REPO_ROOT / "examples" / "hype.timeline.full.json"
 
 
 class TimelineAllSurfaceTest(unittest.TestCase):
-    """Pin the exact ``__all__`` list of ``astrid.timeline``.
+    """Pin the exact ``__all__`` list of ``astrid.core.timeline``.
 
     The list is the public contract; removing or renaming any name is a
-    breaking change. After structural migration the re-export shim must
+    breaking change. After structural migration the public surface must
     preserve every name.
     """
 
@@ -137,13 +137,13 @@ class TimelineAllSurfaceTest(unittest.TestCase):
 
     def test_all_exact_contents(self) -> None:
         """``__all__`` must match the pre-migration golden list exactly."""
-        from astrid.timeline import __all__ as timeline_all
+        from astrid.core.timeline import __all__ as timeline_all
 
         self.assertEqual(sorted(timeline_all), self.GOLDEN_ALL)
 
     def test_every_all_name_is_importable(self) -> None:
         """Every name in ``__all__`` must resolve at import time."""
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         for name in self.GOLDEN_ALL:
             with self.subTest(name=name):
@@ -151,9 +151,9 @@ class TimelineAllSurfaceTest(unittest.TestCase):
 
     def test_no_extra_public_attributes(self) -> None:
         """No public names exist beyond ``__all__`` (excluding dunders and
-        internal submodule attributes loaded by the facade shim).
+        internal submodule attributes loaded by the public surface).
         """
-        import astrid.timeline as t
+        import astrid.core.timeline as t
 
         public = {
             n
@@ -177,9 +177,18 @@ class TimelineAllSurfaceTest(unittest.TestCase):
             "__package__",
             "__spec__",
             "__path__",
-            # Internal submodules loaded by the facade shim:
-            "timeline_model",
+            # Internal submodules loaded by the public surface:
             "banodoco_composer",
+            "banodoco_schema",
+            "crud",
+            "defaults",
+            "eventlog",
+            "events",
+            "integrity",
+            "kinds",
+            "model",
+            "paths",
+            "projection",
             # __future__ import side-effect:
             "annotations",
         }
@@ -212,7 +221,7 @@ class TimelineDigestGoldenTest(unittest.TestCase):
 
     def test_digest_matches_golden(self) -> None:
         """The digest of the hype fixture must match the golden hash."""
-        from astrid.timeline import timeline_config_digest
+        from astrid.core.timeline import timeline_config_digest
 
         config = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         actual = timeline_config_digest(config)
@@ -226,7 +235,7 @@ class TimelineDigestGoldenTest(unittest.TestCase):
 
     def test_digest_is_stable(self) -> None:
         """Repeated digests of the same config must produce the same hash."""
-        from astrid.timeline import timeline_config_digest
+        from astrid.core.timeline import timeline_config_digest
 
         config = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
         first = timeline_config_digest(config)
@@ -241,7 +250,7 @@ class TimelineDigestGoldenTest(unittest.TestCase):
         keys) while the fixture uses ``from`` keys. However, repeated
         round-trips must produce the same digest.
         """
-        from astrid.timeline import load_timeline, save_timeline, timeline_config_digest
+        from astrid.core.timeline import load_timeline, save_timeline, timeline_config_digest
 
         config = load_timeline(FIXTURE_PATH)
         with tempfile.TemporaryDirectory() as tmp:
@@ -277,7 +286,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_from_config_to_json_data_is_valid(self) -> None:
         """``to_json_data()`` output must pass ``validate_timeline``."""
-        from astrid.timeline import Timeline, validate_timeline
+        from astrid.core.timeline import Timeline, validate_timeline
 
         tl = Timeline.from_config(self.raw)
         output = tl.to_json_data()
@@ -286,7 +295,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_from_config_to_json_data_preserves_top_level(self) -> None:
         """Top-level keys from the fixture survive the chain."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(self.raw)
         output = tl.to_json_data()
@@ -296,7 +305,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_from_config_to_json_data_preserves_clip_count(self) -> None:
         """The number of clips must not change."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(self.raw)
         output = tl.to_json_data()
@@ -307,7 +316,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_from_config_to_json_data_unknown_field_survives(self) -> None:
         """Unknown top-level fields pass through ``to_json_data()``."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         sentinel = "_char_canary_v1"
         data = dict(self.raw)
@@ -323,7 +332,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
         ``from_`` internally (Python attribute). ``to_json_data()`` must
         restore the wire key ``from``.
         """
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(self.raw)
         output = tl.to_json_data()
@@ -340,7 +349,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_from_config_to_json_data_rounds_at_to_three_decimal_places(self) -> None:
         """Float ``at`` values must be rounded to 3 decimal places in output."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         # Use exact integer to avoid float-precision noise in the assertion.
         data = {
@@ -363,7 +372,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_from_config_to_json_data_idempotent(self) -> None:
         """Two calls to ``to_json_data()`` produce equal output."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(self.raw)
         out1 = tl.to_json_data()
@@ -377,7 +386,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
         keys). ``to_json_data()`` re-serializes. They should agree on all
         non-serialization-convention fields.
         """
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(self.raw)
         cfg = tl.to_config()
@@ -402,7 +411,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_for_render_sets_default_theme(self) -> None:
         """``for_render(default_theme=...)`` fills in a missing theme."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         data: dict = {
             "tracks": [dict(self._TRACK_WITH_LABEL)],
@@ -415,7 +424,7 @@ class TimelineFromConfigToJsonDataTest(unittest.TestCase):
 
     def test_for_render_rejects_empty_theme_slug(self) -> None:
         """``for_render`` must raise ValueError for an empty theme slug."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(
             {
@@ -442,7 +451,7 @@ class TimelineClassifiedClipsTest(unittest.TestCase):
 
     def test_classified_clips_count_matches(self) -> None:
         """Every clip in the fixture produces a ``TimelineClipView``."""
-        from astrid.timeline import Timeline
+        from astrid.core.timeline import Timeline
 
         tl = Timeline.from_config(self.raw)
         views = tl.classified_clips()
@@ -450,7 +459,7 @@ class TimelineClassifiedClipsTest(unittest.TestCase):
 
     def test_classified_clips_kinds(self) -> None:
         """Known clip kinds classify correctly."""
-        from astrid.timeline import ClipClassifiedKind, Timeline
+        from astrid.core.timeline import ClipClassifiedKind, Timeline
 
         tl = Timeline.from_config(self.raw)
         views = tl.classified_clips()
@@ -475,7 +484,7 @@ class TimelineConvenienceFunctionsTest(unittest.TestCase):
 
     def test_load_timeline_returns_config(self) -> None:
         """``load_timeline`` returns a TimelineConfig (dict)."""
-        from astrid.timeline import load_timeline
+        from astrid.core.timeline import load_timeline
 
         config = load_timeline(FIXTURE_PATH)
         self.assertIsInstance(config, dict)
@@ -484,7 +493,7 @@ class TimelineConvenienceFunctionsTest(unittest.TestCase):
 
     def test_load_timeline_raises_on_non_object(self) -> None:
         """``load_timeline`` raises on a JSON array."""
-        from astrid.timeline import load_timeline
+        from astrid.core.timeline import load_timeline
 
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp) / "array.json"
@@ -494,14 +503,14 @@ class TimelineConvenienceFunctionsTest(unittest.TestCase):
 
     def test_timeline_configs_equal_same_config(self) -> None:
         """Identical configs are equal after canonicalization."""
-        from astrid.timeline import load_timeline, timeline_configs_equal
+        from astrid.core.timeline import load_timeline, timeline_configs_equal
 
         config = load_timeline(FIXTURE_PATH)
         self.assertTrue(timeline_configs_equal(config, config))
 
     def test_canonical_timeline_config_is_stable(self) -> None:
         """``canonical_timeline_config`` produces a stable ordered dict."""
-        from astrid.timeline import canonical_timeline_config, load_timeline
+        from astrid.core.timeline import canonical_timeline_config, load_timeline
 
         config = load_timeline(FIXTURE_PATH)
         c1 = canonical_timeline_config(config)

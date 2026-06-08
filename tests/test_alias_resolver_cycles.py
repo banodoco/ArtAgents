@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.core.alias_resolver import AliasResolutionError, AliasResolver
+from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
 from astrid.contracts.schema import AliasRecord
 
 

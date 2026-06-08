@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.pack_store import InstallRecord, InstalledPackStore
+from astrid.core.pack.store import InstallRecord, InstalledPackStore
 
 
 def _record(
