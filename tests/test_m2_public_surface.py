@@ -150,6 +150,13 @@ class PipelinePatchSeamTest(unittest.TestCase):
         for name in (
             "main",
             "_run_default_brief_orchestrator",
+            "_dispatch",
+            "_build_dispatch_parser",
+            "_TOP_LEVEL_HANDLERS",
+            "_dispatch_elements",
+            "_dispatch_skills",
+            "_dispatch_packs",
+            "_dispatch_executors",
             "LIFECYCLE_VERBS",
             "SPRINT1_UNBOUND_ALLOWLIST_CONTRACT",
         ):
@@ -161,6 +168,40 @@ class PipelinePatchSeamTest(unittest.TestCase):
                     f"astrid.gateway.{name} and astrid.pipeline.{name} must be "
                     f"the same object",
                 )
+
+    def test_patch_dispatch_through_pipeline(self) -> None:
+        """Patching _dispatch via astrid.pipeline must intercept at the gateway."""
+        import astrid.gateway
+
+        self.assertTrue(
+            hasattr(astrid.gateway, "_dispatch"),
+            "_dispatch must be an attribute of astrid.gateway",
+        )
+        self.assertTrue(callable(astrid.gateway._dispatch))
+
+        with mock.patch(
+            "astrid.pipeline._dispatch",
+            return_value=77,
+        ) as patched:
+            from astrid import pipeline
+            result = pipeline._dispatch(["status"])
+            self.assertEqual(result, 77)
+            patched.assert_called_once_with(["status"])
+
+    def test_patch_dispatch_elements_through_pipeline(self) -> None:
+        """Patching _dispatch_elements via astrid.pipeline must intercept."""
+        import astrid.gateway
+
+        self.assertTrue(callable(astrid.gateway._dispatch_elements))
+
+        with mock.patch(
+            "astrid.pipeline._dispatch_elements",
+            return_value=88,
+        ) as patched:
+            from astrid import pipeline
+            result = pipeline._dispatch_elements(["list"])
+            self.assertEqual(result, 88)
+            patched.assert_called_once_with(["list"])
 
 
 # ---------------------------------------------------------------------------

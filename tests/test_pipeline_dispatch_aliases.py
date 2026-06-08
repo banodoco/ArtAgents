@@ -166,6 +166,42 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("effects\ttext-card", stdout.getvalue())
 
+    def test_patch_dispatch_seam_through_pipeline_direct_call(self) -> None:
+        """Characterize: _dispatch_elements patched through astrid.pipeline
+        IS intercepted when called directly (not via main(), which captures
+        references in _TOP_LEVEL_HANDLERS at import time)."""
+        with mock.patch(
+            "astrid.pipeline._dispatch_elements",
+            return_value=55,
+        ) as patched_dispatch:
+            result = pipeline._dispatch_elements(["list"])
+            self.assertEqual(result, 55)
+            patched_dispatch.assert_called_once_with(["list"])
+
+    def test_dispatch_helpers_captured_in_top_level_handlers(self) -> None:
+        """Characterize: _dispatch_elements in _TOP_LEVEL_HANDLERS holds the
+        original function reference. Mocking the module attribute does NOT
+        intercept calls routed through main() because the handler dict was
+        populated at import time. This is a documented compatibility seam:
+        legacy patches that need to intercept dispatch must target
+        _TOP_LEVEL_HANDLERS or the lower-level CLI module entry points."""
+        import astrid.gateway
+
+        original = astrid.gateway._TOP_LEVEL_HANDLERS["elements"]
+        self.assertIs(original, astrid.gateway._dispatch_elements)
+
+        with mock.patch(
+            "astrid.pipeline._dispatch_elements",
+            return_value=999,
+        ):
+            # The handler dict still holds the original reference
+            self.assertIsNot(
+                astrid.gateway._TOP_LEVEL_HANDLERS["elements"],
+                astrid.gateway._dispatch_elements,
+            )
+            # Direct call goes through the mock
+            self.assertEqual(astrid.gateway._dispatch_elements(["x"]), 999)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,32 +1,40 @@
-"""Repeat (until / for_each) entry helpers and iteration-state queries."""
+"""Repeat (until / for_each) entry helpers, iteration-state queries,
+autoclose, and autocomplete helpers."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import warnings
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from astrid.core.task.events import (
+    EventLogError,
     make_for_each_expanded_event,
     make_item_started_event,
     make_iteration_exhausted_event,
     make_iteration_started_event,
+    read_events,
 )
 from astrid.core.task.gate_attestation import match_attested_command
-from astrid.core.task.gate_base import TaskRunGateError
+from astrid.core.task.gate_base import GateDecision, TaskRunGateError
 from astrid.core.task.gate_cursor import (
     CursorPath,
     _ForEachSelection,
     _Frame,
+    _event_matches_step_version,
     _make_exhaust_override_step,
     _make_item_frame,
     _make_iteration_frame,
     _path_str_from_event,
 )
 from astrid.core.task.plan import (
+    STEP_PATH_SEP,
     RepeatForEach,
     RepeatUntil,
     TaskPlan,
+    TaskPlanError,
     is_attested_kind,
     iter_steps_with_path,
     load_plan,
@@ -284,3 +292,258 @@ def _enter_repeat_for_each(
     append_fn(make_item_started_event(path_tuple, target_item, step_version=host.version))
     cursor.frames.append(_make_item_frame(host, parent_prefix, target_item))
     return _ForEachSelection(item_id=target_item)
+
+
+# ── for_each host autoclose / autocomplete ──────────────────────────
+#
+# These helpers use late imports from .gate to avoid a circular import
+# (gate.py imports from gate_repeat.py at module level, so gate_repeat
+# cannot import gate.py at module level).
+
+
+def _maybe_autoclose_for_each_host(
+    *,
+    events_path: Path,
+    path_tuple: tuple[str, ...],
+    project_root: Path,
+    slug: str,
+    run_id: str,
+    append_fn: Callable[[dict[str, Any]], Any],
+    current_item_id: str | None = None,
+) -> None:
+    context = _build_autoclose_for_each_host_context(
+        events_path=events_path,
+        path_tuple=path_tuple,
+        project_root=project_root,
+        slug=slug,
+        run_id=run_id,
+        current_item_id=current_item_id,
+    )
+    if context is None:
+        return
+    from astrid.core.task.gate import _finalize_step, _ActiveWriterAppend
+
+    _finalize_step(
+        context.decision,
+        context.terminal_event,
+        append_mode=_ActiveWriterAppend(append_fn),
+    )
+
+
+def _build_autoclose_for_each_host_context(
+    *,
+    events_path: Path,
+    path_tuple: tuple[str, ...],
+    project_root: Path,
+    slug: str,
+    run_id: str,
+    current_item_id: str | None = None,
+) -> Any:  # returns _ParentFinalizationContext | None
+    """Build a synthetic ``step_attested`` for a for_each host once all items
+    are attested. SD-001: attestor is always ``system`` / ``gate.autoclose``
+    (never inherits from the closing item). SD-004: optional bodies / any
+    prior ``item_skipped`` event are loud failures, not silent.
+
+    See FLAG-S1-001 / FLAG-S1-004. Single emit site is in ``_dispatch_attested``
+    immediately after the ``item_attested`` ``append_event``; if another
+    ``item_attested`` emit path appears later, it MUST route through this
+    helper too or for_each closure regresses.
+    """
+    from astrid.core.task.gate import _ParentFinalizationContext, _TerminalEventRequest
+
+    plan_path = project_root / "plan.json"
+    try:
+        plan = load_plan(plan_path)
+        from astrid.core.task.plan_verbs import apply_mutations
+
+        events = read_events(events_path) if events_path.exists() else []
+        plan = apply_mutations(plan, events)
+    except (TaskPlanError, EventLogError) as exc:
+        warnings.warn(
+            f"for_each autoclose skipped for {'/'.join(path_tuple)}: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
+    host_step = None
+    for tup, s in iter_steps_with_path(plan):
+        if tup == path_tuple:
+            host_step = s
+            break
+    if host_step is None or not isinstance(getattr(host_step, "repeat", None), RepeatForEach):
+        return
+    if host_step.optional:
+        raise AssertionError(
+            "for_each autoclose: optional body bodies not yet supported (FLAG-S1-004 / SD-004)"
+        )
+    path_list = list(path_tuple)
+    item_attested_ids: set[str] = set()
+    has_host_step_attested = False
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        kind = ev.get("kind")
+        if kind == "item_skipped" and ev.get("plan_step_path") == path_list:
+            raise AssertionError(
+                "for_each autoclose: optional body bodies not yet supported (FLAG-S1-004 / SD-004)"
+            )
+        if kind == "item_attested" and ev.get("plan_step_path") == path_list:
+            item_id = ev.get("item_id")
+            if isinstance(item_id, str):
+                item_attested_ids.add(item_id)
+        if kind == "step_attested":
+            ev_id = ev.get("plan_step_id")
+            if ev_id == STEP_PATH_SEP.join(path_tuple):
+                has_host_step_attested = True
+    if has_host_step_attested:
+        return
+    if current_item_id is not None:
+        item_attested_ids.add(current_item_id)
+    # Resolve expected total: prefer for_each_expanded (covers items_source='from'),
+    # fall back to static items declared on the host.
+    expected_items: set[str] | None = None
+    for ev in events:
+        if (
+            isinstance(ev, dict)
+            and ev.get("kind") == "for_each_expanded"
+            and ev.get("plan_step_path") == path_list
+        ):
+            raw = ev.get("item_ids") or []
+            if isinstance(raw, list):
+                expected_items = {item for item in raw if isinstance(item, str)}
+                break
+    if expected_items is None:
+        repeat = host_step.repeat
+        if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
+            expected_items = set(repeat.items)
+    if expected_items is None or item_attested_ids != expected_items:
+        return
+    decision = GateDecision(
+        active=True,
+        run_id=run_id,
+        plan_step_id=STEP_PATH_SEP.join(path_tuple),
+        events_path=events_path,
+        step_kind="attested",
+        slug=slug,
+        plan_step_path=path_tuple,
+        project_root=project_root,
+        step_version=host_step.version,
+    )
+    return _ParentFinalizationContext(
+        decision=decision,
+        terminal_event=_TerminalEventRequest(
+            "step_attested",
+            {
+                "plan_step_path": STEP_PATH_SEP.join(path_tuple),
+                "attestor_kind": "system",
+                "attestor_id": "gate.autoclose",
+                "evidence": ("auto-close: all items attested",),
+                "step_version": host_step.version,
+            },
+        ),
+    )
+
+
+def _maybe_autocomplete_for_each_host(
+    *,
+    decision: GateDecision,
+    returncode: int,
+    cost: dict[str, Any] | None,
+) -> None:
+    context = _build_autocomplete_for_each_host_context(
+        decision=decision,
+        returncode=returncode,
+        cost=cost,
+    )
+    if context is None:
+        return
+    from astrid.core.task.gate import _finalize_step
+
+    _finalize_step(
+        context.decision,
+        context.terminal_event,
+        append_mode="decision",
+    )
+
+
+def _build_autocomplete_for_each_host_context(
+    *,
+    decision: GateDecision,
+    returncode: int,
+    cost: dict[str, Any] | None,
+) -> Any:  # returns _ParentFinalizationContext | None
+    """Build a host ``step_completed`` when all code-repeat items completed."""
+    if (
+        not decision.active
+        or decision.events_path is None
+        or decision.project_root is None
+        or decision.run_id is None
+        or decision.item_id is None
+    ):
+        return
+    from astrid.core.task.gate import _ParentFinalizationContext, _TerminalEventRequest
+
+    plan_path = decision.project_root / "plan.json"
+    try:
+        plan = load_plan(plan_path)
+        from astrid.core.task.plan_verbs import apply_mutations
+
+        events = read_events(decision.events_path) if decision.events_path.exists() else []
+        plan = apply_mutations(plan, events)
+    except (TaskPlanError, EventLogError) as exc:
+        warnings.warn(
+            "for_each autocomplete skipped for "
+            f"{'/'.join(decision.plan_step_path)}: {exc}",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return
+    host_step = None
+    for tup, step in iter_steps_with_path(plan):
+        if tup == decision.plan_step_path:
+            host_step = step
+            break
+    if host_step is None or not isinstance(getattr(host_step, "repeat", None), RepeatForEach):
+        return
+
+    path_list = list(decision.plan_step_path)
+    completed_items: set[str] = set()
+    expected_items: set[str] | None = None
+    has_host_completed = False
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        if ev.get("kind") == "step_completed" and ev.get("plan_step_path") == path_list:
+            if _event_matches_step_version(ev, host_step):
+                has_host_completed = True
+        if ev.get("kind") == "item_completed" and ev.get("plan_step_path") == path_list:
+            if _event_matches_step_version(ev, host_step):
+                item_id = ev.get("item_id")
+                if isinstance(item_id, str):
+                    completed_items.add(item_id)
+        if ev.get("kind") == "for_each_expanded" and ev.get("plan_step_path") == path_list:
+            raw = ev.get("item_ids") or []
+            if isinstance(raw, list):
+                expected_items = {item for item in raw if isinstance(item, str)}
+    if has_host_completed:
+        return
+    completed_items.add(decision.item_id)
+    if expected_items is None:
+        repeat = host_step.repeat
+        if isinstance(repeat, RepeatForEach) and repeat.items_source == "static":
+            expected_items = set(repeat.items)
+    if expected_items is None or completed_items != expected_items:
+        return
+    return _ParentFinalizationContext(
+        decision=dataclasses.replace(decision, item_id=None, step_version=host_step.version),
+        terminal_event=_TerminalEventRequest(
+            "step_completed",
+            {
+                "plan_step_path": STEP_PATH_SEP.join(decision.plan_step_path),
+                "returncode": returncode,
+                "cost": cost,
+                "adapter": decision.adapter,
+                "step_version": host_step.version,
+            },
+        ),
+    )

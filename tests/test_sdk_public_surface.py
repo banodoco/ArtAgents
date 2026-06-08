@@ -1684,7 +1684,9 @@ generation_executor_modules = (
     "astrid.packs.generation.executors.generate_image.run",
     "astrid.packs.generation.executors.generate_video.run",
     "astrid.core.generation.backends.base",
+    "astrid.core.generation.backends.registry",
     "astrid.core.generation",
+    "astrid.core.model_catalog.registry",
 )
 
 state_after_import = {
@@ -1733,7 +1735,9 @@ def test_import_astrid_does_not_load_generation_executor_modules() -> None:
         "astrid.packs.generation.executors.generate_image.run": False,
         "astrid.packs.generation.executors.generate_video.run": False,
         "astrid.core.generation.backends.base": False,
+        "astrid.core.generation.backends.registry": False,
         "astrid.core.generation": False,
+        "astrid.core.model_catalog.registry": False,
     }, f"Generation executor modules leaked during import: {after_import}"
 
 
@@ -1747,7 +1751,9 @@ def test_astrid_generate_lazy_access_does_not_load_generation_executor_modules()
         "astrid.packs.generation.executors.generate_image.run": False,
         "astrid.packs.generation.executors.generate_video.run": False,
         "astrid.core.generation.backends.base": False,
+        "astrid.core.generation.backends.registry": False,
         "astrid.core.generation": False,
+        "astrid.core.model_catalog.registry": False,
     }, f"Generation executor modules leaked during facade access: {after_facade}"
 
     # astrid.sdk should be loaded after accessing astrid.generate (lazy load)
