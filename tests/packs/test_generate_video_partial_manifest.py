@@ -18,6 +18,7 @@ import pytest
 os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
 
 from astrid.core.generation.backends.base import GenerationResult  # noqa: E402
+from astrid.media import MediaProbe  # noqa: E402
 from astrid.packs.generation.executors.generate_video.run import (  # noqa: E402
     generate_core as generate_video_core,
 )
@@ -109,8 +110,8 @@ class TestPartialOutputManifestOnVideoLoopFailure:
             "astrid.packs.generation.executors.generate_video.run._create_backend_adapter",
             return_value=mock_adapter,
         ), patch(
-            "astrid.packs.generation.executors.generate_video.run._ffprobe_metadata",
-            return_value={"duration_seconds": None, "fps": None, "resolution": None},
+            "astrid.packs.generation.executors.generate_video.run.ffprobe_metadata",
+            return_value=MediaProbe(),
         ), patch(
             "astrid.packs.generation.executors.generate_video.run.write_json_atomic",
         ) as mock_write:
@@ -192,7 +193,7 @@ class TestPartialOutputManifestOnVideoLoopFailure:
             "astrid.packs.generation.executors.generate_video.run._create_backend_adapter",
             return_value=mock_adapter,
         ), patch(
-            "astrid.packs.generation.executors.generate_video.run._ffprobe_metadata",
+            "astrid.packs.generation.executors.generate_video.run.ffprobe_metadata",
         ), patch(
             "astrid.packs.generation.executors.generate_video.run.write_json_atomic",
         ) as mock_write:
@@ -320,8 +321,11 @@ class TestPartialOutputManifestOnVideoLoopFailure:
             "astrid.packs.generation.executors.generate_video.run._create_backend_adapter",
             return_value=mock_adapter_partial,
         ), patch(
-            "astrid.packs.generation.executors.generate_video.run._ffprobe_metadata",
-            return_value={"duration_seconds": 10.0, "fps": 30.0, "resolution": "1920x1080"},
+            "astrid.packs.generation.executors.generate_video.run.ffprobe_metadata",
+            return_value=MediaProbe(
+                duration_seconds=10.0, fps=30.0, resolution="1920x1080",
+                width=1920, height=1080,
+            ),
         ), patch(
             "astrid.packs.generation.executors.generate_video.run.write_json_atomic",
             side_effect=_capture_partial,
@@ -349,8 +353,11 @@ class TestPartialOutputManifestOnVideoLoopFailure:
             "astrid.packs.generation.executors.generate_video.run._create_backend_adapter",
             return_value=mock_adapter_full,
         ), patch(
-            "astrid.packs.generation.executors.generate_video.run._ffprobe_metadata",
-            return_value={"duration_seconds": 10.0, "fps": 30.0, "resolution": "1920x1080"},
+            "astrid.packs.generation.executors.generate_video.run.ffprobe_metadata",
+            return_value=MediaProbe(
+                duration_seconds=10.0, fps=30.0, resolution="1920x1080",
+                width=1920, height=1080,
+            ),
         ), patch(
             "astrid.packs.generation.executors.generate_video.run.write_json_atomic",
             side_effect=_capture_full,

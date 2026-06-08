@@ -21,18 +21,16 @@ from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint, warn_
 guard_canonical_entrypoint('generation.generate_video')
 import argparse
 
-from astrid.contracts.errors import AstridError
 import hashlib
 import json
 import logging
 import random
-import shutil
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from astrid.contracts.errors import AstridError
 from astrid.contracts.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
@@ -44,6 +42,7 @@ from astrid.core.generation.backends import (
 )
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.util.atomic_io import write_json_atomic
+from astrid.media import ffprobe_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -312,78 +311,6 @@ def _resolve_seed(requested: int | None, index: int) -> int:
     if requested is not None:
         return requested + index
     return random.randint(0, 2**31 - 1)
-
-
-# ---------------------------------------------------------------------------
-# ffprobe best-effort metadata
-# ---------------------------------------------------------------------------
-
-
-def _ffprobe_metadata(file_path: Path) -> dict[str, Any]:
-    """Extract duration_seconds, fps, and resolution via ffprobe.
-
-    Returns a dict with keys ``duration_seconds`` (float|None), ``fps``
-    (float|None), ``resolution`` (str|None, e.g. ``"1280x720"``).  If
-    ffprobe is not available or fails, all values are ``None``.
-    """
-    result: dict[str, Any] = {
-        "duration_seconds": None,
-        "fps": None,
-        "resolution": None,
-    }
-    ffprobe_exe = shutil.which("ffprobe")
-    if ffprobe_exe is None:
-        return result
-
-    try:
-        proc = subprocess.run(
-            [
-                ffprobe_exe,
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
-                "-show_format",
-                "-show_streams",
-                str(file_path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if proc.returncode != 0:
-            return result
-        data = json.loads(proc.stdout)
-    except (json.JSONDecodeError, subprocess.TimeoutExpired, OSError):
-        return result
-
-    # Duration from format
-    fmt = data.get("format", {})
-    dur_str = fmt.get("duration")
-    if dur_str is not None:
-        try:
-            result["duration_seconds"] = float(dur_str)
-        except (ValueError, TypeError):
-            pass
-
-    # Resolution and FPS from first video stream
-    for stream in data.get("streams", []):
-        if stream.get("codec_type") == "video":
-            w = stream.get("width")
-            h = stream.get("height")
-            if w is not None and h is not None:
-                result["resolution"] = f"{w}x{h}"
-
-            fps_str = stream.get("r_frame_rate")
-            if fps_str and "/" in fps_str:
-                try:
-                    num, den = fps_str.split("/", 1)
-                    result["fps"] = float(num) / float(den)
-                except (ValueError, ZeroDivisionError):
-                    pass
-            break
-
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -947,15 +874,15 @@ def generate_core(
                 rel = str(vid_path.relative_to(out))
 
                 # ffprobe best-effort metadata
-                probe = _ffprobe_metadata(vid_path)
+                probe = ffprobe_metadata(vid_path)
 
                 output_entry: dict[str, Any] = {
                     "path": rel,
                     "content_hash": content_hash,
                     "bytes": vid_path.stat().st_size,
-                    "duration_seconds": probe.get("duration_seconds"),
-                    "fps": probe.get("fps"),
-                    "resolution": probe.get("resolution"),
+                    "duration_seconds": probe.duration_seconds,
+                    "fps": probe.fps,
+                    "resolution": probe.resolution,
                 }
                 all_outputs.append(output_entry)
 

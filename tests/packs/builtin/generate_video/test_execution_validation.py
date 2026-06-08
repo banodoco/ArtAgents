@@ -81,14 +81,18 @@ def test_generate_core_returns_enriched_generation_result(
         "load_default_generation_backend_registry",
         lambda: FakeBackendRegistry(),
     )
+    from astrid.media import MediaProbe
+
     monkeypatch.setattr(
         run_mod,
-        "_ffprobe_metadata",
-        lambda path: {
-            "duration_seconds": 2.0,
-            "fps": 24.0,
-            "resolution": "1280x720",
-        },
+        "ffprobe_metadata",
+        lambda path: MediaProbe(
+            duration_seconds=2.0,
+            fps=24.0,
+            resolution="1280x720",
+            width=1280,
+            height=720,
+        ),
     )
 
     image_ref = tmp_path / "first.png"
@@ -217,8 +221,8 @@ def test_registry_lookup_failure_is_reported_as_cli_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Missing backend descriptors become CLI errors instead of raw exceptions."""
-    from astrid.packs.generation.executors.generate_video import run as run_mod
     from astrid.core.generation.backends.registry import GenerationBackendRegistry
+    from astrid.packs.generation.executors.generate_video import run as run_mod
 
     class EmptyBackendRegistry(GenerationBackendRegistry):
         def __init__(self) -> None:
