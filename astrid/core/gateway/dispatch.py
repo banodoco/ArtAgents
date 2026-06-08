@@ -196,9 +196,9 @@ def _dispatch_projects(args: list[str]) -> int:
 
 
 def _dispatch_themes(args: list[str]) -> int:
-    from astrid.core import theme_cli
+    from astrid.core.theme import cli
 
-    return theme_cli.main(args)
+    return cli.main(args)
 
 
 def _dispatch_timelines(args: list[str]) -> int:
@@ -220,9 +220,9 @@ def _dispatch_doctor(args: list[str]) -> int:
 
 
 def _dispatch_setup(args: list[str]) -> int:
-    from astrid.core import setup_cli
+    from .setup import main as setup_main
 
-    return setup_cli.main(args)
+    return setup_main(args)
 
 
 def _dispatch_audit(args: list[str]) -> int:

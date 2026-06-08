@@ -94,7 +94,7 @@ def test_validate_import_layering_flags_dynamic_concrete_pack_imports_and_respec
 def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "astrid/core/domains/hype/rules.py",
+        "astrid/packs/editorial/hype/rules.py",
         "from astrid.core.pack.cli import build_parser\n",
     )
     _write(
@@ -106,7 +106,7 @@ def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_pa
     violations = validate_cli_domain_boundary(tmp_path)
 
     assert set(violations) == {
-        "astrid/core/domains/hype/rules.py:1 imports CLI module 'astrid.core.pack.cli'; move CLI-only logic to a cli.py entrypoint or shared helper"
+        "astrid/packs/editorial/hype/rules.py:1 imports CLI module 'astrid.core.pack.cli'; move CLI-only logic to a cli.py entrypoint or shared helper"
     }
 
 

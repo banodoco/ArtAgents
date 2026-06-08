@@ -4,8 +4,8 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 
 ## Summary
 
-- AST sites inventoried: 737
-- Grep lexical hits after the same source exclusions: 752.
+- AST sites inventoried: 735
+- Grep lexical hits after the same source exclusions: 750.
 - Source exclusions: `astrid/packs/**` and `.astrid/**`.
 
 ## Inventory
@@ -109,13 +109,6 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 | 687 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 | 689 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 | 691 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-
-### `astrid/core/domains/hype/enriched_arrangement.py`
-
-| Line | Kind | Scope | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 95 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 303 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
 ### `astrid/core/element/cli.py`
 
@@ -812,19 +805,19 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 | ---: | --- | --- | --- | --- |
 | 78 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 | 81 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 122 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 125 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 197 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 209 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 312 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 354 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 384 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 435 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 441 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 468 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 582 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 677 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 721 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 127 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 130 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 202 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 214 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 317 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 359 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 389 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 440 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 446 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 473 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 587 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 682 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 726 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
 ### `astrid/core/task/claim.py`
 
@@ -1066,18 +1059,18 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 | 158 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 | 177 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
-### `astrid/core/theme.py`
+### `astrid/core/theme/__init__.py`
 
 | Line | Kind | Scope | Status | Reason |
 | ---: | --- | --- | --- | --- |
-| 66 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 80 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
-### `astrid/core/theme_schema.py`
+### `astrid/core/theme/_schema.py`
 
 | Line | Kind | Scope | Status | Reason |
 | ---: | --- | --- | --- | --- |
-| 204 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 206 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 203 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 205 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
 ### `astrid/core/threads/attribute.py`
 

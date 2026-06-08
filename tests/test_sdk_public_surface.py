@@ -33,7 +33,7 @@ pytestmark = pytest.mark.skipif(
 REPRESENTATIVE_SUBMODULES = (
     "astrid.core.gateway",
     "astrid.core.doctor",
-    "astrid.core.setup_cli",
+    "astrid.core.gateway.setup",
 )
 
 RETIRED_COMPATIBILITY_SUBMODULES = (

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from astrid.core.domains.hype import enriched_arrangement
+from astrid.packs.editorial.hype import enriched_arrangement
 from astrid.packs.editorial.executors.quality_zones import run as quality_zones
 
 

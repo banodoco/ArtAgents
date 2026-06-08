@@ -37,8 +37,8 @@ class RootModuleImportTest(unittest.TestCase):
         self.assertIsNotNone(astrid.core.media)
 
     def test_theme_schema_importable(self) -> None:
-        import astrid.core.theme_schema
-        self.assertIsNotNone(astrid.core.theme_schema)
+        import astrid.core.theme
+        self.assertIsNotNone(astrid.core.theme)
 
     def test_structure_importable(self) -> None:
         import astrid.core.structure
@@ -209,20 +209,20 @@ class MediaModuleTest(unittest.TestCase):
         self.assertTrue(callable(astrid.core.media.ffprobe_duration_seconds))
 
 # ---------------------------------------------------------------------------
-# astrid.core.theme_schema validation surface
+# astrid.core.theme validation surface
 # ---------------------------------------------------------------------------
 
 class ThemeSchemaTest(unittest.TestCase):
-    """astrid.core.theme_schema must export theme validation helpers."""
+    """astrid.core.theme must export theme validation helpers."""
 
     def test_theme_schema_constants_importable(self) -> None:
-        import astrid.core.theme_schema
+        import astrid.core.theme
 
-        self.assertTrue(hasattr(astrid.core.theme_schema, "THEME_SCHEMA"))
-        self.assertTrue(hasattr(astrid.core.theme_schema, "ThemeValidationError"))
+        self.assertTrue(hasattr(astrid.core.theme, "THEME_SCHEMA"))
+        self.assertTrue(hasattr(astrid.core.theme, "ThemeValidationError"))
 
     def test_validate_theme_importable(self) -> None:
-        from astrid.core.theme_schema import load_theme
+        from astrid.core.theme import load_theme
 
         self.assertTrue(callable(load_theme))
 

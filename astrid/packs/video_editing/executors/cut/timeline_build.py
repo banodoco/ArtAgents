@@ -24,7 +24,7 @@ from astrid.core.timeline import (
     materialize_output,
 )
 from astrid.core.util.time import utc_now_seconds
-from astrid.core.domains.hype.arrangement_rules import compile_arrangement_plan
+from astrid.packs.editorial.hype.arrangement_rules import compile_arrangement_plan
 from astrid.core.paths import PACKAGE_ROOT
 
 _LEGACY_DEFAULT_CLIP_SEC = 4.0

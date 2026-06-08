@@ -46,7 +46,8 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 self.assertIn(f"unknown command '{token}'", stderr.getvalue())
 
     def test_doctor_and_setup_dispatch_before_legacy_validation(self) -> None:
-        from astrid.core import doctor, setup_cli
+        from astrid.core import doctor
+        from astrid.core.gateway import setup as setup_cli
 
         with (
             mock.patch(

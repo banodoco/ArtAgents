@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validation helpers for project styledoc theme files."""
 
 from __future__ import annotations

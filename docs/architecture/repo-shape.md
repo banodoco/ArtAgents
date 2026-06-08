@@ -80,7 +80,7 @@ and their purposes:
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
 
 Loose `.py` files at `astrid/core/` are kernel helpers such as `scaffold.py`,
-`search.py`, `cli_choices.py`, `theme_cli.py`, and `dirty.py`.
+`search.py`, `cli_choices.py`, and `dirty.py`.
 Pack machinery does not live in loose root-level core modules; it belongs under
 `astrid/core/pack/`.
 
@@ -108,7 +108,8 @@ When adding new code to the repository, follow these placement rules:
 - **New pack data** (executors, orchestrators, elements, skills): `astrid/packs/<pack>/`
 - **New public SDK surface**: add to the `astrid/sdk/` package and expose it through the package facade only when it is part of the v1 contract
 - **New gateway subcommands**: add to the appropriate `astrid/core/gateway/*.py` module or create a new one; register dispatch in `astrid/core/gateway/dispatch.py`
-- **New domain libraries**: `astrid/core/domains/<domain>/`
+- **New pack-domain libraries**: under the owning pack, for example
+  `astrid/packs/editorial/hype/`
 - **New shared utilities**: `astrid/core/util/`
 - **New CLI entrypoints for subsystems**: follow the pattern of `astrid/<subsystem>/cli.py`
 
@@ -139,7 +140,7 @@ Canonical homes:
 | Package | Classification | Notes |
 | --- | --- | --- |
 | `astrid/core/contracts/` | **Shared library** | Common schema dataclasses (ports, outputs, cache, commands, isolation, errors, run status). |
-| `astrid/core/domains/` | **Domain libraries** | Domain-specific shared logic (e.g., `astrid/core/domains/hype/` for arrangement rules, enriched arrangements, text matching). |
+| `astrid/packs/editorial/hype/` | **Pack-owned domain library** | Hype/editing logic such as arrangement rules, enriched arrangements, and text matching. |
 | `astrid/core/util/` | **Utility library** | Generic helpers (LLM client construction, environment handling). |
 | `astrid/core/audit/` | **Shared library** | Run-local provenance ledger, graph, transport, and HTML report. |
 | `astrid/core/threads/` | **Lineage and thread management** | Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in `astrid.core.threads.__all__`. |
@@ -147,16 +148,16 @@ Canonical homes:
 | `astrid/core/modalities/` | **Modality helpers** | Modality-specific support code. |
 | `astrid/skills/` | **Skill harnesses** | Agent skill discovery, registry, and harness runtimes (base, codex, claude, hermes). |
 | `astrid/core/orchestrate/` | **Plan compilation and test running** | DSL, compile, test runner, CLI. |
-| `astrid/core/theme_schema.py` | **Shared library** | Theme schema validation helpers. Soft boundary — convention. |
+| `astrid/core/theme/` | **Shared library** | Theme resolution, CLI, and schema validation helpers. Soft boundary — convention. |
 | `astrid/core/paths.py` | **Shared library** | Repository and workspace path resolution. |
-| `astrid/core/setup_cli.py` | **Shared library** | Setup CLI support. |
+| `astrid/core/gateway/setup.py` | **Shared library** | Setup CLI support. |
 
 ### 4.1 CLI/Domain/Import-Layering Convention
 
 The repository enforces a strict import layering convention:
 
 - **CLI modules** live as `<subsystem>/cli.py` for each subsystem (skills, core/threads, core/orchestrate, core/timeline, core/pack). CLI modules may import from their subsystem's internals and from shared libraries, but must not be imported by non-CLI code.
-- **Domain libraries** under `astrid/core/domains/` may import from `astrid/core/contracts/`, `astrid/core/util/`, and other core shared libraries. They must not import from `astrid/packs/`.
+- **Pack-owned domain libraries** such as `astrid/packs/editorial/hype/` may import from core shared libraries but must not import CLI modules.
 - **Core kernel** (`astrid/core/`) must not import concrete pack implementation modules except through named runtime bridge exemptions.
 - **Pack data** (`astrid/packs/<pack>/`) must not import from `astrid/core/` except through sanctioned entrypoints.
 

@@ -9,7 +9,7 @@ from astrid.packs.video_editing.executors.cut import run as cut
 from astrid.packs.editorial.executors.refine import run as refine
 from astrid.core import timeline
 from astrid.packs.editorial.executors.validate import run as validate
-from astrid.core.domains.hype.arrangement_rules import TRIM_BOUND_EXTENSION_SEC
+from astrid.packs.editorial.hype.arrangement_rules import TRIM_BOUND_EXTENSION_SEC
 
 
 class RefineTest(unittest.TestCase):

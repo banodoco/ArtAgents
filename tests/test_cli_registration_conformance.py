@@ -1,6 +1,6 @@
 """CLI registration conformance tests.
 
-Validates that the shared :class:`astrid.core.cli_registration.CommandSpec`
+Validates that the shared :class:`astrid.core.cli.registration.CommandSpec`
 helper works correctly with arbitrary argparse parser configuration and
 that the phased allowlist tracks which CLI modules are migrated.
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 import argparse
 import unittest
 
-from astrid.core.cli_registration import CommandSpec, register_commands
+from astrid.core.cli.registration import CommandSpec, register_commands
 
 
 # ── Phased allowlist ────────────────────────────────────────────────────────

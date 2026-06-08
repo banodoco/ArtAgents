@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 import unittest
 
-from astrid.core.domains.hype import enriched_arrangement
+from astrid.packs.editorial.hype import enriched_arrangement
 
 from tests.helpers.fixture_case import make_brief_case
 

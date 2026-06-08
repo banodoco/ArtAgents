@@ -1,4 +1,4 @@
-"""Tests for astrid.core.run_subprocess."""
+"""Tests for astrid.core.runtime.subprocess."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import subprocess
 from unittest.mock import patch
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.run_subprocess import run_subprocess
+from astrid.core.runtime import run_subprocess
 
 
 def test_returns_stdout_on_success() -> None:
-    with patch("astrid.core.run_subprocess.subprocess.run") as mock_run:
+    with patch("astrid.core.runtime.subprocess.subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["echo", "hello"],
             returncode=0,
@@ -27,7 +27,7 @@ def test_returns_stdout_on_success() -> None:
 
 
 def test_raises_astrid_error_on_failure() -> None:
-    with patch("astrid.core.run_subprocess.subprocess.run") as mock_run:
+    with patch("astrid.core.runtime.subprocess.subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["false"],
             returncode=1,
@@ -48,7 +48,7 @@ def test_raises_astrid_error_on_failure() -> None:
 
 
 def test_orchestrator_prefix_in_error_message() -> None:
-    with patch("astrid.core.run_subprocess.subprocess.run") as mock_run:
+    with patch("astrid.core.runtime.subprocess.subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["bad"],
             returncode=2,
@@ -68,7 +68,7 @@ def test_orchestrator_prefix_in_error_message() -> None:
 
 
 def test_no_orchestrator_prefix_when_not_given() -> None:
-    with patch("astrid.core.run_subprocess.subprocess.run") as mock_run:
+    with patch("astrid.core.runtime.subprocess.subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["bad"],
             returncode=2,
@@ -83,7 +83,7 @@ def test_no_orchestrator_prefix_when_not_given() -> None:
 
 
 def test_extra_kwargs_forwarded_to_subprocess_run() -> None:
-    with patch("astrid.core.run_subprocess.subprocess.run") as mock_run:
+    with patch("astrid.core.runtime.subprocess.subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["ls"],
             returncode=0,
@@ -108,7 +108,7 @@ def test_extra_kwargs_forwarded_to_subprocess_run() -> None:
 
 
 def test_state_snapshot_uses_json_safe_values() -> None:
-    with patch("astrid.core.run_subprocess.subprocess.run") as mock_run:
+    with patch("astrid.core.runtime.subprocess.subprocess.run") as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=["boom"],
             returncode=3,

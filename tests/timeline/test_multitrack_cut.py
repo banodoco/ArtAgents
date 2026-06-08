@@ -9,7 +9,7 @@ from unittest import mock
 from astrid.packs.video_editing.executors.cut import run as cut
 from astrid.core import timeline
 from astrid.packs.editorial.executors.validate import run as validate
-from astrid.core.domains.hype.arrangement_rules import ROLE_DURATION_BOUNDS
+from astrid.packs.editorial.hype.arrangement_rules import ROLE_DURATION_BOUNDS
 
 
 ROOT = Path(__file__).resolve().parents[2]

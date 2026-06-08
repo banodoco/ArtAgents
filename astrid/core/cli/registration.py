@@ -13,7 +13,7 @@ API without any wrapper restricting the configuration surface.
 Usage::
 
     from argparse import ArgumentParser
-    from astrid.core.cli_registration import CommandSpec, register_commands
+    from astrid.core.cli.registration import CommandSpec, register_commands
 
     def _cmd_ls(parsed, registry):
         ...

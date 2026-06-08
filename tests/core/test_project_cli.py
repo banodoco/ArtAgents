@@ -30,7 +30,7 @@ from typing import Any
 from unittest.mock import patch
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core import theme_cli
+from astrid.core.theme import cli
 from astrid.core.cli_choices import StaticChoices
 from astrid.core.project import cli as project_cli
 from astrid.core.project import paths
@@ -199,7 +199,7 @@ class CreateShowSourceCLITest(unittest.TestCase):
         with patch.dict("os.environ", {"ASTRID_THEMES_ROOT": str(themes_root)}, clear=False):
             out = StringIO()
             with redirect_stdout(out):
-                rc = theme_cli.main(["ls"])
+                rc = cli.main(["ls"])
 
         self.assertEqual(rc, 0)
         output = out.getvalue()

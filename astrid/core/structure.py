@@ -105,35 +105,40 @@ def validate_cli_domain_boundary(root: str | Path = REPO_ROOT) -> list[str]:
     """Reject domain-library imports of CLI modules.
 
     This intentionally stays narrow to avoid false positives in Astrid's
-    existing CLI helper split: only files under ``astrid/core/domains/`` are checked,
-    and only imports of ``*.cli`` modules are flagged.
+    existing CLI helper split: only core domain-library files and pack-owned
+    domain support folders are checked, and only imports of ``*.cli`` modules
+    are flagged.
     """
 
     repo_root = Path(root)
-    domains_root = repo_root / "astrid" / "core" / "domains"
-    if not domains_root.is_dir():
-        return []
+    domain_roots = [repo_root / "astrid" / "core" / "domains"]
+    packs_root = repo_root / "astrid" / "packs"
+    if packs_root.is_dir():
+        domain_roots.extend(path for path in packs_root.glob("*/hype") if path.is_dir())
 
     violations: list[str] = []
-    for path in _iter_python_files(domains_root):
-        rel = _repo_rel(path, repo_root)
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except SyntaxError as exc:
-            violations.append(f"could not parse imports in {rel}: {exc.msg} at line {exc.lineno}")
+    for domains_root in domain_roots:
+        if not domains_root.is_dir():
             continue
-        except UnicodeDecodeError as exc:
-            violations.append(f"could not read imports in {rel}: {exc}")
-            continue
+        for path in _iter_python_files(domains_root):
+            rel = _repo_rel(path, repo_root)
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            except SyntaxError as exc:
+                violations.append(f"could not parse imports in {rel}: {exc.msg} at line {exc.lineno}")
+                continue
+            except UnicodeDecodeError as exc:
+                violations.append(f"could not read imports in {rel}: {exc}")
+                continue
 
-        module_name = _module_name_for_path(path, repo_root)
-        for node in ast.walk(tree):
-            for module in _imported_modules_from_node(node, module_name=module_name):
-                cli_module = _cli_module_boundary_name(module)
-                if cli_module is not None:
-                    violations.append(
-                        f"{rel}:{node.lineno} imports CLI module {cli_module!r}; move CLI-only logic to a cli.py entrypoint or shared helper"
-                    )
+            module_name = _module_name_for_path(path, repo_root)
+            for node in ast.walk(tree):
+                for module in _imported_modules_from_node(node, module_name=module_name):
+                    cli_module = _cli_module_boundary_name(module)
+                    if cli_module is not None:
+                        violations.append(
+                            f"{rel}:{node.lineno} imports CLI module {cli_module!r}; move CLI-only logic to a cli.py entrypoint or shared helper"
+                        )
     return violations
 
 

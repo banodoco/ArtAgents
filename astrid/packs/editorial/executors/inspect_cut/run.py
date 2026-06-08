@@ -12,7 +12,7 @@ import sys
 import textwrap
 from pathlib import Path
 
-from astrid.core.domains.hype import enriched_arrangement
+from astrid.packs.editorial.hype import enriched_arrangement
 
 TRACKS = ("a1", "v1", "v2")
 TRACK_FILL = {"a1": "A", "v1": "V", "v2": "O"}

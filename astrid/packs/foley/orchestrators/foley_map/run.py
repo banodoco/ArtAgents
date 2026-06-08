@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.run_subprocess import run_subprocess
+from astrid.core.runtime import run_subprocess
 
 GLOBAL_QUERY = (
     "You are designing AMBIENT atmosphere audio for a video — drones, hums, "

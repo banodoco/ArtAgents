@@ -10,7 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from astrid.core import doctor, setup_cli
+from astrid.core import doctor
+from astrid.core.gateway import setup as setup_cli
 from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.project.project import create_project
 from astrid.core.structure import TOP_LEVEL_ASTRID_DIRS, validate_repo_structure

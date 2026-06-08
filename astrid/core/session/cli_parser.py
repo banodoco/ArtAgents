@@ -2,7 +2,7 @@
 
 Extracted from ``astrid/core/session/cli.py`` during M4 giant-file split
 (T50).  ``build_parser`` remains the public entry point; it uses the shared
-:class:`~astrid.core.cli_registration.CommandSpec` convention so the command
+:class:`~astrid.core.cli.registration.CommandSpec` convention so the command
 set is declarative and can be checked by the phased CLI allowlist.
 
 All handler references are resolved through the ``.cli`` facade at
@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import argparse
 
-from astrid.core.cli_registration import CommandSpec, register_commands
+from astrid.core.cli.registration import CommandSpec, register_commands
 
 
 def _configure_attach(sub: argparse.ArgumentParser) -> None:

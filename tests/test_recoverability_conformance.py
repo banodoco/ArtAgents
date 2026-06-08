@@ -276,7 +276,7 @@ def _iter_parser_surface_files() -> list[tuple[Path, str]]:
         relative = path.relative_to(ASTRID_ROOT).as_posix()
         if (
             relative.endswith("/cli.py")
-            or relative in {"doctor.py", "setup_cli.py"}
+            or relative in {"doctor.py", "gateway/setup.py"}
             or relative.startswith("packs/")
         ):
             surfaces.append((path, builder_name))

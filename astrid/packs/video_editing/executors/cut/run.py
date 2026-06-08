@@ -35,10 +35,10 @@ from astrid.core.timeline import (
     validate_arrangement_duration_window,
 )
 from astrid.core.util.hash import sha256_file
-from astrid.core.domains.hype.arrangement_rules import compile_arrangement_plan
+from astrid.packs.editorial.hype.arrangement_rules import compile_arrangement_plan
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 from astrid.core.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.theme_schema import load_theme, theme_root
+from astrid.core.theme import load_theme, theme_root
 
 from . import probe
 from . import registry as _registry

@@ -2695,8 +2695,8 @@
     },
     {
       "builder": "build_parser",
-      "module": "astrid.core.setup_cli",
-      "path": "astrid/core/setup_cli.py"
+      "module": "astrid.core.gateway.setup",
+      "path": "astrid/core/gateway/setup.py"
     },
     {
       "builder": "build_parser",
@@ -3139,8 +3139,8 @@
     {
       "builder": "build_parser",
       "enum_arg_count": 0,
-      "module": "astrid.core.setup_cli",
-      "path": "astrid/core/setup_cli.py",
+      "module": "astrid.core.gateway.setup",
+      "path": "astrid/core/gateway/setup.py",
       "prog": "python3 -m astrid setup"
     },
     {

@@ -1,4 +1,11 @@
-"""Theme root and styledoc validation helpers."""
+"""Theme root, styledoc validation helpers, and CLI.
+
+Public surface:
+  - THEME_SCHEMA, ThemeValidationError, load_theme, theme_root, resolve_theme_asset
+    (re-exported from ._schema)
+  - ACTIVE_THEME_ENV, DEFAULT_THEMES_ROOT, resolve_themes_root, resolve_theme_dir,
+    load_theme_by_id, list_themes
+"""
 
 from __future__ import annotations
 
@@ -8,14 +15,21 @@ from typing import Any
 
 from astrid.core.env_vars import ASTRID_THEMES_ROOT as THEMES_ROOT_ENV
 from astrid.core.env_vars import HYPE_ACTIVE_THEME
-from astrid.core.theme_schema import ThemeValidationError, load_theme
+
+from ._schema import (  # noqa: F401 — re-export for public consumers
+    THEME_SCHEMA,
+    ThemeValidationError,
+    load_theme,
+    resolve_theme_asset,
+    theme_root,
+)
 
 ACTIVE_THEME_ENV = HYPE_ACTIVE_THEME
 
 
 def _default_themes_root() -> Path:
-    # theme.py lives at astrid/core/theme.py -> parents[2] is the repo root.
-    repo_root = Path(__file__).resolve().parents[2]
+    # __init__.py lives at astrid/core/theme/__init__.py -> parents[3] is the repo root.
+    repo_root = Path(__file__).resolve().parents[3]
     if (repo_root / "pyproject.toml").is_file() or (repo_root / ".git").exists():
         return repo_root / "themes"
     return Path("~/.astrid/themes").expanduser()
@@ -70,3 +84,6 @@ def list_themes(*, root: str | Path | None = None) -> list[dict[str, Any]]:
             entry["theme_id"] = theme["id"]
         entries.append(entry)
     return entries
+
+
+from . import _cli as cli  # noqa: E402,F401 — deferred to avoid circular import with _cli

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from astrid.core.domains.hype.enriched_arrangement import EnrichedArrangement, ReviewerFinding
+from astrid.packs.editorial.hype.enriched_arrangement import EnrichedArrangement, ReviewerFinding
 
 
 class Reviewer(Protocol):

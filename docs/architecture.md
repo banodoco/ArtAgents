@@ -95,7 +95,7 @@ Every runnable tool is a built-in or external executor exposed from exactly one 
 | Iteration tools | `astrid/packs/iteration/{prepare,assemble}` | `iteration.prepare` and `iteration.assemble` for the iteration_video orchestrator. |
 | Upload tools | `astrid/packs/youtube/` | `youtube.upload` and `youtube.youtube_audio`. Legacy `upload.youtube` is a deprecated alias. |
 
-Executor-owned complexity stays in the executor folder, usually under optional local `src/` modules. Shared pure hype/editing logic belongs in `astrid/core/domains/hype`; generic plumbing belongs in `astrid/utilities`.
+Executor-owned complexity stays in the executor folder, usually under optional local `src/` modules. Hype/editing domain logic belongs with its owning pack under `astrid/packs/editorial/hype`; generic plumbing belongs in `astrid/utilities`.
 
 ## Element Support
 
@@ -116,10 +116,10 @@ Executor-owned complexity stays in the executor folder, usually under optional l
 | Module or package | Classification | Notes |
 | --- | --- | --- |
 | `astrid/core/contracts/*` | Shared library | Common schema dataclasses for ports, outputs, cache, commands, and isolation. |
-| `astrid/core/domains/hype/*` | Domain library | Shared hype-cut/editing concepts such as arrangement rules, enriched arrangements, and text matching. |
+| `astrid/packs/editorial/hype/*` | Pack-owned domain library | Hype-cut/editing concepts such as arrangement rules, enriched arrangements, and text matching. |
 | `astrid/core/util/llm_clients.py` | Utility library | Generic LLM client construction and environment handling. |
 | `astrid/core/audit/*` | Shared library | Run-local provenance ledger, graph, and HTML report. |
-| `astrid/core/theme_schema.py` | Shared library | Theme schema validation helpers. |
+| `astrid/core/theme/` | Shared library | Theme resolution, CLI, and schema validation helpers. |
 | `astrid/core/paths.py` | Shared library | Repository and workspace path resolution. |
 | `astrid/packs/editorial/executors/refine/src/reviewers/*` | Executor-owned library | Focused review heuristics used only by `editorial.refine`. |
 | `astrid/packs/youtube/executors/upload/src/social_publish.py` | Executor-owned library | Social publishing client logic used by `youtube.upload`. |
