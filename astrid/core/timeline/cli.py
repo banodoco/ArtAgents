@@ -17,7 +17,6 @@ from . import (
     clip_edits,  # kept for monkeypatch seams (timeline_cli.clip_edits)
     crud,
     effect_edits,  # kept for monkeypatch seams
-    pool_edits,  # kept for monkeypatch seams
     theme_edits,  # kept for monkeypatch seams
     track_edits,  # kept for monkeypatch seams
     transition_edits,  # kept for monkeypatch seams
@@ -221,9 +220,6 @@ from .cli_edits import (  # noqa: E402, F401
     cmd_effect_add,
     cmd_effect_remove,
     cmd_effect_tune,
-    cmd_pool_add,
-    cmd_pool_remove,
-    cmd_pool_score,
     cmd_theme_override,
     cmd_theme_set,
     cmd_track_add,

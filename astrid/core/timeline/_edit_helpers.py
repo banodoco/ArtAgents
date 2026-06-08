@@ -1,8 +1,8 @@
 """Shared internal helpers for timeline edit modules.
 
-Extracted from ``clip_edits.py`` to avoid duplication across the seven
+Extracted from ``clip_edits.py`` to avoid duplication across the active
 secondary domain edit modules (transition_edits, effect_edits, theme_edits,
-track_edits, audio_edits, pool_edits).
+track_edits, audio_edits).
 
 Every public mutation function in the edit modules uses:
 
@@ -58,7 +58,7 @@ class TimelineEditError(AstridError):
     """Raised when a timeline edit cannot be completed.
 
     All domain edit modules (clip_edits, transition_edits, effect_edits,
-    theme_edits, track_edits, audio_edits, pool_edits)
+    theme_edits, track_edits, audio_edits)
     raise this exception or a subclass.  The CLI entrypoint catches it
     via a single ``except TimelineEditError`` clause.
     """

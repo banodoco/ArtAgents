@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.schema import LocalEditState
-from astrid.core.git_util import GitUtilError, git_status, is_git_worktree
+from astrid.core.util.git import GitUtilError, git_status, is_git_worktree
 from astrid.core.util.hash import sha256_file as _sha256_file
 
 _FORK_STATE_FILENAME = ".astrid_fork_state.json"

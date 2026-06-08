@@ -155,8 +155,8 @@ alias or override instead.
 **What:** A redirection rule that says "when anything asks for capability X,
 give it capability Y instead."
 
-**How it works:** The `OverrideStore` (in `astrid/core/override.py`) maintains a
-thread-safe in-memory mapping of `(type, id) → target_id`, persisted to
+**How it works:** The `OverrideStore` (in `astrid/core/pack/override.py`) maintains
+a thread-safe in-memory mapping of `(type, id) → target_id`, persisted to
 `astrid/packs/local/.overrides.json`. Overrides are checked at resolution time
 — whenever a registry looks up a capability by id, the override store is
 consulted after alias resolution.

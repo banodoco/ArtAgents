@@ -19,7 +19,7 @@ from unittest.mock import patch
 import pytest
 
 from astrid.core.dirty import detect_local_edits, write_fork_state, read_fork_state
-from astrid.core.git_util import GitStatus, GitUtilError
+from astrid.core.util.git import GitStatus, GitUtilError
 
 
 _EMPTY_STATUS = GitStatus(dirty=False, staged=(), unstaged=(), untracked=(), raw_lines=())

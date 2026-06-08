@@ -29,8 +29,8 @@ from astrid.core.orchestrator.registry import OrchestratorRegistry, Orchestrator
 from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.orchestrator.schema import to_capability_handle as orch_to_capability_handle
-from astrid.core.override import OverrideStore
 from astrid.core.pack import PackDefinition, discover_packs
+from astrid.core.pack.override import OverrideStore
 
 # ---------------------------------------------------------------------------
 # SD3: import from astrid.core

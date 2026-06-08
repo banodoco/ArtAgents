@@ -17,7 +17,7 @@ from astrid.core.executor.schema import ExecutorDefinition
 from astrid.core.orchestrator import cli as orchestrators_cli
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
-from astrid.core.override import OverrideStore
+from astrid.core.pack.override import OverrideStore
 
 
 def _executor_definition(executor_id: str, *, name: str = "Demo") -> ExecutorDefinition:

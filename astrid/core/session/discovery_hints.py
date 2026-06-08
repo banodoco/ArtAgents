@@ -1,13 +1,4 @@
-"""Phase 5 lifecycle verbs: start/abort/status/runs ls/next; cmd_ack lives
-in lifecycle_ack.py to keep both modules under the size budget.
-
-cmd_runs_ls (FLAG-P5-006): natural completion does not clear active_run.json
-in V1, so the lister surfaces only 'aborted' vs 'in-progress'.
-cmd_start (SD-007): does not silently invoke compile when the pre-built JSON
-manifest is missing — prints the compile recovery and returns non-zero.
-Author-test replays are the exception: they deliberately use compiled smoke
-plans even for orchestrators that normally build dynamic start plans.
-"""
+"""Session discovery and recovery hints for unbound task commands."""
 
 from __future__ import annotations
 
@@ -211,4 +202,3 @@ def _most_recent_session_slug(projects_root: Optional[Path]) -> str | None:
             print(f"  --project {pslug}", file=sys.stderr)
         return None
     return candidates[0][1]
-

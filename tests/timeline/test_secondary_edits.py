@@ -39,7 +39,6 @@ from astrid.core.timeline.events.schema import (
     TransitionSetPayload,
 )
 from astrid.core.timeline.paths import assembly_identity_path, timeline_dir
-from astrid.core.timeline.pool_edits import pool_asset_add, pool_asset_remove, pool_asset_score
 from astrid.core.timeline.theme_edits import theme_override, theme_set
 from astrid.core.timeline.track_edits import track_add, track_remove
 from astrid.core.timeline.transition_edits import (
@@ -602,48 +601,6 @@ def test_audio_events_materialize_and_read_back(demo_timeline: dict[str, object]
     _assert_last_event(demo_timeline, unbind_event, kind="audio.unbound", payload_type=AudioUnboundPayload)
     assembly = _read_assembly_json(tdir)
     assert "asset" not in assembly["clips"][0]
-
-
-def test_pool_events_reject_runtime_edit_paths(demo_timeline: dict[str, object]) -> None:
-    with pytest.raises(TimelineEditError, match="non-container read-model"):
-        pool_asset_add(
-            "demo",
-            "primary",
-            asset_id="asset-1",
-            actor=_actor(),
-            root=demo_timeline["root"],
-        )
-
-    with pytest.raises(TimelineEditError, match="non-container read-model"):
-        pool_asset_score(
-            "demo",
-            "primary",
-            asset_id="asset-1",
-            score=0.9,
-            actor=_actor(),
-            root=demo_timeline["root"],
-        )
-
-    with pytest.raises(TimelineEditError, match="non-container read-model"):
-        pool_asset_remove(
-            "demo",
-            "primary",
-            asset_id="asset-1",
-            actor=_actor(),
-            root=demo_timeline["root"],
-        )
-
-
-def test_pool_score_rejects_out_of_range(demo_timeline: dict[str, object]) -> None:
-    with pytest.raises(TimelineEditError, match="score must be between 0 and 1"):
-        pool_asset_score(
-            "demo",
-            "primary",
-            asset_id="asset-1",
-            score=1.5,
-            actor=_actor(),
-            root=demo_timeline["root"],
-        )
 
 
 def test_secondary_supabase_paths_raise_missing_config_explicitly(

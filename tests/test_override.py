@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.override import OverrideStore, OverrideStoreError
+from astrid.core.pack.override import OverrideStore, OverrideStoreError
 
 
 class TestOverrideStoreSetRemove:

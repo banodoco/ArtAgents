@@ -67,7 +67,7 @@ from astrid.core.task.plan_verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.task.run_state import _run_is_complete
 from astrid.core.task.run_store import _emit_run_completed_if_needed
-from astrid.core.task.session_discovery import (
+from astrid.core.session.discovery_hints import (
     _most_recent_session_slug,
     _os_environ_has_session,
     _print_next_no_run_hint,

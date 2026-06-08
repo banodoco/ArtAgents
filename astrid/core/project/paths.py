@@ -50,14 +50,6 @@ def validate_source_id(source_id: object) -> str:
     return source_id
 
 
-def validate_placement_id(placement_id: object) -> str:
-    if not isinstance(placement_id, str) or _ID_RE.fullmatch(placement_id) is None:
-        raise ProjectPathError(
-            "placement id must start with a letter or digit and contain only letters, digits, '.', ':', '_' or '-'"
-        )
-    return placement_id
-
-
 def validate_run_id(run_id: object) -> str:
     if not isinstance(run_id, str) or _ID_RE.fullmatch(run_id) is None:
         raise ProjectPathError(
@@ -72,10 +64,6 @@ def project_dir(slug: str, *, root: str | Path | None = None) -> Path:
 
 def project_json_path(slug: str, *, root: str | Path | None = None) -> Path:
     return project_dir(slug, root=root) / "project.json"
-
-
-def project_timeline_path(slug: str, *, root: str | Path | None = None) -> Path:
-    return project_dir(slug, root=root) / "timeline.json"
 
 
 def sources_dir(slug: str, *, root: str | Path | None = None) -> Path:
@@ -104,15 +92,3 @@ def run_dir(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
 
 def run_json_path(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
     return run_dir(slug, run_id, root=root) / "run.json"
-
-
-def run_timeline_path(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
-    return run_dir(slug, run_id, root=root) / "timeline.json"
-
-
-def run_assets_path(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
-    return run_dir(slug, run_id, root=root) / "assets.json"
-
-
-def run_metadata_path(slug: str, run_id: str, *, root: str | Path | None = None) -> Path:
-    return run_dir(slug, run_id, root=root) / "metadata.json"

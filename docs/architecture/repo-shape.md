@@ -68,22 +68,19 @@ and their purposes:
 | `core/element/` | Element schema, registry, catalog, CLI, install |
 | `core/executor/` | Executor schema, registry, runner, folder loader, CLI, banodoco catalog |
 | `core/generation/` | Generation backends (base, codex, fal, vibecomfy), feature registry, verb dispatch |
-| `core/lineage/` | Run lineage variant tracking |
+| `core/integrations/` | External-service integrations (Reigh, RunPod, worker bridges) |
 | `core/model_catalog/` | Model registry, schema, CLI |
 | `core/orchestrator/` | Orchestrator schema, registry, runner, folder loader, CLI, plan template |
 | `core/pack/` | **Canonical pack machinery** (M2): discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/v1/ |
 | `core/project/` | Project schema, paths, run management, sidecar, JSON I/O, CLI |
-| `core/reigh/` | Reigh data provider, Supabase client, task client, timeline I/O, worker JWT |
-| `core/runpod/` | RunPod sweeper and storage |
 | `core/runtime/` | In-process runtime invoker, log capture |
 | `core/session/` | Session identity, binding, lease, lifecycle, discovery, writer |
 | `core/task/` | Task kernel: event stream, run store, run audit, gate, lifecycle, CAS, inbox, claim, plan verbs, managed binding |
-| `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, pool, track, transition), erasure, integrity, migration, projection, undo, observability, event log (local FS, Supabase, projector), banodoco schema |
+| `core/timeline/` | Timeline model, CRUD, edits (audio, clip, effect, track, transition), erasure, integrity, migration, projection, undo, observability, event log (local FS, Supabase, projector), banodoco schema |
 | `core/util/` | Generic utilities (log-and-swallow, etc.) |
-| `core/worker/` | Worker machinery |
 
 Loose `.py` files at `astrid/core/` are kernel helpers such as `scaffold.py`,
-`search.py`, `git_util.py`, `cli_choices.py`, `theme_cli.py`, and `dirty.py`.
+`search.py`, `cli_choices.py`, `theme_cli.py`, and `dirty.py`.
 Pack machinery does not live in loose root-level core modules; it belongs under
 `astrid/core/pack/`.
 

@@ -17,6 +17,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.theme import load_theme_by_id
+from astrid.core.util.atomic_io import write_text_atomic
 from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_seconds
 
@@ -93,26 +94,8 @@ def create_project(
     # Idempotent — if it already exists, leave it alone.
     plan_path = project_root / "plan.md"
     if not plan_path.exists():
-        _write_text_atomic(plan_path, _PLAN_MD_SKELETON.format(slug=slug))
+        write_text_atomic(plan_path, _PLAN_MD_SKELETON.format(slug=slug))
     return payload
-
-
-def _write_text_atomic(path: Path, content: str) -> None:
-    """Atomic text write — temp file in same dir, then rename."""
-    import os
-    import tempfile
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    tmp_path = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 def load_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]:

@@ -21,7 +21,6 @@ class LayoutExceptionClass(str, Enum):
     DOMAIN_EXCEPTION = "domain_exception"
     GENERATED_IGNORED = "generated_ignored"
     SKILL_ONLY_SHELL = "skill_only_shell"
-    MACHINERY_SHIM = "machinery_shim"
     DSL_ORCHESTRATOR_SHIM = "dsl_orchestrator_shim"
 
 
@@ -35,7 +34,6 @@ class LayoutExceptionLifecycle(str, Enum):
 
 _TEMPORARY_LAYOUT_EXCEPTION_CLASSES = {
     LayoutExceptionClass.LEGACY_PUBLIC_SHIM,
-    LayoutExceptionClass.MACHINERY_SHIM,
     LayoutExceptionClass.DSL_ORCHESTRATOR_SHIM,
 }
 
@@ -98,20 +96,6 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 )
 
 
-# ---------------------------------------------------------------------------
-# M1 machinery-shim exceptions (not relocated during Plan v1.0)
-# ---------------------------------------------------------------------------
-# These files remain at ``astrid/packs/`` during M1 and will be relocated
-# to ``astrid/core/pack/`` in M2.  They are documented here so the
-# layout contract is explicit about every known deviation.
-#
-#   astrid/packs/_canonical_entrypoint.py
-#       class:       machinery_shim
-#       defer_to:    M2
-#       reason:      50+ import sites across pack run.py files, in_process.py,
-#                   and test files create disproportionate regression risk
-#                   for M1.  Relocation deferred to M2.
-#
 # ---------------------------------------------------------------------------
 # M1 root pack Python shim exceptions (classified in pack metadata)
 # ---------------------------------------------------------------------------

@@ -49,7 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     #   cli_crud    — lifecycle (ls, create, show, rename, finalize, tombstone,
     #                 purge, set-default)
     #   cli_output  — export, cost
-    #   cli_edits   — clip, transition, effect, theme, track, audio, pool,
+    #   cli_edits   — clip, transition, effect, theme, track, audio,
     #                 arrangement
     #   cli_events  — history, diff, audit, preview, who-edited, migrate-events
     #   cli_backends — push, pull, branch, undo, mass-undo, erase, recover
@@ -83,9 +83,6 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_effect_add,
         cmd_effect_remove,
         cmd_effect_tune,
-        cmd_pool_add,
-        cmd_pool_remove,
-        cmd_pool_score,
         cmd_theme_override,
         cmd_theme_set,
         cmd_track_add,
@@ -566,35 +563,6 @@ def build_parser() -> argparse.ArgumentParser:
     _add_expected_version_arg(audio_unbind_p)
     _add_project_arg(audio_unbind_p)
     audio_unbind_p.set_defaults(handler=cmd_audio_unbind)
-
-    # --- pool ---
-    pool_parser = subparsers.add_parser("pool", help="Manage asset pool.")
-    pool_subs = pool_parser.add_subparsers(dest="pool_command", required=True)
-
-    # pool add
-    pool_add_p = pool_subs.add_parser("add", help="Add an asset to the pool.")
-    pool_add_p.add_argument("slug", help="Timeline slug.")
-    pool_add_p.add_argument("--asset", required=True, dest="asset_id", help="Asset identifier.")
-    _add_expected_version_arg(pool_add_p)
-    _add_project_arg(pool_add_p)
-    pool_add_p.set_defaults(handler=cmd_pool_add)
-
-    # pool remove
-    pool_remove_p = pool_subs.add_parser("remove", help="Remove an asset from the pool.")
-    pool_remove_p.add_argument("slug", help="Timeline slug.")
-    pool_remove_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
-    _add_expected_version_arg(pool_remove_p)
-    _add_project_arg(pool_remove_p)
-    pool_remove_p.set_defaults(handler=cmd_pool_remove)
-
-    # pool score
-    pool_score_p = pool_subs.add_parser("score", help="Score a pool asset.")
-    pool_score_p.add_argument("slug", help="Timeline slug.")
-    pool_score_p.add_argument("--asset-id", required=True, dest="asset_id", help="Asset identifier.")
-    pool_score_p.add_argument("--score", type=float, required=True, help="Score between 0 and 1.")
-    _add_expected_version_arg(pool_score_p)
-    _add_project_arg(pool_score_p)
-    pool_score_p.set_defaults(handler=cmd_pool_score)
 
     # --- arrangement ---
     arr_parser = subparsers.add_parser("arrangement", help="Manage arrangement.")

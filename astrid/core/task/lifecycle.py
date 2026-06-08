@@ -5,7 +5,7 @@ Implementation lives in focused modules:
 - orchestrator_resolver: qualified id and registry/alias resolution helpers
 - run_store: run terminal state, run listing, abort, retry-fetch
 - operator_view: status/next rendering and operator-facing instructions
-- session_discovery: session/project discovery hints for next
+- session.discovery_hints: session/project discovery hints for next
 """
 
 from __future__ import annotations

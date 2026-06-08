@@ -24,7 +24,6 @@ from astrid.core.timeline.events.schema import (
     AudioBoundPayload,
     ClipAddedPayload,
     EffectAddedPayload,
-    PoolAssetAddedPayload,
     ThemeSetPayload,
     TimelineActor,
     TimelineConfigReplacedPayload,
@@ -1177,21 +1176,6 @@ def test_transition_subcommand_help_shows_verbs(capsys: pytest.CaptureFixture[st
             {"slug": "my-slug", "clip_id": "c1"},
         ),
         (
-            ["pool", "add", "my-slug", "--asset", "asset-1"],
-            "cmd_pool_add",
-            {"slug": "my-slug", "asset_id": "asset-1"},
-        ),
-        (
-            ["pool", "remove", "my-slug", "--asset-id", "asset-1"],
-            "cmd_pool_remove",
-            {"slug": "my-slug", "asset_id": "asset-1"},
-        ),
-        (
-            ["pool", "score", "my-slug", "--asset-id", "asset-1", "--score", "0.25"],
-            "cmd_pool_score",
-            {"slug": "my-slug", "asset_id": "asset-1", "score": 0.25},
-        ),
-        (
             ["arrangement", "set", "my-slug", "--from-json", "/tmp/arrangement.json"],
             "cmd_arrangement_set",
             {"slug": "my-slug", "from_json": "/tmp/arrangement.json"},
@@ -1454,27 +1438,6 @@ def test_audio_bind_handler_delegates_to_audio_edits(
     assert "kind=audio.bound" in captured.out
 
 
-def test_pool_add_handler_delegates_to_pool_edits(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    seen: dict[str, object] = {}
-
-    def fake_pool_add(project_slug, slug, *, asset_id, actor=None, expected_version=None, txn_id=None, root=None):
-        seen.update({"project_slug": project_slug, "slug": slug, "asset_id": asset_id})
-        return _event("pool.asset_added", PoolAssetAddedPayload(asset_id=asset_id))
-
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
-    monkeypatch.setattr(timeline_cli, "_resolve_clip_backend_name", lambda ps, s: "local_fs")
-    monkeypatch.setattr(timeline_cli.pool_edits, "pool_asset_add", fake_pool_add)
-
-    rc = timeline_cli.cmd_pool_add(argparse.Namespace(slug="primary", asset_id="asset-1"))
-    assert rc == 0
-    assert seen == {"project_slug": "demo", "slug": "primary", "asset_id": "asset-1"}
-    captured = capsys.readouterr()
-    assert "pool: event " in captured.out
-    assert "kind=pool.asset_added" in captured.out
-
-
 def test_arrangement_set_handler_rejects_runtime_container_write(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1521,15 +1484,6 @@ def test_transition_set_bad_between_raises_astrid_error(
 
     with pytest.raises(AstridError, match="--between must be LEFT,RIGHT"):
         timeline_cli.main(["transition", "set", "my-slug", "--between", "a", "--kind", "cross-fade", "--duration", "0.5"])
-
-
-def test_pool_score_out_of_range_raises_astrid_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(timeline_cli, "_require_session", lambda slug=None: _session())
-
-    with pytest.raises(AstridError, match="score must be between 0 and 1"):
-        timeline_cli.main(["pool", "score", "my-slug", "--asset-id", "asset-1", "--score", "1.5"])
 
 
 def test_effect_tune_invalid_json_value_raises_astrid_error(

@@ -1,4 +1,4 @@
-"""Timeline edit command handlers (clip, transition, effect, theme, track, audio, pool, arrangement).
+"""Timeline edit command handlers (clip, transition, effect, theme, track, audio, arrangement).
 
 Extracted from ``astrid/core/timeline/cli.py`` during M4 giant-file split.
 These handlers implement the mutation commands for timeline editing; business
@@ -640,83 +640,6 @@ def cmd_audio_unbind(args: argparse.Namespace) -> int:
         **extra,
     )
     print(_edit_success("audio", event, backend_name))
-    return 0
-
-
-# ---------------------------------------------------------------------------
-# Handler: pool (3 verbs)
-# ---------------------------------------------------------------------------
-
-
-def cmd_pool_add(args: argparse.Namespace) -> int:
-    from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
-        _require_session,
-        _resolve_clip_backend_name,
-        _timeline_actor_from_session,
-        pool_edits,
-    )
-
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
-    extra = _expected_version_kwargs(args)
-    event = pool_edits.pool_asset_add(
-        session.project,
-        args.slug,
-        asset_id=args.asset_id,
-        actor=_timeline_actor_from_session(session),
-        **extra,
-    )
-    print(_edit_success("pool", event, backend_name))
-    return 0
-
-
-def cmd_pool_remove(args: argparse.Namespace) -> int:
-    from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
-        _require_session,
-        _resolve_clip_backend_name,
-        _timeline_actor_from_session,
-        pool_edits,
-    )
-
-    session = _require_session(slug=getattr(args, "project", None))
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
-    extra = _expected_version_kwargs(args)
-    event = pool_edits.pool_asset_remove(
-        session.project,
-        args.slug,
-        asset_id=args.asset_id,
-        actor=_timeline_actor_from_session(session),
-        **extra,
-    )
-    print(_edit_success("pool", event, backend_name))
-    return 0
-
-
-def cmd_pool_score(args: argparse.Namespace) -> int:
-    from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
-        _require_session,
-        _resolve_clip_backend_name,
-        _timeline_actor_from_session,
-        pool_edits,
-    )
-
-    session = _require_session(slug=getattr(args, "project", None))
-    if args.score < 0 or args.score > 1:
-        raise TimelineEditError("score must be between 0 and 1")
-    backend_name = _resolve_clip_backend_name(session.project, args.slug)
-    extra = _expected_version_kwargs(args)
-    event = pool_edits.pool_asset_score(
-        session.project,
-        args.slug,
-        asset_id=args.asset_id,
-        score=args.score,
-        actor=_timeline_actor_from_session(session),
-        **extra,
-    )
-    print(_edit_success("pool", event, backend_name))
     return 0
 
 
