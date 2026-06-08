@@ -39,7 +39,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ASTRID_ROOT = ROOT / "astrid"
 FIXTURE_PATH = ROOT / "tests" / "fixtures" / "recoverability_conformance_worklist.json"
@@ -162,6 +161,10 @@ ALLOWED_STDERR_SITES: dict[tuple[str, int], str] = {
     ('astrid/packs/generation/executors/generate_video/run.py', 879): 'non-fatal warning: skipping row in batch loop due to model/backend mismatch',
     ('astrid/packs/generation/executors/generate_video/run.py', 899): 'non-fatal warning: skipping row in batch loop due to missing required features',
     ('astrid/packs/iteration/executors/assemble/run.py', 133): 'managed-mode informational diagnostic printed before success-path execution proceeds',
+    ('astrid/packs/rendering/executors/sprite_sheet/run.py', 217): 'progress message: Calling model for size — informational pre-API-call status, not an error exit',
+    ('astrid/packs/rendering/executors/sprite_sheet/run.py', 225): 'progress message: Sprite sheet completed in Xs — informational post-API-call summary, not an error exit',
+    ('astrid/packs/rendering/executors/sprite_sheet/run.py', 228): 'progress message: Post-processing existing sprite sheet — informational mode indicator, not an error exit',
+    ('astrid/packs/rendering/executors/sprite_sheet/run.py', 258): 'non-fatal warning: frame(s) touch safety edge — program continues to assemble outputs',
     ('astrid/packs/rendering/executors/sprite_sheet/run.py', 441): 'progress message: FAL upscaling frame X/Y — informational batch-loop status, not an error exit',
     ('astrid/packs/rendering/executors/sprite_sheet/run.py', 444): 'progress message: FAL upscaling frame X/Y — informational batch-loop status, not an error exit',
     ('astrid/packs/rendering/executors/sprite_sheet/run.py', 1150): 'non-fatal warning: animated WebP export failed — program continues with null animated_webp_path',

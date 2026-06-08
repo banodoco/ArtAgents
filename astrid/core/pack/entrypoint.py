@@ -15,6 +15,7 @@ from contextvars import ContextVar
 from typing import Callable, Iterator
 
 from astrid.contracts.errors import AstridError, render_astrid_error, wrap_degraded_error
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PROJECT_RUN
 
 _CANONICAL_RUNTIME_CAPABILITY: ContextVar[str | None] = ContextVar(
     "astrid_canonical_runtime_capability",
@@ -38,7 +39,7 @@ def guard_canonical_entrypoint(pack_id: str) -> None:
     import os
     import sys
 
-    if os.environ.get("ASTRID_INTERNAL_INVOCATION"):
+    if os.environ.get(ASTRID_INTERNAL_INVOCATION):
         return
     if _CANONICAL_RUNTIME_CAPABILITY.get() == pack_id:
         return
@@ -65,7 +66,7 @@ def warn_if_unledgered() -> None:
     import os
     import sys
 
-    if not os.environ.get("ASTRID_PROJECT_RUN"):
+    if not os.environ.get(ASTRID_PROJECT_RUN):
         print(
             "[astrid] running unledgered — invoke through executors run"
             " or the SDK to persist a run record",

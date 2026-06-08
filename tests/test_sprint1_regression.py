@@ -24,7 +24,7 @@ from unittest import mock
 from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
-from astrid.core.pack import qualified_id_pack_id, PackValidationError
+from astrid.core.pack import PackValidationError, qualified_id_pack_id
 
 
 class TestExecutorsListRegression(unittest.TestCase):
@@ -323,11 +323,11 @@ class TestFullExistingSuitePasses(unittest.TestCase):
         test_dir = Path(__file__).resolve().parent
         test_files = [
             "test_canonical_aliases.py",
-            "test_pack_discovery.py",
-            "test_pack_yaml_schema.py",
-            "test_packs_shipped_ids.py",
-            "test_elements_registry.py",
-            "test_packs_validate.py",
+            "packs/test_pack_discovery.py",
+            "packs/test_pack_yaml_schema.py",
+            "packs/test_packs_shipped_ids.py",
+            "core/test_elements_registry.py",
+            "packs/test_packs_validate.py",
         ]
 
         for tf in test_files:

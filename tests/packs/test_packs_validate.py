@@ -24,7 +24,6 @@ from astrid.packs.validate import (
     validate_pack,
 )
 
-
 _FIRST_PARTY_PACKS_ROOT = Path(__file__).resolve().parents[2] / "astrid" / "packs"
 
 
@@ -313,7 +312,11 @@ class TestLayoutValidation(MinimalPackTestCase):
     def test_non_builtin_pack_uses_discovery_iterators_for_declared_content_roots(self) -> None:
         from astrid.core.pack import (
             iter_element_roots as real_iter_element_roots,
+        )
+        from astrid.core.pack import (
             iter_executor_roots as real_iter_executor_roots,
+        )
+        from astrid.core.pack import (
             iter_orchestrator_roots as real_iter_orchestrator_roots,
         )
 
@@ -351,15 +354,15 @@ agent:
 
         with (
             mock.patch(
-                "astrid.packs.validate.iter_executor_roots",
+                "astrid.core.pack.validate.iter_executor_roots",
                 side_effect=real_iter_executor_roots,
             ) as executor_roots,
             mock.patch(
-                "astrid.packs.validate.iter_orchestrator_roots",
+                "astrid.core.pack.validate.iter_orchestrator_roots",
                 side_effect=real_iter_orchestrator_roots,
             ) as orchestrator_roots,
             mock.patch(
-                "astrid.packs.validate.iter_element_roots",
+                "astrid.core.pack.validate.iter_element_roots",
                 side_effect=real_iter_element_roots,
             ) as element_roots,
         ):

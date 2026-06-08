@@ -20,8 +20,8 @@ from astrid._paths import REPO_ROOT
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack_discovery import (
     ASTRID_PACKS_PATH_ENV,
-    DiscoveredPack,
     SOURCE_KINDS,
+    DiscoveredPack,
     discover_pack_metadata,
     discover_packs_ordered,
 )
