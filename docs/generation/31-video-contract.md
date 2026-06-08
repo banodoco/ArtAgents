@@ -112,5 +112,5 @@ See:
   demo reference
 - `astrid/packs/builtin/generate_video/golden/demo_wan_ltx_local_cloud.py` —
   golden demo exercising all wired cells with mocked backends
-- `astrid/docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
-- `astrid/docs/generation/00-features.md` — canonical feature list
+- `docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
+- `docs/generation/00-features.md` — canonical feature list

@@ -32,6 +32,7 @@ reference material.
 | [skills-install.md](skills-install.md) | Installing Astrid prompt content as skills into Claude Code, Codex, and Hermes |
 | [build-your-first-agentic-ux.md](build-your-first-agentic-ux.md) | Tutorial — discover → inspect → invoke → read-events via the public SDK |
 | [output-result-contract.md](output-result-contract.md) | Universal result manifest contract for M1-adopter executors |
+| [generation/](generation/) | Generation feature, registry, manifest, and modality contracts |
 | [run-ledger-contract.md](run-ledger-contract.md) | M2 run ledger contract (exactly one truthful entry per execution) |
 | [threads.md](threads.md) | Threads — retired user-facing concept, retained as internal lineage model |
 | [HOOKS.md](HOOKS.md) | Claude Code stop hook for re-injecting task-mode rules on stop boundaries |

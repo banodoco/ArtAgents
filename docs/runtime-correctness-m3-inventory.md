@@ -27,7 +27,7 @@ Generated from the current non-pack `astrid/**/*.py` AST after the core-layout c
 
 - `astrid/core/executor/install.py:239`: completed
 - `astrid/core/executor/install.py:245`: completed
-- `astrid/core/runpod/sweeper.py:149`: completed
+- `astrid/core/integrations/runpod/sweeper.py:149`: completed
 - `astrid/core/session/cli.py:711`: completed
 
 ## Inventory
@@ -302,6 +302,76 @@ Generated from the current non-pack `astrid/**/*.py` AST after the core-layout c
 | 77 | `except` | `except subprocess.TimeoutExpired as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 | 132 | `except` | `except FileNotFoundError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 | 134 | `except` | `except subprocess.TimeoutExpired as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/reigh/data_provider.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 336 | `except` | `except RuntimeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/reigh/supabase_client.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 70 | `except` | `except urllib.error.HTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 77 | `except` | `except urllib.error.URLError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 86 | `except` | `except json.JSONDecodeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 108 | `except` | `except urllib.error.HTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 115 | `except` | `except urllib.error.URLError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 124 | `except` | `except json.JSONDecodeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/reigh/task_client.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 79 | `except` | `except urllib.error.HTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 81 | `except` | `except urllib.error.URLError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 118 | `except` | `except json.JSONDecodeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/reigh/timeline_io.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 216 | `except` | `except SupabaseHTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 287 | `except` | `except SupabaseHTTPError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 312 | `except` | `except SupabaseHTTPError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/reigh/worker_jwt.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 61 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 72 | `except` | `except InvalidTokenError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 87 | `except` | `except AttributeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 126 | `except` | `except InvalidTokenError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/runpod/sweeper.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 60 | `except` | `except (json.JSONDecodeError, OSError) as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 77 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 101 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 149 | `except` | `except StaleTailError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 215 | `except` | `except RuntimeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 263 | `except` | `except (ValueError, TypeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 293 | `except` | `except LeaseError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 316 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 352 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 376 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+
+### `astrid/core/integrations/worker/banodoco_worker.py`
+
+| Line | Kind | Snippet | Status | Reason |
+| ---: | --- | --- | --- | --- |
+| 319 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 348 | `except` | `except JwtVerificationError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 375 | `except` | `except ProjectOwnershipError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 391 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 410 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 423 | `except` | `except DispatchError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 452 | `except` | `except RuntimeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 508 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 
 ### `astrid/core/lineage/variants.py`
 
@@ -667,63 +737,6 @@ Generated from the current non-pack `astrid/**/*.py` AST after the core-layout c
 | ---: | --- | --- | --- | --- |
 | 45 | `except` | `except OSError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 
-### `astrid/core/reigh/data_provider.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 336 | `except` | `except RuntimeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
-### `astrid/core/reigh/supabase_client.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 70 | `except` | `except urllib.error.HTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 77 | `except` | `except urllib.error.URLError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 86 | `except` | `except json.JSONDecodeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 108 | `except` | `except urllib.error.HTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 115 | `except` | `except urllib.error.URLError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 124 | `except` | `except json.JSONDecodeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
-### `astrid/core/reigh/task_client.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 79 | `except` | `except urllib.error.HTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 81 | `except` | `except urllib.error.URLError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 118 | `except` | `except json.JSONDecodeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
-### `astrid/core/reigh/timeline_io.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 216 | `except` | `except SupabaseHTTPError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 287 | `except` | `except SupabaseHTTPError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 312 | `except` | `except SupabaseHTTPError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
-### `astrid/core/reigh/worker_jwt.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 61 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 72 | `except` | `except InvalidTokenError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 87 | `except` | `except AttributeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 126 | `except` | `except InvalidTokenError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
-### `astrid/core/runpod/sweeper.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 60 | `except` | `except (json.JSONDecodeError, OSError) as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 77 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 101 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 149 | `except` | `except StaleTailError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 215 | `except` | `except RuntimeError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 263 | `except` | `except (ValueError, TypeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 293 | `except` | `except LeaseError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 316 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 352 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 376 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
 ### `astrid/core/runtime/in_process.py`
 
 | Line | Kind | Snippet | Status | Reason |
@@ -833,21 +846,21 @@ Generated from the current non-pack `astrid/**/*.py` AST after the core-layout c
 
 | Line | Kind | Snippet | Status | Reason |
 | ---: | --- | --- | --- | --- |
-| 79 | `except` | `except SyntaxError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 82 | `except` | `except UnicodeDecodeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 123 | `except` | `except SyntaxError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 126 | `except` | `except UnicodeDecodeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 198 | `except` | `except UnicodeDecodeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 210 | `except` | `except SyntaxError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 313 | `except` | `except (OSError, subprocess.CalledProcessError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 355 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 385 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 436 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 442 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 469 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 583 | `except` | `except (SyntaxError, UnicodeDecodeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 678 | `except` | `except (SyntaxError, UnicodeDecodeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 722 | `except` | `except (SyntaxError, UnicodeDecodeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 78 | `except` | `except SyntaxError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 81 | `except` | `except UnicodeDecodeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 122 | `except` | `except SyntaxError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 125 | `except` | `except UnicodeDecodeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 197 | `except` | `except UnicodeDecodeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 209 | `except` | `except SyntaxError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 312 | `except` | `except (OSError, subprocess.CalledProcessError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 354 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 384 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 435 | `except` | `except Exception as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 441 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 468 | `except` | `except ValueError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 582 | `except` | `except (SyntaxError, UnicodeDecodeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 677 | `except` | `except (SyntaxError, UnicodeDecodeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
+| 721 | `except` | `except (SyntaxError, UnicodeDecodeError):` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 
 ### `astrid/core/task/claim.py`
 
@@ -1505,19 +1518,6 @@ Generated from the current non-pack `astrid/**/*.py` AST after the core-layout c
 | 323 | `except` | `except FileNotFoundError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 | 325 | `except` | `except OSError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 | 368 | `except` | `except OSError:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-
-### `astrid/core/worker/banodoco_worker.py`
-
-| Line | Kind | Snippet | Status | Reason |
-| ---: | --- | --- | --- | --- |
-| 319 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 348 | `except` | `except JwtVerificationError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 375 | `except` | `except ProjectOwnershipError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 391 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 410 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 423 | `except` | `except DispatchError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 452 | `except` | `except RuntimeError as exc:` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
-| 508 | `except` | `except Exception as exc:  # noqa: BLE001` | `justified` | Reviewed non-pack runtime surface after core-layout cleanup. Existing assert/exception behavior is intentionally retained. |
 
 ### `astrid/sdk/discovery.py`
 

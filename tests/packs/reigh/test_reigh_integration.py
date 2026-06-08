@@ -6,7 +6,7 @@ Unlike the per-module unit tests under ``tests/test_worker_jwt.py``,
 real code paths together:
 
   * a real RSA keypair signs a real JWT
-  * ``astrid.core.reigh.worker_jwt.verify_user_jwt`` decodes it against
+  * ``astrid.core.integrations.reigh.worker_jwt.verify_user_jwt`` decodes it against
     a real JWKS payload
   * ``SupabaseDataProvider.save_timeline`` calls real
     ``timeline_io.save_timeline`` which calls real
@@ -48,13 +48,13 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from astrid.core import timeline as timeline_mod
-from astrid.core.reigh import worker_jwt
-from astrid.core.reigh.data_provider import SupabaseDataProvider
-from astrid.core.reigh.errors import (
+from astrid.core.integrations.reigh import worker_jwt
+from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
+from astrid.core.integrations.reigh.errors import (
     TimelineNotFoundError,
     TimelineVersionConflictError,
 )
-from astrid.core.reigh.worker_jwt import (
+from astrid.core.integrations.reigh.worker_jwt import (
     DEFAULT_AUDIENCE,
     JwtVerificationError,
     verify_user_jwt,

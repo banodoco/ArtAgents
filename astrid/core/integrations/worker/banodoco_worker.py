@@ -6,7 +6,7 @@ worker file is auditable in isolation):
 * **Contract #1 — claim-next-task body**:
   ``banodoco-worker/worker.py:88-130`` POSTs
   ``{worker_id, run_type:"banodoco-worker", worker_pool:"banodoco",
-    task_types:[...]}``. AA's :mod:`astrid.core.reigh.task_client` mirrors
+    task_types:[...]}``. AA's :mod:`astrid.core.integrations.reigh.task_client` mirrors
   that exactly; this worker calls into it.
 
 * **Contract #2 — JWT + service-role split**:
@@ -21,7 +21,7 @@ worker file is auditable in isolation):
   ``ee2e6f10c`` added a ``task-status`` GET endpoint that surfaces
   ``tasks.result_data`` to the UI poller. AA's worker writes
   ``result_data={config_version, correlation_id, timeline_id}`` on success and
-  ``{correlation_id}`` on failure via :mod:`astrid.core.reigh.task_client`'s
+  ``{correlation_id}`` on failure via :mod:`astrid.core.integrations.reigh.task_client`'s
   ``update_task_status``. AA NEVER calls ``/functions/v1/complete-task`` and
   NEVER calls ``/functions/v1/task-status``.
 
@@ -44,17 +44,17 @@ from typing import Any, Mapping, Protocol
 
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.run import write_run_record
-from astrid.core.reigh import env as reigh_env
-from astrid.core.reigh.data_provider import SupabaseDataProvider
-from astrid.core.reigh.task_client import (
+from astrid.core.integrations.reigh import env as reigh_env
+from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
+from astrid.core.integrations.reigh.task_client import (
     SUPPORTED_TASK_TYPES,
     ClaimResult,
     claim_next_task,
     update_task_status,
 )
-from astrid.core.reigh.timeline_io import Mutator
-from astrid.core.reigh.timeline_io import RawTimelinePayload as TimelineConfig
-from astrid.core.reigh.worker_jwt import JwtVerificationError, VerifiedJwt, verify_user_jwt
+from astrid.core.integrations.reigh.timeline_io import Mutator
+from astrid.core.integrations.reigh.timeline_io import RawTimelinePayload as TimelineConfig
+from astrid.core.integrations.reigh.worker_jwt import JwtVerificationError, VerifiedJwt, verify_user_jwt
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +184,7 @@ def _write_baseline_snapshot(
     run_record = write_run_record(
         project_slug,
         run_id,
-        tool_id="astrid.core.worker.banodoco_worker",
+        tool_id="astrid.core.integrations.worker.banodoco_worker",
         kind="banodoco_timeline_generate",
         metadata={"baseline_snapshot": digest},
     )

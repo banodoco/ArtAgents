@@ -11,7 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from astrid.core.project.current_run import write_current_run
-from astrid.core.runpod.sweeper import (
+from astrid.core.integrations.runpod.sweeper import (
     POD_HANDLE_FILENAME,
     RUNPOD_SWEEPER_AUDIT_FILENAME,
     _derive_run_dir,
@@ -217,7 +217,7 @@ def test_sweeper_skip_terminate_at_not_passed(sweeper_projects_root: Path) -> No
     _write_handle_tree(sweeper_projects_root, "proj", "run-1", "step-1", handle)
     _write_lease(sweeper_projects_root, "proj", "run-1", {"writer_epoch": 0, "attached_session_id": None})
 
-    from astrid.core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
     summary = run_sweep(sweeper_projects_root, mode="default", dry_run=True)
     assert summary["terminated"] == 0
@@ -236,7 +236,7 @@ def test_sweeper_skip_live_session_acked(sweeper_projects_root: Path) -> None:
         "attached_session_id": "sess-live-123",
     })
 
-    from astrid.core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
     summary = run_sweep(sweeper_projects_root, mode="default", dry_run=True)
     assert summary["terminated"] == 0
@@ -268,7 +268,7 @@ def test_sweeper_default_skips_any_attached_writer_even_epoch_zero(
     os.environ["RUNPOD_API_KEY"] = "test-key-rpa_0000000000000000000000000000000000000000000000"
     try:
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock()) as terminate:
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="default", dry_run=False)
 
@@ -302,7 +302,7 @@ def test_sweeper_skip_pod_not_idle(sweeper_projects_root: Path) -> None:
     try:
         with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="default", dry_run=True)
             reasons = [d["reason"] for d in summary["details"]]
@@ -341,7 +341,7 @@ def test_sweeper_default_terminate_idle_pod(sweeper_projects_root: Path) -> None
         with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
              patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             # Dry run: just assert it would terminate
             summary = run_sweep(sweeper_projects_root, mode="default", dry_run=True)
@@ -384,7 +384,7 @@ def test_sweeper_hard_overrides_live_session_check(sweeper_projects_root: Path) 
         with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
              patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=True)
             # --hard should permit termination despite live session and busy pod
@@ -403,7 +403,7 @@ def test_sweeper_hard_requires_terminate_at_passed(sweeper_projects_root: Path) 
     handle = _make_handle(pod_id="pod-hard-future", terminate_at=future)
     _write_handle_tree(sweeper_projects_root, "proj", "run-hard-future", "step-1", handle)
 
-    from astrid.core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
     summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=True)
     assert summary["terminated"] == 0
@@ -439,7 +439,7 @@ def test_sweeper_emits_pod_terminated_event(sweeper_projects_root: Path) -> None
         with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
              patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
             from astrid.core.task.events import EVENTS_FILENAME
 
             # Real (non-dry-run) sweep
@@ -499,7 +499,7 @@ def test_default_sweep_appends_owned_event_without_bound_writer_session(
         with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
              patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="default", dry_run=False)
             assert summary["terminated"] == 1
@@ -541,7 +541,7 @@ def test_sweeper_rejects_noncanonical_handle_path_before_termination(
     os.environ["RUNPOD_API_KEY"] = "test-key-rpa_0000000000000000000000000000000000000000000000"
     try:
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock()) as terminate:
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
 
@@ -570,7 +570,7 @@ def test_sweeper_missing_lease_fails_before_termination_or_append(
     events_path = sweeper_projects_root / "proj" / "runs" / "run-missing-lease" / "events.jsonl"
     before = events_path.read_bytes()
 
-    from astrid.core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
     summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
     assert summary["terminated"] == 0
@@ -595,7 +595,7 @@ def test_sweeper_malformed_lease_fails_before_termination_or_append(
     events_path = run_dir / "events.jsonl"
     before = events_path.read_bytes()
 
-    from astrid.core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
     summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
     assert summary["terminated"] == 0
@@ -627,7 +627,7 @@ def test_sweeper_hard_appends_owned_task_event_without_bound_writer_session(
     try:
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
             assert summary["terminated"] == 1
@@ -673,10 +673,10 @@ def test_sweeper_reports_event_append_failures_in_summary_and_audit(
     try:
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch(
-                 "astrid.core.runpod.sweeper.append_runpod_sweeper_event",
+                 "astrid.core.integrations.runpod.sweeper.append_runpod_sweeper_event",
                  side_effect=RuntimeError("append down"),
              ):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
 
@@ -719,7 +719,7 @@ def test_sweeper_already_gone_pod_still_appends_owned_event(
     os.environ["RUNPOD_API_KEY"] = "test-key-rpa_0000000000000000000000000000000000000000000000"
     try:
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock(side_effect=RuntimeError("pod not found"))):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
             summary = run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
 
@@ -765,7 +765,7 @@ def test_sweeper_hard_preserves_task_hash_chain(sweeper_projects_root: Path) -> 
     try:
         with patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
              patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-            from astrid.core.runpod.sweeper import sweep as run_sweep
+            from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
             from astrid.core.task.events import EVENTS_FILENAME, verify_chain
 
             run_sweep(sweeper_projects_root, mode="hard", dry_run=False)
@@ -813,7 +813,7 @@ def test_append_runpod_sweeper_event_retries_tail_conflicts(
     sweeper_projects_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import astrid.core.runpod.sweeper as sweeper_module
+    import astrid.core.integrations.runpod.sweeper as sweeper_module
     from astrid.core.task.events import StaleTailError
 
     handle_path = _write_handle_tree(sweeper_projects_root, "proj", "run-retry", "step-1", _make_handle())

@@ -28,7 +28,6 @@ TOP_LEVEL_ASTRID_FILES = {
 }
 TOP_LEVEL_ASTRID_DIRS = {
     "core",
-    "docs",
     "packs",
     "sdk",
     "skills",

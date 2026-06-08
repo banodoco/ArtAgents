@@ -3,7 +3,7 @@
 T10 collapsed the parallel placement schema. T11 reinstates ``edit
 <project_id>`` (sub-verbs ``add-clip``/``move-clip``/``set-theme``) and
 ``list <project_id>`` that operate on reigh-app UUIDs through
-``astrid.core.reigh.SupabaseDataProvider``. Edit verbs shell out to
+``astrid.core.integrations.reigh.SupabaseDataProvider``. Edit verbs shell out to
 ``scripts/node/ops_helper.mjs`` to apply timeline-ops primitives, then call
 ``SupabaseDataProvider.save_timeline`` with the required
 ``expected_version`` (read from reigh-data-fetch's ``config_version``).
@@ -12,7 +12,7 @@ Auth scope (FLAG-012, SD-009): the CLI is an ownership-bound client, so the
 write path uses a user PAT (``REIGH_PAT``) by default rather than the
 worker-only service-role key. ``--service-role`` is provided as a documented
 escape hatch for operators who know the row is theirs to edit; the worker
-itself uses a separate code path (``astrid.core.worker.banodoco_worker``).
+itself uses a separate code path (``astrid.core.integrations.worker.banodoco_worker``).
 """
 
 from __future__ import annotations
@@ -396,8 +396,8 @@ def _cmd_register_source(args: argparse.Namespace) -> int:
 def _cmd_list(args: argparse.Namespace) -> int:
     """List timelines for a reigh-app project via reigh-data-fetch."""
 
-    from astrid.core.reigh import env as reigh_env
-    from astrid.core.reigh.supabase_client import post_json
+    from astrid.core.integrations.reigh import env as reigh_env
+    from astrid.core.integrations.reigh.supabase_client import post_json
 
     auth = ("pat", reigh_env.resolve_pat())
     payload = post_json(
@@ -436,8 +436,8 @@ def _cmd_list(args: argparse.Namespace) -> int:
 def _cmd_edit(args: argparse.Namespace) -> int:
     """Edit a reigh-app timeline via timeline-ops + SupabaseDataProvider."""
 
-    from astrid.core.reigh import env as reigh_env
-    from astrid.core.reigh.data_provider import SupabaseDataProvider
+    from astrid.core.integrations.reigh import env as reigh_env
+    from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
 
     op = args.edit_op_name
     op_args = _build_op_args(args, op)

@@ -1698,7 +1698,7 @@ class PackSchemaRuntimeParityTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         from referencing import Registry, Resource
 
-        schemas_root = Path(__file__).resolve().parents[2] / "astrid" / "core" / "pack_machinery" / "schemas" / "v1"
+        schemas_root = Path(__file__).resolve().parents[2] / "astrid" / "core" / "pack" / "schemas" / "v1"
         defs_path = schemas_root / "_defs.json"
         pack_path = schemas_root / "pack.json"
 

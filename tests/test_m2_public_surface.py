@@ -159,8 +159,8 @@ class BanodocoIntegrationImportTest(unittest.TestCase):
     for M2 (removal is deferred to a later milestone per SD3)."""
 
     def test_banodoco_worker_importable(self) -> None:
-        import astrid.core.worker.banodoco_worker
-        self.assertIsNotNone(astrid.core.worker.banodoco_worker)
+        import astrid.core.integrations.worker.banodoco_worker
+        self.assertIsNotNone(astrid.core.integrations.worker.banodoco_worker)
 
     def test_banodoco_schema_importable(self) -> None:
         import astrid.core.timeline.banodoco_schema

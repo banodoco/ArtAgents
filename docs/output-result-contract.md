@@ -271,7 +271,7 @@ registry conformance gate in `tests/test_result_manifest.py`.
   fields (`modality`, `model`, `mode_used`, `model_actual`, `execution`,
   `request`, `seed`, plus optional v2 fields like `applied_features`,
   `dropped_features`, `duration_ms`, `cost_usd`, `request_id`). See
-  [astrid/docs/generation/20-manifest-schema.md](../astrid/docs/generation/20-manifest-schema.md).
+  [docs/generation/20-manifest-schema.md](generation/20-manifest-schema.md).
 
 New fields are **additive-only** — existing fields will not be removed or
 change type within a major version.

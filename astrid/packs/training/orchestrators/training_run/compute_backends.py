@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
+from astrid.core.integrations.runpod.storage import ENSURE_STORAGE_HINT
 from astrid.packs.training.orchestrators.dataset_build.interfaces import (
     ArtifactPullResult,
     ComputeHandle,

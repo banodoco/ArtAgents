@@ -270,7 +270,7 @@ def _preflight_storage(storage_name: str | None, *, required: bool, context: str
     if not required and not storage_name:
         return 0
 
-    from astrid.core.runpod.storage import require_existing_storage
+    from astrid.core.integrations.runpod.storage import require_existing_storage
 
     try:
         asyncio.run(require_existing_storage(storage_name, context=context))

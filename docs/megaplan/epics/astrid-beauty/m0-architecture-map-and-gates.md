@@ -30,7 +30,7 @@ kernel internals, packs, tests, docs, and operational history.
   import-boundary checks for packs/core, source-layout smoke checks,
   compatibility/public-surface characterization where later moves depend on it,
   and a Reigh import smoke that proves public cleanup does not break
-  `astrid.core.reigh` imports.
+  `astrid.core.integrations.reigh` imports.
 
 ## Scope - OUT
 - Do not move large amounts of code in this milestone.

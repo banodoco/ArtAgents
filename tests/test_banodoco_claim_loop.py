@@ -18,10 +18,10 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-from astrid.core.reigh.task_client import ClaimResult
-from astrid.core.reigh.worker_jwt import VerifiedJwt
-from astrid.core.worker import banodoco_worker as bw_mod
-from astrid.core.worker.banodoco_worker import BanodocoWorker, WorkerConfig
+from astrid.core.integrations.reigh.task_client import ClaimResult
+from astrid.core.integrations.reigh.worker_jwt import VerifiedJwt
+from astrid.core.integrations.worker import banodoco_worker as bw_mod
+from astrid.core.integrations.worker.banodoco_worker import BanodocoWorker, WorkerConfig
 
 
 class _FakeProvider:
@@ -80,8 +80,8 @@ _VERIFIED_JWT = VerifiedJwt(
 
 def _common_patches(recorder: _StatusRecorder):
     return [
-        patch("astrid.core.worker.banodoco_worker.time.sleep"),
-        patch("astrid.core.reigh.env.resolve_service_role_key", return_value="srv-key"),
+        patch("astrid.core.integrations.worker.banodoco_worker.time.sleep"),
+        patch("astrid.core.integrations.reigh.env.resolve_service_role_key", return_value="srv-key"),
         patch.object(bw_mod, "update_task_status", side_effect=recorder),
         patch.object(bw_mod, "verify_user_jwt", return_value=_VERIFIED_JWT),
         patch.object(bw_mod, "_verify_project_ownership", return_value=None),
@@ -114,7 +114,7 @@ class TestRetryOnTransportError:
             patch.object(bw_mod, "claim_next_task", side_effect=_fake_claim),
         ]
 
-        with caplog.at_level(logging.WARNING, logger="astrid.core.worker.banodoco_worker"):
+        with caplog.at_level(logging.WARNING, logger="astrid.core.integrations.worker.banodoco_worker"):
             for p in patches:
                 p.start()
             try:
@@ -204,12 +204,12 @@ class TestLostClaim:
             raise RuntimeError("status endpoint unreachable")
 
         patches = [
-            patch("astrid.core.worker.banodoco_worker.time.sleep"),
-            patch("astrid.core.reigh.env.resolve_service_role_key", return_value="srv-key"),
+            patch("astrid.core.integrations.worker.banodoco_worker.time.sleep"),
+            patch("astrid.core.integrations.reigh.env.resolve_service_role_key", return_value="srv-key"),
             patch.object(bw_mod, "update_task_status", side_effect=_fail_update),
             patch.object(bw_mod, "claim_next_task", side_effect=[claim, None]),
         ]
-        with caplog.at_level(logging.ERROR, logger="astrid.core.worker.banodoco_worker"):
+        with caplog.at_level(logging.ERROR, logger="astrid.core.integrations.worker.banodoco_worker"):
             for p in patches:
                 p.start()
             try:
@@ -284,8 +284,8 @@ class TestBaselineSnapshotFailureRoutesToFail:
         complete_calls = []
 
         patches = [
-            patch("astrid.core.worker.banodoco_worker.time.sleep"),
-            patch("astrid.core.reigh.env.resolve_service_role_key", return_value="srv-key"),
+            patch("astrid.core.integrations.worker.banodoco_worker.time.sleep"),
+            patch("astrid.core.integrations.reigh.env.resolve_service_role_key", return_value="srv-key"),
             patch.object(bw_mod, "update_task_status"),
             patch.object(bw_mod, "verify_user_jwt", return_value=_VERIFIED_JWT),
             patch.object(bw_mod, "_verify_project_ownership", return_value=None),

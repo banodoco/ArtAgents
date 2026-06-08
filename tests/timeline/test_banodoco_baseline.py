@@ -16,10 +16,10 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from astrid.core.reigh.task_client import ClaimResult
-from astrid.core.reigh.worker_jwt import VerifiedJwt
-from astrid.core.worker import banodoco_worker as bw_mod
-from astrid.core.worker.banodoco_worker import (
+from astrid.core.integrations.reigh.task_client import ClaimResult
+from astrid.core.integrations.reigh.worker_jwt import VerifiedJwt
+from astrid.core.integrations.worker import banodoco_worker as bw_mod
+from astrid.core.integrations.worker.banodoco_worker import (
     BanodocoWorker,
     WorkerConfig,
     _write_baseline_snapshot,

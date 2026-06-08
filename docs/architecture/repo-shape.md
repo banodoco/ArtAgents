@@ -148,7 +148,6 @@ Canonical homes:
 | `astrid/core/threads/` | **Lineage and thread management** | Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in `astrid.core.threads.__all__`. |
 | `astrid/core/verify/` | **Verification helpers** | Soft boundary — currently a convention, not a hard gate. |
 | `astrid/core/modalities/` | **Modality helpers** | Modality-specific support code. |
-| `astrid/docs/` | **Package-level docs** | Internal documentation within the `astrid` package. |
 | `astrid/skills/` | **Skill harnesses** | Agent skill discovery, registry, and harness runtimes (base, codex, claude, hermes). |
 | `astrid/core/orchestrate/` | **Plan compilation and test running** | DSL, compile, test runner, CLI. |
 | `astrid/core/theme_schema.py` | **Shared library** | Theme schema validation helpers. Soft boundary — convention. |
@@ -234,16 +233,12 @@ top-level module under `astrid/packs/`.
 - Custom element kinds declared in `pack.yaml` extensions are accepted
 - Top-level `.py` files under `astrid/packs/` are rejected except `__init__.py`
 
-## 6. `astrid/elements/` — Planned-Absent Canonical Concept
+## 6. No Planned-Absent Package Roots
 
-`TOP_LEVEL_ASTRID_DIRS` in `astrid/core/structure.py` includes `"elements"` as a
-top-level canonical directory. However, **no `astrid/elements/` directory exists
-on disk** and M5 does not create it.
-
-This is a **planned-but-not-materialized** canonical concept: the constant
-allows it, the directory is absent, and creating it would be unnecessary scope
-growth. Source-layout smoke tests treat `elements/` as the only allowed
-planned-absent canonical directory.
+`TOP_LEVEL_ASTRID_DIRS` in `astrid/core/structure.py` is strict: every listed
+directory must exist on disk, and no unlisted directory may appear under
+`astrid/`. Repository documentation belongs under root `docs/`, not inside the
+Python package.
 
 ## 7. Tests
 

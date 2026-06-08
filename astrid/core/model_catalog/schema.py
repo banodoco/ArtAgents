@@ -216,7 +216,7 @@ def validate_registry_with_backends(
                 "each model declares a 'modes' dict whose values carry "
                 "per-mode 'supports', 'requires', and 'backends' with "
                 "'local'/'cloud' sub-entries.  See "
-                "astrid/docs/generation/10-registry-schema.md for the "
+                "docs/generation/10-registry-schema.md for the "
                 "full v2 specification."
             )
         raise ValueError(

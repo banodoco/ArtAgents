@@ -41,10 +41,10 @@ the folder-level `PACKAGE_ID`.
 
 ## Cross-links
 
-- `astrid/docs/generation/` — modality contracts, manifest schema, feature list
+- `docs/generation/` — modality contracts, manifest schema, feature list
 - `astrid/packs/builtin/generate_image/skill/SKILL.md` — the `generate-image` skill (primary entry point)
 - `astrid/packs/builtin/generate_image/STAGE.md` — the basic image executor
 - `astrid/packs/builtin/generate_video/STAGE.md` — the basic video executor (Sprint 04)
-- `astrid/docs/generation/30-image-contract.md` — image modality contract (all six canonical modes)
-- `astrid/docs/generation/31-video-contract.md` — video modality contract (implemented Sprint 04)
-- `astrid/docs/generation/32-audio-contract.md` — audio modality contract (spec-only)
+- `docs/generation/30-image-contract.md` — image modality contract (all six canonical modes)
+- `docs/generation/31-video-contract.md` — video modality contract (implemented Sprint 04)
+- `docs/generation/32-audio-contract.md` — audio modality contract (spec-only)

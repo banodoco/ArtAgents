@@ -8,7 +8,6 @@
     "cli_entrypoint": "Executable CLI surface.",
     "internal_kernel": "Framework machinery under astrid/core.",
     "pack_capability_surface": "Capability surface; packs ship here.",
-    "docs": "Package-level documentation.",
     "sdk_package": "Public SDK package.",
     "skills": "Agent skill discovery and harnesses."
   },
@@ -28,12 +27,7 @@
     {
       "name": "core",
       "classification": "internal_kernel",
-      "notes": "Framework kernel, gateway, contracts, audit, domains, orchestration helpers, verification, utilities, and shared runtime libraries."
-    },
-    {
-      "name": "docs",
-      "classification": "docs",
-      "notes": "Package-level documentation within astrid/."
+      "notes": "Framework kernel, contracts, runtime, integrations, generation/model catalog, timelines, packs, tasks, and shared libraries."
     },
     {
       "name": "packs",
@@ -58,15 +52,14 @@
     ],
     "TOP_LEVEL_ASTRID_DIRS": [
       "core",
-      "docs",
       "packs",
       "sdk",
       "skills"
     ],
-    "rule": "No top-level implementation modules or compatibility shim files are allowed. New implementation code belongs under astrid/core/ unless it is pack data, SDK surface, package docs, or agent skill machinery."
+    "rule": "No top-level implementation modules, package-local docs, or compatibility shim files are allowed. New implementation code belongs under astrid/core/ unless it is pack data, SDK surface, or agent skill machinery. Repository documentation belongs under root docs/."
   },
-  "pack_machinery_layout": {
+  "pack_layout": {
     "canonical_home": "astrid/core/pack/",
-    "rule": "New pack machinery belongs in astrid/core/pack/*. astrid/packs/ is for pack data only."
+    "rule": "New pack machinery and schemas belong in astrid/core/pack/*. astrid/packs/ is for pack data only."
   }
 }

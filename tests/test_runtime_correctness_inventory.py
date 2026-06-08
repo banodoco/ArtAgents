@@ -11,7 +11,7 @@ ALLOWED_STATUSES = {"fixed", "justified", "justified-with-caveat", "deferred"}
 PLANNED_ASSERT_CONVERSIONS = {
     ("astrid/core/executor/install.py", 239),
     ("astrid/core/executor/install.py", 245),
-    ("astrid/core/runpod/sweeper.py", 149),
+    ("astrid/core/integrations/runpod/sweeper.py", 149),
     ("astrid/core/session/cli.py", 711),
 }
 

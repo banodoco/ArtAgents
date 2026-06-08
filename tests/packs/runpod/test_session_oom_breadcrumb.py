@@ -212,7 +212,7 @@ def test_sweeper_picks_up_session_breadcrumb() -> None:
             },
         }
 
-        from astrid.core.runpod.sweeper import POD_HANDLE_FILENAME
+        from astrid.core.integrations.runpod.sweeper import POD_HANDLE_FILENAME
 
         produces_dir = projects_root / "proj" / "runs" / "run-swept" / "steps" / "step-s" / "v1" / "produces"
         produces_dir.mkdir(parents=True)
@@ -251,7 +251,7 @@ def test_sweeper_picks_up_session_breadcrumb() -> None:
             with patch("runpod_lifecycle.discovery.get_pod", AsyncMock(return_value=mock_pod)), \
                  patch("runpod_lifecycle.discovery.terminate", AsyncMock()), \
                  patch("runpod_lifecycle.RunPodConfig", MagicMock()):
-                from astrid.core.runpod.sweeper import sweep as run_sweep
+                from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
                 summary = run_sweep(projects_root, mode="default", dry_run=True)
                 assert summary["terminated"] == 1, (

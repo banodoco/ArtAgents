@@ -5,7 +5,7 @@ Astrid currently has two mixed surfaces under `astrid/packs/`: first-party pack 
 
 The fundamental fix is to make the layout contract explicit in code first, then mechanically move/normalize only what the contract can verify. The high-risk part is not deleting files; it is preserving runtime module imports such as `astrid.packs.<pack>.executors.<name>.run` and helper imports under executor/orchestrator directories.
 
-**Critical architectural constraint:** `astrid/core/pack.py` already exists as a 1171-line module (`PackDefinition`, `discover_packs`, manifest constants, etc.) imported by 46+ call sites. Creating `astrid/core/pack/` as a package would collide with this module. Machinery relocation uses the **new** package name `astrid/core/pack_machinery/` instead, leaving the existing `astrid/core/pack.py` untouched.
+**Critical architectural constraint:** `astrid/core/pack.py` already exists as a 1171-line module (`PackDefinition`, `discover_packs`, manifest constants, etc.) imported by 46+ call sites. Creating `astrid/core/pack/` as a package would collide with this module. Machinery relocation uses the **new** package name `astrid/core/pack/` instead, leaving the existing `astrid/core/pack.py` untouched.
 
 **Deferred to M2:** `_canonical_entrypoint.py` has 50+ import sites across pack `run.py` files plus `astrid/core/runtime/in_process.py` and test files. Updating all of those in M1 carries disproportionate regression risk. It stays in `astrid/packs/` for M1 as a documented, validated machinery exception and will be relocated in M2.
 
@@ -57,38 +57,38 @@ The fundamental fix is to make the layout contract explicit in code first, then 
 
 ## Phase 3: Move Pack-System Machinery in Stages
 
-### Step 5: Move `gitignore.py` and prepare `_canonical_entrypoint.py` exception (`astrid/core/pack_machinery/`)
+### Step 5: Move `gitignore.py` and prepare `_canonical_entrypoint.py` exception (`astrid/core/pack/`)
 **Scope:** Small  
 **Complexity: 2**
-1. Create `astrid/core/pack_machinery/` package with `__init__.py`.
-2. Move `astrid/packs/gitignore.py` → `astrid/core/pack_machinery/gitignore.py`.
+1. Create `astrid/core/pack/` package with `__init__.py`.
+2. Move `astrid/packs/gitignore.py` → `astrid/core/pack/gitignore.py`.
 3. Update `astrid/packs/install.py` (line 35) to import from new location: `from astrid.core.pack.gitignore import gitignore_filter`.
 4. Leave `astrid/packs/_canonical_entrypoint.py` **in place** for M1. Document it as an M2-deferred machinery exception in the layout contract (class: `machinery_shim`, `defer_to: M2`). This avoids updating 50+ pack `run.py` import sites, `astrid/core/runtime/in_process.py`, `tests/test_canonical_entrypoint.py`, and `tests/core/runtime/test_in_process.py` in M1.
 5. Leave thin compatibility shim at `astrid/packs/gitignore.py` that re-exports from `astrid.core.pack.gitignore`.
 
-### Step 6: Move `validate.py` and `agent_index.py` (`astrid/core/pack_machinery/`)
+### Step 6: Move `validate.py` and `agent_index.py` (`astrid/core/pack/`)
 **Scope:** Medium  
 **Complexity: 3**
-1. Move `astrid/packs/validate.py` (1046 lines) → `astrid/core/pack_machinery/validate.py`.
-2. Move `astrid/packs/agent_index.py` (498 lines) → `astrid/core/pack_machinery/agent_index.py`.
+1. Move `astrid/packs/validate.py` (1046 lines) → `astrid/core/pack/validate.py`.
+2. Move `astrid/packs/agent_index.py` (498 lines) → `astrid/core/pack/agent_index.py`.
 3. Update internal references in `cli.py` and `install.py` that import from `validate` and `agent_index`.
 4. Leave thin compatibility shims at `astrid/packs/validate.py` and `astrid/packs/agent_index.py` that re-export from the new location.
 5. Update `astrid/gateway.py` (line 398: `from .packs import cli as packs_cli`) — keep pointing at the shim, which still works.
 
-### Step 7: Move `cli.py` and `install.py` (`astrid/core/pack_machinery/`)
+### Step 7: Move `cli.py` and `install.py` (`astrid/core/pack/`)
 **Scope:** Medium  
 **Complexity: 3**
-1. Move `astrid/packs/cli.py` (1761 lines) → `astrid/core/pack_machinery/cli.py`.
-2. Move `astrid/packs/install.py` (1930 lines) → `astrid/core/pack_machinery/install.py`.
+1. Move `astrid/packs/cli.py` (1761 lines) → `astrid/core/pack/cli.py`.
+2. Move `astrid/packs/install.py` (1930 lines) → `astrid/core/pack/install.py`.
 3. Update `astrid/gateway.py` imports (lines 398–400 and 1089) to use the new machinery path: `from astrid.core.pack import cli as packs_cli` and `from astrid.core.pack.cli import build_parser`.
 4. Leave thin compatibility shims at `astrid/packs/cli.py` and `astrid/packs/install.py`.
 
 ## Phase 4: Relocate Schemas
 
-### Step 8: Move schemas to machinery home (`astrid/packs/schemas/v1/` → `astrid/core/pack_machinery/schemas/v1/`)
+### Step 8: Move schemas to machinery home (`astrid/packs/schemas/v1/` → `astrid/core/pack/schemas/v1/`)
 **Scope:** Medium  
 **Complexity: 3**
-1. Move `astrid/packs/schemas/v1/` → `astrid/core/pack_machinery/schemas/v1/`.
+1. Move `astrid/packs/schemas/v1/` → `astrid/core/pack/schemas/v1/`.
 2. Update `KNOWN_SCHEMA_VERSIONS` and schema resolution paths in `validate.py` (now in `pack_machinery/`) plus direct docs references in `docs/creating-packs.md`.
 3. Update `docs/architecture/pack-layout-variants.json` to reflect schemas classification change.
 4. If moving proves too disruptive, document `schemas` as a public contract exception in the layout contract and add validator coverage. Preference is to move.

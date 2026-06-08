@@ -81,7 +81,7 @@ the escape hatch.
 
 See:
 - `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
-- `astrid/docs/generation/` — modality contracts, manifest schema, feature list
+- `docs/generation/` — modality contracts, manifest schema, feature list
 
 ## CLI quick-start
 
@@ -157,11 +157,11 @@ rejected at argparse.
 ## Output
 
 - `{out}/images/` — generated image files (e.g. `0-flux-dev.png`)
-- `{out}/manifest.json` — canonical manifest conforming to `astrid/docs/generation/20-manifest-schema.md` (v2)
+- `{out}/manifest.json` — canonical manifest conforming to `docs/generation/20-manifest-schema.md` (v2)
 
 ## Design docs
 
-- `astrid/docs/generation/00-features.md` — canonical feature list
-- `astrid/docs/generation/10-registry-schema.md` — model registry schema (v2)
-- `astrid/docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
-- `astrid/docs/generation/30-image-contract.md` — image modality contract with six canonical modes
+- `docs/generation/00-features.md` — canonical feature list
+- `docs/generation/10-registry-schema.md` — model registry schema (v2)
+- `docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
+- `docs/generation/30-image-contract.md` — image modality contract with six canonical modes

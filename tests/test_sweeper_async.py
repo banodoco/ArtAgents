@@ -16,7 +16,7 @@ import asyncio
 import unittest
 from pathlib import Path
 
-from astrid.core.runpod.sweeper import SweeperLoopError, sweep, sweep_async
+from astrid.core.integrations.runpod.sweeper import SweeperLoopError, sweep, sweep_async
 
 
 class SweeperAsyncBoundaryTest(unittest.TestCase):

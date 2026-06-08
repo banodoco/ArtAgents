@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.reigh.task_client import ALLOWED_STATUSES
+from astrid.core.integrations.reigh.task_client import ALLOWED_STATUSES
 
 
 class TestEventKindMapping:

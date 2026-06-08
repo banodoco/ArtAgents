@@ -1,4 +1,4 @@
-"""Unit tests for astrid.core.reigh.task_client."""
+"""Unit tests for astrid.core.integrations.reigh.task_client."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import urllib.error
 from typing import Any
 from unittest.mock import patch
 
-from astrid.core.reigh import task_client
-from astrid.core.reigh.task_client import (
+from astrid.core.integrations.reigh import task_client
+from astrid.core.integrations.reigh.task_client import (
     ALLOWED_STATUSES,
     ClaimResult,
     claim_next_task,

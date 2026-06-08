@@ -671,7 +671,7 @@ class ManagedPackConfigReplacementSurfaceTest(unittest.TestCase):
             ROOT / "astrid/packs/video_editing/orchestrators/hype/run.py",
             ROOT / "astrid/packs/editorial/executors/refine/run.py",
             ROOT / "astrid/packs/iteration/executors/assemble/run.py",
-            ROOT / "astrid/core/worker/banodoco_worker.py",
+            ROOT / "astrid/core/integrations/worker/banodoco_worker.py",
         ]
         for path in managed_sources:
             source = path.read_text(encoding="utf-8")

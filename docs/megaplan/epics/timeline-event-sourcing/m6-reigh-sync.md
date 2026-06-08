@@ -81,7 +81,7 @@ Phase 6a stops when the Supabase table, RPC, projection parity, idempotent retry
 - Is projection best implemented in SQL, an Edge Function, or TypeScript server code near the existing data provider while still matching m4's fixtures?
 - How should existing `config_version` map to event `version` during the migration window?
 - Should `timeline_checkpoints` rows be written by explicit `timeline.snapshot` events, automatic cadence, or both?
-- Asset URL stability and orphan-asset semantics under hash-chained events. `astrid/core/reigh/data_provider.py:177` uses epoch-ms paths that are non-deterministic on retry. Candidate resolutions:
+- Asset URL stability and orphan-asset semantics under hash-chained events. `astrid/core/integrations/reigh/data_provider.py:177` uses epoch-ms paths that are non-deterministic on retry. Candidate resolutions:
   - Event payload carries `asset_ref: {registry_id, content_sha256}` and projection resolves URL from the asset registry.
   - Event payload carries the URL directly, but the registry promises URL immutability as a hard contract.
 - Confirm all reigh-app touchpoints still exist before editing; if a file moved, update the plan with the discovered path.

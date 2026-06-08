@@ -3,7 +3,7 @@
 After the placement-schema collapse (T10), local ``project.json`` keeps an
 opaque ``project_id`` that points at the canonical reigh-app row. Local
 ``timeline.json`` is no longer the source of truth — timeline reads/writes go
-through ``astrid.core.reigh.SupabaseDataProvider`` as a legacy compatibility
+through ``astrid.core.integrations.reigh.SupabaseDataProvider`` as a legacy compatibility
 bridge. The local provenance cache (``sources/`` and ``runs/`` directories)
 survives.
 """
@@ -131,7 +131,7 @@ def show_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
 
     Live timeline state (clip count, theme, etc.) lives on the canonical
     reigh-app row keyed by ``project.project_id``. Callers that need it should
-    use ``astrid.core.reigh.SupabaseDataProvider.load_timeline`` directly;
+    use ``astrid.core.integrations.reigh.SupabaseDataProvider.load_timeline`` directly;
     this helper deliberately stays offline so ``projects show`` works without
     network access.
     """

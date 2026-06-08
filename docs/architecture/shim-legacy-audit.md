@@ -19,7 +19,7 @@ not preserve compatibility import surfaces.
 | `astrid.pipeline` | `astrid.core.gateway` |
 | `astrid.timeline` and timeline re-export modules | `astrid.core.timeline` |
 | `astrid.core._search` | `astrid.core.search` |
-| `astrid.core.pack_machinery.*` | `astrid.core.pack.*` |
+| `astrid.core.pack.*` | `astrid.core.pack.*` |
 | `astrid.core.pack_discovery` | `astrid.core.pack.discovery` |
 | `astrid.core.pack_resolver` | `astrid.core.pack.resolver` |
 | `astrid.core.pack_store` | `astrid.core.pack.store` |

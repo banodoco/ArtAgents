@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from astrid.core.runpod.sweeper import (
+from astrid.core.integrations.runpod.sweeper import (
     POD_HANDLE_FILENAME,
     sweep_async,
 )
@@ -107,8 +107,8 @@ def test_sweep_async_dry_run_records_would_terminate() -> None:
         )
 
         with (
-            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
-            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
+            patch("astrid.core.integrations.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.integrations.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="default", dry_run=True))
 
@@ -136,8 +136,8 @@ def test_sweep_async_dry_run_mode_hard() -> None:
         discovery = SimpleNamespace(get_pod=AsyncMock(), terminate=AsyncMock())
 
         with (
-            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
-            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
+            patch("astrid.core.integrations.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.integrations.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="hard", dry_run=True))
 
@@ -164,8 +164,8 @@ def test_sweep_async_running_pod_fixture_default_mode_skips() -> None:
         discovery = SimpleNamespace(get_pod=AsyncMock(), terminate=AsyncMock())
 
         with (
-            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
-            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
+            patch("astrid.core.integrations.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.integrations.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="default", dry_run=True))
 
@@ -192,8 +192,8 @@ def test_sweep_async_running_pod_fixture_hard_mode_proceeds() -> None:
         discovery = SimpleNamespace(get_pod=AsyncMock(), terminate=AsyncMock())
 
         with (
-            patch("astrid.core.runpod.sweeper._rebuild_config", MagicMock()),
-            patch("astrid.core.runpod.sweeper._runpod_discovery", return_value=discovery),
+            patch("astrid.core.integrations.runpod.sweeper._rebuild_config", MagicMock()),
+            patch("astrid.core.integrations.runpod.sweeper._runpod_discovery", return_value=discovery),
         ):
             result = asyncio.run(sweep_async(base, mode="hard", dry_run=True))
 

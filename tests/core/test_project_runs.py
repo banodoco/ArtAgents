@@ -449,7 +449,7 @@ def test_run_record_baseline_snapshot_is_sha256_hex_at_canonical_path(
     record = write_run_record(
         "demo",
         "01ARZ3NDEKTSV4RRFFQ69G5FAV",
-        tool_id="astrid.core.worker.banodoco_worker",
+        tool_id="astrid.core.integrations.worker.banodoco_worker",
         kind="banodoco_timeline_generate",
         metadata={"baseline_snapshot": expected_digest},
     )

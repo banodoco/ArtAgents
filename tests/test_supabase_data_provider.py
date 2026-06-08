@@ -1,4 +1,4 @@
-"""Unit tests for astrid.core.reigh.data_provider.SupabaseDataProvider."""
+"""Unit tests for astrid.core.integrations.reigh.data_provider.SupabaseDataProvider."""
 
 from __future__ import annotations
 
@@ -7,12 +7,12 @@ import unittest
 from typing import Any
 from unittest.mock import patch
 
-from astrid.core.reigh import data_provider as dp_mod
-from astrid.core.reigh import timeline_io as tio
-from astrid.core.reigh.data_provider import SupabaseDataProvider
-from astrid.core.reigh.errors import TimelineVersionConflictError
-from astrid.core.reigh.supabase_client import SupabaseHTTPError
-from astrid.core.reigh.timeline_io import save_timeline
+from astrid.core.integrations.reigh import data_provider as dp_mod
+from astrid.core.integrations.reigh import timeline_io as tio
+from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
+from astrid.core.integrations.reigh.errors import TimelineVersionConflictError
+from astrid.core.integrations.reigh.supabase_client import SupabaseHTTPError
+from astrid.core.integrations.reigh.timeline_io import save_timeline
 
 
 def _canonical_timeline() -> dict[str, Any]:

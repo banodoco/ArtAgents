@@ -6,7 +6,7 @@ HTTP ``Authorization`` header accordingly and, for service-role calls, also
 sets ``apikey`` as Supabase requires for direct PostgREST/RPC access.
 
 The wrapper deliberately stays small: callers compose endpoint URLs (via
-``astrid.core.reigh.env``) and decide which auth scheme is appropriate.
+``astrid.core.integrations.reigh.env``) and decide which auth scheme is appropriate.
 """
 
 from __future__ import annotations

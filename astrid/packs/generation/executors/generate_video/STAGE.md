@@ -74,8 +74,8 @@ resolution, frames, fps, duration, guidance_scale, steps).
 
 See:
 - `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy workflow runner
-- `astrid/docs/generation/31-video-contract.md` — video modality contract
-- `astrid/docs/generation/` — modality contracts, manifest schema, feature list
+- `docs/generation/31-video-contract.md` — video modality contract
+- `docs/generation/` — modality contracts, manifest schema, feature list
 
 ## CLI quick-start
 
@@ -142,7 +142,7 @@ rejected at argparse.
 
 - `{out}/videos/` — generated video files (e.g. `output_000.mp4`)
 - `{out}/manifest.json` — canonical manifest conforming to
-  `astrid/docs/generation/20-manifest-schema.md` (v2) with video extensions
+  `docs/generation/20-manifest-schema.md` (v2) with video extensions
   (per-output `duration_seconds`, `fps`, `resolution` via ffprobe best-effort)
 
 ## Golden demo
@@ -153,8 +153,8 @@ exercises every wired cell with mocked `HttpClient` transport and mocked
 
 ## Design docs
 
-- `astrid/docs/generation/00-features.md` — canonical feature list
-- `astrid/docs/generation/10-registry-schema.md` — model registry schema (v2)
-- `astrid/docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
-- `astrid/docs/generation/31-video-contract.md` — video modality contract
+- `docs/generation/00-features.md` — canonical feature list
+- `docs/generation/10-registry-schema.md` — model registry schema (v2)
+- `docs/generation/20-manifest-schema.md` — manifest JSON shape (v2)
+- `docs/generation/31-video-contract.md` — video modality contract
 - `astrid/packs/external/vibecomfy/STAGE.md` — VibeComfy escape hatch

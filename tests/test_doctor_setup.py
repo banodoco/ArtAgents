@@ -375,7 +375,7 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertIn("[skipped] elements install: effects/text-card: no dependencies declared", stdout)
 
     def test_top_level_dirs_are_collapsed_to_canonical_roots(self) -> None:
-        self.assertEqual(TOP_LEVEL_ASTRID_DIRS, {"core", "docs", "packs", "sdk", "skills"})
+        self.assertEqual(TOP_LEVEL_ASTRID_DIRS, {"core", "packs", "sdk", "skills"})
 
     def test_repo_structure_guard_rejects_legacy_and_misplaced_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

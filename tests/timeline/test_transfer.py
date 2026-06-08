@@ -605,8 +605,8 @@ class TestReighBridgeNotInvoked:
                 source = f.read()
             # Strip the module docstring so we check only the code body
             code_body = re.sub(r'^""".*?"""', '', source, count=1, flags=re.DOTALL)
-            assert "from astrid.core.reigh" not in code_body, (
-                "transfer.py must not import from astrid.core.reigh"
+            assert "from astrid.core.integrations.reigh" not in code_body, (
+                "transfer.py must not import from astrid.core.integrations.reigh"
             )
             assert "import reigh" not in code_body, (
                 "transfer.py must not import reigh"

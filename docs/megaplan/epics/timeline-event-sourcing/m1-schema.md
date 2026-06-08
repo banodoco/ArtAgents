@@ -101,7 +101,7 @@ As proof of life, migrate exactly one mutation, `rename`, through the new protoc
 6. **`expected_version` semantics.** Does version mean event count everywhere, or temporarily map to Supabase `config_version`?
 7. **Should Supabase enforce row-level immutability?** Consider a trigger that prevents UPDATE/DELETE on existing `timeline_events` rows in addition to denying direct inserts.
 8. **Operational failure log schema.** The state-change log only stores successful appends; decide whether `events_ops.jsonl` / `public.timeline_event_failures` is defined in m4 or its own milestone.
-9. **Asset URL stability and orphan-asset semantics under hash-chained events.** `astrid/core/reigh/data_provider.py:177` uses epoch-ms paths that are non-deterministic on retry. Candidate resolutions for the planner:
+9. **Asset URL stability and orphan-asset semantics under hash-chained events.** `astrid/core/integrations/reigh/data_provider.py:177` uses epoch-ms paths that are non-deterministic on retry. Candidate resolutions for the planner:
    - Event payload carries `asset_ref: {registry_id, content_sha256}` and projection resolves the URL from the asset registry; the hash covers the ref, not the URL.
    - Event payload carries the URL directly, but the registry promises URL immutability as a hard contract.
 

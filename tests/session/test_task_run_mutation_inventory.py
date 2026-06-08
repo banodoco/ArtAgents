@@ -105,7 +105,7 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "record_dispatch_complete",
     ): (1, "canonical_pack_step_reentry_dispatch_complete_caller"),
     CallSite(
-        "astrid/core/runpod/sweeper.py",
+        "astrid/core/integrations/runpod/sweeper.py",
         "append_runpod_sweeper_event",
         "append_event_locked",
     ): (1, "runpod_sweeper_owned_event_append"),
@@ -165,7 +165,7 @@ APPROVED_PRODUCTION_APPEND_EVENT_LOCKED_CALLS: dict[CallSite, str] = {
         "append_event_locked",
     ): "guarded_legacy_test_migration_wrapper",
     CallSite(
-        "astrid/core/runpod/sweeper.py",
+        "astrid/core/integrations/runpod/sweeper.py",
         "append_runpod_sweeper_event",
         "append_event_locked",
     ): "runpod_sweeper_owned_event_append",
@@ -217,7 +217,7 @@ EXPECTED_PACK_LOCAL_LOG_WRITES = {
 
 EXPECTED_RUNPOD_NON_TASK_AUDIT_WRITES = {
     CallSite(
-        "astrid/core/runpod/sweeper.py",
+        "astrid/core/integrations/runpod/sweeper.py",
         "_append_sweep_audit",
         "handle.write",
     ): (1, "runpod_sweeper_supplemental_audit_log_non_task"),
@@ -477,7 +477,7 @@ def test_runpod_sweeper_event_append_is_classified() -> None:
     runpod_direct_writes = {
         site: count
         for site, count in actual_writes.items()
-        if site.path == "astrid/core/runpod/sweeper.py"
+        if site.path == "astrid/core/integrations/runpod/sweeper.py"
     }
     assert runpod_direct_writes == Counter(
         {
@@ -489,11 +489,11 @@ def test_runpod_sweeper_event_append_is_classified() -> None:
     runpod_raw_task_appends = {
         site: count
         for site, count in _collect_calls(watched={"append_event_locked"}).items()
-        if site.path == "astrid/core/runpod/sweeper.py"
+        if site.path == "astrid/core/integrations/runpod/sweeper.py"
     }
     assert runpod_raw_task_appends == {
         CallSite(
-            "astrid/core/runpod/sweeper.py",
+            "astrid/core/integrations/runpod/sweeper.py",
             "append_runpod_sweeper_event",
             "append_event_locked",
         ): 1

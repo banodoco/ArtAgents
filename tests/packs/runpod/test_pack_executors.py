@@ -312,7 +312,7 @@ def test_provision_storage_required_fails_before_launch_with_ensure_storage_hint
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Storage-required provision fails before launch when no storage name is configured."""
-    from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
+    from astrid.core.integrations.runpod.storage import ENSURE_STORAGE_HINT
     from astrid.packs.runpod.executors.provision.run import cmd_provision
 
     class Args:
@@ -346,7 +346,7 @@ def test_provision_named_storage_missing_fails_before_launch_without_creation(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A provided storage_name must already exist; provision never creates it implicitly."""
-    from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
+    from astrid.core.integrations.runpod.storage import ENSURE_STORAGE_HINT
     from astrid.packs.runpod.executors.provision.run import cmd_provision
 
     class Args:
@@ -421,7 +421,7 @@ def test_session_storage_required_fails_before_launch_with_ensure_storage_hint(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Storage-required session fails before launch when no storage name is configured."""
-    from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
+    from astrid.core.integrations.runpod.storage import ENSURE_STORAGE_HINT
     from astrid.packs.runpod.executors.provision.run import cmd_session
 
     class Args:

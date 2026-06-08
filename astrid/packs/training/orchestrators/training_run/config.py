@@ -10,7 +10,7 @@ from typing import Any, Mapping
 
 import jsonschema
 
-from astrid.core.runpod.storage import ENSURE_STORAGE_HINT
+from astrid.core.integrations.runpod.storage import ENSURE_STORAGE_HINT
 
 try:
     import yaml

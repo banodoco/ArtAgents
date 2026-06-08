@@ -262,27 +262,27 @@
     },
     "origin": {
       "type": "string",
-      "enum": ["builtin", "external", "unknown"]
+      "pattern": "^(|.*\\S.*)$"
     },
     "install_tier": {
       "type": "string",
-      "enum": ["core", "default"]
+      "pattern": "^(|.*\\S.*)$"
     },
     "pack_type": {
       "type": "string",
-      "enum": ["capability"]
+      "pattern": "^(|.*\\S.*)$"
     },
     "domain": {
       "type": "string",
-      "enum": ["development", "editorial", "generation", "infrastructure", "integration", "media", "system", "general"]
+      "pattern": "^(|.*\\S.*)$"
     },
     "stability": {
       "type": "string",
-      "enum": ["stable", "experimental", "deprecated"]
+      "pattern": "^(|.*\\S.*)$"
     },
     "support": {
       "type": "string",
-      "enum": ["core", "project"]
+      "pattern": "^(|.*\\S.*)$"
     },
     "visibility": {
       "type": "string",

@@ -14,7 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from astrid.core.reigh.env import (
+from astrid.core.integrations.reigh.env import (
     DEFAULT_FUNCTION_NAME,
     _candidate_env_files,
     _env_first,

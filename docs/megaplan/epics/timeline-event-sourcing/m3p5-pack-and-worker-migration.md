@@ -37,7 +37,7 @@ Profile: `partnered/full/medium`. Estimated effort: 2-3 human-weeks.
    - Confirm it reads through the m4 projection / compatibility blob and does not create a new write bypass. Add regression tests to keep it read-only.
    - Actor: none for reads; if publish records timeline metadata later, it must use a `system` actor.
 7. **Banodoco worker generation write-back.**
-   - Touchpoint: `astrid/core/worker/banodoco_worker.py:344`.
+   - Touchpoint: `astrid/core/integrations/worker/banodoco_worker.py:344`.
    - Replace `provider.save_timeline` after generation tasks with event appends through the selected backend.
    - Expected event kinds: use semantic generated edit kinds where available (`clip.added`, `clip.replaced`, `asset`/pool events from m3), or `timeline.config_replaced` for coarse generation outputs.
    - Actor: `system` `"banodoco_worker:claim:<task_id>"` or equivalent, with `actor.via` preserving the user/agent task initiator.
@@ -92,6 +92,6 @@ Profile: `partnered/full/medium`. Estimated effort: 2-3 human-weeks.
 - `astrid/packs/builtin/hype/run.py`
 - `astrid/packs/builtin/open_in_reigh/run.py:193`
 - `astrid/packs/builtin/publish/run.py:520`
-- `astrid/core/worker/banodoco_worker.py:344`
+- `astrid/core/integrations/worker/banodoco_worker.py:344`
 - Event APIs and schema package from m1-m3.
 - Pack/worker agentic test fixtures selected by the planner.

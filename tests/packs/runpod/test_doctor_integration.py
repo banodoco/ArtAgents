@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from astrid.core.runpod.sweeper import POD_HANDLE_FILENAME
+from astrid.core.integrations.runpod.sweeper import POD_HANDLE_FILENAME
 
 
 def _make_stale_handle(pod_id: str = "pod-stale") -> dict:
@@ -132,7 +132,7 @@ def test_doctor_does_not_mutate() -> None:
 
         with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root), \
              patch("runpod_lifecycle.discovery.terminate") as terminate, \
-             patch("astrid.core.runpod.sweeper.append_runpod_sweeper_event") as append_event:
+             patch("astrid.core.integrations.runpod.sweeper.append_runpod_sweeper_event") as append_event:
             from astrid.core.doctor import _check_runpod_stale_handles
 
             # This should NOT import or call discovery.terminate / append_event_locked

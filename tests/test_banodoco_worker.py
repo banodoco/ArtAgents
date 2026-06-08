@@ -1,4 +1,4 @@
-"""Unit tests for astrid.core.worker.banodoco_worker.
+"""Unit tests for astrid.core.integrations.worker.banodoco_worker.
 
 Cover the per-task pipeline: task-type guard, JWKS verify, FLAG-013 project-
 ownership read, snapshot fast-path, intent dispatch, carry-fields enforcement,
@@ -16,10 +16,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from astrid.core.reigh.task_client import ClaimResult
-from astrid.core.reigh.worker_jwt import VerifiedJwt
-from astrid.core.worker import banodoco_worker as bw_mod
-from astrid.core.worker.banodoco_worker import (
+from astrid.core.integrations.reigh.task_client import ClaimResult
+from astrid.core.integrations.reigh.worker_jwt import VerifiedJwt
+from astrid.core.integrations.worker import banodoco_worker as bw_mod
+from astrid.core.integrations.worker.banodoco_worker import (
     BanodocoWorker,
     DispatchError,
     WorkerConfig,
@@ -147,7 +147,7 @@ class BanodocoWorkerTest(unittest.TestCase):
         self.assertEqual(self.provider.save_calls, [])
 
     def test_invalid_jwt_yields_failed(self) -> None:
-        from astrid.core.reigh.worker_jwt import JwtVerificationError
+        from astrid.core.integrations.reigh.worker_jwt import JwtVerificationError
 
         patches = [
             patch.object(bw_mod, "update_task_status", side_effect=self.recorder),
@@ -161,7 +161,7 @@ class BanodocoWorkerTest(unittest.TestCase):
         self.assertEqual(self.provider.save_calls, [])
 
     def test_project_ownership_mismatch_yields_failed(self) -> None:
-        from astrid.core.worker.banodoco_worker import ProjectOwnershipError
+        from astrid.core.integrations.worker.banodoco_worker import ProjectOwnershipError
 
         patches = [
             patch.object(bw_mod, "update_task_status", side_effect=self.recorder),

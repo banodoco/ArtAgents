@@ -1,4 +1,4 @@
-"""Unit tests for astrid.core.reigh.worker_jwt."""
+"""Unit tests for astrid.core.integrations.reigh.worker_jwt."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from unittest.mock import patch
 import jwt as pyjwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from astrid.core.reigh import worker_jwt
-from astrid.core.reigh.worker_jwt import (
+from astrid.core.integrations.reigh import worker_jwt
+from astrid.core.integrations.reigh.worker_jwt import (
     DEFAULT_AUDIENCE,
     JwtVerificationError,
     verify_user_jwt,

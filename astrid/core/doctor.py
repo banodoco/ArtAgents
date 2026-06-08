@@ -377,7 +377,7 @@ def _check_runpod_stale_handles() -> DoctorCheck:
     Does NOT add a symmetric runpod metadata check (out of scope).
     """
     from astrid.core.project.paths import resolve_projects_root
-    from astrid.core.runpod.sweeper import (
+    from astrid.core.integrations.runpod.sweeper import (
         _derive_run_dir,
         _handle_path_belongs_to_run,
         collect_handles,

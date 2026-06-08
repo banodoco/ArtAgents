@@ -61,7 +61,7 @@ machinery.
 
 - `astrid/core/alias_resolver.py`
 - executor/orchestrator registries
-- `astrid/core/pack_machinery/schemas/v1/pack.json`
+- `astrid/core/pack/schemas/v1/pack.json`
 - `astrid/packs/validate.py`
 - `astrid/packs/cli.py`
 - docs for aliases/deprecation

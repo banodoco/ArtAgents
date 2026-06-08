@@ -245,7 +245,7 @@ def _dispatch_executor_main(executor_id: str, args: list[str]) -> int:
 
 
 def _dispatch_worker(args: list[str]) -> int:
-    from astrid.core.worker import banodoco_worker
+    from astrid.core.integrations.worker import banodoco_worker
 
     return banodoco_worker.main(args)
 
@@ -508,7 +508,7 @@ def _dispatch_runpod_sweep(parsed: Any, _tail: list[str]) -> int:
     from typing import Literal
 
     from astrid.core.project.paths import resolve_projects_root
-    from astrid.core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
 
     mode: Literal["default", "hard"] = "hard" if parsed.hard else "default"
     projects_root = (
@@ -537,7 +537,7 @@ def _dispatch_runpod_volumes(_parsed: Any, args: list[str]) -> int:
             state_snapshot={"command": "runpod volumes"},
         )
 
-    from astrid.core.runpod.storage import list_volumes
+    from astrid.core.integrations.runpod.storage import list_volumes
 
     try:
 
@@ -570,7 +570,7 @@ def _dispatch_runpod_ensure_storage(_parsed: Any, args: list[str]) -> int:
     except SystemExit:
         return 2
 
-    from astrid.core.runpod.storage import ensure_storage
+    from astrid.core.integrations.runpod.storage import ensure_storage
 
     try:
 

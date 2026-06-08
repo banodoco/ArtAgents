@@ -35,10 +35,10 @@ from astrid.core.cli_choices import StaticChoices
 from astrid.core.project import cli as project_cli
 from astrid.core.project import paths
 from astrid.core.project.project import ProjectError
-from astrid.core.reigh import data_provider as dp_mod
-from astrid.core.reigh import timeline_io as tio
-from astrid.core.reigh.errors import TimelineVersionConflictError
-from astrid.core.reigh.supabase_client import SupabaseHTTPError
+from astrid.core.integrations.reigh import data_provider as dp_mod
+from astrid.core.integrations.reigh import timeline_io as tio
+from astrid.core.integrations.reigh.errors import TimelineVersionConflictError
+from astrid.core.integrations.reigh.supabase_client import SupabaseHTTPError
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -224,9 +224,9 @@ class ListCLITest(unittest.TestCase):
             }
 
         with patch(
-            "astrid.core.reigh.supabase_client.post_json", side_effect=fake_post
-        ), patch("astrid.core.reigh.env.resolve_pat", return_value="pat-token"), patch(
-            "astrid.core.reigh.env.resolve_api_url",
+            "astrid.core.integrations.reigh.supabase_client.post_json", side_effect=fake_post
+        ), patch("astrid.core.integrations.reigh.env.resolve_pat", return_value="pat-token"), patch(
+            "astrid.core.integrations.reigh.env.resolve_api_url",
             return_value="https://x/functions/v1/reigh-data-fetch",
         ):
             rc = project_cli.main(["list", "proj-1", "--json"])
@@ -296,12 +296,12 @@ class EditCLITest(unittest.TestCase):
             return FakeCompleted(stdout=json.dumps(ops_helper_result) + "\n")
 
         with patch(
-            "astrid.core.reigh.env.resolve_supabase_url", return_value="https://x"
+            "astrid.core.integrations.reigh.env.resolve_supabase_url", return_value="https://x"
         ), patch(
-            "astrid.core.reigh.env.resolve_api_url",
+            "astrid.core.integrations.reigh.env.resolve_api_url",
             return_value="https://x/functions/v1/reigh-data-fetch",
-        ), patch("astrid.core.reigh.env.resolve_pat", return_value="pat-token"), patch(
-            "astrid.core.reigh.env.resolve_service_role_key", return_value="srv-key"
+        ), patch("astrid.core.integrations.reigh.env.resolve_pat", return_value="pat-token"), patch(
+            "astrid.core.integrations.reigh.env.resolve_service_role_key", return_value="srv-key"
         ), patch.object(dp_mod, "post_json", side_effect=fake_post_json), patch.object(
             tio, "post_json", side_effect=fake_post_json
         ), patch.object(tio, "rpc", side_effect=fake_rpc), patch.object(

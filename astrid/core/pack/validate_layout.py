@@ -102,7 +102,7 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 # M1 machinery-shim exceptions (not relocated during Plan v1.0)
 # ---------------------------------------------------------------------------
 # These files remain at ``astrid/packs/`` during M1 and will be relocated
-# to ``astrid/core/pack_machinery/`` in M2.  They are documented here so the
+# to ``astrid/core/pack/`` in M2.  They are documented here so the
 # layout contract is explicit about every known deviation.
 #
 #   astrid/packs/_canonical_entrypoint.py
@@ -158,7 +158,7 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 #       contract:    ``test_schemas_directory_absent_from_pack_tree`` in
 #                    ``tests/test_pack_layout_contract.py`` enforces
 #                    continued absence.
-#   astrid/core/pack_machinery/schemas/
+#   astrid/core/pack/schemas/
 #       status:      relocated to astrid/core/pack/schemas/ (M2 T10)
 #       contract:    ``test_schemas_relocated_to_pack`` in
 #                    ``tests/test_pack_layout_contract.py`` enforces

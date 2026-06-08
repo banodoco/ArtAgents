@@ -65,5 +65,5 @@ executor covers the basic happy path only.
 > **Note for Sprint 05 implementers**: When the `builtin.generate_audio`
 > executor and its `STAGE.md` are created, add an explicit escape-hatch
 > paragraph cross-linking to `astrid/packs/external/vibecomfy/STAGE.md` and
-> `astrid/docs/generation/` — matching the pattern in
+> `docs/generation/` — matching the pattern in
 > `astrid/packs/builtin/generate_image/STAGE.md`.

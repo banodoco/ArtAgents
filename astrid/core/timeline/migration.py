@@ -263,7 +263,7 @@ def discover_supabase_timelines(
     """
     import os as _os
 
-    from astrid.core.reigh.timeline_io import list_timelines, timeline_has_events
+    from astrid.core.integrations.reigh.timeline_io import list_timelines, timeline_has_events
 
     url = supabase_url or _os.environ.get("SUPABASE_URL", "").strip()
     key = service_role_key or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()

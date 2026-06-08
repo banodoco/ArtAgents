@@ -23,7 +23,7 @@ def test_ensure_storage_finds_existing() -> None:
     existing_volume = {"id": "vol-abc", "name": "my-volume", "size": 50}
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=existing_volume)):
-        from astrid.core.runpod.storage import ensure_storage
+        from astrid.core.integrations.runpod.storage import ensure_storage
 
         import asyncio
 
@@ -44,7 +44,7 @@ def test_ensure_storage_creates_when_missing() -> None:
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created_volume)) as create_storage:
-        from astrid.core.runpod.storage import ensure_storage
+        from astrid.core.integrations.runpod.storage import ensure_storage
 
         import asyncio
 
@@ -60,7 +60,7 @@ def test_ensure_storage_raises_without_datacenter_when_missing() -> None:
 
     try:
         with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)):
-            from astrid.core.runpod.storage import ensure_storage
+            from astrid.core.integrations.runpod.storage import ensure_storage
 
             import asyncio
 
@@ -92,7 +92,7 @@ def test_ensure_storage_idempotent() -> None:
 
     with patch("runpod_lifecycle.Pod.get_storage", get_storage), \
          patch("runpod_lifecycle.Pod.create_storage", create_storage):
-        from astrid.core.runpod.storage import ensure_storage
+        from astrid.core.integrations.runpod.storage import ensure_storage
 
         import asyncio
 
@@ -103,7 +103,7 @@ def test_ensure_storage_idempotent() -> None:
 
 def test_require_existing_storage_fails_without_creating_when_missing() -> None:
     """Storage-required executor paths report the ensure-storage command without creation."""
-    from astrid.core.runpod.storage import ENSURE_STORAGE_HINT, require_existing_storage
+    from astrid.core.integrations.runpod.storage import ENSURE_STORAGE_HINT, require_existing_storage
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
@@ -213,7 +213,7 @@ def test_list_volumes_passthrough() -> None:
 
     try:
         with patch("runpod_lifecycle.api.get_network_volumes", return_value=mock_volumes):
-            from astrid.core.runpod.storage import list_volumes
+            from astrid.core.integrations.runpod.storage import list_volumes
 
             import asyncio
 
@@ -228,7 +228,7 @@ def test_runpod_volumes_ls_requires_api_key(monkeypatch: pytest.MonkeyPatch, cap
     monkeypatch.delenv("RUNPOD_API_KEY", raising=False)
 
     with pytest.raises(AstridError) as raised:
-        pipeline._dispatch_runpod_volumes(None, ["ls"])
+        gateway._dispatch_runpod_volumes(None, ["ls"])
     assert "RUNPOD_API_KEY is not set" in raised.value.cause
 
 
@@ -241,7 +241,7 @@ def test_runpod_volumes_ls_emits_json_and_is_read_only(
 
     with patch("runpod_lifecycle.api.get_network_volumes", return_value=volumes), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
-        rc = pipeline._dispatch_runpod_volumes(None, ["ls"])
+        rc = gateway._dispatch_runpod_volumes(None, ["ls"])
 
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == volumes
@@ -257,7 +257,7 @@ def test_runpod_ensure_storage_cli_requires_datacenter_when_creation_needed(
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock()) as create_storage:
         with pytest.raises(AstridError) as raised:
-            pipeline._dispatch_runpod_ensure_storage(None, ["missing-vol"])
+            gateway._dispatch_runpod_ensure_storage(None, ["missing-vol"])
 
     assert "datacenter_id is required" in raised.value.cause
     create_storage.assert_not_called()
@@ -272,7 +272,7 @@ def test_runpod_ensure_storage_cli_supports_datacenter_id_alias(
 
     with patch("runpod_lifecycle.Pod.get_storage", AsyncMock(return_value=None)), \
          patch("runpod_lifecycle.Pod.create_storage", AsyncMock(return_value=created)):
-        rc = pipeline._dispatch_runpod_ensure_storage(None, ["new-volume", "--datacenter-id", "US-GA-1"])
+        rc = gateway._dispatch_runpod_ensure_storage(None, ["new-volume", "--datacenter-id", "US-GA-1"])
 
     assert rc == 0
     assert json.loads(capsys.readouterr().out) == created
