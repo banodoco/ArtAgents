@@ -7,6 +7,7 @@ import pytest
 
 from astrid.core.project.project import create_project
 from astrid.core.task import gate as task_gate
+from tests.conftest import seed_event as append_event
 from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import (
     ASTRID_ACTOR,
@@ -14,7 +15,6 @@ from astrid.core.task.env import (
     child_subprocess_env,
 )
 from astrid.core.task.events import (
-    append_event,
     make_for_each_expanded_event,
     make_item_completed_event,
     make_item_started_event,

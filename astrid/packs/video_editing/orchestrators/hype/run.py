@@ -19,6 +19,7 @@ guard_canonical_entrypoint('video_editing.hype')
 import os
 import sys
 
+from astrid.core.orchestrate import attested, code, orchestrator
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
     METADATA_KEY_TIMELINE_SLUG,
@@ -29,10 +30,11 @@ from astrid.core.project.run import (
 )
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
+from astrid.core.verify import json_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 # Extracted modules (M4 T62)
-from .config import (  # noqa: F401 — re-exported for facade compatibility
+from astrid.packs.video_editing.orchestrators.hype.config import (  # noqa: F401 — re-exported for facade compatibility
     STEP_ORDER,
     load_config,
     normalize_config,
@@ -41,10 +43,10 @@ from .config import (  # noqa: F401 — re-exported for facade compatibility
     parse_asset_entry,
     usage_error,
 )
-from .parser import build_parser, resolve_args  # noqa: F401 — build_parser re-exported for facade compatibility
+from astrid.packs.video_editing.orchestrators.hype.parser import build_parser, resolve_args  # noqa: F401 — build_parser re-exported for facade compatibility
 
 # Extracted module (M4 T66)
-from .project_adapter import (  # noqa: F401 — re-exported for facade compatibility
+from astrid.packs.video_editing.orchestrators.hype.project_adapter import (  # noqa: F401 — re-exported for facade compatibility
     _prepare_project_main,
     _project_hype_artifact_roots,
     _project_hype_metadata,
@@ -53,7 +55,7 @@ from .project_adapter import (  # noqa: F401 — re-exported for facade compatib
     _set_project_env,
     _system_exit_code,
 )
-from .runner import (  # noqa: F401 — re-exported for facade compatibility
+from astrid.packs.video_editing.orchestrators.hype.runner import (  # noqa: F401 — re-exported for facade compatibility
     _apply_trim_deltas_to_arrangement,
     _asset_kind_for_sentinel,
     _brief_allow_generative_visuals,
@@ -86,7 +88,7 @@ from .runner import (  # noqa: F401 — re-exported for facade compatibility
 )
 
 # Extracted modules (M4 T64)
-from .steps import (  # noqa: F401 — re-exported for facade compatibility
+from astrid.packs.video_editing.orchestrators.hype.steps import (  # noqa: F401 — re-exported for facade compatibility
     PER_BRIEF_SENTINELS,
     PER_SOURCE_SENTINELS,
     Step,
@@ -103,6 +105,54 @@ from .steps import (  # noqa: F401 — re-exported for facade compatibility
     select_steps,
     step_argv,
 )
+
+
+def _json_verdict_step(step_id: str, filename: str, verdict: str) -> object:
+    return attested(
+        step_id,
+        command=f"echo '{{\"verdict\": \"{verdict}\"}}' > {filename}",
+        instructions=(
+            f"Write a one-line JSON verdict to {filename} with a single "
+            f'"verdict" key (e.g. {{"verdict": "{verdict}"}}), then ack to finish.'
+        ),
+        ack="human",
+        produces={"verdict": (json_file(), filename)},
+    )
+
+
+def _text_verdict_step(step_id: str, filename: str, verdict: str) -> object:
+    return attested(
+        step_id,
+        command=f"echo '{verdict}' > {filename}",
+        instructions=(
+            f"Write a one-line verdict to {filename} (e.g. '{verdict}'), then ack to finish."
+        ),
+        ack="human",
+    )
+
+
+@orchestrator("video_editing.hype")
+def author_test_plan() -> list[object]:
+    return [
+        code("noop", argv=["python3", "-c", "print('ok')"]),
+        attested(
+            "review",
+            command="echo review",
+            instructions="approve to finish",
+            ack="human",
+        ),
+        _json_verdict_step("verdict", "verdict.json", "ship"),
+        _json_verdict_step("final_verdict", "final_verdict.json", "ship"),
+        _text_verdict_step("closing_verdict", "verdict.txt", "ship"),
+        _text_verdict_step("end_verdict", "end_verdict.txt", "ready"),
+        _json_verdict_step("terminal_verdict", "terminal_verdict.json", "complete"),
+        _json_verdict_step("ultimate_verdict", "ultimate_verdict.json", "done"),
+        _text_verdict_step("concluding_verdict", "concluding_verdict.txt", "done"),
+        _json_verdict_step("final_review", "final_review.json", "complete"),
+        _json_verdict_step("wrap_verdict", "wrap_verdict.json", "ship"),
+        _text_verdict_step("attested_final", "verdict.txt", "ship"),
+        _json_verdict_step("agentic_append_verdict", "agentic_append_verdict.json", "ship"),
+    ]
 
 
 # === Main entry point (kept in run.py facade) ===

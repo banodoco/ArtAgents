@@ -18,28 +18,33 @@
   "internal_directories": {
     "__pycache__": {
       "classification": "generated_ignored",
-      "notes": "CPython bytecode cache — removed from pack tree in M1 (T11); gitignore prevents regeneration."
+      "notes": "CPython bytecode cache \u2014 removed from pack tree in M1 (T11); gitignore prevents regeneration."
     },
     "_core": {
       "classification": "skill_only_shell",
-      "notes": "Visible skill-only shell (M2 classified). Contains skill/SKILL.md only — the root Astrid gateway skill. No pack.yaml, no capabilities. Coupled to astrid/skills/registry.py, astrid/skills/discovery.py, astrid/skills/harnesses/*, and astrid/skills/__init__.py. INTERNAL_PACK_DIRS excludes it from pack structure validation. M2 treats it as a permanent visible exception — not moved under _shells/.",
+      "notes": "Visible skill-only shell (M2 classified). Contains skill/SKILL.md only \u2014 the root Astrid gateway skill. No pack.yaml, no capabilities. Coupled to astrid/skills/registry.py, astrid/skills/discovery.py, astrid/skills/harnesses/*, and astrid/skills/__init__.py. INTERNAL_PACK_DIRS excludes it from pack structure validation. M2 treats it as a permanent visible exception \u2014 not moved under _shells/.",
       "has_pack_yaml": false,
-      "contents": ["skill/"]
+      "contents": [
+        "skill/"
+      ]
     }
   },
   "packs": [
     {
       "id": "builtin",
-      "variant": "manifest_only",
+      "variant": "orchestrator_pack",
       "has_pack_yaml": true,
       "executor_count": 0,
-      "orchestrator_count": 0,
+      "orchestrator_count": 1,
       "element_count": 0,
       "has_skill": false,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Hidden compatibility shell (M2 classified). visibility:hidden, status:deprecated. Declares 15+ pack-level aliases mapping legacy builtin.* capability ids to canonical homes. Contains agent_probe.py (dsl_orchestrator_shim used by 16+ regression tests, documented exception), fixtures/, and golden/. Empty executors/ and orchestrators/ directories contain only __init__.py files. Not moved under _shells/ in M2 to preserve stable pack ID and alias contract.",
-      "extra_contents": ["agent_probe.py", "fixtures/", "golden/"]
+      "notes": "Hidden compatibility shell (M2 classified). visibility:hidden, status:deprecated. Declares 15+ pack-level aliases mapping legacy builtin.* capability ids to canonical homes. Contains fixtures/ and golden/. agent_probe.py relocated to orchestrators/agent_probe/run.py in M2. Not moved under _shells/ in M2 to preserve stable pack ID and alias contract.",
+      "extra_contents": [
+        "fixtures/",
+        "golden/"
+      ]
     },
     {
       "id": "comfy_wrap",
@@ -182,8 +187,8 @@
       "element_count": 0,
       "has_skill": true,
       "has_agents_md": false,
-      "has_init_py": true,
-      "notes": "Mixed pack with 2 executors (clip_candidates, segment_map) and 1 orchestrator (distill). Has __init__.py (legacy_public_shim preserved for sub-package imports by 6 call sites — classified in M2) and skill/. Stable pack ID: stream_content. Stable capability IDs: stream_content.clip_candidates, stream_content.segment_map, stream_content.distill."
+      "has_init_py": false,
+      "notes": "Mixed pack with 2 executors (clip_candidates, segment_map) and 1 orchestrator (distill). Has skill/. Stable pack ID: stream_content. Stable capability IDs: stream_content.clip_candidates, stream_content.segment_map, stream_content.distill."
     },
     {
       "id": "text_analysis",
@@ -195,8 +200,11 @@
       "has_skill": false,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Orchestrator pack with 1 DSL orchestrator (summarize, migrated to orchestrators/summarize/run.py in M1 T13). Contains summarize.py (legacy_public_shim, classified in M2), fixtures/ (including sample.txt), and golden/. Stable pack ID: text_analysis. Stable capability ID: text_analysis.summarize.",
-      "extra_contents": ["summarize.py", "fixtures/", "golden/"]
+      "notes": "Orchestrator pack with 1 DSL orchestrator (summarize, migrated to orchestrators/summarize/run.py in M1 T13). Contains fixtures/ (including sample.txt) and golden/. Legacy summarize.py shim removed in M2. Stable pack ID: text_analysis. Stable capability ID: text_analysis.summarize.",
+      "extra_contents": [
+        "fixtures/",
+        "golden/"
+      ]
     },
     {
       "id": "training",
@@ -244,8 +252,7 @@
       "has_skill": true,
       "has_agents_md": false,
       "has_init_py": false,
-      "notes": "Orchestrator-heavy pack with 1 executor and 7 orchestrators for video editing workflows. Includes skill/ and hype.py (legacy_public_shim, M2-deferred).",
-      "extra_contents": ["hype.py"]
+      "notes": "Orchestrator-heavy pack with 1 executor and 7 orchestrators for video editing workflows. Includes skill/. Legacy hype.py shim removed in M2."
     },
     {
       "id": "youtube",
@@ -271,32 +278,40 @@
     ]
   },
   "variant_summary": {
-    "manifest_only": ["builtin"],
-    "executor_pack": ["comfy_wrap", "editorial", "fal", "generation", "iteration", "media", "moirae", "reigh", "runpod", "understanding", "vibecomfy", "youtube"],
-    "orchestrator_pack": ["text_analysis"],
-    "mixed_executor_orchestrator": ["foley", "stream_content", "training", "video_editing"],
-    "mixed_executor_element": ["rendering"],
+    "manifest_only": [],
+    "executor_pack": [
+      "comfy_wrap",
+      "editorial",
+      "fal",
+      "generation",
+      "iteration",
+      "media",
+      "moirae",
+      "reigh",
+      "runpod",
+      "understanding",
+      "vibecomfy",
+      "youtube"
+    ],
+    "orchestrator_pack": [
+      "text_analysis",
+      "builtin"
+    ],
+    "mixed_executor_orchestrator": [
+      "foley",
+      "stream_content",
+      "training",
+      "video_editing"
+    ],
+    "mixed_executor_element": [
+      "rendering"
+    ],
     "mixed_full": [],
     "total_shipped_packs": 19
   },
   "documented_exceptions": {
-    "description": "Every layout exception that keeps the pack tree from being purely canonical. All are declared in their respective pack.yaml metadata.layout.exceptions and cross-referenced here.",
-    "exceptions": [
-      {
-        "pack": "builtin",
-        "path": "agent_probe.py",
-        "class": "dsl_orchestrator_shim",
-        "defer_to": "M2 (classified)",
-        "reason": "DSL @orchestrator definition with 16+ test-file references. Not a canonical executor. Classified in M2 as a documented compatibility shell exception. Migration to orchestrators/agent_probe/ deferred to follow-up milestone."
-      },
-      {
-        "pack": "stream_content",
-        "path": "__init__.py",
-        "class": "package_marker",
-        "defer_to": "permanent",
-        "reason": "Package marker for nested modules."
-      }
-    ],
+    "description": "Every declared layout exception that keeps a pack from being purely canonical. None remain after the M2 cleanup.",
+    "exceptions": [],
     "machinery_shims": [],
     "special_directories": [
       {
@@ -308,7 +323,10 @@
     ]
   },
   "structure_constants_reference": {
-    "INTERNAL_PACK_DIRS": ["__pycache__", "schemas"],
+    "INTERNAL_PACK_DIRS": [
+      "__pycache__",
+      "schemas"
+    ],
     "source_file": "astrid/core/structure.py",
     "note": "The shared pack manifest schemas live at astrid/core/pack/schemas/v1/. The 'schemas' entry in INTERNAL_PACK_DIRS is a legacy reference to per-pack content roots only."
   }

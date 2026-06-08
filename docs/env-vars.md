@@ -67,7 +67,6 @@ These are propagated into subprocess env by `build_child_subprocess_env`.
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
 | `ASTRID_NO_NUDGE` | `ASTRID_NO_NUDGE` | User | `skills/__init__.py` | Set to `1` to suppress the skill-nudge banner. |
-| `ASTRID_ALLOW_LEGACY_APPEND_EVENT` | `ASTRID_ALLOW_LEGACY_APPEND_EVENT` | Migration tooling | `task/events.py` | Set to `1` to allow the legacy append-event API that bypasses hash chaining.  Not for production use. |
 
 ## External catalog (Banodoco)
 

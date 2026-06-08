@@ -28,8 +28,7 @@ Approved transport use:
   * Raw locked helper: this module's transport, ``WriterContext.append()``,
     and the RunPod sweeper's documented hard-mode exception.
   * In-handle helper: same-flock lease takeover/orphan recovery only.
-  * ``append_event()``: legacy test/migration compatibility only. It is
-    guarded at runtime and must not be called by production task-run code.
+  * Test event seeding: use ``seed_event()`` from ``tests/conftest.py``.
 """
 
 from __future__ import annotations
@@ -50,7 +49,6 @@ ZERO_HASH = "sha256:" + "0" * 64
 
 LEASE_FILENAME = "lease.json"
 EVENTS_FILENAME = "events.jsonl"
-LEGACY_APPEND_EVENT_ALLOW_ENV = "ASTRID_ALLOW_LEGACY_APPEND_EVENT"
 
 _TAIL_SEEK_INITIAL_WINDOW = 4096
 
@@ -221,63 +219,6 @@ def append_event_to_locked_handle(
     handle.flush()
     os.fsync(handle.fileno())
     return stored
-
-
-def append_event(path: str | Path, event: dict[str, Any]) -> dict[str, Any]:
-    """Legacy test/migration wrapper. Production code MUST use WriterContext.
-
-    Reads the current ``(writer_epoch, tail_hash)`` from disk and calls
-    :func:`append_event_locked` once. Raises :class:`StaleTailError` /
-    :class:`StaleEpochError` / :class:`NotWriterError` with no retry.
-    """
-
-    if not _legacy_append_event_allowed():
-        raise EventLogError(
-            "append_event() is a legacy test/migration helper. "
-            "Production task-run writes must use WriterContext.append(); "
-            "test/migration callers must run under pytest or set "
-            f"{LEGACY_APPEND_EVENT_ALLOW_ENV}=1."
-        )
-
-    events_path = Path(path)
-    run_dir = events_path.parent
-    lease_path = run_dir / LEASE_FILENAME
-    # Read tail without taking the lock — append_event_locked re-reads under
-    # the lock and CAS-checks. This pre-read just supplies an "expected"
-    # value so the contract shape matches the locked helper.
-    pre_tail = _peek_tail_hash(events_path)
-    try:
-        pre_epoch = _read_lease_epoch(lease_path)
-    except EventLogError as exc:
-        if _legacy_append_event_pytest_seed_without_lease(exc):
-            pre_epoch = None
-        else:
-            raise
-    return append_event_locked(
-        run_dir,
-        event,
-        expected_writer_epoch=pre_epoch,
-        expected_prev_hash=pre_tail,
-    )
-
-
-def _legacy_append_event_allowed() -> bool:
-    if os.environ.get(LEGACY_APPEND_EVENT_ALLOW_ENV) == "1":
-        return True
-    return "PYTEST_CURRENT_TEST" in os.environ
-
-
-def _legacy_append_event_pytest_seed_without_lease(exc: EventLogError) -> bool:
-    """Keep old unit-test event seeding working without weakening production.
-
-    The environment override is reserved for deliberate migration/debug use and
-    remains strict. Only pytest's implicit allow path can bypass a missing
-    lease, and only for missing lease state; malformed leases still fail.
-    """
-
-    if os.environ.get(LEGACY_APPEND_EVENT_ALLOW_ENV) == "1":
-        return False
-    return "PYTEST_CURRENT_TEST" in os.environ and "missing lease" in str(exc)
 
 
 def verify_chain(path: str | Path) -> tuple[bool, int, str | None]:
@@ -894,8 +835,9 @@ def _read_tail_hash(handle) -> str:
 def _peek_tail_hash(events_path: Path) -> str:
     """Best-effort read of the tail hash without acquiring the flock.
 
-    Only the legacy :func:`append_event` wrapper uses this; the real CAS
-    happens inside :func:`append_event_locked` under the lock.
+    Used by :class:`WriterContext` to sniff the expected tail before
+    entering the lock. The real CAS happens inside
+    :func:`append_event_locked` under the lock.
     """
 
     if not events_path.exists():
@@ -954,7 +896,6 @@ __all__ = [
     "StaleEpochError",
     "StaleTailError",
     "ZERO_HASH",
-    "append_event",
     "append_event_locked",
     "canonical_event_json",
     "make_cursor_rewind_event",

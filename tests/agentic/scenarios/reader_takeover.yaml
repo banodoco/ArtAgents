@@ -72,8 +72,7 @@ assessment:
   - id: invoked_via_canonical_cli
     question: |
       Did the agent operate exclusively via the astrid CLI
-      (attach/next/ack/takeover) rather than `python -m
-      astrid.packs.builtin.agent_probe.run` or direct imports?
+      (attach/next/ack/takeover) rather than direct module imports?
     evidence: [stderr]
     grading: pass_fail
     weight: 2

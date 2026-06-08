@@ -22,6 +22,8 @@ from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID
 from astrid.core.task.plan import compute_plan_hash
 from astrid.packs.video_editing.orchestrators.hype import run as hype_run
 
+pipeline = gateway
+
 
 def test_pipeline_dispatch_calls_top_gate_and_executor_reentry(
     tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch

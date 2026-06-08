@@ -39,7 +39,6 @@ _PRESERVED_HELPER_PACKAGE_MARKERS = (
     "astrid/packs/editorial/executors/refine/src/reviewers/__init__.py",
 )
 _REMOVED_MARKER_IMPORT_PATHS = (
-    "astrid.packs.builtin.agent_probe",
     "astrid.packs.iteration.executors.prepare.run",
     "astrid.packs.media.executors.clip_extract.run",
 )

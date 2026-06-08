@@ -114,10 +114,6 @@ ASTRID_NO_NUDGE = "ASTRID_NO_NUDGE"
 """Set to ``1`` to suppress the skill-nudge banner that ``astrid`` prints when
 a new skill is available. Read by skills/__init__.py."""
 
-ASTRID_ALLOW_LEGACY_APPEND_EVENT = "ASTRID_ALLOW_LEGACY_APPEND_EVENT"
-"""Set to ``1`` to allow the legacy append-event API path that bypasses hash
-chaining. Read by task/events.py; should only be set during migration."""
-
 # ---------------------------------------------------------------------------
 # External catalog (Banodoco)
 # ---------------------------------------------------------------------------
@@ -182,7 +178,6 @@ def get_author_test_env() -> str | None:
 __all__ = [
     "ASTRID_ACTOR",
     "ASTRID_AGENT_VERSION",
-    "ASTRID_ALLOW_LEGACY_APPEND_EVENT",
     "ASTRID_AUDIT_DISABLED",
     "ASTRID_AUDIT_RUN_DIR",
     "ASTRID_AUTHOR_TEST",

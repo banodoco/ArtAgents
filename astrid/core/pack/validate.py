@@ -65,6 +65,24 @@ _SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
 
+_PACK_TAXONOMY_ENUMS: dict[str, tuple[str, ...]] = {
+    "origin": ("unknown", "builtin", "external"),
+    "install_tier": ("default", "core", "optional"),
+    "pack_type": ("capability", "adapter"),
+    "domain": (
+        "general",
+        "development",
+        "editorial",
+        "generation",
+        "infrastructure",
+        "integration",
+        "media",
+        "system",
+    ),
+    "stability": ("stable", "experimental", "deprecated"),
+    "support": ("project", "core", "community"),
+}
+
 KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
     1: {
         "pack": _SCHEMAS_ROOT / "v1" / "pack.json",
@@ -248,6 +266,8 @@ class PackValidator:
         )
         if version is None:
             return self.errors  # schema_version error already recorded
+
+        self._validate_pack_taxonomy()
 
         # Validate content roots exist
         content = pack_data.get("content", {})
@@ -450,6 +470,20 @@ class PackValidator:
                     self.warnings.append(
                         f"{self._rel(root_path)}/: declared content root does not exist"
                     )
+
+    def _validate_pack_taxonomy(self) -> None:
+        if self._pack_data is None:
+            return
+        for field, allowed in _PACK_TAXONOMY_ENUMS.items():
+            value = self._pack_data.get(field)
+            if value is None or value == "":
+                continue
+            if not isinstance(value, str):
+                continue
+            if value not in allowed:
+                self.errors.append(
+                    f"pack.yaml: {field} must be one of {list(allowed)}, got {value!r}"
+                )
 
     def _validate_docs(self, docs: dict[str, Any]) -> None:
         """Verify that declared doc files exist."""

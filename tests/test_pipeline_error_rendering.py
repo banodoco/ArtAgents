@@ -15,6 +15,8 @@ from astrid.core.session.binding import SessionBindingError
 from astrid.core.task.gate_base import TaskRunGateError
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
+pipeline = gateway
+
 
 def _capture(argv: list[str]) -> tuple[int, str]:
     stderr = io.StringIO()

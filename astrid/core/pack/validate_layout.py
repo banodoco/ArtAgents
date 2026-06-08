@@ -17,11 +17,9 @@ class LayoutExceptionClass(str, Enum):
     """Named exceptions the pack layout contract allows temporarily or permanently."""
 
     IMPORTABLE_COMPONENT_CODE = "importable_component_code"
-    LEGACY_PUBLIC_SHIM = "legacy_public_shim"
     DOMAIN_EXCEPTION = "domain_exception"
     GENERATED_IGNORED = "generated_ignored"
     SKILL_ONLY_SHELL = "skill_only_shell"
-    DSL_ORCHESTRATOR_SHIM = "dsl_orchestrator_shim"
 
 
 class LayoutExceptionLifecycle(str, Enum):
@@ -32,10 +30,9 @@ class LayoutExceptionLifecycle(str, Enum):
     PERMANENT = "permanent"
 
 
-_TEMPORARY_LAYOUT_EXCEPTION_CLASSES = {
-    LayoutExceptionClass.LEGACY_PUBLIC_SHIM,
-    LayoutExceptionClass.DSL_ORCHESTRATOR_SHIM,
-}
+# LEGACY_PUBLIC_SHIM and DSL_ORCHESTRATOR_SHIM were removed in M2
+# after all deferred shims were either deleted or migrated to canonical layout.
+_TEMPORARY_LAYOUT_EXCEPTION_CLASSES: set[LayoutExceptionClass] = set()
 
 _LAYOUT_EXCEPTION_DECLARATION_PATH = "metadata.layout.exceptions"
 _CANONICAL_PACK_ROOT_DIRS = {
@@ -97,29 +94,26 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 
 
 # ---------------------------------------------------------------------------
-# M1 root pack Python shim exceptions (classified in pack metadata)
+# M2-completed: legacy shim exceptions removed
 # ---------------------------------------------------------------------------
-# These shims live at the root of their respective pack directories and are
-# kept in place for M1; each is declared as a layout exception in the pack's
-# ``pack.yaml`` under ``metadata.layout.exceptions`` (see T12).
+# These shims were either deleted or migrated to canonical layout in M2:
 #
 #   builtin/agent_probe.py
-#       class:       dsl_orchestrator_shim
-#       defer_to:    M2 (declared in builtin/pack.yaml)
-#       reason:      DSL @orchestrator("builtin.agent_probe") definition with
-#                    16+ test-file references.  Not a canonical executor.
-#                    Migration to orchestrators/ deferred to M2.
+#       status:      migrated to orchestrators/agent_probe/run.py (M2)
 #
 #   video_editing/hype.py
-#       class:       legacy_public_shim
-#       defer_to:    M2 (declared in video_editing/pack.yaml)
-#       reason:      Legacy author-test DSL shim that duplicates
-#                    video_editing.hype (canonically at
-#                    orchestrators/hype/run.py).  Kept for backward
-#                    compatibility until M2 removes it.
+#       status:      deleted (M2) — canonical duplicate at
+#                    orchestrators/hype/run.py
+#
+#   text_analysis/summarize.py
+#       status:      deleted (M2) — re-export shim; canonical at
+#                    orchestrators/summarize/run.py
+#
+#   stream_content/__init__.py
+#       status:      deleted (M2) — now a namespace package
 #
 # ---------------------------------------------------------------------------
-# M1 special non-manifest directories (classified in this contract)
+# Special non-manifest directories (classified in this contract)
 # ---------------------------------------------------------------------------
 # These directories under ``astrid/packs/`` are not regular packs (they
 # lack a ``pack.yaml``) but serve documented roles.  They are listed here
@@ -135,7 +129,7 @@ CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
 #                    ``astrid.core.pack.discover_packs``.
 #
 # ---------------------------------------------------------------------------
-# M1 relocated / removed directories (validated by contract tests)
+# Relocated / removed directories (validated by contract tests)
 # ---------------------------------------------------------------------------
 #   astrid/packs/schemas/
 #       status:      relocated to astrid/core/pack/schemas/ (M2 T10)

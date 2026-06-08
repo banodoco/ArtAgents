@@ -84,10 +84,4 @@ aliases:
   canonical_id: video_editing.vary_grid
   deprecated: true
   deprecation_message: Moved to video_editing.vary_grid
-metadata:
-  layout:
-    exceptions:
-      - path: hype.py
-        class: legacy_public_shim
-        reason: "Legacy author-test DSL shim duplicating video_editing.hype (canonical at orchestrators/hype/run.py); removal deferred to M2."
-        defer_to: M2
+metadata: {}

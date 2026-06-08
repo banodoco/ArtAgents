@@ -17,8 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from tests.helpers.current_run import read_seeded_current_run
+from tests.conftest import seed_event
 from astrid.core.task.events import (
-    append_event,
     make_produces_check_failed_event,
     make_step_attested_event,
 )
@@ -79,8 +79,8 @@ def test_stop_line_reader_retry_ack_does_not_mutate_events(tmp_path: Path) -> No
     os.environ["ASTRID_ACTOR"] = "alice"
     run_dir = projects / "p" / "runs" / "rsr"
     events_path = run_dir / "events.jsonl"
-    append_event(events_path, make_step_attested_event("review", "human", "alice", ()))
-    append_event(
+    seed_event(events_path, make_step_attested_event("review", "human", "alice", ()))
+    seed_event(
         events_path,
         make_produces_check_failed_event(
             ("review",), "out", check_id="json_file:v1", reason="missing"
@@ -205,8 +205,8 @@ def test_h_retry_after_produces_check_failed_appends_cursor_rewind(tmp_path: Pat
     )
     os.environ["ASTRID_ACTOR"] = "alice"
     events_path = projects / "p" / "runs" / "rh" / "events.jsonl"
-    append_event(events_path, make_step_attested_event("review", "human", "alice", ()))
-    append_event(
+    seed_event(events_path, make_step_attested_event("review", "human", "alice", ()))
+    seed_event(
         events_path,
         make_produces_check_failed_event(("review",), "out", check_id="json_file:v1", reason="missing"),
     )

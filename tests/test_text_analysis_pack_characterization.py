@@ -23,14 +23,3 @@ def test_text_analysis_summarize_resolves_to_canonical_runtime_module() -> None:
 
     assert callable(module.main)
     assert getattr(module.summarize, "plan_id", None) == "text_analysis.summarize"
-
-
-def test_text_analysis_legacy_shim_reexports_canonical_symbols() -> None:
-    with canonical_runtime_entrypoint("text_analysis.summarize"):
-        legacy = importlib.import_module("astrid.packs.text_analysis.summarize")
-        canonical = importlib.import_module(
-            "astrid.packs.text_analysis.orchestrators.summarize.run"
-        )
-
-    assert legacy.main is canonical.main
-    assert legacy.summarize is canonical.summarize

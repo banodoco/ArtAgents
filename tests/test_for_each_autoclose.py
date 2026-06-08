@@ -24,8 +24,8 @@ import pytest
 
 from astrid.core.task import gate
 from astrid.core.task import gate_repeat
+from tests.conftest import seed_event
 from astrid.core.task.events import (
-    append_event,
     make_item_skipped_event,
     make_produces_check_passed_event,
     read_events,

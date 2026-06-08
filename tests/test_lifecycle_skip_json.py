@@ -488,9 +488,9 @@ def test_skip_recoverable_exhausted_run_returns_exit_2(tmp_path: Path) -> None:
         },
     )
     # Append a step_skipped event to advance cursor past the only step.
-    from astrid.core.task.events import append_event
+    from tests.conftest import seed_event
     events_path = run_dir / "events.jsonl"
-    append_event(
+    seed_event(
         events_path,
         make_step_skipped_event("s1", actor_kind="agent", actor_id="cli"),
     )

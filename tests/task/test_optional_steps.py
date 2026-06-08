@@ -411,14 +411,14 @@ def test_repeat_until_body_skip_ends_loop_cleanly(tmp_projects_root: Path) -> No
     )
     # Synthesize an iteration_started event then a step_skipped on the body.
     # The body's path tuple == host's path tuple (single-step iteration body).
+    from tests.conftest import seed_event
     from astrid.core.task.events import (
-        append_event,
         make_iteration_started_event,
     )
 
     events_path = run_dir / "events.jsonl"
-    append_event(events_path, make_iteration_started_event(("iter",), 1))
-    append_event(
+    seed_event(events_path, make_iteration_started_event(("iter",), 1))
+    seed_event(
         events_path,
         make_step_skipped_event(
             "iter", actor_kind="agent", actor_id="cli", reason="test"
@@ -458,8 +458,9 @@ def test_events_verify_strict_rejects_skip_of_non_optional(
         },
     )
     # Synthesize an illegal step_skipped event on s1 (which is not optional).
-    from astrid.core.task.events import append_event
-    append_event(
+    from tests.conftest import seed_event
+
+    seed_event(
         run_dir / "events.jsonl",
         make_step_skipped_event(
             "s1", actor_kind="agent", actor_id="cli", reason="illegal"
@@ -492,8 +493,9 @@ def test_events_verify_strict_accepts_skip_of_optional(
             ],
         },
     )
-    from astrid.core.task.events import append_event
-    append_event(
+    from tests.conftest import seed_event
+
+    seed_event(
         run_dir / "events.jsonl",
         make_step_skipped_event(
             "s1", actor_kind="agent", actor_id="cli", reason="ok"

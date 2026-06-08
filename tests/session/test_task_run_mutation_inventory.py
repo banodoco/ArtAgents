@@ -58,10 +58,6 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "WriterContext.append",
         "append_event_locked",
     ): (1, "normal_writer_context_boundary"),
-    CallSite("astrid/core/task/events.py", "append_event", "append_event_locked"): (
-        1,
-        "guarded_legacy_test_migration_wrapper",
-    ),
     CallSite(
         "astrid/core/session/lease.py",
         "bump_epoch_and_swap_session",
@@ -159,11 +155,6 @@ APPROVED_PRODUCTION_APPEND_EVENT_LOCKED_CALLS: dict[CallSite, str] = {
         "WriterContext.append",
         "append_event_locked",
     ): "normal_writer_context_boundary",
-    CallSite(
-        "astrid/core/task/events.py",
-        "append_event",
-        "append_event_locked",
-    ): "guarded_legacy_test_migration_wrapper",
     CallSite(
         "astrid/core/integrations/runpod/sweeper.py",
         "append_runpod_sweeper_event",

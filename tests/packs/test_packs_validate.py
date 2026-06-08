@@ -1295,7 +1295,7 @@ class TestPackValidatorClass(MinimalPackTestCase):
 class TestLayoutContractExceptions(MinimalPackTestCase):
     """Declared layout exceptions are parsed and surfaced as one aggregate failure."""
 
-    def test_temporary_layout_exception_with_lifecycle_passes(self) -> None:
+    def test_permanent_layout_exception_with_lifecycle_passes(self) -> None:
         root = self.make_pack_root()
         self.write_valid_pack(root)
         _write(root / "legacy.py", "# legacy shim\n")
@@ -1314,9 +1314,9 @@ metadata:
   layout:
     exceptions:
       - path: legacy.py
-        class: legacy_public_shim
-        reason: Preserves legacy import path until M2.
-        defer_to: M2
+        class: domain_exception
+        reason: Preserves legacy import path.
+        defer_to: permanent
 """,
         )
         errors, _warnings = validate_pack(root)
@@ -1342,8 +1342,8 @@ metadata:
   layout:
     exceptions:
       - path: legacy.py
-        class: legacy_public_shim
-        reason: Temporary shim without lifecycle.
+        class: invalid_class
+        reason: Unknown exception class.
       - path: executors/test_exec/run.py
         class: domain_exception
         reason: This path is already canonical.
@@ -1353,7 +1353,7 @@ metadata:
         self.assertGreaterEqual(len(errors), 3, errors)
         self.assertEqual(errors[0], "pack layout contract failed (2 issues)")
         self.assertTrue(
-            any("legacy.py" in error and "defer_to is required" in error for error in errors[1:]),
+            any("legacy.py" in error and "class must be one of" in error for error in errors[1:]),
             errors,
         )
         self.assertTrue(

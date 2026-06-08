@@ -32,6 +32,7 @@ from astrid.core.session.lease import release_writer_lease, write_lease_init
 from astrid.core.task.lifecycle import cmd_next, cmd_status
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.timeline.crud import create_timeline
+from tests.conftest import seed_event
 from tests.helpers.cli_runner import run_cli
 
 # ----  operator_view.py : cmd_status  -----------------------------------
@@ -101,14 +102,13 @@ def test_status_diagnostics_go_to_stderr_not_stdout(tmp_path: Path) -> None:
     """Default cmd_status routes produces-check failures to stderr."""
     packs, projects = setup_run(tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="r3")
     from astrid.core.task.events import (
-        append_event,
         make_step_dispatched_event,
     )
     events_path = projects / "p" / "runs" / "r3" / "events.jsonl"
-    append_event(events_path, make_step_dispatched_event("step_a", "echo alpha"))
+    seed_event(events_path, make_step_dispatched_event("step_a", "echo alpha"))
     # _inline_failure_tail requires: last in {cursor_rewind, iteration_failed},
     # prior = produces_check_failed
-    append_event(
+    seed_event(
         events_path,
         {
             "kind": "produces_check_failed",
@@ -118,7 +118,7 @@ def test_status_diagnostics_go_to_stderr_not_stdout(tmp_path: Path) -> None:
             "ts": "2026-01-01T00:00:00Z",
         },
     )
-    append_event(
+    seed_event(
         events_path,
         {
             "kind": "iteration_failed",
@@ -241,9 +241,9 @@ def test_next_reader_takeover_hints_on_stdout(tmp_path: Path) -> None:
     # To trigger reader state, we need a writer session different from the caller.
     # We simulate this by creating a lease held by a different session.
     run_dir = projects / "p" / "runs" / "r11"
-    from astrid.core.task.events import append_event, make_step_dispatched_event
+    from astrid.core.task.events import make_step_dispatched_event
     events_path = run_dir / "events.jsonl"
-    append_event(events_path, make_step_dispatched_event("step_a", "echo alpha"))
+    seed_event(events_path, make_step_dispatched_event("step_a", "echo alpha"))
     write_lease_init(run_dir, session_id="S-OTHER", plan_hash="abc")
     from tests._lifecycle_fixtures import bind_writer_session
     bind_writer_session(projects, "p", run_id="r11", sid="S-READER")

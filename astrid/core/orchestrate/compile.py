@@ -1,8 +1,10 @@
 """Module loader and JSON compiler for the orchestrate DSL (Phase 4).
 
-`resolve_orchestrator(qid)` imports `<packs_root>/<pack>/<name>.py` via
-`importlib.util.spec_from_file_location` (without polluting sys.modules across
-test fixtures) and returns the module-level ``_PlanBuilder``.
+`resolve_orchestrator(qid)` imports the canonical
+`<packs_root>/<pack>/orchestrators/<name>/run.py` module, with
+`<packs_root>/<pack>/<name>.py` retained for author-scaffolded source files,
+via `importlib.util.spec_from_file_location` (without polluting sys.modules
+across test fixtures) and returns the module-level ``_PlanBuilder``.
 
 `compile_to_path(qid)` resolves, calls ``_PlanBuilder.to_dict()`` (which
 round-trips through ``astrid.core.task.plan.load_plan``), and writes the
@@ -19,12 +21,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
 import uuid
 from pathlib import Path
 from typing import Optional
 
 from astrid.core.pack import DEFAULT_PACKS_ROOT
+from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 
 from .dsl import OrchestrateDefinitionError, _PlanBuilder
 
@@ -50,9 +54,8 @@ def _qualified_split(qualified_id: str) -> tuple[str, str]:
 def _candidate_module_paths(root: Path, pack: str, name: str) -> tuple[Path, ...]:
     pack_root = root / pack
     candidates = [
-        pack_root / f"{name}.py",
         pack_root / "orchestrators" / name / "run.py",
-        pack_root / "_legacy" / f"{name}.py",
+        pack_root / f"{name}.py",
     ]
     return tuple(candidates)
 
@@ -66,6 +69,8 @@ def _load_module_isolated(module_path: Path, qualified_id: str):
         )
     module = importlib.util.module_from_spec(spec)
     sys.modules[unique] = module
+    previous_internal = os.environ.get(ASTRID_INTERNAL_INVOCATION)
+    os.environ[ASTRID_INTERNAL_INVOCATION] = "1"
     try:
         spec.loader.exec_module(module)
     except Exception as exc:
@@ -74,6 +79,10 @@ def _load_module_isolated(module_path: Path, qualified_id: str):
             f"failed to import orchestrator module {module_path}: {exc}"
         ) from exc
     finally:
+        if previous_internal is None:
+            os.environ.pop(ASTRID_INTERNAL_INVOCATION, None)
+        else:
+            os.environ[ASTRID_INTERNAL_INVOCATION] = previous_internal
         sys.modules.pop(unique, None)
     return module
 

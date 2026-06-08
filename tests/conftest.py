@@ -370,3 +370,43 @@ def tmp_projects_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         TASK_ITERATION_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
+
+
+# Test-only event seeding helper.
+# Replaces the removed astrid.core.task.events.append_event() legacy wrapper.
+# Usage: seed_event(events_path, event_dict) -> stored_event_dict
+
+def seed_event(events_path, event):
+    """Test-only: append an event via append_event_locked with auto-read epoch/tail.
+
+    Reads ``lease.json`` from the parent directory for ``writer_epoch`` and
+    re-reads the tail hash from ``events.jsonl``, then calls
+    ``append_event_locked``.  This is the test-only replacement for the
+    removed ``append_event()`` legacy wrapper.
+    """
+    import json
+    from pathlib import Path
+
+    from astrid.core.task.events import ZERO_HASH, append_event_locked, read_events
+
+    events_path = Path(events_path)
+    run_dir = events_path.parent
+    lease_path = run_dir / "lease.json"
+
+    # epoch
+    try:
+        lease_data = json.loads(lease_path.read_text(encoding="utf-8"))
+        expected_writer_epoch = lease_data["writer_epoch"]
+    except Exception:
+        expected_writer_epoch = None
+
+    # prev hash
+    existing = read_events(events_path)
+    expected_prev_hash = existing[-1]["hash"] if existing else ZERO_HASH
+
+    return append_event_locked(
+        run_dir,
+        event,
+        expected_writer_epoch=expected_writer_epoch,
+        expected_prev_hash=expected_prev_hash,
+    )

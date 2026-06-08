@@ -19,7 +19,6 @@ from .env import (
 )
 from .event_stream import EventStreamRecord, read_event_stream, subscribe_event_stream
 from .events import (
-    append_event,
     canonical_event_json,
     make_cursor_rewind_event,
     make_iteration_failed_event,
@@ -76,7 +75,6 @@ __all__ = [
     "InboxEntry",
     "PeekResult",
     "TaskRunGateError",
-    "append_event",
     "apply_task_run_env",
     "canonical_event_json",
     "child_subprocess_env",

@@ -43,8 +43,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.task import lifecycle
+from tests.conftest import seed_event
 from astrid.core.task.events import (
-    append_event,
     make_cursor_rewind_event,
     make_for_each_expanded_event,
     make_item_attested_event,
@@ -92,13 +92,13 @@ def test_a_rewind_with_reason_echoes_produces_check_failed(tmp_path: Path) -> No
     )
     events_path = projects / "p" / "runs" / "ra" / "events.jsonl"
     rejection_reason = "required key 'why' missing"
-    append_event(
+    seed_event(
         events_path,
         make_produces_check_failed_event(
             ("review",), "out", check_id="json_file:v1", reason=rejection_reason,
         ),
     )
-    append_event(
+    seed_event(
         events_path,
         make_cursor_rewind_event(("review",), reason="produces_check_failed"),
     )
@@ -125,9 +125,9 @@ def test_b_host_close_hint_when_items_complete_without_host_attested(
         tmp_path, "demo", "fe", _BODY_FE, "demo.fe", run_id="rb",
     )
     events_path = projects / "p" / "runs" / "rb" / "events.jsonl"
-    append_event(events_path, make_for_each_expanded_event(("review_each",), ("a", "b", "c")))
+    seed_event(events_path, make_for_each_expanded_event(("review_each",), ("a", "b", "c")))
     for item in ("a", "b", "c"):
-        append_event(
+        seed_event(
             events_path,
             make_item_attested_event(
                 ("review_each",), item, attestor_kind="human", attestor_id="alice",
@@ -158,7 +158,7 @@ def test_c_run_complete_emits_run_completed_exactly_once(tmp_path: Path) -> None
         tmp_path, "demo", "code", _BODY_CODE, "demo.code", run_id="rc",
     )
     events_path = projects / "p" / "runs" / "rc" / "events.jsonl"
-    append_event(events_path, make_step_completed_event("step_a", returncode=0))
+    seed_event(events_path, make_step_completed_event("step_a", returncode=0))
 
     rc1, out1, _ = _capture(projects)
     assert rc1 == 0
@@ -200,8 +200,8 @@ def test_c2_real_world_event_order_after_attested(tmp_path: Path) -> None:
     )
     events_path = projects / "p" / "runs" / "rc2" / "events.jsonl"
     # Real-world event order from _dispatch_attested + _run_inline_checks:
-    append_event(events_path, make_step_attested_event("review", "human", "tester", evidence=()))
-    append_event(
+    seed_event(events_path, make_step_attested_event("review", "human", "tester", evidence=()))
+    seed_event(
         events_path,
         make_produces_check_passed_event(
             ("review",), "out", check_id="json_file", cas_sha256=None,
@@ -232,10 +232,10 @@ def test_d_exhausted_but_incomplete_state_derived_message(tmp_path: Path) -> Non
     )
     events_path = projects / "p" / "runs" / "rd" / "events.jsonl"
     # step_completed advances the cursor → peek.exhausted=True.
-    append_event(events_path, make_step_completed_event("step_a", returncode=0))
+    seed_event(events_path, make_step_completed_event("step_a", returncode=0))
     # …then a later step_dispatched flips the latest-kind for the leaf back
     # to a non-terminal value so _run_is_complete returns False.
-    append_event(
+    seed_event(
         events_path,
         make_step_dispatched_event("step_a", command="echo x", adapter="local"),
     )
@@ -267,13 +267,13 @@ def test_negative_neutralize_dispatch_from_tail_reverts_to_legacy(
         tmp_path, "demo", "with_produces", _BODY_PRODUCES, "demo.with_produces", run_id="rn",
     )
     events_path = projects / "p" / "runs" / "rn" / "events.jsonl"
-    append_event(
+    seed_event(
         events_path,
         make_produces_check_failed_event(
             ("review",), "out", check_id="json_file:v1", reason="rejected",
         ),
     )
-    append_event(
+    seed_event(
         events_path,
         make_cursor_rewind_event(("review",), reason="produces_check_failed"),
     )

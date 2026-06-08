@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -192,6 +193,12 @@ class TimelineAllSurfaceTest(unittest.TestCase):
             # __future__ import side-effect:
             "annotations",
         }
+        allowed_extra.update(
+            name
+            for name, value in vars(t).items()
+            if isinstance(value, types.ModuleType)
+            and value.__name__.startswith(f"{t.__name__}.")
+        )
         extra = public - set(self.GOLDEN_ALL) - allowed_extra
         self.assertEqual(
             extra,

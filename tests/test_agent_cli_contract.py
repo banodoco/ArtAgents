@@ -38,6 +38,8 @@ from astrid.core.timeline.crud import create_timeline  # noqa: E402
 from tests.helpers.current_run import seed_current_run  # noqa: E402
 from tests.helpers.cli_runner import run_cli  # noqa: E402
 
+pipeline = gateway
+
 _CODE_BODY = """from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]

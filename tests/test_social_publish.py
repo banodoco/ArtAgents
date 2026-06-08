@@ -14,6 +14,8 @@ from astrid.core import gateway
 from astrid.packs.youtube.executors.upload.src import social_publish  # noqa: E402
 from astrid.packs.youtube.executors.upload import run as publish_youtube  # noqa: E402
 
+pipeline = gateway
+
 
 def test_publish_youtube_video_forwards_metadata(monkeypatch):
     captured = {}

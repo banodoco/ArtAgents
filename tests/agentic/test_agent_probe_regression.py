@@ -62,8 +62,8 @@ from astrid.core.timeline.crud import create_timeline  # noqa: E402
 
 from astrid.core.task import gate as _gate_mod
 from astrid.core.task import lifecycle as _lifecycle_mod
+from tests.conftest import seed_event as append_event
 from astrid.core.task.events import (
-    append_event,
     make_produces_check_passed_event,
     read_events,
 )

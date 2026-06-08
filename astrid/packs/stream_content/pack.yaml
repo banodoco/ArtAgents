@@ -25,10 +25,4 @@ agent:
 content:
   executors: executors
   orchestrators: orchestrators
-metadata:
-  layout:
-    exceptions:
-      - path: __init__.py
-        class: legacy_public_shim
-        reason: "Preserved helper-package marker required for sub-package imports (astrid.packs.stream_content.executors.* and .orchestrators.* are imported by 6 call sites including tests and sibling run.py files)."
-        defer_to: M2
+metadata: {}

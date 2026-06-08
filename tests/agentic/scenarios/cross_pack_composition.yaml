@@ -61,8 +61,7 @@ assessment:
   - id: invoked_via_canonical_cli
     question: |
       Did the agent invoke hype via `astrid orchestrators run
-      video_editing.hype` rather than `python -m astrid.packs.video_editing.hype`
-      or a direct import?
+      video_editing.hype` rather than bypassing the Astrid gateway?
     evidence: [stderr]
     grading: pass_fail
     weight: 2

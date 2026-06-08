@@ -31,8 +31,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
+from tests.conftest import seed_event as append_event
 from astrid.core.task.events import (
-    append_event,
     make_produces_check_failed_event,
     make_step_dispatched_event,
     read_events,

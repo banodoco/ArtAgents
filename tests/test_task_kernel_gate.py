@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from astrid.core.project.project import create_project
+from tests.conftest import seed_event as append_event
 from tests.helpers.current_run import seed_current_run
 from astrid.core.task.events import (
-    append_event,
     make_run_started_event,
     make_step_completed_event,
     make_step_dispatched_event,

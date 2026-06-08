@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import seed_event as append_event
 from tests.helpers.current_run import seed_current_run
 from astrid.core.task.env import (
     TASK_ITEM_ID_ENV,
@@ -26,7 +27,6 @@ from astrid.core.task.env import (
     TASK_STEP_ID_ENV,
 )
 from astrid.core.task.events import (
-    append_event,
     make_iteration_failed_event,
     make_iteration_started_event,
     make_run_started_event,

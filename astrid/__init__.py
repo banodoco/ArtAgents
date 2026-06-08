@@ -39,6 +39,8 @@ __all__ = _SDK_EXPORTS
 
 
 def __getattr__(name: str):
+    if name == "audit":
+        return importlib.import_module(".core.audit", __name__)
     if name not in _SDK_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     module = importlib.import_module(".sdk", __name__)
@@ -46,4 +48,4 @@ def __getattr__(name: str):
 
 
 def __dir__() -> list[str]:
-    return sorted(set(globals()) | set(_SDK_EXPORTS))
+    return sorted(set(globals()) | set(_SDK_EXPORTS) | {"audit"})

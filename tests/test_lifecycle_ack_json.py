@@ -19,8 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
+from tests.conftest import seed_event  # noqa: E402
 from astrid.core.task.events import (  # noqa: E402
-    append_event,
     make_produces_check_failed_event,
     make_step_attested_event,
 )
@@ -109,8 +109,8 @@ def test_ack_json_retry_emits_shared_lifecycle_fields(tmp_path: Path) -> None:
     )
     os.environ["ASTRID_ACTOR"] = "alice"
     events_path = projects / "p" / "runs" / "r_retry" / "events.jsonl"
-    append_event(events_path, make_step_attested_event("review", "human", "alice", ()))
-    append_event(
+    seed_event(events_path, make_step_attested_event("review", "human", "alice", ()))
+    seed_event(
         events_path,
         make_produces_check_failed_event(
             ("review",), "out", check_id="json_file:v1", reason="missing"

@@ -8,8 +8,6 @@ import pytest
 from astrid.core.task.events import (
     EventLogError,
     ZERO_HASH,
-    LEGACY_APPEND_EVENT_ALLOW_ENV,
-    append_event,
     append_event_locked,
     canonical_event_json,
     make_run_started_event,
@@ -90,11 +88,3 @@ def test_canonical_event_json_is_key_order_stable() -> None:
 
     assert canonical_event_json(left) == canonical_event_json(right)
     assert "hash" not in canonical_event_json(left)
-
-
-def test_legacy_append_event_wrapper_is_guarded(monkeypatch) -> None:
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
-    monkeypatch.delenv(LEGACY_APPEND_EVENT_ALLOW_ENV, raising=False)
-
-    with pytest.raises(EventLogError, match="legacy test/migration helper"):
-        append_event(Path("/tmp/not-used/events.jsonl"), {"kind": "blocked"})

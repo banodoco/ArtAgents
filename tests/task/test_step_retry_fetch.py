@@ -14,7 +14,8 @@ from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.lease import write_lease_init
 from astrid.core.session.model import Session, now_iso
 from astrid.core.session.paths import session_path
-from astrid.core.task.events import append_event, read_events
+from tests.conftest import seed_event
+from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_step_retry_fetch
 from astrid.core.task.plan import compute_plan_hash
 
@@ -137,7 +138,7 @@ def _build_synthetic_run(
     if events_path.exists():
         events_path.unlink()
     for event in events:
-        append_event(events_path, event)
+        seed_event(events_path, event)
 
     # Write a run.json (needed by current run detection)
     run_json = {"run_id": run_id, "created_at": "2025-01-01T00:00:00Z"}
@@ -271,7 +272,7 @@ def test_retry_fetch_uses_only_current_version_events(
         ),
         encoding="utf-8",
     )
-    append_event(
+    seed_event(
         run_dir / "events.jsonl",
         {
             "kind": "step_dispatched",

@@ -705,10 +705,10 @@ def test_dynamic_add_step_shot_count_discovery(tmp_path: Path) -> None:
     _bind_hype_session(tmp_path / "projects", "demo", "run-hype-1", "test-session-1")
     write_lease_init(run_dir, session_id="test-session-1", plan_hash="")
 
-    # Seed the first event using ``append_event`` so the hash chain is valid.
-    from astrid.core.task.events import append_event as append_event_locked
+    # Seed the first event using seed_event so the hash chain is valid.
+    from tests.conftest import seed_event
     events_path = run_dir / "events.jsonl"
-    append_event_locked(
+    seed_event(
         events_path,
         {"kind": "run_started", "run_id": "run-hype-1", "ts": "2025-01-01T00:00:00Z"},
     )
@@ -759,9 +759,9 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
     write_lease_init(run_dir, session_id="test-session-2", plan_hash="")
 
     # Seed the first event with the hash chain intact.
-    from astrid.core.task.events import append_event as append_event_locked
+    from tests.conftest import seed_event
     events_path = run_dir / "events.jsonl"
-    append_event_locked(
+    seed_event(
         events_path,
         {"kind": "run_started", "run_id": "run-hype-1", "ts": "2025-01-01T00:00:00Z"},
     )

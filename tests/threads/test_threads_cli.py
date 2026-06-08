@@ -13,6 +13,8 @@ from astrid.core.threads.index import ThreadIndexStore
 from astrid.core.threads.record import build_run_record, finalize_run_record, write_run_record
 from astrid.core.threads.schema import make_thread_record
 
+pipeline = gateway
+
 
 def test_thread_cli_lifecycle_show_no_content_and_route(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     """Threads internal-library lifecycle exercised through astrid.core.threads.cli.

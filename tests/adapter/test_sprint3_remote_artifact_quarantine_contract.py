@@ -14,7 +14,8 @@ from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.lease import write_lease_init
 from astrid.core.session.model import now_iso
 from astrid.core.session.paths import session_path
-from astrid.core.task.events import append_event, read_events
+from tests.conftest import seed_event
+from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_step_retry_fetch
 from astrid.core.task.plan import Check, ProducesEntry, Step, compute_plan_hash
 
@@ -124,8 +125,8 @@ def _build_retry_fetch_run(tmp_path: Path) -> tuple[Path, Path]:
         write_lease_init(run_dir, session_id=sid, plan_hash=plan_hash)
         write_current_run("demo", "run-1", root=projects_root)
         events_path = run_dir / "events.jsonl"
-        append_event(events_path, {"kind": "run_started", "run_id": "run-1"})
-        append_event(
+        seed_event(events_path, {"kind": "run_started", "run_id": "run-1"})
+        seed_event(
             events_path,
             {
                 "kind": "step_dispatched",
@@ -135,7 +136,7 @@ def _build_retry_fetch_run(tmp_path: Path) -> tuple[Path, Path]:
                 "command": "echo job-1",
             },
         )
-        append_event(
+        seed_event(
             events_path,
             {
                 "kind": "step_awaiting_fetch",

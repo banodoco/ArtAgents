@@ -12,7 +12,8 @@ from astrid.core.contracts.schema import CommandInputArg, CommandSpec, Port
 from astrid.core.executor.runner import ExecutorRunRequest, run_executor
 from astrid.core.executor.schema import ExecutorDefinition
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
-from astrid.core.task.events import append_event, make_step_dispatched_event, read_events
+from tests.conftest import seed_event
+from astrid.core.task.events import make_step_dispatched_event, read_events
 
 
 _BODY_EXECUTOR = '''from astrid.core.orchestrate import orchestrator, code
@@ -90,7 +91,7 @@ def test_executor_run_enters_task_from_env_preserving_full_runner_argv(
     monkeypatch.setenv(TASK_RUN_ID_ENV, "r-exec")
     monkeypatch.setenv(TASK_STEP_ID_ENV, "render")
     events_path = projects / "p" / "runs" / "r-exec" / "events.jsonl"
-    append_event(events_path, make_step_dispatched_event("render", " ".join(argv), adapter="local"))
+    seed_event(events_path, make_step_dispatched_event("render", " ".join(argv), adapter="local"))
 
     result = run_executor(
         ExecutorRunRequest(
@@ -176,7 +177,7 @@ def main():
     monkeypatch.setenv(TASK_RUN_ID_ENV, "r-exec-repeat")
     monkeypatch.setenv(TASK_STEP_ID_ENV, "render")
     events_path = projects / "p" / "runs" / "r-exec-repeat" / "events.jsonl"
-    append_event(events_path, make_step_dispatched_event("render", " ".join(argv), adapter="local"))
+    seed_event(events_path, make_step_dispatched_event("render", " ".join(argv), adapter="local"))
 
     result = run_executor(
         ExecutorRunRequest(

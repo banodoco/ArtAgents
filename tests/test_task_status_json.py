@@ -19,8 +19,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
+from tests.conftest import seed_event  # noqa: E402
 from astrid.core.task.events import (  # noqa: E402
-    append_event,
     make_step_completed_event,
     make_step_dispatched_event,
 )
@@ -77,8 +77,8 @@ def test_status_json_includes_progress_and_current_step(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "app", _BODY, "demo.app", run_id="r2")
     # Dispatch and complete step_a so the cursor moves to step_b.
     events_path = projects / "p" / "runs" / "r2" / "events.jsonl"
-    append_event(events_path, make_step_dispatched_event("step_a", "echo a"))
-    append_event(events_path, make_step_completed_event("step_a", 0))
+    seed_event(events_path, make_step_dispatched_event("step_a", "echo a"))
+    seed_event(events_path, make_step_completed_event("step_a", 0))
 
     payload = _json_payload("--project", "p", "--json", projects=projects)
 
@@ -96,8 +96,8 @@ def test_status_json_exhausted_run(tmp_path: Path) -> None:
     events_path = projects / "p" / "runs" / "r3" / "events.jsonl"
     # Complete both steps.
     for step_id in ("step_a", "step_b"):
-        append_event(events_path, make_step_dispatched_event(step_id, f"echo {step_id[-1]}"))
-        append_event(events_path, make_step_completed_event(step_id, 0))
+        seed_event(events_path, make_step_dispatched_event(step_id, f"echo {step_id[-1]}"))
+        seed_event(events_path, make_step_completed_event(step_id, 0))
 
     payload = _json_payload("--project", "p", "--json", projects=projects)
 
@@ -125,8 +125,8 @@ def test_default_mode_keeps_prose_on_stdout(tmp_path: Path) -> None:
     """Default mode prints non-diagnostic human prose to stdout."""
     packs, projects = setup_run(tmp_path, "demo", "app", _BODY, "demo.app", run_id="r5")
     events_path = projects / "p" / "runs" / "r5" / "events.jsonl"
-    append_event(events_path, make_step_dispatched_event("step_a", "echo a"))
-    append_event(events_path, make_step_completed_event("step_a", 0))
+    seed_event(events_path, make_step_dispatched_event("step_a", "echo a"))
+    seed_event(events_path, make_step_completed_event("step_a", 0))
 
     rc, stdout, stderr = _capture_all("--project", "p", projects=projects)
     assert rc == 0
@@ -143,9 +143,9 @@ def test_default_mode_diagnostics_go_to_stderr(tmp_path: Path) -> None:
     packs, projects = setup_run(tmp_path, "demo", "app", _BODY, "demo.app", run_id="r6")
     events_path = projects / "p" / "runs" / "r6" / "events.jsonl"
     # Simulate a blocked run: produces_check_failed + cursor_rewind tail.
-    append_event(events_path, make_step_dispatched_event("step_a", "echo a"))
-    append_event(events_path, {"kind": "produces_check_failed", "reason": "missing output", "plan_step_path": ["step_a"]})
-    append_event(events_path, {"kind": "cursor_rewind", "reason": "produces check", "plan_step_path": ["step_a"]})
+    seed_event(events_path, make_step_dispatched_event("step_a", "echo a"))
+    seed_event(events_path, {"kind": "produces_check_failed", "reason": "missing output", "plan_step_path": ["step_a"]})
+    seed_event(events_path, {"kind": "cursor_rewind", "reason": "produces check", "plan_step_path": ["step_a"]})
 
     rc, stdout, stderr = _capture_all("--project", "p", projects=projects)
     assert rc == 0

@@ -170,14 +170,11 @@ and do not require rationale entries.
 > `inspect.getsource(task_gate.record_dispatch_complete)` continue to work through
 > the facade.
 >
-> **Operator status JSON extraction (T58):** `astrid/core/task/operator_view.py`
-> (1,311 → 1,215 lines) during M4 batch 57 (T58):
-> `operator_status_json.py` (135 lines) — ``_status_json`` payload construction,
-> inline-failure helpers (``_inline_failure_tail``, ``_format_inline_failure_tail``,
-> ``_path_tuple_from_event``), and the ``_InlineFailureTail`` dataclass.  All five
-> names are re-exported from ``operator_view.py`` so ``cmd_status``,
-> ``_dispatch_from_tail``, and test monkeypatch seams continue to work through
-> the ``astrid.core.task.operator_view`` namespace.
+> **Operator status JSON cleanup (T58 follow-up):** the short-lived status JSON
+> helper module was folded back into `astrid/core/task/operator_view.py` after the
+> larger render extraction below removed the pressure that justified another
+> task-root file. ``operator_view.py`` owns ``cmd_status --json`` payload
+> construction and inline-failure helpers directly.
 >
 > **Operator render extraction (T60):** `astrid/core/task/operator_view.py`
 > (1,215 → 839 lines) during M4 batch 59 (T60):

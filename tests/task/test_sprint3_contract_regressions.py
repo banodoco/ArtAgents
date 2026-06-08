@@ -15,10 +15,10 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from _lifecycle_fixtures import bind_writer_session, setup_packs_and_compile, setup_run  # noqa: E402
 
 from astrid.core.project.project import create_project
+from tests.conftest import seed_event as append_event
 from tests.helpers.current_run import seed_current_run
 from astrid.core.task import gate as task_gate
 from astrid.core.task.events import (
-    append_event,
     make_for_each_expanded_event,
     make_item_attested_event,
     make_item_started_event,

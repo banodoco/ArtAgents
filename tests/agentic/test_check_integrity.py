@@ -4,7 +4,8 @@ import json
 from pathlib import Path
 
 from astrid.core.audit.transport import append_ledger_record
-from astrid.core.task.events import append_event, make_run_started_event
+from tests.conftest import seed_event
+from astrid.core.task.events import make_run_started_event
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineActor
 
@@ -127,7 +128,7 @@ def _build_evidence_pack(
         run_dir = evidence_dir / "runs" / "run-1"
         run_dir.mkdir(parents=True, exist_ok=True)
         if include_task:
-            append_event(
+            seed_event(
                 run_dir / "events.jsonl",
                 make_run_started_event("run-1", "sha256:" + "1" * 64),
             )
