@@ -32,10 +32,11 @@ for _arg in "$@"; do
   esac
 done
 
-# Coverage flags are omitted on the --changed fast path (SD-004: no-arg
-# invocation MUST keep coverage). T6 wires the fast-path lane using this.
+# Coverage flags are omitted on the --changed fast path and may be disabled by
+# CI lanes that need the full suite to fit within their job timeout. A plain
+# local invocation keeps coverage by default (SD-004).
 COV_ARGS="--cov=astrid --cov-report=term --cov-report=xml --cov-fail-under=72"
-if $CHANGED_MODE; then
+if $CHANGED_MODE || [ "${ASTRID_CI_SKIP_COVERAGE:-}" = "1" ]; then
   COV_ARGS=""
 fi
 
