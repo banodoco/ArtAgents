@@ -41,16 +41,16 @@ fi
 
 TARGETED_BLOCKING_TESTS=(
   tests/spikes/test_env_inheritance.py
-  tests/test_composition_elements.py
+  tests/packs/test_composition_elements.py
   tests/test_for_each_autoclose.py
   tests/test_schema_contract.py
 )
 
 QUARANTINE_TESTS=(
-  "tests/test_agent_probe_regression.py|author-test|builtin.agent_probe negative-revert coverage still depends on the legacy compiled author-test start path.|2026-06-11"
-  "tests/test_author_test_drift.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the diff behavior is exercised.|2026-06-11"
-  "tests/test_author_test_pass.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the golden replay can run.|2026-06-11"
-  "tests/test_author_test_regenerate.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the regenerate flow can run.|2026-06-11"
+  "tests/agentic/test_agent_probe_regression.py|author-test|builtin.agent_probe negative-revert coverage still depends on the legacy compiled author-test start path.|2026-06-11"
+  "tests/orchestrate/test_author_test_drift.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the diff behavior is exercised.|2026-06-11"
+  "tests/orchestrate/test_author_test_pass.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the golden replay can run.|2026-06-11"
+  "tests/orchestrate/test_author_test_regenerate.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the regenerate flow can run.|2026-06-11"
 )
 
 run_quarantine_lane() {

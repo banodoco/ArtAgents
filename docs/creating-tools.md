@@ -158,9 +158,9 @@ are scoped by `kind` (`effects`, `animations`, `transitions`).
 
 Terminology note: pack placement, capability identity, aliases/deprecation,
 adapter versus default-enabled semantics, and local fork/override terminology
-are defined in `docs/megaplan/epics/pack-system/pack-contract.md`. Use that
-contract for identity questions; this guide only describes the current folder
-and authoring conventions.
+are defined in `docs/packs/contract.md`. Use that contract for identity
+questions; this guide only describes the current folder and authoring
+conventions.
 
 The authoritative layout for every pack is its `pack.yaml` manifest. The
 `content` roots declared there — `executors`, `orchestrators`, `elements` —

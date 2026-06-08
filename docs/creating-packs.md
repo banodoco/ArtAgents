@@ -6,8 +6,7 @@ and run.
 
 Terminology note: for pack identity, capability identity, default-enabled versus
 optional placement, aliases, forks, overrides, and in-place edits, use the
-Milestone 0 contract at
-`docs/megaplan/epics/pack-system/pack-contract.md`. This guide stays focused on
+Milestone 0 contract at `docs/packs/contract.md`. This guide stays focused on
 the current authoring workflow.
 
 ## Quick Start
@@ -397,7 +396,7 @@ these for the topics they cover:
 - [pack-taxonomy.md](pack-taxonomy.md) — The six taxonomy fields (`origin`,
   `install_tier`, `pack_type`, `domain`, `stability`, `support`), their
   defaults, and how to filter and group by them in the CLI.
-- [pack-contract.md](megaplan/epics/pack-system/pack-contract.md) — Formal
+- [contract.md](packs/contract.md) — Formal
   definitions for pack identity, capability identity, aliases, forks,
   overrides, and the unified layout contract.
 - [discovery-for-agents.md](discovery-for-agents.md) — How a cold agent

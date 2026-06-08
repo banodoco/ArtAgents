@@ -1,7 +1,7 @@
 # Git-Backed Packs Megaplan Chain
 
 This directory prepares the chained megaplan run for
-`docs/git-backed-packs-plan.md`.
+[`docs/megaplan/git-backed-packs-plan.md`](../git-backed-packs-plan.md).
 
 Run from the repository root only after the chain setup branch has been reviewed:
 

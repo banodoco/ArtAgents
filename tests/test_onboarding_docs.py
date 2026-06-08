@@ -88,13 +88,13 @@ class OnboardingDocsTest(unittest.TestCase):
             with self.subTest(forbidden=phrase):
                 self.assertNotIn(phrase, text)
 
-    def test_docs_visible_root_commands_are_dispatchable(self) -> None:
+    def test_docs_visible_unbound_commands_are_dispatchable(self) -> None:
         commands = (
-            ("doctor", "--json"),
-            ("setup", "--json"),
-            ("orchestrators", "list", "--json"),
-            ("executors", "list", "--json"),
-            ("elements", "list", "--json"),
+            ("status",),
+            ("next",),
+            ("packs", "list", "--json"),
+            ("projects", "ls", "--json"),
+            ("sessions", "ls"),
         )
         for command in commands:
             with self.subTest(command=command):
