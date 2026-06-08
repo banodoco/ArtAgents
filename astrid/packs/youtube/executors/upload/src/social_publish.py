@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import Any, Iterable
 
-from astrid._paths import WORKSPACE_ROOT
+from astrid.paths import WORKSPACE_ROOT
 
 
 class PublishError(RuntimeError):

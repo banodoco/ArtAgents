@@ -114,6 +114,72 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ["reigh.publish", "youtube.upload", "youtube.upload", "reigh.reigh_data"],
         )
 
+    def test_run_alias_warns_and_delegates_to_runs(self) -> None:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch("astrid.core.task.lifecycle.cmd_runs_ls", return_value=57) as runs_ls,
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(pipeline.main(["run", "ls"]), 57)
+
+        warning = stderr.getvalue()
+        self.assertIn("'astrid run' is deprecated", warning)
+        self.assertIn("'astrid runs'", warning)
+        self.assertIn("0.3.0", warning)
+        runs_ls.assert_called_once_with([])
+
+    def test_runs_canonical_command_does_not_warn(self) -> None:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch("astrid.core.task.lifecycle.cmd_runs_ls", return_value=58) as runs_ls,
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(pipeline.main(["runs", "ls"]), 58)
+
+        self.assertNotIn("deprecated", stderr.getvalue())
+        runs_ls.assert_called_once_with([])
+
+    def test_author_alias_warns_and_delegates_to_orchestrate(self) -> None:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch("astrid.orchestrate.cli.main", return_value=59) as orchestrate_main,
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(pipeline.main(["author", "describe", "pack.thing"]), 59)
+
+        warning = stderr.getvalue()
+        self.assertIn("'astrid author' is deprecated", warning)
+        self.assertIn("'astrid orchestrate'", warning)
+        self.assertIn("0.3.0", warning)
+        orchestrate_main.assert_called_once_with(["describe", "pack.thing"])
+
+    def test_orchestrate_canonical_command_does_not_warn(self) -> None:
+        with (
+            mock.patch(
+                "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
+                return_value=object(),
+            ),
+            mock.patch("astrid.orchestrate.cli.main", return_value=60) as orchestrate_main,
+        ):
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(pipeline.main(["orchestrate", "describe", "pack.thing"]), 60)
+
+        self.assertNotIn("deprecated", stderr.getvalue())
+        orchestrate_main.assert_called_once_with(["describe", "pack.thing"])
+
     def test_unknown_command_exits_2_with_message(self) -> None:
         """T7: unknown non-flag command prints to stderr and exits 2."""
         with (

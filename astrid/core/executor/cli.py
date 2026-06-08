@@ -11,21 +11,23 @@ from typing import Any
 
 from astrid.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
-from astrid.core.project.run import ProjectRunError
-
-from astrid.core._search import (
-    SearchRecord,
-    search as run_search,
-    short_description_or_truncated,
-)
-
 from astrid.core.dirty import detect_local_edits
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
+from astrid.core.project.run import ProjectRunError
 from astrid.core.scaffold import (
     TEST_RUN_PY_TEMPLATE as _TEST_RUN_PY_TEMPLATE,
+)
+from astrid.core.scaffold import (
     scaffold_component as _scaffold_component,
 )
-from astrid.core.update import update_check, update_apply
+from astrid.core.search import (
+    SearchRecord,
+    short_description_or_truncated,
+)
+from astrid.core.search import (
+    search as run_search,
+)
+from astrid.core.update import update_apply, update_check
 
 from .banodoco_catalog import BanodocoCatalogConfig
 from .registry import ExecutorRegistry, load_default_registry

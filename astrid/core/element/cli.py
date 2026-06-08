@@ -10,15 +10,15 @@ from pathlib import Path
 from typing import Any
 
 from astrid.contracts.errors import AstridError
-from astrid.core._search import (
+from astrid.core.dirty import detect_local_edits
+from astrid.core.pack.override import OverrideStore, OverrideStoreError
+from astrid.core.search import (
     SearchRecord,
     short_description_or_truncated,
 )
-from astrid.core._search import (
+from astrid.core.search import (
     search as run_search,
 )
-from astrid.core.dirty import detect_local_edits
-from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.update import update_apply, update_check
 
 from .install import install_element

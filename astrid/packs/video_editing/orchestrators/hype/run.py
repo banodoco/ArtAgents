@@ -16,35 +16,23 @@ from astrid.contracts.errors import AstridError, render_astrid_error
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.hype')
-import argparse
-import datetime as dt
-import hashlib
-import json
-import logging
 import os
-import subprocess
 import sys
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Callable
 
-from astrid._paths import executor_argv
-from astrid.audit import PARENT_IDS_ENV, AuditContext
-from astrid.core import timeline
 from astrid.core.project.run import (
     METADATA_KEY_TIMELINE_EVENT_STREAM_ID,
     METADATA_KEY_TIMELINE_SLUG,
-    finalize_project_run,
-    prepare_project_run,  # re-exported for monkeypatch seam (T66)
     ProjectRunError,
+    finalize_project_run,
+    prepare_project_run,
+    reject_project_with_out,
 )
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.core.util.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 # Extracted modules (M4 T62)
-from .config import (
+from .config import (  # noqa: F401 — re-exported for facade compatibility
     STEP_ORDER,
     load_config,
     normalize_config,
@@ -53,25 +41,17 @@ from .config import (
     parse_asset_entry,
     usage_error,
 )
-from .parser import build_parser, resolve_args
+from .parser import build_parser, resolve_args  # noqa: F401 — build_parser re-exported for facade compatibility
 
-# Extracted modules (M4 T64)
-from .steps import (  # noqa: F401 — re-exported for facade compatibility
-    PER_BRIEF_SENTINELS,
-    PER_SOURCE_SENTINELS,
-    Step,
-    _append_managed_binding,
-    _arrange_target_duration,
-    _initial_facts,
-    _verdict_build_cmd,
-    _write_dry_run_plan,
-    add_extra_args,
-    asset_args,
-    build_pool_cut_cmd,
-    build_pool_steps,
-    probe_audio_duration,
-    select_steps,
-    step_argv,
+# Extracted module (M4 T66)
+from .project_adapter import (  # noqa: F401 — re-exported for facade compatibility
+    _prepare_project_main,
+    _project_hype_artifact_roots,
+    _project_hype_metadata,
+    _project_slug_for_gate,
+    _restore_project_env,
+    _set_project_env,
+    _system_exit_code,
 )
 from .runner import (  # noqa: F401 — re-exported for facade compatibility
     _apply_trim_deltas_to_arrangement,
@@ -105,15 +85,23 @@ from .runner import (  # noqa: F401 — re-exported for facade compatibility
     write_skip_log,
 )
 
-# Extracted module (M4 T66)
-from .project_adapter import (  # noqa: F401 — re-exported for facade compatibility
-    _prepare_project_main,
-    _project_hype_artifact_roots,
-    _project_hype_metadata,
-    _project_slug_for_gate,
-    _restore_project_env,
-    _set_project_env,
-    _system_exit_code,
+# Extracted modules (M4 T64)
+from .steps import (  # noqa: F401 — re-exported for facade compatibility
+    PER_BRIEF_SENTINELS,
+    PER_SOURCE_SENTINELS,
+    Step,
+    _append_managed_binding,
+    _arrange_target_duration,
+    _initial_facts,
+    _verdict_build_cmd,
+    _write_dry_run_plan,
+    add_extra_args,
+    asset_args,
+    build_pool_cut_cmd,
+    build_pool_steps,
+    probe_audio_duration,
+    select_steps,
+    step_argv,
 )
 
 

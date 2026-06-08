@@ -4,11 +4,11 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from astrid._media import ffprobe_duration_seconds
-from astrid.verify.checks import ffprobe_duration_seconds as checks_ffprobe_duration_seconds
+from astrid.media import ffprobe_duration_seconds
 from astrid.packs.editorial.executors.editor_review.run import (
     _probe_duration as editor_probe_duration,
 )
+from astrid.verify.checks import ffprobe_duration_seconds as checks_ffprobe_duration_seconds
 
 
 def test_ffprobe_duration_seconds_uses_duration_only_probe() -> None:

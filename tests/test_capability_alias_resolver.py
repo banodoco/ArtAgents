@@ -13,23 +13,24 @@ from unittest import mock
 
 import pytest
 
+from astrid.core import AliasResolutionError as AliasResolutionErrorFromCore
+from astrid.core import AliasResolver as AliasResolverFromCore
 from astrid.core.alias_resolver import (
     AliasResolutionError,
     AliasResolver,
-    create_shared_alias_resolver,
     _register_pack_aliases,
+    create_shared_alias_resolver,
     extract_pack_aliases,
 )
-from astrid.core import AliasResolver as AliasResolverFromCore
-from astrid.core import AliasResolutionError as AliasResolutionErrorFromCore
-from astrid.core.executor.registry import ExecutorRegistry, load_default_registry as load_executor_registry
+from astrid.core.executor.registry import ExecutorRegistry
+from astrid.core.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.executor.schema import ExecutorDefinition, to_capability_handle
 from astrid.core.orchestrator.registry import OrchestratorRegistry, OrchestratorRegistryError
 from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec, to_capability_handle as orch_to_capability_handle
+from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.orchestrator.schema import to_capability_handle as orch_to_capability_handle
 from astrid.core.override import OverrideStore
 from astrid.core.pack import PackDefinition, discover_packs
-
 
 # ---------------------------------------------------------------------------
 # SD3: import from astrid.core
@@ -508,7 +509,6 @@ class TestOrchestratorChildExecutorAliasResolution:
         to the canonical dotted id.
         """
         from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition
 
         exec_reg = ExecutorRegistry(alias_resolver=AliasResolver())
         exec_reg.register(ExecutorDefinition(
@@ -561,7 +561,6 @@ class TestOrchestratorChildExecutorAliasResolution:
     def test_child_executor_without_alias_resolver_falls_back_to_raw_id(self) -> None:
         """When no alias resolver is set, child_executor IDs are used as-is."""
         from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition
 
         exec_reg = ExecutorRegistry()
         exec_reg.register(ExecutorDefinition(
@@ -622,7 +621,7 @@ class TestExecutorDependsOnAliasResolution:
         """Executor A depends on alias 'test.dep_alias' which maps to 'test.b'.
         Validation should resolve the alias and succeed."""
         from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition, GraphMetadata
+        from astrid.core.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.dep_alias", "test.b")
@@ -649,7 +648,7 @@ class TestExecutorDependsOnAliasResolution:
         """Executor A depends on alias 'test.dep_alias' which maps to
         an executor not in the registry. Validation should fail."""
         from astrid.core.executor.registry import ExecutorRegistry, ExecutorRegistryError
-        from astrid.core.executor.schema import ExecutorDefinition, GraphMetadata
+        from astrid.core.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.dep_alias", "test.missing")
@@ -670,7 +669,7 @@ class TestExecutorDependsOnAliasResolution:
         """Executor A depends on 'test.chain_a' → 'test.chain_b' → 'test.c'.
         Validation should resolve the chain and succeed."""
         from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition, GraphMetadata
+        from astrid.core.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.chain_a", "test.chain_b")
@@ -696,7 +695,7 @@ class TestExecutorDependsOnAliasResolution:
     def test_depends_on_without_alias_resolver_falls_back_to_raw_id(self) -> None:
         """When no alias resolver is set, depends_on IDs are used as-is."""
         from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition, GraphMetadata
+        from astrid.core.executor.schema import GraphMetadata
 
         registry = ExecutorRegistry()
         registry.register(ExecutorDefinition(
@@ -719,7 +718,7 @@ class TestExecutorDependsOnAliasResolution:
         """Executor A depends on alias 'test.self_alias' which maps to 'test.a'.
         Validation should detect the self-reference."""
         from astrid.core.executor.registry import ExecutorRegistry, ExecutorRegistryError
-        from astrid.core.executor.schema import ExecutorDefinition, GraphMetadata
+        from astrid.core.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.self_alias", "test.a")
@@ -1169,7 +1168,6 @@ class TestAliasSearchRecords:
     def test_executor_search_record_includes_alias_field(self) -> None:
         """_executor_search_record puts alias text into fields['aliases']."""
         from astrid.core.executor.cli import _executor_search_record
-        from astrid.core.executor.schema import ExecutorDefinition
 
         definition = ExecutorDefinition(
             id="testpack.runner",
@@ -1185,7 +1183,6 @@ class TestAliasSearchRecords:
     def test_executor_search_record_omits_aliases_when_empty(self) -> None:
         """_executor_search_record does not include 'aliases' key when empty."""
         from astrid.core.executor.cli import _executor_search_record
-        from astrid.core.executor.schema import ExecutorDefinition
 
         definition = ExecutorDefinition(
             id="testpack.runner",
@@ -1215,7 +1212,7 @@ class TestAliasSearchRecords:
 
     def test_search_scoring_matches_alias_field(self) -> None:
         """search() matches terms found in the 'aliases' field of a record."""
-        from astrid.core._search import SearchRecord, FIELD_WEIGHTS, search
+        from astrid.core.search import FIELD_WEIGHTS, SearchRecord, search
 
         assert "aliases" in FIELD_WEIGHTS
         assert FIELD_WEIGHTS["aliases"] == 3.0
@@ -1243,7 +1240,7 @@ class TestAliasSearchRecords:
     def test_search_alias_does_not_produce_duplicate_hits(self) -> None:
         """Searching by an alias term returns exactly one hit — the canonical
         capability, not a separate alias record."""
-        from astrid.core._search import SearchRecord, search
+        from astrid.core.search import SearchRecord, search
 
         canonical = SearchRecord(
             id="testpack.runner",
@@ -1290,7 +1287,7 @@ class TestSearchAliasIntegration:
             with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
-            from astrid.core.executor.cli import _executor_search_record, _aliases_text
+            from astrid.core.executor.cli import _aliases_text, _executor_search_record
 
             resolver = registry.alias_resolver
             assert resolver is not None
@@ -1329,7 +1326,7 @@ class TestSearchAliasIntegration:
             with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
-            from astrid.core.orchestrator.cli import _orchestrator_search_record, _aliases_text
+            from astrid.core.orchestrator.cli import _aliases_text, _orchestrator_search_record
 
             resolver = registry.alias_resolver
             assert resolver is not None
@@ -1367,8 +1364,8 @@ class TestSearchAliasIntegration:
                 registry = load_executor_registry()
 
             # Build search records using the same logic as _cmd_search
-            from astrid.core.executor.cli import _executor_search_record, _aliases_text
-            from astrid.core._search import search as run_search
+            from astrid.core.executor.cli import _aliases_text, _executor_search_record
+            from astrid.core.search import search as run_search
 
             resolver = registry.alias_resolver
             assert resolver is not None
@@ -1655,8 +1652,12 @@ class TestMigratedPackAliasFixtures:
         should return the canonical definition and carry alias + deprecation
         metadata in the ``_capability`` block."""
         with tempfile.TemporaryDirectory() as tmp:
+            import argparse
+            import contextlib
+            import io
+            import json as _json
+
             from astrid.core.executor.cli import _cmd_inspect
-            import io, contextlib, json as _json, argparse
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1713,8 +1714,12 @@ class TestMigratedPackAliasFixtures:
         should return the canonical definition and carry alias + deprecation
         metadata in the ``_capability`` block."""
         with tempfile.TemporaryDirectory() as tmp:
+            import argparse
+            import contextlib
+            import io
+            import json as _json
+
             from astrid.core.orchestrator.cli import _cmd_inspect
-            import io, contextlib, json as _json, argparse
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1770,8 +1775,11 @@ class TestMigratedPackAliasFixtures:
         """Human-readable ``executors inspect`` on a deprecated alias prints
         ``requested_alias`` and ``deprecated`` lines."""
         with tempfile.TemporaryDirectory() as tmp:
+            import argparse
+            import contextlib
+            import io
+
             from astrid.core.executor.cli import _cmd_inspect
-            import io, contextlib, argparse
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1813,8 +1821,11 @@ class TestMigratedPackAliasFixtures:
         """Human-readable ``orchestrators inspect`` on a deprecated alias prints
         ``requested_alias`` and ``deprecated`` lines."""
         with tempfile.TemporaryDirectory() as tmp:
+            import argparse
+            import contextlib
+            import io
+
             from astrid.core.orchestrator.cli import _cmd_inspect
-            import io, contextlib, argparse
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(

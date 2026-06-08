@@ -7,10 +7,10 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from astrid._paths import REPO_ROOT
 from astrid.core.element.install import install_element
 from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.project.paths import PROJECTS_ROOT_ENV, resolve_projects_root
+from astrid.paths import REPO_ROOT
 
 
 @dataclass(frozen=True)

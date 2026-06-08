@@ -9,24 +9,28 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Iterable
 
-from astrid._paths import REPO_ROOT
-from astrid.core.pack.alias_resolver import (
-    AliasResolver,
-    _register_pack_aliases,
-    create_shared_alias_resolver,
-    extract_pack_aliases,
-)
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.registry import load_default_registry as load_default_executor_registry
-from astrid.core.pack.manifest import ManifestParseError, dump_manifest_payload, load_manifest_mapping
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,
     iter_orchestrator_roots,
     validate_content_id_in_pack,
 )
+from astrid.core.pack.alias_resolver import (
+    AliasResolver,
+    _register_pack_aliases,
+    create_shared_alias_resolver,
+    extract_pack_aliases,
+)
 from astrid.core.pack.discovery import discover_packs_ordered
+from astrid.core.pack.manifest import (
+    ManifestParseError,
+    dump_manifest_payload,
+    load_manifest_mapping,
+)
+from astrid.paths import REPO_ROOT
 
 from .folder import load_folder_orchestrators
 from .schema import (

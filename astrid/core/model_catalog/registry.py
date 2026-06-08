@@ -13,7 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from astrid._paths import REPO_ROOT
 from astrid.core.generation.backends.registry import (
     load_default_generation_backend_registry,
 )
@@ -25,6 +24,7 @@ from astrid.core.model_catalog.schema import (
     validate_lora_registry,
     validate_registry_with_backends,
 )
+from astrid.paths import REPO_ROOT
 
 
 class ModelRegistry:

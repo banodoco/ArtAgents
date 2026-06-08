@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid._paths import REPO_ROOT
+from astrid.paths import REPO_ROOT
 
 from .schema import empty_threads_index, validate_threads_index
 

@@ -15,6 +15,8 @@ from astrid.core.runtime.log_capture import (
     run_subprocess_with_capture,
 )
 
+_ALIAS_SUNSET_VERSION = "0.3.0"
+
 
 def _dispatch(raw: list[str]) -> int:
     from .gateway import _print_entrypoint_help
@@ -158,6 +160,19 @@ def _dispatch_orchestrate(args: list[str]) -> int:
     from .orchestrate import cli as author_cli
 
     return author_cli.main(args)
+
+
+def _dispatch_author(args: list[str]) -> int:
+    _warn_deprecated_alias(alias="author", replacement="orchestrate")
+    return _dispatch_orchestrate(args)
+
+
+def _warn_deprecated_alias(*, alias: str, replacement: str) -> None:
+    print(
+        f"warning: 'astrid {alias}' is deprecated; use 'astrid {replacement}' "
+        f"instead. The alias is scheduled for removal in {_ALIAS_SUNSET_VERSION}.",
+        file=sys.stderr,
+    )
 
 
 def _dispatch_models(args: list[str]) -> int:
@@ -336,7 +351,7 @@ _TOP_LEVEL_HANDLERS = {
     "abort": _dispatch_lifecycle("cmd_abort"),
     "status": _dispatch_status,
     "runs": lambda args: _dispatch_runs(args),
-    "run": lambda args: _dispatch_runs(args),
+    "run": lambda args: _dispatch_run(args),
     "step": lambda args: _dispatch_step(args),
     "hook": lambda args: _dispatch_hook(args),
     "plan": lambda args: _dispatch_plan_verbs(args),
@@ -350,7 +365,7 @@ _TOP_LEVEL_HANDLERS = {
     "executors": _dispatch_executors,
     "orchestrators": _dispatch_orchestrators,
     "orchestrate": _dispatch_orchestrate,
-    "author": _dispatch_orchestrate,
+    "author": _dispatch_author,
     "models": _dispatch_models,
     "elements": _dispatch_elements,
     "projects": _dispatch_projects,
@@ -420,6 +435,7 @@ def _dispatch_runs(args: list[str]) -> int:
 
 def _dispatch_run(args: list[str]) -> int:
     """Deprecated alias for ``astrid runs``. Delegates to ``_dispatch_runs``."""
+    _warn_deprecated_alias(alias="run", replacement="runs")
     return _dispatch_runs(args)
 
 

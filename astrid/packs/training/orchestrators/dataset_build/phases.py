@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import json
 import shutil
-import subprocess
 import sys
 from collections.abc import Mapping
 from pathlib import Path
@@ -21,7 +20,7 @@ from astrid.core.project.jsonio import write_json_atomic
 from .acquisition import build_acquisition_request
 from .caption_providers import caption_candidate
 from .config import normalize_filter_stages
-from .filter_stages import canonical_source_id, get_filter_stage
+from .filter_stages import canonical_source_id
 from .items import (
     deterministic_id,
     make_review_item,
@@ -32,9 +31,8 @@ from .items import (
 from .manifest import accepted_items, build_canonical_manifest, write_canonical_manifest
 from .manifest_adapters import get_manifest_adapter
 from .review import apply_review_decisions, write_human_review_final, write_review_data
-from .source_providers import get_source_provider
 from .services import DatasetRunServices
-from .state import read_review_state, set_status, write_review_state
+from .state import read_review_state, write_review_state
 
 REVIEW_UI_ROOT = Path(__file__).resolve().parent / "review_ui"
 
@@ -209,7 +207,7 @@ def _confine_candidate_media(candidate: Mapping[str, Any], run_dir: Path) -> dic
     item = dict(candidate)
     source_path = Path(str(item["media_path"])).expanduser()
     if not source_path.is_absolute():
-        from astrid._paths import REPO_ROOT
+        from astrid.paths import REPO_ROOT
 
         source_path = (REPO_ROOT / source_path).resolve()
     clips_dir = run_dir / "clips"

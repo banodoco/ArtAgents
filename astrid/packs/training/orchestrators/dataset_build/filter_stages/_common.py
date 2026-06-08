@@ -7,7 +7,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from astrid._paths import REPO_ROOT
+from astrid.paths import REPO_ROOT
 
 from ..items import deterministic_id
 

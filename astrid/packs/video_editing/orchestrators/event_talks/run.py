@@ -15,7 +15,6 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from astrid._media import ffprobe_duration_seconds
 from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.project.run import (
     finalize_project_run,
@@ -25,6 +24,7 @@ from astrid.core.project.run import (
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 from astrid.core.util.hash import sha256_file
+from astrid.media import ffprobe_duration_seconds
 from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
     build_plan_v2,
     emit_plan_json,

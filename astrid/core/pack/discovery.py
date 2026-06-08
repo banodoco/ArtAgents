@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid._paths import REPO_ROOT
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -23,6 +22,7 @@ from astrid.core.pack import (
     iter_executor_roots,
     iter_orchestrator_roots,
 )
+from astrid.paths import REPO_ROOT
 
 DiscoverPacksFn = Callable[..., "tuple[PackDefinition, ...]"]
 

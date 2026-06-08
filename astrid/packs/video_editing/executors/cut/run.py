@@ -10,7 +10,6 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
 from astrid.contracts.result_manifest import write_manifest
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 
@@ -21,21 +20,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from . import probe
-from . import registry as _registry
-from . import timeline_build as _timeline_build
-from . import resume as _resume
-
-from astrid._paths import PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT
-from astrid.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.task.managed_binding import is_managed_mode
-from astrid.core.util.hash import sha256_file
-from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
-from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.theme_schema import load_theme, theme_root
 from astrid.core.timeline import (
-    AssetRegistry,
     canonical_timeline_config,
     is_all_generative_arrangement,
     load_arrangement,
@@ -47,6 +34,16 @@ from astrid.core.timeline import (
     save_timeline,
     validate_arrangement_duration_window,
 )
+from astrid.core.util.hash import sha256_file
+from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
+from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.theme_schema import load_theme, theme_root
+
+from . import probe
+from . import registry as _registry
+from . import resume as _resume
+from . import timeline_build as _timeline_build
 
 # ── re-exports from focused modules (T78) ────────────────────────────
 _FFPROBE_VERBOSE = probe._FFPROBE_VERBOSE  # alias for module-level access

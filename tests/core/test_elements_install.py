@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid._paths import REPO_ROOT
 from astrid.core.element.install import build_element_install_plan, install_element
 from astrid.core.element.registry import load_default_registry
 from astrid.core.executor.install import (
@@ -14,6 +13,7 @@ from astrid.core.executor.install import (
     executor_python_path,
 )
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
+from astrid.paths import REPO_ROOT
 
 
 class ElementInstallTest(unittest.TestCase):

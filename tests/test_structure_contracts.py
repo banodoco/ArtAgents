@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-from astrid.structure import StructureReport, validate_import_layering, validate_migration_completion, validate_repo_structure
+import astrid.structure as structure
+from astrid.structure import (
+    StructureReport,
+    validate_cli_domain_boundary,
+    validate_first_party_shim_import_boundary,
+    validate_import_layering,
+    validate_migration_completion,
+    validate_repo_structure,
+    validate_run_record_status_boundary,
+)
 
 
 def _write(root: Path, rel: str, body: str) -> Path:
@@ -39,7 +49,10 @@ def test_validate_import_layering_flags_absolute_and_relative_core_pack_imports(
 
     assert "astrid/core/bad_absolute.py:1 imports forbidden module 'astrid.packs.youtube.executors.upload.src'" in violations
     assert "astrid/core/bad_relative.py:1 imports forbidden module 'astrid.packs.youtube.executors.upload.src'" in violations
-    assert not any("dynamic_ok.py" in violation for violation in violations)
+    assert (
+        "astrid/core/dynamic_ok.py:2 dynamically imports forbidden concrete pack module "
+        "'astrid.packs.youtube.executors.upload.src.social_publish'"
+    ) in violations
 
 
 def test_validate_import_layering_flags_core_audit_imports(tmp_path: Path) -> None:
@@ -77,6 +90,266 @@ def test_validate_import_layering_exempts_only_event_stream_audit_import(tmp_pat
     assert any(
         "other_audit.py" in v for v in violations
     ), f"other_audit.py should be flagged but wasn't: {violations}"
+
+
+def test_validate_import_layering_flags_dynamic_concrete_pack_imports_and_respects_bridge_exemptions(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "astrid/core/bad_dynamic.py",
+        "import importlib\n"
+        "runtime = importlib.import_module('astrid.packs.video_editing.orchestrators.hype.run')\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/pack/resolver.py",
+        "from importlib import import_module\n"
+        "runtime = import_module('astrid.packs.video_editing.orchestrators.hype.run')\n",
+    )
+
+    violations = validate_import_layering(tmp_path)
+
+    assert set(violations) == {
+        "astrid/core/bad_dynamic.py:2 dynamically imports forbidden concrete pack module 'astrid.packs.video_editing.orchestrators.hype.run'"
+    }
+
+
+def test_validate_first_party_shim_import_boundary_flags_source_script_and_non_public_tests(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "astrid/internal_source.py",
+        "from astrid._paths import REPO_ROOT\n"
+        "from astrid.pipeline import main as pipeline_main\n",
+    )
+    _write(
+        tmp_path,
+        "scripts/internal_script.py",
+        "from astrid._media import ffprobe_duration_seconds\n"
+        "from astrid.timeline import Timeline\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_internal_shim_usage.py",
+        "from astrid.core._search import search\n",
+    )
+
+    violations = validate_first_party_shim_import_boundary(tmp_path)
+
+    assert set(violations) == {
+        "astrid/internal_source.py:1 imports banned first-party shim 'astrid._paths'",
+        "scripts/internal_script.py:1 imports banned first-party shim 'astrid._media'",
+        "tests/test_internal_shim_usage.py:1 imports banned first-party shim 'astrid.core._search'",
+    }
+
+
+def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "astrid/domains/hype/rules.py",
+        "from astrid.core.pack.cli import build_parser\n",
+    )
+    _write(
+        tmp_path,
+        "astrid/core/session/cli_status.py",
+        "from astrid.core.session.cli import _json_mode\n",
+    )
+
+    violations = validate_cli_domain_boundary(tmp_path)
+
+    assert set(violations) == {
+        "astrid/domains/hype/rules.py:1 imports CLI module 'astrid.core.pack.cli'; move CLI-only logic to a cli.py entrypoint or shared helper"
+    }
+
+
+def test_validate_first_party_shim_import_boundary_allows_only_documented_public_exemptions(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path,
+        "tests/test_structure_contracts.py",
+        "import astrid._media\n"
+        "import astrid._paths\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_m2_public_surface.py",
+        "import astrid._media\n"
+        "import astrid._paths\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_structure_contracts_extra.py",
+        "from astrid.core._search import search\n",
+    )
+
+    violations = validate_first_party_shim_import_boundary(tmp_path)
+
+    assert violations == [
+        "tests/test_structure_contracts_extra.py:1 imports banned first-party shim 'astrid.core._search'"
+    ]
+
+
+def test_validate_repo_structure_flags_generated_debris_and_non_golden_build_dirs(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(tmp_path, "astrid/__init__.py", "")
+    _write(tmp_path, "astrid/core/runtime.py", "")
+    _write(tmp_path, "tests/test_example.py", "")
+    _write(tmp_path, "scripts/tool.py", "")
+    _write(tmp_path, "astrid/core/__pycache__/runtime.cpython-313.pyc", "")
+    _write(tmp_path, "tests/.DS_Store", "")
+    _write(tmp_path, "scripts/build/generated.json", "{}\n")
+
+    report = validate_repo_structure(tmp_path)
+
+    assert "astrid/core/__pycache__: generated debris directory must not exist" in report.errors
+    assert "tests/.DS_Store: generated debris file must not exist" in report.errors
+    assert (
+        "scripts/build: generated build directory must not exist outside documented golden fixtures"
+        in report.errors
+    )
+    assert "top-level astrid directory is not a canonical concept: astrid/__pycache__" not in report.errors
+
+
+def test_validate_repo_structure_rejects_invalid_golden_build_exemption_metadata(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(tmp_path, "astrid/__init__.py", "")
+
+    monkeypatch.setattr(
+        structure,
+        "_COMMITTED_GOLDEN_BUILD_DIR_EXEMPTIONS",
+        {
+            "fixtures/not-build": "wrong leaf name",
+            "tests/fixtures/golden/build": "",
+            "docs/build": "wrong root",
+        },
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert "docs/build: documented golden build exemption must live under astrid/, tests/, or scripts/" in report.errors
+    assert "fixtures/not-build: documented golden build exemption must point to an exact build/ directory" in report.errors
+    assert "tests/fixtures/golden/build: documented golden build exemption must include a rationale" in report.errors
+
+
+def test_validate_repo_structure_ignores_untracked_runtime_debris_in_git_worktree(tmp_path: Path) -> None:
+    _bootstrap_structure_root(tmp_path)
+    _write(tmp_path, "astrid/__init__.py", "")
+    _write(tmp_path, "astrid/core/runtime.py", "")
+    _write(tmp_path, "tests/test_example.py", "")
+    _write(tmp_path, "scripts/tool.py", "")
+    _write(tmp_path, ".gitignore", "__pycache__/\n.DS_Store\nbuild/\n")
+    subprocess.run(["git", "init"], check=True, cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "astrid@example.com"], check=True, cwd=tmp_path, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Astrid Tests"], check=True, cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "add", "astrid/__init__.py", "astrid/core/runtime.py", "tests/test_example.py", "scripts/tool.py", ".gitignore"],
+        check=True,
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+    _write(tmp_path, "astrid/core/__pycache__/runtime.cpython-313.pyc", "")
+    _write(tmp_path, "tests/.DS_Store", "")
+    _write(tmp_path, "scripts/build/generated.json", "{}\n")
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.ok, report.errors
+
+
+def test_validate_repo_structure_allows_documented_golden_build_exemption(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """A documented golden build/ exemption with the correct path leaf,
+    a scan-root parent, and a non-empty rationale must allow a committed
+    build/ directory to pass structure validation."""
+    _bootstrap_structure_root(tmp_path)
+    _write(tmp_path, "astrid/__init__.py", "")
+    _write(tmp_path, "astrid/core/runtime.py", "")
+    _write(tmp_path, "tests/test_example.py", "")
+    _write(tmp_path, "scripts/tool.py", "")
+    _write(tmp_path, ".gitignore", "build/\n__pycache__/\n.DS_Store\n")
+    subprocess.run(["git", "init"], check=True, cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "astrid@example.com"],
+        check=True,
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Astrid Tests"],
+        check=True,
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    # Commit the golden build/ directory so it is tracked.  The .gitignore
+    # above excludes build/ so we force-add the golden fixture.
+    _write(tmp_path, "tests/fixtures/build/golden_data.json", "{}\n")
+    subprocess.run(
+        ["git", "add", "astrid/__init__.py", "astrid/core/runtime.py",
+         "tests/test_example.py", "scripts/tool.py", ".gitignore"],
+        check=True, cwd=tmp_path, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "add", "-f", "tests/fixtures/build/golden_data.json"],
+        check=True,
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(["git", "commit", "-m", "init"], check=True, cwd=tmp_path, capture_output=True)
+
+    monkeypatch.setattr(
+        structure,
+        "_COMMITTED_GOLDEN_BUILD_DIR_EXEMPTIONS",
+        {
+            "tests/fixtures/build": "golden test fixture for offline reference data",
+        },
+    )
+
+    report = validate_repo_structure(tmp_path)
+
+    assert report.ok, report.errors
+
+
+def test_validate_repo_structure_flags_debris_in_all_scan_roots(
+    tmp_path: Path,
+) -> None:
+    """__pycache__ directories and .DS_Store files must be flagged in every
+    scan root (astrid/, tests/, scripts/), not just a single root."""
+    _bootstrap_structure_root(tmp_path)
+    _write(tmp_path, "astrid/__init__.py", "")
+    _write(tmp_path, "astrid/core/runtime.py", "")
+    _write(tmp_path, "tests/test_example.py", "")
+    _write(tmp_path, "scripts/tool.py", "")
+
+    # __pycache__ in all three roots
+    _write(tmp_path, "astrid/core/__pycache__/runtime.cpython-313.pyc", "")
+    _write(tmp_path, "tests/__pycache__/test_example.cpython-313.pyc", "")
+    _write(tmp_path, "scripts/__pycache__/tool.cpython-313.pyc", "")
+
+    # .DS_Store in all three roots
+    _write(tmp_path, "astrid/.DS_Store", "")
+    _write(tmp_path, "tests/.DS_Store", "")
+    _write(tmp_path, "scripts/.DS_Store", "")
+
+    report = validate_repo_structure(tmp_path)
+
+    assert "astrid/core/__pycache__: generated debris directory must not exist" in report.errors
+    assert "tests/__pycache__: generated debris directory must not exist" in report.errors
+    assert "scripts/__pycache__: generated debris directory must not exist" in report.errors
+    assert "astrid/.DS_Store: generated debris file must not exist" in report.errors
+    assert "tests/.DS_Store: generated debris file must not exist" in report.errors
+    assert "scripts/.DS_Store: generated debris file must not exist" in report.errors
+    # __pycache__ at the astrid/ top level must NOT be reported as a
+    # top-level-canonical violation — debris owns the message.
+    assert "top-level astrid directory is not a canonical concept: astrid/__pycache__" not in report.errors
 
 
 def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_path: Path) -> None:
@@ -449,7 +722,7 @@ def test_timeline_facade_files_are_strictly_thin_re_exports() -> None:
     no function/class definitions."""
     import ast
 
-    from astrid._paths import REPO_ROOT
+    from astrid.paths import REPO_ROOT
 
     facade_files = (
         REPO_ROOT / "astrid" / "timeline" / "__init__.py",
@@ -637,8 +910,6 @@ def test_validate_migration_completion_flags_reintroduced_wrapper_all_aliases(
 
 
 # ── m5a run-record status boundary guards ───────────────────────────────
-
-from astrid.structure import validate_run_record_status_boundary
 
 
 def test_run_record_status_boundary_flags_legacy_token_in_dict_literal(tmp_path: Path) -> None:
@@ -901,11 +1172,10 @@ def test_real_repo_top_level_matches_structure_constants() -> None:
     * Every named file must exist on disk.
     * Every named directory must exist **or** be ``elements`` (the single
       planned-absent canonical concept per SD3).
-    * ``__pycache__`` is allowed but not required (runtime-generated).
     * No unexpected ``.py`` files or directories may be present on disk
       (dotfiles are skipped, matching the validator filter).
     """
-    from astrid._paths import REPO_ROOT
+    from astrid.paths import REPO_ROOT
     from astrid.structure import TOP_LEVEL_ASTRID_DIRS, TOP_LEVEL_ASTRID_FILES
 
     astrid_root = REPO_ROOT / "astrid"
@@ -913,9 +1183,6 @@ def test_real_repo_top_level_matches_structure_constants() -> None:
 
     # Canonical planned-absent entry (SD3).
     PLANNED_ABSENT_DIRS: frozenset[str] = frozenset({"elements"})
-    # Generated artifact — optional.
-    GENERATED_OPTIONAL: frozenset[str] = frozenset({"__pycache__"})
-
     # ── constants → disk ──────────────────────────────────────────────
 
     for fname in sorted(TOP_LEVEL_ASTRID_FILES):
@@ -931,9 +1198,6 @@ def test_real_repo_top_level_matches_structure_constants() -> None:
                 f"Planned-absent directory 'astrid/{dname}' "
                 f"must NOT exist on disk in M0"
             )
-        elif dname in GENERATED_OPTIONAL:
-            # __pycache__ may or may not be present.
-            pass
         else:
             assert dpath.is_dir(), (
                 f"TOP_LEVEL_ASTRID_DIRS entry 'astrid/{dname}' "
@@ -945,6 +1209,8 @@ def test_real_repo_top_level_matches_structure_constants() -> None:
     for child in sorted(astrid_root.iterdir()):
         # Skip dotfiles (same filter as _validate_top_level_astrid).
         if child.name.startswith("."):
+            continue
+        if child.name == "__pycache__":
             continue
         if child.is_file() and child.suffix == ".py":
             assert child.name in TOP_LEVEL_ASTRID_FILES, (
@@ -969,7 +1235,7 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
     """
     import json
 
-    from astrid._paths import REPO_ROOT
+    from astrid.paths import REPO_ROOT
 
     arch_dir = REPO_ROOT / "docs" / "architecture"
 
@@ -1164,6 +1430,9 @@ def test_reigh_smoke_imports() -> None:
     secrets, or network connections.  No Reigh behavior is exercised.
     """
     # Direct submodules listed in the M0 architecture gate (T8).
+    # Prove every listed submodule landed in sys.modules.
+    import sys
+
     import astrid.core.reigh.data_provider  # noqa: F401
     import astrid.core.reigh.env  # noqa: F401
     import astrid.core.reigh.errors  # noqa: F401
@@ -1171,9 +1440,6 @@ def test_reigh_smoke_imports() -> None:
     import astrid.core.reigh.task_client  # noqa: F401
     import astrid.core.reigh.timeline_io  # noqa: F401
     import astrid.core.reigh.worker_jwt  # noqa: F401
-
-    # Prove every listed submodule landed in sys.modules.
-    import sys
 
     expected = {
         "astrid.core.reigh.data_provider",
@@ -1199,9 +1465,8 @@ def test_giant_file_inventory_matches_rationale() -> None:
     and do not require rationale entries.
     """
     import re
-    from pathlib import Path
 
-    from astrid._paths import REPO_ROOT
+    from astrid.paths import REPO_ROOT
 
     GIANT_THRESHOLD = 1200
 

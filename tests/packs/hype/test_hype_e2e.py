@@ -1047,7 +1047,7 @@ def test_hype_registry_and_merged_render_props_match_golden(
     directly, and assert the assembled dict matches the committed goldens."""
     import shutil
 
-    from astrid._paths import REPO_ROOT
+    from astrid.paths import REPO_ROOT
 
     # -- 1. copy hype fixtures into tmp_path ---------------------------------
     examples = REPO_ROOT / "examples"

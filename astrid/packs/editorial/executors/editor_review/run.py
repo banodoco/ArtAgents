@@ -17,11 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid._media import ffprobe_duration_seconds
-from astrid._paths import executor_argv
 from astrid.audit import AuditContext
 from astrid.contracts.result_manifest import write_manifest
 from astrid.core.timeline import load_arrangement, load_metadata, load_pool
+from astrid.media import ffprobe_duration_seconds
+from astrid.paths import executor_argv
 from astrid.utilities.llm_clients import build_claude_client
 
 from ..arrange.run import pool_digest

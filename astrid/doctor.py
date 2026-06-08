@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import ast
 import importlib
-import importlib.metadata
 import importlib.machinery
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -20,9 +20,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid.core.timeline.kinds import default_transition_kind, transition_kind_options
-
+from astrid.paths import REPO_ROOT
 
 Status = str
 _DECLARED_DEP_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")

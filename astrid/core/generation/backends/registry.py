@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid._paths import REPO_ROOT
 from astrid.core.generation.backends.base import BackendAdapter
 from astrid.core.generation.features import (
     CLOUD_BACKEND_ID,
@@ -22,6 +21,7 @@ from astrid.core.generation.features import (
 )
 from astrid.core.pack import PackDefinition, discover_packs
 from astrid.core.pack.discovery import discover_pack_metadata
+from astrid.paths import REPO_ROOT
 
 
 @dataclass(frozen=True)
