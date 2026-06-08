@@ -16,9 +16,9 @@ import argparse
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
-from astrid.contracts.result_manifest import write_manifest
+from astrid.contracts.result_manifest import build_manifest, write_manifest
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -104,20 +104,16 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess.run) -> i
 
         # --- universal result manifest (output-contract M2) -------------------
         manifest_path = out.parent / "manifest.json"
-        manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "clip_extract",
-            "inputs": {
+        manifest = build_manifest(
+            kind="clip_extract",
+            inputs={
                 "input": str(src),
                 "start": args.start,
                 "dur": args.dur,
             },
-            "outputs": [
-                {"path": out.name, "type": "file"},
-            ],
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            outputs=[{"path": out.name, "type": "file"}],
+            created=datetime.now(timezone.utc).isoformat(),
+        )
         write_manifest(manifest_path, manifest)
         # ---------------------------------------------------------------------
 

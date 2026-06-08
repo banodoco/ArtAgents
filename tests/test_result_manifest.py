@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.contracts import complete_output_metadata, write_manifest
+from astrid.contracts import build_manifest, complete_output_metadata, write_manifest
 from astrid.core.executor.registry import load_default_registry
 
 
@@ -156,6 +156,108 @@ def test_write_manifest_delegates_to_write_json_atomic(tmp_path: Path) -> None:
     written_path, written_payload = mock_write.call_args[0]
     assert written_path == tmp_path / "manifest.json"
     assert written_payload == manifest
+
+
+# -- build_manifest -------------------------------------------------------
+
+
+def test_build_manifest_constructs_minimal_dict() -> None:
+    manifest = build_manifest(
+        kind="analysis",
+        inputs={"prompt": "hello"},
+        outputs=[{"path": "out.txt"}],
+        created="2026-06-05T09:39:21Z",
+    )
+
+    assert manifest == {
+        "schema_version": 1,
+        "kind": "analysis",
+        "inputs": {"prompt": "hello"},
+        "outputs": [{"path": "out.txt"}],
+        "created": "2026-06-05T09:39:21Z",
+        "warnings": [],
+    }
+
+
+def test_build_manifest_defaults_warnings_to_empty_list() -> None:
+    manifest = build_manifest(kind="test", inputs={}, outputs=[], created="t")
+
+    assert manifest["warnings"] == []
+
+
+def test_build_manifest_preserves_explicit_warnings() -> None:
+    manifest = build_manifest(
+        kind="test",
+        inputs={},
+        outputs=[],
+        created="t",
+        warnings=["low disk space"],
+    )
+
+    assert manifest["warnings"] == ["low disk space"]
+
+
+def test_build_manifest_respects_custom_schema_version() -> None:
+    manifest = build_manifest(
+        kind="test",
+        inputs={},
+        outputs=[],
+        created="t",
+        schema_version=3,
+    )
+
+    assert manifest["schema_version"] == 3
+
+
+def test_build_manifest_passthrough_extras() -> None:
+    manifest = build_manifest(
+        kind="analysis",
+        inputs={"prompt": "x"},
+        outputs=[{"path": "artifact.txt"}],
+        created="2026-06-05T09:39:21Z",
+        analysis={"summary": "kept"},
+        domain_version=7,
+    )
+
+    assert manifest["analysis"] == {"summary": "kept"}
+    assert manifest["domain_version"] == 7
+    assert manifest["kind"] == "analysis"
+    assert manifest["schema_version"] == 1
+
+
+def test_build_manifest_result_passes_write_manifest_validation(tmp_path: Path) -> None:
+    artifact = tmp_path / "artifact.txt"
+    artifact.write_text("ok\n", encoding="utf-8")
+
+    manifest = build_manifest(
+        kind="analysis",
+        inputs={"prompt": "x"},
+        outputs=[{"path": "artifact.txt"}],
+        created="2026-06-05T09:39:21Z",
+        extra_tag="passthrough",
+    )
+
+    result = write_manifest(tmp_path / "manifest.json", manifest)
+
+    assert result["extra_tag"] == "passthrough"
+    assert result["kind"] == "analysis"
+
+
+def test_build_manifest_copies_inputs_and_outputs() -> None:
+    inputs = {"key": "value"}
+    outputs = [{"path": "f"}]
+
+    manifest = build_manifest(kind="test", inputs=inputs, outputs=outputs, created="t")
+
+    inputs["extra"] = "leaked"
+    outputs[0]["path"] = "leaked"
+    outputs.append({"path": "also-leaked"})
+
+    assert "extra" not in manifest["inputs"]
+    assert manifest["outputs"] == [{"path": "f"}]
+
+
+# -- registry conformance -------------------------------------------------
 
 
 def test_output_result_registry_conformance_covers_default_registry() -> None:

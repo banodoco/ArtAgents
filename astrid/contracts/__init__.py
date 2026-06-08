@@ -25,7 +25,7 @@ from .schema import (
     Provenance,
     SafetyDeclaration,
 )
-from .result_manifest import complete_output_metadata, write_manifest
+from .result_manifest import build_manifest, complete_output_metadata, write_manifest
 
 __all__ = [
     "CACHE_MODES",
@@ -35,6 +35,7 @@ __all__ = [
     "AstridError",
     "AstridErrorEnvelope",
     "AliasRecord",
+    "build_manifest",
     "build_state_snapshot",
     "CachePolicy",
     "CapabilityHandle",

@@ -153,4 +153,33 @@ def write_manifest(path: str | Path, manifest: Mapping[str, Any]) -> dict[str, A
     return manifest_payload
 
 
-__all__ = ["complete_output_metadata", "write_manifest"]
+def build_manifest(
+    *,
+    kind: str,
+    inputs: Mapping[str, Any],
+    outputs: Sequence[Mapping[str, Any]],
+    created: str,
+    schema_version: int = 1,
+    warnings: list[str] | None = None,
+    **extras: Any,
+) -> dict[str, Any]:
+    """Build a manifest dict suitable for write_manifest().
+
+    Centralizes common boilerplate so executors don't repeat the same
+    dict literal.  Callers supply domain-specific fields; the helper fills
+    in defaults for *schema_version* and *warnings*, and preserves any
+    extra keyword arguments as top-level passthrough fields.
+    """
+    manifest: dict[str, Any] = {
+        "schema_version": schema_version,
+        "kind": kind,
+        "inputs": dict(inputs),
+        "outputs": [dict(output) for output in outputs],
+        "created": created,
+        "warnings": list(warnings) if warnings is not None else [],
+    }
+    manifest.update(extras)
+    return manifest
+
+
+__all__ = ["build_manifest", "complete_output_metadata", "write_manifest"]
