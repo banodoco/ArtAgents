@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.thumbnail_maker')

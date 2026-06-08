@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError, render_astrid_error
+from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('editorial.human_review')

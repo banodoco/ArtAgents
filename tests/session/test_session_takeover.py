@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project import paths as project_paths
 from astrid.core.session import cli
 from astrid.core.session import paths as session_paths

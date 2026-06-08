@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.threads import cli
-from astrid.threads.variants import SELECTION_SENTENCE
+from astrid.core.threads import cli
+from astrid.core.threads.variants import SELECTION_SENTENCE
 
 
 def test_keep_help_documents_append_only_selection_semantics(capsys: pytest.CaptureFixture[str]) -> None:

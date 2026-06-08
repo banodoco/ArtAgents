@@ -7,70 +7,63 @@
     "public_facade": "Part of the public SDK contract.",
     "cli_entrypoint": "Executable CLI surface.",
     "internal_kernel": "Framework machinery under astrid/core.",
-    "shared_library": "Shared library or utility used across subsystems.",
-    "domain_library": "Domain-specific shared logic.",
     "pack_capability_surface": "Capability surface; packs ship here.",
-    "planned_absent": "Canonical concept allowed by constants but not materialized on disk.",
     "docs": "Package-level documentation.",
-    "gateway_package": "CLI gateway package.",
-    "sdk_package": "Public SDK package."
+    "sdk_package": "Public SDK package.",
+    "skills": "Agent skill discovery and harnesses."
   },
   "top_level_files": [
-    {"name": "__init__.py", "classification": "public_facade", "notes": "Lazy public SDK facade."},
-    {"name": "__main__.py", "classification": "cli_entrypoint", "notes": "Executable package gateway; delegates to astrid.gateway.main()."},
-    {"name": "doctor.py", "classification": "cli_entrypoint", "notes": "Repository health diagnostic."},
-    {"name": "media.py", "classification": "shared_library", "notes": "Canonical media helpers."},
-    {"name": "paths.py", "classification": "shared_library", "notes": "Repository and workspace path resolution."},
-    {"name": "setup_cli.py", "classification": "shared_library", "notes": "Setup CLI support."},
-    {"name": "structure.py", "classification": "internal_kernel", "notes": "Repository structure enforcement."},
-    {"name": "theme_schema.py", "classification": "shared_library", "notes": "Theme schema validation helpers."}
+    {
+      "name": "__init__.py",
+      "classification": "public_facade",
+      "notes": "Lazy public SDK facade."
+    },
+    {
+      "name": "__main__.py",
+      "classification": "cli_entrypoint",
+      "notes": "Executable package gateway; delegates to astrid.core.gateway.main()."
+    }
   ],
   "top_level_directories": [
-    {"name": "audit", "classification": "shared_library", "notes": "Run-local provenance ledger, graph, transport, and HTML report."},
-    {"name": "contracts", "classification": "shared_library", "notes": "Common schema dataclasses and errors."},
-    {"name": "core", "classification": "internal_kernel", "notes": "Framework kernel. Pack machinery lives under astrid/core/pack/."},
-    {"name": "docs", "classification": "docs", "notes": "Package-level documentation within astrid/."},
-    {"name": "domains", "classification": "domain_library", "notes": "Domain-specific shared logic."},
-    {"name": "elements", "classification": "planned_absent", "notes": "Allowed canonical concept; no astrid/elements/ directory exists on disk.", "exists_on_disk": false},
-    {"name": "gateway", "classification": "gateway_package", "notes": "CLI gateway facade and implementation modules: dispatch.py, help.py, project.py, wait.py."},
-    {"name": "modalities", "classification": "shared_library", "notes": "Modality-specific support code."},
-    {"name": "orchestrate", "classification": "shared_library", "notes": "Plan compilation and test-running subsystem."},
-    {"name": "packs", "classification": "pack_capability_surface", "notes": "Pack data only. Top-level Python modules are rejected except __init__.py."},
-    {"name": "sdk", "classification": "sdk_package", "notes": "Public SDK package."},
-    {"name": "skills", "classification": "shared_library", "notes": "Agent skill discovery, registry, and harness runtimes."},
-    {"name": "threads", "classification": "shared_library", "notes": "Lineage and thread management."},
-    {"name": "utilities", "classification": "shared_library", "notes": "Generic helpers."},
-    {"name": "verify", "classification": "shared_library", "notes": "Verification helpers."}
+    {
+      "name": "core",
+      "classification": "internal_kernel",
+      "notes": "Framework kernel, gateway, contracts, audit, domains, orchestration helpers, verification, utilities, and shared runtime libraries."
+    },
+    {
+      "name": "docs",
+      "classification": "docs",
+      "notes": "Package-level documentation within astrid/."
+    },
+    {
+      "name": "packs",
+      "classification": "pack_capability_surface",
+      "notes": "Pack data only. Top-level Python modules are rejected except __init__.py."
+    },
+    {
+      "name": "sdk",
+      "classification": "sdk_package",
+      "notes": "Public SDK package."
+    },
+    {
+      "name": "skills",
+      "classification": "skills",
+      "notes": "Agent skill discovery, registry, and harness runtimes."
+    }
   ],
   "structure_constants_reference": {
     "TOP_LEVEL_ASTRID_FILES": [
       "__init__.py",
-      "__main__.py",
-      "doctor.py",
-      "media.py",
-      "paths.py",
-      "setup_cli.py",
-      "structure.py",
-      "theme_schema.py"
+      "__main__.py"
     ],
     "TOP_LEVEL_ASTRID_DIRS": [
-      "audit",
-      "contracts",
       "core",
       "docs",
-      "domains",
-      "elements",
-      "gateway",
-      "modalities",
-      "orchestrate",
       "packs",
       "sdk",
-      "skills",
-      "threads",
-      "utilities",
-      "verify"
+      "skills"
     ],
-    "rule": "No top-level compatibility shim files remain. New top-level modules must be explicit canonical surfaces and added to astrid/structure.py."
+    "rule": "No top-level implementation modules or compatibility shim files are allowed. New implementation code belongs under astrid/core/ unless it is pack data, SDK surface, package docs, or agent skill machinery."
   },
   "pack_machinery_layout": {
     "canonical_home": "astrid/core/pack/",

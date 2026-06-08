@@ -27,7 +27,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
 
-from astrid.contracts.errors import AstridError, coerce_astrid_error
+from astrid.core.contracts.errors import AstridError, coerce_astrid_error
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core.session.binding import (
     SessionBindingError,

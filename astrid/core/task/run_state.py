@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from astrid.contracts.run_status import STEP_LIFECYCLE_KINDS, STEP_TERMINAL_KINDS
+from astrid.core.contracts.run_status import STEP_LIFECYCLE_KINDS, STEP_TERMINAL_KINDS
 from astrid.core.task.plan import STEP_PATH_SEP, iter_steps_with_path
 
 __all__ = ["_run_is_complete"]

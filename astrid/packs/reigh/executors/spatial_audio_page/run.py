@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import write_manifest
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">

@@ -14,15 +14,15 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid import modalities
+from astrid.core import modalities
 from astrid.packs.iteration.executors.assemble import run as assemble
 from astrid.packs.iteration.executors.prepare import run as prepare
 from astrid.packs.rendering.executors.render import run as render_executor
-from astrid.paths import REPO_ROOT
-from astrid.threads.ids import is_ulid
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.schema import SCHEMA_VERSION
-from astrid.threads.variants import update_groups_for_run, write_sidecar
+from astrid.core.paths import REPO_ROOT
+from astrid.core.threads.ids import is_ulid
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.schema import SCHEMA_VERSION
+from astrid.core.threads.variants import update_groups_for_run, write_sidecar
 
 OUTPUT_FILES = (
     ("iteration.mp4", "video"),

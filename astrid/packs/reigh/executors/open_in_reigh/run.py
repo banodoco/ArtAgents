@@ -29,7 +29,7 @@ import json
 import shutil
 from pathlib import Path
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import run_pack_main
 from astrid.core.timeline import Timeline
 

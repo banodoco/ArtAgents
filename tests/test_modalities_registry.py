@@ -3,14 +3,15 @@ import io
 import json
 import pkgutil
 
-from astrid import modalities, pipeline
+from astrid.core import modalities
+from astrid.core import gateway
 
 
 def capture(argv: list[str]) -> tuple[int, str, str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
     with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-        result = pipeline.main(argv)
+        result = gateway.main(argv)
     return result, stdout.getvalue(), stderr.getvalue()
 
 

@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from astrid.core.project.paths import resolve_projects_root
-from astrid.paths import REPO_ROOT as DEFAULT_REPO_ROOT
+from astrid.core.paths import REPO_ROOT as DEFAULT_REPO_ROOT
 
 DEFAULT_SNAPSHOT_ROOT = Path("~/astrid-snapshots")
 _SKIP_DIR_NAMES = {

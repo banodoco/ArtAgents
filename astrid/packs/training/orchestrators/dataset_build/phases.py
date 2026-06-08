@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.jsonio import write_json_atomic
 
 from .acquisition import build_acquisition_request
@@ -207,7 +207,7 @@ def _confine_candidate_media(candidate: Mapping[str, Any], run_dir: Path) -> dic
     item = dict(candidate)
     source_path = Path(str(item["media_path"])).expanduser()
     if not source_path.is_absolute():
-        from astrid.paths import REPO_ROOT
+        from astrid.core.paths import REPO_ROOT
 
         source_path = (REPO_ROOT / source_path).resolve()
     clips_dir = run_dir / "clips"

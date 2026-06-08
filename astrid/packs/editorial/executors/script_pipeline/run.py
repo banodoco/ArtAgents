@@ -18,8 +18,8 @@ from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.contracts.errors import AstridError, render_astrid_error
-from astrid.contracts.result_manifest import write_manifest as write_result_manifest
+from astrid.core.contracts.errors import AstridError, render_astrid_error
+from astrid.core.contracts.result_manifest import write_manifest as write_result_manifest
 
 try:
     import yaml

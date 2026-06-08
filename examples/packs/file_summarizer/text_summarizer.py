@@ -11,7 +11,7 @@ Run:
 
 from __future__ import annotations
 
-from astrid.orchestrate import code, attested, orchestrator, json_file, file_nonempty
+from astrid.core.orchestrate import code, attested, orchestrator, json_file, file_nonempty
 
 
 @orchestrator("file_summarizer.text_summarizer")

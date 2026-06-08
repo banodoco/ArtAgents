@@ -9,7 +9,7 @@ Features are validated per-mode (SD-003).
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, warn_if_unledgered
 
 guard_canonical_entrypoint('generation.generate_image')
@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.result_manifest import complete_output_metadata
+from astrid.core.contracts.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (

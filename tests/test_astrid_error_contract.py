@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from astrid.contracts.errors import (
+from astrid.core.contracts.errors import (
     AstridError,
     build_state_snapshot,
     coerce_astrid_error,
@@ -10,7 +10,7 @@ from astrid.contracts.errors import (
     normalize_valid_options,
     wrap_degraded_error,
 )
-from astrid.contracts.exec_error import ExecError
+from astrid.core.contracts.exec_error import ExecError
 from astrid.core.project.project import ProjectError
 from astrid.core.project.schema import ProjectValidationError
 from astrid.core.session.binding import SessionBindingError
@@ -154,14 +154,14 @@ def test_wrap_degraded_error_without_state_snapshot() -> None:
 
 
 def test_astrid_error_envelope_protocol_isinstance_positive() -> None:
-    from astrid.contracts.errors import AstridErrorEnvelope
+    from astrid.core.contracts.errors import AstridErrorEnvelope
 
     err = AstridError("something")
     assert isinstance(err, AstridErrorEnvelope)
 
 
 def test_astrid_error_envelope_protocol_isinstance_negative() -> None:
-    from astrid.contracts.errors import AstridErrorEnvelope
+    from astrid.core.contracts.errors import AstridErrorEnvelope
 
     class Plain:
         pass

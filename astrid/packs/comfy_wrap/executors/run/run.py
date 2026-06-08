@@ -20,7 +20,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 
 logger = logging.getLogger(__name__)
 

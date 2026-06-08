@@ -9,8 +9,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid.contracts.errors import AstridError, render_astrid_error
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.errors import AstridError, render_astrid_error
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RunPodHandle
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from astrid.audit.transport import append_ledger_record
+from astrid.core.audit.transport import append_ledger_record
 from astrid.core.task.events import append_event, make_run_started_event
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineActor
@@ -75,7 +75,7 @@ def test_u3_chain_integrity_fails_for_tampered_audit_chain(tmp_path: Path) -> No
     result = integrity.u3_chain_integrity(evidence_dir)
 
     assert result["status"] == "fail"
-    assert _subcheck_by_kind(result, "audit")["verifier"] == "astrid.audit.graph.verify_audit_ledger"
+    assert _subcheck_by_kind(result, "audit")["verifier"] == "astrid.core.audit.graph.verify_audit_ledger"
 
 
 def test_u3_chain_integrity_returns_na_when_no_chains_are_present(tmp_path: Path) -> None:

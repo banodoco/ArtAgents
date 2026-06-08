@@ -8,7 +8,7 @@ Edit the steps below to describe your task. Run:
 
 from __future__ import annotations
 
-from astrid.orchestrate import (
+from astrid.core.orchestrate import (
     code,
     file_nonempty,
     orchestrator,

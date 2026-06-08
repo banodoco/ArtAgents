@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.paths import resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
 from astrid.core.session.binding import (

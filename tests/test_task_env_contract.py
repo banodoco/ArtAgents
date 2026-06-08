@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.executor import runner as executor_runner
 from astrid.core.executor.runner import ExecutorRunRequest
 from astrid.core.orchestrator import runner as orchestrator_runner

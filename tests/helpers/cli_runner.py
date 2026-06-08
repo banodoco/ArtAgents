@@ -7,7 +7,7 @@ import dataclasses
 import io
 from typing import Callable, List, Optional
 
-from astrid.contracts.errors import AstridError, render_astrid_error
+from astrid.core.contracts.errors import AstridError, render_astrid_error
 
 
 @dataclasses.dataclass

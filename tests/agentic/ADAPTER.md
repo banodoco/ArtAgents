@@ -110,9 +110,9 @@ Missing mandatory artifacts cause the capture to fail with a clear error.
 
 ### 3.3 Audit Ledger Verifier
 
-- **Source File:** `astrid/audit/graph.py` (public API), `astrid/audit/transport.py` (implementation)
+- **Source File:** `astrid/core/audit/graph.py` (public API), `astrid/core/audit/transport.py` (implementation)
 - **Function:** `verify_audit_ledger`
-- **Import Path:** `astrid.audit.graph import verify_audit_ledger`
+- **Import Path:** `astrid.core.audit.graph import verify_audit_ledger`
 - **Signature:**
   ```python
   def verify_audit_ledger(run_dir: Path | str) -> tuple[bool, int | None, str]:
@@ -121,7 +121,7 @@ Missing mandatory artifacts cause the capture to fail with a clear error.
   - `bool` — `True` if all records validate (or no v2 records present)
   - `int | None` — offending line number on failure, `None` if file missing or no v2 records
   - `str` — `"ok"` on success, error message on failure
-- **Underlying implementation:** Delegates to `verify_ledger_path()` in `astrid/audit/transport.py`, which:
+- **Underlying implementation:** Delegates to `verify_ledger_path()` in `astrid/core/audit/transport.py`, which:
   1. Reads `audit/ledger.jsonl` bytes
   2. Parses via `parse_ledger_bytes(..., require_final_newline=True)`
   3. Calls `verify_records()` which validates `prev_hash` linkage and `hash` field for v2 records
@@ -172,7 +172,7 @@ canonical CLI surface.
 |---|---|---|---|
 | C1 | Timeline eventlog hash-chain integrity | `LocalFsBackend.verify_chain()` (§3.1) | `EventLogVerification` |
 | C2 | Task-run eventlog hash-chain integrity | `verify_chain()` from `astrid.core.task.events` (§3.2) | `(bool, int, str\|None)` |
-| C3 | Audit ledger hash-chain integrity | `verify_audit_ledger()` from `astrid.audit.graph` (§3.3) | `(bool, int\|None, str)` |
+| C3 | Audit ledger hash-chain integrity | `verify_audit_ledger()` from `astrid.core.audit.graph` (§3.3) | `(bool, int\|None, str)` |
 | C4 | Cross-project binding | `_eval_no_cross_project_binding()` in `tests/agentic/auditor.py` | `bool` |
 
 **M1 scope:** Only the function signatures, return types, and preconditions are

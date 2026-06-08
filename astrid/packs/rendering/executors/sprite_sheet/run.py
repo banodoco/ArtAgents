@@ -77,7 +77,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 

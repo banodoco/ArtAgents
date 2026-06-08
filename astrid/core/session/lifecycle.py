@@ -19,7 +19,7 @@ from astrid.core.session.lease import (
     read_lease,
 )
 from astrid.core.task.events import EVENTS_FILENAME
-from astrid.threads.ids import generate_ulid
+from astrid.core.threads.ids import generate_ulid
 
 from .model import Session, SessionRole, SessionStore, now_iso
 

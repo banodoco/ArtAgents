@@ -42,7 +42,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.run import write_run_record
 from astrid.core.reigh import env as reigh_env
 from astrid.core.reigh.data_provider import SupabaseDataProvider

@@ -18,7 +18,7 @@ import pytest
 os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
 
 from astrid.core.generation.backends.base import GenerationResult  # noqa: E402
-from astrid.media import MediaProbe  # noqa: E402
+from astrid.core.media import MediaProbe  # noqa: E402
 from astrid.packs.generation.executors.generate_video.run import (  # noqa: E402
     generate_core as generate_video_core,
 )

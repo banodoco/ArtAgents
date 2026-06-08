@@ -5,7 +5,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import StaticChoices
 from astrid.core.orchestrator import cli as orchestrator_cli
 

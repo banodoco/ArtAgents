@@ -12,7 +12,7 @@ from astrid.packs.training.orchestrators.dataset_build.manifest import validate_
 from astrid.packs.training.orchestrators.dataset_build.manifest_adapters.ai_toolkit_ltx import (
     AiToolkitLtxAdapter,
 )
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 
 class TrainingManifestError(ValueError):

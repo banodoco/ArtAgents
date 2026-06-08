@@ -58,19 +58,19 @@ from astrid.core.task.events import (
 from astrid.core.task.lifecycle import cmd_next
 
 
-_BODY_PRODUCES = '''from astrid.orchestrate import orchestrator, attested
-from astrid.verify import json_file
+_BODY_PRODUCES = '''from astrid.core.orchestrate import orchestrator, attested
+from astrid.core.verify import json_file
 @orchestrator("demo.with_produces")
 def main(): return [attested("review", command="review.sh", instructions="check", ack="human", produces={"out": json_file()})]
 '''
 
-_BODY_FE = '''from astrid.orchestrate import orchestrator, attested, repeat_for_each
+_BODY_FE = '''from astrid.core.orchestrate import orchestrator, attested, repeat_for_each
 @orchestrator("demo.fe")
 def main(): return [attested("review_each", command="r.sh", instructions="check", ack="human",
     repeat=repeat_for_each(items=["a","b","c"]))]
 '''
 
-_BODY_CODE = '''from astrid.orchestrate import orchestrator, code
+_BODY_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo","x"])]
 '''

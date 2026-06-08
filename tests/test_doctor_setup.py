@@ -10,10 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
-from astrid import doctor, setup_cli
+from astrid.core import doctor, setup_cli
 from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.project.project import create_project
-from astrid.structure import TOP_LEVEL_ASTRID_DIRS, validate_repo_structure
+from astrid.core.structure import TOP_LEVEL_ASTRID_DIRS, validate_repo_structure
 
 
 class DoctorSetupTest(unittest.TestCase):
@@ -374,9 +374,8 @@ class DoctorSetupTest(unittest.TestCase):
         self.assertNotIn("elements sync", stdout)
         self.assertIn("[skipped] elements install: effects/text-card: no dependencies declared", stdout)
 
-    def test_top_level_dirs_includes_verify_and_orchestrate(self) -> None:
-        self.assertIn("verify", TOP_LEVEL_ASTRID_DIRS)
-        self.assertIn("orchestrate", TOP_LEVEL_ASTRID_DIRS)
+    def test_top_level_dirs_are_collapsed_to_canonical_roots(self) -> None:
+        self.assertEqual(TOP_LEVEL_ASTRID_DIRS, {"core", "docs", "packs", "sdk", "skills"})
 
     def test_repo_structure_guard_rejects_legacy_and_misplaced_folders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

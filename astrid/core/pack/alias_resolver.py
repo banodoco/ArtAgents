@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 
-from astrid.contracts.schema import AliasRecord
+from astrid.core.contracts.schema import AliasRecord
 from astrid.core.pack import PackAliasKind, PackDefinition
 
 

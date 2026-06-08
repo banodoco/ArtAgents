@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.scripts]
-astrid = "astrid.gateway:main"
+astrid = "astrid.core.gateway:main"
 
 [project.optional-dependencies]
 dev = [

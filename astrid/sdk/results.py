@@ -7,8 +7,8 @@ from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.contracts.exec_error import ExecError
-from astrid.contracts.schema import CapabilityHandle, Output, Port
+from astrid.core.contracts.exec_error import ExecError
+from astrid.core.contracts.schema import CapabilityHandle, Output, Port
 
 from .exceptions import (
     AstridSDKError,

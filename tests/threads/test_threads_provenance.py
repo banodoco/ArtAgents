@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from astrid.audit import AuditContext
-from astrid.threads.ids import generate_run_id, generate_thread_id
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.record import build_run_record, finalize_run_record, write_run_record
-from astrid.threads.schema import make_thread_record
+from astrid.core.audit import AuditContext
+from astrid.core.threads.ids import generate_run_id, generate_thread_id
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.record import build_run_record, finalize_run_record, write_run_record
+from astrid.core.threads.schema import make_thread_record
 
 
 def test_provenance_bridges_audit_ledger_and_hash_ancestry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

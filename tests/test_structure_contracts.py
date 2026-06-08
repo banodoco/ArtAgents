@@ -3,9 +3,11 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-import astrid.structure as structure
-from astrid.structure import (
+import astrid.core.structure as structure
+from astrid.core.structure import (
     StructureReport,
+    TOP_LEVEL_ASTRID_DIRS,
+    TOP_LEVEL_ASTRID_FILES,
     validate_cli_domain_boundary,
     validate_import_layering,
     validate_migration_completion,
@@ -54,41 +56,16 @@ def test_validate_import_layering_flags_absolute_and_relative_core_pack_imports(
     ) in violations
 
 
-def test_validate_import_layering_flags_core_audit_imports(tmp_path: Path) -> None:
+def test_validate_import_layering_allows_core_subsystem_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "astrid/core/bad_audit.py",
-        "from astrid.audit.recorder import record_event\n",
+        "astrid/core/uses_audit.py",
+        "from astrid.core.audit.recorder import record_event\n",
     )
 
     violations = validate_import_layering(tmp_path)
 
-    assert "astrid/core/bad_audit.py:1 imports forbidden module 'astrid.audit.recorder'" in violations
-
-
-def test_validate_import_layering_exempts_only_event_stream_audit_import(tmp_path: Path) -> None:
-    # event_stream.py's audit import is exempt per the documented
-    # file-level _IMPORT_LAYERING_EXEMPT_REL entry (SD2).
-    _write(
-        tmp_path,
-        "astrid/core/task/event_stream.py",
-        "from astrid.audit.recorder import read_events\n",
-    )
-    # Another core file importing audit is NOT exempt.
-    _write(
-        tmp_path,
-        "astrid/core/other_audit.py",
-        "from astrid.audit.recorder import record_event\n",
-    )
-
-    violations = validate_import_layering(tmp_path)
-
-    assert not any(
-        "event_stream.py" in v for v in violations
-    ), f"event_stream.py should be exempt but was flagged: {[v for v in violations if 'event_stream.py' in v]}"
-    assert any(
-        "other_audit.py" in v for v in violations
-    ), f"other_audit.py should be flagged but wasn't: {violations}"
+    assert violations == []
 
 
 def test_validate_import_layering_flags_dynamic_concrete_pack_imports_and_respects_bridge_exemptions(
@@ -117,7 +94,7 @@ def test_validate_import_layering_flags_dynamic_concrete_pack_imports_and_respec
 def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "astrid/domains/hype/rules.py",
+        "astrid/core/domains/hype/rules.py",
         "from astrid.core.pack.cli import build_parser\n",
     )
     _write(
@@ -129,7 +106,7 @@ def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_pa
     violations = validate_cli_domain_boundary(tmp_path)
 
     assert set(violations) == {
-        "astrid/domains/hype/rules.py:1 imports CLI module 'astrid.core.pack.cli'; move CLI-only logic to a cli.py entrypoint or shared helper"
+        "astrid/core/domains/hype/rules.py:1 imports CLI module 'astrid.core.pack.cli'; move CLI-only logic to a cli.py entrypoint or shared helper"
     }
 
 
@@ -328,16 +305,16 @@ def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_pa
     assert report.errors == ()
 
 
-def test_validate_import_layering_flags_deferred_lifecycle_split_imports(tmp_path: Path) -> None:
+def test_validate_import_layering_allows_core_orchestrate_but_flags_pack_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "astrid/core/task/lifecycle.py",
-        "from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
+        "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
     )
     _write(
         tmp_path,
         "astrid/core/task/orchestrator_resolver.py",
-        "from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
+        "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
     )
     _write(
         tmp_path,
@@ -347,16 +324,13 @@ def test_validate_import_layering_flags_deferred_lifecycle_split_imports(tmp_pat
     _write(
         tmp_path,
         "astrid/core/task/not_lifecycle.py",
-        "from astrid.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
+        "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
     )
 
     violations = validate_import_layering(tmp_path)
 
     assert set(violations) == {
-        "astrid/core/task/lifecycle.py:1 imports forbidden module 'astrid.orchestrate.compile'",
-        "astrid/core/task/orchestrator_resolver.py:1 imports forbidden module 'astrid.orchestrate.compile'",
         "astrid/core/task/plan_builder.py:1 imports forbidden module 'astrid.packs.video_editing.orchestrators.hype.plan_template'",
-        "astrid/core/task/not_lifecycle.py:1 imports forbidden module 'astrid.orchestrate.compile'",
     }
 
 
@@ -501,7 +475,7 @@ def test_validate_migration_completion_exempts_only_compile_sys_modules_pattern(
 ) -> None:
     _write(
         tmp_path,
-        "astrid/orchestrate/compile.py",
+        "astrid/core/orchestrate/compile.py",
         "import sys\n"
         "sys.modules['temp'] = object()\n",
     )
@@ -514,7 +488,7 @@ def test_validate_migration_completion_exempts_only_compile_sys_modules_pattern(
 
     advisories = validate_migration_completion(tmp_path)
 
-    assert "astrid/orchestrate/compile.py: sys.modules injection remains outside tests" not in advisories
+    assert "astrid/core/orchestrate/compile.py: sys.modules injection remains outside tests" not in advisories
     assert "astrid/core/not_compile.py: sys.modules injection remains outside tests" in advisories
 
 
@@ -522,7 +496,7 @@ def test_validate_repo_structure_keeps_compile_sys_modules_exemption_green(tmp_p
     _bootstrap_structure_root(tmp_path)
     _write(
         tmp_path,
-        "astrid/orchestrate/compile.py",
+        "astrid/core/orchestrate/compile.py",
         "import sys\n"
         "sys.modules['temp'] = object()\n",
     )
@@ -572,7 +546,7 @@ def test_timeline_facade_files_are_strictly_thin_re_exports() -> None:
     no function/class definitions."""
     import ast
 
-    from astrid.paths import REPO_ROOT
+    from astrid.core.paths import REPO_ROOT
 
     facade_files = (
         REPO_ROOT / "astrid" / "core" / "timeline" / "__init__.py",
@@ -643,37 +617,37 @@ _LINEAGE_SYMBOLS: frozenset[str] = frozenset(
 
 def test_thread_wrapper_symbols_removed_from_public_surface() -> None:
     """Regression guard: m5a-removed thread wrapper symbols must not appear in
-    ``astrid.threads.__all__`` or be accessible as module attributes, while
+    ``astrid.core.threads.__all__`` or be accessible as module attributes, while
     all 10 lineage symbols must remain intact.
 
     If this test fails, a removed symbol was re-introduced into the public
     surface — revert the change or update the m5a plan to reflect the new
     decision.
     """
-    import astrid.threads
+    import astrid.core.threads
 
-    public = set(astrid.threads.__all__)
+    public = set(astrid.core.threads.__all__)
 
     leaked = public & _REMOVED_WRAPPER_SYMBOLS
     assert not leaked, (
-        f"Removed wrapper symbols leaked into astrid.threads.__all__: "
+        f"Removed wrapper symbols leaked into astrid.core.threads.__all__: "
         f"{sorted(leaked)}"
     )
 
     missing_lineage = _LINEAGE_SYMBOLS - public
     assert not missing_lineage, (
-        f"Lineage symbols missing from astrid.threads.__all__: "
+        f"Lineage symbols missing from astrid.core.threads.__all__: "
         f"{sorted(missing_lineage)}"
     )
 
     for sym in sorted(_REMOVED_WRAPPER_SYMBOLS):
-        assert not hasattr(astrid.threads, sym), (
-            f"Removed symbol {sym!r} is still accessible on astrid.threads"
+        assert not hasattr(astrid.core.threads, sym), (
+            f"Removed symbol {sym!r} is still accessible on astrid.core.threads"
         )
 
     for sym in sorted(_LINEAGE_SYMBOLS):
-        assert hasattr(astrid.threads, sym), (
-            f"Lineage symbol {sym!r} is not accessible on astrid.threads"
+        assert hasattr(astrid.core.threads, sym), (
+            f"Lineage symbol {sym!r} is not accessible on astrid.core.threads"
         )
 
 
@@ -690,7 +664,7 @@ def test_validate_migration_completion_flags_reintroduced_wrapper_all_aliases(
     """
     _write(
         tmp_path,
-        "astrid/threads/__init__.py",
+        "astrid/core/threads/__init__.py",
         '"""Thread state primitives — synthetic regression fixture."""\n'
         "from __future__ import annotations\n\n"
         "from .ids import generate_group_id, generate_run_id, generate_thread_id, is_ulid\n"
@@ -718,7 +692,7 @@ def test_validate_migration_completion_flags_reintroduced_wrapper_all_aliases(
     # Stub lineage modules so AST scans on the synthetic tree don't choke
     _write(
         tmp_path,
-        "astrid/threads/ids.py",
+        "astrid/core/threads/ids.py",
         "def generate_group_id(): ...\n"
         "def generate_run_id(): ...\n"
         "def generate_thread_id(): ...\n"
@@ -726,18 +700,18 @@ def test_validate_migration_completion_flags_reintroduced_wrapper_all_aliases(
     )
     _write(
         tmp_path,
-        "astrid/threads/index.py",
+        "astrid/core/threads/index.py",
         "class ThreadIndexError(Exception): ...\n"
         "class ThreadIndexLockTimeout(Exception): ...\n"
         "class ThreadIndexStore: ...\n",
     )
     _write(
         tmp_path,
-        "astrid/threads/record.py",
+        "astrid/core/threads/record.py",
         "def build_run_record(): ...\n"
         "def finalize_run_record(): ...\n",
     )
-    _write(tmp_path, "astrid/threads/schema.py", "SCHEMA_VERSION = 1\n")
+    _write(tmp_path, "astrid/core/threads/schema.py", "SCHEMA_VERSION = 1\n")
 
     advisories = validate_migration_completion(tmp_path)
 
@@ -783,7 +757,7 @@ def test_run_record_status_boundary_flags_legacy_token_in_dict_literal(tmp_path:
 def test_run_record_status_boundary_flags_legacy_token_orphaned(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "astrid/threads/bad_reaper.py",
+        "astrid/core/threads/bad_reaper.py",
         "def reap() -> None:\n"
         '    record["status"] = "orphaned"\n',
     )
@@ -812,7 +786,7 @@ def test_run_record_status_boundary_does_not_flag_run_status_py(tmp_path: Path) 
     """The canonical mapping in run_status.py is exempt."""
     _write(
         tmp_path,
-        "astrid/contracts/run_status.py",
+        "astrid/core/contracts/run_status.py",
         '_RUN_RECORD_STATUS_TO_RUN_STATUS = {"prepared": "running"}\n',
     )
     advisories = validate_run_record_status_boundary(tmp_path)
@@ -1026,8 +1000,8 @@ def test_real_repo_top_level_matches_structure_constants() -> None:
     * No unexpected ``.py`` files or directories may be present on disk
       (dotfiles are skipped, matching the validator filter).
     """
-    from astrid.paths import REPO_ROOT
-    from astrid.structure import TOP_LEVEL_ASTRID_DIRS, TOP_LEVEL_ASTRID_FILES
+    from astrid.core.paths import REPO_ROOT
+    from astrid.core.structure import TOP_LEVEL_ASTRID_DIRS, TOP_LEVEL_ASTRID_FILES
 
     astrid_root = REPO_ROOT / "astrid"
     assert astrid_root.is_dir(), "astrid/ directory must exist on disk"
@@ -1086,7 +1060,7 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
     """
     import json
 
-    from astrid.paths import REPO_ROOT
+    from astrid.core.paths import REPO_ROOT
 
     arch_dir = REPO_ROOT / "docs" / "architecture"
 
@@ -1111,27 +1085,17 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
     assert isinstance(tli.get("top_level_directories"), list), (
         "top-level-inventory.json: 'top_level_directories' must be a list"
     )
-    assert len(tli["top_level_directories"]) >= 10, (
-        f"Expected >= 10 top-level dirs; got {len(tli['top_level_directories'])}"
-    )
     for entry in tli["top_level_directories"]:
         assert "name" in entry, f"Dir entry missing 'name': {entry}"
         assert "classification" in entry, (
             f"Dir entry missing 'classification': {entry}"
         )
 
-    # Confirm the planned-absent entry is recorded.
-    elements_entries = [
-        e for e in tli["top_level_directories"]
-        if e["name"] == "elements"
-    ]
-    assert elements_entries, (
-        "top-level-inventory.json: 'elements' must appear in "
-        "top_level_directories"
+    assert [entry["name"] for entry in tli["top_level_files"]] == sorted(
+        TOP_LEVEL_ASTRID_FILES
     )
-    assert elements_entries[0]["classification"] == "planned_absent", (
-        f"elements classification must be 'planned_absent'; "
-        f"got {elements_entries[0]['classification']!r}"
+    assert [entry["name"] for entry in tli["top_level_directories"]] == sorted(
+        TOP_LEVEL_ASTRID_DIRS
     )
 
     # ── 2. pack-layout-variants.json ──────────────────────────────────
@@ -1203,10 +1167,10 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
 
 def test_public_import_and_shim_smoke() -> None:
     """M0 public import smoke (T7): ``import astrid`` resolves and exposes
-    representative public SDK facade symbols; the stable ``astrid.gateway``
+    representative public SDK facade symbols; the stable ``astrid.core.gateway``
     public import surface remains importable.
 
-    ``astrid.gateway`` aliases itself to ``astrid.gateway`` via
+    ``astrid.core.gateway`` aliases itself to ``astrid.core.gateway`` via
     ``sys.modules`` so assertions are order-insensitive and do not require
     object identity.
     """
@@ -1252,12 +1216,12 @@ def test_public_import_and_shim_smoke() -> None:
         f"{sorted(missing_from_all)}"
     )
 
-    # pipeline aliases itself to astrid.gateway via sys.modules.
+    # pipeline aliases itself to astrid.core.gateway via sys.modules.
     # Only assert importability — do NOT rely on object identity.
-    import astrid.gateway  # noqa: F401
+    import astrid.core.gateway  # noqa: F401
 
-    assert "astrid.gateway" in sys.modules, (
-        "astrid.gateway must be registered in sys.modules"
+    assert "astrid.core.gateway" in sys.modules, (
+        "astrid.core.gateway must be registered in sys.modules"
     )
 
 
@@ -1304,7 +1268,7 @@ def test_giant_file_inventory_matches_rationale() -> None:
     """
     import re
 
-    from astrid.paths import REPO_ROOT
+    from astrid.core.paths import REPO_ROOT
 
     GIANT_THRESHOLD = 1200
 

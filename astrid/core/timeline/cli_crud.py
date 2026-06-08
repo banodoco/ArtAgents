@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
 from astrid.core.session.binding import resolve_current_session
 

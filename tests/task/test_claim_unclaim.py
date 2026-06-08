@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.task.claim import (
     CLAIM_KIND,
     UNCLAIM_KIND,

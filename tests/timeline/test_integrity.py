@@ -8,7 +8,7 @@ import pytest
 
 from astrid.core.timeline.integrity import compute_sha256, file_size, verify
 from astrid.core.timeline.model import FinalOutput
-from astrid.threads.ids import generate_ulid
+from astrid.core.threads.ids import generate_ulid
 
 
 class TestComputeSha256:

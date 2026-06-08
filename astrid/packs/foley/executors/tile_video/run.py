@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('foley.tile_video')

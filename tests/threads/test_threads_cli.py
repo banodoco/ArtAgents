@@ -5,20 +5,20 @@ from pathlib import Path
 
 import pytest
 
-from astrid import gateway
-from astrid.contracts.run_status import RunStatus
-from astrid.threads import cli
-from astrid.threads.ids import generate_run_id, generate_thread_id
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.record import build_run_record, finalize_run_record, write_run_record
-from astrid.threads.schema import make_thread_record
+from astrid.core import gateway
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.threads import cli
+from astrid.core.threads.ids import generate_run_id, generate_thread_id
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.record import build_run_record, finalize_run_record, write_run_record
+from astrid.core.threads.schema import make_thread_record
 
 
 def test_thread_cli_lifecycle_show_no_content_and_route(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
-    """Threads internal-library lifecycle exercised through astrid.threads.cli.
+    """Threads internal-library lifecycle exercised through astrid.core.threads.cli.
 
     Sprint 1 / T12 retired the user-facing ``astrid thread`` CLI verb from
-    ``astrid.gateway``. The internal library (DEC-001) is retained; this
+    ``astrid.core.gateway``. The internal library (DEC-001) is retained; this
     test now exercises only the library-level CLI, not the pipeline route.
     """
 

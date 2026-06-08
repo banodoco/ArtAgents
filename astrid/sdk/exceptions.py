@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from astrid.contracts.exec_error import ExecError
+from astrid.core.contracts.exec_error import ExecError
 from astrid.core.project.paths import ProjectPathError
 
 
@@ -78,7 +78,7 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
     if isinstance(exc, AstridSDKError):
         return exc
 
-    from astrid.contracts.event_log_error import EventLogError
+    from astrid.core.contracts.event_log_error import EventLogError
     from astrid.core.executor.runner import ExecutorRunnerError
     from astrid.core.executor.schema import ExecutorValidationError
     from astrid.core.orchestrator.runner import OrchestratorRunError, OrchestratorRunnerError

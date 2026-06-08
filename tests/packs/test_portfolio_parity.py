@@ -395,7 +395,7 @@ def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
     from astrid.core.project.paths import project_dir
     from astrid.core.session.identity import Identity, write_identity
     from astrid.core.session.paths import session_path
-    from astrid.threads.ids import generate_ulid
+    from astrid.core.threads.ids import generate_ulid
 
     astrid_home.mkdir(parents=True, exist_ok=True)
     write_identity(Identity(agent_id="claude-1",

@@ -9,12 +9,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.env_vars import ASTRID_SESSION_ID
 from astrid.core.task import env as task_env
 from astrid.core.task.plan import step_dir_for
 from astrid.core.util.time import utc_now_seconds
-from astrid.threads.ids import generate_run_id
+from astrid.core.threads.ids import generate_run_id
 
 from . import paths
 from .jsonio import read_json, write_json_atomic

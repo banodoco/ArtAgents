@@ -11,7 +11,7 @@ import copy
 from dataclasses import asdict
 from pathlib import Path
 
-from astrid.contracts.schema import (
+from astrid.core.contracts.schema import (
     CapabilityHandle,
     Port,
     Output,
@@ -74,7 +74,7 @@ def _make_orchestrator(**overrides) -> OrchestratorDefinition:
         name="Pipeline Orchestrator",
         kind="built_in",
         version="2.0.0",
-        runtime=RuntimeSpec(kind="python", module="astrid.gateway", function="run"),
+        runtime=RuntimeSpec(kind="python", module="astrid.core.gateway", function="run"),
         description="Runs the full pipeline",
         short_description="Pipeline runner",
         keywords=("pipeline",),

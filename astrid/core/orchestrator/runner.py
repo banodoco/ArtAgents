@@ -12,9 +12,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from astrid.contracts.capability_runner import CapabilityRunner
-from astrid.contracts.run_status import RunStatus
-from astrid.contracts.schema import Output
+from astrid.core.contracts.capability_runner import CapabilityRunner
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.contracts.schema import Output
 from astrid.core.executor.runner import _has_value, _stringify_value
 from astrid.core.project.run import (
     ProjectRunContext,

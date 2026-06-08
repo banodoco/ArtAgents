@@ -22,7 +22,7 @@ from astrid.core.pack import (
     iter_executor_roots,
     iter_orchestrator_roots,
 )
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 DiscoverPacksFn = Callable[..., "tuple[PackDefinition, ...]"]
 

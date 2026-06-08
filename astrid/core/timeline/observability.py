@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from astrid.threads.ids import is_ulid
+from astrid.core.threads.ids import is_ulid
 
 from .eventlog.types import OpsLogEntry, ResolvedTarget
 from .paths import (

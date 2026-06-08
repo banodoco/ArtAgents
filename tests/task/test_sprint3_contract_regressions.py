@@ -38,13 +38,13 @@ from astrid.core.task.lifecycle import cmd_ack, cmd_next, cmd_start, cmd_status
 from astrid.core.timeline.crud import create_timeline
 
 
-_BODY_CODE = """from astrid.orchestrate import orchestrator, code
+_BODY_CODE = """from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.app")
 def app(): return [code("step_a", argv=["echo", "x"])]
 """
 
-_BODY_FOREACH_ATTESTED_PRODUCES = '''from astrid.orchestrate import orchestrator, attested, repeat_for_each
-from astrid.verify import json_file
+_BODY_FOREACH_ATTESTED_PRODUCES = '''from astrid.core.orchestrate import orchestrator, attested, repeat_for_each
+from astrid.core.verify import json_file
 @orchestrator("demo.fe_produces")
 def main(): return [attested("review_each", command="review.sh", instructions="check", ack="human",
     repeat=repeat_for_each(items=["a", "b"]), produces={"out": json_file()})]

@@ -16,13 +16,13 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
-from astrid.contracts.capability_runner import CapabilityRunner
-from astrid.contracts.exec_error import (
+from astrid.core.contracts.capability_runner import CapabilityRunner
+from astrid.core.contracts.exec_error import (
     ExecError,
     error_from_missing_binaries,
     error_from_returncode,
 )
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.run import (
@@ -45,7 +45,7 @@ from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry

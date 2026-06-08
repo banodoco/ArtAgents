@@ -38,12 +38,12 @@ from tests.helpers.cli_runner import run_cli
 
 _STATUS_SHARED_KEYS = {"schema_version", "project", "run_id", "state"}
 
-_BODY_CODE = """from astrid.orchestrate import orchestrator, code
+_BODY_CODE = """from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]
 """
 
-_BODY_ATTESTED = """from astrid.orchestrate import orchestrator, attested
+_BODY_ATTESTED = """from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review")
 def main(): return [attested("review", command="ok.sh", instructions="confirm", ack="human")]
 """

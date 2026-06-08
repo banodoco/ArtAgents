@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.contracts import build_manifest, complete_output_metadata, write_manifest
+from astrid.core.contracts import build_manifest, complete_output_metadata, write_manifest
 from astrid.core.executor.registry import load_default_registry
 
 
@@ -149,7 +149,7 @@ def test_write_manifest_delegates_to_write_json_atomic(tmp_path: Path) -> None:
         "warnings": [],
     }
 
-    with patch("astrid.contracts.result_manifest.write_json_atomic") as mock_write:
+    with patch("astrid.core.contracts.result_manifest.write_json_atomic") as mock_write:
         manifest = write_manifest(tmp_path / "manifest.json", manifest_input)
 
     mock_write.assert_called_once()
@@ -264,7 +264,7 @@ def test_output_result_registry_conformance_covers_default_registry() -> None:
     registry = load_default_registry()
     registry_ids = {definition.id for definition in registry.list()}
 
-    exemptions_path = Path("astrid/contracts/output_result_exemptions.json")
+    exemptions_path = Path("astrid/core/contracts/output_result_exemptions.json")
     payload = json.loads(exemptions_path.read_text(encoding="utf-8"))
     non_exempt_ids = set(payload["non_exempt"])
     exempted_ids = set(payload["exemptions"])
@@ -293,7 +293,7 @@ def test_output_result_registry_conformance_covers_default_registry() -> None:
 
 def test_output_result_registry_explicitly_covers_understanding_trio_without_declared_outputs() -> None:
     registry = load_default_registry()
-    payload = json.loads(Path("astrid/contracts/output_result_exemptions.json").read_text(encoding="utf-8"))
+    payload = json.loads(Path("astrid/core/contracts/output_result_exemptions.json").read_text(encoding="utf-8"))
     non_exempt_ids = set(payload["non_exempt"])
 
     for executor_id in (

@@ -23,7 +23,7 @@ from astrid.core.util.http import (
     fal_submit_and_poll,
 )
 from astrid.core.util.secrets import load_api_key
-from astrid.threads.variants import write_sidecar as write_variant_sidecar
+from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 
 FIREWORKS_CHAT_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
 

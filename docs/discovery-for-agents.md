@@ -205,7 +205,7 @@ When you add a new CLI argument to a pack `run.py`:
   an `AstridError` so the renderer produces the structured envelope:
 
   ```python
-  from astrid.contracts.errors import AstridError
+  from astrid.core.contracts.errors import AstridError
 
   try:
       args = parser.parse_args(argv)

@@ -5,8 +5,8 @@ from pathlib import Path
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.schema import make_thread_record
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.schema import make_thread_record
 
 
 THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FV0"

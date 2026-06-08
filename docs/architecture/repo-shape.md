@@ -12,7 +12,7 @@ validation, CLI, installation, entrypoint, agent indexing, gitignore filtering,
 schemas) belongs under `astrid/core/pack/*`. `astrid/packs/` is for pack data
 only — executors, orchestrators, elements, `pack.yaml`, `skill/` — with no
 top-level Python machinery except `__init__.py`. Gateway subcommand logic lives
-in the `astrid/gateway/` package. SDK implementation lives in the
+in the `astrid/core/gateway/` package. SDK implementation lives in the
 `astrid/sdk/` package.
 
 ## 1. Public Facades
@@ -34,12 +34,12 @@ The 27 names in `astrid.__all__` are:
 
 | Surface | File | Classification |
 | --- | --- | --- |
-| `python3 -m astrid` | `astrid/__main__.py` | **Executable package gateway** — delegates to `astrid.gateway.main()`. |
-| `astrid.gateway` | `astrid/gateway/` | **Subcommand router package** — session gate, command dispatch, brief/video fall-through to `video_editing.hype`. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
-| `astrid.orchestrate.cli` | `astrid/orchestrate/cli.py` | **Plan compilation and test-running CLI** — CLI entrypoint for orchestrate commands. |
-| `astrid.doctor` | `astrid/doctor.py` | **Repo health diagnostic** — consumes `validate_repo_structure()`. |
+| `python3 -m astrid` | `astrid/__main__.py` | **Executable package gateway** — delegates to `astrid.core.gateway.main()`. |
+| `astrid.core.gateway` | `astrid/core/gateway/` | **Subcommand router package** — session gate, command dispatch, brief/video fall-through to `video_editing.hype`. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
+| `astrid.core.orchestrate.cli` | `astrid/core/orchestrate/cli.py` | **Plan compilation and test-running CLI** — CLI entrypoint for orchestrate commands. |
+| `astrid.core.doctor` | `astrid/core/doctor.py` | **Repo health diagnostic** — consumes `validate_repo_structure()`. |
 | `astrid.skills.cli` | `astrid/skills/cli.py` | **Skills CLI** — skill discovery and harness management. |
-| `astrid.threads.cli` | `astrid/threads/cli.py` | **Threads CLI** — thread index and lineage commands. |
+| `astrid.core.threads.cli` | `astrid/core/threads/cli.py` | **Threads CLI** — thread index and lineage commands. |
 | `astrid.core.timeline.cli` | `astrid/core/timeline/cli.py` | **Timeline CLI** — timeline inspection and manipulation commands. |
 
 ### 1.3 Non-Contract Surfaces (v1)
@@ -52,7 +52,7 @@ The following are explicitly out of the v1 public contract, even if importable:
 - Registry internals, resolver internals, and helper functions
 - CLI implementation modules and verb-routing internals
 - Internal tests, fixtures, and generated discovery payloads
-- Gateway implementation modules under `astrid/gateway/` are internal implementation detail
+- Gateway implementation modules under `astrid/core/gateway/` are internal implementation detail
 
 These surfaces may change in any minor or patch release without deprecation.
 
@@ -90,17 +90,17 @@ Pack machinery does not live in loose root-level core modules; it belongs under
 **Anti-coupling rules enforced by `validate_import_layering()`**:
 
 - `astrid/core` must not import from `astrid.packs` or `astrid.packs.*`
-- `astrid/core` must not import from `astrid.orchestrate` or `astrid.orchestrate.*`
-- `astrid/core` must not import from `astrid.audit` (M0 addition — see §2.1)
+- Core subsystems such as `astrid.core.audit`, `astrid.core.orchestrate`,
+  `astrid.core.threads`, and `astrid.core.verify` may import one another as
+  internal implementation modules.
 
 ### 2.1 Named Import-Layering Exemptions
 
-These exemptions are recorded in `astrid/structure.py` under `_IMPORT_LAYERING_EXEMPT_REL`:
+These exemptions are recorded in `astrid/core/structure.py` under `_IMPORT_LAYERING_EXEMPT_REL`:
 
 | File | Exemption Reason | Milestone |
 | --- | --- | --- |
 | `astrid/core/runtime/in_process.py` | Sanctioned bridge between framework and pack boundaries for the in-process entrypoint machinery. | Permanent architectural choice |
-| `astrid/core/task/event_stream.py` | Imports `astrid.audit.graph` and `astrid.audit.transport` for unified task/audit event stream reading. This is a **file-level exemption** (`_IMPORT_LAYERING_EXEMPT_REL`); finer-grained exemption mechanics are deferred beyond M0. | Audit refactor milestone |
 
 ### 2.2 Contributor Placement Guidance
 
@@ -110,12 +110,12 @@ When adding new code to the repository, follow these placement rules:
 - **New internal framework code**: `astrid/core/<domain>/*`
 - **New pack data** (executors, orchestrators, elements, skills): `astrid/packs/<pack>/`
 - **New public SDK surface**: add to the `astrid/sdk/` package and expose it through the package facade only when it is part of the v1 contract
-- **New gateway subcommands**: add to the appropriate `astrid/gateway/*.py` module or create a new one; register dispatch in `astrid/gateway/dispatch.py`
-- **New domain libraries**: `astrid/domains/<domain>/`
-- **New shared utilities**: `astrid/utilities/`
+- **New gateway subcommands**: add to the appropriate `astrid/core/gateway/*.py` module or create a new one; register dispatch in `astrid/core/gateway/dispatch.py`
+- **New domain libraries**: `astrid/core/domains/<domain>/`
+- **New shared utilities**: `astrid/core/util/`
 - **New CLI entrypoints for subsystems**: follow the pattern of `astrid/<subsystem>/cli.py`
 
-**Do not** add new `.py` files directly under `astrid/` — they must be listed in `TOP_LEVEL_ASTRID_FILES` in `astrid/structure.py` and approved as canonical top-level modules. Adding a new top-level module requires updating `TOP_LEVEL_ASTRID_FILES` in `structure.py` and this document.
+**Do not** add new `.py` files directly under `astrid/` — they must be listed in `TOP_LEVEL_ASTRID_FILES` in `astrid/core/structure.py` and approved as canonical top-level modules. Adding a new top-level module requires updating `TOP_LEVEL_ASTRID_FILES` in `structure.py` and this document.
 
 ## 3. Retired Compatibility Surfaces
 
@@ -129,9 +129,9 @@ Canonical homes:
 
 | Old surface | Canonical surface |
 | --- | --- |
-| `astrid._media` | `astrid.media` |
-| `astrid._paths` | `astrid.paths` |
-| `astrid.pipeline` | `astrid.gateway` |
+| `astrid._media` | `astrid.core.media` |
+| `astrid._paths` | `astrid.core.paths` |
+| `astrid.pipeline` | `astrid.core.gateway` |
 | `astrid.timeline.*` | `astrid.core.timeline.*` |
 | `astrid.core.pack_*`, `astrid.core.manifest`, `astrid.core.alias_resolver` | `astrid.core.pack.*` |
 | `astrid.packs.{cli,validate,agent_index,gitignore,install,_canonical_entrypoint}` | `astrid.core.pack.*` |
@@ -141,31 +141,30 @@ Canonical homes:
 
 | Package | Classification | Notes |
 | --- | --- | --- |
-| `astrid/contracts/` | **Shared library** | Common schema dataclasses (ports, outputs, cache, commands, isolation, errors, run status). |
-| `astrid/domains/` | **Domain libraries** | Domain-specific shared logic (e.g., `astrid/domains/hype/` for arrangement rules, enriched arrangements, text matching). |
-| `astrid/utilities/` | **Utility library** | Generic helpers (LLM client construction, environment handling). |
-| `astrid/audit/` | **Shared library** | Run-local provenance ledger, graph, transport, and HTML report. |
-| `astrid/threads/` | **Lineage and thread management** | Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in `astrid.threads.__all__`. |
-| `astrid/verify/` | **Verification helpers** | Soft boundary — currently a convention, not a hard gate. |
-| `astrid/modalities/` | **Modality helpers** | Modality-specific support code. |
+| `astrid/core/contracts/` | **Shared library** | Common schema dataclasses (ports, outputs, cache, commands, isolation, errors, run status). |
+| `astrid/core/domains/` | **Domain libraries** | Domain-specific shared logic (e.g., `astrid/core/domains/hype/` for arrangement rules, enriched arrangements, text matching). |
+| `astrid/core/util/` | **Utility library** | Generic helpers (LLM client construction, environment handling). |
+| `astrid/core/audit/` | **Shared library** | Run-local provenance ledger, graph, transport, and HTML report. |
+| `astrid/core/threads/` | **Lineage and thread management** | Thread index, ID generation (ULID), provenance tracking, record schema. The m5a milestone removed thread wrapper symbols from the public surface; only 10 lineage symbols remain in `astrid.core.threads.__all__`. |
+| `astrid/core/verify/` | **Verification helpers** | Soft boundary — currently a convention, not a hard gate. |
+| `astrid/core/modalities/` | **Modality helpers** | Modality-specific support code. |
 | `astrid/docs/` | **Package-level docs** | Internal documentation within the `astrid` package. |
 | `astrid/skills/` | **Skill harnesses** | Agent skill discovery, registry, and harness runtimes (base, codex, claude, hermes). |
-| `astrid/orchestrate/` | **Plan compilation and test running** | DSL, compile, test runner, CLI. This is a top-level subsystem, not part of `astrid/core`. |
-| `astrid/theme_schema.py` | **Shared library** | Theme schema validation helpers. Soft boundary — convention. |
-| `astrid/paths.py` | **Shared library** | Repository and workspace path resolution. |
-| `astrid/setup_cli.py` | **Shared library** | Setup CLI support. |
+| `astrid/core/orchestrate/` | **Plan compilation and test running** | DSL, compile, test runner, CLI. |
+| `astrid/core/theme_schema.py` | **Shared library** | Theme schema validation helpers. Soft boundary — convention. |
+| `astrid/core/paths.py` | **Shared library** | Repository and workspace path resolution. |
+| `astrid/core/setup_cli.py` | **Shared library** | Setup CLI support. |
 
 ### 4.1 CLI/Domain/Import-Layering Convention
 
 The repository enforces a strict import layering convention:
 
-- **CLI modules** live as `astrid/<subsystem>/cli.py` for each subsystem (skills, threads, orchestrate, core/timeline, core/pack). CLI modules may import from their subsystem's internals and from shared libraries, but must not be imported by non-CLI code.
-- **Domain libraries** under `astrid/domains/` may import from `astrid/contracts/`, `astrid/utilities/`, and other shared libraries. They must not import from `astrid/core/`, `astrid/packs/`, or `astrid/orchestrate/`.
-- **Core kernel** (`astrid/core/`) is the innermost layer. It must not import from `astrid/packs`, `astrid/orchestrate`, or `astrid/audit` (with named exemptions in §2.1). It may import from `astrid/contracts/` and `astrid/utilities/`.
+- **CLI modules** live as `<subsystem>/cli.py` for each subsystem (skills, core/threads, core/orchestrate, core/timeline, core/pack). CLI modules may import from their subsystem's internals and from shared libraries, but must not be imported by non-CLI code.
+- **Domain libraries** under `astrid/core/domains/` may import from `astrid/core/contracts/`, `astrid/core/util/`, and other core shared libraries. They must not import from `astrid/packs/`.
+- **Core kernel** (`astrid/core/`) must not import concrete pack implementation modules except through named runtime bridge exemptions.
 - **Pack data** (`astrid/packs/<pack>/`) must not import from `astrid/core/` except through sanctioned entrypoints.
-- **Orchestrate** (`astrid/orchestrate/`) is a top-level subsystem that may import from shared libraries but must not be imported by `astrid/core/`.
 
-These rules are enforced by `validate_import_layering()` in `astrid/structure.py`.
+These rules are enforced by `validate_import_layering()` in `astrid/core/structure.py`.
 
 ## 5. `astrid/packs` — Capability Surface
 
@@ -216,7 +215,7 @@ The only Python file directly under `astrid/packs/` is the package marker:
 | --- | --- | --- |
 | `__init__.py` | Package init |
 
-`_validate_packs_top_level_modules()` in `astrid/structure.py` rejects any other
+`_validate_packs_top_level_modules()` in `astrid/core/structure.py` rejects any other
 top-level module under `astrid/packs/`.
 
 ### 5.4 ID Qualification Rules
@@ -237,7 +236,7 @@ top-level module under `astrid/packs/`.
 
 ## 6. `astrid/elements/` — Planned-Absent Canonical Concept
 
-`TOP_LEVEL_ASTRID_DIRS` in `astrid/structure.py` includes `"elements"` as a
+`TOP_LEVEL_ASTRID_DIRS` in `astrid/core/structure.py` includes `"elements"` as a
 top-level canonical directory. However, **no `astrid/elements/` directory exists
 on disk** and M5 does not create it.
 
@@ -338,7 +337,7 @@ the following splits:
 
 | File | Pre-Split Lines | Post-Split Lines | Result |
 | --- | --- | --- | --- |
-| `astrid/gateway.py` | 1,215 | Package | Folded into `astrid/gateway/` (`__init__.py`, `dispatch.py`, `help.py`, `project.py`, `wait.py`) |
+| `astrid/gateway.py` | 1,215 | Package | Folded into `astrid/core/gateway/` (`__init__.py`, `dispatch.py`, `help.py`, `project.py`, `wait.py`) |
 | `astrid/sdk.py` | 1,833 | Package | Folded into the `astrid/sdk/` package (`discovery.py`, `dto.py`, `events.py`, `exceptions.py`, `generation.py`, `invocation.py`, `results.py`) |
 
 The gateway and SDK implementations now live in packages rather than top-level
@@ -393,27 +392,27 @@ Later milestones may choose to enforce these as hard gates.
 
 ### 12.1 Validator
 
-`astrid/structure.py` is the **single source of truth** for repository
+`astrid/core/structure.py` is the **single source of truth** for repository
 structure enforcement. It exposes:
 
 - `validate_repo_structure()` — top-level entry check, pack layout, import layering, migration completion (returns `StructureReport`)
-- `validate_import_layering()` — core→packs/orchestrate/audit import prohibition
+- `validate_import_layering()` — core→packs import prohibition
 - `validate_migration_completion()` — DEPRECATED markers, sys.modules injections, dangling `__all__` aliases, compatibility shim detection
 - `validate_run_record_status_boundary()` — legacy run-record status token detection
 
 ### 12.2 Exemption Lists
 
-All exemptions are colocated in `astrid/structure.py`:
+All exemptions are colocated in `astrid/core/structure.py`:
 
 | Constant | Purpose |
 | --- | --- |
 | `TOP_LEVEL_ASTRID_FILES` | Allowed top-level `.py` files under `astrid/` |
-| `TOP_LEVEL_ASTRID_DIRS` | Allowed top-level directories under `astrid/` including `elements` as planned-absent |
-| `_IMPORT_LAYERING_EXEMPT_REL` | Files exempt from core import-layering rules (2 files) |
+| `TOP_LEVEL_ASTRID_DIRS` | Allowed top-level directories under `astrid/` |
+| `_IMPORT_LAYERING_EXEMPT_REL` | Files exempt from core import-layering rules |
 
 ### 12.3 Consumption
 
-`astrid/doctor.py` consumes `validate_repo_structure()` and fails when
+`astrid/core/doctor.py` consumes `validate_repo_structure()` and fails when
 canonical repository structure drifts.
 
 ## 13. M3, M4, and M5 Inventory Consumption

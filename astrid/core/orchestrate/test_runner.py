@@ -49,7 +49,7 @@ from astrid.core.task.plan import (
     step_dir_for_path,
 )
 from astrid.core.timeline.crud import create_timeline
-from astrid.orchestrate.compile import compile_to_path
+from astrid.core.orchestrate.compile import compile_to_path
 
 _MAX_ITERATIONS = 200
 

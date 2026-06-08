@@ -36,7 +36,7 @@ from astrid.core.task.plan import (
     Step,
     TaskPlan,
 )
-from astrid.orchestrate.test_runner import run_fixture
+from astrid.core.orchestrate.test_runner import run_fixture
 from astrid.core.pack import packs_root as _packs_root
 
 

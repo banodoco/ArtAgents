@@ -4,7 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from astrid.audit.transport import append_ledger_record
+from astrid.core.audit.transport import append_ledger_record
 from astrid.core.task.events import append_event, make_run_started_event
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineActor

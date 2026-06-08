@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from astrid.core.project.paths import resolve_projects_root
-from astrid.paths import REPO_ROOT as DEFAULT_REPO_ROOT
+from astrid.core.paths import REPO_ROOT as DEFAULT_REPO_ROOT
 
 CSV_COLUMNS = [
     "root_kind",

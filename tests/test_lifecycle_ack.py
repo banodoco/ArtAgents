@@ -24,30 +24,30 @@ from astrid.core.task.events import (
 )
 from astrid.core.task.lifecycle import cmd_ack
 
-_ATTESTED_REVIEW = '''from astrid.orchestrate import orchestrator, attested
+_ATTESTED_REVIEW = '''from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review")
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="human")]
 '''
 
-_ATTESTED_PRODUCES = '''from astrid.orchestrate import orchestrator, attested
-from astrid.verify import json_file
+_ATTESTED_PRODUCES = '''from astrid.core.orchestrate import orchestrator, attested
+from astrid.core.verify import json_file
 @orchestrator("demo.with_produces")
 def main(): return [attested("review", command="review.sh", instructions="check", ack="human", produces={"out": json_file()})]
 '''
 
-_ITER = '''from astrid.orchestrate import orchestrator, attested, repeat_until
+_ITER = '''from astrid.core.orchestrate import orchestrator, attested, repeat_until
 @orchestrator("demo.iter")
 def main(): return [attested("review", command="r.sh", instructions="ok", ack="human",
     repeat=repeat_until(condition="user_approves", max_iterations=3, on_exhaust="fail"))]
 '''
 
-_NON_USER_APPROVES = '''from astrid.orchestrate import orchestrator, attested, repeat_until
+_NON_USER_APPROVES = '''from astrid.core.orchestrate import orchestrator, attested, repeat_until
 @orchestrator("demo.va")
 def main(): return [attested("review", command="r.sh", instructions="ok", ack="human",
     repeat=repeat_until(condition="verifier_passes", max_iterations=3, on_exhaust="fail"))]
 '''
 
-_CODE = '''from astrid.orchestrate import orchestrator, code
+_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo","x"])]
 '''

@@ -20,7 +20,7 @@ location, determined by the executor's established `--out` behaviour:
 | Names a file (understanding trio) | Sibling file: `{out_dir}/manifest.json` beside the named output file |
 
 The manifest file is written **atomically** through the shared
-`write_manifest()` helper (`astrid.contracts.result_manifest`) and is valid
+`write_manifest()` helper (`astrid.core.contracts.result_manifest`) and is valid
 JSON with a flat top-level object.
 
 ## Required core fields
@@ -193,7 +193,7 @@ its `executor.yaml`. This flag serves as a **registry conformance signal**:
 - Executors with `output_result_manifest: true` must write a `manifest.json`
   at their output location.
 - Executors without the flag must appear in the committed exemption list
-  (`astrid/contracts/output_result_exemptions.json`) with a specific
+  (`astrid/core/contracts/output_result_exemptions.json`) with a specific
   exemption reason (paid, GPU, heavy, unstable-artifact, external-escape-hatch).
 
 This makes the M1 adoption boundary machine-verifiable.
@@ -225,10 +225,10 @@ same `InvocationResult` envelope.
 ## Writing a result manifest (implementation reference)
 
 Executors use the shared `write_manifest()` helper from
-`astrid.contracts.result_manifest`:
+`astrid.core.contracts.result_manifest`:
 
 ```python
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import write_manifest
 from datetime import datetime, timezone
 
 manifest = {
@@ -252,7 +252,7 @@ result atomically via `write_json_atomic()`.
 
 ## Registry conformance and exemption list
 
-The committed exemption list at `astrid/contracts/output_result_exemptions.json`
+The committed exemption list at `astrid/core/contracts/output_result_exemptions.json`
 enumerates all 57 default-registry executors. As of the M1 cut:
 
 - **14 M1 adopters**: Non-exempt, confirmed `output_result_manifest: true`.

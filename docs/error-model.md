@@ -113,7 +113,7 @@ which category they belong to.
 ## The AstridError Envelope Contract
 
 Since m3, all operator- and agent-facing failures must travel through the
-canonical `AstridError` envelope defined in `astrid/contracts/errors.py`.  The
+canonical `AstridError` envelope defined in `astrid/core/contracts/errors.py`.  The
 envelope carries structured recoverability data that allows agents and the
 assessor to extract valid options and recovery commands without parsing ad-hoc
 error text.
@@ -146,7 +146,7 @@ continue to work.  New code MUST use the canonical field names.
 
 ### The Rendering Contract
 
-`render_astrid_error()` in `astrid/contracts/errors.py` prints the envelope to
+`render_astrid_error()` in `astrid/core/contracts/errors.py` prints the envelope to
 stderr in this order:
 
 1. **Bug flag** (only when `degraded=True`):
@@ -186,7 +186,7 @@ except AstridError as exc:
 except Exception as exc:
     bug = wrap_degraded_error(
         exc,
-        state_snapshot={"argv": raw, "entrypoint": "astrid.gateway.main"},
+        state_snapshot={"argv": raw, "entrypoint": "astrid.core.gateway.main"},
     )
     return render_astrid_error(bug)
 ```

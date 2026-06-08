@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.generation.backends.fal import FalBackend
 from astrid.core.generation.backends.registry import (
     GenerationBackendDescriptor,

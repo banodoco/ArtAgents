@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from unittest.mock import patch
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.run_subprocess import run_subprocess
 
 

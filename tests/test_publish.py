@@ -20,7 +20,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:

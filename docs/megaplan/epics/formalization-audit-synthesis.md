@@ -11,7 +11,7 @@ Method: 6 DeepSeek domain sweeps + 2 Codex high-level frames; Claude adjudicatio
 ## TIER B — next epic: OUTPUT/RESULT CONTRACT (strongest convergence: codex1 #1 risk + codex2 'predictability=folklore' + d5 family-by-family evidence)
 Invariant: every executor writing artifacts emits a self-describing manifest (schema_version, kind, echoed inputs, content-hashed outputs, created).
 Evidence: generation = excellent (manifest v2, golden tests, PNG tEXt); understanding = zero contract, 3 executors × 3 ad-hoc stdout shapes (video/visual/audio_understand run.py:296/456/491); editorial = bare lists / bespoke version markers; training = third versioning dialect (last_run.json). register_outputs opt-in, unused by 60% of families. CLI `--json` returns raw payload while SDK returns typed envelope (sdk.py:1715 vs executor/cli.py:632).
-Fix-shape: one `write_manifest()` in astrid.contracts; one result-envelope schema shared CLI/SDK; conformance test enumerating every executor family. Composes with run-ledger m1 (ledger entry points at the manifest).
+Fix-shape: one `write_manifest()` in astrid.core.contracts; one result-envelope schema shared CLI/SDK; conformance test enumerating every executor family. Composes with run-ledger m1 (ledger entry points at the manifest).
 DISCARDED from codex2's version: full AgentUXEnvelope across all five surfaces (boil-the-ocean); mandatory effects/rollback/idempotency_key on every capability (architect maximalism — a single retry_safe bool captures most value).
 
 ## TIER C — epic or fat ticket: AGENT CLI CONTRACT (d3; critical × cheap)

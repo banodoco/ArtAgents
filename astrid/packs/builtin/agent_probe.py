@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from astrid.orchestrate import attested, orchestrator, repeat_for_each
-from astrid.verify import json_file
+from astrid.core.orchestrate import attested, orchestrator, repeat_for_each
+from astrid.core.verify import json_file
 
 
 @orchestrator("builtin.agent_probe")

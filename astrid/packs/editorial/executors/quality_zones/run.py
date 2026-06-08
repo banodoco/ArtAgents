@@ -17,9 +17,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import register_outputs
-from astrid.contracts.result_manifest import write_manifest
-from astrid.domains.hype import enriched_arrangement
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.domains.hype import enriched_arrangement
 
 sys.modules.setdefault("quality_zones", sys.modules[__name__])
 

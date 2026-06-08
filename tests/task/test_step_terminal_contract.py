@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from astrid.contracts.run_status import STEP_TERMINAL_KINDS, TASK_FINALIZABLE_EVENT_KINDS
+from astrid.core.contracts.run_status import STEP_TERMINAL_KINDS, TASK_FINALIZABLE_EVENT_KINDS
 from astrid.core.task import gate as task_gate
 from astrid.core.task import gate_cursor, operator_view, run_state
 from astrid.core.task.plan import Step, TaskPlan, _validate_plan

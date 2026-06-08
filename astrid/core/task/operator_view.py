@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from astrid.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
+from astrid.core.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
 from astrid.core.task.operator_status_json import (
     _InlineFailureTail,
     _format_inline_failure_tail,

@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 
 from .events.schema import TimelineActor
 

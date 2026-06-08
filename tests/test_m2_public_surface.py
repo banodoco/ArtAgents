@@ -21,32 +21,32 @@ class RootModuleImportTest(unittest.TestCase):
     """Root `astrid.*` modules and packages must be importable."""
 
     def test_gateway_importable(self) -> None:
-        import astrid.gateway
-        self.assertIsNotNone(astrid.gateway)
+        import astrid.core.gateway
+        self.assertIsNotNone(astrid.core.gateway)
 
     def test_sdk_importable(self) -> None:
         import astrid.sdk
         self.assertIsNotNone(astrid.sdk)
 
     def test_paths_importable(self) -> None:
-        import astrid.paths
-        self.assertIsNotNone(astrid.paths)
+        import astrid.core.paths
+        self.assertIsNotNone(astrid.core.paths)
 
     def test_media_importable(self) -> None:
-        import astrid.media
-        self.assertIsNotNone(astrid.media)
+        import astrid.core.media
+        self.assertIsNotNone(astrid.core.media)
 
     def test_theme_schema_importable(self) -> None:
-        import astrid.theme_schema
-        self.assertIsNotNone(astrid.theme_schema)
+        import astrid.core.theme_schema
+        self.assertIsNotNone(astrid.core.theme_schema)
 
     def test_structure_importable(self) -> None:
-        import astrid.structure
-        self.assertIsNotNone(astrid.structure)
+        import astrid.core.structure
+        self.assertIsNotNone(astrid.core.structure)
 
     def test_threads_importable(self) -> None:
-        import astrid.threads
-        self.assertIsNotNone(astrid.threads)
+        import astrid.core.threads
+        self.assertIsNotNone(astrid.core.threads)
 
     def test_timeline_importable(self) -> None:
         import astrid.core.timeline
@@ -71,15 +71,15 @@ class DeprecatedCLIAliasTest(unittest.TestCase):
     """
 
     def test_run_alias_maps_to_runs_handler(self) -> None:
-        import astrid.gateway
+        import astrid.core.gateway
 
-        self.assertIn("run", astrid.gateway._TOP_LEVEL_HANDLERS,
+        self.assertIn("run", astrid.core.gateway._TOP_LEVEL_HANDLERS,
                       "'run' must be a top-level handler key")
-        self.assertIn("runs", astrid.gateway._TOP_LEVEL_HANDLERS,
+        self.assertIn("runs", astrid.core.gateway._TOP_LEVEL_HANDLERS,
                       "'runs' must be a top-level handler key")
 
-        run_handler = astrid.gateway._TOP_LEVEL_HANDLERS["run"]
-        runs_handler = astrid.gateway._TOP_LEVEL_HANDLERS["runs"]
+        run_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["run"]
+        runs_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["runs"]
 
         # The deprecated "run" alias should delegate to _dispatch_runs too
         # (both wrap it via lambdas, so we check the functions are equivalent)
@@ -87,15 +87,15 @@ class DeprecatedCLIAliasTest(unittest.TestCase):
         self.assertIsNotNone(runs_handler, "runs handler must not be None")
 
     def test_author_alias_maps_to_orchestrate_handler(self) -> None:
-        import astrid.gateway
+        import astrid.core.gateway
 
-        self.assertIn("author", astrid.gateway._TOP_LEVEL_HANDLERS,
+        self.assertIn("author", astrid.core.gateway._TOP_LEVEL_HANDLERS,
                       "'author' must be a top-level handler key")
-        self.assertIn("orchestrate", astrid.gateway._TOP_LEVEL_HANDLERS,
+        self.assertIn("orchestrate", astrid.core.gateway._TOP_LEVEL_HANDLERS,
                       "'orchestrate' must be a top-level handler key")
 
-        author_handler = astrid.gateway._TOP_LEVEL_HANDLERS["author"]
-        orch_handler = astrid.gateway._TOP_LEVEL_HANDLERS["orchestrate"]
+        author_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["author"]
+        orch_handler = astrid.core.gateway._TOP_LEVEL_HANDLERS["orchestrate"]
 
         # M5 keeps "author" as a public alias but routes it through a warning
         # wrapper so callers see the canonical "orchestrate" replacement.
@@ -108,12 +108,12 @@ class DeprecatedCLIAliasTest(unittest.TestCase):
         """The gateway help text must document that run/author are deprecated."""
         import io
 
-        import astrid.gateway
+        import astrid.core.gateway
 
         # _print_entrypoint_help prints to stdout; capture its output
         captured = io.StringIO()
         with mock.patch("sys.stdout", captured):
-            astrid.gateway._print_entrypoint_help()
+            astrid.core.gateway._print_entrypoint_help()
 
         text = captured.getvalue()
         self.assertIn("astrid author", text)
@@ -121,13 +121,13 @@ class DeprecatedCLIAliasTest(unittest.TestCase):
 
     def test_run_dispatches_to_runs(self) -> None:
         """_dispatch_run delegates to _dispatch_runs."""
-        import astrid.gateway
+        import astrid.core.gateway
 
         # The _dispatch_run function is the deprecated alias that delegates
-        self.assertTrue(callable(astrid.gateway._dispatch_run))
+        self.assertTrue(callable(astrid.core.gateway._dispatch_run))
         self.assertIn(
             "Deprecated alias",
-            astrid.gateway._dispatch_run.__doc__ or "",
+            astrid.core.gateway._dispatch_run.__doc__ or "",
             "_dispatch_run docstring must note it is a deprecated alias",
         )
 
@@ -141,12 +141,12 @@ class MainModuleTest(unittest.TestCase):
 
     def test_main_uses_gateway_main(self) -> None:
         import astrid.__main__
-        import astrid.gateway
+        import astrid.core.gateway
 
         # __main__ sets ASTRID_INTERNAL_INVOCATION and calls gateway.main()
         self.assertIs(
-            astrid.__main__.main, astrid.gateway.main,
-            "astrid.__main__.main must be astrid.gateway.main",
+            astrid.__main__.main, astrid.core.gateway.main,
+            "astrid.__main__.main must be astrid.core.gateway.main",
         )
 
 
@@ -172,85 +172,85 @@ class BanodocoIntegrationImportTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.paths namespace
+# astrid.core.paths namespace
 # ---------------------------------------------------------------------------
 
 class PathsModuleTest(unittest.TestCase):
-    """astrid.paths must export canonical path constants."""
+    """astrid.core.paths must export canonical path constants."""
 
     def test_paths_constants_importable(self) -> None:
-        import astrid.paths
+        import astrid.core.paths
 
         for name in ("PACKAGE_ROOT", "REPO_ROOT", "WORKSPACE_ROOT"):
             with self.subTest(name=name):
-                self.assertTrue(hasattr(astrid.paths, name),
-                                f"astrid.paths missing {name}")
+                self.assertTrue(hasattr(astrid.core.paths, name),
+                                f"astrid.core.paths missing {name}")
 
     def test_paths_functions_importable(self) -> None:
-        import astrid.paths
+        import astrid.core.paths
 
-        self.assertTrue(hasattr(astrid.paths, "executor_argv"))
-        self.assertTrue(hasattr(astrid.paths, "resolve_executor_runtime_module"))
-        self.assertTrue(callable(astrid.paths.resolve_executor_runtime_module))
+        self.assertTrue(hasattr(astrid.core.paths, "executor_argv"))
+        self.assertTrue(hasattr(astrid.core.paths, "resolve_executor_runtime_module"))
+        self.assertTrue(callable(astrid.core.paths.resolve_executor_runtime_module))
 
 
 # ---------------------------------------------------------------------------
-# astrid.media namespace
+# astrid.core.media namespace
 # ---------------------------------------------------------------------------
 
 class MediaModuleTest(unittest.TestCase):
-    """astrid.media must export media-probing helpers."""
+    """astrid.core.media must export media-probing helpers."""
 
     def test_media_importable(self) -> None:
-        import astrid.media
+        import astrid.core.media
 
-        self.assertTrue(hasattr(astrid.media, "ffprobe_duration_seconds"),
-                        "astrid.media missing ffprobe_duration_seconds")
-        self.assertTrue(callable(astrid.media.ffprobe_duration_seconds))
+        self.assertTrue(hasattr(astrid.core.media, "ffprobe_duration_seconds"),
+                        "astrid.core.media missing ffprobe_duration_seconds")
+        self.assertTrue(callable(astrid.core.media.ffprobe_duration_seconds))
 
 # ---------------------------------------------------------------------------
-# astrid.theme_schema validation surface
+# astrid.core.theme_schema validation surface
 # ---------------------------------------------------------------------------
 
 class ThemeSchemaTest(unittest.TestCase):
-    """astrid.theme_schema must export theme validation helpers."""
+    """astrid.core.theme_schema must export theme validation helpers."""
 
     def test_theme_schema_constants_importable(self) -> None:
-        import astrid.theme_schema
+        import astrid.core.theme_schema
 
-        self.assertTrue(hasattr(astrid.theme_schema, "THEME_SCHEMA"))
-        self.assertTrue(hasattr(astrid.theme_schema, "ThemeValidationError"))
+        self.assertTrue(hasattr(astrid.core.theme_schema, "THEME_SCHEMA"))
+        self.assertTrue(hasattr(astrid.core.theme_schema, "ThemeValidationError"))
 
     def test_validate_theme_importable(self) -> None:
-        from astrid.theme_schema import load_theme
+        from astrid.core.theme_schema import load_theme
 
         self.assertTrue(callable(load_theme))
 
 
 # ---------------------------------------------------------------------------
-# astrid.structure validation surface
+# astrid.core.structure validation surface
 # ---------------------------------------------------------------------------
 
 class StructureModuleTest(unittest.TestCase):
-    """astrid.structure must export repository structure guardrails."""
+    """astrid.core.structure must export repository structure guardrails."""
 
     def test_structure_importable(self) -> None:
-        import astrid.structure
+        import astrid.core.structure
 
-        self.assertTrue(hasattr(astrid.structure, "TOP_LEVEL_ASTRID_FILES"))
-        self.assertTrue(hasattr(astrid.structure, "LEGACY_PUBLIC_DIRS"))
+        self.assertTrue(hasattr(astrid.core.structure, "TOP_LEVEL_ASTRID_FILES"))
+        self.assertTrue(hasattr(astrid.core.structure, "LEGACY_PUBLIC_DIRS"))
 
 
 # ---------------------------------------------------------------------------
-# astrid.threads internal library surface
+# astrid.core.threads internal library surface
 # ---------------------------------------------------------------------------
 
 class ThreadsModuleTest(unittest.TestCase):
-    """astrid.threads is retained as an internal library (DEC-001).
+    """astrid.core.threads is retained as an internal library (DEC-001).
     Its exported names must remain importable."""
 
     def test_threads_exports_importable(self) -> None:
-        import astrid.threads
+        import astrid.core.threads
 
         for name in (
             "SCHEMA_VERSION",
@@ -265,8 +265,8 @@ class ThreadsModuleTest(unittest.TestCase):
             "is_ulid",
         ):
             with self.subTest(name=name):
-                self.assertTrue(hasattr(astrid.threads, name),
-                                f"astrid.threads missing {name}")
+                self.assertTrue(hasattr(astrid.core.threads, name),
+                                f"astrid.core.threads missing {name}")
 
 
 # ---------------------------------------------------------------------------

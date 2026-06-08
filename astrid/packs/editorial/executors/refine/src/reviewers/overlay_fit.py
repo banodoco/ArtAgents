@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from astrid.domains.hype import enriched_arrangement
-from astrid.domains.hype.arrangement_rules import MAX_VISUAL_HOLD_RATIO, MIN_OVERLAY_COVERAGE_SEC
+from astrid.core.domains.hype import enriched_arrangement
+from astrid.core.domains.hype.arrangement_rules import MAX_VISUAL_HOLD_RATIO, MIN_OVERLAY_COVERAGE_SEC
 from astrid.packs.editorial.executors.refine.src.reviewers import Reviewer
 
 

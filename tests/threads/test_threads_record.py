@@ -7,15 +7,15 @@ from unittest import mock
 
 import pytest
 
-from astrid.contracts.run_status import RunStatus
-from astrid.contracts.schema import CommandSpec, Output, Port
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.contracts.schema import CommandSpec, Output, Port
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
 from astrid.core.executor.schema import ExecutorDefinition
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
-from astrid.threads.record import build_run_record, finalize_run_record
+from astrid.core.threads.record import build_run_record, finalize_run_record
 
 
 THREAD_ID = "01ARZ3NDEKTSV4RRFFQ69G5FW0"
@@ -196,7 +196,7 @@ def test_thread_run_record_write_normalizes_legacy_succeeded_to_canonical(tmp_pa
     )
     record["status"] = "succeeded"
 
-    from astrid.threads.record import write_run_record
+    from astrid.core.threads.record import write_run_record
 
     write_run_record(record, out / "run.json")
 
@@ -217,7 +217,7 @@ def test_thread_run_record_write_normalizes_legacy_orphaned_to_canonical(tmp_pat
     )
     record["status"] = "orphaned"
 
-    from astrid.threads.record import write_run_record
+    from astrid.core.threads.record import write_run_record
 
     write_run_record(record, out / "run.json")
 

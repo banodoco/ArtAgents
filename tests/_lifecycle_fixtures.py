@@ -20,7 +20,7 @@ from astrid.core.session.model import Session
 from astrid.core.session.paths import session_path
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.timeline.crud import create_timeline
-from astrid.orchestrate.compile import compile_to_path
+from astrid.core.orchestrate.compile import compile_to_path
 
 
 def migrate_v1_plan(plan: dict) -> dict:

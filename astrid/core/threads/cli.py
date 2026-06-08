@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 from .attribute import (
     archive_thread,

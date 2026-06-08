@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.element.schema import load_element_definition
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.registry import load_default_registry as load_executor_registry

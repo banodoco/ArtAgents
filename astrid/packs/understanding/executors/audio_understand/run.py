@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint('understanding.audio_understand')
@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
-from astrid.media import ffprobe_duration_seconds
+from astrid.core.media import ffprobe_duration_seconds
 
 API_URL = "https://api.openai.com/v1/chat/completions"
 MODEL_PRESETS = {

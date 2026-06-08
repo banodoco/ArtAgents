@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from astrid.audit.graph import verify_audit_ledger
+from astrid.core.audit.graph import verify_audit_ledger
 from astrid.core.task.events import verify_chain as task_verify_chain
 from astrid.core.timeline.eventlog import LocalFsBackend
 
@@ -124,7 +124,7 @@ def _verify_audit_chain(pack: FrozenEvidencePack, run_dir: Path) -> dict[str, An
     return {
         "kind": "audit",
         "evidence_ref": pack.evidence_ref(run_dir / "audit" / "ledger.jsonl"),
-        "verifier": "astrid.audit.graph.verify_audit_ledger",
+        "verifier": "astrid.core.audit.graph.verify_audit_ledger",
         "ok": ok,
         "line_number": line_number,
         "error": error,

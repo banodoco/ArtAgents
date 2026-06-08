@@ -6,7 +6,7 @@ import wave
 from pathlib import Path
 
 from astrid.core import timeline
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.editorial.executors.arrange import run as arrange
 from astrid.packs.training.executors.pool_merge import run as pool_merge
 from astrid.packs.video_editing.executors.cut import run as cut

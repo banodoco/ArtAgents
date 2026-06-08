@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from astrid.audit import AuditContext
-from astrid.audit.graph import build_graph, load_ledger
-from astrid.audit.report import render_html
+from astrid.core.audit import AuditContext
+from astrid.core.audit.graph import build_graph, load_ledger
+from astrid.core.audit.report import render_html
 
 
 def _load_migration_module():
@@ -42,7 +42,7 @@ def test_audit_append_writes_v2_hash_chain(tmp_path: Path) -> None:
 
 
 def test_verify_audit_ledger_detects_corruption(tmp_path: Path) -> None:
-    from astrid.audit.graph import verify_audit_ledger
+    from astrid.core.audit.graph import verify_audit_ledger
 
     run_dir = tmp_path / "run"
     ctx = AuditContext.for_run(run_dir)
@@ -93,7 +93,7 @@ def test_legacy_v1_and_v2_ledgers_both_render(tmp_path: Path) -> None:
 
 
 def test_audit_cli_renders_legacy_and_v2_ledgers(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    from astrid.audit import cli as audit_cli
+    from astrid.core.audit import cli as audit_cli
 
     legacy_run = tmp_path / "legacy"
     legacy_ledger = legacy_run / "audit" / "ledger.jsonl"
@@ -128,7 +128,7 @@ def test_audit_cli_verifies_by_default_and_no_verify_is_explicit_escape_hatch(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from astrid.audit import cli as audit_cli
+    from astrid.core.audit import cli as audit_cli
 
     run_dir = tmp_path / "run"
     ctx = AuditContext.for_run(run_dir)
@@ -146,7 +146,7 @@ def test_audit_cli_verifies_by_default_and_no_verify_is_explicit_escape_hatch(
 
 
 def test_audit_report_write_report_verifies_by_default(tmp_path: Path) -> None:
-    from astrid.audit.report import write_report
+    from astrid.core.audit.report import write_report
 
     run_dir = tmp_path / "run"
     ctx = AuditContext.for_run(run_dir)
@@ -164,7 +164,7 @@ def test_audit_report_write_report_verifies_by_default(tmp_path: Path) -> None:
 
 
 def test_verify_audit_ledger_detects_truncation(tmp_path: Path) -> None:
-    from astrid.audit.graph import verify_audit_ledger
+    from astrid.core.audit.graph import verify_audit_ledger
 
     run_dir = tmp_path / "run"
     ctx = AuditContext.for_run(run_dir)

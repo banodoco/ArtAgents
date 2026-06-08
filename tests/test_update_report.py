@@ -17,7 +17,7 @@ import pytest
 from astrid.core.update import update_check, update_apply
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.schema import ExecutorDefinition
-from astrid.contracts.schema import IsolationMetadata, SafetyDeclaration
+from astrid.core.contracts.schema import IsolationMetadata, SafetyDeclaration
 
 
 def _make_exec_def(id: str, **overrides) -> ExecutorDefinition:

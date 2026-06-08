@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.task.plan import ProducesEntry
 
 ITERATE_FEEDBACK_PREFIX = "iterate_feedback="

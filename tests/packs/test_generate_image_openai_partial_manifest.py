@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.generation.executors.generate_image_openai.run import (
     generate as openai_generate,
 )

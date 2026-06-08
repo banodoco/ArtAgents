@@ -7,8 +7,8 @@ import sys
 import textwrap
 from unittest import mock
 
-from astrid import gateway
-from astrid.contracts.errors import AstridError
+from astrid.core import gateway
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.project import ProjectError
 from astrid.core.project.schema import ProjectValidationError
 from astrid.core.session.binding import SessionBindingError
@@ -49,7 +49,7 @@ def test_main_wraps_generic_exception_as_degraded_bug_envelope() -> None:
     assert rc == 1
     assert stderr.splitlines()[0] == "unstructured - this is a bug."
     assert "boom" in stderr
-    assert '"entrypoint": "astrid.gateway.main"' in stderr
+    assert '"entrypoint": "astrid.core.gateway.main"' in stderr
     assert "Traceback" not in stderr
 
 
@@ -110,7 +110,7 @@ def test_task_gate_rejection_flows_through_universal_renderer() -> None:
 def test_module_entry_delegates_to_pipeline_main() -> None:
     """``python -m astrid`` reaches the same ``gateway.main()`` renderer."""
     from astrid.__main__ import main as module_main
-    from astrid.gateway import main as gateway_main
+    from astrid.core.gateway import main as gateway_main
 
     assert module_main is gateway_main
 
@@ -147,9 +147,9 @@ def test_subprocess_module_entry_to_renderer_no_traceback() -> None:
     code = textwrap.dedent("""\
         import sys
         from unittest import mock
-        from astrid.gateway import main
+        from astrid.core.gateway import main
 
-        from astrid.contracts.errors import AstridError
+        from astrid.core.contracts.errors import AstridError
 
         err = AstridError(
             "bad transition kind",
@@ -157,7 +157,7 @@ def test_subprocess_module_entry_to_renderer_no_traceback() -> None:
             recovery_command="astrid timelines transition set --kind cross-fade",
             state_snapshot={"project": "demo"},
         )
-        with mock.patch("astrid.gateway._dispatch", side_effect=err):
+        with mock.patch("astrid.core.gateway._dispatch", side_effect=err):
             sys.exit(main(["doctor"]))
     """)
     result = subprocess.run(
@@ -180,9 +180,9 @@ def test_subprocess_degraded_bug_envelope_no_traceback() -> None:
     code = textwrap.dedent("""\
         import sys
         from unittest import mock
-        from astrid.gateway import main
+        from astrid.core.gateway import main
 
-        with mock.patch("astrid.gateway._dispatch", side_effect=ValueError("boom")):
+        with mock.patch("astrid.core.gateway._dispatch", side_effect=ValueError("boom")):
             sys.exit(main(["doctor"]))
     """)
     result = subprocess.run(
@@ -194,7 +194,7 @@ def test_subprocess_degraded_bug_envelope_no_traceback() -> None:
     assert result.returncode == 1
     assert result.stderr.splitlines()[0] == "unstructured - this is a bug."
     assert "boom" in result.stderr
-    assert '"entrypoint": "astrid.gateway.main"' in result.stderr
+    assert '"entrypoint": "astrid.core.gateway.main"' in result.stderr
     assert "Traceback" not in result.stderr
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.contracts.schema_validators import require_uuid_str
+from astrid.core.contracts.schema_validators import require_uuid_str
 from astrid.core.project.schema import ProjectValidationError, _require_uuid_str as project_require
 from astrid.core.timeline.events.schema.types import TimelineEventSchemaError, _require_uuid_str as timeline_require
 

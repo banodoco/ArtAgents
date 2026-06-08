@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 try:

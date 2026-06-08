@@ -8,7 +8,7 @@ and shells out to ffmpeg.
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint("media.clip_extract")
@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from astrid.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 

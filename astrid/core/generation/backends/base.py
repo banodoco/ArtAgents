@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
 
-from astrid.contracts.exec_error import ExecError
+from astrid.core.contracts.exec_error import ExecError
 
 
 def parse_dimension_pair(

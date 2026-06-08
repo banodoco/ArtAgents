@@ -280,7 +280,7 @@ def test_full_flow_jwt_then_save_then_reload_roundtrips_losslessly(
     Asserts (a) the verified JWT exposes the ``sub``/``aud`` claims we
     expect, (b) ``save_timeline`` issued *exactly one* RPC call with the
     locked 3-param shape, (c) the saved config round-trips through
-    ``astrid.timeline`` and is byte-for-byte equivalent on read-back, and
+    core timeline handling and is byte-for-byte equivalent on read-back, and
     (d) every Supabase POST carried the user JWT in its Authorization
     header (i.e. the auth scheme was honoured down the stack).
     """

@@ -14,9 +14,9 @@ not preserve compatibility import surfaces.
 
 | Retired surface | Canonical surface |
 | --- | --- |
-| `astrid._media` | `astrid.media` |
-| `astrid._paths` | `astrid.paths` |
-| `astrid.pipeline` | `astrid.gateway` |
+| `astrid._media` | `astrid.core.media` |
+| `astrid._paths` | `astrid.core.paths` |
+| `astrid.pipeline` | `astrid.core.gateway` |
 | `astrid.timeline` and timeline re-export modules | `astrid.core.timeline` |
 | `astrid.core._search` | `astrid.core.search` |
 | `astrid.core.pack_machinery.*` | `astrid.core.pack.*` |

@@ -340,7 +340,7 @@ class ProjectionBoundaryKindTest(unittest.TestCase):
         self.assertIn("tracks", result)
 
     def test_bogus_track_kind_rejected_by_boundary(self) -> None:
-        from astrid.contracts.errors import AstridError
+        from astrid.core.contracts.errors import AstridError
         from astrid.core.timeline.projection import (
             TimelineProjectionBoundaryError,
             _validate_projected_timeline_boundary,
@@ -380,7 +380,7 @@ class DoctorTransitionDefaultsTest(unittest.TestCase):
     """Doctor sources transition defaults from registry."""
 
     def test_doctor_default_transition_matches_registry(self) -> None:
-        from astrid import doctor as doctor_mod
+        from astrid.core import doctor as doctor_mod
         default = default_transition_kind()
         self.assertIsNotNone(default)
         self.assertEqual(default, "cross-fade")

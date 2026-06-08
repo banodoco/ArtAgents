@@ -86,11 +86,11 @@ EXPECTED_TASK_RUN_CALLS: dict[CallSite, tuple[int, str]] = {
         "record_dispatch_complete",
     ): (1, "dispatch_complete_caller"),
     CallSite(
-        "astrid/orchestrate/test_runner.py",
+        "astrid/core/orchestrate/test_runner.py",
         "_finish_code_step",
         "record_dispatch_complete",
     ): (1, "author_fixture_dispatch_complete_caller"),
-    CallSite("astrid/gateway/__init__.py", "_main_impl", "record_dispatch_complete"): (
+    CallSite("astrid/core/gateway/__init__.py", "_main_impl", "record_dispatch_complete"): (
         1,
         "gateway_dispatch_complete_caller",
     ),

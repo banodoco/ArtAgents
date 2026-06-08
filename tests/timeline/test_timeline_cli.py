@@ -17,7 +17,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import AstridArgumentError, StaticChoices
 from astrid.core.timeline import cli as timeline_cli, clip_edits
 from astrid.core.timeline.events.schema import (

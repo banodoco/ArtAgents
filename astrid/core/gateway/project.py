@@ -139,13 +139,13 @@ def _resolved_request_project_slug(raw: list[str], session: Any) -> str | None:
 def _dispatch_with_resolved_project(raw: list[str], project_slug: str | None) -> int:
     if not project_slug:
         # Late import to avoid circular dependency at module load time.
-        from astrid.gateway import _dispatch
+        from astrid.core.gateway import _dispatch
 
         return _dispatch(raw)
     previous = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
     os.environ[ASTRID_GATEWAY_RESOLVED_PROJECT_ENV] = project_slug
     try:
-        from astrid.gateway import _dispatch
+        from astrid.core.gateway import _dispatch
 
         return _dispatch(raw)
     finally:

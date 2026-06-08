@@ -14,7 +14,7 @@ milestones:
     depth: high
     vendor: codex
     with_prep: true
-    prep_direction: "Read Sisypy's adapter/runner/evidence API (sibling repo /Users/peteromalley/Documents/reigh-workspace/sisypy: docs/embedding.md, docs/evidence.md, sisypy/adapters.py, public_api.py, schema.py, runner.py) and the vibecomfy reference embed. Confirm the EXACT signatures of the three verifiers the contract names: LocalFsBackend.verify_chain (astrid/core/timeline/eventlog/local_fs.py), astrid.core.task.events.verify_chain, astrid.audit.graph.verify_audit_ledger. Confirm whether assembly.json is derived-on-read (astrid/core/timeline/crud.py). The output is a correct ADAPTER.md, not scenario design."
+    prep_direction: "Read Sisypy's adapter/runner/evidence API (sibling repo /Users/peteromalley/Documents/reigh-workspace/sisypy: docs/embedding.md, docs/evidence.md, sisypy/adapters.py, public_api.py, schema.py, runner.py) and the vibecomfy reference embed. Confirm the EXACT signatures of the three verifiers the contract names: LocalFsBackend.verify_chain (astrid/core/timeline/eventlog/local_fs.py), astrid.core.task.events.verify_chain, astrid.core.audit.graph.verify_audit_ledger. Confirm whether assembly.json is derived-on-read (astrid/core/timeline/crud.py). The output is a correct ADAPTER.md, not scenario design."
 
   # M2 — implement the classified check battery (universal/conditional/scenario-specific) + unit tests.
   # Subtle correctness (erasure exemption, na-skip semantics, no false positives). partnered//high @codex

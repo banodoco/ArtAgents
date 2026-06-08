@@ -13,7 +13,7 @@ from uuid import uuid4
 import pytest
 
 from astrid.core import timeline as timeline_contract
-from astrid.threads.ids import generate_ulid, is_ulid
+from astrid.core.threads.ids import generate_ulid, is_ulid
 
 # Milestone 8 library imports
 from astrid.core.timeline.migration import (

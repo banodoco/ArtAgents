@@ -142,7 +142,7 @@ def _bind_hype_session(projects_root: Path, slug: str, run_id: str, sid: str) ->
 
 def _seed_default_timeline(projects_root: Path, slug: str) -> str:
     from astrid.core import timeline as timeline_contract
-    from astrid.threads.ids import generate_ulid
+    from astrid.core.threads.ids import generate_ulid
 
     timeline_ulid = generate_ulid()
     pdir = projects_root / slug
@@ -1047,7 +1047,7 @@ def test_hype_registry_and_merged_render_props_match_golden(
     directly, and assert the assembled dict matches the committed goldens."""
     import shutil
 
-    from astrid.paths import REPO_ROOT
+    from astrid.core.paths import REPO_ROOT
 
     # -- 1. copy hype fixtures into tmp_path ---------------------------------
     examples = REPO_ROOT / "examples"
@@ -1105,8 +1105,8 @@ def test_hype_registry_and_merged_render_props_match_golden(
     fallback_theme = tmp_path / "themes" / "banodoco-default" / "theme.json"
     resolved_theme = _resolved_theme_for_render(timeline_path, fallback_theme)
 
-    # -- 8. load the asset registry via timeline.load_registry ---------------
-    from astrid.timeline import load_registry
+    # -- 8. load the asset registry via core timeline.load_registry ----------
+    from astrid.core.timeline import load_registry
 
     loaded_registry = load_registry(assets_path)
 

@@ -40,7 +40,7 @@ _START_METADATA_KEYS = {
     "next_command",
 }
 
-_BODY_CODE = '''from astrid.orchestrate import orchestrator, code
+_BODY_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.app")
 def app(): return [code("step_a", argv=["echo", "x"])]
 '''

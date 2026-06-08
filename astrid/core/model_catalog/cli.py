@@ -1,6 +1,6 @@
 """CLI for ``astrid models`` — model catalog discovery.
 
-This module is imported by ``astrid/pipeline.py`` when the user invokes
+This module is imported by ``astrid.core.gateway`` when the user invokes
 ``astrid models ...``.
 
 Schema v2: model → mode → backend taxonomy.  ``astrid models list`` shows
@@ -15,7 +15,7 @@ import argparse
 import json
 import sys
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.model_catalog.registry import ModelRegistry
 
 

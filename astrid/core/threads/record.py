@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -13,7 +12,8 @@ from typing import Any, Mapping
 
 import xxhash
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.util.hash import sha256_file
 
 from . import variants
 from .ids import generate_run_id
@@ -176,14 +176,6 @@ def normalize_external_service_calls(raw_calls: list[Any]) -> list[dict[str, str
         if call:
             normalized.append(call)
     return normalized
-
-
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def repo_relative(path: Path, repo_root: Path) -> str:

@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
 
-from .gateway import main
+from .core.gateway import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

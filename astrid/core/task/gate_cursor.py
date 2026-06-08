@@ -6,7 +6,7 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import Any, Sequence
 
-from astrid.contracts.run_status import STEP_TERMINAL_KINDS
+from astrid.core.contracts.run_status import STEP_TERMINAL_KINDS
 from astrid.core.task.gate_base import TaskRunGateError
 from astrid.core.task.plan import (
     STEP_PATH_SEP,

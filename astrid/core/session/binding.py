@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.paths import project_dir
 from astrid.core.session.lease import read_lease
 from astrid.core.session.model import Session, SessionValidationError

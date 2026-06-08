@@ -7,7 +7,7 @@ from typing import Literal
 
 import pytest
 
-from astrid.contracts.capability_schema import (
+from astrid.core.contracts.capability_schema import (
     DESCRIPTION_MAX_LEN,
     KEYWORD_MAX_LEN,
     KEYWORDS_MAX_COUNT,
@@ -227,7 +227,7 @@ class TestCrossdomainDelegationParity:
         """Each domain binds SchemaValidator from contracts/, not a local copy."""
         import astrid.core.executor.schema as _ex
         import astrid.core.orchestrator.schema as _orch
-        from astrid.contracts.capability_schema import SchemaValidator
+        from astrid.core.contracts.capability_schema import SchemaValidator
         assert _ex._primitives.__class__ is SchemaValidator
         assert _orch._primitives.__class__ is SchemaValidator
 

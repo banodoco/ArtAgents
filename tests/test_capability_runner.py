@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from astrid.contracts.capability_runner import CapabilityRunner
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.capability_runner import CapabilityRunner
+from astrid.core.contracts.run_status import RunStatus
 
 
 class _Registry:

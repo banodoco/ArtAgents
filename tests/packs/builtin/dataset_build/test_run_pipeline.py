@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.training.orchestrators.dataset_build import run as dataset_run
 from astrid.packs.training.orchestrators.dataset_build.items import config_hash, make_candidate_item
 from astrid.packs.training.orchestrators.dataset_build.state import make_initial_state, read_review_state, set_status, write_review_state

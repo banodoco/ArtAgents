@@ -4,7 +4,7 @@ import ast
 
 from astrid.core import util as core_util
 from astrid.core.util import sha256_file, utc_now_iso, utc_now_milliseconds, utc_now_seconds
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 
 def _core_function_defs() -> dict[str, list[str]]:

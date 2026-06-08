@@ -6,7 +6,7 @@ from astrid.core.util.secrets import load_api_key
 from astrid.packs.generation.executors.generate_image_openai.run import main
 from astrid.packs.rendering.executors.sprite_sheet.run import load_fal_key
 from astrid.packs.editorial.executors.transcribe.run import load_api_key as load_transcribe_api_key
-from astrid.utilities.llm_clients import _load_api_key
+from astrid.core.util.llm_clients import _load_api_key
 
 
 def test_generate_image_dry_run_multiple_variants(capsys, tmp_path):

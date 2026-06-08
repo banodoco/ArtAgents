@@ -28,28 +28,28 @@ from astrid.core.task.gate import GateDecision, TaskRunGateError, gate_command
 from astrid.core.task.lifecycle import cmd_next
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 
-_BODY_CODE = '''from astrid.orchestrate import orchestrator, code
+_BODY_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]
 '''
 
-_BODY_AGENT = '''from astrid.orchestrate import orchestrator, attested
+_BODY_AGENT = '''from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review_agent")
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="agent")]
 '''
 
-_BODY_HUMAN = '''from astrid.orchestrate import orchestrator, attested
+_BODY_HUMAN = '''from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review_human")
 def main(): return [attested("review", command="ok.sh", instructions="confirm", ack="human")]
 '''
 
-_BODY_ITER = '''from astrid.orchestrate import orchestrator, attested, repeat_until
+_BODY_ITER = '''from astrid.core.orchestrate import orchestrator, attested, repeat_until
 @orchestrator("demo.iter")
 def main(): return [attested("review", command="r.sh", instructions="ok", ack="human",
     repeat=repeat_until(condition="user_approves", max_iterations=3, on_exhaust="fail"))]
 '''
 
-_BODY_FE = '''from astrid.orchestrate import orchestrator, attested, repeat_for_each
+_BODY_FE = '''from astrid.core.orchestrate import orchestrator, attested, repeat_for_each
 @orchestrator("demo.fe")
 def main(): return [attested("review_each", command="r.sh", instructions="check", ack="human",
     repeat=repeat_for_each(items=["a","b","c"]))]

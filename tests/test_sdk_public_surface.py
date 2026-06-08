@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.event_log_error import EventLogError
+from astrid.core.contracts.event_log_error import EventLogError
 from astrid.core.executor.schema import ExecutorValidationError
 from astrid.core.orchestrator.runner import OrchestratorRunError
 from astrid.core.session.lease import LeaseError
@@ -31,9 +31,9 @@ pytestmark = pytest.mark.skipif(
 
 
 REPRESENTATIVE_SUBMODULES = (
-    "astrid.gateway",
-    "astrid.doctor",
-    "astrid.setup_cli",
+    "astrid.core.gateway",
+    "astrid.core.doctor",
+    "astrid.core.setup_cli",
 )
 
 RETIRED_COMPATIBILITY_SUBMODULES = (
@@ -2016,7 +2016,7 @@ def test_generate_facade_handles_error_generation_result(
     it without raising."""
     astrid = _import_public_module()
     sdk = importlib.import_module("astrid.sdk")
-    from astrid.contracts.exec_error import ExecError
+    from astrid.core.contracts.exec_error import ExecError
     from astrid.core.generation import GENERATION_RESULT_KEY
     from astrid.core.generation.backends.base import GenerationResult
 
@@ -3085,7 +3085,7 @@ import os, sys
 os.environ.pop("ASTRID_SESSION_ID", None)
 
 # Import and call the gate main
-from astrid.gateway import main
+from astrid.core.gateway import main
 # Use --dry-run to avoid actual execution; auto-bind should still happen
 try:
     exit_code = main(["executors", "run", "--dry-run", "generation.nonexistent_99"])
@@ -3134,7 +3134,7 @@ def test_gateway_run_passes_bound_project_via_request_metadata(
     from astrid.core.session.lifecycle import create_session
     from astrid.core.session.paths import sessions_dir
     from astrid.core.timeline.crud import create_timeline
-    from astrid.gateway import main
+    from astrid.core.gateway import main
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(projects_root))

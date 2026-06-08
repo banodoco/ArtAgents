@@ -111,7 +111,7 @@ elements. If the user needs an editable visual primitive, fork or create an
 element instead of hard-coding behavior in an executor.
 
 Create a **shared library** only when the code has no public runtime of its own.
-Shared hype/editing concepts belong under `astrid/domains/hype`. Generic
+Shared hype/editing concepts belong under `astrid/core/domains/hype`. Generic
 plumbing belongs under `astrid/utilities`. Executor-specific helpers belong
 inside that executor's optional `src/` package.
 

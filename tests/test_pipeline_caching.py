@@ -285,7 +285,7 @@ class PipelineCachingTest(unittest.TestCase):
         self.assertEqual([name for name, _ in calls], POOL_NO_RENDER_STEPS)
 
     def test_executors_list_dispatches_before_required_arguments(self) -> None:
-        from astrid import gateway as gateway
+        from astrid.core import gateway as gateway
 
         with mock.patch("astrid.core.executor.cli.main", return_value=0) as executors_main:
             result = gateway.main(["executors", "list"])

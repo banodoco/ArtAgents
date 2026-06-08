@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.task.plan import load_plan
-from astrid.orchestrate import OrchestrateDefinitionError
-from astrid.orchestrate import cli as author_cli
-from astrid.orchestrate.compile import compile_to_path
+from astrid.core.orchestrate import OrchestrateDefinitionError
+from astrid.core.orchestrate import cli as author_cli
+from astrid.core.orchestrate.compile import compile_to_path
 
 
-_VALID_FOO = '''from astrid.orchestrate import (
+_VALID_FOO = '''from astrid.core.orchestrate import (
     code,
     json_file,
     orchestrator,
@@ -90,7 +90,7 @@ class TestCheckFailures:
         _write(
             packs_root,
             "sample.bad_attested",
-            '''from astrid.orchestrate import attested, file_nonempty, orchestrator
+            '''from astrid.core.orchestrate import attested, file_nonempty, orchestrator
 
 @orchestrator("sample.bad_attested")
 def bad():
@@ -114,7 +114,7 @@ def bad():
         _write(
             packs_root,
             "sample.bad_foreach",
-            '''from astrid.orchestrate import code, orchestrator, repeat_for_each
+            '''from astrid.core.orchestrate import code, orchestrator, repeat_for_each
 
 @orchestrator("sample.bad_foreach")
 def bad():
@@ -136,7 +136,7 @@ def bad():
         _write(
             packs_root,
             "sample.bad_nested",
-            '''from astrid.orchestrate import nested, orchestrator
+            '''from astrid.core.orchestrate import nested, orchestrator
 
 @orchestrator("sample.bad_nested")
 def bad():
@@ -153,7 +153,7 @@ def bad():
         _write(
             packs_root,
             "sample.bad_argv",
-            '''from astrid.orchestrate import code, orchestrator
+            '''from astrid.core.orchestrate import code, orchestrator
 
 @orchestrator("sample.bad_argv")
 def bad():
@@ -233,7 +233,7 @@ class TestNestedCycle:
         _write(
             packs_root,
             "sample.cyc",
-            '''from astrid.orchestrate import nested, orchestrator
+            '''from astrid.core.orchestrate import nested, orchestrator
 
 @orchestrator("sample.cyc")
 def cyc():

@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from astrid import gateway
+from astrid.core import gateway
 from astrid.packs.youtube.executors.upload.src import social_publish  # noqa: E402
 from astrid.packs.youtube.executors.upload import run as publish_youtube  # noqa: E402
 

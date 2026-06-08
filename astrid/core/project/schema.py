@@ -14,9 +14,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
-from astrid.contracts.run_status import RunStatus
-from astrid.contracts.schema_validators import require_uuid_str
+from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.contracts.schema_validators import require_uuid_str
 from astrid.core.util.time import utc_now_seconds
 
 from .paths import validate_project_slug, validate_run_id, validate_source_id

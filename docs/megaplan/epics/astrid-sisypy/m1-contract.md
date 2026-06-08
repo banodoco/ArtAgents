@@ -33,7 +33,7 @@ Must specify, concretely and verified against the actual code:
 
 ## Open questions for the planner
 - Dependency wiring for Sisypy (editable install vs pyproject vs PYTHONPATH) matching Astrid packaging + CI.
-- Whether each verifier is callable as a library function (confirm signatures: `LocalFsBackend.verify_chain`, `astrid.core.task.events.verify_chain`, `astrid.audit.graph.verify_audit_ledger`) or must be shelled via CLI; ADAPTER.md records the chosen call.
+- Whether each verifier is callable as a library function (confirm signatures: `LocalFsBackend.verify_chain`, `astrid.core.task.events.verify_chain`, `astrid.core.audit.graph.verify_audit_ledger`) or must be shelled via CLI; ADAPTER.md records the chosen call.
 - How/when to snapshot the read-only `assembly.json` before regeneration (capture hook ordering).
 
 ## Constraints

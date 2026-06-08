@@ -1,4 +1,4 @@
-"""DSL unit tests for astrid.orchestrate (Phase 4)."""
+"""DSL unit tests for astrid.core.orchestrate (Phase 4)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.task.plan import load_plan
-from astrid.orchestrate import (
+from astrid.core.orchestrate import (
     OrchestrateDefinitionError,
     attested,
     code,

@@ -1,7 +1,7 @@
 """Step 7c (Phase 3): Verify the --changed test-selection heuristic.
 
 Simulates a diff touching a nested module with a directly name-mapped test
-file (astrid/contracts/capability_schema.py → tests/test_capability_schema.py,
+file (astrid/core/contracts/capability_schema.py → tests/test_capability_schema.py,
 Rule 3a) and asserts the selection INCLUDES the mapped test and EXCLUDES a
 clearly unrelated file (tests/timeline/test_model.py).
 
@@ -19,10 +19,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CI_SCRIPT = _REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh"
 
-# The name-mapped pair: changing astrid/contracts/capability_schema.py should
+# The name-mapped pair: changing astrid/core/contracts/capability_schema.py should
 # select tests/test_capability_schema.py (Rule 3a in the heuristic — direct
 # test_<mod>.py match for nested modules).
-_CHANGED_MODULE = "astrid/contracts/capability_schema.py"
+_CHANGED_MODULE = "astrid/core/contracts/capability_schema.py"
 _EXPECTED_TEST = "tests/test_capability_schema.py"
 _UNRELATED_TEST = "tests/timeline/test_model.py"
 
@@ -135,7 +135,7 @@ def test_ci_changed_selection_excludes_unrelated_when_only_structure_changes(
 ) -> None:
     """Same mock-diff scenario with tighter exclusion assertion.
 
-    When ONLY astrid/contracts/capability_schema.py changes, the selection
+    When ONLY astrid/core/contracts/capability_schema.py changes, the selection
     should NOT include any test file from tests/timeline/ (the
     directory-fallback would need a changed file under astrid/timeline/
     to trigger that).

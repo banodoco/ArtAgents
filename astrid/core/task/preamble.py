@@ -6,7 +6,7 @@ not import this into hook config from Phase 5.
 
 SD-023 (amended Sprint 1): PROHIBITION_PREAMBLE precedes every
 operator-facing message WITHIN A BOUND SESSION. The 'no session bound'
-error printed by the CLI gate (astrid/pipeline.py) is the documented
+error printed by the CLI gate (astrid.core.gateway) is the documented
 exception — preamble would be premature for an agent not yet in task
 mode.
 """

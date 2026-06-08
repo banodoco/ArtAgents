@@ -24,7 +24,7 @@ from astrid.core.task.preamble import PROHIBITION_PREAMBLE  # noqa: E402
 # Fixtures
 # ---------------------------------------------------------------------------
 
-_BODY_CODE = """from astrid.orchestrate import orchestrator, code
+_BODY_CODE = """from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]
 """
@@ -146,8 +146,8 @@ def test_next_default_mode_includes_preamble_on_stdout(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 _EXPECTED_AGENT_CLI_MODULES: set[str] = {
-    "astrid/gateway/__init__.py",
-    "astrid/gateway/dispatch.py",
+    "astrid/core/gateway/__init__.py",
+    "astrid/core/gateway/dispatch.py",
     "astrid/core/session/cli.py",
     "astrid/core/task/claim.py",
     "astrid/core/task/lifecycle.py",

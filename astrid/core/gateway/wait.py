@@ -22,8 +22,8 @@ def _wait_adapter(decision: Any) -> int:
     For remote-artifact adapter: wait for the generic subprocess wrapper.
     """
     # Look up callees through the gateway module so monkeypatch.setattr on
-    # astrid.gateway._wait_local_subprocess (used by tests) still intercepts.
-    _gw = sys.modules.get("astrid.gateway")
+    # astrid.core.gateway._wait_local_subprocess (used by tests) still intercepts.
+    _gw = sys.modules.get("astrid.core.gateway")
     _wls = _gw._wait_local_subprocess if _gw is not None else _wait_local_subprocess
     _wra = _gw._wait_remote_artifact if _gw is not None else _wait_remote_artifact
 
@@ -73,7 +73,7 @@ def _wait_local_subprocess(decision: Any) -> int:
 def _wait_remote_artifact(decision: Any) -> int:
     """Block until the generic remote-artifact subprocess exits."""
     # Late-binding through the gateway module to preserve monkeypatch seams.
-    _gw = sys.modules.get("astrid.gateway")
+    _gw = sys.modules.get("astrid.core.gateway")
     _wls = _gw._wait_local_subprocess if _gw is not None else _wait_local_subprocess
     return _wls(decision)
 

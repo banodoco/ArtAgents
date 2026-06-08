@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.paths import executor_argv
+from astrid.core.paths import executor_argv
 
 from .config import STEP_ORDER
 
@@ -61,7 +61,7 @@ def asset_args(asset_pairs: list[tuple[str, Path | str]]) -> list[str]:
     return args
 
 def probe_audio_duration(path: Path | str) -> float:
-    from astrid.media import ffprobe_duration_seconds
+    from astrid.core.media import ffprobe_duration_seconds
 
     return ffprobe_duration_seconds(path)
 

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.editorial.executors.arrange import run as arrange
 from astrid.packs.editorial.executors.editor_review import run as editor_review
 from astrid.packs.editorial.executors.human_notes import run as human_notes

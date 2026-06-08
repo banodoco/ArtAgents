@@ -13,8 +13,8 @@ from dataclasses import FrozenInstanceError, asdict
 
 import pytest
 
-from astrid.contracts.errors import AstridError, AstridErrorEnvelope, _json_safe
-from astrid.contracts.exec_error import (
+from astrid.core.contracts.errors import AstridError, AstridErrorEnvelope, _json_safe
+from astrid.core.contracts.exec_error import (
     ExecAstridError,
     ExecError,
     error_from_missing_binaries,

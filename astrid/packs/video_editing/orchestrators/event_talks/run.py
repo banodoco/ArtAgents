@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.event_talks')
@@ -24,7 +24,7 @@ from astrid.core.project.run import (
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
 from astrid.core.util.hash import sha256_file
-from astrid.media import ffprobe_duration_seconds
+from astrid.core.media import ffprobe_duration_seconds
 from astrid.packs.video_editing.orchestrators.event_talks.plan_template import (
     build_plan_v2,
     emit_plan_json,

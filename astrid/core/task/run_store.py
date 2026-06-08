@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.current_run import (
     clear_current_run,
     read_current_run,

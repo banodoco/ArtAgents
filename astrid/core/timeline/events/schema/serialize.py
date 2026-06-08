@@ -8,7 +8,7 @@ import math
 from dataclasses import is_dataclass
 from typing import Any
 
-from astrid.contracts.event_hash import hash_embedded
+from astrid.core.contracts.event_hash import hash_embedded
 from .types import TimelineEvent, TimelineEventSchemaError
 
 

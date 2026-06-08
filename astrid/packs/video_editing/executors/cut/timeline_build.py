@@ -13,8 +13,8 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from astrid.audit import AuditContext
-from astrid.contracts.errors import AstridError
+from astrid.core.audit import AuditContext
+from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline import (
     METADATA_VERSION,
     AssetRegistry,
@@ -24,8 +24,8 @@ from astrid.core.timeline import (
     materialize_output,
 )
 from astrid.core.util.time import utc_now_seconds
-from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
-from astrid.paths import PACKAGE_ROOT
+from astrid.core.domains.hype.arrangement_rules import compile_arrangement_plan
+from astrid.core.paths import PACKAGE_ROOT
 
 _LEGACY_DEFAULT_CLIP_SEC = 4.0
 

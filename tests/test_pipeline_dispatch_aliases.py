@@ -4,7 +4,7 @@ import sys
 import unittest
 from unittest import mock
 
-from astrid import gateway
+from astrid.core import gateway
 
 
 class PipelineDispatchAliasTest(unittest.TestCase):
@@ -46,7 +46,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 self.assertIn(f"unknown command '{token}'", stderr.getvalue())
 
     def test_doctor_and_setup_dispatch_before_legacy_validation(self) -> None:
-        from astrid import doctor, setup_cli
+        from astrid.core import doctor, setup_cli
 
         with (
             mock.patch(
@@ -153,7 +153,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
                 return_value=object(),
             ),
-            mock.patch("astrid.orchestrate.cli.main", return_value=59) as orchestrate_main,
+            mock.patch("astrid.core.orchestrate.cli.main", return_value=59) as orchestrate_main,
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
@@ -171,7 +171,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
                 return_value=object(),
             ),
-            mock.patch("astrid.orchestrate.cli.main", return_value=60) as orchestrate_main,
+            mock.patch("astrid.core.orchestrate.cli.main", return_value=60) as orchestrate_main,
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
@@ -202,7 +202,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=42,
             ) as mock_fallback,
         ):
@@ -233,11 +233,11 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertIn("effects\ttext-card", stdout.getvalue())
 
     def test_patch_dispatch_seam_through_pipeline_direct_call(self) -> None:
-        """Characterize: _dispatch_elements patched through astrid.gateway
+        """Characterize: _dispatch_elements patched through astrid.core.gateway
         IS intercepted when called directly (not via main(), which captures
         references in _TOP_LEVEL_HANDLERS at import time)."""
         with mock.patch(
-            "astrid.gateway._dispatch_elements",
+            "astrid.core.gateway._dispatch_elements",
             return_value=55,
         ) as patched_dispatch:
             result = gateway._dispatch_elements(["list"])
@@ -251,22 +251,22 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         populated at import time. This is a documented compatibility seam:
         legacy patches that need to intercept dispatch must target
         _TOP_LEVEL_HANDLERS or the lower-level CLI module entry points."""
-        import astrid.gateway
+        import astrid.core.gateway
 
-        original = astrid.gateway._TOP_LEVEL_HANDLERS["elements"]
-        self.assertIs(original, astrid.gateway._dispatch_elements)
+        original = astrid.core.gateway._TOP_LEVEL_HANDLERS["elements"]
+        self.assertIs(original, astrid.core.gateway._dispatch_elements)
 
         with mock.patch(
-            "astrid.gateway._dispatch_elements",
+            "astrid.core.gateway._dispatch_elements",
             return_value=999,
         ):
             # The handler dict still holds the original reference
             self.assertIsNot(
-                astrid.gateway._TOP_LEVEL_HANDLERS["elements"],
-                astrid.gateway._dispatch_elements,
+                astrid.core.gateway._TOP_LEVEL_HANDLERS["elements"],
+                astrid.core.gateway._dispatch_elements,
             )
             # Direct call goes through the mock
-            self.assertEqual(astrid.gateway._dispatch_elements(["x"]), 999)
+            self.assertEqual(astrid.core.gateway._dispatch_elements(["x"]), 999)
 
 
 if __name__ == "__main__":

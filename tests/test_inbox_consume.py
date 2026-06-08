@@ -16,7 +16,7 @@ from astrid.core.task.events import read_events, verify_chain
 from astrid.core.task.lifecycle import cmd_next
 
 
-_BODY_AGENT = '''from astrid.orchestrate import orchestrator, attested
+_BODY_AGENT = '''from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review_agent")
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="agent")]
 '''

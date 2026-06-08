@@ -26,7 +26,7 @@ from astrid.core.reigh.env import (
     resolve_supabase_url,
     resolve_task_status_update_url,
 )
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import run_pack_main
 
 

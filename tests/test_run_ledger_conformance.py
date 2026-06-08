@@ -34,7 +34,7 @@ from typing import Any, Literal
 
 import pytest
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project import paths as project_paths
 from astrid.core.project.project import create_project
 
@@ -214,7 +214,7 @@ class TestGatewayRunPrefixes:
     )
 
     def test_auto_bind_prefixes_present(self) -> None:
-        from astrid.gateway import _AUTO_BIND_RUN_VERBS
+        from astrid.core.gateway import _AUTO_BIND_RUN_VERBS
 
         observed = frozenset(_AUTO_BIND_RUN_VERBS)
         required = frozenset(self.REQUIRED_PREFIXES)
@@ -228,7 +228,7 @@ class TestGatewayRunPrefixes:
 
     def test_auto_bind_dispatch_registered(self) -> None:
         """Every auto-bind prefix must map to a dispatch handler."""
-        from astrid.gateway import _TOP_LEVEL_HANDLERS
+        from astrid.core.gateway import _TOP_LEVEL_HANDLERS
 
         for prefix in self.REQUIRED_PREFIXES:
             top = prefix[0]
@@ -260,7 +260,7 @@ def _make_minimal_executor(
     command: tuple[str, ...] = (sys.executable, "-c", "print('ok')"),
 ) -> Any:
     """Build a minimal external executor definition for testing."""
-    from astrid.contracts.schema import CommandSpec
+    from astrid.core.contracts.schema import CommandSpec
     from astrid.core.executor.schema import ExecutorDefinition
 
     return ExecutorDefinition(
@@ -277,7 +277,7 @@ def _make_minimal_requires_executor(
     executor_id: str = "test.requires",
 ) -> Any:
     """Build an executor that requires an input — used for validation-failure tests."""
-    from astrid.contracts.schema import CommandSpec, Port
+    from astrid.core.contracts.schema import CommandSpec, Port
     from astrid.core.executor.schema import ExecutorDefinition
 
     return ExecutorDefinition(
@@ -299,7 +299,7 @@ def _make_minimal_orchestrator(
     Uses a command-runtime so --project is supported (python-runtime
     orchestrators do not yet support --project).
     """
-    from astrid.contracts.schema import CommandSpec
+    from astrid.core.contracts.schema import CommandSpec
     from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 
     return OrchestratorDefinition(

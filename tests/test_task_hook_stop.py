@@ -28,11 +28,11 @@ from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.session.identity import Identity, write_identity
 from astrid.core.session.paths import session_path, sessions_dir
-from astrid.threads.ids import generate_ulid
+from astrid.core.threads.ids import generate_ulid
 from astrid.core.task.hook import cmd_hook_stop
 from astrid.core.task.lifecycle import cmd_next
 
-_BODY_CODE = '''from astrid.orchestrate import orchestrator, code
+_BODY_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]
 '''

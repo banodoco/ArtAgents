@@ -12,10 +12,10 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import register_outputs
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
-from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
+from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 from datetime import datetime, timezone
 
 QUOTE_CANDIDATES_VERSION = 1

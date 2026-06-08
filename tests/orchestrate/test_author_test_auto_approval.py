@@ -30,10 +30,10 @@ from astrid.core.task.env import ASTRID_ACTOR
 from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.lifecycle_ack import cmd_ack
-from astrid.orchestrate.test_runner import _finish_code_step, run_fixture
+from astrid.core.orchestrate.test_runner import _finish_code_step, run_fixture
 
 
-_DEMO_PACK_BODY = '''from astrid.orchestrate import attested, orchestrator
+_DEMO_PACK_BODY = '''from astrid.core.orchestrate import attested, orchestrator
 
 
 @orchestrator("demo.app")
@@ -48,7 +48,7 @@ def app():
     ]
 '''
 
-_CODE_PACK_BODY = '''from astrid.orchestrate import code, orchestrator
+_CODE_PACK_BODY = '''from astrid.core.orchestrate import code, orchestrator
 
 @orchestrator("demo.code_once")
 def app():
@@ -74,7 +74,7 @@ def test_author_test_env_var_unlocks_attested_auto_approval(
 
     # FLAG-P9-001: cmd_start must succeed even when ASTRID_AUTHOR_TEST=1.
     # Compile the demo pack first (cmd_start expects build/<orch>.json).
-    from astrid.orchestrate.compile import compile_to_path
+    from astrid.core.orchestrate.compile import compile_to_path
     from astrid.core.project.project import create_project
     from astrid.core.timeline.crud import create_timeline
     compile_to_path("demo.app", packs_root=packs)
@@ -164,7 +164,7 @@ def test_runner_dispatches_exactly_once(
     )
 
     with patch(
-        "astrid.orchestrate.test_runner._run_fallback_subprocess",
+        "astrid.core.orchestrate.test_runner._run_fallback_subprocess",
         side_effect=AssertionError("adapter-dispatched steps must not hit subprocess fallback"),
     ):
         events_path = run_fixture(
@@ -190,10 +190,10 @@ def test_finish_code_step_uses_subprocess_fallback_for_non_adapter_steps() -> No
 
     decision = _Decision()
     with patch(
-        "astrid.orchestrate.test_runner._run_fallback_subprocess",
+        "astrid.core.orchestrate.test_runner._run_fallback_subprocess",
         return_value=type("_Completed", (), {"returncode": 7})(),
     ) as run_fallback, patch(
-        "astrid.orchestrate.test_runner.record_dispatch_complete"
+        "astrid.core.orchestrate.test_runner.record_dispatch_complete"
     ) as record_complete:
         _finish_code_step(decision, ["echo", "fallback"])
 

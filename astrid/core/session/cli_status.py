@@ -13,7 +13,7 @@ import argparse
 import sys
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
 from astrid.core.project.paths import project_dir
 from astrid.core.session.binding import (

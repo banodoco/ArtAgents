@@ -17,7 +17,7 @@ from astrid.core.pack import (
     load_pack_manifest,
     pack_manifest_path,
 )
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")
@@ -25,29 +25,13 @@ INTERNAL_PACK_DIRS = {"__pycache__", "schemas"}
 TOP_LEVEL_ASTRID_FILES = {
     "__init__.py",
     "__main__.py",
-    "doctor.py",
-    "media.py",
-    "paths.py",
-    "setup_cli.py",
-    "structure.py",
-    "theme_schema.py",
 }
 TOP_LEVEL_ASTRID_DIRS = {
-    "audit",
-    "contracts",
     "core",
     "docs",
-    "domains",
-    "elements",
-    "gateway",
-    "modalities",
-    "orchestrate",
     "packs",
     "sdk",
     "skills",
-    "threads",
-    "utilities",
-    "verify",
 }
 
 
@@ -122,12 +106,12 @@ def validate_cli_domain_boundary(root: str | Path = REPO_ROOT) -> list[str]:
     """Reject domain-library imports of CLI modules.
 
     This intentionally stays narrow to avoid false positives in Astrid's
-    existing CLI helper split: only files under ``astrid/domains/`` are checked,
+    existing CLI helper split: only files under ``astrid/core/domains/`` are checked,
     and only imports of ``*.cli`` modules are flagged.
     """
 
     repo_root = Path(root)
-    domains_root = repo_root / "astrid" / "domains"
+    domains_root = repo_root / "astrid" / "core" / "domains"
     if not domains_root.is_dir():
         return []
 
@@ -160,7 +144,7 @@ _SYS_MODULES_INJECTION_EXEMPTIONS = frozenset(
         # SD2: compile.py temporarily registers a UUID-namespaced module for
         # importlib relative imports and pops it in finally; keep the guard
         # narrow so only this approved register-then-pop pattern is exempt.
-        "astrid/orchestrate/compile.py",
+        "astrid/core/orchestrate/compile.py",
         # The in-process runtime invoker reloads pack modules fresh on each
         # invocation via importlib.util + sys.modules pop/assign.  This is
         # a controlled, necessary pattern to guarantee source-level freshness
@@ -547,10 +531,6 @@ def _is_forbidden_core_import(module: str) -> bool:
     return (
         module == "astrid.packs"
         or module.startswith("astrid.packs.")
-        or module == "astrid.orchestrate"
-        or module.startswith("astrid.orchestrate.")
-        or module == "astrid.audit"
-        or module.startswith("astrid.audit.")
     )
 
 
@@ -570,11 +550,6 @@ def _is_concrete_pack_implementation_module(module: str) -> bool:
 _IMPORT_LAYERING_EXEMPT_REL = frozenset(
     {
         "astrid/core/runtime/in_process.py",
-        # SD2: event_stream.py still imports from astrid.audit to provide a
-        # single task/audit event reader.  The current exemption mechanism is
-        # file-level, so this bypasses the packs/orchestrate/audit checks for
-        # the whole file until finer-grained mechanics exist.
-        "astrid/core/task/event_stream.py",
     }
 )
 

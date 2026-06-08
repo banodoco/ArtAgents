@@ -24,7 +24,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from astrid.audit.transport import (  # noqa: E402
+from astrid.core.audit.transport import (  # noqa: E402
     AUDIT_LEDGER_SCHEMA_VERSION,
     AuditLedgerError,
     migrate_records_to_v2,

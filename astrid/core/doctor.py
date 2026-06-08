@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from astrid.core.timeline.kinds import default_transition_kind, transition_kind_options
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 Status = str
 _DECLARED_DEP_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
@@ -159,7 +159,7 @@ def _check_python_version() -> DoctorCheck:
 
 def _check_required_imports() -> DoctorCheck:
     modules = (
-        "astrid.timeline",
+        "astrid.core.timeline",
         "astrid.core.element.registry",
         "astrid.core.executor.registry",
         "astrid.core.orchestrator.registry",
@@ -304,7 +304,7 @@ def _check_element_registry() -> str:
 
 
 def _check_repo_structure() -> str:
-    from astrid.structure import validate_repo_structure
+    from astrid.core.structure import validate_repo_structure
 
     report = validate_repo_structure(REPO_ROOT)
     if not report.ok:
@@ -425,7 +425,7 @@ def _check_runpod_stale_handles() -> DoctorCheck:
 
 
 def _check_stale_project_runs() -> DoctorCheck:
-    from astrid.contracts.run_status import RunStatus
+    from astrid.core.contracts.run_status import RunStatus
     from astrid.core.project.jsonio import read_json
     from astrid.core.project.paths import resolve_projects_root
     from astrid.core.project.run import update_run_record

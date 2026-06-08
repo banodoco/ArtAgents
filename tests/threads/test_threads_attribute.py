@@ -7,10 +7,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from astrid.threads.attribute import attribute_run, enforce_lifecycle
-from astrid.threads.ids import generate_run_id, generate_thread_id
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.schema import make_thread_record
+from astrid.core.threads.attribute import attribute_run, enforce_lifecycle
+from astrid.core.threads.ids import generate_run_id, generate_thread_id
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.schema import make_thread_record
 
 
 NOW = datetime(2026, 5, 3, 12, 0, tzinfo=timezone.utc)

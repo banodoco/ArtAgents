@@ -24,7 +24,7 @@ from astrid.core.task.claim import _make_claim_event
 from astrid.core.task.lifecycle import cmd_status
 
 
-_BODY = '''from astrid.orchestrate import orchestrator, code
+_BODY = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.app")
 def app(): return [
     code("step_a", argv=["echo","a"]),

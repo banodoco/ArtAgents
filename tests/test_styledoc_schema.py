@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid import theme_schema
-from astrid.theme_schema import ThemeValidationError, load_theme, resolve_theme_asset
+from astrid.core import theme_schema
+from astrid.core.theme_schema import ThemeValidationError, load_theme, resolve_theme_asset
 
 
 ROOT = Path(__file__).resolve().parents[2]

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.audit.graph import load_ledger
-from astrid.audit.transport import verify_ledger_path
+from astrid.core.audit.graph import load_ledger
+from astrid.core.audit.transport import verify_ledger_path
 
 from .events import EVENTS_FILENAME, EventLogError, read_events, verify_chain
 

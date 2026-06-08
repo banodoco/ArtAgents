@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core.dirty import detect_local_edits
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
@@ -687,7 +687,7 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
 def _gateway_resolved_project(explicit_project: str | None) -> str | None:
     if explicit_project is not None:
         return None
-    from astrid.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
+    from astrid.core.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
 
     value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
     return value or None

@@ -9,7 +9,7 @@ from astrid.core.pack.manifest import load_manifest_mapping
 from astrid.core.orchestrator.registry import load_default_registry
 from astrid.core.orchestrator.schema import load_orchestrator_manifest
 from astrid.core.pack.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
 PACK_ROOTS = tuple(sorted(path for path in PACKS_ROOT.iterdir() if (path / "pack.yaml").is_file()))

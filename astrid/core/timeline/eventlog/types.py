@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from astrid.contracts.event_log_error import EventLogError as _EventLogErrorBase
+from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.timeline.events.schema import TimelineActor
 
 BackendName = Literal["local_fs", "supabase"]

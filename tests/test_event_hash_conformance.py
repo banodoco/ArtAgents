@@ -1,4 +1,4 @@
-"""Golden + round-trip conformance tests for astrid.contracts.event_hash.
+"""Golden + round-trip conformance tests for astrid.core.contracts.event_hash.
 
 The golden fixture at tests/fixtures/event_hash_golden.json is FROZEN.
 Do NOT regenerate it — it is the authoritative pre-consolidation baseline.
@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.event_hash import hash_embedded, hash_prepended
+from astrid.core.contracts.event_hash import hash_embedded, hash_prepended
 
 GOLDEN_PATH = Path(__file__).parent / "fixtures" / "event_hash_golden.json"
 

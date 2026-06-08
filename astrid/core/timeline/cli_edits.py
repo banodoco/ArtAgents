@@ -14,7 +14,7 @@ import json
 from typing import Any
 from uuid import uuid4 as _uuid4
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 
 from ._edit_helpers import TimelineEditError
 from .events.schema import ClipPosition

@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import sys
 
-from astrid.contracts.errors import (
+from astrid.core.contracts.errors import (
     AstridError,
     coerce_astrid_error,
     render_astrid_error,
@@ -37,7 +37,7 @@ from astrid.core.util.log_and_swallow import log_and_swallow
 from . import dispatch as _gateway_dispatch
 from . import project as _gateway_project
 from . import wait as _gateway_wait
-from astrid.gateway.project import (
+from astrid.core.gateway.project import (
     ASTRID_GATEWAY_RESOLVED_PROJECT_ENV,
     DEFAULT_PROJECT_SLUG,
     _AUTO_BIND_RUN_VERBS,
@@ -49,18 +49,18 @@ from astrid.gateway.project import (
     _invocation_is_auto_bindable_run,
     _resolved_request_project_slug,
 )
-from astrid.gateway.help import (
+from astrid.core.gateway.help import (
     _packs_subcommand_list,
     _print_entrypoint_help,
 )
-from astrid.gateway.wait import (
+from astrid.core.gateway.wait import (
     _make_run_ctx_for_poll,
     _read_returncode_sidecar,
     _wait_adapter,
     _wait_local_subprocess,
     _wait_remote_artifact,
 )
-from astrid.gateway.dispatch import (
+from astrid.core.gateway.dispatch import (
     _TOP_LEVEL_HANDLERS,
     _build_dispatch_parser,
     _dispatch_attach,
@@ -166,7 +166,7 @@ _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
 # Project resolution constants and helpers live in gateway/project.py.
 # They are re-exported here so the gateway facade remains the canonical
-# access point for all callers (including astrid.gateway).
+# access point for all callers (including astrid.core.gateway).
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -178,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001
         bug = wrap_degraded_error(
             exc,
-            state_snapshot={"argv": raw, "entrypoint": "astrid.gateway.main"},
+            state_snapshot={"argv": raw, "entrypoint": "astrid.core.gateway.main"},
         )
         return render_astrid_error(bug)
 
@@ -333,7 +333,7 @@ def _dispatch(raw: list[str]) -> int:
 # _dispatch_with_resolved_project, _has_cli_option,
 # _invocation_is_auto_bindable_run, and _auto_bind_default_project_session
 # are now defined in gateway/project.py and re-exported at the top of this
-# module so callers (including astrid.gateway) continue to resolve them
+# module so callers (including astrid.core.gateway) continue to resolve them
 # through the gateway facade unchanged.
 
 
@@ -359,7 +359,7 @@ def _run_default_brief_orchestrator(argv: list[str]) -> int:
 
 # _packs_subcommand_list and _print_entrypoint_help are now defined in
 # gateway/help.py and re-exported at the top of this module so callers
-# (including gateway.dispatch._dispatch and astrid.gateway) continue to
+# (including gateway.dispatch._dispatch and astrid.core.gateway) continue to
 # resolve them through the gateway facade unchanged.
 
 

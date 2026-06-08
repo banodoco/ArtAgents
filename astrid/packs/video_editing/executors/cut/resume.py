@@ -11,7 +11,7 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any
 
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.timeline import (
     METADATA_VERSION,
     PipelineMetadata,
@@ -26,7 +26,7 @@ from astrid.core.timeline import (
     save_timeline,
 )
 from astrid.core.util.time import utc_now_seconds
-from astrid.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.paths import REPO_ROOT, WORKSPACE_ROOT
 
 from .registry import rebase_registry_paths
 from .timeline_build import _register_cut_outputs

@@ -22,12 +22,12 @@ from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
 
 
-_BODY_A = '''from astrid.orchestrate import orchestrator, code
+_BODY_A = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.appA")
 def app(): return [code("a1", argv=["echo","a1"])]
 '''
 
-_BODY_B = '''from astrid.orchestrate import orchestrator, code
+_BODY_B = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.appB")
 def app(): return [code("b1", argv=["echo","b1"])]
 '''
@@ -62,7 +62,7 @@ def test_runs_ls_lists_both_projects(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "appA", _BODY_A, "demo.appA")
     # Add second orchestrator into the same pack.
     (packs / "demo" / "appB.py").write_text(_BODY_B, encoding="utf-8")
-    from astrid.orchestrate.compile import compile_to_path
+    from astrid.core.orchestrate.compile import compile_to_path
     compile_to_path("demo.appB", packs_root=packs)
 
     # Project alpha: r1 in-flight + r2 aborted.
@@ -102,7 +102,7 @@ def test_runs_ls_lists_both_projects(tmp_path: Path) -> None:
 def test_runs_ls_project_filter(tmp_path: Path) -> None:
     packs, projects = setup_packs_and_compile(tmp_path, "demo", "appA", _BODY_A, "demo.appA")
     (packs / "demo" / "appB.py").write_text(_BODY_B, encoding="utf-8")
-    from astrid.orchestrate.compile import compile_to_path
+    from astrid.core.orchestrate.compile import compile_to_path
     compile_to_path("demo.appB", packs_root=packs)
     _start_one(packs, projects, "demo.appA", "alpha", "r1")
     _start_one(packs, projects, "demo.appB", "beta", "r2")

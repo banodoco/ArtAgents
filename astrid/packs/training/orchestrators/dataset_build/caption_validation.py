@@ -12,7 +12,7 @@ from typing import Any
 
 from jsonschema import Draft7Validator
 
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 from .artifacts import HASHES_KEY
 from .items import utc_now_iso

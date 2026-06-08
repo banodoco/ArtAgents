@@ -14,9 +14,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import register_outputs
-from astrid.contracts.result_manifest import write_manifest
-from astrid.media import ffprobe_duration_seconds
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.media import ffprobe_duration_seconds
 
 
 def build_parser() -> argparse.ArgumentParser:

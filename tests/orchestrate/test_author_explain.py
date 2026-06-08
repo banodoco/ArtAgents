@@ -12,15 +12,15 @@ from pathlib import Path
 
 import pytest
 
-from astrid.orchestrate import cli as author_cli
+from astrid.core.orchestrate import cli as author_cli
 
 
-_INNER = '''from astrid.orchestrate import orchestrator, code
+_INNER = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.inner")
 def inner(): return [code("inner_step", argv=["echo","x"])]
 '''
 
-_APP = '''from astrid.orchestrate import orchestrator, code, attested, repeat_until, nested
+_APP = '''from astrid.core.orchestrate import orchestrator, code, attested, repeat_until, nested
 @orchestrator("demo.app")
 def app(): return [
     code("transcribe", argv=["echo","t"]),

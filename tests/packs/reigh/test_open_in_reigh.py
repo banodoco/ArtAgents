@@ -231,7 +231,7 @@ class OpenInReighTest(unittest.TestCase):
         ).encode("utf-8")
         self.write_outputs(out_dir, timeline_bytes=placement_blob)
 
-        # Patch load_timeline_blob to bypass astrid.timeline schema validation
+        # Patch load_timeline_blob to bypass core timeline schema validation
         # (which would itself reject placement-shaped timelines for unrelated
         # reasons); we want to assert open_in_reigh's own placement-shape guard.
         with patch.object(open_in_reigh, "load_timeline_blob", return_value=json.loads(placement_blob)):

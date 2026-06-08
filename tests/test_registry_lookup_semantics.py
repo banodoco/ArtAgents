@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from astrid.core.pack.alias_resolver import AliasResolver
-from astrid.contracts.schema import CommandSpec
+from astrid.core.contracts.schema import CommandSpec
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.install import ExecutorInstallPlan, ExecutorInstallResult
 from astrid.core.executor.registry import ExecutorRegistry

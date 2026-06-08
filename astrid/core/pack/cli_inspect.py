@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import yaml
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
 from astrid.core.pack import (
     PackDefinition,

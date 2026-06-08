@@ -11,7 +11,7 @@ import json
 import sys
 from typing import Any, TextIO
 
-from astrid.contracts.errors import AstridError, build_state_snapshot, render_astrid_error
+from astrid.core.contracts.errors import AstridError, build_state_snapshot, render_astrid_error
 from astrid.core.cli_choices import AstridArgumentError
 
 _LIFECYCLE_FIELD_DEFAULTS: dict[str, Any] = {

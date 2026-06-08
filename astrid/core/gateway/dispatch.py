@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
@@ -157,7 +157,7 @@ def _dispatch_orchestrators(args: list[str]) -> int:
 
 
 def _dispatch_orchestrate(args: list[str]) -> int:
-    from astrid.orchestrate import cli as author_cli
+    from astrid.core.orchestrate import cli as author_cli
 
     return author_cli.main(args)
 
@@ -208,19 +208,19 @@ def _dispatch_timelines(args: list[str]) -> int:
 
 
 def _dispatch_modalities(args: list[str]) -> int:
-    from astrid import modalities
+    from astrid.core import modalities
 
     return modalities.main(args)
 
 
 def _dispatch_doctor(args: list[str]) -> int:
-    from astrid import doctor
+    from astrid.core import doctor
 
     return doctor.main(args)
 
 
 def _dispatch_setup(args: list[str]) -> int:
-    from astrid import setup_cli
+    from astrid.core import setup_cli
 
     return setup_cli.main(args)
 
@@ -262,7 +262,7 @@ def _dispatch_scratch(args: list[str]) -> int:
     """Run a throwaway Python script with default project context."""
     import argparse
 
-    from astrid.contracts.run_status import RunStatus
+    from astrid.core.contracts.run_status import RunStatus
     from astrid.core.project.run import (
         finalize_project_run,
         prepare_project_run,

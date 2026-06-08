@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core import theme_cli
 from astrid.core.cli_choices import StaticChoices
 from astrid.core.project import cli as project_cli

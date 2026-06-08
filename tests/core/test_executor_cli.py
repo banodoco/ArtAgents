@@ -19,7 +19,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import StaticChoices
 from tests.helpers.cli_runner import run_cli
 

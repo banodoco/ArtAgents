@@ -5,10 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from astrid.audit import AuditContext
+from astrid.core.audit import AuditContext
 from astrid.core.task.event_stream import read_event_stream, subscribe_event_stream
 from astrid.core.task.events import ZERO_HASH, _event_hash
-from astrid.contracts.event_log_error import EventLogError
+from astrid.core.contracts.event_log_error import EventLogError
 
 
 def _write_task_events(events_path: Path, raw_events: list[dict[str, object]]) -> None:

@@ -65,7 +65,7 @@ from astrid.core.timeline.paths import (
     timelines_dir,
     validate_timeline_ulid,
 )
-from astrid.threads.ids import generate_ulid, is_ulid
+from astrid.core.threads.ids import generate_ulid, is_ulid
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineEvent
 from astrid.core.timeline.events.schema.types import EVENT_SCHEMA_VERSION

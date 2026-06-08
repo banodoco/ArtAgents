@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
+from astrid.core.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
 from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.inbox import pending_count
 from astrid.core.task.plan import (

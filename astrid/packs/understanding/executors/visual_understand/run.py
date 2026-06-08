@@ -20,8 +20,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.contracts.errors import AstridError
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 from astrid.core.pack.entrypoint import run_pack_main

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Sequence
 
-from astrid.contracts.run_status import STEP_TERMINAL_KINDS
+from astrid.core.contracts.run_status import STEP_TERMINAL_KINDS
 from astrid.core.env_vars import ASTRID_STRICT_INSTRUCTION_SUBST
 from astrid.core.project.paths import resolve_projects_root
 from astrid.core.task.operator_status_json import (

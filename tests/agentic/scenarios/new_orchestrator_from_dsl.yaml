@@ -6,7 +6,7 @@ description: |
   told to use the DSL, `astrid author new`, or any specific authoring
   surface. They must discover the authoring path on their own (AGENTS.md
   "Create Something New" section, `astrid author --help`, the DSL primitives
-  under `astrid/orchestrate/dsl.py`, and the existing `hype.py` /
+  under `astrid/core/orchestrate/dsl.py`, and the existing `hype.py` /
   `agent_probe.py` examples).
 
   Failure modes this probes:
@@ -59,7 +59,7 @@ assessment:
   - id: chose_dsl_over_yaml
     question: |
       Did the agent write a Python DSL file (using `@orchestrator`
-      / DSL primitives from `astrid/orchestrate/dsl.py`) rather
+      / DSL primitives from `astrid/core/orchestrate/dsl.py`) rather
       than a hand-written orchestrator YAML?
     evidence: [project_tree, report]
     grading: pass_fail

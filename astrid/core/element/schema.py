@@ -10,10 +10,10 @@ from typing import Any
 
 # Single source of truth for element kinds lives in astrid.core.pack to avoid a
 # circular import (element.__init__ would import pack.py during schema load).
-from astrid.contracts.capability_schema import (
+from astrid.core.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
 )
-from astrid.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
+from astrid.core.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
 from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
     ELEMENT_KINDS as ELEMENT_KINDS,

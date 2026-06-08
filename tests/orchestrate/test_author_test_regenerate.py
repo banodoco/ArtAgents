@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.orchestrate import cli as author_cli
+from astrid.core.orchestrate import cli as author_cli
 
 pytestmark = pytest.mark.opt_in
 

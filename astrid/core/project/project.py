@@ -15,7 +15,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.theme import load_theme_by_id
 from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_seconds

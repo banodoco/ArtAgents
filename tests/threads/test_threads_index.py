@@ -8,10 +8,10 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.run_status import RunStatus
-from astrid.threads.ids import generate_run_id, generate_thread_id
-from astrid.threads.index import ThreadIndexLockTimeout, ThreadIndexStore
-from astrid.threads.schema import (
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.threads.ids import generate_run_id, generate_thread_id
+from astrid.core.threads.index import ThreadIndexLockTimeout, ThreadIndexStore
+from astrid.core.threads.schema import (
     SCHEMA_VERSION,
     ThreadSchemaError,
     empty_threads_index,

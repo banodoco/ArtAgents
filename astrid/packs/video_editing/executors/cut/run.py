@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.cut')
@@ -35,10 +35,10 @@ from astrid.core.timeline import (
     validate_arrangement_duration_window,
 )
 from astrid.core.util.hash import sha256_file
-from astrid.domains.hype.arrangement_rules import compile_arrangement_plan
+from astrid.core.domains.hype.arrangement_rules import compile_arrangement_plan
 from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.theme_schema import load_theme, theme_root
+from astrid.core.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.theme_schema import load_theme, theme_root
 
 from . import probe
 from . import registry as _registry

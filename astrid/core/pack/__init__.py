@@ -437,7 +437,7 @@ def ensure_local_pack(*, project_root: str | Path = None) -> Path:
     ``REPO_ROOT`` so the behaviour matches the old location in
     ``element/registry.py``.
     """
-    from astrid.paths import REPO_ROOT
+    from astrid.core.paths import REPO_ROOT
 
     root = Path(project_root) if project_root is not None else REPO_ROOT
     pack_root = root / "astrid" / "packs" / "local"

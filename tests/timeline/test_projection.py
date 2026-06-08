@@ -1017,7 +1017,7 @@ class TestBootstrapBehavior:
         create_project("legacy-proj")
 
         # Create a fake legacy timeline without identity sidecar.
-        from astrid.threads.ids import generate_ulid
+        from astrid.core.threads.ids import generate_ulid
         ulid = generate_ulid()
         tdir = tmp_path / "legacy-proj" / "timelines" / ulid
         tdir.mkdir(parents=True)

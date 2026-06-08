@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
-from astrid.contracts.errors import AstridError, coerce_astrid_error
+from astrid.core.contracts.errors import AstridError, coerce_astrid_error
 from astrid.core.cli_choices import AstridArgumentError
 from astrid.core.session.binding import (
     SessionBindingError,

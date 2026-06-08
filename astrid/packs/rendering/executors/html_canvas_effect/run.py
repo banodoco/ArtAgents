@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('rendering.html_canvas_effect')
@@ -17,8 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.result_manifest import write_manifest
-from astrid.paths import REPO_ROOT
+from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.paths import REPO_ROOT
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"

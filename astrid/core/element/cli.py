@@ -9,7 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.dirty import detect_local_edits
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.search import (

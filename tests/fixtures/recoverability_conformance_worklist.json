@@ -654,21 +654,21 @@
     {
       "kind": "direct_stderr",
       "line": 90,
-      "path": "astrid/orchestrate/cli.py",
+      "path": "astrid/core/orchestrate/cli.py",
       "source": "print(msg, file=sys.stderr)",
       "stderr_kind": "print"
     },
     {
       "kind": "direct_stderr",
       "line": 127,
-      "path": "astrid/orchestrate/cli.py",
+      "path": "astrid/core/orchestrate/cli.py",
       "source": "print(f\"recommended next: astrid author check {qid}\", file=sys.stderr)",
       "stderr_kind": "print"
     },
     {
       "kind": "direct_stderr",
       "line": 296,
-      "path": "astrid/orchestrate/cli.py",
+      "path": "astrid/core/orchestrate/cli.py",
       "source": "print(f\"recommended next: astrid author check {qid}\", file=sys.stderr)",
       "stderr_kind": "print"
     },
@@ -2420,13 +2420,13 @@
     },
     {
       "builder": "build_parser",
-      "module": "astrid.doctor",
-      "path": "astrid/doctor.py"
+      "module": "astrid.core.doctor",
+      "path": "astrid/core/doctor.py"
     },
     {
       "builder": "_build_parser",
-      "module": "astrid.orchestrate.cli",
-      "path": "astrid/orchestrate/cli.py"
+      "module": "astrid.core.orchestrate.cli",
+      "path": "astrid/core/orchestrate/cli.py"
     },
     {
       "builder": "build_parser",
@@ -2695,8 +2695,8 @@
     },
     {
       "builder": "build_parser",
-      "module": "astrid.setup_cli",
-      "path": "astrid/setup_cli.py"
+      "module": "astrid.core.setup_cli",
+      "path": "astrid/core/setup_cli.py"
     },
     {
       "builder": "build_parser",
@@ -2761,15 +2761,15 @@
     {
       "builder": "build_parser",
       "enum_arg_count": 0,
-      "module": "astrid.doctor",
-      "path": "astrid/doctor.py",
+      "module": "astrid.core.doctor",
+      "path": "astrid/core/doctor.py",
       "prog": "python3 -m astrid doctor"
     },
     {
       "builder": "_build_parser",
       "enum_arg_count": 0,
-      "module": "astrid.orchestrate.cli",
-      "path": "astrid/orchestrate/cli.py",
+      "module": "astrid.core.orchestrate.cli",
+      "path": "astrid/core/orchestrate/cli.py",
       "prog": "astrid author"
     },
     {
@@ -3139,8 +3139,8 @@
     {
       "builder": "build_parser",
       "enum_arg_count": 0,
-      "module": "astrid.setup_cli",
-      "path": "astrid/setup_cli.py",
+      "module": "astrid.core.setup_cli",
+      "path": "astrid/core/setup_cli.py",
       "prog": "python3 -m astrid setup"
     },
     {

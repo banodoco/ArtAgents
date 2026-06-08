@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.run_status import RunStatus
-from astrid.contracts.schema import CommandSpec, Port
+from astrid.core.contracts.run_status import RunStatus
+from astrid.core.contracts.schema import CommandSpec, Port
 from astrid.core.executor.registry import ExecutorRegistry
 from astrid.core.executor.runner import ExecutorRunnerError, ExecutorRunRequest, run_executor
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
@@ -635,7 +635,7 @@ def test_hype_prepare_project_main_writes_ulid_to_timeline_id(
 ) -> None:
     """Prove _prepare_project_main writes a valid ULID to run.timeline_id."""
     from astrid.packs.video_editing.orchestrators.hype.run import _prepare_project_main
-    from astrid.threads.ids import is_ulid
+    from astrid.core.threads.ids import is_ulid
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))

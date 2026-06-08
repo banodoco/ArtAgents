@@ -16,7 +16,7 @@ from unittest.mock import ANY, call, patch
 
 import pytest
 
-from astrid.threads.variants import (
+from astrid.core.threads.variants import (
     VARIANT_SIDECAR_NAME,
     VariantState,
     write_sidecar,
@@ -44,7 +44,7 @@ class TestWriteSidecarAtomic:
             }
         ]
 
-        with patch("astrid.threads.variants.write_json_atomic") as mock_write:
+        with patch("astrid.core.threads.variants.write_json_atomic") as mock_write:
             write_sidecar(tmp_path, artifacts)
             mock_write.assert_called_once()
             call_args = mock_write.call_args
@@ -58,7 +58,7 @@ class TestWriteSidecarAtomic:
 
     def test_write_sidecar_empty_artifacts_no_write(self, tmp_path: Path) -> None:
         """Empty artifacts list should not trigger any write."""
-        with patch("astrid.threads.variants.write_json_atomic") as mock_write:
+        with patch("astrid.core.threads.variants.write_json_atomic") as mock_write:
             write_sidecar(tmp_path, [])
             mock_write.assert_not_called()
 

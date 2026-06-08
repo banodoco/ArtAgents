@@ -6,7 +6,7 @@ import argparse
 import json
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 
 from . import check as check_fn

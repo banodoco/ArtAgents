@@ -66,7 +66,7 @@ class ArrangeVoiceInjectionTest(unittest.TestCase):
         }
         client = StubClaudeClient()
 
-        with mock.patch("astrid.domains.hype.arrangement_rules.compile_arrangement_plan", return_value=[]):
+        with mock.patch("astrid.core.domains.hype.arrangement_rules.compile_arrangement_plan", return_value=[]):
             arrange.build_arrangement(
                 fixture_pool(),
                 "Use the first quote.",

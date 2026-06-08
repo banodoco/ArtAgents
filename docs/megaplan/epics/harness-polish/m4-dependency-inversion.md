@@ -44,10 +44,10 @@ A naive "core imports nothing from packs" needs the right mechanism. The clean i
     NOT edit these files' imports — m5b does it *during* the split/CLI restructure so de-inverted imports land in
     the correct sub-modules. Exempt both files in the contract with a tracked TODO.
 - **Fix the inverted `orchestrate` dependency.** `lifecycle.py:135,1157,1180` import `DEFAULT_PACKS_ROOT` from
-  `astrid.orchestrate.compile`. Move the shared constant to a neutral `core` location. (Reading/relocating the
+  `astrid.core.orchestrate.compile`. Move the shared constant to a neutral `core` location. (Reading/relocating the
   constant is fine; do not rewrite `lifecycle.py`'s other imports — those are m5b.)
 - **Break the `core ↔ verify` cycle.** `core/task/plan.py:15` and `core/orchestrator/plan_template.py:20` import
-  `astrid.verify`; media probing now lives in the leaf module `astrid._media`.
+  `astrid.core.verify`; media probing now lives in the leaf module `astrid._media`.
 - **De-dup helpers into a named `core/util` surface (sweep ALL copies, not 3):**
   - `_sha256` family: `core/.../dirty.py:123-132`, `core/task/lifecycle.py:157-162` (read-only here — the *helper*
     moves to `core/util`; lifecycle's call site updates land in m5b), `core/adapter/remote_artifact_fetch.py:28`.
@@ -59,7 +59,7 @@ A naive "core imports nothing from packs" needs the right mechanism. The clean i
 - **Enforce layering — extend `structure.py`, don't add `importlinter`.** `astrid/structure.py:54` already has
   `validate_repo_structure()` with a `StructureReport` and `_validate_*` helpers. Add `validate_import_layering()`
   in that same pattern, failing if `astrid/core/**` imports `astrid.packs` (other than the one sanctioned seam
-  module) or `astrid.orchestrate`. Wire it as a test/CI check. **This green contract = the m4 handoff.**
+  module) or `astrid.core.orchestrate`. Wire it as a test/CI check. **This green contract = the m4 handoff.**
 - **Build the migration-completion guard (HA3 — systemic root cause).** Add `validate_migration_completion()`
   alongside `validate_import_layering()` in `structure.py`: fails CI if non-pack `astrid/` contains a `DEPRECATED`
   marker without a `TODO(milestone)` removal target, a no-op compatibility shim still imported by >0 callers, a
@@ -82,7 +82,7 @@ A naive "core imports nothing from packs" needs the right mechanism. The clean i
 - `lifecycle.py`/`pipeline.py` de-inversion is m5b's; m4 exempts them in the contract with a TODO.
 
 ## Open questions (resolve in prep)
-- Complete grep of every `astrid.core.* → astrid.packs.*` / `→ astrid.orchestrate.*` import (don't whack-a-mole).
+- Complete grep of every `astrid.core.* → astrid.packs.*` / `→ astrid.core.orchestrate.*` import (don't whack-a-mole).
 - hype `get_step_registry()` vs whitelisting the `runner.py:39` import.
 - Cleanest neutral home for `DEFAULT_PACKS_ROOT` and the `media` util.
 
@@ -93,7 +93,7 @@ A naive "core imports nothing from packs" needs the right mechanism. The clean i
 
 ## Done criteria (mechanically checkable)
 - `grep -rn "import astrid.packs" astrid/core/` returns nothing except the single sanctioned seam module
-  (named in the contract); the `astrid.orchestrate` equivalent returns nothing in core.
+  (named in the contract); the `astrid.core.orchestrate` equivalent returns nothing in core.
 - An isolated import test proves `verify/` imports without importing `core/` (cycle gone).
 - `grep -rn "_utc_now_iso\|def _now_iso\|def _sha256" astrid/core/` shows only the canonical `core/util` definitions.
 - `core/util/__init__.py` exposes an `__all__`; a `test_core_util_surface` fails if new private dup helpers appear outside it.

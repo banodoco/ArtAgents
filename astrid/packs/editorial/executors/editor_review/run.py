@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('editorial.editor_review')
@@ -17,12 +17,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import AuditContext
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.audit import AuditContext
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.timeline import load_arrangement, load_metadata, load_pool
-from astrid.media import ffprobe_duration_seconds
-from astrid.paths import executor_argv
-from astrid.utilities.llm_clients import build_claude_client
+from astrid.core.media import ffprobe_duration_seconds
+from astrid.core.paths import executor_argv
+from astrid.core.util.llm_clients import build_claude_client
 
 from ..arrange.run import pool_digest
 from ..transcribe.run import load_api_key

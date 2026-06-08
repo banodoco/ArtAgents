@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 
-from astrid.orchestrate.test_runner import _run_fallback_subprocess
+from astrid.core.orchestrate.test_runner import _run_fallback_subprocess
 
 
 def test_fallback_subprocess_uses_canonical_env_without_host_spread(monkeypatch) -> None:

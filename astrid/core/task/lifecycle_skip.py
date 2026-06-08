@@ -21,7 +21,7 @@ import argparse
 from pathlib import Path
 from typing import Optional, Sequence
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.session.writer import writer_context_for_project

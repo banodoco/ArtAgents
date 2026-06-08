@@ -309,7 +309,7 @@
   },
   "structure_constants_reference": {
     "INTERNAL_PACK_DIRS": ["__pycache__", "schemas"],
-    "source_file": "astrid/structure.py",
+    "source_file": "astrid/core/structure.py",
     "note": "The shared pack manifest schemas live at astrid/core/pack/schemas/v1/. The 'schemas' entry in INTERNAL_PACK_DIRS is a legacy reference to per-pack content roots only."
   }
 }

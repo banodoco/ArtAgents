@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.training.orchestrators.dataset_build import run as dataset_run
 from astrid.packs.training.orchestrators.dataset_build.items import make_candidate_item
 from astrid.packs.training.orchestrators.dataset_build.state import read_review_state

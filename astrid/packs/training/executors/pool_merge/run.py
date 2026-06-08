@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core import timeline
-from astrid.audit import register_outputs
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.element import catalog as effects_catalog
 from astrid.core.util.time import utc_now_seconds
 

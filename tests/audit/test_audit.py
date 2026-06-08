@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from astrid import audit
-from astrid.audit import AuditContext
+from astrid.core.audit import AuditContext
 
 
 def test_audit_registers_asset_graph_and_report(tmp_path: Path) -> None:
@@ -66,7 +66,7 @@ def test_audit_redacts_secret_like_values(tmp_path: Path) -> None:
 
 def test_pipeline_audit_cli_json(tmp_path: Path, capsys) -> None:
     pytest.importorskip("jsonschema")
-    from astrid.gateway import main as pipeline_main  # gateway
+    from astrid.core.gateway import main as pipeline_main  # gateway
 
     ctx = AuditContext.for_run(tmp_path / "run")
     asset_id = ctx.register_asset(kind="source", label="Only source")
@@ -466,7 +466,7 @@ def test_spatial_audio_page_writes_universal_result_manifest(tmp_path: Path) -> 
     # write_manifest computes the tree hash *before* writing manifest.json,
     # so the tree only includes index.html at that point.  Remove manifest.json
     # to reproduce the same state for a stability recomputation.
-    from astrid.contracts.result_manifest import complete_output_metadata
+    from astrid.core.contracts.result_manifest import complete_output_metadata
 
     tree_hash_1 = manifest["outputs"][0]["content_hash"]
     tree_bytes_1 = manifest["outputs"][0]["bytes"]

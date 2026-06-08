@@ -13,7 +13,7 @@ from typing import Any
 
 import jsonschema
 
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 from ..artifacts import (
     load_valid_cached_sidecar,

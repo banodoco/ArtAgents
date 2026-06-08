@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint('iteration.prepare')
@@ -20,14 +20,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid import modalities
-from astrid.contracts.result_manifest import write_manifest
-from astrid.paths import REPO_ROOT
-from astrid.threads.ids import is_ulid
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.record import sha256_file
-from astrid.threads.schema import SCHEMA_VERSION
-from astrid.threads.variants import selection_history
+from astrid.core import modalities
+from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.paths import REPO_ROOT
+from astrid.core.threads.ids import is_ulid
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.record import sha256_file
+from astrid.core.threads.schema import SCHEMA_VERSION
+from astrid.core.threads.variants import selection_history
 
 UNDERSTAND_EXECUTOR_ID = "understanding.understand"
 DEFAULT_MAX_ITERATIONS = 200

@@ -21,7 +21,7 @@ from typing import Any, Mapping
 import pytest
 
 import astrid.packs
-from astrid.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
+from astrid.core.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.executor import runner as executor_runner
 from astrid.core.executor.cli import main as executor_cli_main
 from astrid.core.executor.registry import ExecutorRegistry, load_default_registry
@@ -34,7 +34,7 @@ from astrid.core.executor.runner import (
 )
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
 from astrid.core.pack.resolver import PackResolverError
-from astrid.paths import executor_argv, resolve_executor_runtime_module
+from astrid.core.paths import executor_argv, resolve_executor_runtime_module
 
 # ---------------------------------------------------------------------------
 # Factory helpers

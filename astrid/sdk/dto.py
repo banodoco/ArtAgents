@@ -6,8 +6,8 @@ exposes without loading execution machinery.
 
 from __future__ import annotations
 
-from astrid.contracts.exec_error import ExecError
-from astrid.contracts.schema import (
+from astrid.core.contracts.exec_error import ExecError
+from astrid.core.contracts.schema import (
     AliasRecord,
     CapabilityHandle,
     Output,

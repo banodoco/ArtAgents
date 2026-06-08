@@ -19,7 +19,7 @@ from tests.helpers.current_run import read_seeded_current_run
 from astrid.core.task.lifecycle import cmd_abort
 
 
-_BODY = '''from astrid.orchestrate import orchestrator, code
+_BODY = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.app")
 def app(): return [code("step_a", argv=["echo", "x"])]
 '''

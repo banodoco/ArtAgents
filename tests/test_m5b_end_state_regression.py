@@ -24,14 +24,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
-# 1.  No ``raw[0] ==`` dispatch in astrid/gateway/dispatch.py
+# 1.  No ``raw[0] ==`` dispatch in astrid/core/gateway/dispatch.py
 # ---------------------------------------------------------------------------
 
 class RawDispatchRemovalTest(unittest.TestCase):
     """The ``_dispatch()`` function must not use ``raw[0] ==`` comparisons.
 
     After the CLI-unification refactor (m5b), the long chain of
-    ``if raw and raw[0] == "..."`` in ``astrid/gateway/dispatch.py:_dispatch()``
+    ``if raw and raw[0] == "..."`` in ``astrid/core/gateway/dispatch.py:_dispatch()``
     must be replaced with a table-driven dispatch (register-based,
     argparse sub-parsers, or equivalent).  String-comparison chains are a
     maintenance liability because they duplicate the verb vocabulary and
@@ -43,7 +43,7 @@ class RawDispatchRemovalTest(unittest.TestCase):
 
     def test_dispatch_has_no_raw0_equality_chain(self) -> None:
         """No ``raw[0] == ...`` comparison inside ``_dispatch()``."""
-        pipeline_path = _REPO_ROOT / "astrid" / "gateway" / "dispatch.py"
+        pipeline_path = _REPO_ROOT / "astrid" / "core" / "gateway" / "dispatch.py"
         source = pipeline_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(pipeline_path))
 
@@ -77,7 +77,7 @@ class RawDispatchRemovalTest(unittest.TestCase):
 
     def test_dispatch_uses_table_or_parser_not_if_chain(self) -> None:
         """_dispatch() uses argparse or a dispatch map, not a long if-chain."""
-        pipeline_path = _REPO_ROOT / "astrid" / "gateway" / "dispatch.py"
+        pipeline_path = _REPO_ROOT / "astrid" / "core" / "gateway" / "dispatch.py"
 
         import ast as ast_mod
 
@@ -282,7 +282,7 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
 
     The current code (m4) has an explicit exemption at
     ``structure.py:_is_import_layering_exempt()`` that allows lifecycle.py
-    to import from ``astrid.orchestrate`` and ``astrid.packs.*``.  The m5b
+    to import from ``astrid.packs.*``.  The m5b
     refactor removes this exemption, meaning lifecycle.py's forbidden
     imports will be reported as violations.
 
@@ -293,7 +293,7 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
 
     def test_lifecycle_path_is_not_exempt(self) -> None:
         """``_is_import_layering_exempt`` must NOT exempt lifecycle.py."""
-        from astrid.structure import _is_import_layering_exempt
+        from astrid.core.structure import _is_import_layering_exempt
 
         lifecycle_path = _REPO_ROOT / "astrid" / "core" / "task" / "lifecycle.py"
         self.assertFalse(
@@ -303,7 +303,7 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
 
     def test_lifecycle_has_no_forbidden_imports(self) -> None:
         """Running validate_import_layering on real lifecycle.py produces zero violations."""
-        from astrid.structure import validate_import_layering
+        from astrid.core.structure import validate_import_layering
 
         violations = validate_import_layering(_REPO_ROOT)
         lifecycle_violations = [
@@ -318,7 +318,7 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
 
     def test_lifecycle_forbidden_import_would_be_flagged_in_isolation(self) -> None:
         """If lifecycle.py had a forbidden import, it would be flagged (no exemption)."""
-        from astrid.structure import validate_import_layering
+        from astrid.core.structure import validate_import_layering
 
         violations = validate_import_layering(_REPO_ROOT)
 
@@ -329,7 +329,7 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
             if v.startswith("astrid/core/")
         ]
         # The only allowed forbidden imports in core are the documented
-        # astrid/core/task/event_stream.py file-level audit-import exemption.
+        # no longer any file-level core-subsystem exemption.
         # This test verifies there's no hidden exemption for lifecycle.py.
         exempted_paths = {
             v.split(":")[0] for v in violations
@@ -343,9 +343,8 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
 
     def test_validate_import_layering_exemption_is_removed(self) -> None:
         """The ``_is_import_layering_exempt`` function no longer returns True for
-        lifecycle-related files.  The only remaining file-level exemption is the
-        documented ``astrid/core/task/event_stream.py`` audit-import exemption."""
-        from astrid.structure import _is_import_layering_exempt
+        lifecycle-related files or core-subsystem imports."""
+        from astrid.core.structure import _is_import_layering_exempt
 
         for relpath in (
             "astrid/core/task/lifecycle.py",
@@ -358,27 +357,26 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
                 f"Lifecycle-related file should not be exempt — {relpath} must be checked normally",
             )
 
-        # Verify the documented event_stream.py exemption is in place.
         event_stream_path = _REPO_ROOT / "astrid" / "core" / "task" / "event_stream.py"
-        self.assertTrue(
+        self.assertFalse(
             _is_import_layering_exempt(event_stream_path, _REPO_ROOT),
-            "event_stream.py must remain exempt per the documented file-level audit-import exemption",
+            "event_stream.py should not need a file-level exemption now that audit is a core subsystem",
         )
 
     def test_forbidden_imports_from_packs_are_flagged(self) -> None:
         """A core file importing from astrid.packs.* is flagged."""
-        from astrid.structure import validate_import_layering
+        from astrid.core.structure import validate_import_layering
 
         violations = validate_import_layering(_REPO_ROOT)
 
-        # At end state, any core file importing from astrid.packs or
-        # astrid.orchestrate should be flagged as a violation.
+        # At end state, any core file importing from astrid.packs should be
+        # flagged as a violation.
         # We verify the validator itself works by checking that it catches
         # at least one current known violation (if any exist outside lifecycle).
         # After the refactor there should be zero.
         packs_violations = [
             v for v in violations
-            if "astrid.packs." in v or "astrid.orchestrate" in v
+            if "astrid.packs." in v
         ]
         # These violations may exist in non-lifecycle files that haven't been
         # cleaned up yet. The key assertion: none of them are from lifecycle.py.
@@ -408,7 +406,7 @@ class DefaultBriefRoutingIsExplicitTest(unittest.TestCase):
         """Arbitrary unknown argv must NOT invoke default hype."""
         import io
 
-        from astrid import gateway as pipeline_mod
+        from astrid.core import gateway as pipeline_mod
 
         # Simulate an unrecognized verb.
         stdout = io.StringIO()
@@ -427,7 +425,7 @@ class DefaultBriefRoutingIsExplicitTest(unittest.TestCase):
         # This test verifies that entering hype requires an explicit pathway.
         # Read the dispatch function source to verify _run_default_brief_orchestrator
         # is only called from controlled contexts.
-        pipeline_path = _REPO_ROOT / "astrid" / "gateway" / "dispatch.py"
+        pipeline_path = _REPO_ROOT / "astrid" / "core" / "gateway" / "dispatch.py"
         source = pipeline_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(pipeline_path))
 

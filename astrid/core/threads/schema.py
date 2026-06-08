@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import PurePosixPath
 from typing import Any, Mapping
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 
 from .ids import require_ulid
 

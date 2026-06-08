@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from astrid.contracts.schema_validators import require_uuid_str
+from astrid.core.contracts.schema_validators import require_uuid_str
 from astrid.core.timeline.kinds import (
     normalize_event_clip_kind,
     normalize_track_kind,
@@ -64,7 +64,7 @@ TimelineImportSource = Literal["legacy_local", "supabase_config", "other"]
 ClipKind = Literal["visual", "audio", "text"]
 # Canonical event-schema TrackKind; mirrors
 # ``astrid.core.timeline.banodoco_schema.TrackKind`` and
-# the public ``astrid.timeline.TrackKind`` compatibility export, plus
+# the public ``astrid.core.timeline.TrackKind`` export, plus
 # the built-in track catalog (catalog="track") in ``astrid.core.pack``.
 # This definition is intentionally duplicated rather than imported from the
 # schema-model module: keeping event-payload schemas decoupled from the

@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, cast
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.log_and_swallow import log_and_swallow
 from astrid.core.util.time import utc_now_milliseconds

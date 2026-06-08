@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from astrid.orchestrate import attested, code, orchestrator
-from astrid.verify import json_file
+from astrid.core.orchestrate import attested, code, orchestrator
+from astrid.core.verify import json_file
 
 
 def _json_verdict_step(step_id: str, filename: str, verdict: str) -> object:

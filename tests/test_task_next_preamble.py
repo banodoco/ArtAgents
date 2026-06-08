@@ -20,7 +20,7 @@ from astrid.core.task.lifecycle import cmd_next
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 
 
-_BODY_CODE = '''from astrid.orchestrate import orchestrator, code
+_BODY_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]
 '''

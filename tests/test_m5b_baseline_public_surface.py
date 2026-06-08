@@ -544,7 +544,7 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
     """
 
     def test_unknown_top_level_command_exits_2(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         with mock.patch(
             "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
@@ -559,7 +559,7 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
 
     def test_multiple_unknown_commands(self) -> None:
         """A spread of non-existent commands all produce the same guardrail."""
-        from astrid import gateway
+        from astrid.core import gateway
 
         bogus = ["xyzzy", "floob", "gargleblaster", "notarealthing"]
         with mock.patch(
@@ -576,7 +576,7 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
 
     def test_unknown_command_with_args(self) -> None:
         """Unknown command followed by extra args still exits 2."""
-        from astrid import gateway
+        from astrid.core import gateway
 
         with mock.patch(
             "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
@@ -590,7 +590,7 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
 
     def test_unknown_command_never_routes_to_default_orchestrator(self) -> None:
         """Verify that an unknown command does NOT invoke the default orchestrator."""
-        from astrid import gateway
+        from astrid.core import gateway
 
         with (
             mock.patch(
@@ -598,7 +598,7 @@ class UnknownCommandGuardrailTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
             ) as mock_fallback,
         ):
             stderr = io.StringIO()
@@ -621,7 +621,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
     """
 
     def test_double_dash_brief_routes_to_default(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         with (
             mock.patch(
@@ -629,7 +629,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=42,
             ) as mock_fallback,
         ):
@@ -638,7 +638,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
             mock_fallback.assert_called_once_with(["--brief", "test brief content"])
 
     def test_double_dash_video_routes_to_default(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         with (
             mock.patch(
@@ -646,7 +646,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=43,
             ) as mock_fallback,
         ):
@@ -657,7 +657,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
             )
 
     def test_flag_style_out_routes_to_default(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         with (
             mock.patch(
@@ -665,7 +665,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=44,
             ) as mock_fallback,
         ):
@@ -674,7 +674,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
             mock_fallback.assert_called_once()
 
     def test_double_dash_render_routes_to_default(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         with (
             mock.patch(
@@ -682,7 +682,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=45,
             ) as mock_fallback,
         ):
@@ -693,7 +693,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
             mock_fallback.assert_called_once()
 
     def test_target_duration_flag_routes_to_default(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         with (
             mock.patch(
@@ -701,7 +701,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=46,
             ) as mock_fallback,
         ):
@@ -713,7 +713,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
 
     def test_default_routing_preserves_all_args(self) -> None:
         """The complete argv is forwarded to the default orchestrator."""
-        from astrid import gateway
+        from astrid.core import gateway
 
         argv = [
             "--video",
@@ -732,7 +732,7 @@ class DefaultBriefRoutingTest(unittest.TestCase):
                 return_value=object(),
             ),
             mock.patch(
-                "astrid.gateway._run_default_brief_orchestrator",
+                "astrid.core.gateway._run_default_brief_orchestrator",
                 return_value=47,
             ) as mock_fallback,
         ):
@@ -858,7 +858,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
         NOTE: ``skip`` is intentionally omitted from the top-level help in the
         pre-split state — it is documented in ``cmd_skip``'s own --help output.
         """
-        from astrid.gateway import _print_entrypoint_help
+        from astrid.core.gateway import _print_entrypoint_help
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -881,7 +881,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
 
     def test_entrypoint_help_lists_runs_and_claim(self) -> None:
         """Top-level help mentions the 'runs ls' and 'claim' verbs."""
-        from astrid.gateway import _print_entrypoint_help
+        from astrid.core.gateway import _print_entrypoint_help
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -893,7 +893,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
 
     def test_top_level_help_exits_0(self) -> None:
         """python3 -m astrid --help exits 0."""
-        from astrid import gateway
+        from astrid.core import gateway
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -901,7 +901,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
         self.assertEqual(result, 0)
 
     def test_top_level_help_mentions_canonical_gateway(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -911,7 +911,7 @@ class LifecycleCommandParsingTest(unittest.TestCase):
         self.assertIn("python3 -m astrid", help_text)
 
     def test_top_level_h_flag_exits_0(self) -> None:
-        from astrid import gateway
+        from astrid.core import gateway
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):

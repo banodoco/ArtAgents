@@ -123,7 +123,7 @@ class TestCycleDetection:
 
     def test_validate_no_cycles_detects_existing_cycle(self) -> None:
         """validate_no_cycles raises even if cycle pre-exists."""
-        from astrid.contracts.schema import AliasRecord
+        from astrid.core.contracts.schema import AliasRecord
 
         resolver = AliasResolver()
         # Manually inject a cycle by bypassing register_alias validation

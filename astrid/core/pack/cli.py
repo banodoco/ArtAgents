@@ -17,7 +17,7 @@ import argparse
 import sys
 from typing import Any, Optional
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack import PackDefinition
 
 # ── Re-exports from split modules ───────────────────────────────────────────
@@ -175,7 +175,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     try:
         return int(handler(args))
     except AstridError as exc:
-        from astrid.contracts.errors import render_astrid_error
+        from astrid.core.contracts.errors import render_astrid_error
 
         return render_astrid_error(exc)
 

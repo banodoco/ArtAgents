@@ -15,7 +15,7 @@ Run:
 
 from __future__ import annotations
 
-from astrid.orchestrate import (
+from astrid.core.orchestrate import (
     attested,
     code,
     file_nonempty,

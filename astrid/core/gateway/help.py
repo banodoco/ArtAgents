@@ -2,8 +2,8 @@
 
 Extracted from ``astrid/gateway.py`` during M4 batch 41 (T42) to keep the
 gateway facade focused while preserving the help-printing entrypoints that
-callers and monkeypatch seams rely on via ``astrid.gateway._print_entrypoint_help``
-and ``astrid.gateway._packs_subcommand_list``.
+callers and monkeypatch seams rely on via ``astrid.core.gateway._print_entrypoint_help``
+and ``astrid.core.gateway._packs_subcommand_list``.
 """
 
 from __future__ import annotations

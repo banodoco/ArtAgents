@@ -14,7 +14,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Callable, Iterator
 
-from astrid.contracts.errors import AstridError, render_astrid_error, wrap_degraded_error
+from astrid.core.contracts.errors import AstridError, render_astrid_error, wrap_degraded_error
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, ASTRID_PROJECT_RUN
 
 _CANONICAL_RUNTIME_CAPABILITY: ContextVar[str | None] = ContextVar(

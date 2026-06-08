@@ -5,11 +5,11 @@ import shutil
 from pathlib import Path
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
-from astrid.threads.attribute import AttributionDecision, infer_lineage_thread_id
-from astrid.threads.cli import main as thread_cli
-from astrid.threads.index import ThreadIndexStore
-from astrid.threads.prefix import format_prefix_lines
-from astrid.threads.variants import keep_selection, variant_prefix_message
+from astrid.core.threads.attribute import AttributionDecision, infer_lineage_thread_id
+from astrid.core.threads.cli import main as thread_cli
+from astrid.core.threads.index import ThreadIndexStore
+from astrid.core.threads.prefix import format_prefix_lines
+from astrid.core.threads.variants import keep_selection, variant_prefix_message
 
 
 FIXTURE = Path("tests/fixtures/iteration_video")

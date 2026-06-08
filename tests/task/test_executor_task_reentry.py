@@ -8,14 +8,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
-from astrid.contracts.schema import CommandInputArg, CommandSpec, Port
+from astrid.core.contracts.schema import CommandInputArg, CommandSpec, Port
 from astrid.core.executor.runner import ExecutorRunRequest, run_executor
 from astrid.core.executor.schema import ExecutorDefinition
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from astrid.core.task.events import append_event, make_step_dispatched_event, read_events
 
 
-_BODY_EXECUTOR = '''from astrid.orchestrate import orchestrator, code
+_BODY_EXECUTOR = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.executor_entry")
 def main():
     return [code("render", argv=[
@@ -146,7 +146,7 @@ def test_executor_task_env_rejects_shortened_runner_argv(tmp_path: Path, monkeyp
 def test_executor_reentry_preserves_ordered_repeated_inputs_through_gate_and_expansion(
     tmp_path: Path, monkeypatch
 ) -> None:
-    body = '''from astrid.orchestrate import orchestrator, code
+    body = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.executor_repeat")
 def main():
     return [code("render", argv=[

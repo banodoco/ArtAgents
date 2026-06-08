@@ -42,8 +42,8 @@ import os
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from astrid.contracts.event_hash import hash_prepended
-from astrid.contracts.event_log_error import EventLogError as _EventLogErrorBase
+from astrid.core.contracts.event_hash import hash_prepended
+from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.util.time import utc_now_iso
 
 ZERO_HASH = "sha256:" + "0" * 64

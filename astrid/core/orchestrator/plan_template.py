@@ -17,7 +17,7 @@ from astrid.core.task.plan import (
     Step,
     TaskPlan,
 )
-from astrid.verify import Check, canonical_check_params
+from astrid.core.verify import Check, canonical_check_params
 
 
 class PlanStep(TypedDict, total=False):

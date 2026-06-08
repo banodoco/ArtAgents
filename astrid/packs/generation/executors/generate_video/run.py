@@ -30,8 +30,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
-from astrid.contracts.result_manifest import complete_output_metadata
+from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
@@ -42,7 +42,7 @@ from astrid.core.generation.backends import (
 )
 from astrid.core.model_catalog.registry import ModelRegistry
 from astrid.core.util.atomic_io import write_json_atomic
-from astrid.media import ffprobe_metadata
+from astrid.core.media import ffprobe_metadata
 
 logger = logging.getLogger(__name__)
 

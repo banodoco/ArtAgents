@@ -21,7 +21,7 @@ from astrid.core.generation.features import (
 )
 from astrid.core.pack import PackDefinition, discover_packs
 from astrid.core.pack.discovery import discover_pack_metadata
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 
 @dataclass(frozen=True)

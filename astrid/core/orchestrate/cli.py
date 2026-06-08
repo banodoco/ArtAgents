@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack import DEFAULT_PACKS_ROOT
 from astrid.core.task.events import read_events
 from astrid.core.task.normalize import dump_events_jsonl, normalize_events
@@ -59,7 +59,7 @@ Edit the steps below to describe your task. Run:
 
 from __future__ import annotations
 
-from astrid.orchestrate import (
+from astrid.core.orchestrate import (
     code,
     file_nonempty,
     orchestrator,

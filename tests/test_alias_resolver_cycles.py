@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
-from astrid.contracts.schema import AliasRecord
+from astrid.core.contracts.schema import AliasRecord
 
 
 class TestRegisterAliasRollbackBranch:

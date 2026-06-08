@@ -53,7 +53,7 @@ from astrid.core.session.paths import (
 )
 from astrid.core.task.events import EVENTS_FILENAME, read_events
 # timeline_crud, read_project_default, find_timeline_slug_for_ulid moved to cli_status
-from astrid.threads.ids import generate_ulid
+from astrid.core.threads.ids import generate_ulid
 
 # M4 T44: Re-export attach command and templates from cli_attach.py.
 # Tests call ``cli.cmd_attach(...)`` and reference ``cli.ATTACH_HEADER``.

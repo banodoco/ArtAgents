@@ -16,8 +16,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.audit import PARENT_IDS_ENV, AuditContext
-from astrid.contracts.errors import AstridError, render_astrid_error
+from astrid.core.audit import PARENT_IDS_ENV, AuditContext
+from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core import timeline
 from astrid.core.util.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache

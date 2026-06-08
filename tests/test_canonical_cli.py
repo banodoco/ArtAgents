@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest import mock
 
-from astrid import gateway
+from astrid.core import gateway
 from astrid.core.element import cli as elements_cli
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.schema import (

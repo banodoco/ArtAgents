@@ -20,7 +20,7 @@ from astrid.core.dirty import (
     read_fork_state,
     write_fork_state,
 )
-from astrid.contracts.schema import LocalEditState
+from astrid.core.contracts.schema import LocalEditState
 
 
 class TestDetectLocalEdits:

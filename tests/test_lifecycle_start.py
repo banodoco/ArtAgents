@@ -25,7 +25,7 @@ from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
 
 
-_BODY_CODE = '''from astrid.orchestrate import orchestrator, code
+_BODY_CODE = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.app")
 def app(): return [code("step_a", argv=["echo", "x"])]
 '''
@@ -411,7 +411,7 @@ def test_canonical_step_reentry_records_completion_and_events_verify_bypasses_ga
     ]
     assert any(event["kind"] == "step_completed" for event in events)
 
-    from astrid.gateway import main as astrid_main
+    from astrid.core.gateway import main as astrid_main
 
     os.environ["ASTRID_TASK_PROJECT"] = slug
     os.environ["ASTRID_TASK_RUN_ID"] = run_id

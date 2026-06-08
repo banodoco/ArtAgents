@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from astrid.threads.ids import is_ulid
+from astrid.core.threads.ids import is_ulid
 
 from ..project.jsonio import ProjectJsonError, read_json
 from ..project.paths import ProjectPathError, project_dir

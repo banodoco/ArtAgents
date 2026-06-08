@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 
 guard_canonical_entrypoint('training.pool_build')
@@ -15,8 +15,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core import timeline
-from astrid.audit import register_outputs
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
 from datetime import datetime, timezone
 

@@ -30,7 +30,7 @@ from astrid.core.task.validator import (
     MutationInvariantError,
     validate_mutation,
 )
-from astrid.verify import file_nonempty
+from astrid.core.verify import file_nonempty
 
 
 # ---------------------------------------------------------------------------

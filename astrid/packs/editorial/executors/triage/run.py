@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('editorial.triage')
@@ -14,10 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.audit import register_outputs
-from astrid.contracts.result_manifest import write_manifest
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.util.time import utc_now_seconds
-from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
+from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 
 TRIAGE_VERSION = 1
 FORBIDDEN_TIME_KEYS = frozenset({"start", "end", "timestamp", "seconds", "time", "src_start", "src_end", "from", "to", "at"})

@@ -23,7 +23,7 @@ from __future__ import annotations
 import sys
 from typing import Generic, Protocol, TypeVar
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 
 RequestT = TypeVar("RequestT")
 ResultT = TypeVar("ResultT")

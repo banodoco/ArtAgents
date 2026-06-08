@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from astrid.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
+from astrid.core.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.project import paths as project_paths
 from astrid.core.project.project import create_project

@@ -95,14 +95,14 @@ def test_runtime_inventory_reason_quality_and_deferred_tickets() -> None:
     text = _inventory_text()
     seed_section = text.split("## Seed-File Non-Fixed Reasons", 1)[1].split("## Deferred Tickets", 1)[0]
     for seed_file in [
-        "astrid/gateway/__init__.py",
+        "astrid/core/gateway/__init__.py",
         "astrid/core/task/run_audit.py",
-        "astrid/orchestrate/cli.py",
-        "astrid/threads/provenance.py",
+        "astrid/core/orchestrate/cli.py",
+        "astrid/core/threads/provenance.py",
         "astrid/skills/__init__.py",
         "astrid/skills/discovery.py",
         "astrid/skills/harnesses/base.py",
-        "astrid/audit/context.py",
+        "astrid/core/audit/context.py",
     ]:
         line = next((candidate for candidate in seed_section.splitlines() if f"`{seed_file}`" in candidate), "")
         assert "Non-fixed AST sites in this file:" in line

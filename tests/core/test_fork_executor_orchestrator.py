@@ -25,7 +25,7 @@ from astrid.core.orchestrator.registry import (
     OrchestratorRegistryError,
 )
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
-from astrid.contracts.schema import CommandSpec, CachePolicy
+from astrid.core.contracts.schema import CommandSpec, CachePolicy
 
 
 # ---------------------------------------------------------------------------

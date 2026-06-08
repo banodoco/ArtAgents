@@ -64,7 +64,7 @@ class LoadTimelineTest(unittest.TestCase):
                 )
                 config, version = provider.load_timeline("proj-1", "tl-1")
         self.assertEqual(version, 7)
-        # Round-trip through astrid.timeline preserves the canonical clip shape.
+        # Round-trip through core timeline handling preserves the canonical clip shape.
         self.assertEqual(config["clips"][0]["id"], "c1")
         self.assertEqual(fake.calls[0]["auth"], ("pat", "pat-token"))
 

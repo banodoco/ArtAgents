@@ -54,7 +54,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Sequence
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline.banodoco_schema import (
     canonical_empty_timeline,
     canonical_timeline_config,

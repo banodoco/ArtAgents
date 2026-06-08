@@ -15,7 +15,7 @@ from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.result_manifest import write_manifest  # noqa: E402
+from astrid.core.contracts.result_manifest import write_manifest  # noqa: E402
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">

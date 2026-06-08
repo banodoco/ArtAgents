@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.executor.schema import load_executor_manifest
 from astrid.core.generation.backends import GenerationResult
 from astrid.core.model_catalog.schema import ModeSpec

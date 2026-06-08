@@ -74,7 +74,7 @@ def test_doctor_finds_stale_handles() -> None:
 
         # Patch resolve_projects_root to return our temp dir
         with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
-            from astrid.doctor import _check_runpod_stale_handles
+            from astrid.core.doctor import _check_runpod_stale_handles
 
             check = _check_runpod_stale_handles()
             assert check.status == "warn"
@@ -88,7 +88,7 @@ def test_doctor_reports_zero_stale_when_none() -> None:
         projects_root = Path(tmp)
 
         with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
-            from astrid.doctor import _check_runpod_stale_handles
+            from astrid.core.doctor import _check_runpod_stale_handles
 
             check = _check_runpod_stale_handles()
             assert check.status == "ok"
@@ -102,7 +102,7 @@ def test_doctor_ignores_stale_noncanonical_handles() -> None:
         _write_noncanonical_stale_handle(projects_root, "proj", "run-scratch")
 
         with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
-            from astrid.doctor import _check_runpod_stale_handles
+            from astrid.core.doctor import _check_runpod_stale_handles
 
             check = _check_runpod_stale_handles()
             assert check.status == "ok"
@@ -112,7 +112,7 @@ def test_doctor_ignores_stale_noncanonical_handles() -> None:
 def test_doctor_handles_missing_projects_root() -> None:
     """_check_runpod_stale_handles returns ok when projects root missing."""
     with patch("astrid.core.project.paths.resolve_projects_root", return_value=Path("/nonexistent/path/xyz")):
-        from astrid.doctor import _check_runpod_stale_handles
+        from astrid.core.doctor import _check_runpod_stale_handles
 
         check = _check_runpod_stale_handles()
         assert check.status == "ok"
@@ -133,7 +133,7 @@ def test_doctor_does_not_mutate() -> None:
         with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root), \
              patch("runpod_lifecycle.discovery.terminate") as terminate, \
              patch("astrid.core.runpod.sweeper.append_runpod_sweeper_event") as append_event:
-            from astrid.doctor import _check_runpod_stale_handles
+            from astrid.core.doctor import _check_runpod_stale_handles
 
             # This should NOT import or call discovery.terminate / append_event_locked
             check = _check_runpod_stale_handles()
@@ -158,7 +158,7 @@ def test_doctor_has_no_runpod_metadata_check() -> None:
     # The run_checks function should not contain any runpod metadata checks
     import inspect
 
-    from astrid import doctor
+    from astrid.core import doctor
 
     source = inspect.getsource(doctor.run_checks)
     # "runpod metadata" or "runpod catalog" should not appear

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project import paths as project_paths
 from astrid.core.session import cli
 from astrid.core.session.identity import Identity, write_identity
@@ -42,7 +42,7 @@ def _seed_timeline(
     is_default: bool = True,
 ) -> str:
     """Create a minimal timeline and return its ULID."""
-    from astrid.threads.ids import generate_ulid
+    from astrid.core.threads.ids import generate_ulid
 
     ulid = generate_ulid()
     tdir = projects_root / project_slug / "timelines" / ulid

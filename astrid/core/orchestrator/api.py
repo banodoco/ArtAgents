@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from typing import Any, Callable
 
-from astrid.contracts.schema import CachePolicy, CommandSpec, IsolationMetadata, Output, Port
+from astrid.core.contracts.schema import CachePolicy, CommandSpec, IsolationMetadata, Output, Port
 
 from .schema import (
     OrchestratorDefinition,

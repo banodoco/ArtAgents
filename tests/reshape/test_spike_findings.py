@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.schema import CommandSpec
+from astrid.core.contracts.schema import CommandSpec
 from astrid.core.orchestrator.runner import (
     OrchestratorRunRequest,
     _run_command_orchestrator,

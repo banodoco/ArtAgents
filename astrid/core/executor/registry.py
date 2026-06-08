@@ -29,7 +29,7 @@ from astrid.core.pack.manifest import (
     load_manifest_mapping,
 )
 from astrid.core.pack.resolver import PackResolver
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors

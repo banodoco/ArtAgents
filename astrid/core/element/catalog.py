@@ -16,7 +16,7 @@ from astrid.core.element.registry import (
 )
 from astrid.core.element.schema import ElementKind
 from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
-from astrid.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.paths import REPO_ROOT, WORKSPACE_ROOT
 
 TOOLS_DIR = REPO_ROOT
 THEMES_ROOT = resolve_themes_root()

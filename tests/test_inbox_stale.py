@@ -17,12 +17,12 @@ from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_next
 
 
-_BODY_AGENT = '''from astrid.orchestrate import orchestrator, attested
+_BODY_AGENT = '''from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review_agent")
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="agent")]
 '''
 
-_BODY_HUMAN = '''from astrid.orchestrate import orchestrator, attested
+_BODY_HUMAN = '''from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review_human")
 def main(): return [attested("review", command="ok.sh", instructions="confirm", ack="human")]
 '''

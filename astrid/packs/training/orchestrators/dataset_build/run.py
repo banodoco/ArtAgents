@@ -12,7 +12,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 
 from .acquisition import build_acquisition_request
 from .caption_validation import validate_accepted_captions

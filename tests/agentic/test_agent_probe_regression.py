@@ -67,7 +67,7 @@ from astrid.core.task.events import (
     make_produces_check_passed_event,
     read_events,
 )
-from astrid.orchestrate.test_runner import run_fixture
+from astrid.core.orchestrate.test_runner import run_fixture
 from astrid.core.pack import packs_root as _packs_root
 
 

@@ -17,7 +17,7 @@ from astrid.core.timeline.model import (
     validate_timeline_config_json,
     write_timeline_config_json,
 )
-from astrid.threads.ids import generate_ulid
+from astrid.core.threads.ids import generate_ulid
 
 
 # ---------------------------------------------------------------------------

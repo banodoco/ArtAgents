@@ -91,8 +91,8 @@ above for documentation purposes only.
 
 | Directory | Reason |
 |---|---|
-| `astrid/threads/` | Contract-locked; separately versioned subsystem. |
-| `astrid/audit/` | Separate concern; defines its own context (`ASTRID_AUDIT_*`). |
+| `astrid/core/threads/` | Contract-locked; separately versioned subsystem. |
+| `astrid/core/audit/` | Separate concern; defines its own context (`ASTRID_AUDIT_*`). |
 | `astrid/packs/` | Executor `run.py` files that do not import astrid core. |
 
 ### Additional env vars in allowlisted modules

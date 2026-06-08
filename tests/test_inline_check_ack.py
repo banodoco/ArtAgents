@@ -45,14 +45,14 @@ from astrid.core.task.gate import (
 from astrid.core.task.lifecycle import cmd_ack
 
 
-_ATTESTED_PRODUCES = '''from astrid.orchestrate import orchestrator, attested
-from astrid.verify import json_file
+_ATTESTED_PRODUCES = '''from astrid.core.orchestrate import orchestrator, attested
+from astrid.core.verify import json_file
 @orchestrator("demo.attested_with_produces")
 def main(): return [attested("review", command="review.sh", instructions="check", ack="agent", produces={"out": json_file()})]
 '''
 
-_CODE_WITH_PRODUCES = '''from astrid.orchestrate import orchestrator, code
-from astrid.verify import json_file
+_CODE_WITH_PRODUCES = '''from astrid.core.orchestrate import orchestrator, code
+from astrid.core.verify import json_file
 @orchestrator("demo.code_with_produces")
 def main(): return [code("step_a", argv=["python3", "-m", "astrid", "next", "--project", "p"], produces={"out": json_file()})]
 '''

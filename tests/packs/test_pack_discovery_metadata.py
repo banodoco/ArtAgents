@@ -24,7 +24,7 @@ from astrid.core.pack.discovery import (
     discover_pack_metadata,
     discover_packs_ordered,
 )
-from astrid.paths import REPO_ROOT
+from astrid.core.paths import REPO_ROOT
 
 
 def write_pack(root: Path, pack_id: str, *, folder: str | None = None) -> Path:

@@ -7,7 +7,7 @@ by `astrid.core.task.plan.load_plan`.
 
 from __future__ import annotations
 
-from astrid.verify import (
+from astrid.core.verify import (
     all_of,
     audio_duration_min,
     file_nonempty,

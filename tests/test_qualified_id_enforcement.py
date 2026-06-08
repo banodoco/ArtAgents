@@ -4,7 +4,7 @@ import contextlib
 import io
 import unittest
 
-from astrid.contracts.errors import AstridError, render_astrid_error
+from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core.executor import cli as executors_cli
 from astrid.core.executor.schema import ExecutorValidationError, validate_executor_definition
 from astrid.core.orchestrator import cli as orchestrators_cli

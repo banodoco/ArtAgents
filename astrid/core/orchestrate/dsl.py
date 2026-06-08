@@ -1,7 +1,7 @@
 """DSL builders for Astrid task-mode orchestrators (Phase 4).
 
 Authors construct task plans in Python using the helpers exported from
-``astrid.orchestrate``. The DSL emits a JSON payload byte-shape-equivalent
+``astrid.core.orchestrate``. The DSL emits a JSON payload byte-shape-equivalent
 to the schema accepted by ``astrid.core.task.plan.load_plan``.
 
 Construction-time guards are intentional: the typo trap on
@@ -27,7 +27,7 @@ from astrid.core.task.plan import (
     load_plan,
     parse_repeat_until_expression,
 )
-from astrid.verify import Check, canonical_check_params
+from astrid.core.verify import Check, canonical_check_params
 
 
 class OrchestrateDefinitionError(Exception):
@@ -223,7 +223,7 @@ def _step_to_dict(
             if _resolver is None:
                 raise OrchestrateDefinitionError(
                     f"nested step {step.id!r} uses string plan ref {nested_plan!r}; "
-                    "compile via astrid.orchestrate.compile.compile_to_path "
+                    "compile via astrid.core.orchestrate.compile.compile_to_path "
                     "or pass _resolver= to to_dict()"
                 )
             sub_builder = _resolver(nested_plan, _visiting=_visiting)

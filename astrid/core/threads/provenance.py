@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid.audit.graph import build_graph, load_ledger
+from astrid.core.audit.graph import build_graph, load_ledger
 
 from .index import ThreadIndexStore
 from .schema import SCHEMA_VERSION

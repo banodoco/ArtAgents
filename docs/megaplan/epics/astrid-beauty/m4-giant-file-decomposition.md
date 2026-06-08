@@ -30,7 +30,7 @@ test, and change.
 - Add characterization tests before splitting any file whose behavior is not
   already well-covered.
 - Before splitting `astrid/gateway.py`, characterize names accessible through
-  `astrid.gateway` and scan test `mock.patch("astrid.gateway...")` targets.
+  `astrid.core.gateway` and scan test `mock.patch("astrid.core.gateway...")` targets.
   Post-split gateway facades must preserve those attribute-level compatibility
   paths.
 

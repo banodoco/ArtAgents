@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('youtube.youtube_audio')
@@ -15,7 +15,7 @@ from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path
 from typing import Any
 
-from astrid.contracts.result_manifest import write_manifest  # noqa: E402
+from astrid.core.contracts.result_manifest import write_manifest  # noqa: E402
 from astrid.core.cli_choices import add_choice_arg  # noqa: E402
 from astrid.core.pack.entrypoint import run_pack_main  # noqa: E402
 

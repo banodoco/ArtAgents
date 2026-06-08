@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
-from astrid.contracts.run_status import TASK_FINALIZABLE_EVENT_KINDS
+from astrid.core.contracts.run_status import TASK_FINALIZABLE_EVENT_KINDS
 from astrid.core.project.current_run import read_current_run_state
 from astrid.core.project.paths import project_dir
 from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision

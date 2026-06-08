@@ -18,7 +18,7 @@ from _lifecycle_fixtures import (  # noqa: E402
     setup_run,
 )
 
-from astrid import gateway  # noqa: E402
+from astrid.core import gateway  # noqa: E402
 from astrid.core.project import paths as project_paths  # noqa: E402
 from astrid.core.project.project import create_project  # noqa: E402
 from astrid.core.session import paths as session_paths  # noqa: E402
@@ -38,12 +38,12 @@ from astrid.core.timeline.crud import create_timeline  # noqa: E402
 from tests.helpers.current_run import seed_current_run  # noqa: E402
 from tests.helpers.cli_runner import run_cli  # noqa: E402
 
-_CODE_BODY = """from astrid.orchestrate import orchestrator, code
+_CODE_BODY = """from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.code")
 def main(): return [code("step_a", argv=["echo", "alpha"])]
 """
 
-_ATTESTED_BODY = """from astrid.orchestrate import orchestrator, attested
+_ATTESTED_BODY = """from astrid.core.orchestrate import orchestrator, attested
 @orchestrator("demo.review")
 def main(): return [attested("review", command="review.sh", instructions="please review", ack="human")]
 """

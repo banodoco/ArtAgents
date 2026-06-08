@@ -395,7 +395,7 @@ that a pack behaves safely or only does what its declarations describe.
 - [docs/creating-packs.md](creating-packs.md) — pack authoring reference
 - `astrid/__init__.py` — top-level public export list
 - `astrid/sdk.py` — public SDK DTOs and function entrypoints
-- `astrid/contracts/schema.py` — shared DTO field types
+- `astrid/core/contracts/schema.py` — shared DTO field types
 - `astrid/core/pack/schemas/v1/` — normative v1 manifest schema files
 - `astrid/core/pack/validate.py` — trust summary extraction and trust block source
 - `astrid/core/pack/install.py` — trust acknowledgement/install behavior

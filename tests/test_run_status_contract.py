@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.contracts.run_status import RunStatus
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.reigh.task_client import ALLOWED_STATUSES
 
 

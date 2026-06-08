@@ -9,20 +9,20 @@ from typing import Any
 from typing import Literal as _Literal
 from typing import get_args as _get_args
 
-from astrid.contracts.capability_schema import (
+from astrid.core.contracts.capability_schema import (
     DESCRIPTION_MAX_LEN,
     KEYWORD_MAX_LEN,
     KEYWORDS_MAX_COUNT,
     SHORT_DESCRIPTION_MAX_LEN,
     SchemaValidator,
 )
-from astrid.contracts.capability_schema import (
+from astrid.core.contracts.capability_schema import (
     drop_none as _drop_none,
 )
-from astrid.contracts.capability_schema import (
+from astrid.core.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
 )
-from astrid.contracts.schema import (
+from astrid.core.contracts.schema import (
     CACHE_MODES,
     ISOLATION_MODES,
     OUTPUT_MODES,

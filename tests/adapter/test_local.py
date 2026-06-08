@@ -18,7 +18,7 @@ import pytest
 from astrid.core.adapter import RunContext
 from astrid.core.adapter.local import LocalAdapter
 from astrid.core.task.plan import ProducesEntry, Step
-from astrid.verify import file_nonempty
+from astrid.core.verify import file_nonempty
 
 
 @pytest.fixture

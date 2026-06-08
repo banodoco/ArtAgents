@@ -33,7 +33,7 @@ _STATUS_SHARED_KEYS = {
     "state",
 }
 
-_BODY = '''from astrid.orchestrate import orchestrator, code
+_BODY = '''from astrid.core.orchestrate import orchestrator, code
 @orchestrator("demo.app")
 def app(): return [
     code("step_a", argv=["echo","a"]),

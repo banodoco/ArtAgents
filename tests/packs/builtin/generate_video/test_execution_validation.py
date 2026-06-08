@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.contracts.errors import AstridError
+from astrid.core.contracts.errors import AstridError
 from astrid.core.executor.schema import load_executor_manifest
 from astrid.core.generation.backends.base import GenerationResult
 from astrid.core.model_catalog.schema import ModeSpec
@@ -81,7 +81,7 @@ def test_generate_core_returns_enriched_generation_result(
         "load_default_generation_backend_registry",
         lambda: FakeBackendRegistry(),
     )
-    from astrid.media import MediaProbe
+    from astrid.core.media import MediaProbe
 
     monkeypatch.setattr(
         run_mod,

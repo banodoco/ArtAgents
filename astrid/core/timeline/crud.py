@@ -19,7 +19,7 @@ from astrid.core.project.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
 from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
-from astrid.threads.ids import generate_ulid
+from astrid.core.threads.ids import generate_ulid
 
 from .eventlog import select_timeline_backend
 from .eventlog.types import SupabaseEventLogOptions

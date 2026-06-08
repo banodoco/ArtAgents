@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.media import (
+from astrid.core.media import (
     MediaProbe,
     ffprobe_duration_seconds,
     ffprobe_metadata,
@@ -16,7 +16,7 @@ from astrid.media import (
 from astrid.packs.editorial.executors.editor_review.run import (
     _probe_duration as editor_probe_duration,
 )
-from astrid.verify.checks import ffprobe_duration_seconds as checks_ffprobe_duration_seconds
+from astrid.core.verify.checks import ffprobe_duration_seconds as checks_ffprobe_duration_seconds
 
 
 def test_ffprobe_duration_seconds_uses_duration_only_probe() -> None:

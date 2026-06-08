@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 # Excludes pack executors (*/executor/cli.py, packs/*) as required by the task.
 # ---------------------------------------------------------------------------
 AGENT_CLI_MODULE_PATHS: list[Path] = [
-    ROOT / "astrid" / "gateway" / "__init__.py",
-    ROOT / "astrid" / "gateway" / "dispatch.py",
+    ROOT / "astrid" / "core" / "gateway" / "__init__.py",
+    ROOT / "astrid" / "core" / "gateway" / "dispatch.py",
     ROOT / "astrid" / "core" / "session" / "cli.py",
     ROOT / "astrid" / "core" / "task" / "claim.py",
     ROOT / "astrid" / "core" / "task" / "lifecycle.py",
