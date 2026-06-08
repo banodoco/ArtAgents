@@ -364,6 +364,7 @@ def check_executor_binaries(executor: ExecutorDefinition) -> tuple[str, ...]:
 def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefinition | None = None) -> argparse.Namespace:
     pipeline = _pipeline_module()
     from astrid.core.element.catalog import resolve_active_theme
+    from astrid.core.theme import resolve_theme_dir, resolve_themes_root
 
     values = _request_values(request)
     out = Path(request.out).expanduser().resolve()
@@ -378,7 +379,18 @@ def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefini
     theme_raw = values.get("theme")
     theme_explicit = theme_raw is not None
     active_theme = resolve_active_theme(project_slug=request.project)
-    theme = pipeline._resolve_theme_arg(theme_raw) if theme_explicit else active_theme
+    if theme_explicit:
+        theme_dir = resolve_theme_dir(theme_raw)
+        if theme_dir is None:
+            theme = (resolve_themes_root() / "banodoco-default" / "theme.json").resolve()
+        else:
+            candidate = Path(theme_raw).expanduser()
+            if candidate.name == "theme.json" or (candidate.exists() and candidate.is_file()):
+                theme = candidate.resolve()
+            else:
+                theme = (theme_dir / "theme.json").resolve()
+    else:
+        theme = active_theme
     brief_slug = str(values.get("brief_slug") or _default_brief_slug(brief, out))
     brief_out = (out / "briefs" / brief_slug).resolve()
     skip = _as_string_list(values.get("skip"))

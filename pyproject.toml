@@ -11,6 +11,7 @@ dependencies = [
     "filelock>=3.13",
     "PyYAML>=6.0",
     "jsonschema>=4.0",
+    "referencing>=0.30",
     "pillow>=10.0",
     "fal-client>=0.7.0",
     "xxhash>=3.4",

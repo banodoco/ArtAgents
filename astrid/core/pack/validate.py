@@ -525,14 +525,6 @@ class PackValidator:
         )
 
     def _validate_discovered_components(self, content: dict[str, Any]) -> None:
-        # Lazy-import through the public shim so that tests mocking
-        # astrid.packs.validate.iter_*_roots can intercept these calls.
-        from astrid.packs.validate import (
-            iter_element_roots,
-            iter_executor_roots,
-            iter_orchestrator_roots,
-        )
-
         pack = self._pack_definition_for_discovery(content)
         for comp_dir in iter_executor_roots(pack):
             manifest_path = self._find_component_manifest(comp_dir, "executor")
