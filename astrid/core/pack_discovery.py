@@ -10,6 +10,7 @@ from astrid.core.pack.discovery import (  # noqa: F401
     ASTRID_PACKS_PATH_ENV,
     SOURCE_KINDS,
     DiscoveredPack,
+    discover_packs,
     discover_pack_metadata,
     discover_packs_ordered,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "ASTRID_PACKS_PATH_ENV",
     "SOURCE_KINDS",
     "DiscoveredPack",
+    "discover_packs",
     "discover_pack_metadata",
     "discover_packs_ordered",
 ]

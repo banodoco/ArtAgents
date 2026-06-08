@@ -295,13 +295,18 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             packs = discover_packs(packs_root)
 
             with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs), \
-                 mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs), \
-                 mock.patch("astrid.core.pack_discovery.discover_packs", return_value=packs):
+                 mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
                 exec_ids = [p.id for p in exec_registry._discover_executor_packs(
                     project_root=REPO_ROOT, extra_pack_roots=(), include_installed=False)]
                 orch_ids = [p.id for p in orch_registry._discover_orchestrator_packs(
                     project_root=REPO_ROOT, extra_pack_roots=(), include_installed=False)]
-                helper_ids = [dp.id for dp in discover_pack_metadata(include_installed=False)]
+                helper_ids = [
+                    dp.id
+                    for dp in discover_pack_metadata(
+                        discover_packs_fn=lambda arg=None: packs,
+                        include_installed=False,
+                    )
+                ]
 
         self.assertEqual(exec_ids, ["alpha", "beta"])
         self.assertEqual(orch_ids, ["alpha", "beta"])
