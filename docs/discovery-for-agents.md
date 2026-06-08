@@ -22,7 +22,7 @@ pack and is exposed through a consistent list/search/inspect surface with a
 `--json` flag for machine consumption.
 
 See the formal vocabulary in
-[docs/megaplan/epics/pack-system/pack-contract.md](megaplan/epics/pack-system/pack-contract.md).
+[docs/packs/contract.md](packs/contract.md).
 
 For the taxonomy fields that classify packs for discovery and filtering
 (`origin`, `install_tier`, `pack_type`, `domain`, `stability`, `support`),

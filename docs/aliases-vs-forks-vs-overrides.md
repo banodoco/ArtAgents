@@ -2,7 +2,7 @@
 
 Three mechanisms for redirecting or customizing capability resolution. This
 guide builds on the vocabulary in
-[docs/megaplan/epics/pack-system/pack-contract.md](megaplan/epics/pack-system/pack-contract.md).
+[docs/packs/contract.md](packs/contract.md).
 
 ## Quick Decision Table
 

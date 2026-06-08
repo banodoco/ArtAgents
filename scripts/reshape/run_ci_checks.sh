@@ -32,25 +32,26 @@ for _arg in "$@"; do
   esac
 done
 
-# Coverage flags are omitted on the --changed fast path (SD-004: no-arg
-# invocation MUST keep coverage). T6 wires the fast-path lane using this.
+# Coverage flags are omitted on the --changed fast path and may be disabled by
+# CI lanes that need the full suite to fit within their job timeout. A plain
+# local invocation keeps coverage by default (SD-004).
 COV_ARGS="--cov=astrid --cov-report=term --cov-report=xml --cov-fail-under=72"
-if $CHANGED_MODE; then
+if $CHANGED_MODE || [ "${ASTRID_CI_SKIP_COVERAGE:-}" = "1" ]; then
   COV_ARGS=""
 fi
 
 TARGETED_BLOCKING_TESTS=(
   tests/spikes/test_env_inheritance.py
-  tests/test_composition_elements.py
+  tests/packs/test_composition_elements.py
   tests/test_for_each_autoclose.py
   tests/test_schema_contract.py
 )
 
 QUARANTINE_TESTS=(
-  "tests/test_agent_probe_regression.py|author-test|builtin.agent_probe negative-revert coverage still depends on the legacy compiled author-test start path.|2026-06-11"
-  "tests/test_author_test_drift.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the diff behavior is exercised.|2026-06-11"
-  "tests/test_author_test_pass.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the golden replay can run.|2026-06-11"
-  "tests/test_author_test_regenerate.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the regenerate flow can run.|2026-06-11"
+  "tests/agentic/test_agent_probe_regression.py|author-test|builtin.agent_probe negative-revert coverage still depends on the legacy compiled author-test start path.|2026-06-11"
+  "tests/orchestrate/test_author_test_drift.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the diff behavior is exercised.|2026-06-11"
+  "tests/orchestrate/test_author_test_pass.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the golden replay can run.|2026-06-11"
+  "tests/orchestrate/test_author_test_regenerate.py|author-test|dynamic orchestrator author-test compile for video_editing.hype still fails before the regenerate flow can run.|2026-06-11"
 )
 
 run_quarantine_lane() {

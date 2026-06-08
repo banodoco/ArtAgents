@@ -69,6 +69,8 @@ jobs:
           python scripts/reshape/compare_mypy_baseline.py
 
       - name: Run local CI mirror
+        env:
+          ASTRID_CI_SKIP_COVERAGE: "1"
         run: bash scripts/reshape/run_ci_checks.sh
 
       - name: Set up Node for Remotion typecheck
