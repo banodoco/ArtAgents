@@ -76,7 +76,7 @@ class CanonicalCliTest(unittest.TestCase):
 
     def test_training_run_orchestrator_top_level_inspect_json_without_session(self) -> None:
         result, stdout, stderr = self.capture(
-            pipeline.main, ["orchestrators", "inspect", "training.training_run", "--json"]
+            gateway.main, ["orchestrators", "inspect", "training.training_run", "--json"]
         )
         self.assertEqual(result, 0, stderr)
         payload = json.loads(stdout)
@@ -152,14 +152,14 @@ class CanonicalCliTest(unittest.TestCase):
             return_value=object(),
         ):
             with mock.patch.object(orchestrators_cli, "main", return_value=61) as main:
-                self.assertEqual(pipeline.main(["orchestrators", "list"]), 61)
+                self.assertEqual(gateway.main(["orchestrators", "list"]), 61)
                 main.assert_called_once_with(["list"])
             with mock.patch.object(executors_cli, "main", return_value=62) as main:
-                self.assertEqual(pipeline.main(["executors", "list"]), 62)
+                self.assertEqual(gateway.main(["executors", "list"]), 62)
                 main.assert_called_once_with(["list"])
 
     def test_lifecycle_start_short_circuits_gate(self) -> None:
-        """T21: pipeline.main(['start', ...]) routes to lifecycle.cmd_start
+        """T21: gateway.main(['start', ...]) routes to lifecycle.cmd_start
         without invoking the implicit task_gate. Existing orchestrators/
         executors paths remain unchanged.
         """
@@ -174,7 +174,7 @@ class CanonicalCliTest(unittest.TestCase):
             mock.patch.object(lifecycle_module, "cmd_start", return_value=71) as cmd_start_mock,
             mock.patch.object(task_gate, "gate_command") as gate_mock,
         ):
-            rc = pipeline.main(["start", "demo.app", "--project", "p", "--name", "r1"])
+            rc = gateway.main(["start", "demo.app", "--project", "p", "--name", "r1"])
         self.assertEqual(rc, 71)
         cmd_start_mock.assert_called_once_with(
             ["demo.app", "--project", "p", "--name", "r1"]
@@ -206,7 +206,7 @@ class CanonicalCliTest(unittest.TestCase):
                 mock.patch.object(task_gate, "gate_command") as gate_mock,
             ):
                 argv = ["runs", "ls", "--project", "p"] if verb == "runs" else [verb, "--project", "p"]
-                rc = pipeline.main(argv)
+                rc = gateway.main(argv)
             self.assertEqual(rc, rc_marker, f"{verb} should route to lifecycle.{attr}")
             self.assertEqual(
                 gate_mock.call_count, 0, f"gate_command called for `{verb}`"
@@ -219,10 +219,10 @@ class CanonicalCliTest(unittest.TestCase):
             return_value=object(),
         ):
             with mock.patch.object(orchestrators_cli, "main", return_value=81) as main:
-                self.assertEqual(pipeline.main(["orchestrators", "list"]), 81)
+                self.assertEqual(gateway.main(["orchestrators", "list"]), 81)
                 main.assert_called_once_with(["list"])
             with mock.patch.object(executors_cli, "main", return_value=82) as main:
-                self.assertEqual(pipeline.main(["executors", "list"]), 82)
+                self.assertEqual(gateway.main(["executors", "list"]), 82)
                 main.assert_called_once_with(["list"])
 
 

@@ -34,10 +34,10 @@ from astrid.contracts.errors import (
     wrap_degraded_error,
 )
 from astrid.core.util.log_and_swallow import log_and_swallow
-from astrid import gateway_dispatch as _gateway_dispatch
-from astrid import gateway_project as _gateway_project
-from astrid import gateway_wait as _gateway_wait
-from astrid.gateway_project import (
+from . import dispatch as _gateway_dispatch
+from . import project as _gateway_project
+from . import wait as _gateway_wait
+from astrid.gateway.project import (
     ASTRID_GATEWAY_RESOLVED_PROJECT_ENV,
     DEFAULT_PROJECT_SLUG,
     _AUTO_BIND_RUN_VERBS,
@@ -49,18 +49,18 @@ from astrid.gateway_project import (
     _invocation_is_auto_bindable_run,
     _resolved_request_project_slug,
 )
-from astrid.gateway_help import (
+from astrid.gateway.help import (
     _packs_subcommand_list,
     _print_entrypoint_help,
 )
-from astrid.gateway_wait import (
+from astrid.gateway.wait import (
     _make_run_ctx_for_poll,
     _read_returncode_sidecar,
     _wait_adapter,
     _wait_local_subprocess,
     _wait_remote_artifact,
 )
-from astrid.gateway_dispatch import (
+from astrid.gateway.dispatch import (
     _TOP_LEVEL_HANDLERS,
     _build_dispatch_parser,
     _dispatch_attach,
@@ -164,7 +164,7 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
 )
 _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
-# Project resolution constants and helpers live in gateway_project.py.
+# Project resolution constants and helpers live in gateway/project.py.
 # They are re-exported here so the gateway facade remains the canonical
 # access point for all callers (including astrid.gateway).
 
@@ -201,7 +201,7 @@ def _main_impl(raw: list[str]) -> int:
     # for the `skills` subcommand (would be silly) or help. Cheap state-file
     # read; bails early if no harness is detected or ASTRID_NO_NUDGE is set.
     try:
-        from .skills import nudge_if_needed
+        from astrid.skills import nudge_if_needed
 
         nudge_if_needed(argv=raw)
     except Exception as exc:  # noqa: BLE001
@@ -212,7 +212,7 @@ def _main_impl(raw: list[str]) -> int:
     # session record; print the documented hint and exit 2 otherwise.
     session = None
     if not _verb_is_unbound_allowlisted(raw):
-        from .core.session.binding import (
+        from astrid.core.session.binding import (
             SessionBindingError,
             resolve_current_session_with_fs_fallback,
         )
@@ -272,7 +272,7 @@ def _main_impl(raw: list[str]) -> int:
     if project_slug is None:
         return _dispatch_with_resolved_project(raw, request_project)
 
-    from .core.task import gate as task_gate
+    from astrid.core.task import gate as task_gate
 
     try:
         decision = task_gate.gate_command(project_slug, task_gate.command_for_argv(raw), raw)
@@ -332,7 +332,7 @@ def _dispatch(raw: list[str]) -> int:
 # _extract_project_slug, _resolved_request_project_slug,
 # _dispatch_with_resolved_project, _has_cli_option,
 # _invocation_is_auto_bindable_run, and _auto_bind_default_project_session
-# are now defined in gateway_project.py and re-exported at the top of this
+# are now defined in gateway/project.py and re-exported at the top of this
 # module so callers (including astrid.gateway) continue to resolve them
 # through the gateway facade unchanged.
 
@@ -340,7 +340,7 @@ def _dispatch(raw: list[str]) -> int:
 def _run_default_brief_orchestrator(argv: list[str]) -> int:
     from importlib import import_module
 
-    from .core.orchestrator.registry import load_default_registry
+    from astrid.core.orchestrator.registry import load_default_registry
 
     registry = load_default_registry()
     orchestrator = registry.get("video_editing.hype")
@@ -358,8 +358,8 @@ def _run_default_brief_orchestrator(argv: list[str]) -> int:
 
 
 # _packs_subcommand_list and _print_entrypoint_help are now defined in
-# gateway_help.py and re-exported at the top of this module so callers
-# (including gateway_dispatch._dispatch and astrid.gateway) continue to
+# gateway/help.py and re-exported at the top of this module so callers
+# (including gateway.dispatch._dispatch and astrid.gateway) continue to
 # resolve them through the gateway facade unchanged.
 
 

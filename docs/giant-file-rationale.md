@@ -42,19 +42,10 @@ and do not require rationale entries.
 > `invocation.py`, `dto.py`, and `events.py`.
 > The monolithic module no longer exists and is no longer listed here.
 >
-> **Fully decomposed:** `astrid/gateway.py` (originally 1,215 lines) has been
-> split during M4 batches 35-39, 41:
-> `gateway_dispatch.py` (T36) now owns the dispatch table, parser builders,
-> and command-specific dispatch helpers.  `gateway_wait.py` (T38, 105 lines)
-> owns the wait-adapter, subprocess-poll, and remote-artifact helpers.
-> `gateway_project.py` (T40, 145 lines) owns project resolution, auto-bind,
-> and environment constants (``ASTRID_GATEWAY_RESOLVED_PROJECT_ENV``,
-> ``DEFAULT_PROJECT_SLUG``, ``_AUTO_BIND_RUN_VERBS``).
-> `gateway_help.py` (T42, ~128 lines) owns the entrypoint help rendering
-> (``_print_entrypoint_help``, ``_packs_subcommand_list``).  The original
-> module remains the canonical gateway facade (now below 365 lines) and
-> preserves the `astrid.gateway is astrid.gateway` patching surface while
-> staying well below the 1,200-line threshold.
+> **Fully decomposed:** `astrid/gateway.py` (originally 1,215 lines) was split
+> during M4 and has since been folded into the `astrid/gateway/` package:
+> `__init__.py`, `dispatch.py`, `help.py`, `project.py`, and `wait.py`.
+> The monolithic module no longer exists and is no longer listed here.
 
 | # | File | Lines | Classification | Rationale |
 |---|------|-------|----------------|-----------|

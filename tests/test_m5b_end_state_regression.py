@@ -24,14 +24,14 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 # ---------------------------------------------------------------------------
-# 1.  No ``raw[0] ==`` dispatch in astrid/gateway.py
+# 1.  No ``raw[0] ==`` dispatch in astrid/gateway/dispatch.py
 # ---------------------------------------------------------------------------
 
 class RawDispatchRemovalTest(unittest.TestCase):
     """The ``_dispatch()`` function must not use ``raw[0] ==`` comparisons.
 
     After the CLI-unification refactor (m5b), the long chain of
-    ``if raw and raw[0] == "..."`` in ``astrid/gateway.py:_dispatch()``
+    ``if raw and raw[0] == "..."`` in ``astrid/gateway/dispatch.py:_dispatch()``
     must be replaced with a table-driven dispatch (register-based,
     argparse sub-parsers, or equivalent).  String-comparison chains are a
     maintenance liability because they duplicate the verb vocabulary and
@@ -43,7 +43,7 @@ class RawDispatchRemovalTest(unittest.TestCase):
 
     def test_dispatch_has_no_raw0_equality_chain(self) -> None:
         """No ``raw[0] == ...`` comparison inside ``_dispatch()``."""
-        pipeline_path = _REPO_ROOT / "astrid" / "gateway.py"
+        pipeline_path = _REPO_ROOT / "astrid" / "gateway" / "dispatch.py"
         source = pipeline_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(pipeline_path))
 
@@ -53,7 +53,7 @@ class RawDispatchRemovalTest(unittest.TestCase):
                 dispatch_fn = node
                 break
 
-        self.assertIsNotNone(dispatch_fn, "Could not find _dispatch() in gateway.py")
+        self.assertIsNotNone(dispatch_fn, "Could not find _dispatch() in gateway/dispatch.py")
 
         raw0_eq_locations: list[str] = []
         for node in ast.walk(dispatch_fn):
@@ -77,7 +77,7 @@ class RawDispatchRemovalTest(unittest.TestCase):
 
     def test_dispatch_uses_table_or_parser_not_if_chain(self) -> None:
         """_dispatch() uses argparse or a dispatch map, not a long if-chain."""
-        pipeline_path = _REPO_ROOT / "astrid" / "gateway.py"
+        pipeline_path = _REPO_ROOT / "astrid" / "gateway" / "dispatch.py"
 
         import ast as ast_mod
 
@@ -116,7 +116,7 @@ class RawDispatchRemovalTest(unittest.TestCase):
 class UnknownCommandDoesNotHitDefaultHypeTest(unittest.TestCase):
     """Unknown top-level commands must not invoke the default hype orchestrator.
 
-    Today ``astrid gateway.py:_dispatch()`` falls through to
+    Today ``astrid gateway/dispatch.py:_dispatch()`` falls through to
     ``_run_default_brief_orchestrator(raw)`` whenever ``raw[0]`` starts
     with ``--`` and doesn't match any known verb.  This is surprising
     behavior: ``astrid --typo`` silently runs hype instead of reporting
@@ -427,7 +427,7 @@ class DefaultBriefRoutingIsExplicitTest(unittest.TestCase):
         # This test verifies that entering hype requires an explicit pathway.
         # Read the dispatch function source to verify _run_default_brief_orchestrator
         # is only called from controlled contexts.
-        pipeline_path = _REPO_ROOT / "astrid" / "gateway.py"
+        pipeline_path = _REPO_ROOT / "astrid" / "gateway" / "dispatch.py"
         source = pipeline_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(pipeline_path))
 

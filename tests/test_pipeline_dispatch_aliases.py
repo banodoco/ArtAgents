@@ -11,7 +11,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
     def test_root_help_explains_canonical_gateway(self) -> None:
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            self.assertEqual(pipeline.main(["--help"]), 0)
+            self.assertEqual(gateway.main(["--help"]), 0)
 
         help_text = stdout.getvalue()
         self.assertIn("Astrid command gateway", help_text)
@@ -19,7 +19,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         self.assertIn("python3 -m astrid executors {new,list,inspect,validate,fork,install,run}", help_text)
         self.assertIn("python3 -m astrid elements {list,inspect,fork,install}", help_text)
         self.assertIn("python3 -m astrid is the package entry point", help_text)
-        self.assertNotIn("pipeline.py", help_text)
+        self.assertNotIn("gateway.py", help_text)
         self.assertNotIn("conductors", help_text)
         self.assertNotIn("performers", help_text)
 
@@ -33,7 +33,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ),
             mock.patch.object(elements_cli, "main", return_value=31) as elements_main,
         ):
-            self.assertEqual(pipeline.main(["elements", "list"]), 31)
+            self.assertEqual(gateway.main(["elements", "list"]), 31)
             elements_main.assert_called_once_with(["list"])
 
     def test_legacy_public_dispatch_tokens_are_rejected(self) -> None:
@@ -41,7 +41,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             with self.subTest(token=token):
                 stderr = io.StringIO()
                 with contextlib.redirect_stderr(stderr):
-                    exit_code = pipeline.main([token, "list"])
+                    exit_code = gateway.main([token, "list"])
                 self.assertEqual(exit_code, 2)
                 self.assertIn(f"unknown command '{token}'", stderr.getvalue())
 
@@ -55,7 +55,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ),
             mock.patch.object(doctor, "main", return_value=41) as doctor_main,
         ):
-            self.assertEqual(pipeline.main(["doctor", "--help"]), 41)
+            self.assertEqual(gateway.main(["doctor", "--help"]), 41)
             doctor_main.assert_called_once_with(["--help"])
 
         with (
@@ -65,7 +65,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             ),
             mock.patch.object(setup_cli, "main", return_value=42) as setup_main,
         ):
-            self.assertEqual(pipeline.main(["setup", "--help"]), 42)
+            self.assertEqual(gateway.main(["setup", "--help"]), 42)
             setup_main.assert_called_once_with(["--help"])
 
     def test_publish_style_dispatch_resolves_executor_runtime_from_registry_metadata(self) -> None:
@@ -97,10 +97,10 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 ],
             ) as resolve_runtime,
         ):
-            self.assertEqual(pipeline.main(["publish", "--help"]), 51)
-            self.assertEqual(pipeline.main(["publish-youtube", "--help"]), 52)
-            self.assertEqual(pipeline.main(["upload-youtube", "--help"]), 52)
-            self.assertEqual(pipeline.main(["reigh-data", "--help"]), 53)
+            self.assertEqual(gateway.main(["publish", "--help"]), 51)
+            self.assertEqual(gateway.main(["publish-youtube", "--help"]), 52)
+            self.assertEqual(gateway.main(["upload-youtube", "--help"]), 52)
+            self.assertEqual(gateway.main(["reigh-data", "--help"]), 53)
 
         self.assertEqual(
             [call.args[0] for call in registry.get.call_args_list],
@@ -124,7 +124,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                self.assertEqual(pipeline.main(["run", "ls"]), 57)
+                self.assertEqual(gateway.main(["run", "ls"]), 57)
 
         warning = stderr.getvalue()
         self.assertIn("'astrid run' is deprecated", warning)
@@ -142,7 +142,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                self.assertEqual(pipeline.main(["runs", "ls"]), 58)
+                self.assertEqual(gateway.main(["runs", "ls"]), 58)
 
         self.assertNotIn("deprecated", stderr.getvalue())
         runs_ls.assert_called_once_with([])
@@ -157,7 +157,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                self.assertEqual(pipeline.main(["author", "describe", "pack.thing"]), 59)
+                self.assertEqual(gateway.main(["author", "describe", "pack.thing"]), 59)
 
         warning = stderr.getvalue()
         self.assertIn("'astrid author' is deprecated", warning)
@@ -175,7 +175,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                self.assertEqual(pipeline.main(["orchestrate", "describe", "pack.thing"]), 60)
+                self.assertEqual(gateway.main(["orchestrate", "describe", "pack.thing"]), 60)
 
         self.assertNotIn("deprecated", stderr.getvalue())
         orchestrate_main.assert_called_once_with(["describe", "pack.thing"])
@@ -190,7 +190,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
         ):
             stderr = io.StringIO()
             with contextlib.redirect_stderr(stderr):
-                exit_code = pipeline.main(["boguscmd"])
+                exit_code = gateway.main(["boguscmd"])
             self.assertEqual(exit_code, 2)
             self.assertIn("unknown command 'boguscmd'", stderr.getvalue())
 
@@ -206,7 +206,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 return_value=42,
             ) as mock_fallback,
         ):
-            exit_code = pipeline.main(["--brief", "some brief text"])
+            exit_code = gateway.main(["--brief", "some brief text"])
             self.assertEqual(exit_code, 42)
             mock_fallback.assert_called_once_with(["--brief", "some brief text"])
 
@@ -240,7 +240,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
             "astrid.gateway._dispatch_elements",
             return_value=55,
         ) as patched_dispatch:
-            result = pipeline._dispatch_elements(["list"])
+            result = gateway._dispatch_elements(["list"])
             self.assertEqual(result, 55)
             patched_dispatch.assert_called_once_with(["list"])
 

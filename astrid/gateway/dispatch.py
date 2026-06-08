@@ -19,7 +19,7 @@ _ALIAS_SUNSET_VERSION = "0.3.0"
 
 
 def _dispatch(raw: list[str]) -> int:
-    from .gateway import _print_entrypoint_help
+    from . import _print_entrypoint_help
 
     if not raw:
         _print_entrypoint_help()
@@ -76,13 +76,13 @@ def _dispatch_default_brief(args: list[str]) -> int:
 
 
 def _run_default_brief_from_args(args: list[str]) -> int:
-    from .gateway import _run_default_brief_orchestrator
+    from . import _run_default_brief_orchestrator
 
     return _run_default_brief_orchestrator(args)
 
 
 def _dispatch_attach(args: list[str]) -> int:
-    from .core.session.cli import build_parser, cmd_attach
+    from astrid.core.session.cli import build_parser, cmd_attach
 
     parsed = build_parser().parse_args(["attach", *args])
     return int(cmd_attach(parsed))
@@ -92,11 +92,11 @@ def _dispatch_status(args: list[str]) -> int:
     # The session-status verb fires when no --project is given; lifecycle
     # status keeps working with --project.
     if "--project" in args or any(arg.startswith("--project=") for arg in args):
-        from .core.task.lifecycle import cmd_status
+        from astrid.core.task.lifecycle import cmd_status
 
         return cmd_status(args)
-    from .core.session.cli import build_parser
-    from .core.session.cli import cmd_status as session_status
+    from astrid.core.session.cli import build_parser
+    from astrid.core.session.cli import cmd_status as session_status
 
     status_args = ["status", *[arg for arg in args if arg in {"-h", "--help", "--json"}]]
     parsed = build_parser().parse_args(status_args)
@@ -105,7 +105,7 @@ def _dispatch_status(args: list[str]) -> int:
 
 def _dispatch_lifecycle(command: str) -> Any:
     def _handler(args: list[str]) -> int:
-        from .core.task import lifecycle
+        from astrid.core.task import lifecycle
 
         return int(getattr(lifecycle, command)(args))
 
@@ -113,13 +113,13 @@ def _dispatch_lifecycle(command: str) -> Any:
 
 
 def _dispatch_claim(args: list[str]) -> int:
-    from .core.task.claim import cmd_claim
+    from astrid.core.task.claim import cmd_claim
 
     return cmd_claim(args)
 
 
 def _dispatch_unclaim(args: list[str]) -> int:
-    from .core.task.claim import cmd_unclaim
+    from astrid.core.task.claim import cmd_unclaim
 
     return cmd_unclaim(args)
 
@@ -133,31 +133,31 @@ def _dispatch_publish_youtube(args: list[str]) -> int:
 
 
 def _dispatch_skills(args: list[str]) -> int:
-    from .skills import cli as skills_cli
+    from astrid.skills import cli as skills_cli
 
     return skills_cli.main(args)
 
 
 def _dispatch_packs(args: list[str]) -> int:
-    from .core.pack import cli as packs_cli
+    from astrid.core.pack import cli as packs_cli
 
     return packs_cli.main(args)
 
 
 def _dispatch_executors(args: list[str]) -> int:
-    from .core.executor import cli as executors_cli
+    from astrid.core.executor import cli as executors_cli
 
     return executors_cli.main(args)
 
 
 def _dispatch_orchestrators(args: list[str]) -> int:
-    from .core.orchestrator import cli as orchestrators_cli
+    from astrid.core.orchestrator import cli as orchestrators_cli
 
     return orchestrators_cli.main(args)
 
 
 def _dispatch_orchestrate(args: list[str]) -> int:
-    from .orchestrate import cli as author_cli
+    from astrid.orchestrate import cli as author_cli
 
     return author_cli.main(args)
 
@@ -176,13 +176,13 @@ def _warn_deprecated_alias(*, alias: str, replacement: str) -> None:
 
 
 def _dispatch_models(args: list[str]) -> int:
-    from .core.model_catalog import cli as models_cli
+    from astrid.core.model_catalog import cli as models_cli
 
     return models_cli.main(args)
 
 
 def _dispatch_elements(args: list[str]) -> int:
-    from .core.element import cli as elements_cli
+    from astrid.core.element import cli as elements_cli
 
     return elements_cli.main(args)
 
@@ -190,43 +190,43 @@ def _dispatch_elements(args: list[str]) -> int:
 def _dispatch_projects(args: list[str]) -> int:
     # TODO(Sprint 5b): astrid projects timeline is a legacy reigh-app
     # subcommand that collides with the Sprint 2 timeline concept.
-    from .core.project import cli as projects_cli
+    from astrid.core.project import cli as projects_cli
 
     return projects_cli.main(args)
 
 
 def _dispatch_themes(args: list[str]) -> int:
-    from .core import theme_cli
+    from astrid.core import theme_cli
 
     return theme_cli.main(args)
 
 
 def _dispatch_timelines(args: list[str]) -> int:
-    from .core.timeline import cli as timelines_cli
+    from astrid.core.timeline import cli as timelines_cli
 
     return timelines_cli.main(args)
 
 
 def _dispatch_modalities(args: list[str]) -> int:
-    from . import modalities
+    from astrid import modalities
 
     return modalities.main(args)
 
 
 def _dispatch_doctor(args: list[str]) -> int:
-    from . import doctor
+    from astrid import doctor
 
     return doctor.main(args)
 
 
 def _dispatch_setup(args: list[str]) -> int:
-    from . import setup_cli
+    from astrid import setup_cli
 
     return setup_cli.main(args)
 
 
 def _dispatch_audit(args: list[str]) -> int:
-    from . import audit
+    from astrid import audit
 
     return audit.main(args)
 
@@ -236,8 +236,8 @@ def _dispatch_reigh_data(args: list[str]) -> int:
 
 
 def _dispatch_executor_main(executor_id: str, args: list[str]) -> int:
-    from .core.executor.registry import load_default_registry
-    from .core.pack_resolver import resolve_callable_from_metadata
+    from astrid.core.executor.registry import load_default_registry
+    from astrid.core.pack.resolver import resolve_callable_from_metadata
 
     executor = load_default_registry().get(executor_id)
     entrypoint = resolve_callable_from_metadata(executor.metadata, owner_id=executor.id)
@@ -245,7 +245,7 @@ def _dispatch_executor_main(executor_id: str, args: list[str]) -> int:
 
 
 def _dispatch_worker(args: list[str]) -> int:
-    from .core.worker import banodoco_worker
+    from astrid.core.worker import banodoco_worker
 
     return banodoco_worker.main(args)
 
@@ -269,7 +269,7 @@ def _dispatch_scratch(args: list[str]) -> int:
     )
     from astrid.core.subprocess_env import build_child_subprocess_env
 
-    from .gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV, DEFAULT_PROJECT_SLUG
+    from . import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV, DEFAULT_PROJECT_SLUG
 
     parser = argparse.ArgumentParser(prog="astrid scratch")
     sub = parser.add_subparsers(dest="scratch_command")
@@ -385,7 +385,7 @@ _TOP_LEVEL_HANDLERS = {
 
 
 def _dispatch_sessions(args: list[str]) -> int:
-    from .core.session.cli import (
+    from astrid.core.session.cli import (
         build_parser,
         cmd_sessions_detach,
         cmd_sessions_ls,
@@ -418,8 +418,8 @@ def _dispatch_runs(args: list[str]) -> int:
         cmd_run_trace,
     )
 
-    from .core.task.lifecycle import cmd_runs_ls
-    from .core.task.run_gc import cmd_runs_gc
+    from astrid.core.task.lifecycle import cmd_runs_ls
+    from astrid.core.task.run_gc import cmd_runs_gc
 
     parser = argparse.ArgumentParser(prog="astrid runs")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -455,7 +455,7 @@ def _dispatch_step(args: list[str]) -> int:
 def _dispatch_hook(args: list[str]) -> int:
     import argparse
 
-    from .core.task.hook import cmd_hook_stop
+    from astrid.core.task.hook import cmd_hook_stop
 
     parser = argparse.ArgumentParser(prog="astrid hook")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -466,7 +466,7 @@ def _dispatch_hook(args: list[str]) -> int:
 
 def _dispatch_plan_verbs(args: list[str]) -> int:
     """Delegate plan sub-verbs to plan_verbs.cmd_plan (T8/T17)."""
-    from .core.task.plan_verbs import cmd_plan
+    from astrid.core.task.plan_verbs import cmd_plan
 
     return cmd_plan(args)
 
@@ -507,8 +507,8 @@ def _dispatch_runpod_sweep(parsed: Any, _tail: list[str]) -> int:
     from pathlib import Path
     from typing import Literal
 
-    from .core.project.paths import resolve_projects_root
-    from .core.runpod.sweeper import sweep as run_sweep
+    from astrid.core.project.paths import resolve_projects_root
+    from astrid.core.runpod.sweeper import sweep as run_sweep
 
     mode: Literal["default", "hard"] = "hard" if parsed.hard else "default"
     projects_root = (
@@ -537,7 +537,7 @@ def _dispatch_runpod_volumes(_parsed: Any, args: list[str]) -> int:
             state_snapshot={"command": "runpod volumes"},
         )
 
-    from .core.runpod.storage import list_volumes
+    from astrid.core.runpod.storage import list_volumes
 
     try:
 
@@ -570,7 +570,7 @@ def _dispatch_runpod_ensure_storage(_parsed: Any, args: list[str]) -> int:
     except SystemExit:
         return 2
 
-    from .core.runpod.storage import ensure_storage
+    from astrid.core.runpod.storage import ensure_storage
 
     try:
 

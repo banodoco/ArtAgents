@@ -12,8 +12,8 @@ validation, CLI, installation, entrypoint, agent indexing, gitignore filtering,
 schemas) belongs under `astrid/core/pack/*`. `astrid/packs/` is for pack data
 only — executors, orchestrators, elements, `pack.yaml`, `skill/` — with no
 top-level Python machinery except `__init__.py`. Gateway subcommand logic lives
-in `astrid/gateway_*.py` split modules; the root `gateway.py` is the
-router/facade. SDK implementation lives in the `astrid/sdk/` package.
+in the `astrid/gateway/` package. SDK implementation lives in the
+`astrid/sdk/` package.
 
 ## 1. Public Facades
 
@@ -35,7 +35,7 @@ The 27 names in `astrid.__all__` are:
 | Surface | File | Classification |
 | --- | --- | --- |
 | `python3 -m astrid` | `astrid/__main__.py` | **Executable package gateway** — delegates to `astrid.gateway.main()`. |
-| `astrid.gateway` | `astrid/gateway.py` | **Subcommand router and facade** (367 lines) — session gate, command dispatch, brief/video fall-through to `video_editing.hype`. Giant-file split completed in M4: dispatch logic lives in `gateway_dispatch.py` (578 lines), help text in `gateway_help.py` (139 lines), project commands in `gateway_project.py` (155 lines), wait/lease logic in `gateway_wait.py` (115 lines). |
+| `astrid.gateway` | `astrid/gateway/` | **Subcommand router package** — session gate, command dispatch, brief/video fall-through to `video_editing.hype`. The facade lives in `__init__.py`; implementation modules are `dispatch.py`, `help.py`, `project.py`, and `wait.py`. |
 | `astrid.orchestrate.cli` | `astrid/orchestrate/cli.py` | **Plan compilation and test-running CLI** — CLI entrypoint for orchestrate commands. |
 | `astrid.doctor` | `astrid/doctor.py` | **Repo health diagnostic** — consumes `validate_repo_structure()`. |
 | `astrid.skills.cli` | `astrid/skills/cli.py` | **Skills CLI** — skill discovery and harness management. |
@@ -52,7 +52,7 @@ The following are explicitly out of the v1 public contract, even if importable:
 - Registry internals, resolver internals, and helper functions
 - CLI implementation modules and verb-routing internals
 - Internal tests, fixtures, and generated discovery payloads
-- Split gateway modules (`gateway_dispatch`, `gateway_help`, `gateway_project`, `gateway_wait`) are internal implementation detail
+- Gateway implementation modules under `astrid/gateway/` are internal implementation detail
 
 These surfaces may change in any minor or patch release without deprecation.
 
@@ -110,7 +110,7 @@ When adding new code to the repository, follow these placement rules:
 - **New internal framework code**: `astrid/core/<domain>/*`
 - **New pack data** (executors, orchestrators, elements, skills): `astrid/packs/<pack>/`
 - **New public SDK surface**: add to the `astrid/sdk/` package and expose it through the package facade only when it is part of the v1 contract
-- **New gateway subcommands**: add to the appropriate `astrid/gateway_*.py` split module or create a new one; register the dispatch in `gateway_dispatch.py`
+- **New gateway subcommands**: add to the appropriate `astrid/gateway/*.py` module or create a new one; register dispatch in `astrid/gateway/dispatch.py`
 - **New domain libraries**: `astrid/domains/<domain>/`
 - **New shared utilities**: `astrid/utilities/`
 - **New CLI entrypoints for subsystems**: follow the pattern of `astrid/<subsystem>/cli.py`
@@ -338,12 +338,11 @@ the following splits:
 
 | File | Pre-Split Lines | Post-Split Lines | Result |
 | --- | --- | --- | --- |
-| `astrid/gateway.py` | 1,215 | 367 | Split into `gateway.py` (router, 367), `gateway_dispatch.py` (578), `gateway_help.py` (139), `gateway_project.py` (155), `gateway_wait.py` (115) |
+| `astrid/gateway.py` | 1,215 | Package | Folded into `astrid/gateway/` (`__init__.py`, `dispatch.py`, `help.py`, `project.py`, `wait.py`) |
 | `astrid/sdk.py` | 1,833 | Package | Folded into the `astrid/sdk/` package (`discovery.py`, `dto.py`, `events.py`, `exceptions.py`, `generation.py`, `invocation.py`, `results.py`) |
 
-Gateway split modules are listed in `TOP_LEVEL_ASTRID_FILES` in
-`astrid/structure.py`; SDK implementation now lives in the `astrid/sdk/`
-package.
+The gateway and SDK implementations now live in packages rather than top-level
+split modules.
 
 ### 9.2 Test Relocation Candidates (M3)
 
@@ -373,7 +372,7 @@ document:
 | Internal threads lineage (m5a) | **Complete** | §4 — Threads subsystem with removed wrapper symbols |
 | Public compatibility shim removal | **Complete** | §3 — retired surface map |
 | Top-level module rationalization (M2) | **Complete** | §2 — `core/pack/` canonical pack machinery; §5 — `packs/` as pack data only; §5.3 — no top-level pack modules; §5.5 — structure enforcement |
-| Giant-file split (M4) | **Complete** | §9.1 — Gateway split into 4 sub-modules; SDK folded into `astrid/sdk/` package |
+| Giant-file split (M4) | **Complete** | §9.1 — Gateway and SDK folded into packages |
 | M5 boundary enforcement | **Complete** | §2.2 — Contributor placement guidance; §4.1 — CLI/domain/import-layering convention; §12.1 — Structure enforcement model |
 | Shim and legacy surface audit (M5) | **Complete** | `docs/architecture/shim-legacy-audit.md` — M5 dispositions with retention metadata |
 
@@ -424,8 +423,8 @@ canonical repository structure drifts.
   Ambiguous cases are flagged for owner review.
 
 - **M4** consumed `docs/architecture/giant-file-split-candidates.json` to
-  split `gateway.py` (into 4 sub-modules) and `sdk.py` (into 5 sub-modules).
-  The split is complete; the pre-split files now serve as router/facade modules.
+  split `gateway.py` and `sdk.py`. Later cleanup folded both split surfaces into
+  packages.
 
 - **M5** updates this document to reflect the post-split layout, adds
   contributor placement guidance, formalizes the CLI/domain/import-layering

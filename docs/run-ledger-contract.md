@@ -367,11 +367,11 @@ Every in-band invocation surface that must produce a ledger entry:
 | `executors run [--project <p>]` | `astrid/core/executor/cli.py` → `runner.py` → `CapabilityRunner.run()` | **Ledgered** — project required or auto-resolved |
 | `executors run --out <dir>` (no `--project`) | Same | **Ledgered** — default project auto-resolved; `run.json.out` set |
 | `orchestrators run [--project <p>]` | `astrid/core/orchestrator/cli.py` → `runner.py` → `CapabilityRunner.run()` | **Ledgered** — project required or auto-resolved |
-| `scratch run <script>` | `astrid/gateway.py:484-514` → `astrid/core/project/run.py` | **Ledgered** — `kind: "scratch"`, `tool_id: "scratch.run"`, `invocation: "scratch"`, `auto_bound: true`, status from subprocess return code |
+| `scratch run <script>` | `astrid/gateway/dispatch.py` → `astrid/core/project/run.py` | **Ledgered** — `kind: "scratch"`, `tool_id: "scratch.run"`, `invocation: "scratch"`, `auto_bound: true`, status from subprocess return code |
 | SDK `astrid.generate.image(..., project=...)` | `astrid/sdk.py` → `invoke()` → `CapabilityRunner.run()` | **Ledgered** — `invocation: "sdk"` |
 | SDK `astrid.generate.image(..., out=...)` | `astrid/sdk.py` → `invoke()` → `CapabilityRunner.run()` | **Ledgered** — default project auto-resolved; `run.json.out` set; `invocation: "sdk"` |
 | SDK `astrid.generate.video(..., out=...)` | Same as image | **Ledgered** (same semantics) |
-| Gateway auto-bind (no `--project`) | `astrid/gateway.py` → request construction → `CapabilityRunner.run()` | **Ledgered** — resolved project passed at request/lifecycle level, not raw argv injection |
+| Gateway auto-bind (no `--project`) | `astrid/gateway/` → request construction → `CapabilityRunner.run()` | **Ledgered** — resolved project passed at request/lifecycle level, not raw argv injection |
 
 ---
 

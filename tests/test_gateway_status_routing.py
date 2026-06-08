@@ -40,7 +40,7 @@ def _run_pipeline(argv: list[str]) -> tuple[int, str, str]:
     rc = -1
     with redirect_stdout(out), redirect_stderr(err):
         try:
-            rc = pipeline.main(argv)
+            rc = gateway.main(argv)
         except SystemExit as exc:
             rc = int(exc.code) if isinstance(exc.code, int) else 2
     return rc, out.getvalue(), err.getvalue()

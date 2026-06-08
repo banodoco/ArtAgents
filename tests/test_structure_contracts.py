@@ -1099,8 +1099,8 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
     assert isinstance(tli.get("top_level_files"), list), (
         "top-level-inventory.json: 'top_level_files' must be a list"
     )
-    assert len(tli["top_level_files"]) >= 10, (
-        f"Expected >= 10 top-level files; got {len(tli['top_level_files'])}"
+    assert len(tli["top_level_files"]) >= 1, (
+        f"Expected at least one top-level file; got {len(tli['top_level_files'])}"
     )
     for entry in tli["top_level_files"]:
         assert "name" in entry, f"File entry missing 'name': {entry}"

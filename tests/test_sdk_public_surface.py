@@ -31,10 +31,16 @@ pytestmark = pytest.mark.skipif(
 
 
 REPRESENTATIVE_SUBMODULES = (
-    "astrid.timeline",
     "astrid.gateway",
     "astrid.doctor",
     "astrid.setup_cli",
+)
+
+RETIRED_COMPATIBILITY_SUBMODULES = (
+    "astrid.timeline",
+    "astrid.pipeline",
+    "astrid._media",
+    "astrid._paths",
 )
 
 
@@ -130,10 +136,16 @@ def test_generate_facade_is_lazy_public_surface() -> None:
     assert type(facade).__name__ == "GenerationFacade"
 
 
-def test_legacy_top_level_submodule_imports_still_resolve() -> None:
+def test_representative_top_level_submodule_imports_resolve() -> None:
     for module_name in REPRESENTATIVE_SUBMODULES:
         imported = importlib.import_module(module_name)
         assert imported is not None
+
+
+def test_retired_compatibility_submodule_imports_do_not_resolve() -> None:
+    for module_name in RETIRED_COMPATIBILITY_SUBMODULES:
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(module_name)
 
 
 def test_discover_and_get_capability_expose_public_dtos() -> None:

@@ -14,7 +14,7 @@ def _packs_subcommand_list() -> str:
     try:
         import argparse
 
-        from .core.pack.cli import build_parser as packs_build_parser
+        from astrid.core.pack.cli import build_parser as packs_build_parser
 
         packs_parser = packs_build_parser()
         # Extract subcommand names from the parser's subparsers action.

@@ -76,7 +76,7 @@ For a step-by-step tutorial on building your first agentic UX, see
 | Module or entry point | Classification | Notes |
 | --- | --- | --- |
 | `python3 -m astrid`, `astrid/__main__.py` | System entry point | Executable package gateway for all canonical commands. |
-| `astrid/gateway.py` | System command and dispatcher | Subcommand router; falls through to `video_editing.hype` via the orchestrator registry's `runtime_module` metadata. |
+| `astrid/gateway/` | System command and dispatcher | Subcommand router; falls through to `video_editing.hype` via the orchestrator registry's `runtime_module` metadata. |
 | `astrid/packs/video_editing/orchestrators/hype/` | Orchestrator | Canonical hype video editing orchestrator. |
 | `astrid/packs/video_editing/orchestrators/event_talks/` | Orchestrator | Canonical event-talk discovery and rendering workflow. |
 | `astrid/packs/video_editing/orchestrators/thumbnail_maker/` | Orchestrator | Canonical source-evidence thumbnail workflow. |

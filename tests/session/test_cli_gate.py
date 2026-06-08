@@ -58,7 +58,7 @@ def _run_pipeline(argv: list[str]) -> tuple[int, str, str]:
     rc = -1
     with redirect_stdout(out), redirect_stderr(err):
         try:
-            rc = pipeline.main(argv)
+            rc = gateway.main(argv)
         except SystemExit as exc:
             # Sub-CLIs (argparse) may sys.exit on bad args. For the gate
             # tests, the important signal is whether the SESSION gate
@@ -124,7 +124,7 @@ def test_gate_does_not_resolve_stray_projects_root(
     Plants a valid .astrid-session under a *separate* stray root (standing in
     for what DEFAULT_PROJECTS_ROOT would be on disk) while ASTRID_PROJECTS_ROOT
     is already set to the env fixture's isolated tmp dir. The gated verb must
-    still return rc=2 because pipeline.py passes projects_root=resolve_projects_root()
+    still return rc=2 because gateway.py passes projects_root=resolve_projects_root()
     explicitly, so the stray root is never walked.
     """
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
@@ -163,9 +163,9 @@ def test_unbound_next_prints_discovery_hint(
 
 
 def test_unbound_gate_uses_the_frozen_allowlist_table() -> None:
-    assert pipeline.SPRINT1_UNBOUND_ALLOWLIST_CONTRACT == EXPECTED_SPRINT1_UNBOUND_ALLOWLIST
+    assert gateway.SPRINT1_UNBOUND_ALLOWLIST_CONTRACT == EXPECTED_SPRINT1_UNBOUND_ALLOWLIST
     for allowed in EXPECTED_SPRINT1_UNBOUND_ALLOWLIST:
-        assert pipeline._verb_is_unbound_allowlisted(list(allowed))
+        assert gateway._verb_is_unbound_allowlisted(list(allowed))
 
 
 def test_stop_line_unbound_gate_has_no_transitional_extras() -> None:
@@ -182,7 +182,7 @@ def test_stop_line_unbound_gate_has_no_transitional_extras() -> None:
         ["timelines", "ls"],
     ]
     still_allowed = [
-        argv for argv in transitional_extras if pipeline._verb_is_unbound_allowlisted(argv)
+        argv for argv in transitional_extras if gateway._verb_is_unbound_allowlisted(argv)
     ]
     assert still_allowed == []
 

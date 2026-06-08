@@ -201,7 +201,7 @@ The contract is implemented across these modules:
 | `astrid/core/task/lifecycle_ack.py` | `cmd_ack` (approve/retry/iterate with JSON and abort delegation). |
 | `astrid/core/task/lifecycle_skip.py` | `cmd_skip` (optional-step skip with JSON). |
 | `astrid/core/session/cli.py` | `cmd_attach` (non-prompting JSON policy, structured errors) and `cmd_status` (session status JSON). |
-| `astrid/gateway.py` | Status routing (`--json` preservation, session vs. task dispatch). |
+| `astrid/gateway/` | Status routing (`--json` preservation, session vs. task dispatch). |
 | `astrid/contracts/errors.py` | `AstridError` envelope, `render_astrid_error`, and `wrap_degraded_error`. |
 
 ## Cross-References
