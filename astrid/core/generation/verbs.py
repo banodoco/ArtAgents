@@ -75,9 +75,9 @@ def load_generation_verb_plugins() -> None:
 
     # Lazy-import pack discovery so the module is importable without
     # pulling in the full pack machinery at module level.
-    from astrid._paths import REPO_ROOT
     from astrid.core.pack import discover_packs
     from astrid.core.pack.discovery import discover_pack_metadata
+    from astrid.paths import REPO_ROOT
 
     for discovered in discover_pack_metadata(
         project_root=REPO_ROOT,

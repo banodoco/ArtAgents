@@ -16,7 +16,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from astrid._paths import REPO_ROOT
 from astrid.core.pack import discover_packs, load_pack_manifest, pack_manifest_path
 from astrid.core.pack_discovery import (
     ASTRID_PACKS_PATH_ENV,
@@ -25,6 +24,7 @@ from astrid.core.pack_discovery import (
     discover_pack_metadata,
     discover_packs_ordered,
 )
+from astrid.paths import REPO_ROOT
 
 
 def write_pack(root: Path, pack_id: str, *, folder: str | None = None) -> Path:

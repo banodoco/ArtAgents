@@ -12,9 +12,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Iterable
 
-from astrid._paths import REPO_ROOT
 from astrid.core.pack import discover_packs
 from astrid.core.pack.discovery import discover_pack_metadata
+from astrid.paths import REPO_ROOT
 
 if TYPE_CHECKING:
     from astrid.core.pack import PackDefinition

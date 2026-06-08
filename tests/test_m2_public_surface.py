@@ -14,7 +14,6 @@ import sys
 import unittest
 from unittest import mock
 
-
 # ---------------------------------------------------------------------------
 # Root module imports — every top-level facade must be importable
 # ---------------------------------------------------------------------------
@@ -96,8 +95,7 @@ class PipelineGatewayIdentityTest(unittest.TestCase):
 
     def test_import_pipeline_gives_gateway(self) -> None:
         """`from astrid import pipeline` should yield the gateway module."""
-        from astrid import pipeline
-        from astrid import gateway
+        from astrid import gateway, pipeline
         self.assertIs(pipeline, gateway)
 
 
@@ -243,15 +241,17 @@ class DeprecatedCLIAliasTest(unittest.TestCase):
         author_handler = astrid.gateway._TOP_LEVEL_HANDLERS["author"]
         orch_handler = astrid.gateway._TOP_LEVEL_HANDLERS["orchestrate"]
 
-        # "author" is a direct reference to _dispatch_orchestrate (not a lambda)
-        # Both should point to the same function object
-        self.assertIs(author_handler, orch_handler,
-                      "'author' and 'orchestrate' handlers must be the same "
-                      "function object (_dispatch_orchestrate)")
+        # M5 keeps "author" as a public alias but routes it through a warning
+        # wrapper so callers see the canonical "orchestrate" replacement.
+        self.assertIsNotNone(author_handler, "author handler must not be None")
+        self.assertIsNot(author_handler, orch_handler,
+                         "'author' must use the deprecating wrapper, not the "
+                         "canonical orchestrate handler directly")
 
     def test_help_text_documents_deprecated_aliases(self) -> None:
         """The gateway help text must document that run/author are deprecated."""
         import io
+
         import astrid.gateway
 
         # _print_entrypoint_help prints to stdout; capture its output
@@ -337,8 +337,8 @@ class PathsModuleTest(unittest.TestCase):
 
     def test_underscore_paths_re_exports(self) -> None:
         """astrid._paths must re-export from astrid.paths as a compatibility shim."""
-        import astrid.paths
         import astrid._paths
+        import astrid.paths
 
         for name in ("PACKAGE_ROOT", "REPO_ROOT", "WORKSPACE_ROOT"):
             with self.subTest(name=name):
@@ -374,8 +374,8 @@ class MediaModuleTest(unittest.TestCase):
 
     def test_underscore_media_re_exports(self) -> None:
         """astrid._media must re-export from astrid.media as a compatibility shim."""
-        import astrid.media
         import astrid._media
+        import astrid.media
 
         self.assertTrue(hasattr(astrid._media, "ffprobe_duration_seconds"))
         self.assertEqual(

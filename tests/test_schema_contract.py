@@ -12,7 +12,6 @@ from astrid.core.timeline import banodoco_schema
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
-GENERATED_TYPES = ROOT / "remotion" / "src" / "types.generated.ts"
 GENERATOR = ROOT / "scripts" / "gen_remotion_types.py"
 
 
@@ -38,8 +37,13 @@ class SchemaContractTest(unittest.TestCase):
         timeline.save_registry(registry, tmp_path)
         return tmp_path.read_text(encoding="utf-8"), original
 
+    def _generate_types(self) -> str:
+        tmp_path = self._make_tempdir("generated-types-") / "types.generated.ts"
+        subprocess.run([sys.executable, str(GENERATOR), str(tmp_path)], cwd=ROOT, check=True)
+        return tmp_path.read_text(encoding="utf-8")
+
     def _parse_generated_array(self, name: str) -> set[str]:
-        source = GENERATED_TYPES.read_text(encoding="utf-8")
+        source = self._generate_types()
         pattern = rf"export const {name} = \[(.*?)\] as const;"
         match = re.search(pattern, source, re.DOTALL)
         self.assertIsNotNone(match, f"Missing generated array {name}")
@@ -72,9 +76,7 @@ class SchemaContractTest(unittest.TestCase):
         self.assertEqual(roundtripped_assets, original_assets)
 
     def test_generator_byte_stability(self) -> None:
-        tmp_path = self._make_tempdir("generated-types-") / "types.generated.ts"
-        subprocess.run([sys.executable, str(GENERATOR), str(tmp_path)], cwd=ROOT, check=True)
-        self.assertEqual(tmp_path.read_text(encoding="utf-8"), GENERATED_TYPES.read_text(encoding="utf-8"))
+        self.assertEqual(self._generate_types(), self._generate_types())
 
     def test_generator_arrays_match_frozensets(self) -> None:
         self.assertEqual(self._parse_generated_array("_TIMELINE_TOP_ALLOWED"), set(timeline._TIMELINE_TOP_ALLOWED))

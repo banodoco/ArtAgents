@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrid._paths import REPO_ROOT
+from astrid.paths import REPO_ROOT
 
 from .discovery import SkillDescriptor, list_skills
 

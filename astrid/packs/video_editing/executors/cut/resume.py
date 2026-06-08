@@ -8,14 +8,10 @@ re-processed for re-render or asset rebasing.
 from __future__ import annotations
 
 import argparse
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from astrid._paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.contracts.result_manifest import write_manifest
-from astrid.core.util.time import utc_now_seconds
 from astrid.core.timeline import (
     METADATA_VERSION,
     PipelineMetadata,
@@ -29,6 +25,8 @@ from astrid.core.timeline import (
     save_registry,
     save_timeline,
 )
+from astrid.core.util.time import utc_now_seconds
+from astrid.paths import REPO_ROOT, WORKSPACE_ROOT
 
 from .registry import rebase_registry_paths
 from .timeline_build import _register_cut_outputs

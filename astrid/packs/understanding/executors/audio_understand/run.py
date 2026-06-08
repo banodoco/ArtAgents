@@ -21,9 +21,9 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid._media import ffprobe_duration_seconds
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
+from astrid.media import ffprobe_duration_seconds
 
 API_URL = "https://api.openai.com/v1/chat/completions"
 MODEL_PRESETS = {

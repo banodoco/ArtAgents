@@ -5,7 +5,6 @@ from typing import Any
 
 import jsonschema
 
-from astrid._paths import REPO_ROOT
 from astrid.core.element.registry import load_default_registry as load_default_element_registry
 from astrid.core.element.schema import load_element_definition
 from astrid.core.executor.registry import load_default_registry as load_default_executor_registry
@@ -16,6 +15,7 @@ from astrid.core.orchestrator.registry import (
 )
 from astrid.core.orchestrator.schema import load_orchestrator_manifest
 from astrid.packs.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
+from astrid.paths import REPO_ROOT
 
 PACKS_ROOT = REPO_ROOT / "astrid" / "packs"
 PACK_ROOTS = tuple(sorted(path for path in PACKS_ROOT.iterdir() if (path / "pack.yaml").is_file()))

@@ -18,13 +18,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from astrid._paths import REPO_ROOT as ASTRID_REPO_ROOT  # noqa: E402
-from astrid.core._search import short_description_or_truncated  # noqa: E402
 from astrid.core.element.registry import load_default_registry as load_elements  # noqa: E402
 from astrid.core.executor.registry import load_default_registry as load_executors  # noqa: E402
 from astrid.core.orchestrator.registry import (  # noqa: E402
     load_default_registry as load_orchestrators,
 )
+from astrid.core.search import short_description_or_truncated  # noqa: E402
+from astrid.paths import REPO_ROOT as ASTRID_REPO_ROOT  # noqa: E402
 
 CORE_SKILL_PATH = REPO_ROOT / "astrid" / "packs" / "_core" / "skill" / "SKILL.md"
 

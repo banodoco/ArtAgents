@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrid._paths import REPO_ROOT
+from astrid.paths import REPO_ROOT
 
 from .schema import ElementDefinition
 

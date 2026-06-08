@@ -16,7 +16,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
-from astrid._paths import REPO_ROOT
 from astrid.contracts.capability_runner import CapabilityRunner
 from astrid.contracts.exec_error import (
     ExecError,
@@ -46,6 +45,7 @@ from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
+from astrid.paths import REPO_ROOT
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry
@@ -362,7 +362,6 @@ def check_executor_binaries(executor: ExecutorDefinition) -> tuple[str, ...]:
 
 
 def build_pipeline_context(request: ExecutorRunRequest, executor: ExecutorDefinition | None = None) -> argparse.Namespace:
-    pipeline = _pipeline_module()
     from astrid.core.element.catalog import resolve_active_theme
     from astrid.core.theme import resolve_theme_dir, resolve_themes_root
 

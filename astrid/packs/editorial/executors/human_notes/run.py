@@ -17,8 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.contracts.result_manifest import write_manifest
-
-from astrid._paths import executor_argv
+from astrid.core.timeline import load_arrangement, load_pool
 from astrid.packs.editorial.executors.arrange.run import pool_digest
 from astrid.packs.editorial.executors.editor_review.run import (
     DEFAULT_MODEL,
@@ -28,7 +27,7 @@ from astrid.packs.editorial.executors.editor_review.run import (
     arrangement_summary,
 )
 from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.core.timeline import load_arrangement, load_pool
+from astrid.paths import executor_argv
 from astrid.utilities.llm_clients import ClaudeClient, build_claude_client
 
 

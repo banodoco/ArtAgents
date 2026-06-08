@@ -4,8 +4,8 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 ## Summary
 
-- AST sites inventoried: 739 (737 `except`, 2 `assert`).
-- Grep lexical hits after the same source exclusions: 754.
+- AST sites inventoried: 744 (742 `except`, 2 `assert`).
+- Grep lexical hits after the same source exclusions: 759.
 - AST sites not present as direct grep hits: 0. These are parser-normalized multi-line handlers/asserts or sites whose keyword line differs from the AST node line; AST remains authoritative.
 
 ## Seed-File Non-Fixed Reasons
@@ -156,7 +156,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 61 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 63 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/folder.py`
 
@@ -176,15 +176,15 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 367 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 371 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/runner.py`
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
 | 188 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 548 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 561 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 547 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 560 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/executor/schema.py`
 
@@ -283,7 +283,7 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 64 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 68 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/orchestrator/folder.py`
 
@@ -297,9 +297,9 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 324 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 338 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 456 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 328 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 342 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 460 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/core/orchestrator/runner.py`
 
@@ -1280,12 +1280,12 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 127 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 412 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 449 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 688 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 690 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 692 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 126 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 411 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 448 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 687 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 689 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 691 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/domains/hype/enriched_arrangement.py`
 
@@ -1308,13 +1308,13 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 69 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 288 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 383 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 515 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 536 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 554 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 573 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 71 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 303 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 398 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 531 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 552 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 570 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 589 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/gateway_help.py`
 
@@ -1484,19 +1484,24 @@ Generated inventory of non-pack `astrid/` Python `except` and runtime `assert` s
 
 | Line | Kind | Context | Status | Reason |
 | --- | --- | --- | --- | --- |
-| 107 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 110 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 184 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 195 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 263 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 293 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 344 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 350 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 377 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 450 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 538 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 111 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 114 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 155 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 158 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 286 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 297 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 327 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 330 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 440 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 482 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 512 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 563 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 | 569 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
-| 613 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 596 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 719 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 807 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 838 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
+| 882 | `except` | runtime-correctness | `justified-with-caveat` | Classified inventory row retained after M3/M4 layout splits; behavior unchanged and reviewed as non-pack runtime surface. |
 
 ### `astrid/theme_schema.py`
 

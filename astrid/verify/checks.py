@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid._media import ffprobe_duration_seconds
+from astrid.media import ffprobe_duration_seconds
 
 
 @dataclass(frozen=True)

@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid import modalities
-from astrid._paths import REPO_ROOT
 from astrid.contracts.result_manifest import write_manifest
+from astrid.paths import REPO_ROOT
 from astrid.threads.ids import is_ulid
 from astrid.threads.index import ThreadIndexStore
 from astrid.threads.record import sha256_file

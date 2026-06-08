@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 from typing import Iterable, Optional
 
-from astrid._paths import REPO_ROOT
+from astrid.paths import REPO_ROOT
 
 from ..discovery import SkillDescriptor
 from .base import Action, HarnessAdapter, InstallRecord, PlannedStep, ensure_symlink, remove_symlink

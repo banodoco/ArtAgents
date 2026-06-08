@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('understanding.video_understand')
 import argparse
 import json
@@ -16,12 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid._media import ffprobe_duration_seconds
 from astrid.contracts.errors import AstridError
 from astrid.contracts.result_manifest import write_manifest
 from astrid.core.cli_choices import add_choice_arg
+from astrid.media import ffprobe_duration_seconds
 from astrid.utilities.llm_clients import build_gemini_client
-
 
 MODEL_PRESETS = {
     "fast": "gemini-2.5-flash",

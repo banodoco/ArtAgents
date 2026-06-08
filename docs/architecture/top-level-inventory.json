@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "M2 top-level inventory of every file and directory directly under astrid/. Classifications align with astrid/structure.py constants TOP_LEVEL_ASTRID_FILES and TOP_LEVEL_ASTRID_DIRS. Updated post M2 Top-Level Module Rationalization to reflect the final physical layout: pack machinery has moved to astrid/core/pack/, compatibility shims remain at old paths, and astrid/packs/ is pack data only (with documented thin re-export shims). This is a documentation artifact — not a runtime input.",
-  "milestone": "M2",
+  "description": "M5 top-level inventory of every file and directory directly under astrid/. Classifications align with astrid/structure.py constants TOP_LEVEL_ASTRID_FILES and TOP_LEVEL_ASTRID_DIRS. Updated post M4 giant-file split to reflect gateway and SDK decomposition. This is a documentation artifact — not a runtime input.",
+  "milestone": "M5",
   "generated_at": "2026-06-07",
-  "updated_at": "2026-06-07T22:30:00Z",
+  "updated_at": "2026-06-08T11:30:00Z",
   "source_root": "astrid/",
   "classification_categories": {
     "public_facade": "Part of the public SDK contract (directly or via lazy facade).",
@@ -13,13 +13,15 @@
     "shared_library": "Shared library/utility, not part of public SDK but used across subsystems.",
     "domain_library": "Domain-specific shared logic.",
     "pack_capability_surface": "Capability surface — packs ship here.",
-    "planned_absent": "Canonical concept allowed by constants but not materialized on disk in M0.",
+    "planned_absent": "Canonical concept allowed by constants but not materialized on disk.",
     "generated_ignored": "Build artifact or runtime cache — ignored by structure enforcement.",
     "docs": "Package-level documentation within astrid/.",
-    "soft_boundary_convention": "Convention documented for awareness, not hard-gated in M0.",
+    "soft_boundary_convention": "Convention documented for awareness, not hard-gated.",
     "pack_machinery_shim": "M2 shim — canonical implementation lives in astrid/core/pack/. This file exists only for backward-compatible imports and patch targets.",
     "skill_only_shell": "Directory under packs/ that contains only skill/SKILL.md — no pack.yaml, no capabilities. Not a runtime pack.",
-    "pack_compatibility_shell": "Hidden pack under packs/ that preserves backward-compatible pack-level aliases and test infrastructure. Not a capability-producing pack."
+    "pack_compatibility_shell": "Hidden pack under packs/ that preserves backward-compatible pack-level aliases and test infrastructure. Not a capability-producing pack.",
+    "gateway_split_module": "M4 split module from giant-file decomposition of gateway.py. Internal implementation detail, not public contract.",
+    "sdk_split_module": "M4 split module from giant-file decomposition of sdk.py. Internal implementation detail; sdk.py is the public aggregation facade."
   },
   "top_level_files": [
     {
@@ -55,8 +57,36 @@
     {
       "name": "gateway.py",
       "classification": "cli_entrypoint",
-      "notes": "Subcommand router — session gate, command dispatch, brief/video fall-through to video_editing.hype. 1,215 lines; a giant-file split candidate for M4.",
-      "line_count": 1215,
+      "notes": "Subcommand router and facade (367 lines). Session gate, command dispatch, brief/video fall-through to video_editing.hype. Giant-file split completed in M4: dispatch logic in gateway_dispatch.py (578), help text in gateway_help.py (139), project commands in gateway_project.py (155), wait/lease in gateway_wait.py (115).",
+      "line_count": 367,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "gateway_dispatch.py",
+      "classification": "gateway_split_module",
+      "notes": "M4 split module: focused dispatch-table and parser helpers for the Astrid gateway (578 lines). Internal implementation detail — not public contract.",
+      "line_count": 578,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "gateway_help.py",
+      "classification": "gateway_split_module",
+      "notes": "M4 split module: help text and usage banners for the Astrid gateway (139 lines). Internal implementation detail — not public contract.",
+      "line_count": 139,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "gateway_project.py",
+      "classification": "gateway_split_module",
+      "notes": "M4 split module: project subcommand dispatch and handler for the Astrid gateway (155 lines). Internal implementation detail — not public contract.",
+      "line_count": 155,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "gateway_wait.py",
+      "classification": "gateway_split_module",
+      "notes": "M4 split module: wait/lease management and polling logic for the Astrid gateway (115 lines). Internal implementation detail — not public contract.",
+      "line_count": 115,
       "in_structure_py_constant": true
     },
     {
@@ -74,14 +104,49 @@
     {
       "name": "pipeline.py",
       "classification": "stable_compatibility_shim",
-      "notes": "Backward-compatibility shim — astrid.pipeline is astrid.gateway. Uses sys.modules[__name__] = sys.modules['astrid.gateway'] to alias itself. Listed in both _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS and _SYS_MODULES_INJECTION_EXEMPTIONS (SD1).",
+      "notes": "Permanent backward-compatibility shim (SD1) — astrid.pipeline is astrid.gateway. Uses sys.modules[__name__] = sys.modules['astrid.gateway'] to alias itself. Listed in both _STABLE_COMPATIBILITY_SHIM_EXEMPTIONS and _SYS_MODULES_INJECTION_EXEMPTIONS. Zero internal callers; retained permanently.",
       "in_structure_py_constant": true
     },
     {
       "name": "sdk.py",
       "classification": "public_facade",
-      "notes": "Public SDK implementation — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. 1,833 lines; a giant-file split candidate for M4.",
-      "line_count": 1833,
+      "notes": "Public SDK aggregation facade (651 lines) — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. Giant-file split completed in M4: implementation split across sdk_discovery.py (620), sdk_errors.py (148), sdk_generation.py (330), sdk_invocation.py (323), sdk_results.py (213).",
+      "line_count": 651,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "sdk_discovery.py",
+      "classification": "sdk_split_module",
+      "notes": "M4 split module: registry loading, discovery metadata, and capability resolution helpers (620 lines). Internal implementation detail — sdk.py is the public aggregation facade.",
+      "line_count": 620,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "sdk_errors.py",
+      "classification": "sdk_split_module",
+      "notes": "M4 split module: SDK exception taxonomy and error serialization (148 lines). Internal implementation detail — sdk.py is the public aggregation facade.",
+      "line_count": 148,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "sdk_generation.py",
+      "classification": "sdk_split_module",
+      "notes": "M4 split module: generation backend discovery, feature registry, and verb dispatch helpers (330 lines). Internal implementation detail — sdk.py is the public aggregation facade.",
+      "line_count": 330,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "sdk_invocation.py",
+      "classification": "sdk_split_module",
+      "notes": "M4 split module: capability invocation pipeline and result handling (323 lines). Internal implementation detail — sdk.py is the public aggregation facade.",
+      "line_count": 323,
+      "in_structure_py_constant": true
+    },
+    {
+      "name": "sdk_results.py",
+      "classification": "sdk_split_module",
+      "notes": "M4 split module: result serialization, event stream records, and invocation output helpers (213 lines). Internal implementation detail — sdk.py is the public aggregation facade.",
+      "line_count": 213,
       "in_structure_py_constant": true
     },
     {
@@ -93,13 +158,13 @@
     {
       "name": "structure.py",
       "classification": "internal_kernel",
-      "notes": "Single source of truth for repository structure enforcement. Exposes validate_repo_structure(), validate_import_layering(), validate_migration_completion(). Contains all exemption lists.",
+      "notes": "Single source of truth for repository structure enforcement. Exposes validate_repo_structure(), validate_import_layering(), validate_migration_completion(). Contains all exemption lists and the authoritative TOP_LEVEL_ASTRID_FILES / TOP_LEVEL_ASTRID_DIRS constants.",
       "in_structure_py_constant": true
     },
     {
       "name": "theme_schema.py",
       "classification": "soft_boundary_convention",
-      "notes": "Theme schema validation helpers. Soft boundary — convention in M0.",
+      "notes": "Theme schema validation helpers. Soft boundary — convention.",
       "in_structure_py_constant": true
     }
   ],
@@ -125,7 +190,7 @@
     {
       "name": "core",
       "classification": "internal_kernel",
-      "notes": "Internal kernel — framework machinery. Contains adapter, element, executor, generation, lineage, model_catalog, orchestrator, pack (canonical pack machinery: discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/), project, reigh, runpod, runtime, session, task, timeline, util, worker subdirectories. Also contains pack_machinery/ (thin compatibility shims) and loose pack_*.py / manifest.py / override.py / alias_resolver.py files (all thin re-export shims pointing into astrid/core/pack/). Anti-coupling rules enforced: core must not import from packs, orchestrate, or audit (with named exemptions). New internal code belongs under astrid/core/*; new pack machinery belongs under astrid/core/pack/*.",
+      "notes": "Internal kernel — framework machinery. Contains adapter, element, executor, generation, lineage, model_catalog, orchestrator, pack (canonical pack machinery: discovery, resolver, store, manifest, override, alias_resolver, validate, CLI, install, entrypoint, agent_index, gitignore, schemas/), project, reigh, runpod, runtime, session, task, timeline, util, worker subdirectories. Also contains pack_machinery/ (thin compatibility shims, retained for M5) and loose pack_*.py / manifest.py / override.py / alias_resolver.py files (all thin re-export shims pointing into astrid/core/pack/). Anti-coupling rules enforced: core must not import from packs, orchestrate, or audit (with named exemptions). New internal code belongs under astrid/core/*; new pack machinery belongs under astrid/core/pack/*.",
       "in_structure_py_constant": true
     },
     {
@@ -143,7 +208,7 @@
     {
       "name": "elements",
       "classification": "planned_absent",
-      "notes": "Planned-but-not-materialized canonical concept. TOP_LEVEL_ASTRID_DIRS includes 'elements' but no astrid/elements/ directory exists on disk. M0 does not create it (SD3). Source-layout smoke tests treat elements/ as the only allowed planned-absent canonical directory.",
+      "notes": "Planned-but-not-materialized canonical concept. TOP_LEVEL_ASTRID_DIRS includes 'elements' but no astrid/elements/ directory exists on disk. M5 does not create it. Source-layout smoke tests treat elements/ as the only allowed planned-absent canonical directory.",
       "in_structure_py_constant": true,
       "exists_on_disk": false
     },
@@ -180,7 +245,7 @@
     {
       "name": "timeline",
       "classification": "stable_compatibility_shim",
-      "notes": "Thin public re-export surface for the canonical core timeline API. Callers import from astrid.timeline while implementation lives in astrid.core.timeline. Guarded by _MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS with TODO(m5b) marker requirement.",
+      "notes": "Thin public re-export surface for the canonical core timeline API. Callers import from astrid.timeline while implementation lives in astrid.core.timeline. Guarded by _MILESTONE_COMPATIBILITY_SHIM_EXEMPTIONS with TODO(m5b) marker requirement. Removal deferred to M5b for broader Banodoco integration work.",
       "in_structure_py_constant": true
     },
     {
@@ -192,22 +257,31 @@
     {
       "name": "verify",
       "classification": "soft_boundary_convention",
-      "notes": "Verification helpers. Soft boundary — currently a convention, not a hard gate in M0.",
+      "notes": "Verification helpers. Soft boundary — currently a convention, not a hard gate.",
       "in_structure_py_constant": true
     }
   ],
   "structure_constants_reference": {
     "TOP_LEVEL_ASTRID_FILES": [
       "__init__.py", "__main__.py", "_media.py", "_paths.py",
-      "doctor.py", "gateway.py", "media.py", "paths.py",
-      "pipeline.py", "sdk.py", "setup_cli.py", "structure.py", "theme_schema.py"
+      "doctor.py", "gateway.py", "gateway_dispatch.py", "gateway_help.py",
+      "gateway_project.py", "gateway_wait.py", "media.py", "paths.py",
+      "pipeline.py", "sdk.py", "sdk_discovery.py", "sdk_errors.py",
+      "sdk_generation.py", "sdk_invocation.py", "sdk_results.py",
+      "setup_cli.py", "structure.py", "theme_schema.py"
     ],
     "TOP_LEVEL_ASTRID_DIRS": [
       "__pycache__", "audit", "contracts", "core", "docs", "domains",
       "elements", "modalities", "orchestrate", "packs", "skills",
       "threads", "timeline", "utilities", "verify"
     ],
-    "source_file": "astrid/structure.py"
+    "source_file": "astrid/structure.py",
+    "total_top_level_files": 22,
+    "total_top_level_dirs": 15,
+    "m4_split_modules": {
+      "gateway": ["gateway_dispatch.py", "gateway_help.py", "gateway_project.py", "gateway_wait.py"],
+      "sdk": ["sdk_discovery.py", "sdk_errors.py", "sdk_generation.py", "sdk_invocation.py", "sdk_results.py"]
+    }
   },
   "coverage_notes": {
     "all_files_accounted": true,
@@ -221,17 +295,17 @@
       "canonical_home": "astrid/core/pack/",
       "canonical_modules": ["__init__.py", "discovery.py", "resolver.py", "store.py", "manifest.py", "override.py", "alias_resolver.py", "validate.py", "cli.py", "install.py", "entrypoint.py", "agent_index.py", "gitignore.py", "schemas/v1/"],
       "shim_locations": {
-        "astrid/core/pack_machinery/": "Thin re-export shims for cli, validate, agent_index, gitignore, install (plus deprecated schemas/ copy)",
+        "astrid/core/pack_machinery/": "Thin re-export shims for cli, validate, agent_index, gitignore, install (plus deprecated schemas/ copy). Retained for M5; removal deferred to M6+.",
         "astrid/core/pack_discovery.py": "Thin re-export shim → astrid/core/pack/discovery.py",
         "astrid/core/pack_resolver.py": "Thin re-export shim → astrid/core/pack/resolver.py",
         "astrid/core/pack_store.py": "Thin re-export shim → astrid/core/pack/store.py",
         "astrid/core/manifest.py": "Thin re-export shim → astrid/core/pack/manifest.py",
         "astrid/core/override.py": "Thin re-export shim → astrid/core/pack/override.py",
         "astrid/core/alias_resolver.py": "Thin re-export shim → astrid/core/pack/alias_resolver.py",
-        "astrid/packs/cli.py": "Thin re-export shim → astrid/core/pack_machinery/cli.py → astrid/core/pack/cli.py",
-        "astrid/packs/validate.py": "Thin re-export shim → astrid/core/pack_machinery/validate.py → astrid/core/pack/validate.py",
-        "astrid/packs/agent_index.py": "Thin re-export shim → astrid/core/pack_machinery/agent_index.py → astrid/core/pack/agent_index.py",
-        "astrid/packs/gitignore.py": "Thin re-export shim → astrid/core/pack_machinery/gitignore.py → astrid/core/pack/gitignore.py",
+        "astrid/packs/cli.py": "Thin re-export shim → astrid/core/pack/cli.py",
+        "astrid/packs/validate.py": "Thin re-export shim → astrid/core/pack/validate.py",
+        "astrid/packs/agent_index.py": "Thin re-export shim → astrid/core/pack/agent_index.py",
+        "astrid/packs/gitignore.py": "Thin re-export shim → astrid/core/pack/gitignore.py",
         "astrid/packs/install.py": "Thin sys.modules alias shim → astrid/core/pack/install.py",
         "astrid/packs/_canonical_entrypoint.py": "Thin re-export shim → astrid/core/pack/entrypoint.py"
       },
