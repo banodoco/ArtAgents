@@ -7,6 +7,9 @@ into file-specific builder-facing messages.
 Validation is static: checks declared content roots, docs, STAGE.md,
 runtime entrypoint files, and component manifests exist on disk without
 importing run.py.
+
+Layout contract validation lives in ``astrid.core.pack.validate_layout``.
+First-party packs root validation lives in ``astrid.core.pack.validate_first_party``.
 """
 
 from __future__ import annotations
@@ -14,9 +17,7 @@ from __future__ import annotations
 import json as _json
 import logging
 import re as _re
-from dataclasses import dataclass
-from enum import Enum
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any, Optional
 
 import jsonschema
@@ -40,6 +41,19 @@ from astrid.core.pack import (
     validate_content_id_in_pack,
     validate_element_pack_id,
 )
+from astrid.core.pack.validate_layout import (
+    CANONICAL_PACK_LAYOUT_RULES,
+    CanonicalLayoutRule,
+    LayoutExceptionClass,
+    LayoutExceptionLifecycle,
+    LayoutValidationIssue,
+    PackLayoutException,
+    parse_layout_exceptions,
+)
+from astrid.core.pack.validate_first_party import (
+    is_first_party_packs_root_candidate,
+    validate_first_party_packs_root,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,30 +64,6 @@ logger = logging.getLogger(__name__)
 _SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
-_FIRST_PARTY_PACKS_ROOT = _REPO_ROOT / "astrid" / "packs"
-_FIRST_PARTY_PACK_IDS = (
-    "builtin",
-    "comfy_wrap",
-    "editorial",
-    "fal",
-    "foley",
-    "generation",
-    "iteration",
-    "media",
-    "moirae",
-    "reigh",
-    "rendering",
-    "runpod",
-    "stream_content",
-    "text_analysis",
-    "training",
-    "understanding",
-    "vibecomfy",
-    "video_editing",
-    "youtube",
-)
-_FIRST_PARTY_INTERNAL_DIRS = {"_core"}
-_IGNORED_PACKS_ROOT_DIRS = {"__pycache__"}
 
 KNOWN_SCHEMA_VERSIONS: dict[int, dict[str, Path]] = {
     1: {
@@ -90,157 +80,6 @@ V1_TRUST_BLOCK: dict[str, Any] = {
     "runs_with_user_process_permissions": True,
     "permission_enforcement": "disclosure_only",
 }
-
-
-class LayoutExceptionClass(str, Enum):
-    """Named exceptions the pack layout contract allows temporarily or permanently."""
-
-    IMPORTABLE_COMPONENT_CODE = "importable_component_code"
-    LEGACY_PUBLIC_SHIM = "legacy_public_shim"
-    DOMAIN_EXCEPTION = "domain_exception"
-    GENERATED_IGNORED = "generated_ignored"
-    SKILL_ONLY_SHELL = "skill_only_shell"
-    MACHINERY_SHIM = "machinery_shim"
-    DSL_ORCHESTRATOR_SHIM = "dsl_orchestrator_shim"
-
-
-class LayoutExceptionLifecycle(str, Enum):
-    """Lifecycle for declared layout exceptions."""
-
-    M1 = "M1"
-    M2 = "M2"
-    PERMANENT = "permanent"
-
-
-_TEMPORARY_LAYOUT_EXCEPTION_CLASSES = {
-    LayoutExceptionClass.LEGACY_PUBLIC_SHIM,
-    LayoutExceptionClass.MACHINERY_SHIM,
-    LayoutExceptionClass.DSL_ORCHESTRATOR_SHIM,
-}
-
-_LAYOUT_EXCEPTION_DECLARATION_PATH = "metadata.layout.exceptions"
-_CANONICAL_PACK_ROOT_DIRS = {
-    "build",
-    "docs",
-    "elements",
-    "examples",
-    "executors",
-    "fixtures",
-    "golden",
-    "orchestrators",
-    "schemas",
-    "skill",
-}
-_CANONICAL_COMPONENT_SUPPORT_FILES = {"STAGE.md"}
-_CANONICAL_COMPONENT_SUPPORT_DIRS = {"skill"}
-
-
-@dataclass(frozen=True)
-class CanonicalLayoutRule:
-    """Agent-readable description of a canonical pack path family."""
-
-    pattern: str
-    description: str
-
-
-@dataclass(frozen=True)
-class PackLayoutException:
-    """One declared exception to the canonical pack layout contract."""
-
-    path: str
-    exception_class: LayoutExceptionClass
-    reason: str
-    defer_to: LayoutExceptionLifecycle = LayoutExceptionLifecycle.PERMANENT
-
-    @property
-    def is_temporary(self) -> bool:
-        return self.exception_class in _TEMPORARY_LAYOUT_EXCEPTION_CLASSES
-
-
-@dataclass(frozen=True)
-class LayoutValidationIssue:
-    """One layout-contract problem surfaced under the aggregate failure heading."""
-
-    path: str
-    message: str
-
-
-CANONICAL_PACK_LAYOUT_RULES: tuple[CanonicalLayoutRule, ...] = (
-    CanonicalLayoutRule("pack.yaml|pack.yml|pack.json", "pack manifest at the pack root"),
-    CanonicalLayoutRule("skill/SKILL.md", "optional pack-level skill guidance"),
-    CanonicalLayoutRule("executors/<name>/...", "executor capability directories"),
-    CanonicalLayoutRule("orchestrators/<name>/...", "orchestrator capability directories"),
-    CanonicalLayoutRule("elements/<kind>/<name>/...", "element capability directories"),
-    CanonicalLayoutRule("fixtures/...|golden/...", "optional checked-in fixture data"),
-    CanonicalLayoutRule("build/...", "generated build output when explicitly classified"),
-    CanonicalLayoutRule("docs/...|examples/...|schemas/...", "declared supporting assets"),
-)
-
-# ---------------------------------------------------------------------------
-# M1 machinery-shim exceptions (not relocated during Plan v1.0)
-# ---------------------------------------------------------------------------
-# These files remain at ``astrid/packs/`` during M1 and will be relocated
-# to ``astrid/core/pack_machinery/`` in M2.  They are documented here so the
-# layout contract is explicit about every known deviation.
-#
-#   astrid/packs/_canonical_entrypoint.py
-#       class:       machinery_shim
-#       defer_to:    M2
-#       reason:      50+ import sites across pack run.py files, in_process.py,
-#                   and test files create disproportionate regression risk
-#                   for M1.  Relocation deferred to M2.
-#
-# ---------------------------------------------------------------------------
-# M1 root pack Python shim exceptions (classified in pack metadata)
-# ---------------------------------------------------------------------------
-# These shims live at the root of their respective pack directories and are
-# kept in place for M1; each is declared as a layout exception in the pack's
-# ``pack.yaml`` under ``metadata.layout.exceptions`` (see T12).
-#
-#   builtin/agent_probe.py
-#       class:       dsl_orchestrator_shim
-#       defer_to:    M2 (declared in builtin/pack.yaml)
-#       reason:      DSL @orchestrator("builtin.agent_probe") definition with
-#                    16+ test-file references.  Not a canonical executor.
-#                    Migration to orchestrators/ deferred to M2.
-#
-#   video_editing/hype.py
-#       class:       legacy_public_shim
-#       defer_to:    M2 (declared in video_editing/pack.yaml)
-#       reason:      Legacy author-test DSL shim that duplicates
-#                    video_editing.hype (canonically at
-#                    orchestrators/hype/run.py).  Kept for backward
-#                    compatibility until M2 removes it.
-#
-# ---------------------------------------------------------------------------
-# M1 special non-manifest directories (classified in this contract)
-# ---------------------------------------------------------------------------
-# These directories under ``astrid/packs/`` are not regular packs (they
-# lack a ``pack.yaml``) but serve documented roles.  They are listed here
-# so the layout contract remains explicit about every known deviation.
-#
-#   _core/
-#       class:       skill_only_shell
-#       defer_to:    permanent (not a pack — skill documentation surface)
-#       reason:      Contains only ``skill/SKILL.md`` providing the root
-#                    Astrid skill description for agent harnesses.  No
-#                    ``pack.yaml``, executors, or orchestrators exist.
-#                    Discovered via ``astrid.skills.discovery``, not via
-#                    ``astrid.core.pack.discover_packs``.
-#
-# ---------------------------------------------------------------------------
-# M1 relocated / removed directories (validated by contract tests)
-# ---------------------------------------------------------------------------
-#   astrid/packs/schemas/
-#       status:      relocated to astrid/core/pack/schemas/ (M2 T10)
-#       contract:    ``test_schemas_directory_absent_from_pack_tree`` in
-#                    ``tests/test_pack_layout_contract.py`` enforces
-#                    continued absence.
-#   astrid/core/pack_machinery/schemas/
-#       status:      relocated to astrid/core/pack/schemas/ (M2 T10)
-#       contract:    ``test_schemas_relocated_to_pack`` in
-#                    ``tests/test_pack_layout_contract.py`` enforces
-#                    presence at the new canonical location.
 
 
 def _check_schema_version(version_value: Any, manifest_relpath: str) -> int:
@@ -1044,241 +883,19 @@ class PackValidator:
                     f"{relpath}: {alias_path} points to unknown capability id {target!r}"
                 )
 
+    # -----------------------------------------------------------------------
+    # Layout contract validation (delegates to validate_layout module)
+    # -----------------------------------------------------------------------
+
     def _validate_layout_contract(self) -> None:
+        """Validate the pack directory layout against the canonical contract."""
         if self._pack_data is None:
             return
-        self._layout_exceptions = self._parse_layout_exceptions(self._pack_data)
-
-    def _parse_layout_exceptions(
-        self,
-        pack_data: dict[str, Any],
-    ) -> list[PackLayoutException]:
-        metadata = pack_data.get("metadata")
-        if metadata is None:
-            return []
-        if not isinstance(metadata, dict):
-            self._record_layout_issue(
-                "pack.yaml",
-                "metadata must be an object before layout exceptions can be parsed",
-            )
-            return []
-
-        layout = metadata.get("layout")
-        if layout is None:
-            return []
-        if not isinstance(layout, dict):
-            self._record_layout_issue(
-                "pack.yaml",
-                "metadata.layout must be an object",
-            )
-            return []
-
-        declarations = layout.get("exceptions")
-        if declarations is None:
-            return []
-        if not isinstance(declarations, list):
-            self._record_layout_issue(
-                "pack.yaml",
-                f"{_LAYOUT_EXCEPTION_DECLARATION_PATH} must be an array",
-            )
-            return []
-
-        parsed: list[PackLayoutException] = []
-        seen_paths: dict[str, int] = {}
-        for index, raw in enumerate(declarations):
-            item_path = f"{_LAYOUT_EXCEPTION_DECLARATION_PATH}[{index}]"
-            parsed_decl = self._parse_layout_exception_declaration(raw, item_path)
-            if parsed_decl is None:
-                continue
-            first_index = seen_paths.get(parsed_decl.path)
-            if first_index is not None:
-                self._record_layout_issue(
-                    "pack.yaml",
-                    f"{item_path}.path duplicates {_LAYOUT_EXCEPTION_DECLARATION_PATH}[{first_index}].path ({parsed_decl.path!r})",
-                )
-                continue
-            seen_paths[parsed_decl.path] = index
-            if self._is_canonical_pack_path(parsed_decl.path):
-                self._record_layout_issue(
-                    parsed_decl.path,
-                    "declared as a layout exception even though the path already matches the canonical pack layout",
-                )
-                continue
-            parsed.append(parsed_decl)
-        return parsed
-
-    def _parse_layout_exception_declaration(
-        self,
-        raw: Any,
-        item_path: str,
-    ) -> PackLayoutException | None:
-        if not isinstance(raw, dict):
-            self._record_layout_issue("pack.yaml", f"{item_path} must be an object")
-            return None
-
-        allowed_fields = {"path", "class", "reason", "defer_to"}
-        extra_fields = sorted(set(raw) - allowed_fields)
-        if extra_fields:
-            fields = ", ".join(extra_fields)
-            self._record_layout_issue(
-                "pack.yaml",
-                f"{item_path} has unknown field(s): {fields}",
-            )
-            return None
-
-        path_value = raw.get("path")
-        normalized_path = self._normalize_layout_exception_path(path_value, item_path)
-        if normalized_path is None:
-            return None
-
-        class_value = raw.get("class")
-        try:
-            exception_class = LayoutExceptionClass(str(class_value))
-        except Exception:
-            valid = ", ".join(member.value for member in LayoutExceptionClass)
-            self._record_layout_issue(
-                normalized_path,
-                f"{item_path}.class must be one of [{valid}]",
-            )
-            return None
-
-        reason_value = raw.get("reason")
-        if not isinstance(reason_value, str) or not reason_value.strip():
-            self._record_layout_issue(
-                normalized_path,
-                f"{item_path}.reason must be a non-empty string",
-            )
-            return None
-
-        lifecycle = self._parse_layout_lifecycle(
-            raw.get("defer_to"),
-            item_path=item_path,
-            path=normalized_path,
-            exception_class=exception_class,
-        )
-        if lifecycle is None:
-            return None
-
-        return PackLayoutException(
-            path=normalized_path,
-            exception_class=exception_class,
-            reason=reason_value.strip(),
-            defer_to=lifecycle,
-        )
-
-    def _parse_layout_lifecycle(
-        self,
-        raw_lifecycle: Any,
-        *,
-        item_path: str,
-        path: str,
-        exception_class: LayoutExceptionClass,
-    ) -> LayoutExceptionLifecycle | None:
-        if raw_lifecycle is None:
-            if exception_class in _TEMPORARY_LAYOUT_EXCEPTION_CLASSES:
-                self._record_layout_issue(
-                    path,
-                    f"{item_path}.defer_to is required for temporary exception class {exception_class.value!r}",
-                )
-                return None
-            return LayoutExceptionLifecycle.PERMANENT
-
-        try:
-            lifecycle = LayoutExceptionLifecycle(str(raw_lifecycle))
-        except Exception:
-            valid = ", ".join(member.value for member in LayoutExceptionLifecycle)
-            self._record_layout_issue(
-                path,
-                f"{item_path}.defer_to must be one of [{valid}]",
-            )
-            return None
-
-        if exception_class in _TEMPORARY_LAYOUT_EXCEPTION_CLASSES:
-            if lifecycle == LayoutExceptionLifecycle.PERMANENT:
-                self._record_layout_issue(
-                    path,
-                    f"{item_path}.defer_to must be M1 or M2 for temporary exception class {exception_class.value!r}",
-                )
-                return None
-            return lifecycle
-
-        if lifecycle != LayoutExceptionLifecycle.PERMANENT:
-            self._record_layout_issue(
-                path,
-                f"{item_path}.defer_to must be permanent for non-temporary exception class {exception_class.value!r}",
-            )
-            return None
-        return lifecycle
-
-    def _normalize_layout_exception_path(
-        self,
-        raw_path: Any,
-        item_path: str,
-    ) -> str | None:
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            self._record_layout_issue(
-                "pack.yaml",
-                f"{item_path}.path must be a non-empty relative path",
-            )
-            return None
-        try:
-            normalized = PurePosixPath(raw_path.strip())
-        except Exception:
-            self._record_layout_issue(
-                "pack.yaml",
-                f"{item_path}.path must be a valid relative path",
-            )
-            return None
-        if normalized.is_absolute() or ".." in normalized.parts or "." in normalized.parts:
-            self._record_layout_issue(
-                "pack.yaml",
-                f"{item_path}.path must stay within the pack root",
-            )
-            return None
-        if str(normalized) in {"", "."}:
-            self._record_layout_issue(
-                "pack.yaml",
-                f"{item_path}.path must be a non-empty relative path",
-            )
-            return None
-        return str(normalized)
-
-    def _is_canonical_pack_path(self, relpath: str) -> bool:
-        normalized = PurePosixPath(relpath)
-        if normalized.name in {"pack.yaml", "pack.yml", "pack.json"} and len(normalized.parts) == 1:
-            return True
-        parts = normalized.parts
-        if len(parts) == 2 and parts[0] == "skill" and parts[1] == "SKILL.md":
-            return True
-        if not parts:
-            return False
-        if parts[0] in {"fixtures", "golden", "build", "docs", "examples", "schemas"}:
-            return True
-        if len(parts) >= 2 and parts[0] in {"executors", "orchestrators"}:
-            if len(parts) == 3 and parts[2] in {
-                f"{parts[0][:-1]}.yaml",
-                f"{parts[0][:-1]}.yml",
-                f"{parts[0][:-1]}.json",
-                "run.py",
-            }:
-                return True
-            if len(parts) == 3 and parts[2] in _CANONICAL_COMPONENT_SUPPORT_FILES:
-                return True
-            if len(parts) == 4 and parts[2] in _CANONICAL_COMPONENT_SUPPORT_DIRS and parts[3] == "SKILL.md":
-                return True
-            return False
-        if len(parts) >= 3 and parts[0] == "elements":
-            if len(parts) == 4 and parts[3] in {"element.yaml", "element.yml", "element.json"}:
-                return True
-            return False
-        if parts[0] in _CANONICAL_PACK_ROOT_DIRS:
-            return True
-        return False
-
-    def _record_layout_issue(self, path: str, message: str) -> None:
-        self._layout_issues.append(LayoutValidationIssue(path=path, message=message))
+        self._layout_exceptions, issues = parse_layout_exceptions(self._pack_data)
+        self._layout_issues.extend(issues)
 
     def _flush_layout_issues(self) -> None:
+        """Surface any collected layout validation issues as errors."""
         if not self._layout_issues:
             return
         aggregate = PackLayoutContractError(self._layout_issues)
@@ -1313,120 +930,6 @@ def validate_pack(pack_root: str | Path) -> tuple[list[str], list[str]]:
     validator = PackValidator(Path(pack_root))
     errors = validator.validate()
     return errors, validator.warnings
-
-
-def is_first_party_packs_root_candidate(path: str | Path) -> bool:
-    """Return True when *path* looks like Astrid's multi-pack source root."""
-    root = Path(path).resolve()
-    if not root.is_dir() or pack_manifest_path(root) is not None:
-        return False
-    recognized_dirs = {
-        child.name
-        for child in root.iterdir()
-        if child.is_dir()
-        and not child.name.startswith(".")
-        and child.name not in _IGNORED_PACKS_ROOT_DIRS
-        and child.name in set(_FIRST_PARTY_PACK_IDS) | _FIRST_PARTY_INTERNAL_DIRS
-    }
-    if root == _FIRST_PARTY_PACKS_ROOT:
-        return True
-    return "_core" in recognized_dirs and len(recognized_dirs) >= len(_FIRST_PARTY_PACK_IDS)
-
-
-def validate_first_party_packs_root(packs_root: str | Path) -> tuple[list[str], list[str]]:
-    """Validate the canonical first-party ``astrid/packs`` source tree."""
-    root = Path(packs_root).resolve()
-    internal_schema_errors = _validate_first_party_packs_root_inventory(root)
-    layout_errors: list[str] = []
-    warnings: list[str] = []
-
-    for pack_id in _FIRST_PARTY_PACK_IDS:
-        pack_dir = root / pack_id
-        if not pack_dir.is_dir():
-            continue
-        pack_errors, pack_warnings = validate_pack(pack_dir)
-        layout_errors.extend(f"{pack_id}: {error}" for error in pack_errors)
-        warnings.extend(f"{pack_id}: {warning}" for warning in pack_warnings)
-
-    errors = _aggregate_first_party_packs_root_errors(
-        internal_schema_errors=internal_schema_errors,
-        layout_errors=layout_errors,
-    )
-    return errors, warnings
-
-
-def _validate_first_party_packs_root_inventory(root: Path) -> list[str]:
-    errors: list[str] = []
-    if not root.is_dir():
-        return [f"{root}: first-party packs root does not exist"]
-
-    child_dirs = {
-        child.name: child
-        for child in root.iterdir()
-        if child.is_dir()
-        and not child.name.startswith(".")
-        and child.name not in _IGNORED_PACKS_ROOT_DIRS
-    }
-    expected_pack_ids = set(_FIRST_PARTY_PACK_IDS)
-    allowed_names = expected_pack_ids | _FIRST_PARTY_INTERNAL_DIRS
-
-    for pack_id in sorted(expected_pack_ids - set(child_dirs)):
-        errors.append(f"missing first-party pack directory: {pack_id}")
-
-    for name in sorted(set(child_dirs) - allowed_names):
-        if name == "schemas":
-            errors.append(
-                "unexpected top-level directory: schemas (relocated to "
-                "astrid/core/pack/schemas/)"
-            )
-            continue
-        errors.append(f"unexpected top-level directory: {name}")
-
-    for pack_id in sorted(expected_pack_ids & set(child_dirs)):
-        pack_dir = child_dirs[pack_id]
-        if pack_manifest_path(pack_dir) is None:
-            errors.append(
-                f"{pack_id}: pack manifest not found "
-                f"(pack.yaml, pack.yml, or pack.json)"
-            )
-
-    core_dir = child_dirs.get("_core")
-    if core_dir is None:
-        errors.append("missing internal directory: _core")
-        return errors
-
-    for manifest_name in ("pack.yaml", "pack.yml", "pack.json"):
-        if (core_dir / manifest_name).is_file():
-            errors.append(
-                f"_core: skill-only shell must not contain {manifest_name}"
-            )
-    if not (core_dir / "skill" / "SKILL.md").is_file():
-        errors.append("_core: skill-only shell must provide skill/SKILL.md")
-    for forbidden in sorted(
-        child.name
-        for child in core_dir.iterdir()
-        if child.is_dir() and child.name in {"executors", "orchestrators", "elements", "build"}
-    ):
-        errors.append(
-            f"_core: skill-only shell must not contain top-level {forbidden}/"
-        )
-
-    return errors
-
-
-def _aggregate_first_party_packs_root_errors(
-    *,
-    internal_schema_errors: list[str],
-    layout_errors: list[str],
-) -> list[str]:
-    body: list[str] = []
-    body.extend(f"[internal-schema] {error}" for error in internal_schema_errors)
-    body.extend(f"[layout] {error}" for error in layout_errors)
-    if not body:
-        return []
-    count = len(body)
-    noun = "issue" if count == 1 else "issues"
-    return [f"first-party pack validation failed ({count} {noun})", *body]
 
 
 def json_loads(text: str) -> Any:

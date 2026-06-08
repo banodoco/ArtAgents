@@ -1186,3 +1186,88 @@ def test_reigh_smoke_imports() -> None:
     }
     missing = expected - set(sys.modules)
     assert not missing, f"Reigh submodules not in sys.modules: {sorted(missing)}"
+
+
+# ── M4 giant-file inventory contract ─────────────────────────────────────
+
+
+def test_giant_file_inventory_matches_rationale() -> None:
+    """M4 gate: every ``astrid/**/*.py`` file over 1,200 physical lines
+    must appear in ``docs/giant-file-rationale.md``, and every entry in
+    the rationale must correspond to an existing file that genuinely
+    exceeds the threshold.  Files at or below 1,200 lines are watch-only
+    and do not require rationale entries.
+    """
+    import re
+    from pathlib import Path
+
+    from astrid._paths import REPO_ROOT
+
+    GIANT_THRESHOLD = 1200
+
+    # ── 1. Scan every astrid/**/*.py file and count physical lines ─────
+    astrid_root = REPO_ROOT / "astrid"
+    py_files: dict[str, int] = {}
+    for py_path in sorted(astrid_root.rglob("*.py")):
+        # Skip __pycache__ and other dotted directories.
+        parts = py_path.relative_to(astrid_root).parts
+        if any(part.startswith(".") for part in parts):
+            continue
+        rel = py_path.relative_to(REPO_ROOT).as_posix()
+        lines = py_path.read_text(encoding="utf-8").count("\n")
+        py_files[rel] = lines
+
+    # ── 2. Parse the rationale doc ──────────────────────────────────────
+    rationale_path = REPO_ROOT / "docs" / "giant-file-rationale.md"
+    assert rationale_path.is_file(), (
+        "docs/giant-file-rationale.md is missing — M4 inventory contract "
+        "requires this file"
+    )
+    rationale_text = rationale_path.read_text(encoding="utf-8")
+
+    # Extract table entries of the form: | N | `path` | NNNN | ...
+    # Pattern: | number | `astrid/...` | digits | ...
+    entry_pattern = re.compile(
+        r"\|\s*\d+\s*\|\s*`([^`]+)`\s*\|\s*([\d,]+)\s*\|"
+    )
+    rationale_entries: dict[str, int] = {}
+    for match in entry_pattern.finditer(rationale_text):
+        file_path = match.group(1)
+        lines_str = match.group(2).replace(",", "")
+        rationale_entries[file_path] = int(lines_str)
+
+    m4_complete = "M4-complete" in rationale_text
+    if not m4_complete:
+        assert rationale_entries, (
+            "giant-file-rationale.md must contain at least one table entry "
+            "(or include an M4-complete marker when all files are below threshold)"
+        )
+
+    # ── 3. Every file over threshold must be in rationale ───────────────
+    over_threshold = {
+        rel: lines
+        for rel, lines in py_files.items()
+        if lines > GIANT_THRESHOLD
+    }
+    missing_from_rationale = over_threshold.keys() - rationale_entries.keys()
+    assert not missing_from_rationale, (
+        f"Files over {GIANT_THRESHOLD} lines missing from "
+        f"giant-file-rationale.md: {sorted(missing_from_rationale)}"
+    )
+
+    # ── 4. Every rationale entry must match an existing over-threshold file ─
+    for entry_path, entry_lines in rationale_entries.items():
+        assert entry_path in py_files, (
+            f"giant-file-rationale.md entry '{entry_path}' does not exist on disk"
+        )
+        actual_lines = py_files[entry_path]
+        assert actual_lines > GIANT_THRESHOLD, (
+            f"giant-file-rationale.md entry '{entry_path}' is only "
+            f"{actual_lines} lines (threshold: {GIANT_THRESHOLD})"
+        )
+        # Line count should match within a reasonable tolerance (the doc
+        # is a snapshot; a small drift from whitespace changes is acceptable).
+        assert abs(actual_lines - entry_lines) <= 50, (
+            f"giant-file-rationale.md entry '{entry_path}' claims "
+            f"{entry_lines} lines but on-disk count is {actual_lines}"
+        )

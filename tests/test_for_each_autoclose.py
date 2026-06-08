@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.task import gate
+from astrid.core.task import gate_repeat
 from astrid.core.task.events import (
     append_event,
     make_item_skipped_event,
@@ -149,7 +150,7 @@ def test_for_each_autoclose_optional_body_raises(tmp_path: Path, monkeypatch: py
     )
     events_path.write_text(json.dumps(skipped) + "\n")
 
-    monkeypatch.setattr(gate, "load_plan", lambda _p: fake_plan)
+    monkeypatch.setattr(gate_repeat, "load_plan", lambda _p: fake_plan)
 
     with pytest.raises(AssertionError, match="optional"):
         gate._maybe_autoclose_for_each_host(
