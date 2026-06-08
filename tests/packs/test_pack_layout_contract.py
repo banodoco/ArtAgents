@@ -13,10 +13,10 @@ Covers:
 from __future__ import annotations
 
 import importlib
+import subprocess
 from pathlib import Path
 
 from astrid.core.pack import discover_packs
-
 
 # ── repo-root-relative paths ────────────────────────────────────────────────
 
@@ -94,56 +94,69 @@ def _walk_pack_tree(pack_root: Path) -> list[Path]:
     return list(pack_root.rglob("*"))
 
 
+def _tracked_pack_paths() -> list[Path]:
+    """Return tracked repository paths under ``astrid/packs/``.
+
+    The hygiene contract is about committed source shape. Other tests may
+    legitimately create ignored runtime byproducts such as ``__pycache__/`` or
+    pack ``build/`` files during the same pytest process.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "astrid/packs"],
+        check=True,
+        capture_output=True,
+        cwd=_REPO_ROOT,
+        text=True,
+    )
+    return [Path(line) for line in result.stdout.splitlines() if line]
+
+
 # ── generated-artifact hygiene ───────────────────────────────────────────────
 
 
 def test_no_pycache_dirs_in_packs() -> None:
-    """No ``__pycache__/`` directory may exist inside any pack directory."""
-    offending: list[str] = []
-    for pack in _packs_with_pack_yaml():
-        for pycache in pack.rglob("__pycache__"):
-            if pycache.is_dir():
-                offending.append(str(pycache.relative_to(_REPO_ROOT)))
+    """No tracked path may exist inside a pack ``__pycache__/`` directory."""
+    offending = [
+        path.as_posix()
+        for path in _tracked_pack_paths()
+        if "__pycache__" in path.parts
+    ]
     assert not offending, (
         f"__pycache__/ directories found in pack tree: {offending}"
     )
 
 
 def test_no_pyc_files_in_packs() -> None:
-    """No ``.pyc`` file may exist inside any pack directory."""
-    offending: list[str] = []
-    for pack in _packs_with_pack_yaml():
-        for pyc in pack.rglob("*.pyc"):
-            if pyc.is_file():
-                offending.append(str(pyc.relative_to(_REPO_ROOT)))
+    """No tracked ``.pyc`` file may exist inside any pack directory."""
+    offending = [
+        path.as_posix()
+        for path in _tracked_pack_paths()
+        if path.suffix == ".pyc"
+    ]
     assert not offending, (
         f".pyc files found in pack tree: {offending}"
     )
 
 
 def test_no_ds_store_in_packs() -> None:
-    """No ``.DS_Store`` file may exist inside any pack directory."""
-    offending: list[str] = []
-    for pack in _packs_with_pack_yaml():
-        for ds_store in pack.rglob(".DS_Store"):
-            if ds_store.is_file():
-                offending.append(str(ds_store.relative_to(_REPO_ROOT)))
+    """No tracked ``.DS_Store`` file may exist inside any pack directory."""
+    offending = [
+        path.as_posix()
+        for path in _tracked_pack_paths()
+        if path.name == ".DS_Store"
+    ]
     assert not offending, (
         f".DS_Store files found in pack tree: {offending}"
     )
 
 
 def test_no_build_artifacts_in_packs() -> None:
-    """No build/ directory artifacts (e.g. agent_probe.json) may exist inside
-    any pack's ``build/`` directory."""
-    offending: list[str] = []
-    for pack in _packs_with_pack_yaml():
-        build_dir = pack / "build"
-        if not build_dir.is_dir():
-            continue
-        for artifact in build_dir.rglob("*"):
-            if artifact.is_file():
-                offending.append(str(artifact.relative_to(_REPO_ROOT)))
+    """No tracked build/ directory artifacts may exist inside pack dirs."""
+    offending = [
+        path.as_posix()
+        for path in _tracked_pack_paths()
+        if len(path.parts) >= 4 and path.parts[0:2] == ("astrid", "packs") and "build" in path.parts[3:]
+    ]
     assert not offending, (
         f"Build artifacts found in pack build/ directories: {offending}"
     )
