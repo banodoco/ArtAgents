@@ -112,7 +112,10 @@ def test_curated_sdk_names_do_not_shadow_existing_top_level_modules() -> None:
 
 
 def test_generate_facade_is_lazy_public_surface() -> None:
-    sys.modules.pop("astrid.sdk", None)
+    for module_name in [
+        name for name in sys.modules if name == "astrid.sdk" or name.startswith("astrid.sdk.")
+    ]:
+        sys.modules.pop(module_name, None)
     astrid = _import_public_module()
     astrid_modules_before = {
         name for name in sys.modules if name == "astrid.sdk" or name.startswith("astrid.sdk.")
