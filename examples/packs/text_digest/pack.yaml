@@ -4,10 +4,6 @@ name: Text Digest
 version: 0.1.0
 visibility: hidden
 description: Multi-orchestrator pack for digesting text files through attested agent-in-the-loop pipelines that read, summarize, and deliver verdicts.
-content:
-  executors: executors
-  orchestrators: orchestrators
-  elements: elements
 agent:
   purpose: "Use when you want an agent to read and attest a structured JSON summary of a text file (line count, word count, notes) before returning a final verdict."
 permissions:

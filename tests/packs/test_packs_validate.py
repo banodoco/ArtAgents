@@ -953,9 +953,9 @@ class TestMissingDocsAndFiles(MinimalPackTestCase):
 
 
 class TestUndeclaredContentRoots(MinimalPackTestCase):
-    """Undeclared content roots should produce warnings."""
+    """Undeclared content roots should produce errors for executors/orchestrators/elements."""
 
-    def test_undeclared_content_root_warns(self) -> None:
+    def test_undeclared_content_root_errors(self) -> None:
         root = self.make_pack_root()
         _write(
             root / "pack.yaml",
@@ -971,11 +971,116 @@ agent:
         )
         _write(root / "skill" / "SKILL.md", "# Test")
         errors, warnings = validate_pack(root)
-        self.assertEqual(errors, [])
         self.assertTrue(
-            any("nonexistent_executors" in w for w in warnings),
-            f"Expected content root warning, got: {warnings}",
+            any("nonexistent_executors" in e and "declared content root" in e for e in errors),
+            f"Expected content root error, got errors={errors}, warnings={warnings}",
         )
+
+    def test_missing_orchestrators_root_is_error(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  orchestrators: nonexistent_orchestrators
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "skill" / "SKILL.md", "# Test")
+        errors, warnings = validate_pack(root)
+        self.assertTrue(
+            any("nonexistent_orchestrators" in e and "declared content root" in e for e in errors),
+            f"Expected content root error for orchestrators, got errors={errors}, warnings={warnings}",
+        )
+
+    def test_missing_elements_root_is_error(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  elements: nonexistent_elements
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "skill" / "SKILL.md", "# Test")
+        errors, warnings = validate_pack(root)
+        self.assertTrue(
+            any("nonexistent_elements" in e and "declared content root" in e for e in errors),
+            f"Expected content root error for elements, got errors={errors}, warnings={warnings}",
+        )
+
+    def test_missing_schemas_root_is_only_warning(self) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            """schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+content:
+  schemas: nonexistent_schemas
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "skill" / "SKILL.md", "# Test")
+        errors, warnings = validate_pack(root)
+        self.assertEqual(errors, [], f"Unexpected errors: {errors}")
+        self.assertTrue(
+            any("nonexistent_schemas" in w for w in warnings),
+            f"Expected content root warning for schemas, got: {warnings}",
+        )
+
+
+class TestTaxonomyEnumRejection(MinimalPackTestCase):
+    """Taxonomy fields with unknown values should be rejected by the JSON Schema."""
+
+    def _check_enum_error(self, field: str, bad_value: str) -> None:
+        root = self.make_pack_root()
+        _write(
+            root / "pack.yaml",
+            f"""schema_version: 1
+id: test_pack
+name: Test Pack
+version: 0.1.0
+{field}: {bad_value}
+agent:
+  purpose: Testing
+""",
+        )
+        _write(root / "skill" / "SKILL.md", "# Test")
+        errors, _warnings = validate_pack(root)
+        self.assertTrue(
+            any(f"{field}" in e and "must be one of" in e for e in errors),
+            f"Expected enum rejection for {field}={bad_value!r}, got errors={errors}",
+        )
+
+    def test_origin_rejects_unknown_value(self) -> None:
+        self._check_enum_error("origin", "vendor")
+
+    def test_install_tier_rejects_unknown_value(self) -> None:
+        self._check_enum_error("install_tier", "premium")
+
+    def test_pack_type_rejects_unknown_value(self) -> None:
+        self._check_enum_error("pack_type", "plugin")
+
+    def test_domain_rejects_unknown_value(self) -> None:
+        self._check_enum_error("domain", "blockchain")
+
+    def test_stability_rejects_unknown_value(self) -> None:
+        self._check_enum_error("stability", "beta")
+
+    def test_support_rejects_unknown_value(self) -> None:
+        self._check_enum_error("support", "vendor")
 
 
 class TestFileSpecificErrors(MinimalPackTestCase):

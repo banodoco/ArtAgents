@@ -27,8 +27,6 @@ capabilities:
   - trim_video
 content:
   executors: executors
-  orchestrators: orchestrators
-  elements: elements
 agent:
   purpose: "Use when you need to trim a segment from a video file quickly and losslessly (ffmpeg -ss/-t/-c copy)."
   do_not_use_for: "Not for building iteration videos from run history (use the iteration pack) or final timeline rendering (use the rendering pack)."

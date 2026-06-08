@@ -6,8 +6,6 @@ visibility: hidden
 description: Pipelines for reading text files, producing attested JSON summaries with word/line/char counts and notes, and emitting a verdict.
 content:
   executors: executors
-  orchestrators: orchestrators
-  elements: elements
 agent:
   purpose: "Use when you need to ingest a text file and produce a structured, agent-attested summary with counts and a final verdict through a multi-step pipeline."
 permissions:

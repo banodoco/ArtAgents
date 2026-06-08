@@ -262,33 +262,27 @@
     },
     "origin": {
       "type": "string",
-      "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "pattern": "^$|.*\\S.*$"
+      "enum": ["builtin", "external", "unknown"]
     },
     "install_tier": {
       "type": "string",
-      "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "pattern": "^$|.*\\S.*$"
+      "enum": ["core", "default"]
     },
     "pack_type": {
       "type": "string",
-      "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "pattern": "^$|.*\\S.*$"
+      "enum": ["capability"]
     },
     "domain": {
       "type": "string",
-      "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "pattern": "^$|.*\\S.*$"
+      "enum": ["development", "editorial", "generation", "infrastructure", "integration", "media", "system", "general"]
     },
     "stability": {
       "type": "string",
-      "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "pattern": "^$|.*\\S.*$"
+      "enum": ["stable", "experimental", "deprecated"]
     },
     "support": {
       "type": "string",
-      "$comment": "PROVISIONAL — awaiting authoritative list (ticket 01KRF17FVN1C24HQ8TFJJNPW0G); derived from union of 18 shipped pack manifests",
-      "pattern": "^$|.*\\S.*$"
+      "enum": ["core", "project"]
     },
     "visibility": {
       "type": "string",

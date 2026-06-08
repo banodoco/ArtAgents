@@ -422,12 +422,18 @@ class PackValidator:
         return schema, registry
 
     def _validate_content_roots(self, content: dict[str, Any]) -> None:
-        """Verify that declared content root directories exist."""
+        """Verify that declared content root directories exist.
+
+        Missing ``executors``, ``orchestrators``, or ``elements`` directories
+        are hard errors. Missing ``schemas`` or ``examples`` directories are
+        warnings.
+        """
         supported = {"executors", "orchestrators", "elements", "schemas", "examples", "docs"}
         for key in sorted(set(content) - supported):
             self.warnings.append(
                 f"pack.yaml: unsupported content root {key!r}"
             )
+        _hard_roots = {"executors", "orchestrators", "elements"}
         for key in ("executors", "orchestrators", "elements", "schemas", "examples"):
             if key not in content:
                 continue
@@ -436,9 +442,14 @@ class PackValidator:
                 continue
             root_path = self.pack_root / root_rel
             if not root_path.is_dir():
-                self.warnings.append(
-                    f"{self._rel(root_path)}/: declared content root does not exist"
-                )
+                if key in _hard_roots:
+                    self.errors.append(
+                        f"{self._rel(root_path)}/: declared content root {key!r} does not exist"
+                    )
+                else:
+                    self.warnings.append(
+                        f"{self._rel(root_path)}/: declared content root does not exist"
+                    )
 
     def _validate_docs(self, docs: dict[str, Any]) -> None:
         """Verify that declared doc files exist."""

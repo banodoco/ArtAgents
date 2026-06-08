@@ -6,8 +6,6 @@ visibility: hidden
 description: A text review pipeline that auto-generates a machine summary (line/word/char counts plus preview) and then asks an agent to attest a human-readable verdict.
 content:
   executors: executors
-  orchestrators: orchestrators
-  elements: elements
 agent:
   purpose: "Use when the summary step should be fully automated by code (not agent-attested) and only the final verdict requires human/agent judgment in an attested step."
 permissions:
