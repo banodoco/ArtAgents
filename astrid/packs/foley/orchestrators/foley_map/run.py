@@ -4,20 +4,19 @@
 
 from __future__ import annotations
 
-from astrid.contracts.errors import AstridError
 from astrid.packs._canonical_entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('foley.foley_map')
 import argparse
 import json
 import re
-import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.run_subprocess import run_subprocess
 
 GLOBAL_QUERY = (
     "You are designing AMBIENT atmosphere audio for a video — drones, hums, "
@@ -45,20 +44,6 @@ def _tile_query(global_context: str, row: int, col: int, rows: int, cols: int) -
     )
 
 
-def _run_subprocess(cmd: list[str], *, label: str) -> str:
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
-        raise AstridError(
-            f"[foley_map] {label} failed (exit {proc.returncode})",
-            recovery_command=f"Check the command's dependencies and retry: {' '.join(cmd)}",
-            state_snapshot={
-                "command": ' '.join(cmd),
-                "stdout": proc.stdout,
-                "stderr": proc.stderr,
-            },
-        )
-    return proc.stdout
-
 
 def step_tile(args: argparse.Namespace, out: Path) -> Path:
     cmd = [
@@ -72,7 +57,7 @@ def step_tile(args: argparse.Namespace, out: Path) -> Path:
         cmd += ["--trim", str(args.trim)]
     if args.dry_run:
         cmd += ["--dry-run"]
-    _run_subprocess(cmd, label="tile_video")
+    run_subprocess(cmd, label="tile_video", orchestrator="foley_map")
     return out / "tiles.json"
 
 
@@ -91,7 +76,7 @@ def _visual_understand_query(image: Path, query: str, env_file: Path | None,
         cmd += ["--env-file", str(env_file)]
     if dry_run:
         cmd += ["--dry-run"]
-    _run_subprocess(cmd, label=f"visual_understand({image.name})")
+    run_subprocess(cmd, label=f"visual_understand({image.name})", orchestrator="foley_map")
     if dry_run:
         return f"[dry-run prompt for {image.name}]"
     data = json.loads(out_json.read_text(encoding="utf-8"))
@@ -155,7 +140,7 @@ def _foley_one(clip: Path, prompt: str, out_audio: Path, env_file: Path | None,
         cmd += ["--env-file", str(env_file)]
     if dry_run:
         cmd += ["--dry-run"]
-    _run_subprocess(cmd, label=f"fal_foley({out_audio.name})")
+    run_subprocess(cmd, label=f"fal_foley({out_audio.name})", orchestrator="foley_map")
 
 
 def step_foley(args: argparse.Namespace, out: Path, manifest: dict[str, Any],
@@ -212,7 +197,7 @@ def step_review(out: Path, enriched: dict[str, Any]) -> Path:
         "--manifest", str(manifest_path),
         "--out", str(review_path),
     ]
-    _run_subprocess(cmd, label="foley_review")
+    run_subprocess(cmd, label="foley_review", orchestrator="foley_map")
     return review_path
 
 
@@ -223,7 +208,7 @@ def step_page(out: Path) -> Path:
         "--manifest", str(out / "tiles.json"),
         "--out", str(page_dir),
     ]
-    _run_subprocess(cmd, label="spatial_audio_page")
+    run_subprocess(cmd, label="spatial_audio_page", orchestrator="foley_map")
     return page_dir / "index.html"
 
 
