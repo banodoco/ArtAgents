@@ -67,7 +67,6 @@ from astrid.core.session.discovery_hints import (
 )
 
 # -- Status JSON helpers ----------------------------------------------------
-from astrid.core.task.cli_contract import emit_lifecycle_json as _emit_lifecycle_json_status
 from astrid.core.task.inbox import pending_count as _pending_count
 
 
@@ -301,8 +300,8 @@ def cmd_status(
         ts = ev.get("ts", "")
         plan_step_id = ev.get("plan_step_id")
         if not isinstance(plan_step_id, str):
-            path = ev.get("plan_step_path")
-            plan_step_id = "/".join(path) if isinstance(path, list) else ""
+            path_tuple = _path_tuple_from_event(ev)
+            plan_step_id = "/".join(path_tuple) if path_tuple else ""
         print(f"  {ts}  {kind}  {plan_step_id}")
     return 0
 

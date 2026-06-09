@@ -45,6 +45,11 @@ from astrid.core.contracts.event_hash import hash_prepended
 from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.util.time import utc_now_iso
 
+def _set_if_not_none(payload: dict[str, Any], key: str, value: Any) -> None:
+    if value is not None:
+        payload[key] = value
+
+
 ZERO_HASH = "sha256:" + "0" * 64
 
 LEASE_FILENAME = "lease.json"
@@ -320,8 +325,7 @@ def make_run_started_event(
     }
     if started_by is None and actor is not None:
         started_by = _canonical_identity("human", actor)
-    if started_by is not None:
-        payload["started_by"] = started_by
+    _set_if_not_none(payload, "started_by", started_by)
     return payload
 
 
@@ -345,8 +349,7 @@ def make_run_aborted_event(run_id: str, *, reason: str | None = None) -> dict[st
         "run_id": run_id,
         "ts": utc_now_iso(),
     }
-    if reason is not None:
-        payload["reason"] = reason
+    _set_if_not_none(payload, "reason", reason)
     return payload
 
 
@@ -365,12 +368,9 @@ def make_step_dispatched_event(
         "plan_step_path": plan_step_path.split("/") if "/" in plan_step_path else [plan_step_path],
         "ts": utc_now_iso(),
     }
-    if adapter is not None:
-        payload["adapter"] = adapter
-    if step_version is not None:
-        payload["step_version"] = step_version
-    if pid is not None:
-        payload["pid"] = pid
+    _set_if_not_none(payload, "adapter", adapter)
+    _set_if_not_none(payload, "step_version", step_version)
+    _set_if_not_none(payload, "pid", pid)
     return payload
 
 
@@ -390,14 +390,10 @@ def make_step_completed_event(
         "returncode": returncode,
         "ts": utc_now_iso(),
     }
-    if cost is not None:
-        payload["cost"] = cost
-    if adapter is not None:
-        payload["adapter"] = adapter
-    if step_version is not None:
-        payload["step_version"] = step_version
-    if dispatch_event_hash is not None:
-        payload["dispatch_event_hash"] = dispatch_event_hash
+    _set_if_not_none(payload, "cost", cost)
+    _set_if_not_none(payload, "adapter", adapter)
+    _set_if_not_none(payload, "step_version", step_version)
+    _set_if_not_none(payload, "dispatch_event_hash", dispatch_event_hash)
     return payload
 
 
@@ -417,18 +413,12 @@ def make_step_failed_event(
         "plan_step_path": plan_step_path.split("/") if "/" in plan_step_path else [plan_step_path],
         "ts": utc_now_iso(),
     }
-    if returncode is not None:
-        payload["returncode"] = returncode
-    if reason is not None:
-        payload["reason"] = reason
-    if cost is not None:
-        payload["cost"] = cost
-    if adapter is not None:
-        payload["adapter"] = adapter
-    if step_version is not None:
-        payload["step_version"] = step_version
-    if dispatch_event_hash is not None:
-        payload["dispatch_event_hash"] = dispatch_event_hash
+    _set_if_not_none(payload, "returncode", returncode)
+    _set_if_not_none(payload, "reason", reason)
+    _set_if_not_none(payload, "cost", cost)
+    _set_if_not_none(payload, "adapter", adapter)
+    _set_if_not_none(payload, "step_version", step_version)
+    _set_if_not_none(payload, "dispatch_event_hash", dispatch_event_hash)
     return payload
 
 
@@ -454,14 +444,10 @@ def make_step_awaiting_fetch_event(
         "plan_step_path": path_str.split("/") if "/" in path_str else [path_str],
         "ts": utc_now_iso(),
     }
-    if reason is not None:
-        payload["reason"] = reason
-    if adapter is not None:
-        payload["adapter"] = adapter
-    if step_version is not None:
-        payload["step_version"] = step_version
-    if dispatch_event_hash is not None:
-        payload["dispatch_event_hash"] = dispatch_event_hash
+    _set_if_not_none(payload, "reason", reason)
+    _set_if_not_none(payload, "adapter", adapter)
+    _set_if_not_none(payload, "step_version", step_version)
+    _set_if_not_none(payload, "dispatch_event_hash", dispatch_event_hash)
     return payload
 
 
@@ -492,8 +478,7 @@ def make_step_attested_event(
         "plan_step_id": plan_step_path,
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -519,10 +504,8 @@ def make_step_skipped_event(
         "skipped_by_kind": actor_kind,
         "ts": utc_now_iso(),
     }
-    if reason is not None:
-        payload["reason"] = reason
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "reason", reason)
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -548,10 +531,8 @@ def make_item_skipped_event(
         "skipped_by_kind": actor_kind,
         "ts": utc_now_iso(),
     }
-    if reason is not None:
-        payload["reason"] = reason
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "reason", reason)
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -589,12 +570,9 @@ def make_produces_check_passed_event(
         "produces_name": produces_name,
         "ts": utc_now_iso(),
     }
-    if cas_sha256 is not None:
-        event["cas_sha256"] = cas_sha256
-    if step_version is not None:
-        event["step_version"] = step_version
-    if dispatch_event_hash is not None:
-        event["dispatch_event_hash"] = dispatch_event_hash
+    _set_if_not_none(event, "cas_sha256", cas_sha256)
+    _set_if_not_none(event, "step_version", step_version)
+    _set_if_not_none(event, "dispatch_event_hash", dispatch_event_hash)
     return event
 
 
@@ -615,10 +593,8 @@ def make_produces_check_failed_event(
         "reason": reason,
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
-    if dispatch_event_hash is not None:
-        payload["dispatch_event_hash"] = dispatch_event_hash
+    _set_if_not_none(payload, "step_version", step_version)
+    _set_if_not_none(payload, "dispatch_event_hash", dispatch_event_hash)
     return payload
 
 
@@ -648,8 +624,7 @@ def make_iteration_failed_event(
         "reason": reason,
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -680,8 +655,7 @@ def make_for_each_expanded_event(
         "plan_step_path": list(plan_step_path),
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -697,8 +671,7 @@ def make_item_started_event(
         "plan_step_path": list(plan_step_path),
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -716,8 +689,7 @@ def make_item_completed_event(
         "returncode": int(returncode),
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -741,8 +713,7 @@ def make_item_attested_event(
         "plan_step_path": list(plan_step_path),
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
+    _set_if_not_none(payload, "step_version", step_version)
     return payload
 
 
@@ -759,10 +730,8 @@ def make_cursor_rewind_event(
         "reason": reason,
         "ts": utc_now_iso(),
     }
-    if step_version is not None:
-        payload["step_version"] = step_version
-    if dispatch_event_hash is not None:
-        payload["dispatch_event_hash"] = dispatch_event_hash
+    _set_if_not_none(payload, "step_version", step_version)
+    _set_if_not_none(payload, "dispatch_event_hash", dispatch_event_hash)
     return payload
 
 

@@ -13,6 +13,7 @@ from typing import Any, Optional, Sequence
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.paths import project_dir, validate_project_slug
 from astrid.core.task.events import canonical_event_json, read_events, verify_chain
+from astrid.core.task.operator_render import _path_tuple_from_event
 from astrid.core.task.plan import load_plan
 from astrid.core.task.plan_verbs import (
     PLAN_MUTATED_KIND,
@@ -859,13 +860,8 @@ def _strict_verify_run_events(proj_root: Path, events: list[dict[str, Any]]) -> 
 
 
 def _event_step_path(event: dict[str, Any]) -> tuple[str, ...] | None:
-    path_list = event.get("plan_step_path")
-    if isinstance(path_list, list) and path_list:
-        return tuple(str(part) for part in path_list)
-    plan_step_id = event.get("plan_step_id")
-    if isinstance(plan_step_id, str) and plan_step_id:
-        return tuple(segment for segment in plan_step_id.split("/") if segment)
-    return None
+    result = _path_tuple_from_event(event)
+    return result if result else None
 
 
 __all__ = [
