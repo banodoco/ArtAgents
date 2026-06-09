@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('foley.tile_video')
@@ -236,23 +236,21 @@ def main(argv: list[str] | None = None) -> int:
 
         # --- universal result manifest (output-contract M2) -----------------------
         result_manifest_path = out_root / "manifest.json"
-        result_manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "tile_video",
-            "inputs": {
+        result_manifest = build_manifest(
+            kind="tile_video",
+            inputs={
                 "video": str(video),
                 "grid": [cols, rows],
                 "overlap": args.overlap,
                 "trim": args.trim,
             },
-            "outputs": [
+            outputs=[
                 {"path": "tiles.json", "type": "file"},
                 {"path": "tiles", "type": "directory"},
                 {"path": "frames", "type": "directory"},
             ],
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            created=datetime.now(timezone.utc).isoformat(),
+        )
         write_manifest(result_manifest_path, result_manifest)
         # -------------------------------------------------------------------------
 

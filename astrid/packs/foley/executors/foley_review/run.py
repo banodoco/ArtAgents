@@ -15,7 +15,7 @@ from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.result_manifest import write_manifest  # noqa: E402
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest  # noqa: E402
 
 PAGE_TEMPLATE = """<!doctype html>
 <html lang="en">
@@ -175,18 +175,16 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- universal result manifest (output-contract M2) -----------------------
     result_manifest_path = out_path.parent / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "foley_review",
-        "inputs": {
+    manifest = build_manifest(
+        kind="foley_review",
+        inputs={
             "manifest": str(manifest_path),
         },
-        "outputs": [
+        outputs=[
             {"path": out_path.name, "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(result_manifest_path, manifest)
     # -------------------------------------------------------------------------
 

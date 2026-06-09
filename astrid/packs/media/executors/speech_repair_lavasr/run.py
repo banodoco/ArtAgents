@@ -16,11 +16,11 @@ import subprocess
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 import fal_client
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.util.secrets import load_api_key
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -298,27 +298,16 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess.run) -> i
         _master_loudness(repair_video, out, runner=runner)
         after_metrics = _volumedetect(out, runner=runner)
 
-        manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "speech_repair_lavasr",
-            "inputs": {
+        manifest = build_manifest(
+            kind="speech_repair_lavasr",
+            inputs={
                 "input": str(src),
                 "start": args.start,
                 "dur": args.dur,
                 "env_file": str(env_file) if env_file else None,
                 "deepfilternet3": bool(args.deepfilternet3),
             },
-            "recipe": {
-                "prelift_filter": PRELIFT_FILTER,
-                "fal_model": "fal-ai/lava-sr",
-                "fal_post_model": "fal-ai/deepfilternet3" if args.deepfilternet3 else None,
-                "loudness_filter": LOUDNESS_FILTER,
-            },
-            "metrics": {
-                "source_clip": before_metrics,
-                "output": after_metrics,
-            },
-            "outputs": [
+            outputs=[
                 {"path": out.name, "type": "file"},
                 {"path": clip.name, "type": "intermediate"},
                 {"path": prelift_wav.name, "type": "intermediate"},
@@ -326,9 +315,18 @@ def main(argv: list[str] | None = None, *, runner: Runner = subprocess.run) -> i
                 {"path": lavasr_video.name, "type": "intermediate"},
                 {"path": response_json.name, "type": "metadata"},
             ],
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            created=datetime.now(timezone.utc).isoformat(),
+            recipe={
+                "prelift_filter": PRELIFT_FILTER,
+                "fal_model": "fal-ai/lava-sr",
+                "***": "fal-ai/deepfilternet3" if args.deepfilternet3 else None,
+                "loudness_filter": LOUDNESS_FILTER,
+            },
+            metrics={
+                "source_clip": before_metrics,
+                "output": after_metrics,
+            },
+        )
         if args.deepfilternet3:
             manifest["outputs"].extend(
                 [
