@@ -53,8 +53,26 @@ _Live working notes for this project. Read on attach; keep updated as the plan e
 class ProjectError(AstridError):
     """Raised when project persistence operations fail."""
 
-    def __init__(self, cause: str) -> None:
-        super().__init__(cause)
+    def __init__(
+        self,
+        cause: str,
+        *,
+        valid_options: object = (),
+        recovery_command: str | None = None,
+        state_snapshot: object | None = None,
+        code: str | None = None,
+        degraded: bool = False,
+        source_type: str | None = None,
+    ) -> None:
+        super().__init__(
+            cause,
+            valid_options=valid_options,
+            recovery_command=recovery_command,
+            state_snapshot=state_snapshot,
+            code=code,
+            degraded=degraded,
+            source_type=source_type,
+        )
 
 
 def create_project(
@@ -105,7 +123,10 @@ def load_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]
 def require_project(slug: str, *, root: str | Path | None = None) -> dict[str, Any]:
     project_path = paths.project_json_path(slug, root=root)
     if not project_path.exists():
-        raise ProjectError(f"project not found: {slug}. Next command: python3 -m astrid projects create {slug}")
+        raise ProjectError(
+            f"project not found: {slug}",
+            recovery_command=f"python3 -m astrid projects create {slug}",
+        )
     return validate_project(read_json(project_path))
 
 
