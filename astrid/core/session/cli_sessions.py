@@ -3,8 +3,8 @@
 Extracted from ``astrid.core.session.cli`` during M4 giant-file decomposition.
 The ``cmd_sessions_*`` functions live here; shared helpers (``_list_session_files``,
 ``_session_store``, ``_ensure_identity``, ``_find_reusable_session``,
-``_make_bootstrap_session``, ``NONE_PLACEHOLDER``) are imported from ``.cli``
-via late imports inside functions to preserve monkeypatch seams.
+``_make_bootstrap_session``, ``NONE_PLACEHOLDER``) are imported at module level
+from ``._shared`` (no facade cycle).
 """
 
 from __future__ import annotations
@@ -40,6 +40,18 @@ from astrid.core.session.paths import (
     session_path,
     sessions_dir,
 )
+from astrid.core.session._shared import (
+    NONE_PLACEHOLDER,
+    _ensure_identity,
+    _find_reusable_session,
+    _make_bootstrap_session,
+    _session_store,
+)
+# NOTE: ``_list_session_files`` is a pinned monkeypatch seam (the contract
+# patches ``session_cli._list_session_files``). The two ``cmd_sessions_*``
+# handlers below resolve it through the ``.cli`` facade at call time so that
+# seam keeps working — this is the same deliberate indirection used for
+# ``attach_session`` and the ``cmd_*`` handlers, NOT the shared-helper cycle.
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_slug_for_ulid
 from astrid.core.util.time import utc_now_iso
@@ -53,11 +65,8 @@ from astrid.core.task.events import EVENTS_FILENAME
 
 
 def cmd_sessions_ls(args: argparse.Namespace, *, out: Any = None) -> int:
-    # Late imports from .cli to preserve monkeypatch seams.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        NONE_PLACEHOLDER,
-        _list_session_files,
-    )
+    # _list_session_files resolved through the facade — pinned monkeypatch seam.
+    from astrid.core.session.cli import _list_session_files  # noqa: PLC0415
 
     if out is None:
         out = sys.stdout
@@ -84,10 +93,6 @@ def cmd_sessions_ls(args: argparse.Namespace, *, out: Any = None) -> int:
 
 
 def cmd_sessions_detach(args: argparse.Namespace, *, out: Any = None) -> int:
-    # Late imports from .cli to preserve monkeypatch seams.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        _session_store,
-    )
     from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 
     if out is None:
@@ -168,13 +173,6 @@ def _build_takeover_session(
     role: SessionRole,
     out: Any,
 ) -> Session | None:
-    # Late imports from .cli to preserve monkeypatch seams.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        _ensure_identity,
-        _find_reusable_session,
-        _make_bootstrap_session,
-    )
-
     try:
         identity = _ensure_identity(out=out)
         require_project(slug)
@@ -316,11 +314,8 @@ def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
     A session is considered stale when its ``last_used_at`` is older than
     ``--older-than-days`` (default 30) relative to the current UTC time.
     """
-    # Late imports from .cli to preserve monkeypatch seams.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        _list_session_files,
-        _session_store,
-    )
+    # _list_session_files resolved through the facade — pinned monkeypatch seam.
+    from astrid.core.session.cli import _list_session_files  # noqa: PLC0415
 
     if out is None:
         out = sys.stdout

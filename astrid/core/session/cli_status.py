@@ -28,6 +28,12 @@ from astrid.core.session.lease import (
     read_lease,
 )
 from astrid.core.session.model import Session
+from astrid.core.session._shared import (
+    NONE_PLACEHOLDER,
+    TAKEOVER_HINT_ORPHAN,
+    TAKEOVER_HINT_READER,
+    _json_mode,
+)
 from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.events import EVENTS_FILENAME, read_events
 from astrid.core.timeline import crud as timeline_crud
@@ -85,11 +91,6 @@ def cmd_status(args: argparse.Namespace, *, out: Any = None) -> int:
         session = resolve_current_session()
     except SessionBindingError as exc:
         raise AstridError(f"status: {exc}", recovery_command="astrid status") from exc
-
-    # M4 T48: _json_mode is a shared helper kept in ``cli.py``; late-import
-    # to preserve the single source of truth for JSON-mode detection used by
-    # both attach and status commands.
-    from astrid.core.session.cli import _json_mode  # noqa: PLC0415
 
     if session is None:
         if _json_mode(args):
@@ -213,14 +214,6 @@ def _render_bound_status(session: Session, *, out: Any) -> int:
                 # best-effort; don't break status for a corrupt timeline
                 log_and_swallow(exc, context="session.cli.status.timeline_count")
 
-    # M4 T48: late-import shared constants from the cli facade so they stay
-    # co-located with the attach/takeover paths that also reference them.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        NONE_PLACEHOLDER,
-        TAKEOVER_HINT_ORPHAN,
-        TAKEOVER_HINT_READER,
-    )
-
     timeline_line = f"timeline: {timeline_slug or NONE_PLACEHOLDER}"
     if timeline_final_count > 0:
         plural = "s" if timeline_final_count != 1 else ""
@@ -337,13 +330,6 @@ def _render_bound_status_json(session: Session, *, out: Any) -> int:
                 timeline_final_count = len(data["manifest"].final_outputs)
         except Exception as exc:  # noqa: BLE001
             log_and_swallow(exc, context="session.cli.status.timeline_count")
-
-    # M4 T48: late-import shared constants from the cli facade.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        NONE_PLACEHOLDER,
-        TAKEOVER_HINT_ORPHAN,
-        TAKEOVER_HINT_READER,
-    )
 
     current_step = NONE_PLACEHOLDER
     recent_events: list[dict[str, Any]] = []

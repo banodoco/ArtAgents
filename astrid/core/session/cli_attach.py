@@ -3,8 +3,9 @@
 Extracted from ``astrid.core.session.cli`` during M4 giant-file decomposition.
 The ``cmd_attach`` function and its file-local helpers live here; shared helpers
 (``_ensure_identity``, ``_find_reusable_session``, ``_json_mode``,
-``_emit_notice``) are imported from ``.cli`` via late imports inside functions
-to preserve monkeypatch seams.
+``_emit_notice``, the takeover-hint templates, ``NONE_PLACEHOLDER``) are
+imported at module level from ``._shared``. ``attach_session`` is still pulled
+from ``.cli`` via a late import to preserve its monkeypatch seam.
 """
 
 from __future__ import annotations
@@ -32,6 +33,15 @@ from astrid.core.session.model import (
     SessionRole,
 )
 from astrid.core.session.paths import sessions_dir
+from astrid.core.session._shared import (
+    NONE_PLACEHOLDER,
+    TAKEOVER_HINT_ORPHAN,
+    TAKEOVER_HINT_READER,
+    _emit_notice,
+    _ensure_identity,
+    _find_reusable_session,
+    _json_mode,
+)
 from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.timeline.crud import list_timelines
 from astrid.core.timeline.defaults import read_project_default
@@ -87,20 +97,11 @@ def _emit_attach_json(
 
 
 def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
-    # Late imports from .cli to preserve monkeypatch seams.
     # attach_session is imported here (not at top level) so that
     # monkeypatch.setattr(cli, "attach_session", ...) routes through
-    # the cli facade — tests spy on cli.attach_session.
-    from astrid.core.session.cli import (  # noqa: PLC0415
-        NONE_PLACEHOLDER,
-        TAKEOVER_HINT_ORPHAN,
-        TAKEOVER_HINT_READER,
-        _emit_notice,
-        _ensure_identity,
-        _find_reusable_session,
-        _json_mode,
-        attach_session,
-    )
+    # the cli facade — tests spy on cli.attach_session. The shared helpers
+    # are imported at module level from ``_shared`` (no facade cycle).
+    from astrid.core.session.cli import attach_session  # noqa: PLC0415
 
     if out is None:
         out = sys.stdout
