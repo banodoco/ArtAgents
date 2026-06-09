@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.media import ffprobe_duration_seconds
 
 
@@ -147,17 +147,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         {"path": str(items_path), "type": "file"},
     ]
     manifest_path = json_path.parent / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "scenes",
-        "inputs": {
+    manifest = build_manifest(
+        kind="scenes",
+        inputs={
             "video": str(video_path),
             "threshold": args.threshold,
         },
-        "outputs": manifest_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=manifest_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

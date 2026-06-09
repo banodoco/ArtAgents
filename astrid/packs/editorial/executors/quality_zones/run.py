@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.packs.editorial.hype import enriched_arrangement
 
 sys.modules.setdefault("quality_zones", sys.modules[__name__])
@@ -139,18 +139,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # --- universal result manifest (output-contract M2) -----------------------
     manifest_path = out_path.parent / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "quality_zones",
-        "inputs": {
+    manifest = build_manifest(
+        kind="quality_zones",
+        inputs={
             "source_path": str(source_path),
         },
-        "outputs": [
+        outputs=[
             {"path": out_path.name, "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

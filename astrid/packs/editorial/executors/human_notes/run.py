@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.timeline import load_arrangement, load_pool
 from astrid.packs.editorial.executors.arrange.run import pool_digest
 from astrid.packs.editorial.executors.editor_review.run import (
@@ -301,20 +301,18 @@ def main(argv: Sequence[str] | None = None, *, client: ClaudeClient | None = Non
 
     # --- universal result manifest (output-contract M2) -----------------------
     manifest_path = args.out / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "human_notes",
-        "inputs": {
+    manifest = build_manifest(
+        kind="human_notes",
+        inputs={
             "instructions": str(args.instructions),
             "arrangement": str(args.arrangement),
             "pool": str(args.pool),
         },
-        "outputs": [
+        outputs=[
             {"path": "editor_review.json", "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

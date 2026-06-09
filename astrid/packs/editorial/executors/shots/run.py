@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -126,17 +126,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         {"path": str(shots_path), "type": "file"},
     ]
     manifest_path = out_dir / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "shots",
-        "inputs": {
+    manifest = build_manifest(
+        kind="shots",
+        inputs={
             "video": str(video_path),
             "scenes": str(scenes_path),
         },
-        "outputs": manifest_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=manifest_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

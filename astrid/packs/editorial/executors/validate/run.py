@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.timeline import load_timeline
 from astrid.packs.editorial.hype.text_match import (
     segments_in_range,
@@ -132,20 +132,18 @@ def main() -> int:
 
         # --- universal result manifest (output-contract M2) -----------------------
         manifest_path = out_path.parent / "manifest.json"
-        manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "validate",
-            "inputs": {
+        manifest = build_manifest(
+            kind="validate",
+            inputs={
                 "video": str(video),
                 "timeline": str(timeline_path),
                 "metadata": str(metadata_path),
             },
-            "outputs": [
+            outputs=[
                 {"path": out_path.name, "type": "file"},
             ],
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            created=datetime.now(timezone.utc).isoformat(),
+        )
         write_manifest(manifest_path, manifest)
         # -------------------------------------------------------------------------
 
@@ -267,20 +265,18 @@ def main() -> int:
 
     # --- universal result manifest (output-contract M2) -----------------------
     manifest_path = out_path.parent / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "validate",
-        "inputs": {
+    manifest = build_manifest(
+        kind="validate",
+        inputs={
             "video": str(video),
             "timeline": str(timeline_path),
             "metadata": str(metadata_path),
         },
-        "outputs": [
+        outputs=[
             {"path": out_path.name, "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

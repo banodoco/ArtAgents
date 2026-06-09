@@ -19,7 +19,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.core.contracts.errors import AstridError, render_astrid_error
-from astrid.core.contracts.result_manifest import write_manifest as write_result_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest as write_result_manifest
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+
+guard_canonical_entrypoint("editorial.script_pipeline")
 
 try:
     import yaml
@@ -262,7 +265,7 @@ def run_pipeline(
         judge_reason = "Selection skipped; defaulted to first candidate."
     selected = next(candidate for candidate in candidates if candidate.index == winner_index)
     selected_path = write_selected_scene(produces_dir, selected, winner_index, judge_reason)
-    manifest = write_manifest(
+    manifest = write_pipeline_manifest(
         produces_dir,
         config=config,
         prompt=prompt,
@@ -416,7 +419,7 @@ def write_selected_scene(produces_dir: Path, selected: Candidate, winner_index: 
     return selected_path
 
 
-def write_manifest(
+def write_pipeline_manifest(
     produces_dir: Path,
     *,
     config: PipelineConfig,
@@ -427,17 +430,25 @@ def write_manifest(
     selected_path: Path,
     judge_reason: str,
 ) -> dict[str, Any]:
-    manifest = {
-        "schema_version": 1,
-        "preset": config.preset_id,
-        "preset_path": str(config.source_path),
-        "provider": {
+    manifest = build_manifest(
+        kind="script_pipeline_scene",
+        inputs={
+            "preset": config.preset_id,
+            "prompt": prompt,
+        },
+        outputs=[
+            {"path": "selected_scene.md", "type": "file"},
+        ],
+        created=datetime.now(timezone.utc).isoformat(),
+        preset=config.preset_id,
+        preset_path=str(config.source_path),
+        provider={
             "name": config.provider.name,
             "model": config.provider.model,
         },
-        "prompt": prompt,
-        "rough_attempts": rough_attempts,
-        "candidates": [
+        prompt=prompt,
+        rough_attempts=rough_attempts,
+        candidates=[
             {
                 "index": candidate.index,
                 "markdown": str(candidate.md_path),
@@ -445,11 +456,11 @@ def write_manifest(
             }
             for candidate in candidates
         ],
-        "selected_index": selected_index,
-        "selected_scene": str(selected_path),
-        "judge_reason": judge_reason,
-    }
-    write_text(produces_dir / "manifest.json", json.dumps(manifest, indent=2) + "\n")
+        selected_index=selected_index,
+        selected_scene=str(selected_path),
+        judge_reason=judge_reason,
+    )
+    write_result_manifest(produces_dir / "manifest.json", manifest)
     return manifest
 
 
@@ -535,22 +546,20 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- universal result manifest (output-contract M2) -----------------------
     result_manifest_path = args.produces_dir / "result_manifest.json"
-    result_manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "script_pipeline",
-        "inputs": {
+    result_manifest = build_manifest(
+        kind="script_pipeline",
+        inputs={
             "preset": str(args.preset),
             "prompt": prompt,
             "produces_dir": str(args.produces_dir),
         },
-        "outputs": [
+        outputs=[
             {"path": "selected_scene.md", "type": "file"},
             {"path": "manifest.json", "type": "file"},
             {"path": "candidates", "type": "directory"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_result_manifest(result_manifest_path, result_manifest)
     # -------------------------------------------------------------------------
 

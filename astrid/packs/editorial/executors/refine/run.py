@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.util.hash import sha256_file
 from astrid.packs.editorial.hype import enriched_arrangement
@@ -50,7 +50,7 @@ from astrid.core.timeline import (
     save_timeline,
     validate_arrangement_duration_window,
 )
-from ..transcribe.run import load_api_key
+from .._common import load_api_key
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.errors import AstridError
 
@@ -678,10 +678,9 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
 
     # --- universal result manifest (output-contract M2) -----------------------
     manifest_path = args.out / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "refine",
-        "inputs": {
+    manifest = build_manifest(
+        kind="refine",
+        inputs={
             "arrangement": str(args.arrangement),
             "pool": str(args.pool),
             "timeline": str(args.timeline),
@@ -689,15 +688,14 @@ def write_outputs(enriched: enriched_arrangement.EnrichedArrangement, registry: 
             "metadata": str(args.metadata),
             "transcript": str(args.transcript),
         },
-        "outputs": [
+        outputs=[
             {"path": "refine.json", "type": "file"},
             {"path": args.arrangement.name, "type": "file"},
             {"path": args.timeline.name, "type": "file"},
             {"path": args.metadata.name, "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

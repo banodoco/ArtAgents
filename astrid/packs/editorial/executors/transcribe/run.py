@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import AuditContext
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from .._common import load_api_key
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value
 from astrid.core.media import ffprobe_duration_seconds
 
 SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")
@@ -35,20 +35,6 @@ def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         text=kwargs.pop("text", True),
         **kwargs,
     )
-def read_env_value(env_path: Path, key: str) -> str:
-    return _read_env_value(env_path, key)
-
-
-def load_api_key(env_file: Path | None) -> str:
-    # Lookup order: process env, explicit --env-file, then nearby this.env/.env files.
-    tried: list[str] = ["OPENAI_API_KEY environment variable"]
-    if key := os.environ.get("OPENAI_API_KEY", "").strip():
-        return key
-    for candidate in _candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if key := read_env_value(candidate, "OPENAI_API_KEY"):
-            return key
-    raise SystemExit(f"OPENAI_API_KEY not found. Tried: {', '.join(tried)}")
 def srt_timestamp(seconds: float) -> str:
     ms = int(round(seconds * 1000))
     h, ms = divmod(ms, 3_600_000)
@@ -303,18 +289,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         {"path": str(metadata_path), "type": "file"},
     ]
     manifest_path = out_dir / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "transcript",
-        "inputs": {
+    manifest = build_manifest(
+        kind="transcript",
+        inputs={
             "audio": str(audio_path),
             "model": args.model,
             "language": args.language,
         },
-        "outputs": manifest_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=manifest_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

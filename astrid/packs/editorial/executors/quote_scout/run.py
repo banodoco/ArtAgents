@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.util.time import _utc_now, utc_now_seconds
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 from datetime import datetime, timezone
@@ -146,17 +146,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             {"path": str(out_path), "type": "file"},
         ]
         manifest_path = out_dir / "manifest.json"
-        manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "quotes",
-            "inputs": {
+        manifest = build_manifest(
+            kind="quotes",
+            inputs={
                 "transcript": str(args.transcript.resolve()),
                 "model": args.model,
             },
-            "outputs": manifest_outputs,
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            outputs=manifest_outputs,
+            created=datetime.now(timezone.utc).isoformat(),
+        )
         write_manifest(manifest_path, manifest)
         # -------------------------------------------------------------------------
 

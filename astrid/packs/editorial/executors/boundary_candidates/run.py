@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import add_choice_arg
 
 VERSION = 1
@@ -288,19 +288,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # --- universal result manifest (output-contract M2) -----------------------
     manifest_path = args.out.parent / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "boundary_candidates",
-        "inputs": {
+    manifest = build_manifest(
+        kind="boundary_candidates",
+        inputs={
             "video": str(args.video),
             "manifest": str(args.manifest.resolve()),
         },
-        "outputs": [
+        outputs=[
             {"path": args.out.name, "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

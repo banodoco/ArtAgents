@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.util.time import _utc_now, utc_now_seconds
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 
@@ -304,19 +304,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # --- universal result manifest (output-contract M2) -----------------------
     manifest_path = out_dir / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "triage",
-        "inputs": {
+    manifest = build_manifest(
+        kind="triage",
+        inputs={
             "scenes": str(args.scenes.resolve()),
             "shots": str(args.shots.resolve()),
         },
-        "outputs": [
+        outputs=[
             {"path": "scene_triage.json", "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 
