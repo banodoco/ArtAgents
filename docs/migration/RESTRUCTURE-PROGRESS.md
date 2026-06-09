@@ -24,9 +24,12 @@ Durable progress record for executing `RESTRUCTURE-PLAN.md`. Survives context co
 6. 🔴 HIGH moves: adversarial Opus review (moved-not-rewritten).
 
 ## Measurement
-- Cross-package cycles **baseline: 24** (top granularity) → target floor **~2** (adapter↔task, session↔task accepted).
+- Cross-package cycles: **24 → 6** (floor reached). The 6 are genuine domain couplings, accepted & documented
+  in `docs/architecture/import-tiers.md`: adapter↔task, session↔task, project↔task, project↔timeline,
+  orchestrator↔task, element↔project.
+- Tiers 0/1/2 clean (foundation stdlib-pure; contracts a true leaf; _shared above contracts). CLI lifted to tier-6.
 - Tests collected baseline: **5451**.
-- Update the cycle number after each wave.
+- DEFERRED optional cosmetic (no cycle/correctness impact): execution/ fold, task/ internal nesting, env_vars→foundation tidy, facade→__init__.
 
 ## Wave status
 | Wave | What | Model | Status | Cycles after |
