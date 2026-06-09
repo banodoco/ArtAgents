@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.contracts.errors import AstridError
 from astrid.core.runtime import run_subprocess
 
 GLOBAL_QUERY = (
@@ -82,7 +83,7 @@ def _visual_understand_query(image: Path, query: str, env_file: Path | None,
     data = json.loads(out_json.read_text(encoding="utf-8"))
     results = data.get("results") or []
     if not results or results[0].get("status") != "ok":
-        raise SystemExit(f"VLM call failed: {results}")
+        raise AstridError(f"VLM call failed: {results}")
     return (results[0].get("answer") or "").strip()
 
 

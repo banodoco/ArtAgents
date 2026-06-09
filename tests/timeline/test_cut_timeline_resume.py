@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from astrid.core.contracts.errors import AstridError
 from astrid.packs.video_editing.executors.cut import run as cut
 
 
@@ -132,7 +133,7 @@ class CutTimelineResumeTest(unittest.TestCase):
 
         for flag, value in conflicts:
             with self.subTest(flag=flag):
-                with self.assertRaises(SystemExit) as ctx:
+                with self.assertRaises(AstridError) as ctx:
                     cut.main(["--timeline", str(timeline_path), "--out", str(out_dir), flag, value])
                 self.assertIn(flag, str(ctx.exception))
 
@@ -143,7 +144,7 @@ class CutTimelineResumeTest(unittest.TestCase):
         timeline["clips"][0]["asset"] = "ghost"
         timeline_path.write_text(json.dumps(timeline, indent=2) + "\n", encoding="utf-8")
 
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertRaises(AstridError) as ctx:
             cut.main(["--timeline", str(timeline_path), "--out", str(source_dir.parent / "out")])
 
         self.assertIn("ghost", str(ctx.exception))

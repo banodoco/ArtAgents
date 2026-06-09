@@ -277,7 +277,7 @@ def build_multitrack_timeline(
                 }
             )
     if not theme_slug:
-        raise SystemExit(
+        raise AstridError(
             "build_multitrack_timeline requires a theme_slug — pass --theme so the timeline can reference it."
         )
     # If the source's resolution/fps doesn't match the theme canvas, surface that

@@ -31,6 +31,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Literal
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.util.hash import sha256_file
 from astrid.core.util.time import utc_now_iso
 
@@ -346,13 +347,13 @@ def _parse_ffprobe_fps(value: Any, *, path: str | Path) -> float:
     if isinstance(value, (int, float)):
         return float(value)
     if not isinstance(value, str) or not value:
-        raise SystemExit(f"ffprobe did not return fps for {path}")
+        raise AstridError(f"ffprobe did not return fps for {path}")
     if "/" in value:
         numerator_text, denominator_text = value.split("/", 1)
         numerator = float(numerator_text)
         denominator = float(denominator_text)
         if denominator == 0:
-            raise SystemExit(f"ffprobe returned invalid fps {value!r} for {path}")
+            raise AstridError(f"ffprobe returned invalid fps {value!r} for {path}")
         return numerator / denominator
     return float(value)
 
@@ -378,23 +379,23 @@ def metadata(url_or_path: str | Path) -> dict[str, Any]:
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
-        raise SystemExit(f"Invalid ffprobe JSON for {url_or_path}: {exc.msg}") from exc
+        raise AstridError(f"Invalid ffprobe JSON for {url_or_path}: {exc.msg}") from exc
     streams = payload.get("streams")
     if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
-        raise SystemExit(f"ffprobe did not return a video stream for {url_or_path}")
+        raise AstridError(f"ffprobe did not return a video stream for {url_or_path}")
     stream = streams[0]
     format_info = payload.get("format")
     if not isinstance(format_info, dict):
-        raise SystemExit(f"ffprobe did not return format metadata for {url_or_path}")
+        raise AstridError(f"ffprobe did not return format metadata for {url_or_path}")
     try:
         duration = float(format_info["duration"])
         width = int(stream["width"])
         height = int(stream["height"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise SystemExit(f"ffprobe returned incomplete metadata for {url_or_path}") from exc
+        raise AstridError(f"ffprobe returned incomplete metadata for {url_or_path}") from exc
     codec = stream.get("codec_name")
     if not isinstance(codec, str) or not codec:
-        raise SystemExit(f"ffprobe did not return a codec for {url_or_path}")
+        raise AstridError(f"ffprobe did not return a codec for {url_or_path}")
     fps_source = stream.get("avg_frame_rate")
     if fps_source in (None, "", "0/0"):
         fps_source = stream.get("r_frame_rate")

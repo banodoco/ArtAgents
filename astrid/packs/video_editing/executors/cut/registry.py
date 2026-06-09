@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.timeline import CARRY_FORWARD_SOURCE_FIELDS, AssetRegistry
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
@@ -44,12 +45,12 @@ def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
     raw_assets = getattr(args, "asset", None) or []
     for raw_entry in raw_assets:
         if not isinstance(raw_entry, str) or "=" not in raw_entry:
-            raise SystemExit(f"Invalid --asset value {raw_entry!r}: expected KEY=PATH")
+            raise AstridError(f"Invalid --asset value {raw_entry!r}: expected KEY=PATH")
         key, raw_path = raw_entry.split("=", 1)
         if not key or not raw_path:
-            raise SystemExit(f"Invalid --asset value {raw_entry!r}: expected KEY=PATH")
+            raise AstridError(f"Invalid --asset value {raw_entry!r}: expected KEY=PATH")
         if key in asset_paths or key in asset_urls:
-            raise SystemExit(f"Duplicate asset key {key!r} in --asset")
+            raise AstridError(f"Duplicate asset key {key!r} in --asset")
         if asset_cache.is_url(raw_path):
             asset_urls[key] = raw_path
         else:
@@ -58,7 +59,7 @@ def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
     video_path = getattr(args, "video", None)
     if video_path is not None:
         if "main" in asset_paths or "main" in asset_urls:
-            raise SystemExit("Duplicate asset key 'main': provided by both --asset and --video")
+            raise AstridError("Duplicate asset key 'main': provided by both --asset and --video")
         if asset_cache.is_url(video_path):
             asset_urls["main"] = video_path
         else:
@@ -66,7 +67,7 @@ def resolve_asset_paths(args: Any) -> tuple[dict[str, Path], dict[str, str]]:
     audio_path = getattr(args, "audio", None)
     if audio_path is not None and video_path is None:
         if "rant" in asset_paths or "rant" in asset_urls:
-            raise SystemExit("Duplicate asset key 'rant': provided by both --asset and --audio")
+            raise AstridError("Duplicate asset key 'rant': provided by both --asset and --audio")
         if asset_cache.is_url(audio_path):
             asset_urls["rant"] = audio_path
         else:

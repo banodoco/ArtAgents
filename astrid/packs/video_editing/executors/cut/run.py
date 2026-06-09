@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.contracts.errors import AstridError
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.timeline import (
     canonical_timeline_config,
@@ -183,7 +184,7 @@ def arrangement_uses_generative_visuals(arrangement: dict[str, Any], pool: dict[
 def load_scenes(path: Path) -> list[dict[str, Any]]:
     data = load_json(path)
     if not isinstance(data, list):
-        raise SystemExit(f"Expected a JSON list in {path}")
+        raise AstridError(f"Expected a JSON list in {path}")
     return data
 
 
@@ -193,7 +194,7 @@ def load_transcript_segments(path: Path | None) -> list[dict[str, Any]] | None:
     data = load_json(path)
     segments = data.get("segments") if isinstance(data, dict) else data
     if not isinstance(segments, list):
-        raise SystemExit(f"Expected transcript segments in {path}")
+        raise AstridError(f"Expected transcript segments in {path}")
     return segments
 
 

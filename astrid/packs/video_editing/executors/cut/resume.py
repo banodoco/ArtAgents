@@ -11,6 +11,7 @@ import argparse
 from datetime import datetime, timezone
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.timeline import (
     METADATA_VERSION,
@@ -43,7 +44,7 @@ def ensure_resume_mode_args(args: argparse.Namespace) -> None:
     ]
     for flag, value in conflicts:
         if value not in (None, []):
-            raise SystemExit(f"--timeline cannot be combined with {flag}")
+            raise AstridError(f"--timeline cannot be combined with {flag}")
 
 
 def build_resume_metadata(
@@ -85,11 +86,11 @@ def run_resume_mode(args: argparse.Namespace) -> int:
 
     timeline_path = args.timeline.resolve()
     if not timeline_path.is_file():
-        raise SystemExit(f"Timeline file not found: {timeline_path}")
+        raise AstridError(f"Timeline file not found: {timeline_path}")
     source_dir = timeline_path.parent
     assets_path_in = args.assets.resolve() if args.assets is not None else source_dir / "hype.assets.json"
     if not assets_path_in.is_file():
-        raise SystemExit(f"Assets file not found: {assets_path_in}")
+        raise AstridError(f"Assets file not found: {assets_path_in}")
 
     config = load_timeline(timeline_path)
     registry = load_registry(assets_path_in)
@@ -119,7 +120,7 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     )
     if missing_assets:
         quoted = ", ".join(repr(asset) for asset in missing_assets)
-        raise SystemExit(f"Timeline references assets missing from registry: {quoted}")
+        raise AstridError(f"Timeline references assets missing from registry: {quoted}")
 
     out_dir = args.out.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
