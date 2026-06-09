@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import os
-import re
 import subprocess
 import sys
 from contextlib import nullcontext
@@ -14,8 +13,15 @@ from typing import Any, Literal, Mapping
 
 from astrid.core.contracts.capability_runner import CapabilityRunner
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.contracts.schema import Output
-from astrid.core.contracts._capability_common import _has_value, _stringify_value, _PLACEHOLDER_RE
+from astrid.core.contracts._capability_common import (
+    _PLACEHOLDER_RE,
+    _expand_placeholders,
+    _has_cli_option,
+    _output_value,
+    _project_subprocess_env,
+    _stringify_value,
+    _validate_required_inputs,
+)
 from astrid.core.project.run import (
     ProjectRunContext,
     finalize_project_run,
@@ -231,7 +237,9 @@ def _request_argv_for_gate(request: OrchestratorRunRequest) -> tuple[str, ...]:
 def _run_orchestrator_inner(request: OrchestratorRunRequest, orchestrator: OrchestratorDefinition) -> OrchestratorRunResult:
     values = _request_values(request, orchestrator)
     _validate_out_requirement(orchestrator, request)
-    _validate_required_inputs(orchestrator, values)
+    _validate_required_inputs(
+        orchestrator.id, orchestrator.inputs, values, noun="orchestrator", error_cls=OrchestratorRunnerError
+    )
     if orchestrator.runtime.kind == "python":
         return _ensure_dry_run_plan(_run_python_orchestrator(orchestrator, request))
     if orchestrator.runtime.kind == "command":
@@ -244,7 +252,9 @@ def build_orchestrator_command(request: OrchestratorRunRequest, registry: Orches
     orchestrator = active_registry.get(request.orchestrator_id)
     values = _request_values(request, orchestrator)
     _validate_out_requirement(orchestrator, request)
-    _validate_required_inputs(orchestrator, values)
+    _validate_required_inputs(
+        orchestrator.id, orchestrator.inputs, values, noun="orchestrator", error_cls=OrchestratorRunnerError
+    )
     if orchestrator.runtime.kind != "command":
         raise OrchestratorRunnerError(f"orchestrator {orchestrator.id!r} does not use a command runtime")
     command, _, _ = _expand_command_runtime(orchestrator, request, values)
@@ -425,9 +435,18 @@ def _expand_command_runtime(
         if part == "{orchestrator_args}":
             argv.extend(request.orchestrator_args)
         else:
-            argv.append(_expand_placeholders(part, placeholders))
-    cwd = _expand_placeholders(command_spec.cwd, placeholders) if command_spec.cwd else None
-    env = {key: _expand_placeholders(value, placeholders) for key, value in command_spec.env.items()}
+            argv.append(
+                _expand_placeholders(part, placeholders, error_cls=OrchestratorRunnerError)
+            )
+    cwd = (
+        _expand_placeholders(command_spec.cwd, placeholders, error_cls=OrchestratorRunnerError)
+        if command_spec.cwd
+        else None
+    )
+    env = {
+        key: _expand_placeholders(value, placeholders, error_cls=OrchestratorRunnerError)
+        for key, value in command_spec.env.items()
+    }
     return tuple(argv), cwd, env
 
 
@@ -567,7 +586,7 @@ def _placeholder_values(orchestrator: OrchestratorDefinition, request: Orchestra
         else:
             placeholders[key] = _stringify_value(value)
     for output in orchestrator.outputs:
-        output_path = _output_value(output, request, placeholders)
+        output_path = _output_value(output, request, placeholders, error_cls=OrchestratorRunnerError)
         placeholders[output.name] = output_path
         if output.placeholder:
             placeholders[output.placeholder] = output_path
@@ -670,10 +689,6 @@ def _finalize_project_orchestrator(
     )
 
 
-def _project_subprocess_env(request: OrchestratorRunRequest) -> dict[str, str]:
-    return project_run_env(request.project) if request.project else {}
-
-
 def _resolve_project_request(
     request: OrchestratorRunRequest,
     orchestrator: OrchestratorDefinition,
@@ -713,42 +728,6 @@ def _command_subprocess_env(
         passthrough=orchestrator.isolation.env_passthrough,
         declared_passthrough=orchestrator.isolation.env_passthrough,
     )
-
-
-def _has_cli_option(args: tuple[str, ...], option: str) -> bool:
-    return any(arg == option or arg.startswith(f"{option}=") for arg in args)
-
-
-def _output_value(output: Output, request: OrchestratorRunRequest, placeholders: Mapping[str, str]) -> str:
-    if output.name in request.outputs:
-        return _stringify_value(request.outputs[output.name])
-    if output.placeholder and output.placeholder in request.outputs:
-        return _stringify_value(request.outputs[output.placeholder])
-    if output.path_template:
-        return _expand_placeholders(output.path_template, placeholders)
-    if request.out is None:
-        raise OrchestratorRunnerError(f"--out is required to derive output {output.name!r}")
-    return str((Path(request.out).expanduser().resolve() / output.name).resolve())
-
-
-def _expand_placeholders(value: str, placeholders: Mapping[str, str]) -> str:
-    def replace(match: re.Match[str]) -> str:
-        key = match.group(1)
-        if key not in placeholders:
-            raise OrchestratorRunnerError(f"missing value for placeholder {{{key}}}")
-        return placeholders[key]
-
-    return _PLACEHOLDER_RE.sub(replace, value)
-
-
-def _validate_required_inputs(orchestrator: OrchestratorDefinition, values: Mapping[str, Any]) -> None:
-    missing = [
-        port.name
-        for port in orchestrator.inputs
-        if port.required and port.default is None and not _has_value(values.get(port.name))
-    ]
-    if missing:
-        raise OrchestratorRunnerError(f"orchestrator {orchestrator.id!r} missing required input(s): {', '.join(missing)}")
 
 
 def _validate_out_requirement(orchestrator: OrchestratorDefinition, request: OrchestratorRunRequest) -> None:

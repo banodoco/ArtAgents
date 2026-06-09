@@ -10,7 +10,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, Sequence, runtime_checkable
 
 from astrid.core.contracts.capability_schema import SchemaValidator
 from astrid.core.contracts.schema import (
@@ -21,6 +21,7 @@ from astrid.core.contracts.schema import (
     IsolationMetadata,
     IsolationMode,
 )
+from astrid.core.project.run import project_run_env
 
 # ---------------------------------------------------------------------------
 # runner.py helpers
@@ -295,3 +296,103 @@ def _definition_content_root(
     if root_str:
         return Path(root_str)
     return Path.cwd()
+
+
+# ---------------------------------------------------------------------------
+# Shared runner helpers — moved from executor/runner.py + orchestrator/runner.py
+# ---------------------------------------------------------------------------
+
+
+def _expand_placeholders(
+    value: str,
+    placeholders: Mapping[str, str],
+    *,
+    error_cls: type[Exception],
+) -> str:
+    """Replace ``{placeholder}`` tokens in *value* using *placeholders*.
+
+    Raises *error_cls* when a token has no corresponding entry.
+    Previously duplicated in executor/runner.py and orchestrator/runner.py;
+    only the error class differed.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key not in placeholders:
+            raise error_cls(f"missing value for placeholder {{{key}}}")
+        return placeholders[key]
+
+    return _PLACEHOLDER_RE.sub(replace, value)
+
+
+def _validate_required_inputs(
+    capability_id: str,
+    inputs: tuple[Any, ...],
+    values: Mapping[str, Any],
+    *,
+    noun: str,
+    error_cls: type[Exception],
+) -> None:
+    """Raise *error_cls* when any required input is missing.
+
+    *noun* is the human-readable capability type (``"executor"`` or ``"orchestrator"``).
+    """
+    missing = [
+        port.name
+        for port in inputs
+        if port.required and port.default is None and not _has_value(values.get(port.name))
+    ]
+    if missing:
+        raise error_cls(
+            f"{noun} {capability_id!r} missing required input(s): {', '.join(missing)}"
+        )
+
+
+def _project_subprocess_env(request: Any) -> dict[str, str]:
+    """Return the project-scoped subprocess environment for *request*.
+
+    *request* must have a ``.project`` attribute (``str | None``).
+    Previously byte-identical in executor/runner.py and orchestrator/runner.py.
+    """
+    return project_run_env(request.project) if request.project else {}
+
+
+def _output_value(
+    output: Any,
+    request: Any,
+    placeholders: Mapping[str, str],
+    *,
+    error_cls: type[Exception],
+) -> str:
+    """Derive the filesystem path for an output port.
+
+    *output* must have ``.name``, ``.placeholder``, and ``.path_template``
+    attributes (both ``Output`` and ``ExecutorOutput`` satisfy this).
+    *request* must have ``.out`` (``Path | str | None``) and ``.outputs``
+    (``Mapping[str, Any]``).
+
+    BUG FIX: the previous executor copy silently assumed ``request.out`` was
+    always set, which could produce a traceback escaping the runner error
+    boundary.  The orchestrator already had a guard; this is now unified with
+    the guard applied to both.
+    """
+    if output.name in request.outputs:
+        return _stringify_value(request.outputs[output.name])
+    if output.placeholder and output.placeholder in request.outputs:
+        return _stringify_value(request.outputs[output.placeholder])
+    if output.path_template:
+        return _expand_placeholders(output.path_template, placeholders, error_cls=error_cls)
+    if request.out is None:
+        raise error_cls(f"--out is required to derive output {output.name!r}")
+    return str((Path(request.out).expanduser().resolve() / output.name).resolve())
+
+
+def _has_cli_option(args: Sequence[str], option: str) -> bool:
+    """Return ``True`` if *option* appears in *args* (bare or ``--opt=val`` form).
+
+    Accepts any ``Sequence[str]`` so both ``list[str]`` (gateway) and
+    ``tuple[str, ...]`` (orchestrator runner) work.
+    Previously duplicated in orchestrator/runner.py (tuple) and
+    gateway/project.py (list).
+    """
+    return any(arg == option or arg.startswith(f"{option}=") for arg in args)

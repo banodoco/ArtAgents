@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
+from astrid.core.contracts._capability_common import _has_cli_option
 from astrid.core.util.log_and_swallow import log_and_swallow
 
 # ---------------------------------------------------------------------------
@@ -141,10 +142,6 @@ def _project_slug_for_path_value(value: str, projects_root: Path) -> str | None:
     slug = relative.parts[0]
     project_json = projects_root / slug / "project.json"
     return slug if project_json.is_file() else None
-
-
-def _has_cli_option(raw: list[str], option: str) -> bool:
-    return any(token == option or token.startswith(f"{option}=") for token in raw)
 
 
 def _invocation_is_auto_bindable_run(raw: list[str]) -> bool:

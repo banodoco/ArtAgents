@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -53,14 +52,17 @@ from .schema import (
     ConditionSpec,
     ExecutorDefinition,
     ExecutorKind,
-    ExecutorOutput,
     ExecutorValidationError,
 )
 
 from astrid.core.contracts._capability_common import (
     _PLACEHOLDER_RE,
+    _expand_placeholders,
     _has_value,
+    _output_value,
+    _project_subprocess_env,
     _stringify_value,
+    _validate_required_inputs,
 )
 
 
@@ -155,7 +157,9 @@ class ExecutorCapabilityRunner(CapabilityRunner[ExecutorRunRequest, ExecutorRunR
         active_registry = registry or self.load_default_registry()
         executor = active_registry.get(request.executor_id)
         values = _request_values(request)
-        _validate_required_inputs(executor, values)
+        _validate_required_inputs(
+            executor.id, executor.inputs, values, noun="executor", error_cls=ExecutorRunnerError
+        )
         condition_result = evaluate_conditions(executor, values)
         if condition_result.skipped:
             return ()
@@ -291,7 +295,9 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
     if executor.id == "youtube.upload":
         return _run_upload_youtube(request, executor)
     values = _request_values(request)
-    _validate_required_inputs(executor, values)
+    _validate_required_inputs(
+        executor.id, executor.inputs, values, noun="executor", error_cls=ExecutorRunnerError
+    )
     condition_result = evaluate_conditions(executor, values)
     if condition_result.skipped:
         return ExecutorRunResult(
@@ -646,12 +652,22 @@ def _expand_external_command(
     if executor.command is None:
         raise ExecutorRunnerError(f"executor {executor.id!r} has no command")
     placeholders = _placeholder_values(executor, request, values)
-    argv = tuple(_expand_placeholders(part, placeholders) for part in executor.command.argv)
+    argv = tuple(
+        _expand_placeholders(part, placeholders, error_cls=ExecutorRunnerError)
+        for part in executor.command.argv
+    )
     consumed = _consumed_input_names(executor)
     argv = (*argv, *_expand_input_arg_mappings(executor, values))
     argv = (*argv, *_auto_forward_untemplated_inputs(executor, values, consumed))
-    cwd = _expand_placeholders(executor.command.cwd, placeholders) if executor.command.cwd else None
-    env = {key: _expand_placeholders(value, placeholders) for key, value in executor.command.env.items()}
+    cwd = (
+        _expand_placeholders(executor.command.cwd, placeholders, error_cls=ExecutorRunnerError)
+        if executor.command.cwd
+        else None
+    )
+    env = {
+        key: _expand_placeholders(value, placeholders, error_cls=ExecutorRunnerError)
+        for key, value in executor.command.env.items()
+    }
     return argv, cwd, env
 
 
@@ -847,10 +863,6 @@ def _prepare_dry_run_request(request: ExecutorRunRequest) -> ExecutorRunRequest:
     return replace(request, out=placeholder)
 
 
-def _project_subprocess_env(request: ExecutorRunRequest) -> dict[str, str]:
-    return project_run_env(request.project) if request.project else {}
-
-
 def _command_subprocess_env(
     executor: ExecutorDefinition,
     request: ExecutorRunRequest,
@@ -919,7 +931,7 @@ def _placeholder_values(executor: ExecutorDefinition, request: ExecutorRunReques
             continue
         placeholders[key] = _stringify_value(value)
     for output in executor.outputs:
-        output_path = _output_value(output, request, placeholders)
+        output_path = _output_value(output, request, placeholders, error_cls=ExecutorRunnerError)
         placeholders[output.name] = output_path
         if output.placeholder:
             placeholders[output.placeholder] = output_path
@@ -944,16 +956,6 @@ def _expand_input_arg_mappings(executor: ExecutorDefinition, values: Mapping[str
                 argv.append(mapping.flag)
             argv.append(_stringify_value(item))
     return tuple(argv)
-
-
-def _output_value(output: ExecutorOutput, request: ExecutorRunRequest, placeholders: Mapping[str, str]) -> str:
-    if output.name in request.outputs:
-        return _stringify_value(request.outputs[output.name])
-    if output.placeholder and output.placeholder in request.outputs:
-        return _stringify_value(request.outputs[output.placeholder])
-    if output.path_template:
-        return _expand_placeholders(output.path_template, placeholders)
-    return str((Path(request.out).expanduser().resolve() / output.name).resolve())
 
 
 def _resolve_python_exec(executor: ExecutorDefinition, request: ExecutorRunRequest, values: Mapping[str, Any]) -> str | None:
@@ -984,26 +986,6 @@ def _executor_uses_placeholder(executor: ExecutorDefinition, placeholder: str) -
     if executor.command.cwd and needle in executor.command.cwd:
         return True
     return any(needle in value for value in executor.command.env.values())
-
-
-def _expand_placeholders(value: str, placeholders: Mapping[str, str]) -> str:
-    def replace(match: re.Match[str]) -> str:
-        key = match.group(1)
-        if key not in placeholders:
-            raise ExecutorRunnerError(f"missing value for placeholder {{{key}}}")
-        return placeholders[key]
-
-    return _PLACEHOLDER_RE.sub(replace, value)
-
-
-def _validate_required_inputs(executor: ExecutorDefinition, values: Mapping[str, Any]) -> None:
-    missing = [
-        port.name
-        for port in executor.inputs
-        if port.required and port.default is None and not _has_value(values.get(port.name))
-    ]
-    if missing:
-        raise ExecutorRunnerError(f"executor {executor.id!r} missing required input(s): {', '.join(missing)}")
 
 
 def _evaluate_condition(condition: ConditionSpec, values: Mapping[str, Any]) -> ConditionResult:
