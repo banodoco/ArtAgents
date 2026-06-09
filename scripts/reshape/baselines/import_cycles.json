@@ -18,24 +18,8 @@
       "astrid.core.orchestrator"
     ],
     [
-      "astrid.core.executor",
-      "astrid.core.pack"
-    ],
-    [
-      "astrid.core.executor",
-      "astrid.core.project"
-    ],
-    [
       "astrid.core.integrations",
       "astrid.core.project"
-    ],
-    [
-      "astrid.core.integrations",
-      "astrid.core.timeline"
-    ],
-    [
-      "astrid.core.orchestrator",
-      "astrid.core.pack"
     ],
     [
       "astrid.core.orchestrator",
@@ -82,5 +66,5 @@
       "astrid.core.timeline"
     ]
   ],
-  "pair_count": 16
+  "pair_count": 12
 }

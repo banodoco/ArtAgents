@@ -166,10 +166,11 @@ def prepare_project_run(
     * ``False`` — skip timeline resolution entirely; the run carries no
       ``timeline_id``. Use for stateless executors (image/video generation,
       understanding, rendering, foley, lora search) that never touch a timeline.
-    * ``None`` — auto-detect from the executor's
-      ``metadata.requires_timeline`` flag (defaulting to ``True`` when the
-      executor cannot be resolved or omits the flag), so callers that already
-      pass ``tool_id`` get the conditional behavior for free.
+    * ``None`` — default to ``True`` (legacy timeline-required behavior). The
+      executor runner resolves an executor's ``metadata.requires_timeline``
+      opt-out from the ``ExecutorDefinition`` it already holds and passes the
+      concrete boolean, so the project tier never reaches up into the executor
+      registry to do this.
 
     ``session_id`` resolves in order: explicit parameter, then
     ``ASTRID_SESSION_ID`` from the environment, then no value. This function
@@ -239,7 +240,12 @@ def prepare_project_run(
             root=projects_root,
         )
     if requires_timeline is None:
-        requires_timeline = _executor_requires_timeline(tool_id)
+        # Default to requiring a timeline. Callers that know an executor opts
+        # out (``metadata.requires_timeline: false``) pass ``requires_timeline``
+        # explicitly — the executor runner resolves this from the executor
+        # definition it already holds, so the project tier never reaches back
+        # up into the executor registry.
+        requires_timeline = True
     if timeline_id is None and requires_timeline:
         timeline_id, _timeline_slug = resolve_required_project_timeline(project_slug, root=projects_root)
     effective_run_id = paths.validate_run_id(run_id or generate_run_id())
@@ -317,46 +323,6 @@ def resolve_required_project_timeline(
         f"({choices}); recovery: python3 -m astrid attach {project_slug} && "
         "python3 -m astrid timelines set-default <slug>"
     )
-
-
-def _executor_requires_timeline(tool_id: str | None) -> bool:
-    """Resolve an executor's ``metadata.requires_timeline`` flag from ``tool_id``.
-
-    Defaults to ``True`` (timeline required) for backward compatibility whenever
-    the flag is absent, the executor cannot be resolved, or the registry fails
-    to load. Only an explicit ``requires_timeline: false`` in the executor's
-    metadata opts a run out of timeline resolution. The registry lookup is
-    lazily imported (avoiding an import cycle: executor → project) and cached so
-    repeated runs do not re-discover packs.
-    """
-    if not tool_id:
-        return True
-    metadata = _executor_metadata(tool_id)
-    if metadata is None:
-        return True
-    value = metadata.get("requires_timeline", True)
-    return bool(value)
-
-
-def _executor_metadata(tool_id: str) -> Mapping[str, Any] | None:
-    try:
-        registry = _default_executor_registry()
-        executor = registry.get(tool_id)
-    except Exception:
-        return None
-    return getattr(executor, "metadata", None)
-
-
-_DEFAULT_EXECUTOR_REGISTRY: Any = None
-
-
-def _default_executor_registry() -> Any:
-    global _DEFAULT_EXECUTOR_REGISTRY
-    if _DEFAULT_EXECUTOR_REGISTRY is None:
-        from astrid.core.executor.registry import load_default_registry
-
-        _DEFAULT_EXECUTOR_REGISTRY = load_default_registry()
-    return _DEFAULT_EXECUTOR_REGISTRY
 
 
 def _timeline_id_from_parent_run(

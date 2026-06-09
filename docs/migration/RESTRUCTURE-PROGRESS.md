@@ -60,7 +60,14 @@ Durable progress record for executing `RESTRUCTURE-PLAN.md`. Survives context co
 > **model_catalog assembly seam:** load_default reaches up to generation's pack-scanners at call time (importlib);
 > proper home is the W7 registry-collapse layer.
 > Pure-tidy W2 relocations (_utc_now, env, media, *_edits, cli_contract, plan_verbs) → folded into the W0c cleanup pass (no cycle impact).
-| W3 | invert hacks (_pipeline_module, pack/validate, resolvers, 2 Protocols) | Opus | ⬜ todo | — |
+| W3 | invert hacks: deleted pack/validate deep-validation (broke pack↔executor + pack↔orchestrator), moved requires_timeline resolution into executor.runner (broke executor↔project), RemoteTimelineLister Protocol (broke integrations↔timeline). **task↔orchestrator BLOCKED.** executor↔orchestrator deferred to W7. | Claude(Opus) sub | ✅ done (4 cycles) | 12 |
+
+> **task↔orchestrator BLOCKED (genuine):** `_list_orchestrator_ids` consumers span session AND task; orchestrator
+> already imports session.config → moving the helper to orchestrator makes session↔orchestrator (worse). Injection
+> would ripple ~50 gateway-dispatch call sites + change session's discovery_hints API. → accept-and-document, or
+> resolve via the W7 execution-tier assembler. Joins {element↔project, adapter↔task, session↔task} as accept-candidates.
+> **Remaining 12 cycles** = W4 (accept adapter↔task + session↔task; project↔task domain), W5 (CLI lift: cli_choices↔pack,
+> session↔timeline, task↔timeline, integrations↔project, project↔session/timeline CLI halves), W7 (executor↔orchestrator fold).
 | W4 | task/ + orchestrate→task/dsl (53); accept adapter↔task, session↔task seams | Opus | ⬜ todo | — |
 | W5 | lift CLI tier + packs/tests reorg | DeepSeek | ⬜ todo | — |
 | W6 | integration: full suite, re-measure, push | main | ⬜ todo | — |

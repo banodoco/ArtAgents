@@ -1071,7 +1071,10 @@ class TestSupabaseCandidateDiscovery:
 
     def test_bogus_endpoint_returns_empty_on_error(self) -> None:
         """When credentials are present but endpoint is unreachable, returns []."""
+        from astrid.core.integrations.reigh import timeline_io
+
         result = discover_supabase_timelines(
+            lister=timeline_io,
             supabase_url="http://127.0.0.1:1",  # unreachable
             service_role_key="fake-key",
         )

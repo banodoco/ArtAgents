@@ -24,7 +24,11 @@ import jsonschema
 from referencing import Registry, Resource
 
 from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
+from astrid.core.pack.manifest import (
+    ManifestParseError,
+    load_manifest_mapping,
+    reconcile_runtime_module,
+)
 from astrid.core.pack import (
     PackDefinition,
     _normalize_pack_permissions,
@@ -584,39 +588,40 @@ class PackValidator:
     def _validate_runtime_definition(
         self, data: dict[str, Any], manifest_kind: str, rel: str
     ) -> None:
-        """Run the raising runtime validators after the JSON-Schema pass.
+        """Run the pack-tier runtime-reconciliation check after the JSON-Schema pass.
 
         The JSON Schema is permissive about shapes the runtime parser rejects
         (e.g. a manifest declaring its runtime module twice with conflicting
-        values). The runtime validators ``validate_executor_definition`` /
-        ``validate_orchestrator_definition`` RAISE on those, so translate their
-        errors into the collected error structure rather than letting them
-        escape ``packs validate``.
+        values). That structural check lives in the pack tier
+        (``reconcile_runtime_module``); the executor / orchestrator schemas call
+        the same helper at registry-load time, so running it here keeps
+        ``packs validate`` parity without importing those upper tiers.
         """
         if manifest_kind == "executor":
-            from astrid.core.executor.schema import (
-                ExecutorValidationError,
-                validate_executor_definition,
-            )
-
-            try:
-                if isinstance(data, dict) and isinstance(data.get("executors"), list):
-                    for item in data["executors"]:
-                        validate_executor_definition(item)
-                else:
-                    validate_executor_definition(data)
-            except ExecutorValidationError as exc:
-                self.errors.append(f"{rel}: {exc}")
+            if isinstance(data, dict) and isinstance(data.get("executors"), list):
+                items = data["executors"]
+            else:
+                items = [data]
+            for item in items:
+                self._reconcile_runtime_module(item, "executor", rel)
         elif manifest_kind == "orchestrator":
-            from astrid.core.orchestrator.schema import (
-                OrchestratorValidationError,
-                validate_orchestrator_definition,
-            )
+            self._reconcile_runtime_module(data, "orchestrator", rel)
 
-            try:
-                validate_orchestrator_definition(data)
-            except OrchestratorValidationError as exc:
-                self.errors.append(f"{rel}: {exc}")
+    def _reconcile_runtime_module(
+        self, data: Any, component: str, rel: str
+    ) -> None:
+        """Apply the pack-tier runtime-module reconciliation check to one manifest."""
+        if not isinstance(data, dict):
+            return
+        metadata = data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            return
+        try:
+            reconcile_runtime_module(
+                data.get("runtime"), metadata, ValidationError, component
+            )
+        except ValidationError as exc:
+            self.errors.append(f"{rel}: {exc}")
 
     def _validate_element_manifest_file(
         self,

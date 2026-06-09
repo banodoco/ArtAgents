@@ -778,6 +778,19 @@ def _prepare_project_request(
     if not request.project_was_auto_resolved:
         reject_project_with_out(request.project, request.out)
     record_out = request.out if request.out not in (None, "") else None
+    # Resolve the executor's timeline requirement here, where the
+    # ExecutorDefinition is already in hand, instead of having the project
+    # tier reach back up into the executor registry (which inverted the
+    # layering: project -> executor). Mirrors the prior
+    # ``metadata.requires_timeline`` autodetect (defaulting True).
+    if request.project_was_auto_resolved:
+        requires_timeline = False
+    else:
+        _executor_metadata = getattr(executor, "metadata", None)
+        if isinstance(_executor_metadata, Mapping):
+            requires_timeline = bool(_executor_metadata.get("requires_timeline", True))
+        else:
+            requires_timeline = True
     context = prepare_project_run(
         request.project,
         tool_id=executor.id,
@@ -788,7 +801,7 @@ def _prepare_project_request(
             "project_was_auto_resolved": bool(request.project_was_auto_resolved),
         },
         record_out=record_out,
-        requires_timeline=False if request.project_was_auto_resolved else None,
+        requires_timeline=requires_timeline,
         invocation=request.invocation,
     )
     effective_out = request.out if record_out is not None else context.run_root

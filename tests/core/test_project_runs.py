@@ -244,28 +244,41 @@ def test_prepare_project_run_demands_timeline_by_default(
         prepare_project_run("demo", tool_id="test.stateful", kind="executor")
 
 
-def test_prepare_project_run_autodetects_requires_timeline_from_executor_metadata(
+def test_executor_runner_resolves_requires_timeline_from_executor_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """With requires_timeline=None (the default), the flag is read from the
-    executor's metadata.requires_timeline. The built-in stateless
-    generation.generate_image executor declares it false, so a project with no
-    live timeline prepares cleanly."""
-    from astrid.core.project.run import prepare_project_run
-
-    projects_root = tmp_path / "projects"
+    """The executor runner resolves ``metadata.requires_timeline`` from the
+    ExecutorDefinition it already holds and passes the concrete flag into
+    prepare_project_run, so a stateless executor (requires_timeline=False) runs
+    cleanly against a project with no live timeline — without the project tier
+    reaching back up into the executor registry."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    projects_root = repo / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
+    monkeypatch.setenv("ASTRID_REPO_ROOT", str(repo))
     _clear_thread_env(monkeypatch)
-    create_project("demo")  # no timeline
+    create_project("demo")  # NB: no create_timeline()
 
-    context = prepare_project_run(
-        "demo",
-        tool_id="generation.generate_image",
-        kind="executor",
-        # requires_timeline omitted → auto-detect from executor metadata.
+    stateless = ExecutorDefinition(
+        id="test.stateless_optout",
+        name="Stateless",
+        kind="external",
+        version="1.0",
+        command=CommandSpec(argv=(sys.executable, "-c", "pass")),
+        metadata={"requires_timeline": False},
     )
+    # Resolving requires_timeline=False from metadata lets prepare_project_run
+    # skip the "no live timelines" demand that would otherwise raise.
+    result = run_executor(
+        ExecutorRunRequest("test.stateless_optout", out="", project="demo"),
+        ExecutorRegistry([stateless]),
+    )
+    assert result.returncode == 0
 
-    assert "timeline_id" not in context.record
+    run_jsons = list((projects_root / "demo" / "runs").glob("*/run.json"))
+    assert len(run_jsons) == 1
+    assert "timeline_id" not in _read_json(run_jsons[0])
 
 
 def test_prepare_project_run_records_external_out_and_prepare_metadata(

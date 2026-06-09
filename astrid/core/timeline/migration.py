@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from astrid.core.contracts.remote_timeline import RemoteTimelineLister
+
 # ---------------------------------------------------------------------------
 # Structured result types
 # ---------------------------------------------------------------------------
@@ -233,21 +235,30 @@ class SupabaseTimelineCandidate:
 
 def discover_supabase_timelines(
     *,
+    lister: RemoteTimelineLister | None = None,
     project_id: str | None = None,
     supabase_url: str | None = None,
     service_role_key: str | None = None,
 ) -> list[SupabaseTimelineCandidate]:
     """List candidate Supabase timelines for migration.
 
-    Uses the existing Reigh transport seam (``timeline_io.list_timelines``
-    and ``timeline_io.timeline_has_events``) per SD3.
+    Discovery uses an injected :class:`RemoteTimelineLister` (the structural
+    contract in ``astrid.core.contracts.remote_timeline``) so that the timeline
+    tier does not depend on the higher ``integrations.reigh`` transport. The
+    caller injects the concrete reigh implementation; the
+    ``astrid.core.integrations.reigh.timeline_io`` module satisfies the Protocol
+    directly (its ``list_timelines`` / ``timeline_has_events`` functions match).
 
     **No-credentials behaviour**: when *supabase_url* and *service_role_key*
     are both absent (the default local-only scenario), this function
-    returns an empty list immediately without any network calls.
+    returns an empty list immediately without any network calls — and without
+    requiring a *lister*.
 
     Parameters
     ----------
+    lister:
+        Remote timeline transport seam. Required whenever credentials are
+        present (the network path); ignored in the no-credentials short-circuit.
     project_id:
         Optional filter.  When ``None``, all timelines are returned.
     supabase_url:
@@ -263,8 +274,6 @@ def discover_supabase_timelines(
     """
     import os as _os
 
-    from astrid.core.integrations.reigh.timeline_io import list_timelines, timeline_has_events
-
     url = supabase_url or _os.environ.get("SUPABASE_URL", "").strip()
     key = service_role_key or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 
@@ -272,13 +281,20 @@ def discover_supabase_timelines(
     if not url or not key:
         return []
 
+    if lister is None:
+        raise ValueError(
+            "discover_supabase_timelines requires a RemoteTimelineLister when "
+            "credentials are present; inject astrid.core.integrations.reigh."
+            "timeline_io"
+        )
+
     # Build service-role auth tuple (matching supabase_client.Auth contract)
     auth = ("service_role", key)
 
     # ------------------------------------------------------------------
-    # 1. List public.timelines via Reigh transport seam (SD3)
+    # 1. List public.timelines via the injected Reigh transport seam (SD3)
     # ------------------------------------------------------------------
-    raw_timelines = list_timelines(
+    raw_timelines = lister.list_timelines(
         supabase_url=url,
         auth=auth,
         project_id=project_id,
@@ -296,7 +312,7 @@ def discover_supabase_timelines(
         if not isinstance(pid, str):
             pid = ""
 
-        has_events = timeline_has_events(
+        has_events = lister.timeline_has_events(
             supabase_url=url,
             auth=auth,
             timeline_id=tid,
