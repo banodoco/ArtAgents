@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.result_manifest import complete_output_metadata
+from astrid.packs.generation.executors._common import build_generation_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
@@ -245,25 +246,15 @@ def _resolve_seed(requested: int | None, index: int) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _build_manifest(
+def _build_inputs_request(
     args: argparse.Namespace,
     entry: Any,
     mode_name: str,
-    model_actual: str,
-    outputs: list[dict[str, Any]],
     seed: int,
-    warnings: list[dict[str, str]],
-    dropped_features: list[str],
-    image_ref_resolved: str | None,
     prompt_text: str | None,
-    cost_usd: float | None,
-    duration_ms: int,
-    request_id: str | None,
-    source_urls: list[str] | None,
-    applied_features: list[str],
-) -> dict[str, Any]:
-    """Build the canonical manifest dict (20-manifest-schema.md v2) with
-    universal ``kind`` and ``inputs`` fields (output-contract M1)."""
+    image_ref_resolved: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build inputs and request dicts for the image generation manifest."""
     requested_prompt = prompt_text or getattr(args, "prompt", None)
     request: dict[str, Any] = {
         "prompt": requested_prompt,
@@ -287,34 +278,7 @@ def _build_manifest(
             inputs[key] = val
     if image_ref_resolved is not None:
         inputs["image_ref_resolved"] = image_ref_resolved
-    manifest: dict[str, Any] = {
-        "schema_version": 2,
-        "kind": "generation.generate_image",
-        "inputs": inputs,
-        "modality": entry.modality,
-        "model": entry.id,
-        "mode_used": mode_name,
-        "model_actual": model_actual,
-        "execution": args.execution,
-        "request": request,
-        "outputs": outputs,
-        "seed": seed,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": warnings,
-    }
-    if dropped_features:
-        manifest["dropped_features"] = dropped_features
-    if applied_features:
-        manifest["applied_features"] = applied_features
-    if cost_usd is not None:
-        manifest["cost_usd"] = cost_usd
-    if duration_ms:
-        manifest["duration_ms"] = duration_ms
-    if request_id:
-        manifest["request_id"] = request_id
-    if source_urls:
-        manifest["source_urls"] = source_urls
-    return manifest
+    return inputs, request
 
 
 def _available_backend_ids(mode_spec: Any) -> tuple[str, ...]:
@@ -825,22 +789,28 @@ def generate_core(
         except BaseException:
             if all_outputs:
                 try:
-                    manifest = _build_manifest(
-                        args,
-                        entry,
-                        mode_name,
-                        model_actual,
-                        all_outputs,
-                        final_seed,
-                        warnings,
-                        dropped_features,
-                        image_ref_resolved,
-                        prompt_text,
-                        cost_usd,
-                        duration_ms,
-                        request_id,
-                        source_urls,
-                        all_applied_features,
+                    inputs, request = _build_inputs_request(
+                        args, entry, mode_name, final_seed, prompt_text, image_ref_resolved,
+                    )
+                    manifest = build_generation_manifest(
+                        kind="generation.generate_image",
+                        inputs=inputs,
+                        outputs=all_outputs,
+                        created=datetime.now(timezone.utc).isoformat(),
+                        warnings=warnings,
+                        modality=entry.modality,
+                        model=entry.id,
+                        mode_used=mode_name,
+                        model_actual=model_actual,
+                        execution=args.execution,
+                        request=request,
+                        seed=final_seed,
+                        dropped_features=dropped_features if dropped_features else None,
+                        applied_features=all_applied_features if all_applied_features else None,
+                        cost_usd=cost_usd,
+                        duration_ms=duration_ms,
+                        request_id=request_id,
+                        source_urls=source_urls,
                     )
                     manifest_path = out / "manifest.json"
                     if loras_parsed:
@@ -855,22 +825,28 @@ def generate_core(
             raise
 
     # --- emit manifest -------------------------------------------------------
-    manifest = _build_manifest(
-        args,
-        entry,
-        mode_name,
-        model_actual,
-        all_outputs,
-        final_seed,
-        warnings,
-        dropped_features,
-        image_ref_resolved,
-        prompt_text,
-        cost_usd,
-        duration_ms,
-        request_id,
-        source_urls,
-        all_applied_features,
+    inputs, request = _build_inputs_request(
+        args, entry, mode_name, final_seed, prompt_text, image_ref_resolved,
+    )
+    manifest = build_generation_manifest(
+        kind="generation.generate_image",
+        inputs=inputs,
+        outputs=all_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+        warnings=warnings,
+        modality=entry.modality,
+        model=entry.id,
+        mode_used=mode_name,
+        model_actual=model_actual,
+        execution=args.execution,
+        request=request,
+        seed=final_seed,
+        dropped_features=dropped_features if dropped_features else None,
+        applied_features=all_applied_features if all_applied_features else None,
+        cost_usd=cost_usd,
+        duration_ms=duration_ms,
+        request_id=request_id,
+        source_urls=source_urls,
     )
     manifest_path = out / "manifest.json"
     if loras_parsed:
