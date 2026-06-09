@@ -52,15 +52,6 @@ def _parse_size(size: str) -> str | None:
     return size
 
 
-def _parse_resolution(res: str) -> tuple[int, int] | None:
-    """Parse a resolution string like ``"1280x720"`` into ``(width, height)``.
-
-    Accepted separators: ``x``, ``X``, ``*``, ``,``.  Returns ``None`` if
-    *res* is empty or unparseable.
-    """
-    return parse_dimension_pair(res)
-
-
 # ---------------------------------------------------------------------------
 # FalBackend
 # ---------------------------------------------------------------------------
@@ -209,38 +200,18 @@ class FalBackend(BackendAdapter):
                     payload[remote_param] = normalized
                 continue
 
-            # Special handling for image_ref — upload if it's a local path
-            if canon == "image_ref":
-                ref_str = str(value)
-                ref_path = Path(ref_str)
-                if ref_path.is_file():
-                    # Upload local file to fal's temporary storage
-                    logger.info("Uploading image_ref to fal: %s", ref_path)
-                    ref_url = fal_upload(self._client, ref_path, api_key)
-                    payload[remote_param] = ref_url
-                else:
-                    # Assume it's already a URL
-                    payload[remote_param] = ref_str
-                continue
-
-            # Special handling for image_end_ref — upload if it's a local path (Sprint 04)
-            if canon == "image_end_ref":
-                ref_str = str(value)
-                ref_path = Path(ref_str)
-                if ref_path.is_file():
-                    logger.info("Uploading image_end_ref to fal: %s", ref_path)
-                    ref_url = fal_upload(self._client, ref_path, api_key)
-                    payload[remote_param] = ref_url
-                else:
-                    # Assume it's already a URL
-                    payload[remote_param] = ref_str
+            # Special handling for image_ref / image_end_ref — upload if local path
+            if canon in ("image_ref", "image_end_ref"):
+                payload[remote_param] = _upload_ref_if_local(
+                    str(value), remote_param, self._client, api_key
+                )
                 continue
 
             # Special handling for resolution — parse WxH, split into
             # width/height per param_map or write as single video_size string (Sprint 04)
             if canon == "resolution":
                 res_str = str(value)
-                parsed = _parse_resolution(res_str)
+                parsed = parse_dimension_pair(res_str)
                 if parsed:
                     w, h = parsed
                     # If param_map maps resolution to separate width/height keys
@@ -248,7 +219,8 @@ class FalBackend(BackendAdapter):
                     if remote_param == "video_size" or "width" not in param_map.values():
                         payload[remote_param] = f"{w}x{h}"
                     else:
-                        payload[remote_param] = f"{w}x{h}"
+                        payload["width"] = w
+                        payload["height"] = h
                 else:
                     payload[remote_param] = res_str
                 continue
@@ -337,6 +309,21 @@ class FalBackend(BackendAdapter):
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _upload_ref_if_local(
+    ref_str: str,
+    feature_name: str,
+    client: HttpClient,
+    api_key: str,
+) -> str:
+    """Upload *ref_str* to fal if it is a local path; otherwise return as-is."""
+    ref_path = Path(ref_str)
+    if ref_path.is_file():
+        logger.info("Uploading %s to fal: %s", feature_name, ref_path)
+        return fal_upload(client, ref_path, api_key)
+    # Assume it's already a URL
+    return ref_str
 
 
 def _extract_asset_urls(result: dict[str, Any]) -> list[str]:

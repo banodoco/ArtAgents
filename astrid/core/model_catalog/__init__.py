@@ -13,7 +13,6 @@ from astrid.core.model_catalog.schema import (
     ModeSpec,
     Price,
     validate_lora_registry,
-    validate_registry,
 )
 
 __all__ = [
@@ -28,5 +27,4 @@ __all__ = [
     "ModelRegistry",
     "Price",
     "validate_lora_registry",
-    "validate_registry",
 ]

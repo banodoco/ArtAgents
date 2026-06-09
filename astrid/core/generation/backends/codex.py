@@ -15,7 +15,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from astrid.core.generation.backends.base import BackendAdapter, GenerationResult
+from astrid.core.generation.backends.base import (
+    BackendAdapter,
+    GenerationResult,
+    split_feature_support,
+)
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry
 
 logger = logging.getLogger(__name__)
@@ -100,20 +104,7 @@ class CodexBackend(BackendAdapter):
             for src in source_paths
         ]
         duration_ms = int((time.monotonic() - t0) * 1000)
-        applied = [
-            name
-            for name in (
-                "prompt",
-                "negative_prompt",
-                "seed",
-                "size",
-                "image_ref",
-                "strength",
-                "guidance_scale",
-                "steps",
-            )
-            if params.get(name) not in (None, "")
-        ]
+        applied, dropped = split_feature_support(params, mode_spec.supports)
         return GenerationResult(
             image_paths=image_paths,
             seed_used=int(params.get("seed") or 0),

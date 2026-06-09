@@ -141,49 +141,8 @@ class ModelEntry:
 def validate_registry(raw: dict[str, Any]) -> list[ModelEntry]:
     """Validate a raw registry dict and return a list of :class:`ModelEntry`.
 
-    The *raw* dict must have the top-level shape::
-
-        {
-            "schema_version": 2,
-            "models": [ { ... }, ... ]
-        }
-
-    Every model entry is checked:
-
-    * ``schema_version`` MUST be ``2``.  Any other version (including ``1``)
-      is rejected with a clear error message pointing at the Sprint-2
-      migration.
-
-    Per-model:
-
-    * ``id`` must be a non-empty string, unique across all entries.
-    * ``modality`` must be a non-empty string.
-    * ``closed``, if present, must be a boolean or ``null``.
-    * ``modes`` must be a non-empty dict.  At least one mode is required.
-    * Every mode key must be a canonical mode name for the model's modality
-      (image or video; no unknown modes).
-
-    Per-mode:
-
-    * ``requires`` MUST be a subset of ``supports``.
-    * ``backends`` must be a non-empty dict (at least one of ``local`` or
-      ``cloud`` must be present).
-    * Every backend key must be a built-in backend id or one declared by a
-      loaded pack extension.
-    * For the built-in ``"local"`` backend: ``template`` must be a non-empty
-      string.
-    * For the built-in ``"cloud"`` backend: ``endpoint`` must be a non-empty
-      string.
-    * Every key in ``param_map`` must be a valid ``Feature`` literal AND
-      must be present in the mode's ``supports``.
-    * Every feature in ``supports`` that appears in a backend's
-      ``param_map`` must have a non-empty value.
-
-    Returns:
-        A list of validated ``ModelEntry`` instances.
-
-    Raises:
-        ValueError: If any validation rule is violated.
+    Delegates to :func:`validate_registry_with_backends` with default
+    backend-id resolution.
     """
     return validate_registry_with_backends(raw)
 
@@ -439,11 +398,20 @@ def _validate_backend_spec(
     # param_map on this backend must have a non-empty value (already
     # enforced above).  Features in supports that are NOT in param_map
     # are allowed — they may be mapped on a different backend.
+    lora_endpoint = raw.get("lora_endpoint")
+    if lora_endpoint is not None:
+        if not isinstance(lora_endpoint, str) or not lora_endpoint.strip():
+            raise ValueError(
+                f"{path}.lora_endpoint: must be a non-empty string or null, "
+                f"got {type(lora_endpoint).__name__}"
+            )
+        lora_endpoint = lora_endpoint.strip()
+
     return BackendSpec(
         template=str(template),
         template_hash=str(template_hash),
         endpoint=str(endpoint),
-        lora_endpoint=raw.get("lora_endpoint"),
+        lora_endpoint=lora_endpoint,
         param_map=param_map,
         price=price,
     )
