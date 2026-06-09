@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import keyword
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -23,6 +22,13 @@ from astrid.core.contracts.capability_schema import (
 from astrid.core.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
 )
+from astrid.core.contracts._capability_common import (
+    _parse_cache,
+    _parse_isolation,
+    _validate_cache,
+    _validate_isolation,
+    _validate_unique_env_passthrough,
+)
 from astrid.core.contracts.schema import (
     CACHE_MODES,
     ISOLATION_MODES,
@@ -40,6 +46,8 @@ from astrid.core.contracts.schema import (
     PortType,
     Provenance,
     SafetyDeclaration,
+    to_capability_handle,
+    to_capability_json,
 )
 from astrid.core.contracts.schema import (
     Output as ExecutorOutput,
@@ -193,72 +201,7 @@ class ExecutorDefinition:
         return data
 
     def to_json(self, *, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
-
-
-def to_capability_handle(
-    definition: ExecutorDefinition,
-    *,
-    aliases: tuple[AliasRecord, ...] = (),
-    resolved_alias: str | None = None,
-    deprecated: bool = False,
-    deprecation_message: str = "",
-) -> CapabilityHandle:
-    """Adapt an ``ExecutorDefinition`` into a ``CapabilityHandle``.
-
-    Field mapping:
-
-    * ``canonical_id`` — ``definition.id`` (qualified form ``pack.name``)
-    * ``local_id`` — the portion after the first dot in ``definition.id``
-    * ``pack_id`` — the portion before the first dot in ``definition.id``
-    * ``kind`` — ``definition.kind`` (preserved as-is)
-    * ``provenance`` — source derived from metadata, default ``"pack"``
-    * ``safety`` — network flag from ``definition.isolation.network``
-
-    Alias metadata (*aliases*, *resolved_alias*, *deprecated*,
-    *deprecation_message*) is carried on the handle and never mutates
-    ``ExecutorDefinition.metadata``.
-    """
-    parts = definition.id.split(".", 1)
-    pack_id = parts[0]
-    local_id = parts[1] if len(parts) > 1 else definition.id
-
-    metadata = definition.metadata
-    metadata_source = metadata.get("source")
-    provenance_source = str(metadata_source) if metadata_source else "pack"
-
-    forked_from = str(metadata.get("forked_from") or "")
-    upstream_version = str(metadata.get("upstream_version") or "")
-    compatibility_token=str(metadata.get("compatibility_token") or "")
-    local_edit_state = str(metadata.get("local_edit_state") or "clean")
-    override_target = str(metadata.get("override_target") or "")
-
-    return CapabilityHandle(
-        canonical_id=definition.id,
-        local_id=local_id,
-        pack_id=pack_id,
-        kind=definition.kind,
-        name=definition.name,
-        version=definition.version,
-        provenance=Provenance(
-            source=provenance_source,
-            forked_from=forked_from or None,
-            upstream_version=upstream_version or None,
-            compatibility_token=compatibility_token or None,
-            resolved_alias=resolved_alias,
-        ),
-        safety=SafetyDeclaration(network=definition.isolation.network),
-        description=definition.description,
-        short_description=definition.short_description,
-        keywords=definition.keywords,
-        local_edit_state=local_edit_state,
-        override_target=override_target or None,
-        aliases=aliases,
-        deprecated=deprecated,
-        deprecation_message=deprecation_message,
-        inputs=definition.inputs,
-        outputs=definition.outputs,
-    )
+        return to_capability_json(self, indent=indent)
 
 
 def validate_executor_definition(raw: Any) -> ExecutorDefinition:
@@ -324,7 +267,7 @@ def _parse_executor(raw: Any) -> ExecutorDefinition:
         command = _parse_command(runtime_command, "executor.runtime.command")
     else:
         command = _parse_command(data.get("command"), "executor.command")
-    cache = _parse_cache(data.get("cache", {}), "executor.cache")
+    cache = _parse_cache(data.get("cache", {}), "executor.cache", primitives=_primitives)
     conditions = tuple(
         _parse_condition(item, f"executor.conditions[{index}]")
         for index, item in enumerate(_optional_list(data, "conditions", "executor.conditions"))
@@ -332,7 +275,7 @@ def _parse_executor(raw: Any) -> ExecutorDefinition:
     graph = _parse_graph(data.get("graph", {}), "executor.graph")
     clip_kinds_supported = tuple(_parse_clip_kinds_supported(data))
     pipeline_requirements = tuple(_optional_string_list(data, "pipeline_requirements", "executor.pipeline_requirements"))
-    isolation = _parse_isolation(data.get("isolation", {}), "executor.isolation")
+    isolation = _parse_isolation(data.get("isolation", {}), "executor.isolation", primitives=_primitives)
     metadata = data.get("metadata", {})
     if not isinstance(metadata, dict):
         raise ExecutorValidationError("executor.metadata must be an object")
@@ -493,18 +436,6 @@ def _parse_command_input_arg(raw: Any, path: str) -> CommandInputArg:
     )
 
 
-def _parse_cache(raw: Any, path: str) -> CachePolicy:
-    data = _require_mapping(raw, path)
-    return CachePolicy(
-        mode=_require_literal(
-            data.get("mode", "sentinel"), CACHE_MODES, f"{path}.mode", CacheMode
-        ),
-        sentinels=tuple(_optional_string_list(data, "sentinels", f"{path}.sentinels")),
-        always_run=_optional_bool(data, "always_run", f"{path}.always_run", default=False),
-        per_brief=_optional_bool(data, "per_brief", f"{path}.per_brief", default=False),
-    )
-
-
 def _parse_condition(raw: Any, path: str) -> ConditionSpec:
     data = _require_mapping(raw, path)
     kind = _require_literal(
@@ -527,19 +458,6 @@ def _parse_graph(raw: Any, path: str) -> GraphMetadata:
         depends_on=tuple(_optional_string_list(data, "depends_on", f"{path}.depends_on")),
         provides=tuple(_optional_string_list(data, "provides", f"{path}.provides")),
         consumes=tuple(_optional_string_list(data, "consumes", f"{path}.consumes")),
-    )
-
-
-def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
-    data = _require_mapping(raw, path)
-    return IsolationMetadata(
-        mode=_require_literal(
-            data.get("mode", "subprocess"), ISOLATION_MODES, f"{path}.mode", IsolationMode
-        ),
-        requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
-        binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
-        network=_optional_bool(data, "network", f"{path}.network", default=False),
-        env_passthrough=tuple(_optional_string_list(data, "env_passthrough", f"{path}.env_passthrough")),
     )
 
 
@@ -577,12 +495,12 @@ def _validate_executor(executor: ExecutorDefinition) -> None:
         if output.path_template:
             _validate_placeholders(output.path_template, placeholders, f"output {output.name!r}.path_template")
 
-    _validate_cache(executor.cache)
+    _validate_cache(executor.cache, error_cls=ExecutorValidationError)
     _validate_conditions(executor.conditions, input_names)
     _validate_graph(executor.graph)
     _validate_clip_kinds_supported(executor.clip_kinds_supported)
     _validate_pipeline_requirements(executor.pipeline_requirements)
-    _validate_isolation(executor.isolation)
+    _validate_isolation(executor.isolation, error_cls=ExecutorValidationError)
     _validate_external_runtime(executor)
     if executor.command is not None:
         _validate_command(executor.command, placeholders)
@@ -609,17 +527,6 @@ def _validate_output(output: ExecutorOutput) -> None:
             raise ExecutorValidationError(f"output {output.name!r}.extension must be 16 characters or fewer")
         if any(char in output.extension for char in ("/", "\\")):
             raise ExecutorValidationError(f"output {output.name!r}.extension must not contain path separators")
-
-
-def _validate_cache(cache: CachePolicy) -> None:
-    if cache.mode not in CACHE_MODES:
-        raise ExecutorValidationError(f"cache.mode must be one of {sorted(CACHE_MODES)}")
-    if cache.always_run and cache.sentinels:
-        raise ExecutorValidationError("cache.always_run cannot be combined with cache.sentinels")
-    if cache.mode == "none" and (cache.sentinels or cache.always_run or cache.per_brief):
-        raise ExecutorValidationError("cache.mode 'none' cannot include sentinels, always_run, or per_brief")
-    if cache.mode == "always_run" and not cache.always_run:
-        raise ExecutorValidationError("cache.mode 'always_run' requires cache.always_run=true")
 
 
 def _validate_conditions(conditions: tuple[ConditionSpec, ...], input_names: set[str]) -> None:
@@ -665,24 +572,6 @@ def _validate_pipeline_requirements(values: tuple[str, ...]) -> None:
         if value in seen:
             raise ExecutorValidationError(f"pipeline_requirements contains duplicate fact {value!r}")
         seen.add(value)
-
-
-def _validate_isolation(isolation: IsolationMetadata) -> None:
-    if isolation.mode not in ISOLATION_MODES:
-        raise ExecutorValidationError(f"isolation.mode must be one of {sorted(ISOLATION_MODES)}")
-    _validate_unique_env_passthrough(isolation.env_passthrough)
-
-
-def _validate_unique_env_passthrough(values: tuple[str, ...]) -> None:
-    seen: set[str] = set()
-    for index, value in enumerate(values):
-        _validate_env_name(value, f"isolation.env_passthrough[{index}]")
-        if value in seen:
-            raise ExecutorValidationError(f"isolation.env_passthrough contains duplicate name {value!r}")
-        seen.add(value)
-
-
-_validate_env_name = _primitives.validate_env_name
 
 
 def _validate_external_runtime(executor: ExecutorDefinition) -> None:

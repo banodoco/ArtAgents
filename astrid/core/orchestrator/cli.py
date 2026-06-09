@@ -39,11 +39,15 @@ from .schema import OrchestratorDefinition, OrchestratorValidationError, to_capa
 from astrid.core.contracts._capability_common import (
     _aliases_text,
     _banodoco_config_from_args,
+    _definition_content_root,
+    _definition_pack_id,
     _eprint,
+    _filter_by_pack,
     _format_invocation_hint,
     _gateway_resolved_project,
     _print_invocation_example,
     _print_ports,
+    _require_pack_match,
     _require_qualified_id,
 )
 
@@ -469,7 +473,7 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
         alias_record = registry.alias_resolver.get_record(requested_id)
 
     orchestrator = registry.get(requested_id)
-    _require_pack_match(orchestrator, getattr(args, "pack", None))
+    _require_pack_match(orchestrator, getattr(args, "pack", None), component_type="orchestrator")
     show_overrides = bool(getattr(args, "show_overrides", False))
 
     # Collect alias metadata for the capability handle.
@@ -554,24 +558,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
                 print(f"  # discover pack args: python3 -m {module} --help")
             print("  # anything after `--` is forwarded verbatim to the pack runtime.")
     return 0
-
-
-def _definition_pack_id(definition: OrchestratorDefinition) -> str:
-    source_pack = definition.metadata.get("source_pack")
-    if isinstance(source_pack, str) and source_pack:
-        return source_pack
-    return definition.id.split(".", 1)[0]
-
-
-def _filter_by_pack(definitions: list[OrchestratorDefinition], pack_id: str | None) -> list[OrchestratorDefinition]:
-    if not pack_id:
-        return definitions
-    return [definition for definition in definitions if _definition_pack_id(definition) == pack_id]
-
-
-def _require_pack_match(definition: OrchestratorDefinition, pack_id: str | None) -> None:
-    if pack_id and _definition_pack_id(definition) != pack_id:
-        raise ValueError(f"orchestrator {definition.id!r} does not belong to pack {pack_id!r}")
 
 
 def _cmd_validate(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
@@ -681,14 +667,14 @@ def _cmd_dirty(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
     action = getattr(args, "dirty_action", None)
     if action == "check":
         orchestrator = registry.get(args.orchestrator_id)
-        content_root = _orchestrator_content_root(orchestrator)
+        content_root = _definition_content_root(orchestrator, fallback_root_key="orchestrator_root")
         forked_from = str(orchestrator.metadata.get("forked_from") or "")
         state = detect_local_edits(content_root, forked_from=forked_from)
         print(f"orchestrator/{orchestrator.id}: {state}")
     elif action == "list":
         dirty_found = 0
         for orchestrator in registry.list():
-            content_root = _orchestrator_content_root(orchestrator)
+            content_root = _definition_content_root(orchestrator, fallback_root_key="orchestrator_root")
             forked_from = str(orchestrator.metadata.get("forked_from") or "")
             state = detect_local_edits(content_root, forked_from=forked_from)
             if state != "clean":
@@ -724,18 +710,6 @@ def _cmd_update(args: argparse.Namespace, registry: OrchestratorRegistry) -> int
     else:
         _eprint(f"orchestrators update: unknown action {action!r}")
         return 2
-
-
-def _orchestrator_content_root(definition: OrchestratorDefinition) -> Path:
-    """Extract content root from orchestrator definition metadata."""
-    root_str = definition.metadata.get("content_root")
-    if root_str:
-        return Path(root_str)
-    # Fallback to orchestrator_root metadata key.
-    root_str = definition.metadata.get("orchestrator_root")
-    if root_str:
-        return Path(root_str)
-    return Path.cwd()
 
 
 if __name__ == "__main__":

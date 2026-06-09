@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal, get_args
+from typing import Any, Literal, Protocol, get_args, runtime_checkable
 
 PortType = Literal[
     "string", "path", "file", "directory", "json", "boolean", "number", "integer", "html"
@@ -151,6 +152,112 @@ class CapabilityHandle:
         return asdict(self)
 
 
+# ---------------------------------------------------------------------------
+# Shared ``to_json`` helper (used by both ExecutorDefinition and
+# OrchestratorDefinition — their implementations were 100 % identical).
+# ---------------------------------------------------------------------------
+
+
+def to_capability_json(obj: Any, *, indent: int | None = 2) -> str:
+    """Serialize *obj* (which must have ``.to_dict()``) to sorted JSON."""
+    return json.dumps(obj.to_dict(), indent=indent, sort_keys=True)
+
+
+# ---------------------------------------------------------------------------
+# Protocol for capability definitions that can be adapted into a CapabilityHandle
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class HasCapabilityFields(Protocol):
+    """Structural protocol for any Definition that carries capability identity fields.
+
+    Both ``ExecutorDefinition`` and ``OrchestratorDefinition`` satisfy this
+    protocol, which allows ``to_capability_handle`` to be a single generic
+    function in the shared contracts layer.
+    """
+
+    id: str
+    name: str
+    kind: str
+    version: str
+    description: str
+    short_description: str
+    keywords: tuple[str, ...]
+    inputs: tuple[Port, ...]
+    outputs: tuple[Output, ...]
+    isolation: IsolationMetadata
+    metadata: dict[str, Any]
+
+
+def to_capability_handle(
+    definition: HasCapabilityFields,
+    *,
+    aliases: tuple[AliasRecord, ...] = (),
+    resolved_alias: str | None = None,
+    deprecated: bool = False,
+    deprecation_message: str = "",
+) -> CapabilityHandle:
+    """Adapt a capability definition into a shared ``CapabilityHandle``.
+
+    Works with any definition that satisfies ``HasCapabilityFields``
+    (``ExecutorDefinition``, ``OrchestratorDefinition``, etc.).
+
+    Field mapping:
+
+    * ``canonical_id`` — ``definition.id`` (qualified form ``pack.name``)
+    * ``local_id`` — the portion after the first dot in ``definition.id``
+    * ``pack_id`` — the portion before the first dot in ``definition.id``
+    * ``kind`` — ``definition.kind`` (preserved as-is)
+    * ``provenance`` — source derived from metadata, default ``"pack"``
+    * ``safety`` — network flag from ``definition.isolation.network``
+
+    Alias metadata (*aliases*, *resolved_alias*, *deprecated*,
+    *deprecation_message*) is carried on the handle and never mutates
+    the definition's ``.metadata``.
+    """
+    parts = definition.id.split(".", 1)
+    pack_id = parts[0]
+    local_id = parts[1] if len(parts) > 1 else definition.id
+
+    metadata = definition.metadata
+    metadata_source = metadata.get("source")
+    provenance_source = str(metadata_source) if metadata_source else "pack"
+
+    forked_from = str(metadata.get("forked_from") or "")
+    upstream_version = str(metadata.get("upstream_version") or "")
+    compatibility_token = str(metadata.get("compatibility_token") or "")
+    local_edit_state = str(metadata.get("local_edit_state") or "clean")
+    override_target = str(metadata.get("override_target") or "")
+
+    return CapabilityHandle(
+        canonical_id=definition.id,
+        local_id=local_id,
+        pack_id=pack_id,
+        kind=definition.kind,
+        name=definition.name,
+        version=definition.version,
+        provenance=Provenance(
+            source=provenance_source,
+            forked_from=forked_from or None,
+            upstream_version=upstream_version or None,
+            compatibility_token=compatibility_token or None,
+            resolved_alias=resolved_alias,
+        ),
+        safety=SafetyDeclaration(network=definition.isolation.network),
+        description=definition.description,
+        short_description=definition.short_description,
+        keywords=definition.keywords,
+        local_edit_state=local_edit_state,
+        override_target=override_target or None,
+        aliases=aliases,
+        deprecated=deprecated,
+        deprecation_message=deprecation_message,
+        inputs=definition.inputs,
+        outputs=definition.outputs,
+    )
+
+
 __all__ = [
     "CACHE_MODES",
     "CacheMode",
@@ -166,9 +273,11 @@ __all__ = [
     "CommandInputArg",
     "CapabilityHandle",
     "CommandSpec",
+    "HasCapabilityFields",
     "IsolationMetadata",
     "Output",
     "Port",
     "Provenance",
     "SafetyDeclaration",
+    "to_capability_handle",
 ]

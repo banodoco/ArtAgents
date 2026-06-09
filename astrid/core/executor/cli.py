@@ -36,12 +36,16 @@ from .schema import ExecutorDefinition, ExecutorValidationError, to_capability_h
 from astrid.core.contracts._capability_common import (
     _aliases_text,
     _banodoco_config_from_args,
+    _definition_content_root,
+    _definition_pack_id,
     _eprint,
     _example_path_for_port,
+    _filter_by_pack,
     _format_invocation_hint,
     _gateway_resolved_project,
     _print_invocation_example,
     _print_ports,
+    _require_pack_match,
     _require_qualified_id,
 )
 
@@ -436,7 +440,7 @@ def _cmd_inspect(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
         alias_record = registry.alias_resolver.get_record(requested_id)
 
     executor = registry.get(requested_id)
-    _require_pack_match(executor, getattr(args, "pack", None))
+    _require_pack_match(executor, getattr(args, "pack", None), component_type="executor")
     show_overrides = bool(getattr(args, "show_overrides", False))
 
     # Collect alias metadata for the capability handle.
@@ -500,24 +504,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
             print("override: none")
     _print_invocation_example("executors", executor.id, executor.inputs)
     return 0
-
-
-def _definition_pack_id(definition: ExecutorDefinition) -> str:
-    source_pack = definition.metadata.get("source_pack")
-    if isinstance(source_pack, str) and source_pack:
-        return source_pack
-    return definition.id.split(".", 1)[0]
-
-
-def _filter_by_pack(definitions: list[ExecutorDefinition], pack_id: str | None) -> list[ExecutorDefinition]:
-    if not pack_id:
-        return definitions
-    return [definition for definition in definitions if _definition_pack_id(definition) == pack_id]
-
-
-def _require_pack_match(definition: ExecutorDefinition, pack_id: str | None) -> None:
-    if pack_id and _definition_pack_id(definition) != pack_id:
-        raise ValueError(f"executor {definition.id!r} does not belong to pack {pack_id!r}")
 
 
 def _cmd_validate(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
@@ -804,14 +790,14 @@ def _cmd_dirty(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     action = getattr(args, "dirty_action", None)
     if action == "check":
         executor = registry.get(args.executor_id)
-        content_root = _definition_content_root(executor)
+        content_root = _definition_content_root(executor, fallback_root_key="executor_root")
         forked_from = str(executor.metadata.get("forked_from") or "")
         state = detect_local_edits(content_root, forked_from=forked_from)
         print(f"executor/{executor.id}: {state}")
     elif action == "list":
         dirty_found = 0
         for executor in registry.list():
-            content_root = _definition_content_root(executor)
+            content_root = _definition_content_root(executor, fallback_root_key="executor_root")
             forked_from = str(executor.metadata.get("forked_from") or "")
             state = detect_local_edits(content_root, forked_from=forked_from)
             if state != "clean":
@@ -847,18 +833,6 @@ def _cmd_update(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     else:
         _eprint(f"executors update: unknown action {action!r}")
         return 2
-
-
-def _definition_content_root(definition: ExecutorDefinition) -> Path:
-    """Extract content root from executor definition metadata."""
-    root_str = definition.metadata.get("content_root")
-    if root_str:
-        return Path(root_str)
-    # Fallback to executor_root metadata key.
-    root_str = definition.metadata.get("executor_root")
-    if root_str:
-        return Path(root_str)
-    return Path.cwd()
 
 
 if __name__ == "__main__":

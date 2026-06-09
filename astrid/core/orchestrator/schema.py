@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 from typing import Literal as _Literal
 from typing import get_args as _get_args
 
+from astrid.core.contracts._capability_common import (
+    _parse_cache,
+    _parse_isolation,
+    _validate_cache,
+    _validate_isolation,
+    _validate_unique_env_passthrough,
+)
 from astrid.core.contracts.capability_schema import (
     DESCRIPTION_MAX_LEN,
     KEYWORD_MAX_LEN,
@@ -40,6 +46,8 @@ from astrid.core.contracts.schema import (
     PortType,
     Provenance,
     SafetyDeclaration,
+    to_capability_handle,
+    to_capability_json,
 )
 from astrid.core.pack.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
 
@@ -89,72 +97,7 @@ class OrchestratorDefinition:
         return _drop_none(asdict(self))
 
     def to_json(self, *, indent: int | None = 2) -> str:
-        return json.dumps(self.to_dict(), indent=indent, sort_keys=True)
-
-
-def to_capability_handle(
-    definition: OrchestratorDefinition,
-    *,
-    aliases: tuple[AliasRecord, ...] = (),
-    resolved_alias: str | None = None,
-    deprecated: bool = False,
-    deprecation_message: str = "",
-) -> CapabilityHandle:
-    """Adapt an ``OrchestratorDefinition`` into a ``CapabilityHandle``.
-
-    Field mapping mirrors the executor adapter:
-
-    * ``canonical_id`` — ``definition.id`` (qualified form ``pack.name``)
-    * ``local_id`` — the portion after the first dot in ``definition.id``
-    * ``pack_id`` — the portion before the first dot in ``definition.id``
-    * ``kind`` — ``definition.kind`` (preserved as-is)
-    * ``provenance`` — source derived from metadata, default ``"pack"``
-    * ``safety`` — network flag from ``definition.isolation.network``
-
-    Alias metadata (*aliases*, *resolved_alias*, *deprecated*,
-    *deprecation_message*) is carried on the handle and never mutates
-    ``OrchestratorDefinition.metadata``.
-    """
-    parts = definition.id.split(".", 1)
-    pack_id = parts[0]
-    local_id = parts[1] if len(parts) > 1 else definition.id
-
-    metadata = definition.metadata
-    metadata_source = metadata.get("source")
-    provenance_source = str(metadata_source) if metadata_source else "pack"
-
-    forked_from = str(metadata.get("forked_from") or "")
-    upstream_version = str(metadata.get("upstream_version") or "")
-    compatibility_token=str(metadata.get("compatibility_token") or "")
-    local_edit_state = str(metadata.get("local_edit_state") or "clean")
-    override_target = str(metadata.get("override_target") or "")
-
-    return CapabilityHandle(
-        canonical_id=definition.id,
-        local_id=local_id,
-        pack_id=pack_id,
-        kind=definition.kind,
-        name=definition.name,
-        version=definition.version,
-        provenance=Provenance(
-            source=provenance_source,
-            forked_from=forked_from or None,
-            upstream_version=upstream_version or None,
-            compatibility_token=compatibility_token or None,
-            resolved_alias=resolved_alias,
-        ),
-        safety=SafetyDeclaration(network=definition.isolation.network),
-        description=definition.description,
-        short_description=definition.short_description,
-        keywords=definition.keywords,
-        local_edit_state=local_edit_state,
-        override_target=override_target or None,
-        aliases=aliases,
-        deprecated=deprecated,
-        deprecation_message=deprecation_message,
-        inputs=definition.inputs,
-        outputs=definition.outputs,
-    )
+        return to_capability_json(self, indent=indent)
 
 
 def validate_orchestrator_definition(raw: Any) -> OrchestratorDefinition:
@@ -218,8 +161,8 @@ def _parse_orchestrator(raw: Any) -> OrchestratorDefinition:
         outputs=tuple(_parse_output(item, f"orchestrator.outputs[{index}]") for index, item in enumerate(_optional_list(data, "outputs", "orchestrator.outputs"))),
         child_executors=tuple(child_executors),
         child_orchestrators=tuple(child_orchestrators),
-        cache=_parse_cache(data.get("cache", {}), "orchestrator.cache"),
-        isolation=_parse_isolation(data.get("isolation", {}), "orchestrator.isolation"),
+        cache=_parse_cache(data.get("cache", {}), "orchestrator.cache", primitives=_primitives),
+        isolation=_parse_isolation(data.get("isolation", {}), "orchestrator.isolation", primitives=_primitives),
         metadata=dict(metadata),
     )
 
@@ -314,31 +257,6 @@ def _parse_command(raw: Any, path: str) -> CommandSpec | None:
     )
 
 
-def _parse_cache(raw: Any, path: str) -> CachePolicy:
-    data = _require_mapping(raw, path)
-    return CachePolicy(
-        mode=_require_literal(
-            data.get("mode", "sentinel"), CACHE_MODES, f"{path}.mode", CacheMode
-        ),
-        sentinels=tuple(_optional_string_list(data, "sentinels", f"{path}.sentinels")),
-        always_run=_optional_bool(data, "always_run", f"{path}.always_run", default=False),
-        per_brief=_optional_bool(data, "per_brief", f"{path}.per_brief", default=False),
-    )
-
-
-def _parse_isolation(raw: Any, path: str) -> IsolationMetadata:
-    data = _require_mapping(raw, path)
-    return IsolationMetadata(
-        mode=_require_literal(
-            data.get("mode", "subprocess"), ISOLATION_MODES, f"{path}.mode", IsolationMode
-        ),
-        requirements=tuple(_optional_string_list(data, "requirements", f"{path}.requirements")),
-        binaries=tuple(_optional_string_list(data, "binaries", f"{path}.binaries")),
-        network=_optional_bool(data, "network", f"{path}.network", default=False),
-        env_passthrough=tuple(_optional_string_list(data, "env_passthrough", f"{path}.env_passthrough")),
-    )
-
-
 def _validate_orchestrator(orchestrator: OrchestratorDefinition) -> None:
     _validate_qualified_identifier(orchestrator.id, "orchestrator.id")
     _validate_non_empty_string(orchestrator.name, "orchestrator.name")
@@ -375,8 +293,8 @@ def _validate_orchestrator(orchestrator: OrchestratorDefinition) -> None:
         _validate_qualified_identifier(child_executor, f"orchestrator.child_executors[{index}]")
     for index, child_orchestrator in enumerate(orchestrator.child_orchestrators):
         _validate_qualified_identifier(child_orchestrator, f"orchestrator.child_orchestrators[{index}]")
-    _validate_cache(orchestrator.cache)
-    _validate_isolation(orchestrator.isolation)
+    _validate_cache(orchestrator.cache, error_cls=OrchestratorValidationError)
+    _validate_isolation(orchestrator.isolation, error_cls=OrchestratorValidationError)
     if orchestrator.runtime.command is not None:
         _validate_command(orchestrator.runtime.command, placeholders)
 
@@ -407,35 +325,6 @@ def _validate_output(output: Output) -> None:
     _validate_non_empty_identifier(output.name, "output.name")
     if output.mode not in OUTPUT_MODES:
         raise OrchestratorValidationError(f"output {output.name!r}.mode must be one of ['create', 'create_or_replace', 'mutate']")
-
-
-def _validate_cache(cache: CachePolicy) -> None:
-    if cache.mode not in CACHE_MODES:
-        raise OrchestratorValidationError("cache.mode must be one of ['always_run', 'none', 'sentinel']")
-    if cache.always_run and cache.sentinels:
-        raise OrchestratorValidationError("cache.always_run cannot be combined with cache.sentinels")
-    if cache.mode == "none" and (cache.sentinels or cache.always_run or cache.per_brief):
-        raise OrchestratorValidationError("cache.mode 'none' cannot include sentinels, always_run, or per_brief")
-    if cache.mode == "always_run" and not cache.always_run:
-        raise OrchestratorValidationError("cache.mode 'always_run' requires cache.always_run=true")
-
-
-def _validate_isolation(isolation: IsolationMetadata) -> None:
-    if isolation.mode not in ISOLATION_MODES:
-        raise OrchestratorValidationError("isolation.mode must be one of ['in_process', 'subprocess']")
-    _validate_unique_env_passthrough(isolation.env_passthrough)
-
-
-_validate_env_name = _primitives.validate_env_name
-
-
-def _validate_unique_env_passthrough(values: tuple[str, ...]) -> None:
-    seen: set[str] = set()
-    for index, value in enumerate(values):
-        _validate_env_name(value, f"isolation.env_passthrough[{index}]")
-        if value in seen:
-            raise OrchestratorValidationError(f"isolation.env_passthrough contains duplicate name {value!r}")
-        seen.add(value)
 
 
 def _validate_command(command: CommandSpec, placeholders: set[str]) -> None:
