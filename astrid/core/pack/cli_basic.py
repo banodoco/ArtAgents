@@ -26,19 +26,10 @@ from astrid.core.pack.validate import (
     validate_pack,
 )
 
+from ._cli_shared import _TAXONOMY_FIELDS, _pack_payload
+
 # Must match the pack_id pattern in _defs.json: lowercase, digits, underscore
 _PACK_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-
-# Duplicated from .cli to avoid circular import.  Keep in sync with
-# _TAXONOMY_FIELDS in astrid.core.pack.cli and astrid.core.pack.cli_parser.
-_TAXONOMY_FIELDS = (
-    "origin",
-    "install_tier",
-    "pack_type",
-    "domain",
-    "stability",
-    "support",
-)
 
 _SKILL_MD_STUB = """# {pack_name} — Agent Guide
 
@@ -452,9 +443,6 @@ def _handle_new(args: argparse.Namespace) -> int:
 
 def _handle_list(args: argparse.Namespace) -> int:
     """Handler for ``packs list``."""
-    # _pack_payload is defined in .cli; late-import to avoid circular deps.
-    from .cli import _pack_payload
-
     packs = _filtered_packs(args)
     rows = [_pack_payload(pack) for pack in packs]
     if args.json:
@@ -466,9 +454,6 @@ def _handle_list(args: argparse.Namespace) -> int:
 
 def _handle_status(args: argparse.Namespace) -> int:
     """Handler for ``packs status``."""
-    # _pack_payload is defined in .cli; late-import to avoid circular deps.
-    from .cli import _pack_payload
-
     packs = _filtered_packs(args)
     rows: list[dict[str, Any]] = []
     for pack in packs:

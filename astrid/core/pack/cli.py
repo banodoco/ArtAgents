@@ -15,10 +15,16 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Any, Optional
+from typing import Optional
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.pack import PackDefinition
+
+from ._cli_shared import (  # noqa: E402
+    _pack_payload,
+    _pack_taxonomy,
+    _print_taxonomy_block,
+    _TAXONOMY_FIELDS,
+)
 
 # ── Re-exports from split modules ───────────────────────────────────────────
 # build_parser and _add_taxonomy_filter_args are now defined in cli_parser.
@@ -81,35 +87,6 @@ from astrid.core.pack.validate import (  # noqa: E402, F401
     extract_trust_summary,
     validate_pack,
 )
-
-# ── Shared constants ────────────────────────────────────────────────────────
-
-_TAXONOMY_FIELDS = (
-    "origin",
-    "install_tier",
-    "pack_type",
-    "domain",
-    "stability",
-    "support",
-)
-
-
-# ── Shared helpers (used by both basic and inspect handlers) ──────────────
-
-
-def _pack_payload(pack: PackDefinition) -> dict:
-    return pack.to_dict()
-
-
-def _pack_taxonomy(pack: PackDefinition) -> dict[str, str]:
-    return {field: getattr(pack, field) for field in _TAXONOMY_FIELDS}
-
-
-def _print_taxonomy_block(taxonomy: dict[str, Any], *, indent: str = "") -> None:
-    print(f"{indent}taxonomy:")
-    for field in _TAXONOMY_FIELDS:
-        print(f"{indent}  {field}: {taxonomy.get(field, '')}")
-
 
 # ── install / update / uninstall / rollback handlers ─────────────────────
 # These are thin delegation wrappers that stay in the facade because they

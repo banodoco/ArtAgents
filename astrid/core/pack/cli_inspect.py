@@ -28,6 +28,8 @@ from astrid.core.pack.validate import (
     extract_trust_summary,
 )
 
+from ._cli_shared import _pack_payload, _pack_taxonomy, _print_taxonomy_block
+
 # ---------------------------------------------------------------------------
 # pack inspect
 # ---------------------------------------------------------------------------
@@ -584,9 +586,6 @@ def _build_full_inspect(
 
 def _print_full_inspect(data: dict) -> None:
     """Pretty-print a full pack inspect result."""
-    # Late import for _print_taxonomy_block from the .cli facade
-    from .cli import _print_taxonomy_block
-
     print(f"━━━ Pack: {data['pack_id']} ━━━")
     print(f"  Name:          {data['name']}")
     print(f"  Version:       {data['version']}")
@@ -771,9 +770,6 @@ def _print_full_inspect(data: dict) -> None:
 
 def _inspect_discovered_pack(*, pack_id: str, agent: bool, json_output: bool) -> int:
     """Render discovery-backed inspect output for non-installed packs."""
-    # Late imports from .cli facade for shared helpers
-    from .cli import _pack_payload, _pack_taxonomy, _print_taxonomy_block
-
     packs = {pack.id: pack for pack in discover_packs(packs_root(), include_hidden=True)}
     pack = packs.get(pack_id)
     if pack is None:
