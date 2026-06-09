@@ -12,7 +12,6 @@ from typing import Any
 from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core.dirty import detect_local_edits
-from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
 from astrid.core.scaffold import (
@@ -37,9 +36,16 @@ from .registry import OrchestratorRegistry, load_default_registry
 from .schema import OrchestratorDefinition, OrchestratorValidationError, to_capability_handle
 
 
-# Shared stderr sink for command previews and legacy override diagnostics.
-def _eprint(*args: object) -> None:
-    print(*args, file=sys.stderr)
+from astrid.core.contracts._capability_common import (
+    _aliases_text,
+    _banodoco_config_from_args,
+    _eprint,
+    _format_invocation_hint,
+    _gateway_resolved_project,
+    _print_invocation_example,
+    _print_ports,
+    _require_qualified_id,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         # Create OverrideStore so --show-overrides and override set/remove/list work.
         override_store = OverrideStore(project_root=project_root)
         registry = load_default_registry(
-            banodoco_config=_banodoco_config_from_args(args),
+            banodoco_config=_banodoco_config_from_args(args, agent_flag="banodoco_agent_orchestrators"),
             project_root=project_root,
             extra_pack_roots=tuple(args.pack_root),
         )
@@ -380,20 +386,6 @@ if __name__ == \"__main__\":
 """
 
 
-def _banodoco_config_from_args(args: argparse.Namespace) -> BanodocoCatalogConfig:
-    env_config = BanodocoCatalogConfig.from_env()
-    enabled = bool(args.banodoco_agent_orchestrators or env_config.enabled)
-    return BanodocoCatalogConfig(
-        enabled=enabled,
-        catalog_url=args.banodoco_catalog_url or env_config.catalog_url,
-        include_defaults=False if args.no_banodoco_defaults else env_config.include_defaults,
-        include_mandatory=False if args.no_banodoco_mandatory else env_config.include_mandatory,
-        cache_dir=Path(args.banodoco_cache_dir).expanduser() if args.banodoco_cache_dir else env_config.cache_dir,
-        refresh=bool(args.banodoco_refresh or env_config.refresh),
-        timeout_seconds=env_config.timeout_seconds,
-    )
-
-
 def _cmd_list(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
     orchestrators = _filter_by_pack(registry.list(kind=args.kind), getattr(args, "pack", None))
     show_overrides = bool(getattr(args, "show_overrides", False))
@@ -417,8 +409,6 @@ def _cmd_list(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
         if no_describe:
             print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}{override_tag}")
         else:
-            from astrid.core.executor.cli import _format_invocation_hint
-
             short = short_description_or_truncated(orchestrator.short_description, orchestrator.description)
             invoke = _format_invocation_hint("orchestrators", orchestrator.id, orchestrator.inputs)
             print(f"{orchestrator.id}\t{orchestrator.kind}\t{orchestrator.name}\t{short}\t{invoke}{override_tag}")
@@ -450,27 +440,6 @@ def _cmd_search(args: argparse.Namespace, registry: OrchestratorRegistry) -> int
     for hit in hits:
         print(f"{hit.score:.2f}\t{hit.record.id}\t{hit.record.kind}\t{hit.record.short_description}")
     return 0
-
-
-def _aliases_text(resolver: Any, canonical_id: str) -> str:
-    """Return a space-joined string of alias ids for *canonical_id*.
-
-    Deprecated aliases get a ``[deprecated]`` suffix so the deprecation
-    status is visible to search scoring and human-readable output.
-    Returns the empty string when there are no aliases.
-    """
-    records = resolver.get_aliases_for(canonical_id)
-    if not records:
-        return ""
-    parts: list[str] = []
-    for r in records:
-        part = r.alias
-        if r.deprecated:
-            part += " [deprecated]"
-        if r.deprecation_message:
-            part += " " + r.deprecation_message
-        parts.append(part)
-    return " ".join(parts)
 
 
 def _orchestrator_search_record(orchestrator: OrchestratorDefinition, *, aliases: str = "") -> SearchRecord:
@@ -566,7 +535,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: OrchestratorRegistry) -> in
     # passthrough case, but plain `--input <port>=<path>` wiring needs its
     # own example so agents don't guess at the flag shape from `run --help`.
     if orchestrator.inputs:
-        from astrid.core.executor.cli import _print_invocation_example
         _print_invocation_example("orchestrators", orchestrator.id, orchestrator.inputs)
     if orchestrator.runtime.command is not None:
         print(f"command: {shlex.join(orchestrator.runtime.command.argv)}")
@@ -644,15 +612,6 @@ def _cmd_run(args: argparse.Namespace, registry: OrchestratorRegistry) -> int:
     return int(result.returncode or 0)
 
 
-def _gateway_resolved_project(explicit_project: str | None) -> str | None:
-    if explicit_project is not None:
-        return None
-    from astrid.core.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
-
-    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
-    return value or None
-
-
 def _parse_input_values(raw_values: list[str]) -> dict[str, str]:
     values: dict[str, str] = {}
     for raw in raw_values:
@@ -664,11 +623,6 @@ def _parse_input_values(raw_values: list[str]) -> dict[str, str]:
             raise ValueError(f"invalid --input value {raw!r}; expected NAME=VALUE")
         values[key] = value
     return values
-
-
-def _require_qualified_id(value: str, label: str) -> None:
-    if "." not in value or any(not part for part in value.split(".")):
-        raise ValueError(f"{label} must be qualified as <pack>.<name>")
 
 
 def _split_run_passthrough(argv: list[str]) -> tuple[list[str], list[str]]:
@@ -686,15 +640,6 @@ def _print_run_result(result: Any) -> None:
     if result.errors:
         for error in result.errors:
             _eprint(f"{error.kind}: {error.message}")
-
-
-def _print_ports(label: str, ports: tuple[Any, ...]) -> None:
-    if not ports:
-        return
-    print(f"{label}:")
-    for port in ports:
-        required = "required" if port.required else "optional"
-        print(f"  - {port.name} ({port.type}, {required})")
 
 
 def _print_outputs(orchestrator: OrchestratorDefinition) -> None:

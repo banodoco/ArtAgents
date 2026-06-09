@@ -57,7 +57,11 @@ from .schema import (
     ExecutorValidationError,
 )
 
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+from astrid.core.contracts._capability_common import (
+    _PLACEHOLDER_RE,
+    _has_value,
+    _stringify_value,
+)
 
 
 class ExecutorRunnerError(ExecutorValidationError):
@@ -1042,10 +1046,6 @@ def _request_values(request: ExecutorRunRequest) -> dict[str, Any]:
     return values
 
 
-def _has_value(value: Any) -> bool:
-    return value is not None and value != ""
-
-
 def _optional_path(value: Any) -> Path | None:
     if value is None or value == "":
         return None
@@ -1107,14 +1107,6 @@ def _normalize_extra_args(value: Any) -> dict[str, list[str]]:
 def _default_brief_slug(brief: Path, out: Path) -> str:
     generic_brief_names = {"brief", "plan", "prompt"}
     return out.name if brief.stem.lower() in generic_brief_names else brief.stem
-
-
-def _stringify_value(value: Any) -> str:
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (list, tuple)):
-        return ",".join(str(item) for item in value)
-    return str(value)
 
 
 def _iter_input_values(value: Any) -> tuple[Any, ...]:

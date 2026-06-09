@@ -29,14 +29,21 @@ from astrid.core.search import (
 )
 from astrid.core.update import update_apply, update_check
 
-from .banodoco_catalog import BanodocoCatalogConfig
 from .registry import ExecutorRegistry, load_default_registry
 from .schema import ExecutorDefinition, ExecutorValidationError, to_capability_handle
 
 
-# Shared stderr sink for command previews and legacy override diagnostics.
-def _eprint(*args: object) -> None:
-    print(*args, file=sys.stderr)
+from astrid.core.contracts._capability_common import (
+    _aliases_text,
+    _banodoco_config_from_args,
+    _eprint,
+    _example_path_for_port,
+    _format_invocation_hint,
+    _gateway_resolved_project,
+    _print_invocation_example,
+    _print_ports,
+    _require_qualified_id,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -55,7 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         # Create OverrideStore so --show-overrides and override set/remove/list work.
         override_store = OverrideStore(project_root=project_root)
         registry = load_default_registry(
-            _banodoco_config_from_args(args), project_root=project_root,
+            _banodoco_config_from_args(args, agent_flag="banodoco_agent_executors"), project_root=project_root,
             extra_pack_roots=tuple(args.pack_root),
         )
         registry.override_store = override_store
@@ -345,20 +352,6 @@ if __name__ == "__main__":
 # in astrid.core.scaffold; _scaffold_component consumes STAGE_MD_TEMPLATE there.
 
 
-def _banodoco_config_from_args(args: argparse.Namespace) -> BanodocoCatalogConfig:
-    env_config = BanodocoCatalogConfig.from_env()
-    enabled = bool(args.banodoco_agent_executors or env_config.enabled)
-    return BanodocoCatalogConfig(
-        enabled=enabled,
-        catalog_url=args.banodoco_catalog_url or env_config.catalog_url,
-        include_defaults=False if args.no_banodoco_defaults else env_config.include_defaults,
-        include_mandatory=False if args.no_banodoco_mandatory else env_config.include_mandatory,
-        cache_dir=Path(args.banodoco_cache_dir).expanduser() if args.banodoco_cache_dir else env_config.cache_dir,
-        refresh=bool(args.banodoco_refresh or env_config.refresh),
-        timeout_seconds=env_config.timeout_seconds,
-    )
-
-
 def _cmd_list(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     executors = _filter_by_pack(registry.list(kind=args.kind), getattr(args, "pack", None))
     show_overrides = bool(getattr(args, "show_overrides", False))
@@ -413,27 +406,6 @@ def _cmd_search(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     for hit in hits:
         print(f"{hit.score:.2f}\t{hit.record.id}\t{hit.record.kind}\t{hit.record.short_description}")
     return 0
-
-
-def _aliases_text(resolver: Any, canonical_id: str) -> str:
-    """Return a space-joined string of alias ids for *canonical_id*.
-
-    Deprecated aliases get a ``[deprecated]`` suffix so the deprecation
-    status is visible to search scoring and human-readable output.
-    Returns the empty string when there are no aliases.
-    """
-    records = resolver.get_aliases_for(canonical_id)
-    if not records:
-        return ""
-    parts: list[str] = []
-    for r in records:
-        part = r.alias
-        if r.deprecated:
-            part += " [deprecated]"
-        if r.deprecation_message:
-            part += " " + r.deprecation_message
-        parts.append(part)
-    return " ".join(parts)
 
 
 def _executor_search_record(executor: ExecutorDefinition, *, aliases: str = "") -> SearchRecord:
@@ -684,15 +656,6 @@ def _cmd_run(args: argparse.Namespace, registry: ExecutorRegistry) -> int:
     return rc
 
 
-def _gateway_resolved_project(explicit_project: str | None) -> str | None:
-    if explicit_project is not None:
-        return None
-    from astrid.core.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
-
-    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
-    return value or None
-
-
 _UUID_RE = __import__("re").compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -800,71 +763,6 @@ def _reject_run_passthrough(raw_argv: tuple[str, ...] | list[str]) -> None:
     extra = list(raw_argv)[marker + 1 :]
     if extra:
         raise ValueError("executors run does not accept arbitrary passthrough arguments after --")
-
-
-def _require_qualified_id(value: str, label: str) -> None:
-    if "." not in value or any(not part for part in value.split(".")):
-        raise ValueError(f"{label} must be qualified as <pack>.<name>")
-
-
-def _example_path_for_port(port: Any) -> str:
-    """Fix 6: render a plausible ``<path>`` placeholder for an input port.
-
-    Uses the port name as the filename so the example looks like a real
-    invocation; the suffix is best-effort based on the port type (image →
-    .png, video → .mp4, audio → .wav, text → .txt, otherwise no suffix).
-    """
-    type_to_ext = {
-        "image": ".png",
-        "video": ".mp4",
-        "audio": ".wav",
-        "text": ".txt",
-        "json": ".json",
-        "directory": "",
-        "dir": "",
-    }
-    port_type = getattr(port, "type", None) or ""
-    suffix = type_to_ext.get(str(port_type).lower(), "")
-    return f"/path/to/{port.name}{suffix}"
-
-
-def _format_invocation_hint(verb: str, qid: str, inputs: tuple[Any, ...]) -> str:
-    parts = [f"astrid {verb} run {qid}"]
-    required = [port for port in inputs if getattr(port, "required", False)]
-    for port in required[:3]:
-        flag = str(getattr(port, "name", "input")).replace("_", "-")
-        parts.append(f"--{flag} <path>")
-    if len(required) > 3:
-        parts.append("...")
-    return " ".join(parts)
-
-
-def _print_invocation_example(verb: str, qid: str, inputs: tuple[Any, ...]) -> None:
-    """Fix 6 (v6 dogfood): the v5 cross-report flagged that agents read
-    inputs/outputs from ``inspect`` and then guessed at the
-    ``--input <port>=<path>`` syntax from ``run --help``. Append a
-    synthesized example to the inspect output so the wiring is explicit.
-
-    ``verb`` is ``"executors"`` or ``"orchestrators"``.
-    """
-    print()
-    print("Example:")
-    parts = [f"  astrid {verb} run {qid}"]
-    for port in inputs:
-        if not getattr(port, "required", False):
-            continue
-        parts.append(f"--input {port.name}={_example_path_for_port(port)}")
-    parts.append("--out /path/to/output")
-    print(" ".join(parts))
-
-
-def _print_ports(label: str, ports: tuple[Any, ...]) -> None:
-    if not ports:
-        return
-    print(f"{label}:")
-    for port in ports:
-        required = "required" if port.required else "optional"
-        print(f"  - {port.name} ({port.type}, {required})")
 
 
 def _print_outputs(executor: ExecutorDefinition) -> None:

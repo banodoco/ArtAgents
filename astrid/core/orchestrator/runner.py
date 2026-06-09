@@ -15,7 +15,7 @@ from typing import Any, Literal, Mapping
 from astrid.core.contracts.capability_runner import CapabilityRunner
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.schema import Output
-from astrid.core.executor.runner import _has_value, _stringify_value
+from astrid.core.contracts._capability_common import _has_value, _stringify_value, _PLACEHOLDER_RE
 from astrid.core.project.run import (
     ProjectRunContext,
     finalize_project_run,
@@ -45,9 +45,6 @@ from .schema import (
     OrchestratorValidationError,
     RuntimeKind,
 )
-
-_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
-
 
 class OrchestratorRunnerError(OrchestratorValidationError):
     """Raised when a orchestrator cannot be prepared or executed."""
