@@ -1,0 +1,44 @@
+# Capability Artifact Waist — epic chain (organized by seam, dials per megaplan-prep).
+# Run later with:  megaplan chain start --spec docs/migration/capability-waist/chain.yaml
+# DO NOT run until approved. Carrier-first, parity-gated strangler (arnold methodology).
+base_branch: astrid-capability-waist
+
+defaults:
+  vendor: codex          # house default; pin explicitly
+  profile: solo
+  robustness: full       # home base; none of these warrant `thorough`
+
+milestones:
+  - label: s1-waist-and-timeline-proof
+    idea: docs/migration/capability-waist/briefs/s1-waist-and-timeline-proof.md
+    profile: directed     # carrier additive, but type-resolution design is a real planner decision
+    depth: medium
+    notes: "Vertical proof slice: artifact_type field + ArtifactTypeRegistry, annotate element/clip I/O, rewire timeline validator to type-checked id-resolution behind a PARITY ORACLE. Preserve open-string opaque fallback. This is the go/no-go and the launch-now sprint."
+
+  - label: s2-waist-rollout
+    idea: docs/migration/capability-waist/briefs/s2-waist-rollout.md
+    profile: solo         # mechanical replication of the proven pattern; per-seam parity backstops
+    depends_on: s1-waist-and-timeline-proof
+    notes: "Type-wire the remaining name-wired seams: annotate all exec/orch/model I/O; orchestrator child_executors/child_orchestrators -> type-validated refs; model param_map -> adapters; fal.py model-name hardcodes -> adapter hints."
+
+  - label: s3-scoped-config-themes
+    idea: docs/migration/capability-waist/briefs/s3-scoped-config-themes.md
+    profile: partnered    # novel cross-cutting primitive across 32+ sites
+    depth: high
+    depends_on: s1-waist-and-timeline-proof
+    notes: "Introduce scoped-config primitive; reimplement theme on it; kill _ACTIVE_THEME_DIR global + HYPE_ACTIVE_THEME env threading (subprocess_env propagation); theme.json -> style_config scoped artifact; fold secrets in. Parity oracle on theme resolution."
+
+  - label: s4-collapse-restructure-purge
+    idea: docs/migration/capability-waist/briefs/s4-collapse-restructure-purge.md
+    profile: partnered    # IMPORT-TOPOLOGY trigger: __init__/re-export + gateway dispatch rewiring -> premium planner mandatory
+    depth: high
+    depends_on: [s2-waist-rollout, s3-scoped-config-themes]
+    notes: "Collapse 4 registries onto one CapabilityHandle kernel; kind becomes a tag; unify gateway dispatch. Migrate 12 elements to capability form (runtime adapter; component.tsx non-required); dedup text-card to kernel override; PURGE fork/install/override/dirty/update + their tests (removed not skipped). Parity oracle: SDK discovery identical. If this bloats, split element-restructure+purge into its own sprint."
+
+  - label: s5-example-and-docs
+    idea: docs/migration/capability-waist/briefs/s5-example-and-docs.md
+    profile: solo
+    robustness: light
+    depth: low
+    depends_on: s4-collapse-restructure-purge
+    notes: "Worked example (fal model + Remotion element, same contract) in docs/examples/capability-contract/; guide in docs/contracts/; update docs/templates/element/ to the new form. Example validates against the real registry."
