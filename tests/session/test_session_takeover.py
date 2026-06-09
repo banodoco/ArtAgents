@@ -11,7 +11,7 @@ import pytest
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation import project_paths
-from astrid.core.session import cli
+from astrid.core.cli import session as cli
 from astrid.core.session import paths as session_paths
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV, SESSION_FILE_NAME
 from astrid.core.session.identity import Identity, write_identity

@@ -14,7 +14,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 
-from ._shared import (
+from astrid.core.timeline._shared import (
     _resolve_optional_session,
     _resolve_project_slug,
     _timeline_actor_from_session,
@@ -31,7 +31,7 @@ def cmd_push(args: argparse.Namespace) -> int:
     session = _resolve_optional_session(args)
     project_slug = _resolve_project_slug(args, session)
 
-    from .transfer import push_timeline
+    from astrid.core.timeline.transfer import push_timeline
 
     try:
         result = push_timeline(
@@ -70,7 +70,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
     """Pull a Supabase timeline to a local destination via event-log replay."""
     project_slug = args.project  # --project is required for pull
 
-    from .transfer import pull_timeline
+    from astrid.core.timeline.transfer import pull_timeline
 
     try:
         result = pull_timeline(
@@ -109,12 +109,12 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
 def cmd_branch_create(args: argparse.Namespace) -> int:
     """Create a branch timeline from a source timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
 
-    from .branch import create_branch_timeline
-    from .projection import ProjectionError
+    from astrid.core.timeline.branch import create_branch_timeline
+    from astrid.core.timeline.projection import ProjectionError
 
     try:
         result = create_branch_timeline(
@@ -153,11 +153,11 @@ def cmd_branch_create(args: argparse.Namespace) -> int:
 
 def cmd_branch_list(args: argparse.Namespace) -> int:
     """List branches of a source timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
 
-    from .branch import list_branches
+    from astrid.core.timeline.branch import list_branches
 
     try:
         branches = list_branches(session.project, args.source_slug_or_id)
@@ -190,14 +190,14 @@ def cmd_branch_list(args: argparse.Namespace) -> int:
 
 def cmd_undo(args: argparse.Namespace) -> int:
     """Undo the latest undoable event on a timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .inverses import plan_inverses
-    from .observability import resolve_timeline_target
-    from .projection import regenerate_projection, replay_projection
+    from astrid.core.timeline.inverses import plan_inverses
+    from astrid.core.timeline.observability import resolve_timeline_target
+    from astrid.core.timeline.projection import regenerate_projection, replay_projection
 
     # Resolve the timeline
     try:
@@ -211,7 +211,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
 
     preferred_backend = getattr(args, "from_backend", None) or target.backend
 
-    from .eventlog import select_timeline_backend
+    from astrid.core.timeline.eventlog import select_timeline_backend
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -242,7 +242,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
     # Also skip erased events
     from astrid.core.timeline.events.schema import ErasedPayload
 
-    from .inverses import _NON_REVERSIBLE_KINDS
+    from astrid.core.timeline.inverses import _NON_REVERSIBLE_KINDS
 
     target_idx: int | None = None
     target_event = None
@@ -343,13 +343,13 @@ def cmd_undo(args: argparse.Namespace) -> int:
 
 def cmd_mass_undo(args: argparse.Namespace) -> int:
     """Mass-undo events matching filter criteria (preview-first, chunked writes)."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .observability import resolve_timeline_target
-    from .undo import (
+    from astrid.core.timeline.observability import resolve_timeline_target
+    from astrid.core.timeline.undo import (
         MassUndoSelector,
         execute_mass_undo,
         plan_mass_undo,
@@ -375,7 +375,7 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
 
     preferred_backend = getattr(args, "from_backend", None) or target.backend
 
-    from .eventlog import select_timeline_backend
+    from astrid.core.timeline.eventlog import select_timeline_backend
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -473,17 +473,17 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
 
 def cmd_erase(args: argparse.Namespace) -> int:
     """Erase (redact) event payloads matching a selector."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .erasure import (
+    from astrid.core.timeline.erasure import (
         ErasureSelector,
         apply_erasure,
         query_erasure,
     )
-    from .observability import resolve_timeline_target
+    from astrid.core.timeline.observability import resolve_timeline_target
 
     # Resolve the timeline
     try:
@@ -495,7 +495,7 @@ def cmd_erase(args: argparse.Namespace) -> int:
             state_snapshot={"timeline": args.slug},
         ) from exc
 
-    from .eventlog import select_timeline_backend
+    from astrid.core.timeline.eventlog import select_timeline_backend
 
     stream_ref, backend = select_timeline_backend(
         timeline_id=target.timeline_id,
@@ -554,7 +554,7 @@ def cmd_erase(args: argparse.Namespace) -> int:
         return 0
 
     # --yes: perform erasure
-    from .projection import ProjectionError
+    from astrid.core.timeline.projection import ProjectionError
 
     try:
         result = apply_erasure(
@@ -592,13 +592,13 @@ def cmd_erase(args: argparse.Namespace) -> int:
 
 def cmd_recover(args: argparse.Namespace) -> int:
     """Recover a timeline to a known-good anchor event."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .operations import recover_to_event
-    from .projection import ProjectionError
+    from astrid.core.timeline.operations import recover_to_event
+    from astrid.core.timeline.projection import ProjectionError
 
     try:
         result = recover_to_event(

@@ -1428,7 +1428,7 @@ def test_runtime_sources_do_not_seed_wrapper_assembly_defaults() -> None:
     """Runtime timeline code must not depend on legacy Assembly wrappers."""
     runtime_files = [
         Path("astrid/core/timeline/branch.py"),
-        Path("astrid/core/timeline/cli.py"),
+        Path("astrid/core/cli/timeline.py"),
         Path("astrid/core/timeline/crud.py"),
         Path("astrid/core/timeline/eventlog/local_fs.py"),
         Path("astrid/core/timeline/eventlog/projector.py"),

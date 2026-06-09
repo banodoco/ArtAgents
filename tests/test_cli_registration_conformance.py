@@ -34,7 +34,8 @@ from astrid.core.cli.registration import CommandSpec, register_commands
 
 _ALLOWLISTED: tuple[str, ...] = (
     # M4 T50: Session CLI parser now uses CommandSpec + register_commands.
-    "astrid.core.session.cli",
+    # W5: lifted into the top-level CLI aggregation tier.
+    "astrid.core.cli.session",
 )
 
 # Fully decomposed during M4 — below the 1,200-line threshold and using

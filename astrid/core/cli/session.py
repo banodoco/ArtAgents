@@ -57,7 +57,7 @@ from astrid.core.threads.ids import generate_ulid
 
 # M4 T44: Re-export attach command and templates from cli_attach.py.
 # Tests call ``cli.cmd_attach(...)`` and reference ``cli.ATTACH_HEADER``.
-from astrid.core.session.cli_attach import (  # noqa: E402, F401
+from astrid.core.cli.session_attach import (  # noqa: E402, F401
     ATTACH_HEADER,
     ATTACH_HEADER_REUSED,
     EXPORT_LINE_TEMPLATE,
@@ -70,7 +70,7 @@ from astrid.core.session.cli_attach import (  # noqa: E402, F401
 # Tests call ``cli.cmd_sessions_ls(...)``, ``cli.cmd_sessions_detach(...)``,
 # ``cli.cmd_sessions_takeover(...)``, ``cli.cmd_sessions_prune(...)`` and
 # monkeypatch ``cli._list_session_files``.
-from astrid.core.session.cli_sessions import (  # noqa: E402, F401
+from astrid.core.cli.session_sessions import (  # noqa: E402, F401
     _build_takeover_session,
     _raise_takeover_status_recovery,
     _resolve_unbound_takeover_target,
@@ -82,7 +82,7 @@ from astrid.core.session.cli_sessions import (  # noqa: E402, F401
 
 # M4 T48: Re-export status command and templates from cli_status.py.
 # Tests call ``cli.cmd_status(...)`` and reference ``cli.STATUS_UNBOUND_HEADER``.
-from astrid.core.session.cli_status import (  # noqa: E402, F401
+from astrid.core.cli.session_status import (  # noqa: E402, F401
     ATTACH_SUGGESTION_TEMPLATE,
     NO_PROJECTS_FOUND,
     STATUS_UNBOUND_HEADER,
@@ -130,7 +130,7 @@ from astrid.core.session._shared import (  # noqa: E402, F401
 # from this facade so monkeypatch seams (``cli.cmd_attach``, ``cli.cmd_status``,
 # etc.) remain interceptable.
 
-from astrid.core.session.cli_parser import (  # noqa: E402, F401
+from astrid.core.cli.session_parser import (  # noqa: E402, F401
     COMMANDS,  # re-export for CLI conformance allowlist
     build_parser,
 )

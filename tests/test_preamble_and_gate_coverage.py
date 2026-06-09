@@ -148,7 +148,7 @@ def test_next_default_mode_includes_preamble_on_stdout(tmp_path: Path) -> None:
 _EXPECTED_AGENT_CLI_MODULES: set[str] = {
     "astrid/core/gateway/__init__.py",
     "astrid/core/gateway/dispatch.py",
-    "astrid/core/session/cli.py",
+    "astrid/core/cli/session.py",
     "astrid/core/task/claim.py",
     "astrid/core/task/lifecycle.py",
     "astrid/core/task/lifecycle_ack.py",

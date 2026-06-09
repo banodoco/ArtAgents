@@ -11,9 +11,9 @@ from astrid.core.session.binding import (  # noqa: F401  (resolve_current_sessio
     SessionBindingError,
     resolve_current_session,
 )
-from .events.schema import TimelineActor  # noqa: F401  (re-exported)
+from astrid.core.timeline.events.schema import TimelineActor  # noqa: F401  (re-exported)
 
-from . import (
+from astrid.core.timeline import (
     audio_edits,  # kept for monkeypatch seams (timeline_cli.audio_edits)
     clip_edits,  # kept for monkeypatch seams (timeline_cli.clip_edits)
     crud,
@@ -22,15 +22,15 @@ from . import (
     track_edits,  # kept for monkeypatch seams
     transition_edits,  # kept for monkeypatch seams
 )
-from ._edit_helpers import TimelineEditError
-from .eventlog import EventLogError
-from .projection import ErasedPayloadProjectionError, ProjectionError
+from astrid.core.timeline._edit_helpers import TimelineEditError
+from astrid.core.timeline.eventlog import EventLogError
+from astrid.core.timeline.projection import ErasedPayloadProjectionError, ProjectionError
 
 # Shared session/version helpers were moved to ._shared to break the
 # circular-facade dependency (leaves no longer reach back into .cli for them).
 # They are re-exported here so the legacy monkeypatch seams
 # ``astrid.core.timeline.cli._require_session`` (et al.) keep resolving.
-from ._shared import (  # noqa: F401
+from astrid.core.timeline._shared import (  # noqa: F401
     _SESSION_GATE_HINT,
     _expected_version_kwargs,
     _require_session,
@@ -59,19 +59,19 @@ def main(argv: list[str] | None = None) -> int:
 # The original source lines occupied 787 lines of this module and have been
 # moved into astrid.core.timeline.cli_parser to reduce this file below the
 # 1,200-line M4 threshold.
-from .cli_parser import build_parser  # noqa: E402, F401
+from .timeline_parser import build_parser  # noqa: E402, F401
 
 # Legacy stub preserved for the parser-only helpers that were moved.
 # These are re-exported so intra-module references (like the cmd_*
 # handlers that import from .cli) don't break — but they are no longer
 # defined here.
 def _add_project_arg(parser: argparse.ArgumentParser) -> None:
-    from .cli_parser import _add_project_arg as _impl
+    from .timeline_parser import _add_project_arg as _impl
     return _impl(parser)
 
 
 def _add_expected_version_arg(parser: argparse.ArgumentParser) -> None:
-    from .cli_parser import _add_expected_version_arg as _impl
+    from .timeline_parser import _add_expected_version_arg as _impl
     return _impl(parser)
 
 
@@ -95,8 +95,8 @@ def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
     or ``"supabase"`` when the sidecar requests it.
     """
     from astrid.core._shared.jsonio import read_json  # noqa: PLC0415
-    from .paths import assembly_identity_path, find_timeline_by_slug  # noqa: PLC0415
-    from . import clip_edits  # noqa: PLC0415
+    from astrid.core.timeline.paths import assembly_identity_path, find_timeline_by_slug  # noqa: PLC0415
+    from astrid.core.timeline import clip_edits  # noqa: PLC0415
 
     found = find_timeline_by_slug(project_slug, slug)
     if found is None:
@@ -138,7 +138,7 @@ def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
 # Facade re-exports for command handlers moved to cli_crud / cli_output / cli_edits (M4).
 # These are imported here so that legacy monkeypatch seams on
 # ``astrid.core.timeline.cli.cmd_*`` continue to work.
-from .cli_crud import (  # noqa: E402, F401
+from .timeline_crud import (  # noqa: E402, F401
     cmd_ls,
     cmd_create,
     cmd_show,
@@ -148,11 +148,11 @@ from .cli_crud import (  # noqa: E402, F401
     cmd_purge,
     cmd_set_default,
 )
-from .cli_output import (  # noqa: E402, F401
+from .timeline_output import (  # noqa: E402, F401
     cmd_cost,
     cmd_export,
 )
-from .cli_edits import (  # noqa: E402, F401
+from .timeline_edits import (  # noqa: E402, F401
     cmd_arrangement_set,
     cmd_arrangement_show,
     cmd_audio_bind,
@@ -176,7 +176,7 @@ from .cli_edits import (  # noqa: E402, F401
     cmd_transition_remove,
     cmd_transition_set,
 )
-from .cli_events import (  # noqa: E402, F401
+from .timeline_events import (  # noqa: E402, F401
     _diff_keys,
     _format_history_row,
     _redact_actor,
@@ -188,7 +188,7 @@ from .cli_events import (  # noqa: E402, F401
     cmd_preview,
     cmd_who_edited,
 )
-from .cli_backends import (  # noqa: E402, F401
+from .timeline_backends import (  # noqa: E402, F401
     cmd_branch_create,
     cmd_branch_list,
     cmd_erase,

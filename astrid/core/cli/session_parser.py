@@ -19,7 +19,7 @@ from astrid.core.cli.registration import CommandSpec, register_commands
 
 
 def _configure_attach(sub: argparse.ArgumentParser) -> None:
-    from .cli import cmd_attach  # late import — preserves monkeypatch seam
+    from .session import cmd_attach  # late import — preserves monkeypatch seam
 
     sub.add_argument("project", nargs="?")
     sub.add_argument("--timeline")
@@ -55,20 +55,20 @@ def _configure_attach(sub: argparse.ArgumentParser) -> None:
 
 
 def _configure_ls(sub: argparse.ArgumentParser) -> None:
-    from .cli import cmd_sessions_ls  # late import — preserves monkeypatch seam
+    from .session import cmd_sessions_ls  # late import — preserves monkeypatch seam
 
     sub.set_defaults(handler=cmd_sessions_ls)
 
 
 def _configure_detach(sub: argparse.ArgumentParser) -> None:
-    from .cli import cmd_sessions_detach  # late import — preserves monkeypatch seam
+    from .session import cmd_sessions_detach  # late import — preserves monkeypatch seam
 
     sub.add_argument("session_id", nargs="?")
     sub.set_defaults(handler=cmd_sessions_detach)
 
 
 def _configure_takeover(sub: argparse.ArgumentParser) -> None:
-    from .cli import cmd_sessions_takeover  # late import — preserves monkeypatch seam
+    from .session import cmd_sessions_takeover  # late import — preserves monkeypatch seam
 
     sub.add_argument("target", help="Session id or run id.")
     sub.add_argument(
@@ -78,7 +78,7 @@ def _configure_takeover(sub: argparse.ArgumentParser) -> None:
 
 
 def _configure_prune(sub: argparse.ArgumentParser) -> None:
-    from .cli import cmd_sessions_prune  # late import — preserves monkeypatch seam
+    from .session import cmd_sessions_prune  # late import — preserves monkeypatch seam
 
     sub.add_argument(
         "--older-than-days",
@@ -95,7 +95,7 @@ def _configure_prune(sub: argparse.ArgumentParser) -> None:
 
 
 def _configure_status(sub: argparse.ArgumentParser) -> None:
-    from .cli import cmd_status  # late import — preserves monkeypatch seam
+    from .session import cmd_status  # late import — preserves monkeypatch seam
 
     sub.add_argument(
         "--json", action="store_true", help="Emit machine-readable JSON."

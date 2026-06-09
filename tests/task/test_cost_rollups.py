@@ -148,7 +148,7 @@ def test_timeline_cost_excludes_aborted_by_default(
     cost_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Without ``--include-aborted``, aborted-run costs are excluded."""
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -170,7 +170,7 @@ def test_timeline_cost_includes_aborted_with_flag(
     cost_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With ``--include-aborted``, aborted-run costs ARE included."""
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -192,7 +192,7 @@ def test_timeline_cost_json_output(
     cost_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``--json`` produces structured output."""
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -213,7 +213,7 @@ def test_timeline_cost_json_output(
 def test_timeline_cost_dedupes_duplicate_manifest_runs(
     cost_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -250,7 +250,7 @@ def test_project_cost_aggregates_across_timelines(
     tmp_projects_root: Path, cost_fixture: dict
 ) -> None:
     """Project cost sums across all timelines in the project."""
-    from astrid.core.project.cli import _cmd_project_cost
+    from astrid.core.cli.project import _cmd_project_cost
     import argparse
 
     args = argparse.Namespace(
@@ -267,7 +267,7 @@ def test_project_cost_json_output(
     tmp_projects_root: Path, cost_fixture: dict
 ) -> None:
     """Project cost ``--json`` produces structured output."""
-    from astrid.core.project.cli import _cmd_project_cost
+    from astrid.core.cli.project import _cmd_project_cost
     import argparse
 
     args = argparse.Namespace(
@@ -297,7 +297,7 @@ def test_project_cost_include_aborted(
     tmp_projects_root: Path, cost_fixture: dict
 ) -> None:
     """``--include-aborted`` on project cost toggles aborted runs."""
-    from astrid.core.project.cli import _cmd_project_cost
+    from astrid.core.cli.project import _cmd_project_cost
     import argparse
 
     args = argparse.Namespace(

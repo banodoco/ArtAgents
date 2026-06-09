@@ -22,7 +22,8 @@ from typing import Any
 
 import pytest
 
-from astrid.core.cli_choices import AstridArgumentError, RegistryChoices, StaticChoices
+from astrid.core.cli.choices_registry import RegistryChoices
+from astrid.core.cli_choices import AstridArgumentError, StaticChoices
 
 
 ROOT = Path(__file__).resolve().parents[2]

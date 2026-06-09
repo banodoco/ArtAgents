@@ -425,7 +425,7 @@ def test_status_help_runs_without_rendering_live_status(
 def test_unbound_sessions_takeover_reaches_takeover_handler(
     env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from astrid.core.session import cli as session_cli
+    from astrid.core.cli import session as session_cli
 
     monkeypatch.delenv(ASTRID_SESSION_ID_ENV, raising=False)
 

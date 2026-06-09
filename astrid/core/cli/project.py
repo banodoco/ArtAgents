@@ -43,7 +43,7 @@ from astrid.core.session.discovery import discover_projects
 from astrid.core.util.log_and_swallow import log_and_swallow
 
 from astrid.core.foundation import project_paths as paths
-from .project import (
+from astrid.core.project.project import (
     ProjectError,
     create_project,
     get_project_theme,
@@ -52,8 +52,8 @@ from .project import (
     set_project_theme,
     show_project,
 )
-from .schema import SOURCE_KINDS
-from .source import add_source
+from astrid.core.project.schema import SOURCE_KINDS
+from astrid.core.project.source import add_source
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
@@ -562,7 +562,7 @@ def _extract_ledger_cost_usd(record: dict[str, Any]) -> float | None:
 
 # Re-exports from cli_handlers.py (structural split P5-3)
 # Keep all dotted-path imports working for monkeypatch contracts.
-from astrid.core.project.cli_handlers import (
+from astrid.core.cli.project_handlers import (
     OPS_HELPER,
     OpsHelperResponse,
     _bound_project_slug,

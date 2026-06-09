@@ -227,7 +227,7 @@ def _assert_recovery_command_parses(command: str) -> None:
         ls.add_argument("--project")
         parser.parse_args(tail)
     elif verb == "sessions":
-        from astrid.core.session.cli import build_parser
+        from astrid.core.cli.session import build_parser
 
         build_parser().parse_args(tail)
     else:

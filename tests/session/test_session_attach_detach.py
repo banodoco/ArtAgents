@@ -12,7 +12,7 @@ import pytest
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation import project_paths
 from astrid.core.project.current_run import write_current_run
-from astrid.core.session import cli
+from astrid.core.cli import session as cli
 from astrid.core.session import paths as session_paths
 from astrid.core.session.identity import Identity, write_identity
 from astrid.core.session.lease import release_writer_lease, write_lease_init

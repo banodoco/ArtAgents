@@ -68,11 +68,11 @@ ALLOWED_BARE_RAISES: dict[tuple[str, int], str] = {
     ('astrid/core/orchestrator/cli.py', 660): 'wrapped by orchestrator.main() into AstridError before operator output',
     ('astrid/core/orchestrator/cli.py', 664): 'wrapped by orchestrator.main() into AstridError before operator output',
     ('astrid/core/orchestrator/cli.py', 671): 'wrapped by orchestrator.main() into AstridError before operator output',
-    ('astrid/core/project/cli.py', 244): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/project/cli.py', 432): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/project/cli.py', 434): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/project/cli.py', 443): 'wrapped by project.main() into AstridError before operator output',
-    ('astrid/core/session/cli.py', 94): 'caught by cmd_attach() and rendered as attach guidance nearby',
+    ('astrid/core/cli/project.py', 244): 'wrapped by project.main() into AstridError before operator output',
+    ('astrid/core/cli/project.py', 432): 'wrapped by project.main() into AstridError before operator output',
+    ('astrid/core/cli/project.py', 434): 'wrapped by project.main() into AstridError before operator output',
+    ('astrid/core/cli/project.py', 443): 'wrapped by project.main() into AstridError before operator output',
+    ('astrid/core/cli/session.py', 94): 'caught by cmd_attach() and rendered as attach guidance nearby',
     ('astrid/core/doctor.py', 284): 'captured by doctor._capture_check and rendered as a structured check result',
     ('astrid/core/doctor.py', 293): 'captured by doctor._capture_check and rendered as a structured check result',
     ('astrid/core/doctor.py', 302): 'captured by doctor._capture_check and rendered as a structured check result',
@@ -195,7 +195,8 @@ import importlib
 import json
 import sys
 
-from astrid.core.cli_choices import RegistryChoices, StaticChoices
+from astrid.core.cli.choices_registry import RegistryChoices
+from astrid.core.cli_choices import StaticChoices
 
 
 def _action_payload(

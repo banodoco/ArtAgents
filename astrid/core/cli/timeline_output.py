@@ -20,7 +20,7 @@ from astrid.core.foundation.project_paths import project_dir
 from astrid.core.task.events import read_events
 from astrid.core.task.run_audit import _cost_by_source, _run_status
 
-from . import crud
+from astrid.core.timeline import crud
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ from . import crud
 
 def cmd_export(args: argparse.Namespace) -> int:
     """Export a timeline as a self-contained tarball bundle."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     data = crud.show_timeline(session.project, args.slug)
@@ -71,7 +71,7 @@ def cmd_export(args: argparse.Namespace) -> int:
         # Repair assembly.json from the event log before export (ensures the
         # exported tarball carries the current projected state even when the
         # on-disk compatibility file is stale).
-        from .paths import load_assembly_json_with_repair
+        from astrid.core.timeline.paths import load_assembly_json_with_repair
 
         load_assembly_json_with_repair(timelines_dir)
 
@@ -159,7 +159,7 @@ def _run_initial_plan_payload(events_path: Path) -> dict[str, object] | None:
 
 def cmd_cost(args: argparse.Namespace) -> int:
     """Aggregate cost across all contributing runs in a timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     data = crud.show_timeline(session.project, args.slug)

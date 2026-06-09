@@ -86,7 +86,7 @@ def test_stop_line_takeover_helpers_do_not_touch_events_before_lock() -> None:
 
 
 def test_stop_line_takeover_cli_has_no_prelock_warm_decision() -> None:
-    from astrid.core.session import cli as session_cli
+    from astrid.core.cli import session as session_cli
 
     source = inspect.getsource(session_cli.cmd_sessions_takeover)
     assert "_is_target_warm" not in source

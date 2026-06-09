@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.session import cli as _session_cli
+from astrid.core.cli import session as _session_cli
 
 _ALIAS_SUNSET_VERSION = "0.3.0"
 
@@ -180,7 +180,7 @@ def _dispatch_elements(args: list[str]) -> int:
 def _dispatch_projects(args: list[str]) -> int:
     # TODO(Sprint 5b): astrid projects timeline is a legacy reigh-app
     # subcommand that collides with the Sprint 2 timeline concept.
-    from astrid.core.project import cli as projects_cli
+    from astrid.core.cli import project as projects_cli
 
     return projects_cli.main(args)
 
@@ -192,7 +192,7 @@ def _dispatch_themes(args: list[str]) -> int:
 
 
 def _dispatch_timelines(args: list[str]) -> int:
-    from astrid.core.timeline import cli as timelines_cli
+    from astrid.core.cli import timeline as timelines_cli
 
     return timelines_cli.main(args)
 

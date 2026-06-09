@@ -176,7 +176,7 @@ def test_timeline_export_excludes_aborted_by_default(
     tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Aborted runs should be excluded from the export bundle by default."""
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -229,7 +229,7 @@ def test_timeline_export_includes_aborted_with_flag(
     tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """With ``--include-aborted``, aborted runs ARE bundled."""
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -262,7 +262,7 @@ def test_timeline_export_includes_aborted_with_flag(
 def test_timeline_export_dedupes_duplicate_manifest_runs(
     tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 
@@ -296,7 +296,7 @@ def test_project_export_includes_all_timelines(
     tmp_projects_root: Path, timeline_fixture: dict
 ) -> None:
     """Project export bundles all timelines and their contributing runs."""
-    from astrid.core.project.cli import _cmd_project_export
+    from astrid.core.cli.project import _cmd_project_export
     import argparse
 
     out_path = tmp_projects_root / "project-bundle.tar.gz"
@@ -329,7 +329,7 @@ def test_timeline_export_falls_back_to_plan_initialized_event(
     tmp_projects_root: Path, timeline_fixture: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Old runs without run-local plan.json still export their genesis plan."""
-    from astrid.core.timeline import cli as tm_cli
+    from astrid.core.cli import timeline as tm_cli
     from unittest.mock import MagicMock
     import argparse
 

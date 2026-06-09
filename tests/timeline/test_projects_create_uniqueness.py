@@ -92,7 +92,7 @@ def test_create_project_unique_slug_direct(tmp_path: Path, monkeypatch: pytest.M
 def test_projects_ls_and_default_commands(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from astrid.core.project import cli
+    from astrid.core.cli import project as cli
     from astrid.core.foundation import project_paths as paths
     from astrid.core.project.project import create_project
     from astrid.core.session import paths as session_paths
@@ -131,7 +131,7 @@ def test_projects_ls_and_default_commands(
 def test_projects_default_warns_when_configured_default_is_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from astrid.core.project import cli
+    from astrid.core.cli import project as cli
     from astrid.core.foundation import project_paths as paths
     from astrid.core.project.project import create_project
     from astrid.core.session import paths as session_paths

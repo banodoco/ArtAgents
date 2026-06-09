@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AGENT_CLI_MODULE_PATHS: list[Path] = [
     ROOT / "astrid" / "core" / "gateway" / "__init__.py",
     ROOT / "astrid" / "core" / "gateway" / "dispatch.py",
-    ROOT / "astrid" / "core" / "session" / "cli.py",
+    ROOT / "astrid" / "core" / "cli" / "session.py",
     ROOT / "astrid" / "core" / "task" / "claim.py",
     ROOT / "astrid" / "core" / "task" / "lifecycle.py",
     ROOT / "astrid" / "core" / "task" / "lifecycle_ack.py",
@@ -199,7 +199,7 @@ def _assert_recovery_command_parses(command: str) -> None:
         ls.add_argument("--project")
         parser.parse_args(tail)
     elif verb == "sessions":
-        from astrid.core.session.cli import build_parser
+        from astrid.core.cli.session import build_parser
         build_parser().parse_args(tail)
     elif verb == "status":
         # status takes optional --project and --json

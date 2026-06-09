@@ -13,7 +13,7 @@ import argparse
 
 import pytest
 
-from astrid.core.session import cli as session_cli
+from astrid.core.cli import session as session_cli
 
 
 # ---------------------------------------------------------------------------

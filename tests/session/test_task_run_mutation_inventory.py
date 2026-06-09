@@ -300,6 +300,9 @@ def test_task_run_mutation_call_inventory_is_fully_classified() -> None:
             site: count
             for site, count in actual.items()
             if not site.path.startswith("astrid/core/timeline/")
+            # W5: timeline CLI handlers were lifted into the CLI aggregation tier;
+            # they remain excluded from the task/run mutation inventory as before.
+            and not site.path.startswith("astrid/core/cli/timeline")
         }
     )
     expected = Counter(
@@ -370,6 +373,8 @@ def test_static_allowlists_reject_raw_task_run_append_bypasses() -> None:
             for site, count in actual.items()
             if site.path.startswith("astrid/")
             and not site.path.startswith("astrid/core/timeline/")
+            # W5: lifted timeline CLI handlers stay excluded (see above).
+            and not site.path.startswith("astrid/core/cli/timeline")
         }
     )
 

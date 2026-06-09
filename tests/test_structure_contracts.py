@@ -100,7 +100,7 @@ def test_validate_cli_domain_boundary_flags_domains_importing_cli_modules(tmp_pa
     _write(
         tmp_path,
         "astrid/core/session/cli_status.py",
-        "from astrid.core.session.cli import _json_mode\n",
+        "from astrid.core.cli.session import _json_mode\n",
     )
 
     violations = validate_cli_domain_boundary(tmp_path)

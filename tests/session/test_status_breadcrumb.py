@@ -12,7 +12,7 @@ import pytest
 from astrid.core.foundation import project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.project.project import create_project
-from astrid.core.session import cli
+from astrid.core.cli import session as cli
 from astrid.core.session import paths as session_paths
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.identity import Identity, write_identity

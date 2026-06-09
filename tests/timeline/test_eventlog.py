@@ -461,7 +461,7 @@ def test_history_formatting_includes_backend_timeline_version_event_actor_kind(
         actor=TimelineActor(type="agent", id="alice:session-1", display="alice"),
     )
 
-    from astrid.core.timeline.cli import _format_history_row, _redact_actor
+    from astrid.core.cli.timeline import _format_history_row, _redact_actor
 
     events = backend.read_events()
     assert len(events) == 1

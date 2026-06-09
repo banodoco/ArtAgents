@@ -6,13 +6,12 @@ import io
 import sys
 import unittest
 
+from astrid.core.cli.choices_registry import RegistryChoices, add_kind_arg
 from astrid.core.cli_choices import (
     AstridArgumentError,
     RecoverableArgumentParser,
-    RegistryChoices,
     StaticChoices,
     add_choice_arg,
-    add_kind_arg,
 )
 from astrid.core.pack import ElementKindDescriptor, ElementKindRegistry
 

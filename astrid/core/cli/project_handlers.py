@@ -23,7 +23,7 @@ from astrid.core.session.config import (
 from astrid.core.session.discovery import discover_projects
 
 from astrid.core.foundation import project_paths as paths
-from .project import (
+from astrid.core.project.project import (
     ProjectError,
     create_project,
     get_project_theme,
@@ -32,7 +32,7 @@ from .project import (
     set_project_theme,
     show_project,
 )
-from .source import add_source
+from astrid.core.project.source import add_source
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPS_HELPER = REPO_ROOT / "scripts" / "node" / "ops_helper.mjs"

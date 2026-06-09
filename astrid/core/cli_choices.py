@@ -1,4 +1,12 @@
-"""Recoverable argparse helpers for registry-backed and static enum choices."""
+"""Recoverable argparse helpers for registry-backed and static enum choices.
+
+The pack-dependent registry helpers (``RegistryChoices`` / ``add_kind_arg``) live
+in ``astrid.core.cli.choices_registry`` so this module stays free of any
+``astrid.core.pack`` import (which previously formed the ``cli_choices <-> pack``
+cycle). The shared recoverability machinery here is pack-free; recoverable choice
+objects mark themselves by subclassing ``RecoverableChoices`` so
+``RecoverableArgumentParser`` can recognise them without importing the registry half.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +14,6 @@ import argparse
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
-
-from astrid.core.pack import ELEMENT_KIND_REGISTRY, ElementKindRegistry
 
 
 @dataclass(frozen=True)
@@ -24,43 +30,17 @@ class AstridArgumentError(ValueError):
         return self.message
 
 
-class RegistryChoices(Sequence[str]):
-    """Live argparse ``choices`` view backed by an ``ElementKindRegistry``."""
+class RecoverableChoices(Sequence[str]):
+    """Marker base for choice views that carry recoverability metadata.
 
-    def __init__(
-        self,
-        *,
-        catalog: str,
-        registry: ElementKindRegistry | None = None,
-    ) -> None:
-        self.catalog = catalog
-        self._registry = registry or ELEMENT_KIND_REGISTRY
-
-    @property
-    def valid_options(self) -> tuple[str, ...]:
-        return self._registry.valid_options(catalog=self.catalog)
-
-    @property
-    def accepted_names(self) -> tuple[str, ...]:
-        return self._registry.accepted_names(catalog=self.catalog)
-
-    def __contains__(self, item: object) -> bool:
-        return isinstance(item, str) and item in self.accepted_names
-
-    def __iter__(self) -> Iterator[str]:
-        return iter(self.accepted_names)
-
-    def __len__(self) -> int:
-        return len(self.accepted_names)
-
-    def __getitem__(self, index: int | slice) -> str | tuple[str, ...]:
-        return self.accepted_names[index]
-
-    def __repr__(self) -> str:
-        return repr(self.accepted_names)
+    ``RecoverableArgumentParser`` recognises instances of this base (rather than
+    importing the concrete ``RegistryChoices``/``StaticChoices`` classes) so the
+    registry-backed subclass can live in the pack-importing ``cli`` tier without
+    coupling this module to ``astrid.core.pack``.
+    """
 
 
-class StaticChoices(Sequence[str]):
+class StaticChoices(RecoverableChoices):
     """Argparse ``choices`` wrapper that preserves recoverability metadata."""
 
     def __init__(
@@ -109,7 +89,7 @@ class RecoverableArgumentParser(argparse.ArgumentParser):
 
     def _check_value(self, action: argparse.Action, value: Any) -> None:
         choices = getattr(action, "choices", None)
-        if not isinstance(choices, (RegistryChoices, StaticChoices)):
+        if not isinstance(choices, RecoverableChoices):
             super()._check_value(action, value)
             return
         if value in choices:
@@ -151,21 +131,6 @@ class RecoverableArgumentParser(argparse.ArgumentParser):
         return action.dest
 
 
-def add_kind_arg(
-    parser: argparse.ArgumentParser,
-    *name_or_flags: str,
-    catalog: str,
-    registry: ElementKindRegistry | None = None,
-    **kwargs: Any,
-) -> argparse.Action:
-    """Add a registry-backed enum argument with live ``choices`` metadata."""
-
-    if "choices" in kwargs:
-        raise TypeError("add_kind_arg() manages choices automatically")
-    choices = RegistryChoices(catalog=catalog, registry=registry)
-    return parser.add_argument(*name_or_flags, choices=choices, **kwargs)
-
-
 def add_choice_arg(
     parser: argparse.ArgumentParser,
     *name_or_flags: str,
@@ -184,8 +149,7 @@ def add_choice_arg(
 __all__ = [
     "AstridArgumentError",
     "RecoverableArgumentParser",
-    "RegistryChoices",
+    "RecoverableChoices",
     "StaticChoices",
     "add_choice_arg",
-    "add_kind_arg",
 ]

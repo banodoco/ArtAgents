@@ -101,7 +101,7 @@ def cmd_attach(args: argparse.Namespace, *, out: Any = None) -> int:
     # monkeypatch.setattr(cli, "attach_session", ...) routes through
     # the cli facade — tests spy on cli.attach_session. The shared helpers
     # are imported at module level from ``_shared`` (no facade cycle).
-    from astrid.core.session.cli import attach_session  # noqa: PLC0415
+    from astrid.core.cli.session import attach_session  # noqa: PLC0415
 
     if out is None:
         out = sys.stdout

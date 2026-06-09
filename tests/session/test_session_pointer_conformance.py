@@ -201,7 +201,7 @@ class TestCmdAttachDelegation:
     def test_cmd_attach_imports_attach_session(self):
         """cmd_attach relies on attach_session from binding module."""
         import inspect
-        from astrid.core.session.cli import cmd_attach
+        from astrid.core.cli.session import cmd_attach
 
         source = inspect.getsource(cmd_attach)
         assert "attach_session(" in source, (

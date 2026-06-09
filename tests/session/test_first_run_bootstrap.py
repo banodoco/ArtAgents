@@ -11,7 +11,8 @@ import pytest
 
 from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
-from astrid.core.session import cli, paths as session_paths
+from astrid.core.cli import session as cli
+from astrid.core.session import paths as session_paths
 from astrid.core.session import config
 from astrid.core.session.identity import read_identity
 from astrid.core.task import lifecycle

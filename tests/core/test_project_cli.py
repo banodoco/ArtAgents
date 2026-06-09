@@ -32,7 +32,7 @@ from unittest.mock import patch
 from astrid.core.contracts.errors import AstridError
 from astrid.core.theme import cli
 from astrid.core.cli_choices import StaticChoices
-from astrid.core.project import cli as project_cli
+from astrid.core.cli import project as project_cli
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import ProjectError
 from astrid.core.integrations.reigh import data_provider as dp_mod
@@ -307,7 +307,7 @@ class EditCLITest(unittest.TestCase):
         ), patch.object(tio, "rpc", side_effect=fake_rpc), patch.object(
             project_cli, "OPS_HELPER", ROOT / "scripts" / "node" / "ops_helper.mjs"
         ), patch("shutil.which", return_value="/usr/bin/node"), patch(
-            "astrid.core.project.cli.subprocess.run", side_effect=fake_subprocess_run
+            "astrid.core.cli.project.subprocess.run", side_effect=fake_subprocess_run
         ):
             rc = project_cli.main(argv)
         return rc, fetch_calls, ops_calls, rpc_calls

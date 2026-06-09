@@ -15,13 +15,13 @@ from __future__ import annotations
 import argparse
 from typing import Any, Callable
 
+from astrid.core.cli.choices_registry import add_kind_arg
 from astrid.core.cli_choices import (
     RecoverableArgumentParser,
     add_choice_arg,
-    add_kind_arg,
 )
 
-from .kinds import default_transition_kind
+from astrid.core.timeline.kinds import default_transition_kind
 
 
 # ── Shared helpers (kept public — cli.py delegates to these) ────────────────
@@ -1366,7 +1366,7 @@ def build_parser() -> argparse.ArgumentParser:
     """
     # Late import through the .cli facade — this is the indirection that
     # ~50 tests rely on for monkeypatch.setattr(timeline_cli, "cmd_ls", fake).
-    from .cli import (  # noqa: PLC0415
+    from .timeline import (  # noqa: PLC0415
         # -- cli_crud --
         cmd_create,
         cmd_finalize,

@@ -14,9 +14,9 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
 from astrid.core.session.binding import resolve_current_session
 
-from . import crud
-from ._shared import _expected_version_kwargs, _timeline_actor_from_session
-from .integrity import verify
+from astrid.core.timeline import crud
+from astrid.core.timeline._shared import _expected_version_kwargs, _timeline_actor_from_session
+from astrid.core.timeline.integrity import verify
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +65,7 @@ def cmd_ls(args: argparse.Namespace) -> int:
 
 
 def cmd_create(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     result = crud.create_timeline(
@@ -86,7 +86,7 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 
 def cmd_show(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     data = crud.show_timeline(
@@ -196,7 +196,7 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_rename(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     extra = _expected_version_kwargs(args)
@@ -217,7 +217,7 @@ def cmd_rename(args: argparse.Namespace) -> int:
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     from_run = args.from_run
@@ -251,7 +251,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
 
 def cmd_tombstone(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     result = crud.tombstone_timeline(session.project, args.slug)
@@ -267,7 +267,7 @@ def cmd_tombstone(args: argparse.Namespace) -> int:
 
 
 def cmd_purge(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
 
@@ -306,7 +306,7 @@ def cmd_purge(args: argparse.Namespace) -> int:
 
 
 def cmd_set_default(args: argparse.Namespace) -> int:
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     result = crud.set_default(session.project, args.slug)

@@ -16,7 +16,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 
-from .events.schema import TimelineActor
+from astrid.core.timeline.events.schema import TimelineActor
 
 
 # ---------------------------------------------------------------------------
@@ -82,9 +82,9 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
 
     Returns nonzero on parity failures or unreadable source blobs.
     """
-    from .eventlog.local_fs import LocalFsBackend
-    from .events.schema import TimelineActor
-    from .migration import (
+    from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
+    from astrid.core.timeline.events.schema import TimelineActor
+    from astrid.core.timeline.migration import (
         MigrationResult,
         SkippedTimeline,
         discover_projects_for_migration,
@@ -170,7 +170,7 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
             if import_result.get("imported"):
                 result.imported.append(ulid)
                 if not import_result.get("parity_ok"):
-                    from .migration import ParityFailure
+                    from astrid.core.timeline.migration import ParityFailure
                     result.parity_failures.append(
                         ParityFailure(
                             project_slug=slug,
@@ -256,13 +256,13 @@ def cmd_migrate_events(args: argparse.Namespace) -> int:
 
 def cmd_history(args: argparse.Namespace) -> int:
     """Read and pretty-print the event history of a timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .eventlog import select_timeline_backend
-    from .observability import resolve_timeline_target
+    from astrid.core.timeline.eventlog import select_timeline_backend
+    from astrid.core.timeline.observability import resolve_timeline_target
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
@@ -320,14 +320,14 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 def cmd_diff(args: argparse.Namespace) -> int:
     """Semantic diff between two events in a timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .eventlog import select_timeline_backend
-    from .observability import resolve_timeline_target
-    from .projection import replay_projection
+    from astrid.core.timeline.eventlog import select_timeline_backend
+    from astrid.core.timeline.observability import resolve_timeline_target
+    from astrid.core.timeline.projection import replay_projection
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
@@ -434,14 +434,14 @@ def cmd_diff(args: argparse.Namespace) -> int:
 
 def cmd_audit(args: argparse.Namespace) -> int:
     """Verify event chain integrity and projection parity."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .eventlog import select_timeline_backend
-    from .observability import read_ops_log, resolve_timeline_target
-    from .projection import replay_projection
+    from astrid.core.timeline.eventlog import select_timeline_backend
+    from astrid.core.timeline.observability import read_ops_log, resolve_timeline_target
+    from astrid.core.timeline.projection import replay_projection
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
@@ -580,14 +580,14 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
 def cmd_preview(args: argparse.Namespace) -> int:
     """Project a past state at a specific event."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .eventlog import select_timeline_backend
-    from .observability import resolve_timeline_target
-    from .projection import replay_projection
+    from astrid.core.timeline.eventlog import select_timeline_backend
+    from astrid.core.timeline.observability import resolve_timeline_target
+    from astrid.core.timeline.projection import replay_projection
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)
@@ -648,13 +648,13 @@ def cmd_preview(args: argparse.Namespace) -> int:
 
 def cmd_who_edited(args: argparse.Namespace) -> int:
     """Show actor rollup for a timeline."""
-    from .cli import _require_session  # noqa: PLC0415
+    from .timeline import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
 
-    from .eventlog import select_timeline_backend
-    from .observability import resolve_timeline_target
+    from astrid.core.timeline.eventlog import select_timeline_backend
+    from astrid.core.timeline.observability import resolve_timeline_target
 
     try:
         target = resolve_timeline_target(project_slug, args.slug_or_id)

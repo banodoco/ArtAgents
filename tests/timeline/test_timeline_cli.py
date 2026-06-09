@@ -19,7 +19,8 @@ import pytest
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import AstridArgumentError, StaticChoices
-from astrid.core.timeline import cli as timeline_cli, clip_edits
+from astrid.core.cli import timeline as timeline_cli
+from astrid.core.timeline import clip_edits
 from astrid.core.timeline.events.schema import (
     AudioBoundPayload,
     ClipAddedPayload,

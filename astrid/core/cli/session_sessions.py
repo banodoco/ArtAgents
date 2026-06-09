@@ -66,7 +66,7 @@ from astrid.core.task.events import EVENTS_FILENAME
 
 def cmd_sessions_ls(args: argparse.Namespace, *, out: Any = None) -> int:
     # _list_session_files resolved through the facade — pinned monkeypatch seam.
-    from astrid.core.session.cli import _list_session_files  # noqa: PLC0415
+    from astrid.core.cli.session import _list_session_files  # noqa: PLC0415
 
     if out is None:
         out = sys.stdout
@@ -315,7 +315,7 @@ def cmd_sessions_prune(args: argparse.Namespace, *, out: Any = None) -> int:
     ``--older-than-days`` (default 30) relative to the current UTC time.
     """
     # _list_session_files resolved through the facade — pinned monkeypatch seam.
-    from astrid.core.session.cli import _list_session_files  # noqa: PLC0415
+    from astrid.core.cli.session import _list_session_files  # noqa: PLC0415
 
     if out is None:
         out = sys.stdout

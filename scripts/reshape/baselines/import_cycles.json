@@ -6,20 +6,12 @@
       "astrid.core.task"
     ],
     [
-      "astrid.core.cli_choices",
-      "astrid.core.pack"
-    ],
-    [
       "astrid.core.element",
       "astrid.core.project"
     ],
     [
       "astrid.core.executor",
       "astrid.core.orchestrator"
-    ],
-    [
-      "astrid.core.integrations",
-      "astrid.core.project"
     ],
     [
       "astrid.core.orchestrator",
@@ -40,20 +32,13 @@
     [
       "astrid.core.session",
       "astrid.core.task"
-    ],
-    [
-      "astrid.core.session",
-      "astrid.core.timeline"
-    ],
-    [
-      "astrid.core.task",
-      "astrid.core.timeline"
     ]
   ],
   "sccs": [
     [
       "astrid.core.adapter",
-      "astrid.core.cli_choices",
+      "astrid.core.audit",
+      "astrid.core.cli",
       "astrid.core.element",
       "astrid.core.executor",
       "astrid.core.integrations",
@@ -63,8 +48,9 @@
       "astrid.core.runtime",
       "astrid.core.session",
       "astrid.core.task",
+      "astrid.core.threads",
       "astrid.core.timeline"
     ]
   ],
-  "pair_count": 12
+  "pair_count": 8
 }
