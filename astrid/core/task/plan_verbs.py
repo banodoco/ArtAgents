@@ -33,7 +33,6 @@ from astrid.core.task.validator import (
 
 PLAN_MUTATED_KIND = "plan_mutated"
 PLAN_INITIALIZED_KIND = "plan_initialized"
-STEP_TOMBSTONED_KIND = "plan_step_tombstoned"  # rendered inside plan_mutated.diff.op
 
 
 # -----------------------------------------------------------------------------

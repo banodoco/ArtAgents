@@ -92,8 +92,7 @@ def git_status(path: str | Path) -> GitStatus:
         filename = line[3:].rstrip()
         # Renames may show up as 'R  old -> new'
         if " -> " in filename:
-            # For structured tracking, store the whole line
-            filename = filename
+            pass
         if xy == "??":
             untracked.append(filename)
         else:

@@ -32,16 +32,6 @@ METADATA_KEY_TIMELINE_BINDING_MODE = "timeline_binding_mode"
 TIMELINE_BINDING_MODE_MANAGED = "managed"
 TIMELINE_BINDING_MODE_UNMANAGED = "unmanaged"
 TIMELINE_BINDING_MODES = {TIMELINE_BINDING_MODE_MANAGED, TIMELINE_BINDING_MODE_UNMANAGED}
-SENSITIVE_ARG_NAMES = {
-    "--api-key",
-    "--apikey",
-    "--auth",
-    "--env-file",
-    "--key",
-    "--password",
-    "--secret",
-    "--token",
-}
 # Normalized (dashes → underscores, no leading dashes) exact-match set
 # used by _is_sensitive_key after key normalization.  Keep in sync with
 # the substrings below.

@@ -3,7 +3,6 @@
 
 
 from __future__ import annotations
-from __future__ import annotations
 
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('editorial.refine')

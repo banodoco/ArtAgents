@@ -67,18 +67,6 @@ def _add_expected_version_arg(parser: argparse.ArgumentParser) -> None:
     return _impl(parser)
 
 
-# Original build_parser body (lines 72-857) is now in cli_parser.py.
-# The parser construction was moved in its entirety to avoid a circular
-# import: cli_parser lazily imports command handlers from this module.
-# Original function signature start preserved below for diff context.
-# def build_parser() -> argparse.ArgumentParser:
-#     parser = RecoverableArgumentParser(
-#         prog="python3 -m astrid timelines",
-#         description="Create, inspect, and manage project timelines.",
-#     )
-#     subparsers = parser.add_subparsers(dest="command", required=True)
-#     ...  # (787 lines total, now in cli_parser.py)
-
 
 # ---------------------------------------------------------------------------
 # Edit command handlers (clip, transition, effect, theme, track, audio,

@@ -25,7 +25,6 @@ PROJECT_SCHEMA_VERSION = 1
 SOURCE_SCHEMA_VERSION = 1
 RUN_SCHEMA_VERSION = 1
 SOURCE_KINDS = {"audio", "image", "other", "video"}
-RUN_STATUSES = {status.value for status in RunStatus}
 RUN_INVOCATIONS = {"cli", "sdk", "scratch", "task"}
 
 
