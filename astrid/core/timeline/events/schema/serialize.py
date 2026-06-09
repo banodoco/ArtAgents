@@ -8,7 +8,6 @@ import math
 from dataclasses import is_dataclass
 from typing import Any
 
-from astrid.core.contracts.event_hash import hash_embedded
 from .types import TimelineEvent, TimelineEventSchemaError
 
 
@@ -60,6 +59,22 @@ def canonical_json_text(value: Any, *, exclude_hash: bool = False) -> str:
 
 def sha256_hex(value: Any, *, exclude_hash: bool = False) -> str:
     return hashlib.sha256(canonical_json_bytes(value, exclude_hash=exclude_hash)).hexdigest()
+
+
+def hash_embedded(prev_hash: str | None, event: TimelineEvent) -> str:
+    """Return the bare-hex SHA-256 digest for a timeline event.
+
+    Embeds *prev_hash* in the event payload JSON and hashes with
+    ``exclude_hash=True`` (the ``hash`` field is stripped before hashing).
+    Returns a bare hexadecimal digest — no ``sha256:`` prefix.
+
+    Used by timeline serialization (``with_event_hash``).
+    Algorithms are frozen; do not modify.
+    """
+    payload = event.to_json_obj()
+    payload["prev_hash"] = prev_hash
+    payload["hash"] = None
+    return sha256_hex(payload, exclude_hash=True)
 
 
 def with_event_hash(event: TimelineEvent, *, prev_hash: str | None) -> TimelineEvent:

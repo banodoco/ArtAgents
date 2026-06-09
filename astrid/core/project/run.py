@@ -100,6 +100,15 @@ def project_run_env(project_slug: str | None = None) -> dict[str, str]:
     return env
 
 
+def _project_subprocess_env(request: Any) -> dict[str, str]:
+    """Return the project-scoped subprocess environment for *request*.
+
+    *request* must have a ``.project`` attribute (``str | None``).
+    Byte-identical in executor/runner.py and orchestrator/runner.py.
+    """
+    return project_run_env(request.project) if request.project else {}
+
+
 def record_path_value(
     value: str | Path,
     project_slug: str,
@@ -749,6 +758,7 @@ __all__ = [
     "TIMELINE_BINDING_MODE_MANAGED",
     "TIMELINE_BINDING_MODE_UNMANAGED",
     "TIMELINE_BINDING_MODES",
+    "_project_subprocess_env",
     "bind_managed_timeline",
     "discover_hype_artifact_root",
     "discover_manifest_path",

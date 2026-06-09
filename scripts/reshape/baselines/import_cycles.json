@@ -15,18 +15,6 @@
     ],
     [
       "astrid.core.contracts",
-      "astrid.core.gateway"
-    ],
-    [
-      "astrid.core.contracts",
-      "astrid.core.project"
-    ],
-    [
-      "astrid.core.contracts",
-      "astrid.core.timeline"
-    ],
-    [
-      "astrid.core.contracts",
       "astrid.core.util"
     ],
     [
@@ -105,27 +93,25 @@
       "astrid.core.cli_choices",
       "astrid.core.contracts",
       "astrid.core.dirty",
-      "astrid.core.doctor",
       "astrid.core.element",
       "astrid.core.executor",
-      "astrid.core.gateway",
-      "astrid.core.generation",
       "astrid.core.integrations",
-      "astrid.core.model_catalog",
-      "astrid.core.orchestrate",
       "astrid.core.orchestrator",
       "astrid.core.pack",
       "astrid.core.paths",
       "astrid.core.project",
       "astrid.core.runtime",
       "astrid.core.session",
-      "astrid.core.structure",
       "astrid.core.task",
       "astrid.core.threads",
       "astrid.core.timeline",
       "astrid.core.update",
       "astrid.core.util"
+    ],
+    [
+      "astrid.core.generation",
+      "astrid.core.model_catalog"
     ]
   ],
-  "pair_count": 24
+  "pair_count": 21
 }

@@ -26,6 +26,7 @@ from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION
 from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.run import (
     ProjectRunContext,
+    _project_subprocess_env,
     finalize_project_run,
     prepare_project_run,
     project_run_env,
@@ -60,7 +61,6 @@ from astrid.core.contracts._capability_common import (
     _expand_placeholders,
     _has_value,
     _output_value,
-    _project_subprocess_env,
     _stringify_value,
     _validate_required_inputs,
 )

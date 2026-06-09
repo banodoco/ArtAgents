@@ -9,8 +9,21 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core.util.atomic_io import write_json_atomic as _atomic_write_json
 from astrid.core.util.hash import sha256_file
+
+
+def write_json_atomic(path: str | Path, payload: Any) -> None:
+    """Atomically write *payload* as JSON to *path*.
+
+    Delegates to :func:`astrid.core.util.atomic_io.write_json_atomic`,
+    wrapping low-level ``OSError`` in :class:`AstridError` with the same
+    message previously produced by ``project.jsonio.write_json_atomic``.
+    """
+    try:
+        _atomic_write_json(path, payload)
+    except OSError as exc:
+        raise AstridError(f"failed to write {path}: {exc}") from exc
 
 _REQUIRED_FIELDS = frozenset(
     {"schema_version", "kind", "inputs", "outputs", "created", "warnings"}

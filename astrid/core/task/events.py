@@ -41,7 +41,6 @@ import os
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from astrid.core.contracts.event_hash import hash_prepended
 from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.util.time import utc_now_iso
 
@@ -733,6 +732,23 @@ def make_cursor_rewind_event(
     _set_if_not_none(payload, "step_version", step_version)
     _set_if_not_none(payload, "dispatch_event_hash", dispatch_event_hash)
     return payload
+
+
+def hash_prepended(prev_hash: str, event: dict[str, Any]) -> str:
+    """Return the ``sha256:<hex>`` digest for a task event log entry.
+
+    Prepends the raw *prev_hash* string to the canonical JSON representation
+    of *event* (with the ``hash`` field excluded), then SHA-256 hashes the
+    concatenated UTF-8 bytes.  Returns ``f"sha256:{digest}"`` — WITH the
+    ``sha256:`` prefix.
+
+    Algorithms are frozen; do not modify. On-disk hash chains for existing
+    event logs depend on byte-identical output.
+    """
+    payload = {key: value for key, value in event.items() if key != "hash"}
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256((prev_hash + canonical).encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
 
 
 def _event_hash(prev_hash: str, event: dict[str, Any]) -> str:

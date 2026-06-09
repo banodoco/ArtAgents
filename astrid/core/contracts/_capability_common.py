@@ -21,7 +21,6 @@ from astrid.core.contracts.schema import (
     IsolationMetadata,
     IsolationMode,
 )
-from astrid.core.project.run import project_run_env
 
 # ---------------------------------------------------------------------------
 # runner.py helpers
@@ -55,9 +54,9 @@ def _eprint(*args: object) -> None:
 def _gateway_resolved_project(explicit_project: str | None) -> str | None:
     if explicit_project is not None:
         return None
-    from astrid.core.gateway import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV
+    from astrid.core.env_vars import ASTRID_GATEWAY_RESOLVED_PROJECT
 
-    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
+    value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT)
     return value or None
 
 
@@ -346,15 +345,6 @@ def _validate_required_inputs(
         raise error_cls(
             f"{noun} {capability_id!r} missing required input(s): {', '.join(missing)}"
         )
-
-
-def _project_subprocess_env(request: Any) -> dict[str, str]:
-    """Return the project-scoped subprocess environment for *request*.
-
-    *request* must have a ``.project`` attribute (``str | None``).
-    Previously byte-identical in executor/runner.py and orchestrator/runner.py.
-    """
-    return project_run_env(request.project) if request.project else {}
 
 
 def _output_value(
