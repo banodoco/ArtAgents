@@ -154,6 +154,13 @@
       "name": "steps",
       "required": false,
       "type": "integer"
+    },
+    {
+      "default": "",
+      "description": "LoRAs to apply (cloud/fal backends with a lora_endpoint). JSON array of {\"path\": <url>, \"scale\": <float>, \"transformer\": \"both\"|\"high\"|\"low\"} items, or comma-separated url:scale entries. Routes the request to the model's lora_endpoint.",
+      "name": "loras",
+      "required": false,
+      "type": "string"
     }
   ],
   "isolation": {

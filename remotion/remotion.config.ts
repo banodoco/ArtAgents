@@ -5,6 +5,7 @@ const projectDir = process.cwd();
 const activeThemeDir = path.resolve(projectDir, '_active_theme');
 const astridDir = path.resolve(projectDir, '..');
 const builtinPackElementsDir = path.resolve(astridDir, 'astrid/packs/builtin/elements');
+const renderingPackElementsDir = path.resolve(astridDir, 'astrid/packs/rendering/elements');
 const localPackElementsDir = path.resolve(astridDir, 'astrid/packs/local/elements');
 
 Config.setVideoImageFormat('jpeg');
@@ -20,17 +21,20 @@ Config.overrideWebpackConfig((currentConfiguration) => ({
       '@theme-effects': path.resolve(activeThemeDir, 'effects'),
       '@pack-local-elements-effects': path.resolve(localPackElementsDir, 'effects'),
       '@pack-builtin-elements-effects': path.resolve(builtinPackElementsDir, 'effects'),
+      '@pack-rendering-elements-effects': path.resolve(renderingPackElementsDir, 'effects'),
       '@theme-elements-animations': path.resolve(activeThemeDir, 'elements/animations'),
       '@theme-animations': path.resolve(activeThemeDir, 'animations'),
       '@pack-local-elements-animations': path.resolve(localPackElementsDir, 'animations'),
       '@pack-builtin-elements-animations': path.resolve(builtinPackElementsDir, 'animations'),
+      '@pack-rendering-elements-animations': path.resolve(renderingPackElementsDir, 'animations'),
       '@theme-elements-transitions': path.resolve(activeThemeDir, 'elements/transitions'),
       '@theme-transitions': path.resolve(activeThemeDir, 'transitions'),
       '@pack-local-elements-transitions': path.resolve(localPackElementsDir, 'transitions'),
       '@pack-builtin-elements-transitions': path.resolve(builtinPackElementsDir, 'transitions'),
-      '@workspace-animations': path.resolve(builtinPackElementsDir, 'animations'),
-      '@workspace-effects': path.resolve(builtinPackElementsDir, 'effects'),
-      '@workspace-transitions': path.resolve(builtinPackElementsDir, 'transitions'),
+      '@pack-rendering-elements-transitions': path.resolve(renderingPackElementsDir, 'transitions'),
+      '@workspace-animations': path.resolve(renderingPackElementsDir, 'animations'),
+      '@workspace-effects': path.resolve(renderingPackElementsDir, 'effects'),
+      '@workspace-transitions': path.resolve(renderingPackElementsDir, 'transitions'),
     },
     modules: [
       ...(currentConfiguration.resolve?.modules ?? ['node_modules']),

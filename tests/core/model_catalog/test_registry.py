@@ -783,6 +783,7 @@ class TestShippedRegistry:
         "flux-schnell",
         "flux2-klein-9b",
         "flux2-klein-4b",
+        "ideogram-v4",
         "wan-2.2",
         "ltx-2.3",
         "ltx-2.3-pro",
@@ -911,6 +912,7 @@ class TestListByModalityV2:
             "flux-schnell",
             "flux2-klein-9b",
             "flux2-klein-4b",
+            "ideogram-v4",
         }
 
     def test_video_returns_expected_entries(self) -> None:

@@ -120,3 +120,6 @@ plan_revision.json
 # Python build / distribution artifacts (regenerated; never committed)
 build/
 dist/
+
+# Separate Next.js project (Ideogram x Banodoco competition page); not part of Astrid
+/ideogram-competition/

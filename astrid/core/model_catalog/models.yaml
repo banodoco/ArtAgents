@@ -454,6 +454,61 @@ models:
               negative_prompt: negative_prompt
 
   # =========================================================================
+  # ideogram-v4 — Ideogram V4 (text-to-image) CLOUD-ONLY
+  #
+  # Cloud endpoint (fal):
+  #   t2i: ideogram/v4 — confirmed via fal model card + live API call
+  #        (https://fal.ai/models/ideogram/v4).  NOTE: no `fal-ai/` prefix,
+  #        unlike ideogram v3 (fal-ai/ideogram/v3).  The bare `fal-ai/...`
+  #        path 404s ("Path /v4 not found") on result fetch.
+  #
+  # fal input schema exposes: prompt (required), image_size, num_images,
+  # seed, rendering_speed (default BALANCED), expansion_model, num_images.
+  # It does NOT expose negative_prompt, guidance_scale, or step count, so
+  # those canonical features are omitted from supports.  rendering_speed /
+  # expansion_model are ideogram-specific (no canonical feature) and use
+  # the fal defaults.
+  #
+  # No local vibecomfy template yet (Ideogram 4.0 has open FP8 weights with
+  # day-0 ComfyUI support, so a `local` backend is feasible later — needs a
+  # ready-template + weights download).  Cloud-only for now.
+  #
+  # Pricing on fal is per output megapixel ($0.03/$0.06/$0.10 per MP for
+  # turbo/balanced/quality).  fal reports the actual per-request cost, which
+  # the adapter prefers; the price below is an approximate balanced-mode,
+  # ~1 MP (square_hd) fallback used only if the API omits a cost.
+  # =========================================================================
+  - id: ideogram-v4
+    modality: image
+    modes:
+      t2i:
+        supports:
+          - prompt
+          - seed
+          - count
+          - size
+        requires:
+          - prompt
+        backends:
+          cloud:
+            endpoint: ideogram/v4
+            price:
+              unit: image
+              usd: 0.06
+            param_map:
+              prompt: prompt
+              seed: seed
+              count: num_images
+              size: image_size
+          codex:
+            endpoint: codex/gpt-image
+            param_map:
+              prompt: prompt
+              seed: seed
+              count: count
+              size: size
+
+  # =========================================================================
   # wan-2.2 — Wan 2.2 A14B (text-to-video + image-to-video + first-last-frame)
   #
   # Local templates (vibecomfy):
@@ -699,6 +754,11 @@ models:
               fps: fps
           cloud:
             endpoint: fal-ai/ltx-2.3/image-to-video/fast
+            # When LoRAs are requested the backend routes to this quality
+            # endpoint, which accepts a `loras` list of {path, scale,
+            # transformer} items (fal-ai/ltx-2.3-quality/image-to-video/lora).
+            # The base /fast endpoint does not take custom LoRAs.
+            lora_endpoint: fal-ai/ltx-2.3-quality/image-to-video/lora
             param_map:
               prompt: prompt
               negative_prompt: negative_prompt

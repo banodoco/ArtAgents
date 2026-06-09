@@ -161,7 +161,7 @@ class FalBackend(BackendAdapter):
                         "scale": lora_entry.default_scale,
                     })
                 elif isinstance(item, dict):
-                    # Inline {path, scale} spec
+                    # Inline {path, scale[, transformer]} spec
                     path = item.get("path")
                     scale = item.get("scale", 1.0)
                     if not path or not isinstance(path, str):
@@ -170,7 +170,14 @@ class FalBackend(BackendAdapter):
                         )
                     # Inline LoRAs cannot be validated for base_model —
                     # caller assumes responsibility.
-                    fal_loras.append({"path": path, "scale": scale})
+                    fal_lora: dict[str, Any] = {"path": path, "scale": scale}
+                    # Some endpoints (e.g. ltx-2.3-quality lora) require a
+                    # per-LoRA `transformer` target ("both"/"high"/"low");
+                    # forward it verbatim when the caller supplies one.
+                    transformer = item.get("transformer")
+                    if transformer is not None:
+                        fal_lora["transformer"] = transformer
+                    fal_loras.append(fal_lora)
                     lora_provenance.append({
                         "url": path,
                         "scale": scale,
@@ -251,6 +258,11 @@ class FalBackend(BackendAdapter):
         # flux-schnell: guidance_scale is always 1.0 (frozen value)
         if entry.id == "flux-schnell" and mode == "t2i":
             payload["guidance_scale"] = 1.0
+
+        # ideogram-v4: disable fal's safety checker by default.  setdefault
+        # so an explicit caller-supplied value (if ever wired) still wins.
+        if entry.id == "ideogram-v4":
+            payload.setdefault("enable_safety_checker", False)
 
         # --- attach LoRA payload if present ----------------------------------
         if loras_raw and fal_loras:

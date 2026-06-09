@@ -168,6 +168,90 @@ def test_unbound_gate_uses_the_frozen_allowlist_table() -> None:
         assert gateway._verb_is_unbound_allowlisted(list(allowed))
 
 
+def test_file_scoped_executor_run_infers_project_from_out_path(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_project("demo")
+    monkeypatch.chdir(env["projects"].parent)
+
+    slug = gateway._extract_project_slug_from_run_paths(
+        [
+            "executors",
+            "run",
+            "rendering.render",
+            "--out",
+            "projects/demo/runs/render",
+        ]
+    )
+
+    assert slug == "demo"
+
+
+def test_file_scoped_executor_run_infers_project_from_input_path(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_project("demo")
+    monkeypatch.chdir(env["projects"].parent)
+
+    slug = gateway._extract_project_slug_from_run_paths(
+        [
+            "executors",
+            "run",
+            "rendering.render",
+            "--input",
+            "timeline=projects/demo/runs/render/hype.timeline.json",
+        ]
+    )
+
+    assert slug == "demo"
+
+
+def test_file_scoped_executor_run_refuses_ambiguous_project_paths(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_project("demo")
+    create_project("other")
+    monkeypatch.chdir(env["projects"].parent)
+
+    slug = gateway._extract_project_slug_from_run_paths(
+        [
+            "executors",
+            "run",
+            "rendering.render",
+            "--out",
+            "projects/demo/runs/render",
+            "--input",
+            "timeline=projects/other/runs/render/hype.timeline.json",
+        ]
+    )
+
+    assert slug is None
+
+
+def test_file_scoped_executor_run_errors_on_ambiguous_project_paths(
+    env: dict[str, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    create_project("demo")
+    create_project("other")
+    monkeypatch.chdir(env["projects"].parent)
+
+    rc, _stdout, stderr = _run_pipeline(
+        [
+            "executors",
+            "run",
+            "rendering.render",
+            "--out",
+            "projects/demo/runs/render",
+            "--input",
+            "timeline=projects/other/runs/render/hype.timeline.json",
+        ]
+    )
+
+    assert rc == 2
+    assert "ambiguous project context" in stderr
+    assert "pass --project <slug> explicitly" in stderr
+
+
 def test_stop_line_unbound_gate_has_no_transitional_extras() -> None:
     transitional_extras = [
         ["init"],

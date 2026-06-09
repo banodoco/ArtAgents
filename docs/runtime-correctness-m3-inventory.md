@@ -4,8 +4,8 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 
 ## Summary
 
-- AST sites inventoried: 734
-- Grep lexical hits after the same source exclusions: 749.
+- AST sites inventoried: 736
+- Grep lexical hits after the same source exclusions: 751.
 - Source exclusions: `astrid/packs/**` and `.astrid/**`.
 
 ## Inventory
@@ -187,11 +187,11 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 
 | Line | Kind | Scope | Status | Reason |
 | ---: | --- | --- | --- | --- |
-| 176 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 | 178 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 207 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 243 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 279 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 180 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 209 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 251 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 287 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
 ### `astrid/core/gateway/dispatch.py`
 
@@ -215,7 +215,9 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 
 | Line | Kind | Scope | Status | Reason |
 | ---: | --- | --- | --- | --- |
-| 124 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 81 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 137 | `except` | runtime | `justified` | Graceful fallback in run-path project inference: returns empty when the projects root cannot be resolved. |
+| 215 | `except` | runtime | `justified` | Graceful fallback in run-path project inference: skips a path value that is not under the projects root. |
 
 ### `astrid/core/gateway/wait.py`
 
@@ -247,7 +249,7 @@ Regenerated from the current non-pack `astrid/` Python AST after core cleanup.
 | Line | Kind | Scope | Status | Reason |
 | ---: | --- | --- | --- | --- |
 | 143 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
-| 298 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
+| 310 | `except` | runtime | `justified` | Audited non-pack runtime control-flow site retained after core cleanup. |
 
 ### `astrid/core/generation/backends/registry.py`
 

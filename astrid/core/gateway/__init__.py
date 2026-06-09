@@ -45,8 +45,10 @@ from astrid.core.gateway.project import (
     _auto_bind_default_project_session,
     _dispatch_with_resolved_project,
     _extract_project_slug,
+    _extract_project_slug_from_run_paths,
     _has_cli_option,
     _invocation_is_auto_bindable_run,
+    _raise_on_ambiguous_run_path_projects,
     _resolved_request_project_slug,
 )
 from astrid.core.gateway.help import (
@@ -208,6 +210,12 @@ def _main_impl(raw: list[str]) -> int:
         # Never let the nudge break a real command.
         log_and_swallow(exc, context="gateway.nudge_if_needed")
 
+    # File-scoped run invocations that reference more than one local project in
+    # their explicit paths are ambiguous: refuse rather than silently routing
+    # provenance to the wrong project (or the global default). Raised before the
+    # session gate so the error is reported regardless of bound-session state.
+    _raise_on_ambiguous_run_path_projects(raw)
+
     # Session gate. Verbs outside the unbound allowlist require a resolvable
     # session record; print the documented hint and exit 2 otherwise.
     session = None
@@ -241,7 +249,7 @@ def _main_impl(raw: list[str]) -> int:
                 projects_root=resolve_projects_root(),
             )
         except SessionBindingError as exc:
-            _project_hint = _extract_project_slug(raw)
+            _project_hint = _extract_project_slug(raw) or _extract_project_slug_from_run_paths(raw)
             _recovery_cmd = f"astrid attach {_project_hint}" if _project_hint else "astrid status"
             raise AstridError(
                 f"session: {exc}",
@@ -251,7 +259,7 @@ def _main_impl(raw: list[str]) -> int:
         if session is None:
             session = _auto_bind_default_project_session(raw)
         if session is None:
-            project_hint = _extract_project_slug(raw)
+            project_hint = _extract_project_slug(raw) or _extract_project_slug_from_run_paths(raw)
             attach_hint = (
                 f"`astrid attach {project_hint}`"
                 if project_hint
