@@ -15,9 +15,24 @@ from pathlib import Path
 import yaml
 
 from astrid.core.pack import pack_manifest_path
-# Trust helpers are imported via late imports from .install inside each
-# function so that mock.patch("astrid.core.pack.install._confirm") and similar
-# monkeypatch seams continue to work (M4 T20 / SD3).
+# Leaf-level helpers imported directly from their real home modules
+# (install_trust = pure leaf, install_git = git leaf).  ``_confirm`` and
+# ``_confirm_trust`` are NOT imported here: they retain a late import from
+# ``.install`` inside the functions that call them so that
+# mock.patch("astrid.core.pack.install._confirm" / "._confirm_trust") still
+# intercepts the call (the documented monkeypatch contract — see
+# docs/contracts/monkeypatch-contracts.md §2).
+from astrid.core.pack.install_trust import (
+    _format_permission,
+    _format_trust_summary,
+    _normalized_summary_permissions,
+    _trust_missing_error,
+)
+from astrid.core.pack.install_git import (
+    _install_from_git,
+    _is_git_url,
+    _update_git_pack,
+)
 from astrid.core.pack.store import (
     InstalledPackStore,
     InstallRecord,
@@ -77,17 +92,11 @@ def install_pack(
     if store is None:
         store = InstalledPackStore()
 
-    # ── Late imports from .install to preserve monkeypatch seams (M4 T20/T22 / SD3)
-    # _install_from_git and _is_git_url are now in install_git.py (T22) but
-    # re-exported via install.py so these late imports continue to work.
-    from astrid.core.pack.install import (  # noqa: E402
-        _confirm,
-        _confirm_trust,
-        _format_trust_summary,
-        _install_from_git,
-        _is_git_url,
-        _trust_missing_error,
-    )
+    # ── Late import from .install preserves the monkeypatch seams for
+    # _confirm / _confirm_trust (mock.patch("astrid.core.pack.install.*")).
+    # All other helpers (_format_trust_summary, _install_from_git, _is_git_url,
+    # _trust_missing_error) are now module-level imports from their leaf homes.
+    from astrid.core.pack.install import _confirm, _confirm_trust  # noqa: E402
 
     # ── Git URL detection MUST happen BEFORE Path().resolve() ──────────
     source_str = str(source_path)
@@ -288,12 +297,6 @@ def _do_install(
     trust_actor: str | None = None,
 ) -> int:
     """Perform the actual install (called under lock)."""
-    # Late imports from .install to preserve monkeypatch seams (M4 T20 / SD3)
-    from astrid.core.pack.install import (  # noqa: E402
-        _format_trust_summary,
-        _normalized_summary_permissions,
-    )
-
     install_root = store.install_root_for(pack_id)
     revisions_dir = store.revisions_dir(pack_id)
     staging = store.staging_path_for(pack_id)
@@ -486,7 +489,7 @@ def uninstall_pack(
     if store is None:
         store = InstalledPackStore()
 
-    # Late import from .install to preserve monkeypatch seams (M4 T20 / SD3)
+    # Late import preserves the mock.patch("astrid.core.pack.install._confirm") seam.
     from astrid.core.pack.install import _confirm  # noqa: E402
 
     existing = store.get_active(pack_id)
@@ -541,12 +544,6 @@ def _format_update_diff(
     Returns:
         A formatted multi-line string suitable for console display.
     """
-    # Late imports from .install to preserve monkeypatch seams (M4 T20 / SD3)
-    from astrid.core.pack.install import (  # noqa: E402
-        _format_permission,
-        _normalized_summary_permissions,
-    )
-
     lines: list[str] = []
     lines.append("═══ Diff Summary ═══")
 
@@ -694,9 +691,6 @@ def update_pack(
     if store is None:
         store = InstalledPackStore()
 
-    # Late imports from .install to preserve monkeypatch seams (M4 T20 / SD3)
-    from astrid.core.pack.install import _format_trust_summary  # noqa: E402
-
     existing = store.get_active(pack_id)
     if existing is None:
         print(
@@ -707,10 +701,6 @@ def update_pack(
 
     # ── Branch: Git-backed packs ──────────────────────────────────────
     if existing.source_type == "git":
-        # Late import to avoid circular dependency with .install (M4 T20/T22)
-        # _update_git_pack is now in install_git.py (T22) but re-exported via install.py.
-        from astrid.core.pack.install import _update_git_pack  # noqa: E402
-
         return _update_git_pack(
             existing, pack_id, store,
             dry_run=dry_run,
@@ -833,7 +823,7 @@ def rollback_pack(
     if store is None:
         store = InstalledPackStore()
 
-    # Late import from .install to preserve monkeypatch seams (M4 T20 / SD3)
+    # Late import preserves the mock.patch("astrid.core.pack.install._confirm") seam.
     from astrid.core.pack.install import _confirm  # noqa: E402
 
     existing = store.get_active(pack_id)

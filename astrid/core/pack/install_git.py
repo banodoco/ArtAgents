@@ -14,6 +14,7 @@ from pathlib import Path
 
 from astrid.core.pack import pack_manifest_path
 from astrid.core.pack.gitignore import gitignore_filter
+from astrid.core.pack.install_trust import _format_trust_summary
 from astrid.core.pack.store import InstallRecord
 
 
@@ -332,7 +333,10 @@ def _install_from_git(
         # 3. Auto-detect pack root inside the checkout
         pack_root = _find_pack_root_in_checkout(checkout_path)
 
-        # Late import to preserve monkeypatch seams (M4 T22 / SD3)
+        # Late import preserves the mock.patch("astrid.core.pack.install.install_pack")
+        # seam AND breaks the install_local <-> install_git import cycle
+        # (install_local imports install_git at module level; the reverse must
+        # stay deferred).
         from astrid.core.pack.install import install_pack  # noqa: E402
 
         return install_pack(
@@ -384,12 +388,12 @@ def _update_git_pack(
     """
     import yaml as _yaml
 
-    # Late imports for monkeypatch seam compatibility (M4 T22 / SD3)
-    from astrid.core.pack.install import (  # noqa: E402
-        _diff_component_inventories,
-        _format_trust_summary,
-        install_pack,
-    )
+    # Late imports break the install_local <-> install_git import cycle
+    # (_diff_component_inventories lives in install_local) and preserve the
+    # mock.patch("astrid.core.pack.install.install_pack") seam.
+    # _format_trust_summary is a module-level import (leaf install_trust).
+    from astrid.core.pack.install import install_pack  # noqa: E402
+    from astrid.core.pack.install_local import _diff_component_inventories  # noqa: E402
     from astrid.core.pack.validate import extract_trust_summary  # noqa: E402
 
     git_url = existing.git_url
