@@ -19,10 +19,6 @@
     ],
     [
       "astrid.core.project",
-      "astrid.core.session"
-    ],
-    [
-      "astrid.core.project",
       "astrid.core.task"
     ],
     [
@@ -52,5 +48,5 @@
       "astrid.core.timeline"
     ]
   ],
-  "pair_count": 8
+  "pair_count": 7
 }

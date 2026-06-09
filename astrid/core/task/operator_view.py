@@ -25,9 +25,7 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from astrid.core.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
-from astrid.core.project.current_run import (
-    read_current_run_state,
-)
+from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.foundation.project_paths import (
     project_dir,
     resolve_projects_root,

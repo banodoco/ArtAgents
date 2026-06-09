@@ -51,9 +51,9 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
-from astrid.core.project.current_run import (
+from astrid.core.project.current_run import read_current_run
+from astrid.core.session.current_run_state import (
     migrate_legacy_active_run_before_writer_auth,
-    read_current_run,
 )
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.model import Session, now_iso

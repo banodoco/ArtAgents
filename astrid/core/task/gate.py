@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
 from astrid.core.contracts.run_status import TASK_FINALIZABLE_EVENT_KINDS
-from astrid.core.project.current_run import read_current_run_state
+from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision
 from astrid.core.task.cas import intern, link_into_produces

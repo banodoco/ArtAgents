@@ -3,7 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from astrid.core.project.current_run import read_current_run_state, write_current_run
+from astrid.core.project.current_run import write_current_run
+from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.lease import write_lease_init
 

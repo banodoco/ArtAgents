@@ -70,7 +70,15 @@ Durable progress record for executing `RESTRUCTURE-PLAN.md`. Survives context co
 > session↔timeline, task↔timeline, integrations↔project, project↔session/timeline CLI halves), W7 (executor↔orchestrator fold).
 | W4 | task/ + orchestrate→task/dsl (53); accept adapter↔task, session↔task seams | Opus | ⬜ todo | — |
 | W5 | lift CLI tier + packs/tests reorg | DeepSeek | ⬜ todo | — |
+| project-web | diagnose+break project↔{session,task,timeline}: project↔session BROKEN (lease-blender fns → session/current_run_state.py); project↔task + project↔timeline ACCEPT (genuine host/plugin + co-owned-binding coupling) | Claude(Opus) sub | ✅ done | 7 |
 | W6 | integration: full suite, re-measure, push | main | ⬜ todo | — |
+
+> **Accepted floor forming (genuine bidirectional domain coupling — documented, not failures):**
+> `adapter↔task` (plugin), `session↔task` (shared write path; has a known cold-import-order sensitivity — pre-existing,
+> avoided because real entry loads task first; the W4 shallow-bridge cut would reduce it), `project↔task` (a run is
+> hosted-by / produces task steps), `project↔timeline` (a run and its timeline co-own the contributing-run binding).
+> Still potentially breakable: `executor↔orchestrator` (W7 fold → intra-package), `orchestrator↔task` (W3-blocked),
+> `element↔project` (W2-deferred). Realistic floor ≈ 6 (5 accepted + executor↔orchestrator pending W7).
 | W7 | umbrellas: execution/ (executor 65, orchestrator 60), core/registry/ | Opus | ⬜ todo | — |
 
 ## Log (newest first)
