@@ -14,6 +14,12 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 
+from ._shared import (
+    _resolve_optional_session,
+    _resolve_project_slug,
+    _timeline_actor_from_session,
+)
+
 
 # ---------------------------------------------------------------------------
 # Handler: push (m9)
@@ -22,12 +28,6 @@ from astrid.core.contracts.errors import AstridError
 
 def cmd_push(args: argparse.Namespace) -> int:
     """Push a local timeline to Supabase via event-log replay."""
-    from .cli import (  # noqa: PLC0415
-        _resolve_optional_session,
-        _resolve_project_slug,
-        _timeline_actor_from_session,
-    )
-
     session = _resolve_optional_session(args)
     project_slug = _resolve_project_slug(args, session)
 
@@ -109,7 +109,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
 
 def cmd_branch_create(args: argparse.Namespace) -> int:
     """Create a branch timeline from a source timeline."""
-    from .cli import _require_session, _timeline_actor_from_session  # noqa: PLC0415
+    from .cli import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
 
@@ -190,7 +190,7 @@ def cmd_branch_list(args: argparse.Namespace) -> int:
 
 def cmd_undo(args: argparse.Namespace) -> int:
     """Undo the latest undoable event on a timeline."""
-    from .cli import _require_session, _timeline_actor_from_session  # noqa: PLC0415
+    from .cli import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
@@ -343,7 +343,7 @@ def cmd_undo(args: argparse.Namespace) -> int:
 
 def cmd_mass_undo(args: argparse.Namespace) -> int:
     """Mass-undo events matching filter criteria (preview-first, chunked writes)."""
-    from .cli import _require_session, _timeline_actor_from_session  # noqa: PLC0415
+    from .cli import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
@@ -473,7 +473,7 @@ def cmd_mass_undo(args: argparse.Namespace) -> int:
 
 def cmd_erase(args: argparse.Namespace) -> int:
     """Erase (redact) event payloads matching a selector."""
-    from .cli import _require_session, _timeline_actor_from_session  # noqa: PLC0415
+    from .cli import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project
@@ -592,7 +592,7 @@ def cmd_erase(args: argparse.Namespace) -> int:
 
 def cmd_recover(args: argparse.Namespace) -> int:
     """Recover a timeline to a known-good anchor event."""
-    from .cli import _require_session, _timeline_actor_from_session  # noqa: PLC0415
+    from .cli import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     project_slug = session.project

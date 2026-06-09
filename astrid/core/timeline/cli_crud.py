@@ -15,6 +15,7 @@ from astrid.core.project.current_run import read_current_run
 from astrid.core.session.binding import resolve_current_session
 
 from . import crud
+from ._shared import _expected_version_kwargs, _timeline_actor_from_session
 from .integrity import verify
 
 
@@ -195,11 +196,7 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_rename(args: argparse.Namespace) -> int:
-    from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
-        _require_session,
-        _timeline_actor_from_session,
-    )
+    from .cli import _require_session  # noqa: PLC0415
 
     session = _require_session(slug=getattr(args, "project", None))
     extra = _expected_version_kwargs(args)

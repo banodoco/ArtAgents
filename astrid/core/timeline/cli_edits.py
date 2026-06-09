@@ -18,6 +18,7 @@ from astrid.core.contracts.errors import AstridError
 
 from ._edit_helpers import TimelineEditError
 from .events.schema import ClipPosition
+from ._shared import _expected_version_kwargs, _timeline_actor_from_session
 
 
 # ---------------------------------------------------------------------------
@@ -127,10 +128,8 @@ def _edit_success(domain: str, event, backend_name: str) -> str:
 
 def cmd_clip_add(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -154,10 +153,8 @@ def cmd_clip_add(args: argparse.Namespace) -> int:
 
 def cmd_clip_remove(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -177,10 +174,8 @@ def cmd_clip_remove(args: argparse.Namespace) -> int:
 
 def cmd_clip_move(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -202,10 +197,8 @@ def cmd_clip_move(args: argparse.Namespace) -> int:
 
 def cmd_clip_retrack(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -226,10 +219,8 @@ def cmd_clip_retrack(args: argparse.Namespace) -> int:
 
 def cmd_clip_retime(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -251,10 +242,8 @@ def cmd_clip_retime(args: argparse.Namespace) -> int:
 
 def cmd_clip_swap(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -275,10 +264,8 @@ def cmd_clip_swap(args: argparse.Namespace) -> int:
 
 def cmd_clip_replace(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -299,10 +286,8 @@ def cmd_clip_replace(args: argparse.Namespace) -> int:
 
 def cmd_clip_set_text(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -323,10 +308,8 @@ def cmd_clip_set_text(args: argparse.Namespace) -> int:
 
 def cmd_clip_annotate(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         clip_edits,
     )
 
@@ -352,10 +335,8 @@ def cmd_clip_annotate(args: argparse.Namespace) -> int:
 
 def cmd_transition_set(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         transition_edits,
     )
 
@@ -379,10 +360,8 @@ def cmd_transition_set(args: argparse.Namespace) -> int:
 
 def cmd_transition_remove(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         transition_edits,
     )
 
@@ -409,10 +388,8 @@ def cmd_transition_remove(args: argparse.Namespace) -> int:
 
 def cmd_effect_add(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         effect_edits,
     )
 
@@ -435,10 +412,8 @@ def cmd_effect_add(args: argparse.Namespace) -> int:
 
 def cmd_effect_remove(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         effect_edits,
     )
 
@@ -459,10 +434,8 @@ def cmd_effect_remove(args: argparse.Namespace) -> int:
 
 def cmd_effect_tune(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         effect_edits,
     )
 
@@ -491,10 +464,8 @@ def cmd_effect_tune(args: argparse.Namespace) -> int:
 
 def cmd_theme_set(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         theme_edits,
     )
 
@@ -514,10 +485,8 @@ def cmd_theme_set(args: argparse.Namespace) -> int:
 
 def cmd_theme_override(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         theme_edits,
     )
 
@@ -544,10 +513,8 @@ def cmd_theme_override(args: argparse.Namespace) -> int:
 
 def cmd_track_add(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         track_edits,
     )
 
@@ -570,10 +537,8 @@ def cmd_track_add(args: argparse.Namespace) -> int:
 
 def cmd_track_remove(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         track_edits,
     )
 
@@ -598,10 +563,8 @@ def cmd_track_remove(args: argparse.Namespace) -> int:
 
 def cmd_audio_bind(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         audio_edits,
     )
 
@@ -622,10 +585,8 @@ def cmd_audio_bind(args: argparse.Namespace) -> int:
 
 def cmd_audio_unbind(args: argparse.Namespace) -> int:
     from .cli import (  # noqa: PLC0415
-        _expected_version_kwargs,
         _require_session,
         _resolve_clip_backend_name,
-        _timeline_actor_from_session,
         audio_edits,
     )
 
