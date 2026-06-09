@@ -79,7 +79,7 @@ def _read_stage_excerpt(stage_path: Path, *, max_lines: int = 30) -> str | None:
 # Component manifest scanning
 # ---------------------------------------------------------------------------
 
-from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
+from astrid.core.pack._common import ELEMENT_MANIFEST_NAMES
 
 # Recognised manifest filenames keyed by kind.
 _COMPONENT_MANIFEST_NAMES: dict[str, tuple[str, ...]] = {

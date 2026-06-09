@@ -19,10 +19,6 @@
     ],
     [
       "astrid.core.element",
-      "astrid.core.pack"
-    ],
-    [
-      "astrid.core.element",
       "astrid.core.project"
     ],
     [
@@ -113,5 +109,5 @@
       "astrid.core.model_catalog"
     ]
   ],
-  "pair_count": 21
+  "pair_count": 20
 }
