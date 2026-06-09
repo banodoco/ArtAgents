@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 import math
 from typing import Any
 
-from astrid.core.generation.features import (
+from astrid.core.model_catalog.taxonomy import (
     CANONICAL_IMAGE_MODES,
     CANONICAL_VIDEO_MODES,
     CLOUD_BACKEND_ID,

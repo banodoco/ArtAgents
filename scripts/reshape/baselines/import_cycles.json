@@ -26,10 +26,6 @@
       "astrid.core.project"
     ],
     [
-      "astrid.core.generation",
-      "astrid.core.model_catalog"
-    ],
-    [
       "astrid.core.integrations",
       "astrid.core.project"
     ],
@@ -84,11 +80,7 @@
       "astrid.core.session",
       "astrid.core.task",
       "astrid.core.timeline"
-    ],
-    [
-      "astrid.core.generation",
-      "astrid.core.model_catalog"
     ]
   ],
-  "pair_count": 17
+  "pair_count": 16
 }

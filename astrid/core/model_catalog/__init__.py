@@ -1,6 +1,6 @@
 """Generation model registry — model entries, validation, and loading."""
 
-from astrid.core.generation.features import (
+from astrid.core.model_catalog.taxonomy import (
     CANONICAL_IMAGE_MODES,
     CANONICAL_VIDEO_MODES,
 )

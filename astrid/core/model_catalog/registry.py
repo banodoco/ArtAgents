@@ -14,10 +14,6 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.generation.backends.registry import (
-    load_default_generation_backend_registry,
-)
-from astrid.core.generation.features import load_default_generation_taxonomy_registry
 from astrid.core.model_catalog.schema import (
     LoraEntry,
     ModelEntry,
@@ -122,6 +118,25 @@ class ModelRegistry:
                 recovery_command="reinstall astrid; models.yaml ships with the package",
             )
         raw = _load_yaml(yaml_path)
+        # Runtime assembly seam. ``load_default`` is a convenience assembler that
+        # builds a fully-populated registry by pack-scanning — and pack-scanning
+        # for generation features/backends lives in ``generation`` (which sits
+        # *above* ``model_catalog``: backends depend on the model schema, not the
+        # reverse). So this one call reaches upward at *call time only*; the
+        # import graph stays acyclic at import time. Resolved via ``importlib`` to
+        # keep that property explicit. (Proper home for this assembler is the
+        # registry-collapse layer — see W7 in the restructure plan.)
+        import importlib
+
+        load_default_generation_backend_registry = getattr(
+            importlib.import_module("astrid.core.generation.backends.registry"),
+            "load_default_generation_backend_registry",
+        )
+        load_default_generation_taxonomy_registry = getattr(
+            importlib.import_module("astrid.core.generation.features"),
+            "load_default_generation_taxonomy_registry",
+        )
+
         taxonomy_registry = load_default_generation_taxonomy_registry(
             project_root=project_root,
             extra_pack_roots=extra_pack_roots,

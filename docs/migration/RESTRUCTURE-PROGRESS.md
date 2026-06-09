@@ -52,7 +52,14 @@ Durable progress record for executing `RESTRUCTURE-PLAN.md`. Survives context co
 > `project` *surface* + a clean tier-0 `foundation/`. Breaking the project-web is now **domain-edge work** (the
 > `project/cli.py` edges → W5 CLI-lift; `project/run.py`↔task → W4 seam, likely accept-and-document). `contracts↔util`
 > → move `write_json_atomic` to foundation too (fold into W1b).
-| W2 | medium leaf moves (taxonomy 45, edits 26, cli_choices 41, …) | DeepSeek | ⬜ todo | — |
+| W2 | generation↔model_catalog: move taxonomy → model_catalog/taxonomy.py (broke the cycle; load_default keeps a runtime-only assembly seam via importlib, import-graph acyclic). element↔project: **DEFERRED** — can't host resolver in theme (project→theme is a pre-existing hard edge → would make theme↔project, worse). | Claude(Opus) sub | ✅ done (1 of 2) | 16 |
+
+> **element↔project deferred:** the slug→theme-dir resolver needs BOTH project (config read+validate) and theme
+> (dir resolve), so it must sit ABOVE both — `theme` can't host it (project already imports theme). Either ACCEPT-and-document
+> (like adapter↔task) or relocate the resolver to an execution-tier assembler. Revisit in W4 (seam triage) / W7.
+> **model_catalog assembly seam:** load_default reaches up to generation's pack-scanners at call time (importlib);
+> proper home is the W7 registry-collapse layer.
+> Pure-tidy W2 relocations (_utc_now, env, media, *_edits, cli_contract, plan_verbs) → folded into the W0c cleanup pass (no cycle impact).
 | W3 | invert hacks (_pipeline_module, pack/validate, resolvers, 2 Protocols) | Opus | ⬜ todo | — |
 | W4 | task/ + orchestrate→task/dsl (53); accept adapter↔task, session↔task seams | Opus | ⬜ todo | — |
 | W5 | lift CLI tier + packs/tests reorg | DeepSeek | ⬜ todo | — |

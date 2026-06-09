@@ -257,11 +257,11 @@ def _build_discovery_metadata(
         descriptors_from_pack,
     )
     from astrid.core.generation.features import (
-        GenerationTaxonomyRegistry,
         backend_descriptors_from_pack,
         feature_descriptors_from_pack,
         mode_descriptors_from_pack,
     )
+    from astrid.core.model_catalog.taxonomy import GenerationTaxonomyRegistry
 
     packs = tuple(_pack_record(discovered_pack) for discovered_pack in discovered_packs)
 

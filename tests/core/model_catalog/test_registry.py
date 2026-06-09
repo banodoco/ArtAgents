@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.generation.features import (
+from astrid.core.model_catalog.taxonomy import (
     GenerationBackendIdDescriptor,
     GenerationFeatureDescriptor,
     GenerationModeDescriptor,

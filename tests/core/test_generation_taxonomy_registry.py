@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from astrid.core.generation.features import (
+    load_default_generation_taxonomy_registry,
+)
+from astrid.core.model_catalog.taxonomy import (
     BUILTIN_GENERATION_BACKEND_IDS,
     CANONICAL_IMAGE_MODES,
     CANONICAL_VIDEO_MODES,
@@ -15,7 +18,6 @@ from astrid.core.generation.features import (
     GenerationFeatureDescriptor,
     GenerationModeDescriptor,
     GenerationTaxonomyRegistry,
-    load_default_generation_taxonomy_registry,
 )
 
 

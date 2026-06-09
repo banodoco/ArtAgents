@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.generation.backends.base import BackendAdapter
-from astrid.core.generation.features import (
+from astrid.core.model_catalog.taxonomy import (
     CLOUD_BACKEND_ID,
     CODEX_BACKEND_ID,
     LOCAL_BACKEND_ID,
