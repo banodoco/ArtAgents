@@ -18,11 +18,7 @@ from astrid.core import timeline
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.element import catalog as effects_catalog
-from astrid.core.util.time import utc_now_seconds
-
-
-def _utc_now() -> str:
-    return utc_now_seconds()
+from astrid.core.util.time import _utc_now, utc_now_seconds
 
 
 def _stable_pool_id(effect_id: str) -> str:

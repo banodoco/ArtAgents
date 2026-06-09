@@ -5,13 +5,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from astrid.core.util.secrets import candidate_env_files, read_env_value
+from astrid.core.util.secrets import _read_env_value, candidate_env_files, read_env_value
 
 DEFAULT_FUNCTION_NAME = "reigh-data-fetch"
-
-
-def _read_env_value(env_path: Path, key: str) -> str:
-    return read_env_value(env_path, key)
 
 
 def _candidate_env_files(env_file: Path | None = None) -> list[Path]:

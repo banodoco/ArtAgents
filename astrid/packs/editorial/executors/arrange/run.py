@@ -27,7 +27,7 @@ from astrid.core.timeline import (
     validate_arrangement,
     validate_arrangement_duration_window,
 )
-from astrid.core.util.time import utc_now_seconds
+from astrid.core.util.time import _utc_now, utc_now_seconds
 from astrid.core.paths import WORKSPACE_ROOT
 from astrid.core.theme import load_theme
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
@@ -110,10 +110,6 @@ REVISE_SYSTEM_PREFIX = (
     "Each prior clip has a `uuid`. Copy the same `uuid` verbatim for any clip you preserve "
     "(even if reordered). Omit `uuid` for newly inserted or swapped clips."
 )
-
-
-def _utc_now() -> str:
-    return utc_now_seconds()
 
 
 def _sha256_bytes(raw: bytes) -> str:

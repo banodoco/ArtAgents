@@ -14,7 +14,7 @@ from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.result_manifest import write_manifest
-from astrid.core.util.time import utc_now_seconds
+from astrid.core.util.time import _utc_now, utc_now_seconds
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 from datetime import datetime, timezone
 
@@ -47,10 +47,6 @@ SYSTEM_PROMPT = (
     "Return only segment_ids, text, speaker, theme, power, and quote_kind. "
     "Never return timestamps, seconds, or source ranges."
 )
-
-
-def _utc_now() -> str:
-    return utc_now_seconds()
 
 
 def validate_quote_candidates(payload: Any) -> None:

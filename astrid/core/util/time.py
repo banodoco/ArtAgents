@@ -24,6 +24,12 @@ def utc_now_seconds() -> str:
     return utc_now_iso(timespec="seconds")
 
 
+def _utc_now() -> str:
+    """Return the current UTC time rounded to whole seconds (convenience alias)."""
+
+    return utc_now_seconds()
+
+
 def utc_now_milliseconds() -> str:
     """Return the current UTC time rounded to milliseconds."""
 

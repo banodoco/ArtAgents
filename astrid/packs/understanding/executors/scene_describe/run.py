@@ -16,7 +16,7 @@ from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.result_manifest import write_manifest
-from astrid.core.util.time import utc_now_seconds
+from astrid.core.util.time import _utc_now, utc_now_seconds
 from astrid.core.util.llm_clients import GeminiClient, build_gemini_client
 
 SCENE_DESCRIPTIONS_VERSION = 1
@@ -43,10 +43,6 @@ RESPONSE_SCHEMA = {
         "mood_tags",
     ],
 }
-
-
-def _utc_now() -> str:
-    return utc_now_seconds()
 
 
 def scene_id_for(scene: dict[str, Any]) -> str:

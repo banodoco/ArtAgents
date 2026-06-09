@@ -13,8 +13,8 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
-from astrid.core.util.secrets import candidate_env_files, read_env_value
-from astrid.core.util.time import utc_now_seconds
+from astrid.core.util.secrets import _candidate_env_files, _read_env_value, candidate_env_files, read_env_value
+from astrid.core.util.time import _utc_now, utc_now_seconds
 
 _IMAGE_BLOCK_ALLOWED_KEYS = frozenset({"type", "source", "cache_control"})
 _LLM_DEBUG_LOCK = threading.Lock()
@@ -52,10 +52,6 @@ def _materialize_message_images(messages: list[dict[str, Any]]) -> list[dict[str
         else:
             out.append(message)
     return out
-
-
-def _utc_now() -> str:
-    return utc_now_seconds()
 
 
 def _jsonable(value: Any) -> Any:
@@ -196,14 +192,6 @@ class GeminiClient(Protocol):
         prompt: str,
         response_schema: dict[str, Any],
     ) -> dict[str, Any]: ...
-
-
-def _read_env_value(env_path: Path, key: str) -> str:
-    return read_env_value(env_path, key)
-
-
-def _candidate_env_files(env_file: Path | None) -> list[Path]:
-    return candidate_env_files(env_file)
 
 
 def _load_api_key(env_file: Path | None, key: str) -> str:

@@ -17,15 +17,11 @@ from typing import Any, Sequence
 from astrid.core import timeline
 from astrid.core.audit import register_outputs
 from astrid.core.contracts.result_manifest import write_manifest
-from astrid.core.util.time import utc_now_seconds
+from astrid.core.util.time import _utc_now, utc_now_seconds
 from datetime import datetime, timezone
 
 AUDIO_EVENT_RE = re.compile(r"\b(applause|laughter|cheer|audience)\b", re.IGNORECASE)
 KIND_LETTER = {"dialogue": "d", "visual": "v", "reaction": "r", "applause": "a", "music": "m"}
-
-
-def _utc_now() -> str:
-    return utc_now_seconds()
 
 
 def scene_id_for(scene: dict[str, Any]) -> str:
