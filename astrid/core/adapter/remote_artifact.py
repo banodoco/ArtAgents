@@ -11,7 +11,7 @@ from pathlib import Path
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.adapter._common import _step_dir
+from astrid.core.adapter._common import _read_cost_sidecar, _step_dir
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.util.time import utc_now_milliseconds
 
@@ -33,19 +33,6 @@ def _update_state(path: Path, updates: dict[str, object]) -> dict[str, object]:
     state.update(updates)
     _write_state(path, state)
     return state
-
-
-def _read_cost_sidecar(step_dir: Path) -> CostEntry | None:
-    candidate = step_dir / "produces" / "cost.json"
-    if not candidate.exists():
-        return None
-    payload = _read_json(candidate)
-    amount = payload.get("amount")
-    currency = payload.get("currency")
-    source = payload.get("source")
-    if not isinstance(amount, (int, float)) or not isinstance(currency, str) or not isinstance(source, str):
-        return None
-    return CostEntry(amount=float(amount), currency=currency, source=source)
 
 
 class RemoteArtifactAdapter:

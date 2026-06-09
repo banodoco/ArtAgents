@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from astrid.core.util.secrets import _read_env_value, candidate_env_files, read_env_value
+from astrid.core.util.secrets import candidate_env_files, read_env_value
 
 DEFAULT_FUNCTION_NAME = "reigh-data-fetch"
 
@@ -21,7 +21,7 @@ def _env_first(keys: tuple[str, ...], env_file: Path | None = None) -> str:
             return value
     for candidate in _candidate_env_files(env_file):
         for key in keys:
-            value = _read_env_value(candidate, key)
+            value = read_env_value(candidate, key)
             if value:
                 return value
     return ""

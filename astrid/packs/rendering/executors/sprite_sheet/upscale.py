@@ -15,7 +15,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value, load_api_key
+from astrid.core.util.secrets import candidate_env_files, read_env_value, load_api_key
 from astrid.packs.generation.executors.generate_image_openai.run import (
     API_URL,
     DEFAULT_MODEL,
@@ -45,7 +45,7 @@ def _run(cmd: list[str]) -> None:
 
 
 def _workspace_env_files(env_file: Path | None) -> list[Path]:
-    candidates = _candidate_env_files(env_file)
+    candidates = candidate_env_files(env_file)
     repo_root = Path(__file__).resolve().parents[3]
     workspace = repo_root.parent
     candidates.extend(
@@ -75,7 +75,7 @@ def load_fal_key(env_file: Path | None = None) -> str:
     for candidate in _workspace_env_files(env_file):
         tried.append(str(candidate))
         for key_name in FAL_KEY_NAMES:
-            if key := _read_env_value(candidate, key_name):
+            if key := read_env_value(candidate, key_name):
                 return key
     raise SystemExit(f"FAL_KEY or FAL_API_KEY not found. Tried: {', '.join(tried)}")
 

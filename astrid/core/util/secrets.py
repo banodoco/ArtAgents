@@ -79,14 +79,6 @@ def candidate_env_files(
     return unique
 
 
-def _read_env_value(env_path: Path, key: str) -> str:
-    return read_env_value(env_path, key)
-
-
-def _candidate_env_files(env_file: Path | None = None) -> list[Path]:
-    return candidate_env_files(env_file)
-
-
 def load_api_key(name: str, env_file: Path | None = None) -> str:
     """Resolve *name* from candidate .env files first, then the environment.
 

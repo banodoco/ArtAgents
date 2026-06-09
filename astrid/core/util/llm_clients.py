@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value, candidate_env_files, read_env_value
+from astrid.core.util.secrets import candidate_env_files, read_env_value
 from astrid.core.util.time import _utc_now, utc_now_seconds
 
 _IMAGE_BLOCK_ALLOWED_KEYS = frozenset({"type", "source", "cache_control"})
@@ -196,11 +196,11 @@ class GeminiClient(Protocol):
 
 
 def _load_api_key(env_file: Path | None, key: str) -> str:
+    for candidate in candidate_env_files(env_file):
+        if value := read_env_value(candidate, key):
+            return value
     if value := os.environ.get(key, "").strip():
         return value
-    for candidate in _candidate_env_files(env_file):
-        if value := _read_env_value(candidate, key):
-            return value
     raise AstridError(
         f"{key} not found",
         recovery_command=f"set {key} in your environment or a .env file",
@@ -265,7 +265,10 @@ def build_claude_client(env_file: Path | None = None) -> ClaudeClient:
                                     },
                                 )
                                 return payload
-                    raise RuntimeError("Claude response did not include a return_json tool payload")
+                    raise AstridError(
+                        "Claude response did not include a return_json tool payload",
+                        recovery_command="retry; if the issue persists, verify the model and response format",
+                    )
                 except Exception as exc:
                     if attempt == 1 or not _is_transient_error(exc):
                         _finish_debug_log(
@@ -281,7 +284,10 @@ def build_claude_client(env_file: Path | None = None) -> ClaudeClient:
                     if attempt == 1 or not _is_transient_error(exc):
                         raise
                     time.sleep(1.0)
-            raise RuntimeError("Claude request exhausted retries")
+            raise AstridError(
+                "Claude request exhausted retries",
+                recovery_command="check your network connection and API key, then retry",
+            )
 
     return _ClaudeJSONClient()
 
@@ -337,9 +343,15 @@ def build_gemini_client(env_file: Path | None = None) -> GeminiClient:
                         if state.endswith("ACTIVE"):
                             break
                         if state.endswith("FAILED"):
-                            raise RuntimeError(f"Gemini upload entered FAILED state: {upload_name}")
+                            raise AstridError(
+                                f"Gemini upload entered FAILED state: {upload_name}",
+                                recovery_command="retry the upload; verify the video file is valid and accessible",
+                            )
                         if time.monotonic() > deadline:
-                            raise RuntimeError(f"Gemini upload {upload_name} did not become ACTIVE within 180s (state={state!r})")
+                            raise AstridError(
+                                f"Gemini upload {upload_name} did not become ACTIVE within 180s (state={state!r})",
+                                recovery_command="retry; if the issue persists, check the Gemini API status",
+                            )
                         time.sleep(2.0)
                         uploaded = sdk_client.files.get(name=upload_name)
                     response = sdk_client.models.generate_content(
@@ -386,6 +398,9 @@ def build_gemini_client(env_file: Path | None = None) -> GeminiClient:
                             sdk_client.files.delete(name=upload_name)
                         except Exception:
                             pass
-            raise RuntimeError("Gemini request exhausted retries")
+            raise AstridError(
+                "Gemini request exhausted retries",
+                recovery_command="check your network connection and API key, then retry",
+            )
 
     return _GeminiVideoClient()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value
+from astrid.core.util.secrets import candidate_env_files, read_env_value
 
 
 def load_api_key(env_file: Path | None) -> str:
@@ -13,9 +13,9 @@ def load_api_key(env_file: Path | None) -> str:
     tried: list[str] = ["OPENAI_API_KEY environment variable"]
     if key := os.environ.get("OPENAI_API_KEY", "").strip():
         return key
-    for candidate in _candidate_env_files(env_file):
+    for candidate in candidate_env_files(env_file):
         tried.append(str(candidate))
-        if key := _read_env_value(candidate, "OPENAI_API_KEY"):
+        if key := read_env_value(candidate, "OPENAI_API_KEY"):
             return key
     raise SystemExit(f"OPENAI_API_KEY not found. Tried: {', '.join(tried)}")
 

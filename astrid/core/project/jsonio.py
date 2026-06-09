@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.util.atomic_io import read_json as _atomic_read_json
 from astrid.core.util.atomic_io import write_json_atomic as _atomic_write_json
 
 
-class ProjectJsonError(RuntimeError):
+class ProjectJsonError(AstridError):
     """Raised when project JSON cannot be read or written."""
 
 

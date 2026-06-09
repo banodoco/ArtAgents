@@ -26,7 +26,7 @@ from astrid.core.cli_choices import (
     add_choice_arg,
 )
 from astrid.core.util.http import FAL_QUEUE_URL, default_client
-from astrid.core.util.secrets import _candidate_env_files, _read_env_value
+from astrid.core.util.secrets import candidate_env_files, read_env_value
 
 FAL_EDIT_MODEL_ID = "openai/gpt-image-2/edit"
 FAL_ANIMATE_MODEL_ID = "fal-ai/wan/v2.2-14b/animate/move"
@@ -72,9 +72,9 @@ def _load_env_var(name: str, env_file: Path | None) -> str:
     if value := os.environ.get(name, "").strip():
         return value
     tried: list[str] = [f"{name} environment variable"]
-    for candidate in _candidate_env_files(env_file):
+    for candidate in candidate_env_files(env_file):
         tried.append(str(candidate))
-        if value := _read_env_value(candidate, name):
+        if value := read_env_value(candidate, name):
             return value
     raise AstridError(
         f"{name} not found. Tried: {', '.join(tried)}",

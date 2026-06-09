@@ -11,7 +11,7 @@ from pathlib import Path
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.adapter._common import _step_dir
+from astrid.core.adapter._common import _read_cost_sidecar, _step_dir
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.util.time import utc_now_milliseconds
 class LocalAdapter:
@@ -136,20 +136,3 @@ class LocalAdapter:
         return CompleteResult(status="completed", returncode=returncode, cost=cost)
 
 
-def _read_cost_sidecar(step_dir: Path) -> CostEntry | None:
-    """Honor the hype-spike G2 convention: subprocess MAY write produces/cost.json."""
-    candidate = step_dir / "produces" / "cost.json"
-    if not candidate.exists():
-        return None
-    try:
-        payload = json.loads(candidate.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    amount = payload.get("amount")
-    currency = payload.get("currency")
-    source = payload.get("source")
-    if not isinstance(amount, (int, float)) or not isinstance(currency, str) or not isinstance(source, str):
-        return None
-    return CostEntry(amount=float(amount), currency=currency, source=source)

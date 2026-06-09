@@ -69,7 +69,7 @@ HYPE_ARTIFACTS = {
 }
 
 
-class ProjectRunError(RuntimeError):
+class ProjectRunError(AstridError):
     """Raised when a project run cannot be prepared or finalized."""
 
 
