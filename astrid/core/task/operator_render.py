@@ -36,6 +36,54 @@ from astrid.core.task.run_store import _emit_run_completed_if_needed
 _PROGRESS_TERMINAL_KINDS = STEP_TERMINAL_KINDS
 
 
+# -- Inline-failure helpers (moved from operator_view.py to break circular dep) --
+
+@dataclass(frozen=True)
+class _InlineFailureTail:
+    name: str | None
+    reason: str
+    path: tuple[str, ...]
+
+
+def _path_tuple_from_event(ev: dict[str, Any]) -> tuple[str, ...]:
+    path_raw = ev.get("plan_step_path")
+    if isinstance(path_raw, list):
+        return tuple(str(p) for p in path_raw)
+    plan_step_id = ev.get("plan_step_id")
+    if isinstance(plan_step_id, str) and plan_step_id:
+        return tuple(plan_step_id.split(STEP_PATH_SEP))
+    return ()
+
+
+def _inline_failure_tail(events: Sequence[dict[str, Any]]) -> _InlineFailureTail | None:
+    """Return inline-check detail for tails that rewind a just-finalized step."""
+    if len(events) < 2:
+        return None
+    last = events[-1] if isinstance(events[-1], dict) else None
+    prior = events[-2] if isinstance(events[-2], dict) else None
+    if last is None or prior is None:
+        return None
+    if last.get("kind") not in {"cursor_rewind", "iteration_failed"}:
+        return None
+    if prior.get("kind") != "produces_check_failed":
+        return None
+    raw_reason = prior.get("reason") or last.get("reason") or "produces check failed"
+    raw_name = prior.get("produces")
+    if not isinstance(raw_name, str):
+        raw_name = prior.get("name") if isinstance(prior.get("name"), str) else None
+    return _InlineFailureTail(
+        name=raw_name,
+        reason=str(raw_reason),
+        path=_path_tuple_from_event(last) or _path_tuple_from_event(prior),
+    )
+
+
+def _format_inline_failure_tail(detail: _InlineFailureTail) -> str:
+    if detail.name:
+        return f"{detail.name}: {detail.reason}"
+    return detail.reason
+
+
 def _leaf_progress(plan, events: Sequence[dict]) -> tuple[int, int]:
     """Return (completed_leaves, total_leaves) for a quick progress line.
 
@@ -383,12 +431,6 @@ def _dispatch_from_tail(
     # (1) Rewind retry — normal inline failures end with cursor_rewind;
     # per-item iteration inline failures end with iteration_failed.
     if last_kind in {"cursor_rewind", "iteration_failed"}:
-        # Lazy import to avoid circular dep (operator_view imports from us)
-        from astrid.core.task.operator_view import (
-            _format_inline_failure_tail,
-            _inline_failure_tail,
-            _path_tuple_from_event,
-        )
         detail = _inline_failure_tail(events)
         if detail is not None:
             return _RewindRetry(

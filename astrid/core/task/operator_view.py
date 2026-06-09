@@ -67,56 +67,8 @@ from astrid.core.session.discovery_hints import (
 )
 
 # -- Status JSON helpers ----------------------------------------------------
-from dataclasses import dataclass
-
 from astrid.core.task.cli_contract import emit_lifecycle_json as _emit_lifecycle_json_status
 from astrid.core.task.inbox import pending_count as _pending_count
-
-
-@dataclass(frozen=True)
-class _InlineFailureTail:
-    name: str | None
-    reason: str
-    path: tuple[str, ...]
-
-
-def _path_tuple_from_event(ev: dict[str, Any]) -> tuple[str, ...]:
-    path_raw = ev.get("plan_step_path")
-    if isinstance(path_raw, list):
-        return tuple(str(p) for p in path_raw)
-    plan_step_id = ev.get("plan_step_id")
-    if isinstance(plan_step_id, str) and plan_step_id:
-        return tuple(plan_step_id.split(STEP_PATH_SEP))
-    return ()
-
-
-def _inline_failure_tail(events: Sequence[dict[str, Any]]) -> _InlineFailureTail | None:
-    """Return inline-check detail for tails that rewind a just-finalized step."""
-    if len(events) < 2:
-        return None
-    last = events[-1] if isinstance(events[-1], dict) else None
-    prior = events[-2] if isinstance(events[-2], dict) else None
-    if last is None or prior is None:
-        return None
-    if last.get("kind") not in {"cursor_rewind", "iteration_failed"}:
-        return None
-    if prior.get("kind") != "produces_check_failed":
-        return None
-    raw_reason = prior.get("reason") or last.get("reason") or "produces check failed"
-    raw_name = prior.get("produces")
-    if not isinstance(raw_name, str):
-        raw_name = prior.get("name") if isinstance(prior.get("name"), str) else None
-    return _InlineFailureTail(
-        name=raw_name,
-        reason=str(raw_reason),
-        path=_path_tuple_from_event(last) or _path_tuple_from_event(prior),
-    )
-
-
-def _format_inline_failure_tail(detail: _InlineFailureTail) -> str:
-    if detail.name:
-        return f"{detail.name}: {detail.reason}"
-    return detail.reason
 
 
 def _status_json(
@@ -194,11 +146,15 @@ from astrid.core.task.operator_render import (  # noqa: E402, F401
     _expected_for_each_total,
     _format_ack_template,
     _format_claim_line,
+    _format_inline_failure_tail,
     _format_schema_requirements,
     _has_host_step_attested,
     _HostCloseHint,
     _identity_parts,
+    _InlineFailureTail,
+    _inline_failure_tail,
     _leaf_progress,
+    _path_tuple_from_event,
     _print_post_completion_handoff,
     _PROGRESS_TERMINAL_KINDS,
     _RewindRetry,
@@ -206,9 +162,6 @@ from astrid.core.task.operator_render import (  # noqa: E402, F401
     NEXT_JSON_SCHEMA,
     render_step_instructions,
 )
-
-# -- These names (inline-failure helpers) live inline above. Existing callers
-# import them from operator_view.
 __all__ = [
     "cmd_next",
     "cmd_status",
