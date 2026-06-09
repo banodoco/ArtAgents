@@ -35,8 +35,6 @@ from astrid.core.contracts.errors import (
 )
 from astrid.core.util.log_and_swallow import log_and_swallow
 from . import dispatch as _gateway_dispatch
-from . import project as _gateway_project
-from . import wait as _gateway_wait
 from astrid.core.gateway.project import (
     ASTRID_GATEWAY_RESOLVED_PROJECT_ENV,
     DEFAULT_PROJECT_SLUG,
