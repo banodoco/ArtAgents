@@ -1,8 +1,8 @@
 # Astrid Python SDK
 
 The `astrid` package exposes a public Python SDK for capability discovery,
-schema inspection, and invocation. Import the top-level package — the SDK
-surface is available directly from `import astrid`.
+schema inspection, generation, and invocation. Import the top-level package —
+the SDK surface is available directly from `import astrid`.
 
 > **Compatibility policy**: This document is a user-facing walkthrough. The
 > normative v1 compatibility contract lives in
@@ -32,6 +32,15 @@ result = astrid.invoke(
     dry_run=True,
 )
 print(result.ok, result.raw_result)
+
+# Generation
+gen_result = astrid.generate(
+    "editorial.arrange",
+    include_installed=False,
+    prompt="Generate a short video from these clips.",
+    inputs={"clips": ["clip1.mp4", "clip2.mp4"]},
+)
+print(gen_result)
 ```
 
 > **Tutorial**: For a step-by-step walkthrough building your first Astrid
@@ -261,97 +270,9 @@ An invalid project slug raises `CapabilityPreconditionError`.
 
 ## DTO Reference
 
-### `Capability` vs `CapabilityHandle`
+See [platform-contract.md](platform-contract.md).
 
-| Concept | Purpose | Source |
-|---|---|---|
-| `Capability` | Public inspectable DTO with schema, definition, defaults, inputs, outputs | Built by the SDK from registry definitions |
-| `CapabilityHandle` | Lightweight identity card shared across all three registry types | Adapted from executor/orchestrator/element schemas by `to_capability_handle()` |
-
-`Capability` carries the full resolved view: `id`, `capability_type`,
-`native_kind`, typed `Port`/`Output` tuples, JSON-safe `schema` and
-`definition` mappings, `defaults` (populated for elements, empty for
-executors/orchestrators), and an embedded `handle` of type `CapabilityHandle`.
-
-`CapabilityHandle` is the lower-level identity object that the registry
-adapters produce. It carries `canonical_id`, `local_id`, `pack_id`, `kind`,
-`name`, `version`, `provenance`, `safety`, `aliases`, `deprecated` status,
-`inputs`, `outputs`, and metadata fields (`description`, `keywords`,
-`category`, `status`, `visibility`).
-
-Rule of thumb: use `Capability` for capability-level operations (discovery,
-inspection, invocation). Reach into `handle` only when you need alias records,
-provenance detail, or the unqualified `local_id`.
-
-### `capability_type` vs `native_kind`
-
-| Field | Meaning | Values |
-|---|---|---|
-| `capability_type` | Which registry and runtime class | `"executor"`, `"orchestrator"`, `"element"` |
-| `native_kind` | The kind within that registry | Executors: `"built_in"`, `"external"`; Elements: `"effects"`, `"animations"`, `"transitions"`; Orchestrators: supply-side kind |
-
-`capability_type` drives routing (`invoke()` dispatches to executor or
-orchestrator runners based on it; elements are rejected). `native_kind` is
-informational — it reflects the underlying manifest field and is surfaced
-unchanged on `InvocationResult`.
-
-### Elements: Discoverability and Non-Invokability
-
-Elements are first-class in `discover()` and `get_capability()`. They expose
-full schema inspection through `Capability` — including `schema`, `defaults`,
-and `definition` mappings.
-
-Element discovery honors theme overlays. When `active_theme` is provided
-during `discover()` or `get_capability()`, the element registry includes
-theme-specific element definitions. Pass `include_missing_roots=True` to
-include element roots not yet installed locally.
-
-Element lookup accepts three forms:
-- Canonical `<kind>/<id>`: `"effects/text-card"`
-- Explicit kind with bare id: `get_capability("text-card", kind="element", element_kind="effects")`
-- Kindless canonical: `get_capability("effects/text-card")` (no `kind` argument)
-
-Elements are **not invokable**. Calling `invoke()` with `kind="element"` raises
-`UnsupportedCapabilityError`. Use invocation only for executors and
-orchestrators.
-
-### `DiscoveryResult`
-
-```python
-@dataclass(frozen=True)
-class DiscoveryResult:
-    executors: tuple[Capability, ...]    # All discovered executor capabilities
-    orchestrators: tuple[Capability, ...]  # All discovered orchestrator capabilities
-    elements: tuple[Capability, ...]     # All discovered element capabilities
-    capabilities: tuple[Capability, ...] # Flat concatenation of all three
-```
-
-The `capabilities` tuple is deterministic: all executors, then all
-orchestrators, then all elements, each in registry order.
-
-### `InvocationResult`
-
-```python
-@dataclass(frozen=True)
-class InvocationResult:
-    capability_id: str
-    capability_type: Literal["executor", "orchestrator", "element"]
-    native_kind: str
-    ok: bool
-    error: Mapping[str, Any] | None
-    manifest_path: str | None
-    raw_result: Mapping[str, Any]
-```
-
-`raw_result` is a JSON-safe normalization of the runner's return value. For
-executors it carries `command`, `cwd`, `env`, `payload`, `returncode`,
-`dry_run`, `skipped`, `skipped_reason`, `missing_binaries`. For orchestrators
-it is the `to_dict()` serialization of the orchestrator result. Path objects
-(`Path`) and `ExecError` instances are recursively converted to strings and
-dicts. Dataclasses are converted via their `to_dict()` method.
-
-`error` is a JSON-safe mapping derived from the result's `ExecError`, or
-`None` on success. `ok` is `True` when `error` is `None`.
+### `manifest_path` Fallback Rules
 
 `manifest_path` is an additive optional pointer to a universal
 `manifest.json` emitted by the invoked capability. When present it is an
@@ -386,61 +307,7 @@ if result.manifest_path:
 
 ## Stability Tiers
 
-The SDK follows a three-tier stability model. The normative definitions and
-the authoritative list of Tier-1, Tier-2, and Tier-3 surfaces are in
-[docs/platform-contract.md](platform-contract.md). This section summarises
-the tiers for SDK users; the platform contract is the source of truth.
-
-### Tier 1 — Stable (semver-guarded)
-
-These names and their function signatures will not break without a major
-version bump. Breaking changes require a deprecation cycle.
-
-| Surface | Details |
-|---|---|
-| `discover()` | Signature and return type (`DiscoveryResult`) |
-| `get_capability()` | Signature and return type (`Capability`) |
-| `invoke()` | Signature and return type (`InvocationResult`) |
-| Exception classes | `AstridSDKError`, `CapabilityNotFoundError`, `CapabilityAmbiguousError`, `CapabilityValidationError`, `CapabilityMissingInputError`, `CapabilityPreconditionError`, `CapabilityRuntimeError`, `CapabilityLeaseError`, `CapabilityEventLogError`, `UnsupportedCapabilityError`, `CapabilityInvocationError` — all 11 names and their position in the hierarchy |
-| `Capability` | Top-level fields: `id`, `capability_type`, `native_kind`, `handle`, `inputs`, `outputs`, `schema`, `defaults`, `definition` |
-| `CapabilityHandle` | Existence as a field of `Capability` and its own exported name |
-| `DiscoveryResult` | Top-level fields: `executors`, `orchestrators`, `elements`, `capabilities` |
-| `InvocationResult` | Top-level fields: `capability_id`, `capability_type`, `native_kind`, `ok`, `error`, `manifest_path`, `raw_result` |
-| `read_events()` | Signature and return type (`tuple[EventStreamRecord, ...]`) |
-| `subscribe_events()` | Signature as a generator function |
-| `EventStreamRecord` | Top-level fields: `source`, `line`, `timestamp`, `kind`, `hash`, `payload` |
-| `Port`, `Output`, `AliasRecord`, `Provenance`, `SafetyDeclaration`, `ExecError` | Exported names and existence as types |
-
-### Tier 2 — Evolving (backward-compatible additions only)
-
-New fields may be added to these surfaces in a minor version. Existing fields
-will not be removed or renamed without a deprecation cycle.
-
-| Surface | Details |
-|---|---|
-| `CapabilityHandle` fields | `canonical_id`, `local_id`, `pack_id`, `kind`, `name`, `version`, `provenance`, `safety`, `aliases`, `deprecated`, `description`, `keywords`, `status`, `visibility`, and others — individual fields may be added without notice but not removed |
-| `Port` fields | `name`, `type`, `required`, `description`, `default`, `placeholder` |
-| `Output` fields | `name`, `type`, `mode`, `description`, `placeholder`, `path_template`, `extension` |
-| `AliasRecord` fields | `alias`, `canonical_id`, `deprecated`, `deprecation_message`, `source_pack_id` |
-| `ExecError` fields | `code`, `type`, `message`, `recovery` |
-| `Provenance` fields | `source`, `pack_id`, `manifest_path`, `content_root`, `resolved_alias`, `forked_from`, `upstream_version`, `compatibility_token` |
-| Function keyword parameters | New keyword-only parameters may be added to `discover()`, `get_capability()`, and `invoke()` |
-| `to_dict()` on all DTOs | The method exists and returns a JSON-safe `dict`; specific keys may grow |
-
-### Tier 3 — Fluid (no stability guarantee)
-
-These are serialized representations whose shape may change in any release
-without notice. External code should treat them as opaque payloads and not
-depend on specific key names, nesting, or value types.
-
-| Surface | Details |
-|---|---|
-| `Capability.schema` | The schema mapping's internal key names, nesting structure, and value types reflect the executor/orchestrator/element definition schema and may evolve |
-| `Capability.definition` | Same as `schema` for executors/orchestrators; for elements it is the serialized `to_dict()` of the element definition — subject to change |
-| `Capability.defaults` | The defaults mapping; populated for elements, empty for executors/orchestrators. Key names and types evolve with the element schema |
-| `InvocationResult.raw_result` | The normalized runner result mapping. Specific keys (`command`, `cwd`, `env`, `payload`, etc.) are added or reshaped as runner output models evolve |
-| `InvocationResult.error` | The JSON-safe `ExecError` mapping; keys follow `ExecError` fields (currently `code`, `type`, `message`, `recovery`). Key set may grow but not shrink in tier-2 fashion |
-| `DiscoveryResult.to_dict()` output | The serialized shape of nested capability DTOs — stable only to the extent that `json.dumps(result.to_dict())` does not raise |
+See [platform-contract.md](platform-contract.md).
 
 ## Exception Hierarchy
 

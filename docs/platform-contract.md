@@ -30,10 +30,10 @@ implementation details, registry internals, or CLI implementation modules.
 ### Supported Top-Level Exports
 
 `astrid.__all__` is the source of truth for the supported top-level Python SDK
-surface in v1. It contains exactly 27 names:
+surface in v1. It contains exactly 28 names:
 
-- Functions: `discover`, `get_capability`, `invoke`, `read_events`,
-  `subscribe_events`
+- Functions: `discover`, `get_capability`, `invoke`, `generate`,
+  `read_events`, `subscribe_events`
 - DTOs: `Capability`, `DiscoveryResult`, `EventStreamRecord`,
   `InvocationResult`, `CapabilityHandle`, `Port`, `Output`, `AliasRecord`,
   `Provenance`, `SafetyDeclaration`, `ExecError`
@@ -109,7 +109,7 @@ These names, signatures, and top-level DTO fields are SemVer-guarded:
 
 - Exported names in `astrid.__all__`
 - Function signatures for `discover()`, `get_capability()`, `invoke()`,
-  `read_events()`, and `subscribe_events()`
+  `generate()`, `read_events()`, and `subscribe_events()`
 - The existence of these DTO types: `Capability`, `DiscoveryResult`,
   `InvocationResult`, `EventStreamRecord`, `CapabilityHandle`, `Port`,
   `Output`, `AliasRecord`, `Provenance`, `SafetyDeclaration`, `ExecError`
@@ -131,8 +131,8 @@ keyword parameters in minor releases:
 
 - Fields on `CapabilityHandle`, `Port`, `Output`, `AliasRecord`, `Provenance`,
   `SafetyDeclaration`, and `ExecError`
-- New keyword-only parameters on `discover()`, `get_capability()`, and
-  `invoke()`
+- New keyword-only parameters on `discover()`, `get_capability()`, `invoke()`,
+  and `generate()`
 - The key sets of `to_dict()` results for public DTOs
 - Pack records in `DiscoveryResult.packs`
 - Records in `DiscoveryResult.generation_backends`,
@@ -392,9 +392,9 @@ that a pack behaves safely or only does what its declarations describe.
 
 - [SECURITY.md](../SECURITY.md) — user-facing security posture
 - [docs/sdk.md](sdk.md) — SDK walkthrough and examples
-- [docs/creating-packs.md](creating-packs.md) — pack authoring reference
+- [docs/packs/creating-packs.md](packs/creating-packs.md) — pack authoring reference
 - `astrid/__init__.py` — top-level public export list
-- `astrid/sdk.py` — public SDK DTOs and function entrypoints
+- `astrid/sdk/` — public SDK DTOs and function entrypoints
 - `astrid/core/contracts/schema.py` — shared DTO field types
 - `astrid/core/pack/schemas/v1/` — normative v1 manifest schema files
 - `astrid/core/pack/validate.py` — trust summary extraction and trust block source

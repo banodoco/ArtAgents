@@ -384,8 +384,4 @@ until they are registered and ledgered.
 
 ---
 
-## Related documents
 
-- **Audit dossier**: `.megaplan/briefs/run-ledger/audit-dossier.md` — 17-agent adversarially-verified audit of invocation persistence.
-- **M2 brief**: `.megaplan/briefs/run-ledger/m2-rich-ledger-provenance.md` — scope, locked decisions, done criteria.
-- **Plan metadata**: `.megaplan/plans/m2-rich-ledger-provenance-20260604-2242/plan_v1.meta.json` — success criteria and assumptions.

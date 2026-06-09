@@ -65,7 +65,7 @@ generation-specific fields. Schema v2 adds `mode_used`, `model_actual`,
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `schema_version` | `integer` | yes | Always `2` for this schema version. |
-| `kind` | `string` | yes | Universal executor kind identifier (e.g. `"generation.generate_image"`, `"generation.generate_image_openai"`). See [output-result-contract.md](../../../docs/output-result-contract.md#kind-vocabulary). Added in M1. |
+| `kind` | `string` | yes | Universal executor kind identifier (e.g. `"generation.generate_image"`, `"generation.generate_image_openai"`). See [output-result-contract.md](../output-result-contract.md#kind-vocabulary). Added in M1. |
 | `inputs` | `object` | yes | Arbitrary key/value map recording the executor's resolved inputs. Added in M1. |
 | `modality` | `string` | yes | `"image"`, `"video"`, or `"audio"`. |
 | `model` | `string` | yes | The model ID used (from the registry). |

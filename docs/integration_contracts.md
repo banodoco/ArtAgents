@@ -20,16 +20,16 @@ Because those trees are absent here, this document serves two roles:
 
 For Milestone 6a, the active cleanup surface is the live Astrid runtime/spec/
 doc/test tree plus this document and
-`docs/megaplan/epics/timeline-event-sourcing/m6a-astrid-supabase-contract.md`.
+`docs/architecture/timeline-event-sourcing/m6a-astrid-supabase-contract.md`.
 Historical milestone records are archival exceptions. The only allowed
 remaining wording-audit exceptions are:
 
-- `docs/megaplan/epics/timeline-event-sourcing/m1-schema.md`
-- `docs/megaplan/epics/timeline-event-sourcing/m2-clip-primitives.md`
-- `docs/megaplan/epics/timeline-event-sourcing/m3-secondary-primitives.md`
-- `docs/megaplan/epics/timeline-event-sourcing/m5-concurrency.md`
-- `docs/megaplan/epics/timeline-event-sourcing/m6-reigh-sync.md`
-- `docs/megaplan/epics/timeline-event-sourcing/chain.yaml`
+- `docs/architecture/timeline-event-sourcing/m1-schema.md`
+- `docs/architecture/timeline-event-sourcing/m2-clip-primitives.md`
+- `docs/architecture/timeline-event-sourcing/m3-secondary-primitives.md`
+- `docs/architecture/timeline-event-sourcing/m5-concurrency.md`
+- `docs/architecture/timeline-event-sourcing/m6-reigh-sync.md`
+- `docs/architecture/timeline-event-sourcing/chain.yaml`
 
 Deferred companion work, which is named here but not claimed as complete in
 this repo, includes:

@@ -261,119 +261,21 @@ except CapabilityEventLogError as e:
     print(f"Event log error: {e}")
 ```
 
-## Step 6 — Assemble the Complete Script
+## Step 6 — Run the Complete Example
 
-Putting it all together — this is the full script matching the
-checked-in example:
-
-```python
-#!/usr/bin/env python3
-"""External example: full Astrid SDK loop (discover → inspect → invoke → read-events)."""
-
-import argparse, json, os, shutil, sys, tempfile
-from pathlib import Path
-
-os.environ.setdefault("ASTRID_INTERNAL_INVOCATION", "1")
-import astrid
-
-FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
-PROJECT_SLUG = "demo-agentic-ux"
-RUN_ID = "demo-run-001"
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="Astrid SDK external example"
-    )
-    parser.add_argument("--projects-root", required=True, type=Path,
-                        help="Base directory for temporary project structure")
-    parser.add_argument("--capability-id", default="editorial.arrange",
-                        help="Qualified capability ID (default: %(default)s)")
-    args = parser.parse_args()
-
-    # 1. Discover
-    discovery = astrid.discover(include_installed=False)
-
-    # 2. Inspect
-    capability = astrid.get_capability(
-        args.capability_id, kind="executor", include_installed=False,
-    )
-
-    # 3. Dry-run invoke
-    with tempfile.TemporaryDirectory(prefix="astrid-agentic-ux-") as tmp_out:
-        invocation = astrid.invoke(
-            args.capability_id,
-            kind="executor",
-            include_installed=False,
-            out=Path(tmp_out),
-            inputs={
-                "brief": "example brief for agentic UX demo",
-                "pool": "default",
-                "theme": "default",
-                "target_duration": 60,
-            },
-            dry_run=True,
-            verbose=False,
-        )
-
-    # 4. Read events from the committed golden fixture
-    run_dir = args.projects_root / PROJECT_SLUG / "runs" / RUN_ID
-    run_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(FIXTURE_DIR / "golden_events.jsonl", run_dir / "events.jsonl")
-
-    events = astrid.read_events(
-        PROJECT_SLUG, RUN_ID,
-        projects_root=args.projects_root,
-        verify=True,
-    )
-
-    # 5. Print deterministic JSON summary
-    summary = {
-        "discovery": {
-            "executor_count": len(discovery.executors),
-            "orchestrator_count": len(discovery.orchestrators),
-            "element_count": len(discovery.elements),
-            "total_capabilities": len(discovery.capabilities),
-        },
-        "inspection": {
-            "id": capability.id,
-            "capability_type": capability.capability_type,
-            "native_kind": capability.native_kind,
-            "inputs": [{"name": p.name, "type": p.type, "required": p.required}
-                       for p in capability.inputs],
-            "outputs": [{"name": o.name, "type": o.type}
-                        for o in capability.outputs],
-        },
-        "invocation": {
-            "capability_id": invocation.capability_id,
-            "capability_type": invocation.capability_type,
-            "native_kind": invocation.native_kind,
-            "ok": invocation.ok,
-            "dry_run": invocation.raw_result.get("dry_run", False),
-        },
-        "events": {
-            "count": len(events),
-            "kinds": [e.kind for e in events],
-        },
-    }
-    json.dump(summary, sys.stdout, indent=2, sort_keys=True)
-    sys.stdout.write("\n")
-
-if __name__ == "__main__":
-    main()
-```
-
-Save this as `my_agentic_ux.py` (or copy the example from
-[`examples/agentic_ux/agentic_ux.py`](../examples/agentic_ux/agentic_ux.py))
-and run it:
+The checked-in example at
+[`examples/agentic_ux/agentic_ux.py`](../examples/agentic_ux/agentic_ux.py)
+bundles Steps 1–5 into a single argparse-driven script.  It runs
+the full **discover → inspect → invoke → read-events** loop against
+`editorial.arrange`, uses the golden events fixture, and prints a
+deterministic JSON summary with four keys (`discovery`, `inspection`,
+`invocation`, `events`) to stdout.
 
 ```bash
-python my_agentic_ux.py \
+python3 examples/agentic_ux/agentic_ux.py \
     --projects-root /tmp/astrid-demo-projects \
     --capability-id editorial.arrange
 ```
-
-The output is a deterministic JSON object with four top-level keys:
-`discovery`, `inspection`, `invocation`, and `events`.
 
 ## Dry-Run vs Live-Run
 
@@ -391,72 +293,27 @@ checks, capability documentation generation.
 **When to live-run**: actual task execution, pipeline automation,
 user-facing workflows.
 
-## Error Handling Quick Reference
-
-| When … | Catch … |
-|---|---|
-| Capability ID not found | `CapabilityNotFoundError` |
-| Bare ID matches multiple capabilities | `CapabilityAmbiguousError` |
-| Required input is missing | `CapabilityMissingInputError` |
-| Execution mode not supported | `CapabilityPreconditionError` |
-| Invocation fails at runtime | `CapabilityInvocationError` |
-| Event log is corrupt or unreadable | `CapabilityEventLogError` |
-| Element is passed to `invoke()` | `UnsupportedCapabilityError` |
-| Unknown SDK failure | `AstridSDKError` (base class) |
-
-All exceptions are importable from `astrid`.  `CapabilityInvocationError`
-preserves the original runner exception as `__cause__`.
-
 ## Security and Trust Disclosures
 
-### Local subprocess execution
-
-`astrid.invoke()` may launch subprocesses on your machine.  By
-default, executors run with the same user and permissions as the
-calling process.  **Only invoke capabilities from packs you trust.**
-The `SafetyDeclaration` attached to every capability (accessible via
-`capability.handle.safety`) declares whether the capability touches
-the network, uses external binaries outside the project tree, requires
-API keys, or accesses project files.
-
-### Project-file access
-
-`astrid.read_events()` and `astrid.subscribe_events()` read from the
-local filesystem under the `projects_root` directory you provide.
-These functions are **read-only** — they never modify event logs or
-project state.  However, they traverse the filesystem structure you
-point them at.  Only pass `projects_root` paths you control.
-
-### Deterministic fixtures in examples
-
-The golden events fixture (`examples/agentic_ux/fixtures/golden_events.jsonl`)
-contains three pre-computed, hash-chained records with fixed
-timestamps.  It is safe to commit and use in CI — it does not contain
-API keys, machine-specific paths, or secrets.  The hashes are
-deterministic and structurally valid; they pass `verify_chain` but
-are not cryptographically bound to any real run.
-
-### Capability provenance
-
-Every capability carries a `Provenance` record (accessible via
-`capability.handle.provenance`) that identifies the pack and manifest
-the capability was loaded from.  Before invoking a capability in
-production, inspect its provenance to confirm it originates from a
-source you trust:
-
-```python
-cap = astrid.get_capability("editorial.arrange", kind="executor")
-print(cap.handle.provenance.source)       # e.g. "builtin"
-print(cap.handle.provenance.pack_id)      # e.g. "editorial"
-print(cap.handle.provenance.manifest_path) # absolute path to executor.yaml
-```
+- **Subprocess execution**: `astrid.invoke()` launches subprocesses with your
+  user permissions.  Only invoke capabilities from packs you trust.
+  Check `capability.handle.safety` for the `SafetyDeclaration` (network,
+  API keys, external binaries, project-file access).
+- **Read-only event access**: `read_events()` and `subscribe_events()`
+  never modify event logs or project state, but they traverse the
+  `projects_root` you provide — only pass paths you control.
+- **Golden fixture**: `examples/agentic_ux/fixtures/golden_events.jsonl`
+  contains hash-chained records with fixed timestamps.  No API keys,
+  machine-specific paths, or secrets — safe for CI.
+- **Capability provenance**: inspect `capability.handle.provenance`
+  (`.source`, `.pack_id`, `.manifest_path`) before invoking in production.
 
 ## Next Steps
 
 - Read [SDK Reference](sdk.md) for the full DTO and exception catalog.
-- Explore [Creating Packs](creating-packs.md) to build your own
+- Explore [Creating Packs](packs/creating-packs.md) to build your own
   executors and orchestrators.
-- See [Adapter Packs](adapter-packs.md) for local, remote, and manual
+- See [Adapter Packs](packs/adapter-packs.md) for local, remote, and manual
   execution backends.
 - Browse [Discovery for Agents](discovery-for-agents.md) to understand
   how AI agents consume the capability registry.

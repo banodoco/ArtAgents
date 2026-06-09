@@ -24,7 +24,7 @@ in the `astrid/core/gateway/` package. SDK implementation lives in the
 | `import astrid` | `astrid/__init__.py` | **Public SDK facade** — lazy-loads the v1 SDK names via `__getattr__`. The normative v1 contract is [docs/platform-contract.md](../platform-contract.md). |
 | `astrid.sdk` | `astrid/sdk/` | **Public SDK package** — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. Direct imports of private SDK implementation modules are out of contract for v1. |
 
-The 27 names in `astrid.__all__` are:
+The 28 names in `astrid.__all__` are:
 
 - **Functions**: `discover`, `get_capability`, `invoke`, `generate`, `read_events`, `subscribe_events`
 - **DTOs**: `Capability`, `DiscoveryResult`, `EventStreamRecord`, `InvocationResult`, `CapabilityHandle`, `Port`, `Output`, `AliasRecord`, `Provenance`, `SafetyDeclaration`, `ExecError`
@@ -113,7 +113,7 @@ When adding new code to the repository, follow these placement rules:
 - **New shared utilities**: `astrid/core/util/`
 - **New CLI entrypoints for subsystems**: follow the pattern of `astrid/<subsystem>/cli.py`
 
-**Do not** add new `.py` files directly under `astrid/` — they must be listed in `TOP_LEVEL_ASTRID_FILES` in `astrid/core/structure.py` and approved as canonical top-level modules. Adding a new top-level module requires updating `TOP_LEVEL_ASTRID_FILES` in `structure.py` and this document.
+**Do not** add new `.py` files directly under `astrid/` — they must be listed in `TOP_LEVEL_ASTRID_FILES` in `astrid/core/structure.py` and approved as canonical top-level modules. Adding a new top-level module requires updating `TOP_LEVEL_ASTRID_FILES` in `astrid/core/structure.py` and this document.
 
 ## 3. Retired Compatibility Surfaces
 
@@ -240,65 +240,10 @@ Python package.
 
 ## 7. Tests
 
-### 7.1 Test Layout
-
-Tests live under `tests/` at the repository root. Key directories:
-
-| Directory | Purpose |
-| --- | --- |
-| `tests/` (root) | Broad functional and regression tests |
-| `tests/core/` | Core kernel tests (generation, model_catalog, runtime, task, util) |
-| `tests/packs/` | Pack-specific tests (builtin, editorial, event_talks, external, foley, hype, runpod, stream_content, thumbnail_maker) |
-| `tests/session/` | Session lifecycle tests |
-| `tests/timeline/` | Timeline tests |
-| `tests/task/` | Task kernel tests |
-| `tests/adapter/` | Adapter tests |
-| `tests/agentic/` | Agentic scenario tests |
-| `tests/audit/` | Audit tests |
-| `tests/concurrency/` | Concurrency tests |
-| `tests/fixtures/` | Test fixtures (themes, external_pack, iteration_video, reshape, multitrack_cut) |
-| `tests/golden/` | Golden output tests (hype) |
-| `tests/helpers/` | Test helpers |
-| `tests/migrations/` | Migration regression tests |
-| `tests/orchestrate/` | Orchestrate tests |
-| `tests/spikes/` | Spike/exploratory tests |
-
-### 7.2 Structure Contract Tests
-
-`tests/test_structure_contracts.py` is the primary test file for repository
-structure enforcement. It tests:
-- Import layering violations (core→packs, core→orchestrate)
-- Migration completion advisories (DEPRECATED markers, sys.modules injections, `__all__` aliases)
-- Compatibility shim detection and exemptions
-- Timeline facade exemption guards (TODO(m5b) marker requirements)
-- Thread wrapper removal regression (m5a)
-- Packs top-level module enforcement (M2 T13): thin documented shims allowed, active implementations rejected
-- Synthetic violation cases before real-repo smoke tests
-
-### 7.3 Public Surface and Pack Machinery Tests
-
-`tests/test_m5b_baseline_public_surface.py` — baseline public surface contract
-verification.
-
-`tests/test_m5b_end_state_regression.py` — end-state regression guards.
-
-`tests/test_m2_public_surface.py` — public surface characterization updated to
-the canonical gateway, paths, media, timeline, thread, and SDK surfaces.
-
-`tests/test_m2_pack_machinery.py` — pack machinery characterization updated to
-the canonical `astrid.core.pack.*` layout: exports, CLI/install surfaces,
-discovery, resolver, store, schema-root relocation, and no-shim enforcement.
-
-`tests/test_pack_layout_contract.py` — pack layout contract verification
-(updated M2 T10 for schema relocation to `astrid/core/pack/schemas/v1/`).
-
-### 7.4 Test Relocation Map (M3)
-
-Root-level `tests/test_*.py` files will be classified and mapped to target
-domains in `docs/architecture/test-relocation-map.json`. Ambiguous cases are
-marked for M3 owner review rather than forcing low-confidence moves.
-
-M3 consumes `test-relocation-map.json`.
+The canonical test layout, root-staying designations, and settled domain-home
+decisions (SD1–SD3) are documented in
+[docs/architecture/test-layout.md](test-layout.md). That document is the
+authoritative source for test directory conventions and relocation policy.
 
 ## 8. Docs
 
@@ -313,7 +258,7 @@ contract documents:
 | `docs/architecture/pack-layout-variants.json` | Machine-readable pack variant catalog |
 | `docs/architecture/test-relocation-map.json` | Test relocation target map (consumed by M3) |
 | `docs/architecture/giant-file-split-candidates.json` | Giant-file split candidates with line counts (consumed by M4, now completed) |
-| `docs/architecture/shim-legacy-audit.md` | Current no-shim audit and retired-surface map |
+| `docs/architecture/shim-legacy-audit.md` | (removed — audit absorbed into §3 above) |
 | `docs/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
 | `docs/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
 | `docs/sdk.md` | User-facing SDK walkthrough |
@@ -321,54 +266,7 @@ contract documents:
 | `docs/integration_contracts.md` | Integration contracts |
 | `docs/output-result-contract.md` | Output result contract |
 
-## 9. Migration Candidates
-
-### 9.1 Giant-File Split Candidates (M4 — Completed)
-
-M4 consumed `docs/architecture/giant-file-split-candidates.json` and completed
-the following splits:
-
-| File | Pre-Split Lines | Post-Split Lines | Result |
-| --- | --- | --- | --- |
-| `astrid/gateway.py` | 1,215 | Package | Folded into `astrid/core/gateway/` (`__init__.py`, `dispatch.py`, `help.py`, `project.py`, `wait.py`) |
-| `astrid/sdk.py` | 1,833 | Package | Folded into the `astrid/sdk/` package (`discovery.py`, `dto.py`, `events.py`, `exceptions.py`, `generation.py`, `invocation.py`, `results.py`) |
-
-The gateway and SDK implementations now live in packages rather than top-level
-split modules.
-
-### 9.2 Test Relocation Candidates (M3)
-
-Root-level `tests/test_*.py` files that could move to domain-specific test
-directories are inventoried in `docs/architecture/test-relocation-map.json`.
-M3 consumes this inventory.
-
-### 9.3 Runtime Correctness Inventory
-
-`docs/runtime-correctness-m3-inventory.md` records every non-pack `astrid/`
-Python `except` and runtime `assert` site, classified for follow-up in later
-milestones. This inventory is maintained outside M5 scope.
-
-## 10. Completed Roadmap Contracts
-
-The following `astrid-roadmap` contracts are settled and reflected in this
-document:
-
-| Contract | Status | Reflected In |
-| --- | --- | --- |
-| Platform contract v1 (`docs/platform-contract.md`) | **Complete** | §1.1 — Public SDK boundary and `__all__` exports |
-| CLI contract (`docs/cli-contract.md`) | **Complete** | §1.2 — CLI entrypoints |
-| Run ledger contract (`docs/run-ledger-contract.md`) | **Complete** | §4 — Audit subsystem |
-| Integration contracts (`docs/integration_contracts.md`) | **Complete** | §5 — Pack capability surface |
-| Output result contract (`docs/output-result-contract.md`) | **Complete** | §1.1 — SDK DTOs |
-| Timeline canonicalization | **Complete** | §3 — retired timeline re-export surfaces |
-| Internal threads lineage (m5a) | **Complete** | §4 — Threads subsystem with removed wrapper symbols |
-| Public compatibility shim removal | **Complete** | §3 — retired surface map |
-| Top-level module rationalization (M2) | **Complete** | §2 — `core/pack/` canonical pack machinery; §5 — `packs/` as pack data only; §5.3 — no top-level pack modules; §5.5 — structure enforcement |
-| Giant-file split (M4) | **Complete** | §9.1 — Gateway and SDK folded into packages |
-| M5 boundary enforcement | **Complete** | §2.2 — Contributor placement guidance; §4.1 — CLI/domain/import-layering convention; §12.1 — Structure enforcement model |
-| Shim and legacy surface audit (M5) | **Complete** | `docs/architecture/shim-legacy-audit.md` — M5 dispositions with retention metadata |
-
-## 11. Soft Boundary Conventions (Not Hard-Gated)
+## 9. Soft Boundary Conventions (Not Hard-Gated)
 
 The following boundaries are conventions documented here for awareness. They are
 not enforced with hard gates:
@@ -381,9 +279,9 @@ not enforced with hard gates:
 
 Later milestones may choose to enforce these as hard gates.
 
-## 12. Structure Enforcement Model
+## 10. Structure Enforcement Model
 
-### 12.1 Validator
+### 10.1 Validator
 
 `astrid/core/structure.py` is the **single source of truth** for repository
 structure enforcement. It exposes:
@@ -393,7 +291,7 @@ structure enforcement. It exposes:
 - `validate_migration_completion()` — DEPRECATED markers, sys.modules injections, dangling `__all__` aliases, compatibility shim detection
 - `validate_run_record_status_boundary()` — legacy run-record status token detection
 
-### 12.2 Exemption Lists
+### 10.2 Exemption Lists
 
 All exemptions are colocated in `astrid/core/structure.py`:
 
@@ -403,12 +301,12 @@ All exemptions are colocated in `astrid/core/structure.py`:
 | `TOP_LEVEL_ASTRID_DIRS` | Allowed top-level directories under `astrid/` |
 | `_IMPORT_LAYERING_EXEMPT_REL` | Files exempt from core import-layering rules |
 
-### 12.3 Consumption
+### 10.3 Consumption
 
 `astrid/core/doctor.py` consumes `validate_repo_structure()` and fails when
 canonical repository structure drifts.
 
-## 13. M3, M4, and M5 Inventory Consumption
+## 11. M3, M4, and M5 Inventory Consumption
 
 - **M3** consumes `docs/architecture/test-relocation-map.json` to guide
   root-level test file relocation into domain-specific test directories.

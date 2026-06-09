@@ -92,85 +92,14 @@ These decisions are locked and must not be re-litigated:
 
 ## Verb Reference
 
-### `astrid next`
-
-The universal port-of-call.  Always prints exactly one legal action on stdout,
-regardless of session/run state.
-
-| Flag | Behavior |
-|---|---|
-| *(default)* | Prints prohibition preamble, separator, and one actionable prose block on stdout. |
-| `--quiet` | Suppresses the preamble and separator; keeps actionable prose. |
-| `--json` | Emits exactly one JSON document on stdout.  No preamble, no prose. |
-| `--quiet --json` | Same as `--json` (preamble is never in JSON mode). |
-| `--skip` | Skips optional steps.  In JSON mode, emits one JSON payload for each skipped step plus a final payload for the next non-optional step or exhaustion.  No prose on stdout in JSON mode. |
-
-JSON states: `unbound`, `no_active_run`, `reader`, `active`, `exhausted`,
-`blocked` (tail-dispatch).  Each payload includes `action`, `command`,
-`step`, `blocked`, and `reason` fields.
-
-### `astrid status`
-
-| Flag | Behavior |
-|---|---|
-| `--project <slug>` (default) | Human-readable status block on stdout; diagnostics on stderr. |
-| `--project <slug> --json` | JSON status object on stdout.  Includes `progress_completed`, `progress_total`, `current_step`, `current_step_kind`, `current_step_version`, `current_step_iteration`, `current_step_item_id`, `inbox_pending`, `owner_assignee`, `owner_claimed`. |
-| *(no `--project`)* (default) | Routes to session status; prints session breadcrumb on stdout. |
-| *(no `--project`)* `--json` | Routes to session status; JSON payload on stdout with `state=no_session_bound`. |
-
-Gateway routing: `astrid status --json` without `--project` delegates to
-session status JSON; `astrid status --project <slug> --json` delegates to task
-status JSON.  The `--json` flag is preserved through the gateway dispatch.
-
-### `astrid start`
-
-Creates a new task run.  JSON payload includes `orchestrator_id`,
-`timeline_slug`, `plan_hash`, and `next_command` (`astrid next --project
-<slug>`).
-
-### `astrid abort`
-
-Clears the active run and releases the writer lease.  Idempotent:
-calling abort with no active run returns `state=no_active_run`.
-
-### `astrid ack`
-
-Approves, retries, or iterates the current step.  States:
-`acknowledged`, `retry_queued`, `iteration_failed`.  The `--decision abort`
-shortcut forwards `--json` to `cmd_abort`.  Recoverable validation failures
-(identity gate, stale epoch, etc.) produce error envelopes on stderr with
-exit code 2.
-
-### `astrid skip`
-
-Skips an optional step.  JSON payload includes `step_path`,
-`kind` (`step_skipped`/`item_skipped`), `actor_kind`, `actor_id`,
-`step_version`, `next_command`, and `reason` (when `--reason` is given).
-
-### `astrid attach`
-
-Binds a session to a project.
-
-| Flag | Behavior |
-|---|---|
-| *(default)* | Interactive: prompts for timeline selection when no default exists. |
-| `--json` | **Non-prompting.**  If no default timeline is configured, raises an `AstridError` with `valid_options` and `recovery_command` instead of blocking on stdin. |
-| `--json --timeline <slug>` | Non-prompting; uses the explicit timeline. |
-
-JSON success payload includes `session_id`, `agent_id`, `timeline`, `role`,
-`attach_kind` (`created`/`reused`/`resumed`), and `export_line`
-(`export ASTRID_SESSION_ID=...`).
-
-The non-prompting policy ensures that agents invoking `astrid attach --json`
-never hang waiting for stdin input.  All missing-selection failures produce
-structured `AstridError` envelopes with `valid_options` and `recovery_command`
-on stderr and exit code 2.
-
-### `astrid sessions status`
-
-JSON payload includes `session_id`, `agent_id`, `project`, `run_id`,
-`timeline`, `role`, `state` (one of `session_bound`, `lease_error`,
-`writer`, `reader`), `run_status`, and `recent_events`.
+- **`astrid next`** — universal port-of-call; always prints exactly one legal action on stdout.  Supports `--quiet`, `--json`, and `--skip`.  JSON states: `unbound`, `no_active_run`, `reader`, `active`, `exhausted`, `blocked`.
+- **`astrid status`** — human-readable or JSON status block (session or task-scoped via `--project <slug>`).
+- **`astrid start`** — creates a new task run; JSON payload includes `orchestrator_id`, `timeline_slug`, `plan_hash`, `next_command`.
+- **`astrid abort`** — clears the active run and releases the writer lease; idempotent.
+- **`astrid ack`** — approves, retries, or iterates the current step.  `--decision abort` forwards to `cmd_abort`.
+- **`astrid skip`** — skips an optional step; JSON payload includes `step_path`, `kind`, `actor_kind`, `actor_id`, `next_command`.
+- **`astrid attach`** — binds a session to a project.  `--json` is non-prompting: missing timeline raises `AstridError` with `valid_options` + `recovery_command`.
+- **`astrid sessions status`** — JSON payload includes `session_id`, `agent_id`, `project`, `run_id`, `role`, `state`, `run_status`, `recent_events`.
 
 ## Error Contract
 
@@ -187,22 +116,6 @@ Key points for agents:
 - **Parser errors** (`AstridArgumentError`) are converted to `AstridError`
   envelopes with `valid_options` listing the accepted values and a
   `recovery_command` suggesting the correct invocation.
-
-## Implementation Modules
-
-The contract is implemented across these modules:
-
-| Module | Responsibility |
-|---|---|
-| `astrid/core/task/cli_contract.py` | Shared JSON emitter (`emit_lifecycle_json`, `emit_json_object`), payload shaping (`shape_lifecycle_payload`), and parser-error adaptation (`astrid_argument_error_to_error`, `exit_with_argument_error`). |
-| `astrid/core/task/operator_view.py` | `cmd_next` (preamble, `--quiet`, `--json`, universal port-of-call) and `cmd_status` (task status with JSON and diagnostics-to-stderr). |
-| `astrid/core/task/plan_builder.py` | `cmd_start` (run creation with JSON output). |
-| `astrid/core/task/run_store.py` | `cmd_abort` (run clearing with JSON output). |
-| `astrid/core/task/lifecycle_ack.py` | `cmd_ack` (approve/retry/iterate with JSON and abort delegation). |
-| `astrid/core/task/lifecycle_skip.py` | `cmd_skip` (optional-step skip with JSON). |
-| `astrid/core/session/cli.py` | `cmd_attach` (non-prompting JSON policy, structured errors) and `cmd_status` (session status JSON). |
-| `astrid/core/gateway/` | Status routing (`--json` preservation, session vs. task dispatch). |
-| `astrid/core/contracts/errors.py` | `AstridError` envelope, `render_astrid_error`, and `wrap_degraded_error`. |
 
 ## Cross-References
 

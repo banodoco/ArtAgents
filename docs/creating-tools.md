@@ -167,7 +167,7 @@ The authoritative layout for every pack is its `pack.yaml` manifest. The
 `content` roots declared there — `executors`, `orchestrators`, `elements` —
 are what the runtime and validation use. Folder scanning is a fallback for
 legacy packs without a `schema_version`; new packs must declare their layout
-explicitly. See [creating-packs.md](creating-packs.md) for the full pack
+explicitly. See [creating-packs.md](packs/creating-packs.md) for the full pack
 authoring workflow and manifest schemas.
 
 Executor folders use:
@@ -267,14 +267,13 @@ command that matches the thing you created.
 
 - [discovery-for-agents.md](discovery-for-agents.md) — How agents discover
   capabilities via `skills list`, search, and `inspect --json`.
-- [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —
+- [aliases-vs-forks-vs-overrides.md](packs/aliases-vs-forks-vs-overrides.md) —
   Decision table for choosing between alias, fork, and override.
-- [personal-packs.md](personal-packs.md) — Scaffolding personal packs for
-  local experimentation.
-- [adapter-packs.md](adapter-packs.md) — Adapter pack conventions and
+- [fork-and-update.md](packs/fork-and-update.md) — Scaffolding personal packs
+  for local experimentation, detecting and managing local edits with dirty
+  check and fork.
+- [adapter-packs.md](packs/adapter-packs.md) — Adapter pack conventions and
   trust/ownership distinctions.
-- [update-workflow.md](update-workflow.md) — Detecting and managing local
-  edits with dirty check and fork.
 
 ## Future Work
 

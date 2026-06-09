@@ -56,7 +56,7 @@ question. Pack metadata must keep these axes separate:
 
 | Axis | Meaning | Examples |
 | --- | --- | --- |
-| Namespace / id prefix | The first segment of capability ids and the owning pack id. | `builtin`, `iteration`, `external`, `upload` |
+| Namespace / id prefix | The first segment of capability ids and the owning pack id. | `builtin`, `editorial`, `fal`, `iteration` |
 | Distribution / source | Where the pack comes from. | bundled, local, personal, git, future registry |
 | Enablement | Whether normal discovery includes the pack by default. | default-enabled, optional, disabled/hidden |
 | Ownership / support | Who maintains and supports the pack. | Astrid-supported, user-owned, adapter-owned, example |
@@ -130,38 +130,15 @@ M0. Later milestones should implement:
 M0 defines this identity and alias policy only. It does not rename existing ids,
 move capabilities, add alias manifests, or implement alias resolution.
 
-## Current M0 Discovery Behavior
+## Historical: M0 Discovery Behavior (2025)
 
-This section describes what exists today. It is intentionally broader than the
-target discovery contract below.
-
-- `astrid/core/pack/discovery.py` loads every immediate child of `astrid/packs/` with a
-  `pack.yaml`, `pack.yml`, or `pack.json` manifest. It validates the pack id and
-  folder-name match, but it does not enforce the richer v1 authoring schema or
-  content-root declarations.
-- Executor and orchestrator registries iterate all manifest-backed packs
-  returned by `discover_packs()` and find manifests recursively outside
-  `elements/`.
-- Element discovery loads pack elements under
-  `elements/{effects,animations,transitions}` and preserves the existing theme
-  and local-pack precedence model.
-- Hidden, example, deprecated, optional, and personal visibility/status is not
-  enforced by current runtime discovery.
-- Current executor and orchestrator list surfaces expose `--kind built_in` and
-  `--kind external`, which filter current component metadata only. They do not
-  expose target pack status, visibility, ownership, source, `--all`, hidden,
-  example, or deprecated filters.
-- Current element list surfaces expose `--kind effects|animations|transitions`,
-  which filters element kind only. They do not expose target pack status,
-  visibility, ownership, source, `--all`, hidden, example, or deprecated
-  filters.
-- `astrid/skills/discovery.py` independently scans pack and nested content
-  `skill/SKILL.md` files. It does not yet consume the richer pack contract.
-
-Therefore normal discovery is currently over-visible. Any wording about default
-visibility, `--all`, hidden/example/deprecated filtering, optional enablement,
-or unified capability discovery below is a target for M1-M3, not current M0
-behavior.
+> **Note:** This section is a dated historical record. M0 discovery was
+> intentionally over-visible: it loaded every immediate child of `astrid/packs/`
+> with a `pack.yaml`/`pack.yml`/`pack.json` manifest, did not enforce
+> visibility/status filtering, exposed only `--kind built_in|external` on
+> executor/orchestrator surfaces, and did not consume the pack contract in
+> skill discovery. The target M1-M3 contract below describes the intended
+> behavior that later milestones progressively implement.
 
 ## Target M1-M3 Discovery Contract
 
@@ -254,28 +231,31 @@ live in executor, orchestrator, or element schemas:
 - inspectable inputs and outputs where the kind supports them;
 - safety/cost/secrets/network declarations.
 
-## First Placement Map
+## Current Pack Listing
 
-This map is classification only. It does not move, delete, hide, or rename any
-directory in M0. It is a starting point for later migration and discovery
-filtering work, not a declaration that current runtime visibility has changed.
+The canonical runtime pack listing and per-pack taxonomy assignments are
+maintained in **[pack-taxonomy.md](pack-taxonomy.md)**. See that document's
+domain table and Example Packs section for the current `astrid/packs/`
+inventory, shell classifications (`_core`, `builtin`), and example packs under
+`examples/packs/`.
 
-| Current top-level group | Initial placement | Notes |
-| --- | --- | --- |
-| `builtin` | default-enabled core | Current home of most supported Astrid capabilities. Future work may split it without changing the meaning of built-in. |
-| `external` | adapter/substrate | Current home for VibeComfy, RunPod, Comfy prompt/image wrappers, fal Foley, Moirae, and similar substrates. Network/API usage is declared through safety metadata, not implied by the word external. |
-| `iteration` | optional workflow | Useful workflow pack, not necessarily default agent surface for every user. |
-| `upload` | optional workflow / adapter | User-facing publishing workflow with service integration and safety metadata needs. |
-| `seinfeld` | optional workflow / training pack | Keep as optional workflow/training pending separate builtin-training coordination before migration, deletion, or genericization. |
-| `clip_tools` | example/test or optional utility candidate | Generated/scaffold-like pack; later milestones decide visibility. |
-| `video_tools` | example/test or optional utility candidate | Duplicate-style utility candidate; no cleanup in M0. |
-| `file_summarizer` | example/test or optional utility candidate | Generated/scaffold-like pack; later milestones decide visibility. |
-| `text_digest` | example/test or optional utility candidate | Generated/scaffold-like pack; later milestones decide visibility. |
-| `_core` | skill/support, not a runtime pack | No `pack.yaml`; supports agent skill installation/documentation. |
-| `schemas` | schema/support, not a runtime pack | No `pack.yaml`; holds pack schema files. |
+### Mapping Contract Axes to Taxonomy Fields
 
-Deprecated, hidden, or delete classifications require later evidence and should
-not be acted on before aliases, filters, and migration checks exist.
+The six conceptual axes defined in §Pack Axes above map onto
+`pack-taxonomy.md`'s six machine-readable fields as follows:
+
+| Contract Axis | Taxonomy Field |
+|---|---|
+| Namespace / id prefix | `id` (pack-level), `domain` (grouping axis) |
+| Distribution / source | `origin` |
+| Enablement | `install_tier` |
+| Ownership / support | `support` |
+| Maturity / status | `stability` |
+| Trust / safety profile | `permissions` block (pack-level, not a taxonomy enum) |
+
+The trust/safety axis is expressed through the `permissions` block in
+`pack.yaml` rather than a single taxonomy enum, since safety posture is
+multi-dimensional (network access, secrets, paid APIs, external binaries).
 
 Element precedence remains the current implementation precedent:
 

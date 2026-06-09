@@ -1,6 +1,8 @@
+Commands below use example/placeholder ids — after scaffolding, substitute your own capability id.
+
 # Example Element
 
-Use `example-card` when a timeline needs a reusable effect-style text card.
+Use `effects text-card` when a timeline needs a reusable effect-style text card.
 
 List compatible effects first:
 
@@ -11,5 +13,5 @@ python3 -m astrid elements list --kind effects
 Inspect the element manifest:
 
 ```bash
-python3 -m astrid elements inspect effects example-card --json
+python3 -m astrid elements inspect effects text-card --json
 ```

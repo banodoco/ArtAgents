@@ -47,7 +47,7 @@ skill first, then open only the specific folder-level `STAGE.md` needed for the
 selected registry item. Do not package every executor and orchestrator stage
 into one merged runtime prompt.
 
-Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, and `media`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` is created on the first `elements fork` and holds user-editable copies. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
+Content ships in **packs** at `astrid/packs/<pack>/`. Each pack carries a `pack.yaml` with `id`, `name`, and `version`, and contains executor folders, orchestrator folders, and an `elements/<kind>/<id>/` tree. The shipped packs are `rendering`, `understanding`, `generation`, `editorial`, `video_editing`, `foley`, `training`, `reigh`, `youtube`, `fal`, `vibecomfy`, `runpod`, `moirae`, `iteration`, `media`, `stream_content`, `comfy_wrap`, and `text_analysis`. The deprecated `builtin` pack is a thin shell; legacy `external` and `upload` pack definitions were removed, and backward compatibility is via pack-level aliases declared in the canonical packs. A gitignored `local` pack at `astrid/packs/local/` is created on the first `elements fork` and holds user-editable copies. Default orchestrators include `video_editing.hype`, `video_editing.event_talks`, and `video_editing.thumbnail_maker` (legacy aliases: `builtin.hype`, `builtin.event_talks`, `builtin.thumbnail_maker`). Default executors include every `STEP_ORDER` capability, upload/action executors, `understanding.understand` (audio/visual/video dispatcher), `generation.generate_image_openai` (with a `saint-peter-of-banodoco` onboarding preset), `moirae.moirae`, and `vibecomfy.run`/`vibecomfy.validate`.
 
 Executor and orchestrator ids are always qualified — `<pack>.<name>` (for example `video_editing.cut`, `vibecomfy.run`). Bare lookups such as `cut` are rejected at the schema and CLI boundaries. Element ids stay bare and are scoped by `kind`, so `animation/fade` and `transition/fade` coexist without collision.
 
@@ -128,20 +128,16 @@ This classification keeps only retained root and bin launchers; executor-owned p
 
 ## Structure Enforcement
 
-`python3 -m astrid doctor` fails when canonical repository structure drifts.
-Public executor folders under `astrid/packs/<pack>/<name>/` must include
-`executor.yaml`, `run.py`, and `STAGE.md`, and the executor's qualified id's
-first segment must equal the pack id. Public orchestrator folders under
-`astrid/packs/<pack>/<name>/` must include `orchestrator.yaml`, `run.py`,
-and `STAGE.md` with the same qualified-id rule. Element folders under
-`astrid/packs/<pack>/elements/<kind>/<id>/` must include `component.tsx` and
-`element.yaml`. Executor folders must not contain orchestrator metadata, and
-orchestrator folders must not contain executor metadata. Legacy public package
-directories (`astrid/executors/`, `astrid/orchestrators/`,
-`astrid/conductors/`, `astrid/performers/`, `astrid/instruments/`,
-`astrid/primitives/`) are rejected so developers do not reintroduce removed
-concepts. A top-level `astrid/skills/` directory is also rejected;
-per-stage guidance lives beside the executor or orchestrator it describes.
+Repository structure enforcement, import layering rules, exemption lists, and
+the `validate_repo_structure()` machinery are documented in
+[docs/architecture/repo-shape.md](architecture/repo-shape.md).
+
+## Retired Concepts
+
+**Threads** are retired as a user-facing concept. The `astrid thread` CLI
+surface no longer exists. Threads are retained only as an internal lineage
+model for iteration-video provenance; no current `astrid` command binds to
+them at runtime.
 
 ## Generated Files and Dirty Worktrees
 

@@ -7,10 +7,16 @@ defined in that module following the invariant `constant_name == constant_value`
 (the constant identifier equals the env-var string it names).  Use the constant
 rather than the bare string in any new code.
 
-Exception: `ASTRID_AUTHOR_TEST_LEGACY` — a backward-compat alias whose value
-is the legacy key `ASTRID...TEST` (not its own name).  `get_author_test_env()`
-checks the canonical key first, then falls back to the legacy key with a
-deprecation warning.  Use `ASTRID_AUTHOR_TEST` for all new code.
+Exceptions to the name==value invariant:
+
+- `ASTRID_AUTHOR_TEST` — the constant's value is the env-var string
+  `ASTRID...TEST` (with three dots), not its own identifier.
+- `ASTRID_AUTHOR_TEST_LEGACY` — backward-compat alias whose value is the
+  legacy key `ASTRID...TEST` (not its own name).
+
+`get_author_test_env()` checks the canonical key (`ASTRID...TEST`) first, then
+falls back to the legacy key with a deprecation warning.  Use
+`ASTRID_AUTHOR_TEST` for all new code.
 
 ---
 
@@ -46,9 +52,9 @@ These are propagated into subprocess env by `build_child_subprocess_env`.
 | Constant | Env var | Who sets | Who reads | Effect |
 |---|---|---|---|---|
 | `ASTRID_ACTOR` | `ASTRID_ACTOR` | Session/task subsystem | `task/env.py` | Identifies the actor driving the invocation (e.g. `agent:<id>`).  Cleared from the child subprocess env. |
-| `ASTRID_AUTHOR_TEST` | `ASTRID_AUTHOR_TEST` | `orchestrate/test_runner.py` | `task/env.py` (`is_author_test_mode`) | Set to `1` in author-test mode: auto-approves attested gates, uses a scratch projects root. |
+| `ASTRID_AUTHOR_TEST` | `ASTRID...TEST` | `orchestrate/test_runner.py` | `task/env.py` (`is_author_test_mode`) | Set to `1` in author-test mode: auto-approves attested gates, uses a scratch projects root. |
 | `ASTRID_INTERNAL_INVOCATION` | `ASTRID_INTERNAL_INVOCATION` | `executor/runner.py`, `orchestrator/runner.py` | `executor/runner.py`, `task/command_render.py` | Set to `1` by the runner when launching a step subprocess, so the child can skip certain prompts. |
-| `ASTRID_STRICT_INSTRUCTION_SUBST` | `ASTRID_STRICT_INSTRUCTION_SUBST` | User / CI | `task/operator_view.py` | Set to `1` to enforce strict substitution of `${ASTRID_…}` placeholders; raises on unknown tokens.  Implied when `ASTRID_AUTHOR_TEST=1`. |
+| `ASTRID_STRICT_INSTRUCTION_SUBST` | `ASTRID_STRICT_INSTRUCTION_SUBST` | User / CI | `task/operator_view.py` | Set to `1` to enforce strict substitution of `${ASTRID_…}` placeholders; raises on unknown tokens.  Implied when `ASTRID_AUTHOR_TEST` is set. |
 
 ## Pack discovery
 

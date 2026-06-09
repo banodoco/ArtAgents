@@ -26,7 +26,7 @@ See the formal vocabulary in
 
 For the taxonomy fields that classify packs for discovery and filtering
 (`origin`, `install_tier`, `pack_type`, `domain`, `stability`, `support`),
-see [docs/pack-taxonomy.md](pack-taxonomy.md).
+see [docs/packs/pack-taxonomy.md](packs/pack-taxonomy.md).
 
 ## Three Capability Kinds
 
@@ -218,7 +218,7 @@ When you add a new CLI argument to a pack `run.py`:
       ) from exc
   ```
 
-  (If the pack entrypoint is wrapped by `_canonical_entrypoint`, the
+  (If the pack entrypoint is wrapped by `guard_canonical_entrypoint`, the
   `AstridArgumentError` will be caught and rendered automatically — the
   explicit conversion is only needed for custom entrypoints.)
 

@@ -6,7 +6,7 @@
 
 ## Canonical video modes
 
-The video modality has four canonical modes.  Three are wired in Sprint 04;
+The video modality has five canonical modes.  Three are wired in Sprint 04;
 `v2v` and `video-edit` are deferred to a future sprint.
 
 | Mode         | Description | Status |

@@ -1,7 +1,7 @@
 # Audio Modality Contract (schema_version: 2)
 
 **Status**: Spec-only (Sprint 02) — implementation deferred to Sprint 05.  
-**Planned executor**: `builtin.generate_audio`  
+**Planned executor**: `generation.generate_audio`  
 **Escape hatch**: `external.vibecomfy` (custom audio pipelines, spectrogram conditioning)
 
 ## Canonical audio modes (preview)
@@ -59,10 +59,10 @@ The `request` object will include audio-specific fields: `duration`,
 ## Escape hatch
 
 For spectrogram conditioning, multi-track generation, inpainting, or exotic
-audio samplers, use `external.vibecomfy` directly.  The `builtin.generate_audio`
+audio samplers, use `external.vibecomfy` directly.  The `generation.generate_audio`
 executor covers the basic happy path only.
 
-> **Note for Sprint 05 implementers**: When the `builtin.generate_audio`
+> **Note for Sprint 05 implementers**: When the `generation.generate_audio`
 > executor and its `STAGE.md` are created, add an explicit escape-hatch
 > paragraph cross-linking to `astrid/packs/external/vibecomfy/STAGE.md` and
 > `docs/generation/` — matching the pattern in
