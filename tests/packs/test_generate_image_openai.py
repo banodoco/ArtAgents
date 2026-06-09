@@ -54,12 +54,14 @@ def test_load_api_key_reads_env_by_default(monkeypatch, tmp_path):
     assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
 
 
-def test_load_api_key_prefers_process_env(monkeypatch, tmp_path):
+def test_load_api_key_prefers_env_file_over_process_env(monkeypatch, tmp_path):
+    # Contract: a committed .env takes precedence over an exported env var, so a
+    # stale or empty shell value never shadows the key the repo actually carries.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENAI_API_KEY", "from-process-env")
     (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dot-env", encoding="utf-8")
 
-    assert load_api_key("OPENAI_API_KEY") == "from-process-env"
+    assert load_api_key("OPENAI_API_KEY") == "from-dot-env"
 
 
 def test_llm_client_key_loader_reads_env(monkeypatch, tmp_path):

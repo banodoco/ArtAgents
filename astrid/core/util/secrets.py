@@ -86,7 +86,12 @@ def _candidate_env_files(env_file: Path | None = None) -> list[Path]:
 
 
 def load_api_key(name: str, env_file: Path | None = None) -> str:
-    """Resolve *name* from environment variable, then candidate .env files.
+    """Resolve *name* from candidate .env files first, then the environment.
+
+    ``.env`` files take precedence over an exported environment variable so a
+    stale or empty shell value never shadows the key the repo actually carries.
+    An explicit ``env_file`` is checked before the standard ``.env`` walk; the
+    process environment is the final fallback when no ``.env`` defines *name*.
 
     Args:
         name: The environment variable name (e.g. ``"FAL_KEY"``).
@@ -98,13 +103,14 @@ def load_api_key(name: str, env_file: Path | None = None) -> str:
     Raises:
         SystemExit: If the key is not found in any location.
     """
-    if key := os.environ.get(name, "").strip():
-        return key
-    tried: list[str] = [f"{name} environment variable"]
+    tried: list[str] = []
     for candidate in candidate_env_files(env_file):
         tried.append(str(candidate))
         if key := read_env_value(candidate, name):
             return key
+    if key := os.environ.get(name, "").strip():
+        return key
+    tried.append(f"{name} environment variable")
     raise SystemExit(f"{name} not found. Tried: {', '.join(tried)}")
 
 
