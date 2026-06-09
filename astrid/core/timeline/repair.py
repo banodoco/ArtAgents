@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
 
 from .events.schema import (
@@ -156,7 +157,10 @@ def repair_erasure_local_fs(
             events_path, os.O_CREAT | os.O_APPEND | os.O_RDWR, 0o644
         )
     except OSError as exc:
-        raise OSError(f"failed to open {events_path}: {exc}") from exc
+        raise AstridError(
+            f"failed to open {events_path}: {exc}",
+            recovery_command="check file permissions and disk health, then retry",
+        ) from exc
 
     try:
         with os.fdopen(fd, "a+b", closefd=True) as handle:
@@ -193,7 +197,10 @@ def repair_erasure_local_fs(
                 except OSError:
                     pass
     except OSError as exc:
-        raise OSError(f"failed to repair {events_path}: {exc}") from exc
+        raise AstridError(
+            f"failed to repair {events_path}: {exc}",
+            recovery_command="check file permissions and disk health, then retry",
+        ) from exc
 
     # Rebuild head
     head = _rebuild_head(repaired, head_path)

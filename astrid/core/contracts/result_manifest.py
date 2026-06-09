@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.core.util.hash import sha256_file
 
@@ -91,7 +92,10 @@ def complete_output_metadata(
                 output["missing"] = True
                 completed.append(output)
                 continue
-            raise FileNotFoundError(f"required output missing: {resolved_path}")
+            raise AstridError(
+                f"required output missing: {resolved_path}",
+                recovery_command="re-run the producing step so it writes the declared output",
+            )
 
         output["path"] = raw_path
         output.pop("missing", None)

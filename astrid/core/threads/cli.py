@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.paths import REPO_ROOT
 
 from .attribute import (
@@ -116,7 +117,10 @@ def _show(repo_root: Path, args: argparse.Namespace) -> int:
     try:
         thread_id = resolve_thread_ref(repo_root, args.thread)
     except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
+        raise AstridError(
+            str(exc),
+            recovery_command="astrid threads list",
+        ) from exc
     index = ThreadIndexStore(repo_root).read()
     thread = index["threads"][thread_id]
     runs = [_load_run(repo_root, run_id) for run_id in thread.get("run_ids", [])]

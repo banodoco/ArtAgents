@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.generation.backends.registry import (
     load_default_generation_backend_registry,
 )
@@ -116,7 +117,10 @@ class ModelRegistry:
         """Load the shipped ``models.yaml`` from the catalog directory."""
         yaml_path = Path(__file__).resolve().parent / "models.yaml"
         if not yaml_path.is_file():
-            raise FileNotFoundError(f"model registry not found: {yaml_path}")
+            raise AstridError(
+                f"model registry not found: {yaml_path}",
+                recovery_command="reinstall astrid; models.yaml ships with the package",
+            )
         raw = _load_yaml(yaml_path)
         taxonomy_registry = load_default_generation_taxonomy_registry(
             project_root=project_root,
@@ -213,7 +217,10 @@ class LoraRegistry:
         """
         yaml_path = Path(__file__).resolve().parent / "loras.yaml"
         if not yaml_path.is_file():
-            raise FileNotFoundError(f"lora registry not found: {yaml_path}")
+            raise AstridError(
+                f"lora registry not found: {yaml_path}",
+                recovery_command="reinstall astrid; loras.yaml ships with the package",
+            )
         raw = _load_yaml(yaml_path)
         # Load all loras; base_model cross-check is done by the caller
         # (fal.py) at generation time, not at registry-load time.

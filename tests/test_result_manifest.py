@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from astrid.core.contracts import build_manifest, complete_output_metadata, write_manifest
+from astrid.core.contracts.errors import AstridError
 from astrid.core.executor.registry import load_default_registry
 
 
@@ -55,7 +56,7 @@ def test_complete_output_metadata_for_directory_adds_tree_metadata(tmp_path: Pat
 
 
 def test_complete_output_metadata_rejects_missing_required_outputs(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="required output missing"):
+    with pytest.raises(AstridError, match="required output missing"):
         complete_output_metadata([{"path": "missing.txt"}], root_dir=tmp_path)
 
 

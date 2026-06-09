@@ -10,6 +10,7 @@ from urllib.request import Request
 
 import pytest
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.util.http import (
     FAL_QUEUE_URL,
     HttpClient,
@@ -157,7 +158,7 @@ class TestSecretScrubbing:
         client = HttpClient(transport=_error_transport(401, f'{{"error":"bad key {api_key}"}}'))
         client.register_secret(api_key)
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(AstridError) as exc_info:
             client.post_json("https://example.com/api", {"prompt": "test"})
 
         message = str(exc_info.value)
@@ -178,12 +179,12 @@ class TestPostJson:
 
     def test_4xx_raises_system_exit(self):
         client = HttpClient(transport=_error_transport(400, '{"error":"bad request"}'))
-        with pytest.raises(SystemExit):
+        with pytest.raises(AstridError):
             client.post_json("https://example.com/api", {})
 
     def test_5xx_raises_system_exit(self):
         client = HttpClient(transport=_error_transport(500, "Internal Server Error"))
-        with pytest.raises(SystemExit):
+        with pytest.raises(AstridError):
             client.post_json("https://example.com/api", {})
 
     def test_custom_headers_sent(self):
@@ -221,7 +222,7 @@ class TestGetBytes:
 
     def test_4xx_raises(self):
         client = HttpClient(transport=_error_transport(404))
-        with pytest.raises(SystemExit):
+        with pytest.raises(AstridError):
             client.get_bytes("https://example.com/missing.png")
 
 
@@ -259,7 +260,7 @@ class TestPollUntil:
 
         with patch("time.monotonic", side_effect=[0, 1, 2]):
             with patch("time.sleep", return_value=None):
-                with pytest.raises(SystemExit) as exc_info:
+                with pytest.raises(AstridError) as exc_info:
                     client.poll_until(
                         "https://queue.fal.run/status",
                         "https://queue.fal.run/result",
@@ -273,7 +274,7 @@ class TestPollUntil:
 
         with patch("time.monotonic", side_effect=[0, 100, 200, 300, 400]):
             with patch("time.sleep", return_value=None):
-                with pytest.raises(SystemExit) as exc_info:
+                with pytest.raises(AstridError) as exc_info:
                     client.poll_until(
                         "https://queue.fal.run/status",
                         "https://queue.fal.run/result",
@@ -371,7 +372,7 @@ class TestFalSubmitAndPoll:
         client = HttpClient(
             transport=_canned_transport(200, {"request_id": "req123"})
         )
-        with pytest.raises(SystemExit):
+        with pytest.raises(AstridError):
             fal_submit_and_poll(
                 client,
                 "fal-ai/flux/dev",
@@ -414,7 +415,7 @@ class TestMockability:
         client = HttpClient(transport=raise_urlerror)
         client.register_secret(api_key)
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(AstridError) as exc_info:
             client.post_json("https://example.com/api", {})
 
         message = str(exc_info.value)

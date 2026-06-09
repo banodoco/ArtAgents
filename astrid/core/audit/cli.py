@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+from astrid.core.contracts.errors import AstridError
+
 from .graph import build_graph, load_ledger, verify_audit_ledger
 from .report import _verification_failure_message, write_report
 
@@ -39,7 +41,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         graph = build_graph(load_ledger(args.run))
     except FileNotFoundError as exc:
-        raise SystemExit(str(exc))
+        raise AstridError(
+            str(exc),
+            recovery_command="run the audited command first to produce audit/ledger.jsonl",
+        ) from exc
     if args.json:
         print(json.dumps(graph, indent=2))
         return 0

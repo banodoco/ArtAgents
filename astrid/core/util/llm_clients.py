@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any, Protocol
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.util.secrets import _candidate_env_files, _read_env_value, candidate_env_files, read_env_value
 from astrid.core.util.time import _utc_now, utc_now_seconds
 
@@ -200,7 +201,10 @@ def _load_api_key(env_file: Path | None, key: str) -> str:
     for candidate in _candidate_env_files(env_file):
         if value := _read_env_value(candidate, key):
             return value
-    raise SystemExit(f"{key} not found")
+    raise AstridError(
+        f"{key} not found",
+        recovery_command=f"set {key} in your environment or a .env file",
+    )
 
 
 def _is_transient_error(exc: Exception) -> bool:

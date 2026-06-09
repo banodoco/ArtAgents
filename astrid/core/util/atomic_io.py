@@ -142,4 +142,7 @@ def read_json(path: str | Path) -> Any:
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid JSON in {json_path}: {exc.msg}") from exc
     except OSError as exc:
-        raise OSError(f"failed to read {json_path}: {exc}") from exc
+        raise AstridError(
+            f"failed to read {json_path}: {exc}",
+            recovery_command="check file permissions and disk health, then retry",
+        ) from exc

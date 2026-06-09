@@ -14,6 +14,8 @@ from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from astrid.core.contracts.errors import AstridError
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -128,12 +130,14 @@ class HttpClient:
             detail = self.scrub_secret(
                 exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             )
-            raise SystemExit(
-                self.scrub_secret(f"HTTP {exc.code} GET {url}: {detail}")
+            raise AstridError(
+                self.scrub_secret(f"HTTP {exc.code} GET {url}: {detail}"),
+                recovery_command="check the URL and credentials, then retry",
             ) from exc
         except URLError as exc:
-            raise SystemExit(
-                self.scrub_secret(f"Network error GET {url}: {exc}")
+            raise AstridError(
+                self.scrub_secret(f"Network error GET {url}: {exc}"),
+                recovery_command="check network connectivity, then retry",
             ) from exc
         return body
 
@@ -152,7 +156,7 @@ class HttpClient:
     ) -> dict[str, Any]:
         """Poll *status_url* until COMPLETED/OK, then GET *response_url*.
 
-        Raises ``SystemExit`` on FAILED / ERROR / CANCELLED status or timeout.
+        Raises ``AstridError`` on FAILED / ERROR / CANCELLED status or timeout.
         """
         deadline = time.monotonic() + max_wait_sec
         delay = delay_initial
@@ -162,16 +166,18 @@ class HttpClient:
             if state in {"COMPLETED", "OK"}:
                 return self.get_json(response_url, headers=headers)
             if state in {"FAILED", "ERROR", "CANCELLED"}:
-                raise SystemExit(
-                    self.scrub_secret(f"fal job {state}: {json.dumps(status)}")
+                raise AstridError(
+                    self.scrub_secret(f"fal job {state}: {json.dumps(status)}"),
+                    recovery_command="inspect the fal job status and retry",
                 )
             time.sleep(delay)
             delay = min(delay * delay_factor, delay_max)
-        raise SystemExit(
+        raise AstridError(
             self.scrub_secret(
                 f"fal job timed out after {max_wait_sec}s; "
                 f"last status_url={status_url}"
-            )
+            ),
+            recovery_command="retry; if it persists, raise max_wait_sec",
         )
 
     # -- internal -----------------------------------------------------------
@@ -192,16 +198,18 @@ class HttpClient:
             detail = (
                 exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             )
-            raise SystemExit(
+            raise AstridError(
                 self.scrub_secret(
                     f"HTTP {exc.code} {request.method} {request.full_url}: {detail}"
-                )
+                ),
+                recovery_command="check the URL and credentials, then retry",
             ) from exc
         except URLError as exc:
-            raise SystemExit(
+            raise AstridError(
                 self.scrub_secret(
                     f"Network error {request.method} {request.full_url}: {exc}"
-                )
+                ),
+                recovery_command="check network connectivity, then retry",
             ) from exc
         return json.loads(body.decode("utf-8")) if body else {}
 
@@ -268,11 +276,12 @@ def fal_submit_and_poll(
     status_url = submission.get("status_url")
     response_url = submission.get("response_url")
     if not status_url or not response_url:
-        raise SystemExit(
+        raise AstridError(
             client.scrub_secret(
                 f"fal submission missing status_url/response_url: "
                 f"{json.dumps(submission)}"
-            )
+            ),
+            recovery_command="retry; the fal submission response was malformed",
         )
     result = client.poll_until(
         status_url,

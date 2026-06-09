@@ -19,6 +19,7 @@ from pathlib import Path
 
 import pytest
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.store import InstallRecord, InstalledPackStore
 
 
@@ -182,7 +183,7 @@ class TestRollback:
         store = InstalledPackStore(packs_home=tmp_path)
         rec = _record("pack.err", tmp_path)
         store.record_install(rec)
-        with pytest.raises(FileNotFoundError, match="does not exist"):
+        with pytest.raises(AstridError, match="does not exist"):
             store.rollback_to_revision("pack.err", "nonexistent.rev")
 
     def test_rollback_noop_when_already_active(self, tmp_path: Path) -> None:
@@ -204,7 +205,7 @@ class TestRollback:
         link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(Path("revisions") / rec.revision)
 
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(AstridError):
             store.rollback_to_revision("pack.stable", "bad.revision")
 
         # Active symlink still points to original revision

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.env_vars import ASTRID_SESSION_ID
 from astrid.core.task import env as task_env
@@ -484,7 +485,10 @@ def load_run_record(project_slug: str, run_id: str, *, root: str | Path | None =
 def require_run_record(project_slug: str, run_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
     run_path = paths.run_json_path(project_slug, run_id, root=root)
     if not run_path.exists():
-        raise FileNotFoundError(f"run not found: {run_id}. Next command: python3 -m astrid projects show --project {project_slug}")
+        raise AstridError(
+            f"run not found: {run_id}",
+            recovery_command=f"python3 -m astrid projects show --project {project_slug}",
+        )
     return validate_run_record(read_json(run_path))
 
 

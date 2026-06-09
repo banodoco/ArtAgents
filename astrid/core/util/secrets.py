@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from astrid.core.contracts.errors import AstridError
+
 EnvSearchProfile = Literal["default", "reigh"]
 
 
@@ -101,7 +103,7 @@ def load_api_key(name: str, env_file: Path | None = None) -> str:
         The resolved key string.
 
     Raises:
-        SystemExit: If the key is not found in any location.
+        AstridError: If the key is not found in any location.
     """
     tried: list[str] = []
     for candidate in candidate_env_files(env_file):
@@ -111,7 +113,10 @@ def load_api_key(name: str, env_file: Path | None = None) -> str:
     if key := os.environ.get(name, "").strip():
         return key
     tried.append(f"{name} environment variable")
-    raise SystemExit(f"{name} not found. Tried: {', '.join(tried)}")
+    raise AstridError(
+        f"{name} not found. Tried: {', '.join(tried)}",
+        recovery_command=f"set {name} in your environment or a .env file",
+    )
 
 
 def scrub_secret(value: str, text: str) -> str:

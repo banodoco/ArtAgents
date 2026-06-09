@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Literal, Optional
 
+from astrid.core.contracts.errors import AstridError
+
 from ..discovery import SkillDescriptor
 
 Action = Literal["install", "uninstall"]
@@ -149,7 +151,10 @@ def ensure_symlink(target: Path, source: Path, *, force: bool = False) -> bool:
         target.unlink()
     elif target.exists():
         if not force:
-            raise FileExistsError(f"{target} exists and is not a symlink; use --force to replace")
+            raise AstridError(
+                f"{target} exists and is not a symlink",
+                recovery_command="re-run with --force to replace it",
+            )
         if target.is_dir():
             import shutil
 

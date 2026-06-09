@@ -26,6 +26,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.session.paths import installed_packs_root
 from astrid.core.util.log_and_swallow import log_and_swallow
 
@@ -376,13 +377,14 @@ class InstalledPackStore:
         active, and repoints the ``active`` symlink at the target.
 
         Raises:
-            FileNotFoundError: If *revision_dir_name* does not exist under
+            AstridError: If *revision_dir_name* does not exist under
                 ``<pack_id>/revisions/``.
         """
         target_path = self.revisions_dir(pack_id) / revision_dir_name
         if not target_path.is_dir():
-            raise FileNotFoundError(
-                f"Revision {revision_dir_name!r} does not exist for pack {pack_id!r}"
+            raise AstridError(
+                f"Revision {revision_dir_name!r} does not exist for pack {pack_id!r}",
+                recovery_command=f"list available revisions under the pack's revisions/ directory",
             )
 
         old_active = self.active_revision_path(pack_id)

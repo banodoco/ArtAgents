@@ -227,7 +227,10 @@ def register_source_file(
     source_root = paths.sources_dir(slug, root=root)
     bare_path = source_root / filename
     if not bare_path.is_file():
-        raise FileNotFoundError(f"bare source file not found: {filename}")
+        raise AstridError(
+            f"bare source file not found: {filename}",
+            recovery_command=f"place the file under {source_root} before registering it",
+        )
     source_dir = paths.source_dir(slug, source_id, root=root)
     if source_dir.exists() and not source_dir.is_file():
         raise ProjectError(f"source already exists: {source_id}")

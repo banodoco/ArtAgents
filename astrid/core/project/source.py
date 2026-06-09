@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
+
 from . import paths
 from .jsonio import read_json, write_json_atomic
 from .project import require_project
@@ -24,7 +26,10 @@ def add_source(
     require_project(project_slug, root=root)
     source_path = paths.source_json_path(project_slug, source_id, root=root)
     if source_path.exists() and not exist_ok:
-        raise FileExistsError(f"source already exists: {source_id}")
+        raise AstridError(
+            f"source already exists: {source_id}",
+            recovery_command=f"pass exist_ok=True to overwrite, or choose a different source_id",
+        )
     paths.source_analysis_dir(project_slug, source_id, root=root).mkdir(parents=True, exist_ok=True)
     payload = build_source(project_slug, source_id, asset=asset, kind=kind, metadata=metadata)
     write_json_atomic(source_path, payload)
@@ -38,7 +43,8 @@ def load_source(project_slug: str, source_id: str, *, root: str | Path | None = 
 def require_source(project_slug: str, source_id: str, *, root: str | Path | None = None) -> dict[str, Any]:
     source_path = paths.source_json_path(project_slug, source_id, root=root)
     if not source_path.exists():
-        raise FileNotFoundError(
-            f"source not found: {source_id}. Next command: python3 -m astrid projects source add --project {project_slug} {source_id} --file <path>"
+        raise AstridError(
+            f"source not found: {source_id}",
+            recovery_command=f"python3 -m astrid projects source add --project {project_slug} {source_id} --file <path>",
         )
     return validate_source(read_json(source_path))
