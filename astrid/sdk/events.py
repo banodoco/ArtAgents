@@ -7,13 +7,13 @@ applied to the package namespace are visible at call time.
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 from astrid.core.project.paths import validate_project_slug
 from astrid.core.project.paths import run_dir as project_run_dir
 from astrid.core.task.events import EVENTS_FILENAME
 
+from ._module import _sdk_module
 from .dto import EventStreamRecord
 from .exceptions import (
     AstridSDKError,
@@ -56,7 +56,7 @@ def read_events(
 ) -> tuple[EventStreamRecord, ...]:
     """Return a verified read-only task/audit event snapshot for one run."""
 
-    _sdk = sys.modules["astrid.sdk"]
+    _sdk = _sdk_module()
     try:
         run_path = _sdk._resolve_event_stream_run_dir(project, run_id, projects_root=projects_root)
         return tuple(
@@ -90,7 +90,7 @@ def subscribe_events(
 ):
     """Yield a verified read-only task/audit event stream for one run."""
 
-    _sdk = sys.modules["astrid.sdk"]
+    _sdk = _sdk_module()
     try:
         run_path = _sdk._resolve_event_stream_run_dir(project, run_id, projects_root=projects_root)
     except AstridSDKError:

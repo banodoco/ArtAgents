@@ -40,6 +40,4 @@ __all__ = [
     "Port",
     "Provenance",
     "SafetyDeclaration",
-    "_json_safe",
-    "_json_safe_mapping",
 ]

@@ -8,6 +8,7 @@ import importlib
 from pathlib import Path
 from typing import Any
 
+from ._module import _sdk_module
 from .exceptions import (
     CapabilityAmbiguousError,
     CapabilityNotFoundError,
@@ -29,10 +30,6 @@ def _registry_load_kwargs(
     if project_root is not None:
         kwargs["project_root"] = project_root
     return kwargs
-
-
-def _sdk_module() -> Any:
-    return importlib.import_module("astrid.sdk")
 
 
 def _load_executor_registry(

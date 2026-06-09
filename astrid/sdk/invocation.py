@@ -5,11 +5,11 @@ This module keeps invocation orchestration behind the SDK package boundary.
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from ._module import _sdk_module
 from .exceptions import (
     AstridSDKError,
     CapabilityInvocationError,
@@ -19,10 +19,6 @@ from .exceptions import (
     _sdk_error_from_exception,
 )
 from .results import DiscoveryResult, InvocationResult, _json_safe, _json_safe_mapping
-
-
-def _sdk_module() -> Any:
-    return importlib.import_module("astrid.sdk")
 
 
 def run_executor(request: Any, registry: Any) -> Any:

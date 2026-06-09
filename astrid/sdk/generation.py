@@ -12,15 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ._module import _sdk_module
 from .exceptions import (
     CapabilityPreconditionError,
     CapabilityValidationError,
 )
 from .results import _reconstruct_generation_result
-
-
-def _sdk_module() -> Any:
-    return importlib.import_module("astrid.sdk")
 
 
 def _load_model_registry(
