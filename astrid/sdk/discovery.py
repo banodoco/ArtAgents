@@ -315,14 +315,16 @@ def _build_discovery_metadata(
     )
 
 
-def _capability_from_executor(
+def _capability_from_definition(
     definition: Any,
     registry: Any,
     *,
+    capability_type: str,
     requested_id: str | None = None,
     pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Capability:
-    from astrid.core.executor.schema import to_capability_handle
+    schema_module_path = f"astrid.core.{capability_type}.schema"
+    to_capability_handle = importlib.import_module(schema_module_path).to_capability_handle
 
     resolved_alias = None
     deprecated = False
@@ -340,7 +342,7 @@ def _capability_from_executor(
     return _apply_pack_permission_ids(
         Capability(
             id=definition.id,
-            capability_type="executor",
+            capability_type=capability_type,
             native_kind=definition.kind,
             handle=to_capability_handle(
                 definition,
@@ -359,6 +361,22 @@ def _capability_from_executor(
     )
 
 
+def _capability_from_executor(
+    definition: Any,
+    registry: Any,
+    *,
+    requested_id: str | None = None,
+    pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
+) -> Capability:
+    return _capability_from_definition(
+        definition,
+        registry,
+        capability_type="executor",
+        requested_id=requested_id,
+        pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
+    )
+
+
 def _capability_from_orchestrator(
     definition: Any,
     registry: Any,
@@ -366,39 +384,11 @@ def _capability_from_orchestrator(
     requested_id: str | None = None,
     pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Capability:
-    from astrid.core.orchestrator.schema import to_capability_handle
-
-    resolved_alias = None
-    deprecated = False
-    deprecation_message = ""
-    aliases = ()
-    if registry.alias_resolver is not None:
-        aliases = tuple(registry.alias_resolver.get_aliases_for(definition.id))
-        if requested_id is not None and registry.alias_resolver.is_alias(requested_id):
-            alias_record = registry.alias_resolver.get_record(requested_id)
-            if alias_record is not None:
-                resolved_alias = requested_id
-                deprecated = alias_record.deprecated
-                deprecation_message = alias_record.deprecation_message
-    definition_mapping = _json_safe_mapping(definition.to_dict())
-    return _apply_pack_permission_ids(
-        Capability(
-            id=definition.id,
-            capability_type="orchestrator",
-            native_kind=definition.kind,
-            handle=to_capability_handle(
-                definition,
-                aliases=aliases,
-                resolved_alias=resolved_alias,
-                deprecated=deprecated,
-                deprecation_message=deprecation_message,
-            ),
-            inputs=tuple(definition.inputs),
-            outputs=tuple(definition.outputs),
-            schema=definition_mapping,
-            defaults={},
-            definition=definition_mapping,
-        ),
+    return _capability_from_definition(
+        definition,
+        registry,
+        capability_type="orchestrator",
+        requested_id=requested_id,
         pack_permission_ids_by_pack_id=pack_permission_ids_by_pack_id,
     )
 
@@ -454,15 +444,21 @@ def _format_candidates(candidates: tuple[str, ...]) -> str:
     return ", ".join(sorted(candidates))
 
 
-def _resolve_executor_capability(capability_id: str, registry: Any) -> Capability:
+def _resolve_typed_capability(
+    capability_id: str, registry: Any, *, capability_type: str
+) -> Capability:
     resolver = registry.alias_resolver
     alias_requested = resolver is not None and resolver.is_alias(capability_id)
     if alias_requested or _is_qualified_capability_id(capability_id):
         try:
             definition = registry.get(capability_id)
         except KeyError as exc:
-            raise CapabilityNotFoundError(f"unknown executor {capability_id!r}") from exc
-        return _capability_from_executor(definition, registry, requested_id=capability_id)
+            raise CapabilityNotFoundError(
+                f"unknown {capability_type} {capability_id!r}"
+            ) from exc
+        return _capability_from_definition(
+            definition, registry, capability_type=capability_type, requested_id=capability_id,
+        )
 
     matches = [
         definition
@@ -470,38 +466,30 @@ def _resolve_executor_capability(capability_id: str, registry: Any) -> Capabilit
         if definition.id.rsplit(".", 1)[-1] == capability_id
     ]
     if not matches:
-        raise CapabilityNotFoundError(f"unknown executor {capability_id!r}")
+        raise CapabilityNotFoundError(f"unknown {capability_type} {capability_id!r}")
     if len(matches) > 1:
-        candidates = tuple(_candidate_label("executor", definition.id) for definition in matches)
-        raise CapabilityAmbiguousError(
-            f"ambiguous executor {capability_id!r}; candidates: {_format_candidates(candidates)}"
+        candidates = tuple(
+            _candidate_label(capability_type, definition.id) for definition in matches
         )
-    return _capability_from_executor(matches[0], registry, requested_id=capability_id)
+        raise CapabilityAmbiguousError(
+            f"ambiguous {capability_type} {capability_id!r};"
+            f" candidates: {_format_candidates(candidates)}"
+        )
+    return _capability_from_definition(
+        matches[0], registry, capability_type=capability_type, requested_id=capability_id,
+    )
+
+
+def _resolve_executor_capability(capability_id: str, registry: Any) -> Capability:
+    return _resolve_typed_capability(
+        capability_id, registry, capability_type="executor"
+    )
 
 
 def _resolve_orchestrator_capability(capability_id: str, registry: Any) -> Capability:
-    resolver = registry.alias_resolver
-    alias_requested = resolver is not None and resolver.is_alias(capability_id)
-    if alias_requested or _is_qualified_capability_id(capability_id):
-        try:
-            definition = registry.get(capability_id)
-        except KeyError as exc:
-            raise CapabilityNotFoundError(f"unknown orchestrator {capability_id!r}") from exc
-        return _capability_from_orchestrator(definition, registry, requested_id=capability_id)
-
-    matches = [
-        definition
-        for definition in registry.list()
-        if definition.id.rsplit(".", 1)[-1] == capability_id
-    ]
-    if not matches:
-        raise CapabilityNotFoundError(f"unknown orchestrator {capability_id!r}")
-    if len(matches) > 1:
-        candidates = tuple(_candidate_label("orchestrator", definition.id) for definition in matches)
-        raise CapabilityAmbiguousError(
-            f"ambiguous orchestrator {capability_id!r}; candidates: {_format_candidates(candidates)}"
-        )
-    return _capability_from_orchestrator(matches[0], registry, requested_id=capability_id)
+    return _resolve_typed_capability(
+        capability_id, registry, capability_type="orchestrator"
+    )
 
 
 def _resolve_element_capability(
@@ -564,11 +552,19 @@ def _resolve_capability_kindless(
     matches: list[Capability] = []
 
     try:
-        matches.append(_resolve_executor_capability(capability_id, executor_registry))
+        matches.append(
+            _resolve_typed_capability(
+                capability_id, executor_registry, capability_type="executor"
+            )
+        )
     except CapabilityNotFoundError:
         pass
     try:
-        matches.append(_resolve_orchestrator_capability(capability_id, orchestrator_registry))
+        matches.append(
+            _resolve_typed_capability(
+                capability_id, orchestrator_registry, capability_type="orchestrator"
+            )
+        )
     except CapabilityNotFoundError:
         pass
     if element_registry is not None:
@@ -603,9 +599,13 @@ def _resolve_capability(
     element_registry: Any | None,
 ) -> Capability:
     if kind == "executor":
-        return _resolve_executor_capability(capability_id, executor_registry)
+        return _resolve_typed_capability(
+            capability_id, executor_registry, capability_type="executor"
+        )
     if kind == "orchestrator":
-        return _resolve_orchestrator_capability(capability_id, orchestrator_registry)
+        return _resolve_typed_capability(
+            capability_id, orchestrator_registry, capability_type="orchestrator"
+        )
     if kind == "element":
         if element_registry is None:
             raise CapabilityNotFoundError("element registry was not loaded")
