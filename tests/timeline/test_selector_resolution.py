@@ -33,7 +33,7 @@ class TestResolveEventLogTarget:
         home = tmp_path / "demo" / "timelines" / "01J00000000000000000000001"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -134,7 +134,7 @@ class TestResolvePullDestination:
         home = tmp_path / "demo" / "timelines" / "01J00000000000000000000001"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -191,7 +191,7 @@ class TestResolvePullDestination:
         assert dest.identity_path.exists()
 
         # Verify provenance: imported
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
         identity = read_json(dest.identity_path)
         assert identity["provenance"] == "imported"
         assert "source_timeline_id" not in identity  # None was passed
@@ -216,7 +216,7 @@ class TestResolvePullDestination:
         )
         assert dest.created is True
 
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
         identity = read_json(dest.identity_path)
         assert identity["provenance"] == "imported"
         assert identity["source_timeline_id"] == "00000000-0000-0000-0000-000000000099"
@@ -227,7 +227,7 @@ class TestResolvePullDestination:
         home = tmp_path / "demo" / "timelines" / "01J00000000000000000000001"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "display.json",
             {
@@ -290,7 +290,7 @@ class TestResolvePullDestination:
         home = tmp_path / "demo" / "timelines" / "01J00000000000000000000001"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "display.json",
             {

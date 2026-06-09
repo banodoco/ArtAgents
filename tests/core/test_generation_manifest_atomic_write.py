@@ -74,7 +74,7 @@ class TestGenerateImageManifestAtomic:
             "seed": 42,
         }
 
-        from astrid.core.util.atomic_io import write_json_atomic
+        from astrid.core.foundation.atomic_io import write_json_atomic
 
         target = tmp_path / "manifest.json"
         write_json_atomic(target, manifest)
@@ -113,7 +113,7 @@ class TestGenerateVideoManifestAtomic:
             "seed": 123,
         }
 
-        from astrid.core.util.atomic_io import write_json_atomic
+        from astrid.core.foundation.atomic_io import write_json_atomic
 
         target = tmp_path / "manifest.json"
         write_json_atomic(target, manifest)
@@ -158,7 +158,7 @@ class TestGenerateImageOpenAIManifestAtomic:
             }
         ]
 
-        from astrid.core.util.atomic_io import write_json_atomic
+        from astrid.core.foundation.atomic_io import write_json_atomic
 
         target = tmp_path / "manifest.json"
         write_json_atomic(target, manifest)
@@ -179,7 +179,7 @@ class TestManifestContentPreserved:
 
     def test_generate_image_manifest_roundtrip(self, tmp_path: Path) -> None:
         """Full manifest shape survives write_json_atomic roundtrip."""
-        from astrid.core.util.atomic_io import write_json_atomic
+        from astrid.core.foundation.atomic_io import write_json_atomic
 
         manifest = {
             "schema_version": 2,
@@ -210,7 +210,7 @@ class TestManifestContentPreserved:
 
     def test_generate_video_manifest_roundtrip(self, tmp_path: Path) -> None:
         """Full video manifest shape survives write_json_atomic roundtrip."""
-        from astrid.core.util.atomic_io import write_json_atomic
+        from astrid.core.foundation.atomic_io import write_json_atomic
 
         manifest = {
             "schema_version": 2,
@@ -245,7 +245,7 @@ class TestManifestContentPreserved:
 
     def test_openai_manifest_list_roundtrip(self, tmp_path: Path) -> None:
         """OpenAI manifest list survives write_json_atomic roundtrip."""
-        from astrid.core.util.atomic_io import write_json_atomic
+        from astrid.core.foundation.atomic_io import write_json_atomic
 
         manifest = [
             {

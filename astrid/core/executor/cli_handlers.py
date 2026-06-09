@@ -13,7 +13,7 @@ import shlex
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts._capability_common import (
+from astrid.core._shared.capability_common import (
     _aliases_text,
     _definition_content_root,
     _definition_pack_id,

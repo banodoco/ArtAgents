@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.timeline import (
     METADATA_VERSION,
     PipelineMetadata,

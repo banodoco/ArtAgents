@@ -324,7 +324,7 @@ def test_allowlist_attach_runs_without_session(
         encoding="utf-8",
     )
     # Update project.json with the default timeline id.
-    from astrid.core.project.jsonio import read_json, write_json_atomic
+    from astrid.core._shared.jsonio import read_json, write_json_atomic
 
     pp = pdir / "project.json"
     proj = read_json(pp)

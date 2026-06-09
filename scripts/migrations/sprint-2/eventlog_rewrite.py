@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 from astrid.core.timeline.events.schema import (
     TimelineEvent,

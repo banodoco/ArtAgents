@@ -27,7 +27,7 @@ from astrid.core.executor.cli import _parse_input_values
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.executor.runner import ExecutorRunRequest, build_executor_command
 from astrid.core.project.current_run import write_current_run
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.paths import session_path

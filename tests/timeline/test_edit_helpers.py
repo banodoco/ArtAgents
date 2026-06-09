@@ -148,7 +148,7 @@ class GatewayBootstrapTest(unittest.TestCase):
         # Resolve backend and verify.
         from astrid.core.timeline.eventlog import select_timeline_backend
         from astrid.core.timeline.paths import assembly_identity_path
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
 
         identity = read_json(assembly_identity_path("bootstrap-proj", ulid))
         tdir = self.tmp_root / "bootstrap-proj" / "timelines" / ulid
@@ -257,7 +257,7 @@ class GatewayActorAttributionTest(unittest.TestCase):
         ulid, tdir = found
 
         # Read identity.
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
         from astrid.core.timeline.paths import assembly_identity_path
 
         identity = read_json(assembly_identity_path("actor-proj", ulid))
@@ -389,7 +389,7 @@ class GatewayMaterializationTest(unittest.TestCase):
         # Resolve backend and verify.
         from astrid.core.timeline.eventlog import select_timeline_backend
         from astrid.core.timeline.paths import assembly_identity_path
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
 
         identity = read_json(assembly_identity_path("mat-proj", ulid))
         _stream, backend = select_timeline_backend(

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import AuditContext
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from .._common import load_api_key
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.media import ffprobe_duration_seconds

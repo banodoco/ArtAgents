@@ -68,7 +68,7 @@ def _resolve_backend_and_verify(project_slug: str, ulid: str, tdir: Path) -> boo
     """Resolve the backend for a timeline and run verify_chain()."""
     from astrid.core.timeline.eventlog import select_timeline_backend
     from astrid.core.timeline.paths import assembly_identity_path
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
 
     identity = read_json(assembly_identity_path(project_slug, ulid))
     _stream, backend = select_timeline_backend(
@@ -100,7 +100,7 @@ class ManagedWriteEventKindsTest(unittest.TestCase):
 
     def _read_event_kinds(self, tdir: Path) -> list[str]:
         from astrid.core.timeline.paths import assembly_identity_path
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
         from astrid.core.timeline.eventlog import select_timeline_backend
 
         identity = read_json(assembly_identity_path("evkinds-proj", self._find_timeline_ulid_and_dir()[0]))
@@ -317,7 +317,7 @@ class ManagedWriteActorAttributionTest(unittest.TestCase):
     def _read_domain_events(self, project_slug: str, timeline_slug: str):
         from astrid.core.timeline.paths import find_timeline_by_slug, assembly_identity_path
         from astrid.core.timeline.eventlog import select_timeline_backend
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
 
         found = find_timeline_by_slug(project_slug, timeline_slug)
         self.assertIsNotNone(found)
@@ -597,7 +597,7 @@ class ManagedEventMultipleKindsTest(unittest.TestCase):
 
         # Verify ordering from event stream.
         from astrid.core.timeline.paths import assembly_identity_path
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
         from astrid.core.timeline.eventlog import select_timeline_backend
 
         identity = read_json(assembly_identity_path("multi-proj", ulid))

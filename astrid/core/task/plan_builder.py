@@ -25,7 +25,7 @@ from astrid.core.project.current_run import (
     read_current_run,
     write_current_run,
 )
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.foundation.project_paths import (
     project_dir,
     validate_project_slug,

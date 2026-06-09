@@ -453,7 +453,7 @@ def local_fs_backend(tmp_path: Path) -> LocalFsBackend:
     home.mkdir(parents=True, exist_ok=True)
 
     # Write a minimal identity so bootstrap_legacy is not required.
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
     write_json_atomic(
         home / "assembly.identity.json",
         {

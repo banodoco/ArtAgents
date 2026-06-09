@@ -702,7 +702,7 @@ def _make_legacy_timeline_home(
     """
     from uuid import uuid4
 
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
 
     home = base / timeline_ulid
     home.mkdir(parents=True, exist_ok=True)

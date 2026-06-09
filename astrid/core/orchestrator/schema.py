@@ -8,7 +8,7 @@ from typing import Any
 from typing import Literal as _Literal
 from typing import get_args as _get_args
 
-from astrid.core.contracts._capability_common import (
+from astrid.core._shared.capability_common import (
     _parse_cache,
     _parse_isolation,
     _validate_cache,

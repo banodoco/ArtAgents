@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from astrid.core.util.atomic_io import write_json_atomic
+from astrid.core.foundation.atomic_io import write_json_atomic
 
 from .ids import is_ulid, require_ulid
 from .schema import SCHEMA_VERSION, utc_now

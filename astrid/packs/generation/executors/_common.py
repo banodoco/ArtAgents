@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import build_manifest
+from astrid.core._shared.result_manifest import build_manifest
 from astrid.core.generation.backends import (
     BackendAdapter,
     GenerationBackendRegistry,

@@ -486,7 +486,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     else:
         assembly_path = target.timeline_home / "assembly.json"
         if assembly_path.is_file():
-            from astrid.core.project.jsonio import read_json  # noqa: PLC0415
+            from astrid.core._shared.jsonio import read_json  # noqa: PLC0415
 
             try:
                 existing = read_json(assembly_path)
@@ -631,7 +631,7 @@ def cmd_preview(args: argparse.Namespace) -> int:
                 state_snapshot={"out": out_path_raw, "timeline_home": timeline_home_resolved},
             )
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
 
         write_json_atomic(out_path, state)
         print(f"Projected state written to {out_path}")

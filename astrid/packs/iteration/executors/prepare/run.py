@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core import modalities
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.threads.ids import is_ulid
 from astrid.core.threads.index import ThreadIndexStore

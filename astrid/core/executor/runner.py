@@ -56,7 +56,7 @@ from .schema import (
     ExecutorValidationError,
 )
 
-from astrid.core.contracts._capability_common import (
+from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
     _expand_placeholders,
     _has_value,

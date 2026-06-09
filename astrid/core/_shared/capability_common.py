@@ -6,7 +6,6 @@ These were previously duplicated verbatim (or near-verbatim) in
 
 from __future__ import annotations
 
-import argparse
 import re
 import sys
 from pathlib import Path
@@ -58,31 +57,6 @@ def _gateway_resolved_project(explicit_project: str | None) -> str | None:
 
     value = sys.modules["os"].environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT)
     return value or None
-
-
-def _banodoco_config_from_args(
-    args: argparse.Namespace,
-    *,
-    agent_flag: str = "banodoco_agent_executors",
-):
-    """Build a BanodocoCatalogConfig from CLI args and env.
-
-    ``agent_flag`` is the arg attribute to check for per-capability-type
-    override (``banodoco_agent_executors`` or ``banodoco_agent_orchestrators``).
-    """
-    from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
-
-    env_config = BanodocoCatalogConfig.from_env()
-    enabled = bool(getattr(args, agent_flag, False) or env_config.enabled)
-    return BanodocoCatalogConfig(
-        enabled=enabled,
-        catalog_url=args.banodoco_catalog_url or env_config.catalog_url,
-        include_defaults=False if args.no_banodoco_defaults else env_config.include_defaults,
-        include_mandatory=False if args.no_banodoco_mandatory else env_config.include_mandatory,
-        cache_dir=Path(args.banodoco_cache_dir).expanduser() if args.banodoco_cache_dir else env_config.cache_dir,
-        refresh=bool(args.banodoco_refresh or env_config.refresh),
-        timeout_seconds=env_config.timeout_seconds,
-    )
 
 
 def _require_qualified_id(value: str, label: str) -> None:

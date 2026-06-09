@@ -58,7 +58,7 @@ class TestErasureSelector:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -172,7 +172,7 @@ class TestErasurePreview:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -218,7 +218,7 @@ class TestErasurePreview:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -248,7 +248,7 @@ class TestErasureApply:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -303,7 +303,7 @@ class TestErasureApply:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -349,7 +349,7 @@ class TestErasureApply:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -396,7 +396,7 @@ class TestErasureApply:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -442,7 +442,7 @@ class TestErasureApply:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -537,7 +537,7 @@ class TestSelectorSafety:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -563,7 +563,7 @@ class TestSelectorSafety:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -598,7 +598,7 @@ class TestErasureImportMetadataPreservation:
         tid = str(uuid4())
         home = tmp_path / "home"
         home.mkdir()
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},

@@ -15,7 +15,7 @@ try:  # pragma: no cover - non-POSIX fallback is exercised only off Unix.
 except ImportError:  # pragma: no cover
     fcntl = None  # type: ignore[assignment]
 
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
 from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso

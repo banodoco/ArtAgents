@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.foundation.project_paths import project_dir, validate_run_id
 
 LEGACY_ACTIVE_RUN_FILENAME = "active_run.json"

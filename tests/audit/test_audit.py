@@ -466,7 +466,7 @@ def test_spatial_audio_page_writes_universal_result_manifest(tmp_path: Path) -> 
     # write_manifest computes the tree hash *before* writing manifest.json,
     # so the tree only includes index.html at that point.  Remove manifest.json
     # to reproduce the same state for a stability recomputation.
-    from astrid.core.contracts.result_manifest import complete_output_metadata
+    from astrid.core._shared.result_manifest import complete_output_metadata
 
     tree_hash_1 = manifest["outputs"][0]["content_hash"]
     tree_bytes_1 = manifest["outputs"][0]["bytes"]

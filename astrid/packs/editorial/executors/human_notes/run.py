@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.timeline import load_arrangement, load_pool
 from astrid.packs.editorial.executors.arrange.run import pool_digest
 from astrid.packs.editorial.executors.editor_review.run import (

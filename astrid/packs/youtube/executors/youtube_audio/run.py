@@ -15,7 +15,7 @@ from datetime import datetime, timezone  # noqa: E402
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.result_manifest import write_manifest  # noqa: E402
+from astrid.core._shared.result_manifest import write_manifest  # noqa: E402
 from astrid.core.cli_choices import add_choice_arg  # noqa: E402
 from astrid.core.pack.entrypoint import run_pack_main  # noqa: E402
 

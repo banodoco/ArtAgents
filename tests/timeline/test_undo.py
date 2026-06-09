@@ -44,7 +44,7 @@ _ACTOR_B = TimelineActor(type="agent", id="other-actor")
 
 
 def _seed_local_identity(tl_dir: Path, timeline_id: str) -> None:
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
 
     write_json_atomic(
         tl_dir / "assembly.identity.json",

@@ -426,7 +426,7 @@ def _check_runpod_stale_handles() -> DoctorCheck:
 
 def _check_stale_project_runs() -> DoctorCheck:
     from astrid.core.contracts.run_status import RunStatus
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
     from astrid.core.foundation.project_paths import resolve_projects_root
     from astrid.core.project.run import update_run_record
     from astrid.core.util.time import utc_now_seconds

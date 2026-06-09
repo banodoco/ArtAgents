@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
 from astrid.core.task.events import (
     EVENTS_FILENAME,

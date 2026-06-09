@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.foundation.project_paths import ProjectPathError, validate_run_id
 from astrid.core.timeline.banodoco_schema import canonical_timeline_config
 

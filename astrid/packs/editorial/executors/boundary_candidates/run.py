@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import add_choice_arg
 
 VERSION = 1

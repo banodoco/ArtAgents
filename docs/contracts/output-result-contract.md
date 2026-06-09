@@ -20,7 +20,7 @@ location, determined by the executor's established `--out` behaviour:
 | Names a file (understanding trio) | Sibling file: `{out_dir}/manifest.json` beside the named output file |
 
 The manifest file is written **atomically** through the shared
-`write_manifest()` helper (`astrid.core.contracts.result_manifest`) and is valid
+`write_manifest()` helper (`astrid.core._shared.result_manifest`) and is valid
 JSON with a flat top-level object.
 
 ## Required core fields
@@ -225,10 +225,10 @@ same `InvocationResult` envelope.
 ## Writing a result manifest (implementation reference)
 
 Executors use the shared `write_manifest()` helper from
-`astrid.core.contracts.result_manifest`:
+`astrid.core._shared.result_manifest`:
 
 ```python
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core._shared.result_manifest import write_manifest
 from datetime import datetime, timezone
 
 manifest = {

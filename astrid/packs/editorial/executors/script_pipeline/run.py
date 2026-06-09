@@ -19,7 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.core.contracts.errors import AstridError, render_astrid_error
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest as write_result_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest as write_result_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint("editorial.script_pipeline")

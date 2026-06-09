@@ -6,7 +6,7 @@ import copy
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 
 LAST_RUN_FILENAME = "last_run.json"
 

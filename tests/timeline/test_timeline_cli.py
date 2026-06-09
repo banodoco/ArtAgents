@@ -2225,7 +2225,7 @@ class TestObservabilityOnImportedLocalFs:
         assert "scripts/migrations/sprint-2" in result.get("detail", "")
         assert _count_events(tdir) == 0
 
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
 
         assert read_json(tdir / "assembly.json") == body
 
@@ -2248,7 +2248,7 @@ class TestAuditProjectionParityAfterImport:
         assert result.get("imported") is False
         assert result.get("parity_ok") is None
 
-        from astrid.core.project.jsonio import read_json
+        from astrid.core._shared.jsonio import read_json
 
         current_assembly = read_json(tdir / "assembly.json")
         assert current_assembly == body, "Source assembly.json was mutated!"

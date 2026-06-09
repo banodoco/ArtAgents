@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import AuditContext
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.timeline import (
     ARRANGEMENT_VERSION,
     is_all_generative_arrangement,

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.timeline import load_timeline
 from astrid.packs.editorial.hype.text_match import (
     segments_in_range,

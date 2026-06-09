@@ -232,7 +232,7 @@ class BanodocoWorkerTest(unittest.TestCase):
 
             # Read the identity UUID so the claim's timeline_id matches.
             from astrid.core.timeline.paths import find_timeline_by_slug, assembly_identity_path
-            from astrid.core.project.jsonio import read_json
+            from astrid.core._shared.jsonio import read_json
 
             found = find_timeline_by_slug("event-demo", "event-timeline")
             self.assertIsNotNone(found)

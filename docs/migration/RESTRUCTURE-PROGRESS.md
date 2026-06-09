@@ -36,7 +36,13 @@ Durable progress record for executing `RESTRUCTURE-PLAN.md`. Survives context co
 | W0b | break element↔pack (local _common dedup) | main | ✅ done | 20 |
 | W0c | facade→__init__ conversions + env_vars/subprocess_env/atomic_io→foundation (PURE TIDY, no cycle impact) | Claude sub | ⬜ DEFERRED to late cleanup pass | — |
 | W1a | foundation/ + paths keystone: extract executor-argv from core/paths→executor (broke executor↔paths), core/paths→foundation/paths (57), project/paths→foundation/project_paths (88), sha256_file→foundation/hash (173 files) | Claude(Opus) sub | ✅ done | 19 |
-| W1b | _shared/: jsonio (52), result_manifest (51), capability_common→_shared/ | Claude(Opus) sub | ⬜ todo | — |
+| W1b | _shared/ (jsonio, result_manifest, capability_common) + atomic_io→foundation + banodoco relocation. **contracts is now a PRISTINE TRUE LEAF.** Broke contracts↔executor + contracts↔util. SCC 18→12 nodes. | Claude(Opus) sub | ✅ done | 17 |
+
+> **Tiers 0/1/2 are now clean.** foundation/ (stdlib-pure), contracts/ (true leaf — imports only itself+stdlib),
+> _shared/ (tier-2, needs contracts). The remaining **17 cycles all live in the domain/execution tiers** (3/4):
+> adapter, cli_choices, element, executor, integrations, orchestrator, pack, project, runtime, session, task, timeline.
+> That's the W2–W7 surface. Of those: ~6 are inversions (W3), project-web is domain-edge (W4/W5), session/timeline CLI (W5),
+> 2 accepted seams (adapter↔task, session↔task, W4).
 
 > **PLAN-CORRECTING FINDING (W1a):** The plan claimed `project/paths → foundation` "dissolves 5 cycles."
 > FALSE. Moving paths broke only `executor↔paths`. `project↔{task,session,timeline}` persist because they

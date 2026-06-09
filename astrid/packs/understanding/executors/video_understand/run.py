@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.packs.understanding.executors._common import emit_dry_run_preview
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.media import ffprobe_duration_seconds

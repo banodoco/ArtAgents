@@ -40,7 +40,7 @@ class TestRecoverToEvent:
         home.mkdir(parents=True)
 
         # Set up identity
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -110,7 +110,7 @@ class TestRecoverToEvent:
         home = tmp_path / "timelines" / "01J00000000000000000000002"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -178,7 +178,7 @@ class TestRecoverToEvent:
         home = tmp_path / "timelines" / "01J00000000000000000000003"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -236,7 +236,7 @@ class TestRecoverToSnapshot:
         home = tmp_path / "timelines" / "01J00000000000000000000004"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -305,7 +305,7 @@ class TestRecoverToSnapshot:
         home = tmp_path / "timelines" / "01J00000000000000000000005"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -365,7 +365,7 @@ class TestRecoverToSnapshot:
         home = tmp_path / "timelines" / "01J00000000000000000000006"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -425,7 +425,7 @@ class TestRecoverToSnapshot:
         home = tmp_path / "timelines" / "01J00000000000000000000007"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -499,7 +499,7 @@ class TestRecoverToSnapshot:
         home = tmp_path / "timelines" / "01J00000000000000000000008"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {
@@ -572,7 +572,7 @@ class TestRecoverToSnapshot:
         home = tmp_path / "timelines" / "01J00000000000000000000009"
         home.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.identity.json",
             {

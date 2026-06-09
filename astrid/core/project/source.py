@@ -8,7 +8,7 @@ from typing import Any
 from astrid.core.contracts.errors import AstridError
 
 from astrid.core.foundation import project_paths as paths
-from .jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from .project import require_project
 from .schema import build_source, validate_source
 

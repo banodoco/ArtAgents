@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
 from astrid.core.timeline.banodoco_schema import validate_timeline_config_for_container
 

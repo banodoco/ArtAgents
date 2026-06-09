@@ -14,9 +14,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.contracts.errors import AstridError, render_astrid_error
-from astrid.core.contracts.result_manifest import build_manifest
+from astrid.core._shared.result_manifest import build_manifest
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RunPodHandle
 
 from .ai_toolkit import register as ai_toolkit_register

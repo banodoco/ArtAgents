@@ -17,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.foundation.hash import sha256_file
 from astrid.packs.editorial.hype import enriched_arrangement

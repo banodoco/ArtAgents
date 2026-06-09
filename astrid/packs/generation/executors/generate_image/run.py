@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.result_manifest import complete_output_metadata
+from astrid.core._shared.result_manifest import complete_output_metadata
 from astrid.packs.generation.executors._common import (
     build_generation_manifest,
     _available_backend_ids,
@@ -49,7 +49,7 @@ from astrid.core.generation.backends import (
 )
 from astrid.core.generation.backends.codex import codex_unavailable_reason
 from astrid.core.model_catalog.registry import ModelRegistry
-from astrid.core.util.atomic_io import write_json_atomic
+from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.util.png_metadata import embed_png_text
 
 logger = logging.getLogger(__name__)

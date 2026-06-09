@@ -362,7 +362,7 @@ def _build_pull_destination_for_existing(
     created: bool = False,
 ) -> PullDestination:
     """Build a PullDestination for an existing timeline home."""
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
     from astrid.core.timeline.paths import assembly_identity_path
 
     # Read identity to get timeline_id
@@ -416,7 +416,7 @@ def _create_pull_destination(
     """
     from uuid import uuid4
 
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
     from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
     from astrid.core.timeline.events.schema import EVENT_SCHEMA_VERSION
     from astrid.core.timeline.model import (

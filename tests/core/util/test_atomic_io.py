@@ -1,11 +1,11 @@
-"""Unit tests for astrid.core.util.atomic_io and jsonio delegation compatibility.
+"""Unit tests for astrid.core.foundation.atomic_io and jsonio delegation compatibility.
 
 Covers:
 - Successful text, bytes, and JSON writes
 - Simulated failure cleanup (temp file removed, target untouched)
 - AtomicWriteError propagation
 - read_json success and error paths
-- Compatibility through astrid.core.project.jsonio delegation
+- Compatibility through astrid.core._shared.jsonio delegation
   (ProjectJsonError wrapping, identical JSON shape, import-path preservation)
 """
 
@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.core.util.atomic_io import (
+from astrid.core.foundation.atomic_io import (
     AtomicWriteError,
     _fsync_dir,
     _write_atomic,
@@ -29,7 +29,7 @@ from astrid.core.util.atomic_io import (
     write_json_atomic,
     write_text_atomic,
 )
-from astrid.core.project.jsonio import (
+from astrid.core._shared.jsonio import (
     ProjectJsonError,
     read_json as project_read_json,
     write_json_atomic as project_write_json_atomic,
@@ -224,12 +224,12 @@ class TestAtomicWriteFailureCleanup:
 # ---------------------------------------------------------------------------
 
 class TestJsonioDelegation:
-    """Verify that astrid.core.project.jsonio delegates correctly to the
+    """Verify that astrid.core._shared.jsonio delegates correctly to the
     shared atomic helpers while preserving its own ProjectJsonError
     exception and identical JSON shape."""
 
     def test_write_json_atomic_produces_same_json_shape(self, tmp_path: Path) -> None:
-        """write_json_atomic via project.jsonio produces the same JSON as
+        """write_json_atomic via _shared.jsonio produces the same JSON as
         the direct atomic_io helper."""
         payload = {"b": 2, "a": 1, "nested": {"z": True, "y": False}}
 

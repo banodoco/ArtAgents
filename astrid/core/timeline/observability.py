@@ -178,7 +178,7 @@ def _looks_like_uuid(value: str) -> bool:
 
 def _read_identity(timeline_home: Path) -> dict[str, Any] | None:
     """Read ``assembly.identity.json``, returning None on any error."""
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
 
     identity_path = timeline_home / "assembly.identity.json"
     if not identity_path.is_file():
@@ -192,7 +192,7 @@ def _read_identity(timeline_home: Path) -> dict[str, Any] | None:
 
 def _read_slug(timeline_home: Path) -> str | None:
     """Read the slug from ``display.json``, returning None on any error."""
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
 
     display_path = timeline_home / "display.json"
     if not display_path.is_file():

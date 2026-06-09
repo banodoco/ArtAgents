@@ -16,7 +16,7 @@ from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.util.time import _utc_now, utc_now_seconds
 from datetime import datetime, timezone
 

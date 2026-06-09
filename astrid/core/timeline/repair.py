@@ -255,7 +255,7 @@ def _rebuild_head(
     events: list[TimelineEvent], head_path: Path
 ) -> Any:
     """Rebuild and write the head from a list of events."""
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
 
     from .eventlog.types import EventLogHead
 

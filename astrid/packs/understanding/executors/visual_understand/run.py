@@ -21,7 +21,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.packs.understanding.executors._common import emit_dry_run_preview
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key

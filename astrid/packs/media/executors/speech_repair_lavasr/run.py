@@ -20,7 +20,7 @@ from typing import Callable
 
 import fal_client
 
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.util.secrets import load_api_key
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]

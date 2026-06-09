@@ -13,7 +13,7 @@ from typing import Any, Literal, Mapping
 
 from astrid.core.contracts.capability_runner import CapabilityRunner
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.contracts._capability_common import (
+from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
     _expand_placeholders,
     _has_cli_option,

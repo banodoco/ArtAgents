@@ -339,7 +339,7 @@ def _write_m4_timeline_concurrent_version_conflict(project_dir: Path, projects_r
 def _write_m4_durability_after_crash(project_dir: Path) -> None:
     from uuid import uuid4
 
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
     from astrid.core.timeline.eventlog.local_fs import LocalFsBackend
 
     desync_dir = project_dir / "m4" / "desync"

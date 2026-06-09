@@ -10,14 +10,6 @@
       "astrid.core.pack"
     ],
     [
-      "astrid.core.contracts",
-      "astrid.core.executor"
-    ],
-    [
-      "astrid.core.contracts",
-      "astrid.core.util"
-    ],
-    [
       "astrid.core.element",
       "astrid.core.project"
     ],
@@ -81,10 +73,7 @@
   "sccs": [
     [
       "astrid.core.adapter",
-      "astrid.core.audit",
       "astrid.core.cli_choices",
-      "astrid.core.contracts",
-      "astrid.core.dirty",
       "astrid.core.element",
       "astrid.core.executor",
       "astrid.core.integrations",
@@ -94,15 +83,12 @@
       "astrid.core.runtime",
       "astrid.core.session",
       "astrid.core.task",
-      "astrid.core.threads",
-      "astrid.core.timeline",
-      "astrid.core.update",
-      "astrid.core.util"
+      "astrid.core.timeline"
     ],
     [
       "astrid.core.generation",
       "astrid.core.model_catalog"
     ]
   ],
-  "pair_count": 19
+  "pair_count": 17
 }

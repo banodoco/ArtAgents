@@ -18,7 +18,7 @@ from astrid.core.util.time import utc_now_seconds
 from astrid.core.threads.ids import generate_run_id
 
 from astrid.core.foundation import project_paths as paths
-from .jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from .project import require_project
 from .schema import build_run_record, validate_run_record
 
@@ -537,7 +537,7 @@ def bind_managed_timeline(
     record carries only the ULID in ``timeline_id`` while storing the slug and
     event-stream UUID in ``metadata``.
     """
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
     from astrid.core.timeline.crud import TimelineCrudError, create_timeline
     from astrid.core.timeline.paths import (
         assembly_identity_path,

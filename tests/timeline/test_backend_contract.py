@@ -452,7 +452,7 @@ class TestGoldenFixtureRoundTrip:
 
         # Recreate backend with the fixture's timeline_id
         from astrid.core.timeline.eventlog import LocalFsBackend
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
 
         # Build a fresh identity matching the fixture
         home = backend.timeline_home
@@ -1292,7 +1292,7 @@ class TestLocalFsRecoveryContract:
         )
 
         # Write minimal assembly so projection can work
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             home / "assembly.json",
             {"clips": [], "tracks": []},

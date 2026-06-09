@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import pytest
 
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.util.time import utc_now_iso
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.eventlog.types import EventLogStaleVersionError

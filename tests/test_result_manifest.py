@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from astrid.core.contracts import build_manifest, complete_output_metadata, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, complete_output_metadata, write_manifest
 from astrid.core.contracts.errors import AstridError
 from astrid.core.executor.registry import load_default_registry
 
@@ -150,7 +150,7 @@ def test_write_manifest_delegates_to_write_json_atomic(tmp_path: Path) -> None:
         "warnings": [],
     }
 
-    with patch("astrid.core.contracts.result_manifest.write_json_atomic") as mock_write:
+    with patch("astrid.core._shared.result_manifest.write_json_atomic") as mock_write:
         manifest = write_manifest(tmp_path / "manifest.json", manifest_input)
 
     mock_write.assert_called_once()

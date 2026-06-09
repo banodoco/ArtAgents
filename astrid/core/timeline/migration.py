@@ -159,7 +159,7 @@ def classify_timeline_dir(timeline_home: Path) -> TimelineClassification:
     if events_path.is_file() and identity_path.is_file():
         # Quick sanity — do the files parse?
         try:
-            from astrid.core.project.jsonio import read_json
+            from astrid.core._shared.jsonio import read_json
             identity = read_json(identity_path)
             if isinstance(identity, dict) and "timeline_id" in identity:
                 return "already_event_sourced"
@@ -169,7 +169,7 @@ def classify_timeline_dir(timeline_home: Path) -> TimelineClassification:
     # Legacy-local: assembly.json exists but no event log.
     if assembly_path.is_file() and not events_path.is_file():
         try:
-            from astrid.core.project.jsonio import read_json
+            from astrid.core._shared.jsonio import read_json
             assembly = read_json(assembly_path)
             if isinstance(assembly, dict):
                 return "legacy_local"
@@ -537,7 +537,7 @@ def write_resumable_checkpoint(
     checkpoint_file: Path,
 ) -> None:
     """Persist *status* to *checkpoint_file* atomically."""
-    from astrid.core.project.jsonio import write_json_atomic
+    from astrid.core._shared.jsonio import write_json_atomic
 
     write_json_atomic(
         checkpoint_file,
@@ -552,7 +552,7 @@ def write_resumable_checkpoint(
 
 def read_resumable_checkpoint(checkpoint_file: Path) -> ResumableStatus | None:
     """Load a previously-saved checkpoint, or ``None``."""
-    from astrid.core.project.jsonio import read_json
+    from astrid.core._shared.jsonio import read_json
 
     if not checkpoint_file.is_file():
         return None

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.jsonio import write_json_atomic
+from astrid.core._shared.jsonio import write_json_atomic
 
 from .acquisition import build_acquisition_request
 from .caption_providers import caption_candidate

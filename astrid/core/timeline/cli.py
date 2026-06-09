@@ -94,7 +94,7 @@ def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
     Returns ``"local_fs"`` when no explicit backend preference is set,
     or ``"supabase"`` when the sidecar requests it.
     """
-    from astrid.core.project.jsonio import read_json  # noqa: PLC0415
+    from astrid.core._shared.jsonio import read_json  # noqa: PLC0415
     from .paths import assembly_identity_path, find_timeline_by_slug  # noqa: PLC0415
     from . import clip_edits  # noqa: PLC0415
 

@@ -42,7 +42,7 @@ class TestTransferLoop:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -99,7 +99,7 @@ class TestTransferLoop:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -180,7 +180,7 @@ class TestTransferLoop:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -257,7 +257,7 @@ class TestTransferLoop:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "imported", "created_at": "2026-05-21T00:00:00Z"},
@@ -390,7 +390,7 @@ class TestSupabaseFakeTransfer:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001",
@@ -462,7 +462,7 @@ class TestSupabaseFakeTransfer:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001",
@@ -530,7 +530,7 @@ class TestSupabaseFakeTransfer:
         dst_home = tmp_path / "dst"
         dst_home.mkdir()
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             src_home / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": src_tid, "timeline_ulid": "01J00000000000000000000001",
@@ -738,7 +738,7 @@ class TestRemoteOnlyPull:
         tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "display.json",
             {"schema_version": 1, "slug": "existing", "name": "existing", "is_default": False},

@@ -8,9 +8,8 @@ from pathlib import Path
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
-from astrid.core.contracts._capability_common import (
+from astrid.core._shared.capability_common import (
     _aliases_text,          # re-export — tests import from cli directly
-    _banodoco_config_from_args,
     _require_qualified_id,  # re-export — tests patch via cli.<name>
 )
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
@@ -48,6 +47,31 @@ from .cli_handlers import (  # noqa: E402, F401  — re-exports for tests
     _EXECUTOR_YAML_TEMPLATE,
     _RUN_PY_TEMPLATE,
 )
+
+
+def _banodoco_config_from_args(
+    args: argparse.Namespace,
+    *,
+    agent_flag: str = "banodoco_agent_executors",
+):
+    """Build a BanodocoCatalogConfig from CLI args and env.
+
+    ``agent_flag`` is the arg attribute to check for per-capability-type
+    override (``banodoco_agent_executors`` or ``banodoco_agent_orchestrators``).
+    """
+    from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
+
+    env_config = BanodocoCatalogConfig.from_env()
+    enabled = bool(getattr(args, agent_flag, False) or env_config.enabled)
+    return BanodocoCatalogConfig(
+        enabled=enabled,
+        catalog_url=args.banodoco_catalog_url or env_config.catalog_url,
+        include_defaults=False if args.no_banodoco_defaults else env_config.include_defaults,
+        include_mandatory=False if args.no_banodoco_mandatory else env_config.include_mandatory,
+        cache_dir=Path(args.banodoco_cache_dir).expanduser() if args.banodoco_cache_dir else env_config.cache_dir,
+        refresh=bool(args.banodoco_refresh or env_config.refresh),
+        timeout_seconds=env_config.timeout_seconds,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

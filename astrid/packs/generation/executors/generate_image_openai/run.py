@@ -23,9 +23,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.core.audit import AuditContext
-from astrid.core.contracts.result_manifest import complete_output_metadata
+from astrid.core._shared.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.atomic_io import write_json_atomic
+from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.util.secrets import load_api_key as _resolve_key
 from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 

@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
 guard_canonical_entrypoint('video_editing.cut')

@@ -961,7 +961,7 @@ def regenerate_projection(
     """
     from pathlib import Path
 
-    from astrid.core.project.jsonio import read_json, write_json_atomic
+    from astrid.core._shared.jsonio import read_json, write_json_atomic
 
     _home = Path(timeline_home)
     checkpoint_file = _home / "assembly.checkpoint.json"

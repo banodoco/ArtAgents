@@ -22,7 +22,7 @@ from astrid.core.contracts.capability_schema import (
 from astrid.core.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
 )
-from astrid.core.contracts._capability_common import (
+from astrid.core._shared.capability_common import (
     _parse_cache,
     _parse_isolation,
     _validate_cache,

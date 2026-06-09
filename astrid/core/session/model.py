@@ -12,7 +12,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.core.project.jsonio import ProjectJsonError, read_json, write_json_atomic
+from astrid.core._shared.jsonio import ProjectJsonError, read_json, write_json_atomic
 from astrid.core.util.time import utc_now_iso
 
 SessionRole = Literal["writer", "reader", "orphan-pending"]

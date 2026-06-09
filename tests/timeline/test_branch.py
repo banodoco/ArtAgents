@@ -42,7 +42,7 @@ class TestBranchProvenance:
         tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
@@ -136,7 +136,7 @@ class TestBranchProvenance:
         tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
@@ -224,7 +224,7 @@ class TestBranchFailureDoesNotPolluteSource:
         tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
@@ -311,7 +311,7 @@ class TestBranchFailureDoesNotPolluteSource:
         tl_dir = proj_dir / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
@@ -391,7 +391,7 @@ class TestBranchesList:
         tl_dir = tmp_path / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},
@@ -455,7 +455,7 @@ class TestBranchesList:
         tl_dir = tmp_path / "timelines" / "01J00000000000000000000001"
         tl_dir.mkdir(parents=True)
 
-        from astrid.core.project.jsonio import write_json_atomic
+        from astrid.core._shared.jsonio import write_json_atomic
         write_json_atomic(
             tl_dir / "assembly.identity.json",
             {"schema_version": 1, "timeline_id": timeline_id, "timeline_ulid": "01J00000000000000000000001", "backend": "local_fs", "provenance": "created", "created_at": "2026-05-21T00:00:00Z"},

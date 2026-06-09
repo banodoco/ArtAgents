@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
 from astrid.packs.understanding.executors._common import emit_dry_run_preview
 

@@ -11,7 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
-from astrid.core.project.jsonio import read_json, write_json_atomic
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.session.paths import identity_path
 from astrid.core.util.time import utc_now_iso
 
