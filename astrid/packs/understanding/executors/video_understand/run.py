@@ -17,7 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.packs.understanding.executors._common import emit_dry_run_preview
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.media import ffprobe_duration_seconds
 from astrid.core.util.llm_clients import build_gemini_client
@@ -232,10 +233,7 @@ def run(args: argparse.Namespace) -> int:
         "philosophy": "Direct video understanding is treated as synchronized sight-and-sound evidence. Use visual_understand.py for cheap frame/contact-sheet reads, audio_understand.py for isolated listening judgment, and transcribe.py for exact words.",
     }
     if args.dry_run:
-        preview["schema_version"] = 1
-        preview["kind"] = "understanding.video_understand"
-        print(json.dumps(preview, indent=2))
-        return 0
+        return emit_dry_run_preview(preview, "understanding.video_understand")
 
     client = build_gemini_client(args.env_file)
     active_schema = RESPONSE_SCHEMA
@@ -317,10 +315,9 @@ def run(args: argparse.Namespace) -> int:
         args.out.write_text(text + "\n", encoding="utf-8")
         print(f"wrote={args.out}", file=sys.stderr)
 
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "understanding.video_understand",
-        "inputs": {
+    manifest = build_manifest(
+        kind="understanding.video_understand",
+        inputs={
             "video": str(video_source),
             "query": args.query,
             "mode": args.mode,
@@ -335,10 +332,10 @@ def run(args: argparse.Namespace) -> int:
             "max_width": args.max_width,
             "out_dir": str(out_dir),
         },
-        "outputs": manifest_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=manifest_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.util.time import _utc_now, utc_now_seconds
 from astrid.core.util.llm_clients import GeminiClient, build_gemini_client
 
@@ -285,20 +285,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             {"path": str(out_path), "type": "file"},
         ]
         manifest_path = out_dir / "manifest.json"
-        manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "understanding.scene_describe",
-            "inputs": {
+        manifest = build_manifest(
+            kind="understanding.scene_describe",
+            inputs={
                 "scenes": str(args.scenes.resolve()),
                 "triage": str(args.triage.resolve()),
                 "video": str(args.video.resolve()),
                 "model": args.model,
                 "top_n": args.top_n,
             },
-            "outputs": manifest_outputs,
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            outputs=manifest_outputs,
+            created=datetime.now(timezone.utc).isoformat(),
+            schema_version=1,
+        )
         write_manifest(manifest_path, manifest)
         # -------------------------------------------------------------------------
 

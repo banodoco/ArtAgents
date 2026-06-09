@@ -21,7 +21,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
+from astrid.packs.understanding.executors._common import emit_dry_run_preview
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 from astrid.core.pack.entrypoint import run_pack_main
@@ -412,10 +413,7 @@ def run(args: argparse.Namespace) -> int:
         "detail": args.detail,
     }
     if args.dry_run:
-        payload_preview["schema_version"] = 1
-        payload_preview["kind"] = "understanding.visual_understand"
-        print(json.dumps(payload_preview, indent=2))
-        return 0
+        return emit_dry_run_preview(payload_preview, "understanding.visual_understand")
 
     api_key = load_api_key("OPENAI_API_KEY", args.env_file)
     response_schema: dict[str, Any] | None = None
@@ -475,10 +473,9 @@ def run(args: argparse.Namespace) -> int:
         args.out.write_text(text + "\n", encoding="utf-8")
         print(f"wrote={args.out}", file=sys.stderr)
 
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "understanding.visual_understand",
-        "inputs": {
+    manifest = build_manifest(
+        kind="understanding.visual_understand",
+        inputs={
             "query": args.query,
             "images": [str(p) for p in (args.image or [])],
             "video": str(args.video) if args.video else None,
@@ -491,10 +488,10 @@ def run(args: argparse.Namespace) -> int:
             "max_images": args.max_images,
             "out_dir": str(args.out_dir),
         },
-        "outputs": manifest_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=manifest_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 

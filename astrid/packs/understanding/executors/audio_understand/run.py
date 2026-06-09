@@ -5,8 +5,9 @@
 from __future__ import annotations
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main
+from astrid.packs.understanding.executors._common import emit_dry_run_preview
 
 guard_canonical_entrypoint('understanding.audio_understand')
 import argparse
@@ -453,10 +454,7 @@ def run(args: argparse.Namespace) -> int:
         "philosophy": "Direct audio understanding is treated as listening evidence: tone, timing, room feel, sound design, and production quality are first-class signals, while transcript text remains a separate factual layer.",
     }
     if args.dry_run:
-        preview["schema_version"] = 1
-        preview["kind"] = "understanding.audio_understand"
-        print(json.dumps(preview, indent=2))
-        return 0
+        return emit_dry_run_preview(preview, "understanding.audio_understand")
 
     api_key = load_api_key("OPENAI_API_KEY", args.env_file)
     results: list[dict[str, Any]] = []
@@ -513,10 +511,9 @@ def run(args: argparse.Namespace) -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(text + "\n", encoding="utf-8")
 
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "understanding.audio_understand",
-        "inputs": {
+    manifest = build_manifest(
+        kind="understanding.audio_understand",
+        inputs={
             "audio": [str(p) for p in audio_sources],
             "video": str(video_source) if video_source is not None else None,
             "query": query,
@@ -535,10 +532,10 @@ def run(args: argparse.Namespace) -> int:
             "sample_rate": args.sample_rate,
             "out_dir": str(out_dir),
         },
-        "outputs": manifest_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=manifest_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 
