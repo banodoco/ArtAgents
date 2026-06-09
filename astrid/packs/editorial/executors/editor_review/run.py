@@ -21,7 +21,7 @@ from astrid.core.audit import AuditContext
 from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.timeline import load_arrangement, load_metadata, load_pool
 from astrid.core.media import ffprobe_duration_seconds
-from astrid.core.paths import executor_argv
+from astrid.core.executor.argv import executor_argv
 from astrid.core.util.llm_clients import build_claude_client
 
 from ..arrange.run import pool_digest

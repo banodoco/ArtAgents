@@ -35,7 +35,7 @@ from typing import Any, Literal
 import pytest
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
 
 # ---------------------------------------------------------------------------

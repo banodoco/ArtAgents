@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.project.jsonio import write_json_atomic
-from astrid.core.project.paths import resolve_projects_root
+from astrid.core.foundation.project_paths import resolve_projects_root
 
 _PLAN_HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 

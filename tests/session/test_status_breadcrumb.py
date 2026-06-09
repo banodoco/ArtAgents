@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.project.project import create_project
 from astrid.core.session import cli

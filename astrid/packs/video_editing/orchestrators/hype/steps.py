@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.paths import executor_argv
+from astrid.core.executor.argv import executor_argv
 
 from .config import STEP_ORDER
 

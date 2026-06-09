@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.paths import project_dir
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.lease import read_lease
 from astrid.core.session.model import Session, SessionValidationError
 from astrid.core.session.paths import session_path
@@ -171,7 +171,7 @@ def resolve_current_session(slug: str | None = None) -> Session | None:
     if not raw and slug:
         # File-bound fallback. NEVER walks the filesystem.
         try:
-            from astrid.core.project.paths import project_dir as _project_dir
+            from astrid.core.foundation.project_paths import project_dir as _project_dir
             file_path = _project_dir(slug) / SESSION_FILE_NAME
             if file_path.is_file():
                 content = file_path.read_text(encoding="utf-8").strip()

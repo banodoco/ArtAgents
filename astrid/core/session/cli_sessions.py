@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.paths import resolve_projects_root
+from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
 from astrid.core.session.binding import (
     resolve_current_session,
@@ -56,7 +56,7 @@ from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_slug_for_ulid
 from astrid.core.util.time import utc_now_iso
 from astrid.core.project.current_run import read_current_run
-from astrid.core.project.paths import project_dir
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.discovery import discover_projects
 from astrid.core.task.events import EVENTS_FILENAME
 

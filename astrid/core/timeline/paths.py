@@ -8,7 +8,7 @@ from pathlib import Path
 from astrid.core.threads.ids import is_ulid
 
 from ..project.jsonio import ProjectJsonError, read_json
-from ..project.paths import ProjectPathError, project_dir
+from astrid.core.foundation.project_paths import ProjectPathError, project_dir
 
 _TIMELINE_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 

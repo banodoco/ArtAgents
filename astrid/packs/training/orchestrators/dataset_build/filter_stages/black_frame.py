@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 from ..interfaces import FilterResult
 from ._common import (

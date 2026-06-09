@@ -17,7 +17,7 @@ from astrid.core.task.plan import step_dir_for
 from astrid.core.util.time import utc_now_seconds
 from astrid.core.threads.ids import generate_run_id
 
-from . import paths
+from astrid.core.foundation import project_paths as paths
 from .jsonio import read_json, write_json_atomic
 from .project import require_project
 from .schema import build_run_record, validate_run_record

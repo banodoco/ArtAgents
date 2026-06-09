@@ -76,7 +76,7 @@ def _project_slugs_from_run_paths(raw: list[str]) -> set[str]:
     if _extract_project_slug(raw) is not None or not _is_request_scoped_run(raw):
         return set()
     try:
-        from astrid.core.project.paths import resolve_projects_root
+        from astrid.core.foundation.project_paths import resolve_projects_root
 
         projects_root = resolve_projects_root().resolve()
     except Exception:
@@ -179,7 +179,7 @@ def _auto_bind_default_project_session(raw: list[str]) -> Any:
     if not _invocation_is_auto_bindable_run(raw):
         return None
     try:
-        from astrid.core.project.paths import resolve_projects_root
+        from astrid.core.foundation.project_paths import resolve_projects_root
         from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
         from astrid.core.session.config import resolve_default_project_for_sdk
         from astrid.core.session.identity import read_identity

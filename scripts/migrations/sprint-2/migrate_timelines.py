@@ -45,7 +45,7 @@ _REPO = _HERE.parent.parent.parent  # scripts/migrations/sprint-2 → repo root
 sys.path.insert(0, str(_REPO))
 sys.path.insert(0, str(_HERE))
 
-from astrid.core.project.paths import (
+from astrid.core.foundation.project_paths import (
     resolve_projects_root,
     project_json_path,
     run_dir,

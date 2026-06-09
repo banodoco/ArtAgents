@@ -239,7 +239,7 @@ def _main_impl(raw: list[str]) -> int:
                     file=sys.__stderr__,
                 )
 
-            from astrid.core.project.paths import resolve_projects_root
+            from astrid.core.foundation.project_paths import resolve_projects_root
 
             session = resolve_current_session_with_fs_fallback(
                 slug=_slug_hint,

@@ -24,7 +24,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.paths import resolve_projects_root
+from astrid.core.foundation.project_paths import resolve_projects_root
 
 
 def _log(msg: str) -> None:

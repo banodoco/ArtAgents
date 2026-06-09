@@ -12,7 +12,7 @@ import pytest
 def test_second_create_same_slug_exit_code_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Running `astrid projects create` with an existing slug returns exit code 2
     and prints a clear error to stderr."""
-    from astrid.core.project import paths
+    from astrid.core.foundation import project_paths as paths
 
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path))
 
@@ -43,7 +43,7 @@ def test_second_create_same_slug_exit_code_2(tmp_path: Path, monkeypatch: pytest
 
 def test_different_roots_are_independent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The same slug can exist under different ASTRID_PROJECTS_ROOT values."""
-    from astrid.core.project import paths
+    from astrid.core.foundation import project_paths as paths
 
     root_a = tmp_path / "root-a"
     root_b = tmp_path / "root-b"
@@ -71,7 +71,7 @@ def test_different_roots_are_independent(tmp_path: Path, monkeypatch: pytest.Mon
 
 def test_create_project_unique_slug_direct(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Test the uniqueness check directly via create_project API."""
-    from astrid.core.project import paths
+    from astrid.core.foundation import project_paths as paths
     from astrid.core.project.project import ProjectError, create_project
 
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(tmp_path))
@@ -92,7 +92,8 @@ def test_create_project_unique_slug_direct(tmp_path: Path, monkeypatch: pytest.M
 def test_projects_ls_and_default_commands(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from astrid.core.project import cli, paths
+    from astrid.core.project import cli
+    from astrid.core.foundation import project_paths as paths
     from astrid.core.project.project import create_project
     from astrid.core.session import paths as session_paths
 
@@ -130,7 +131,8 @@ def test_projects_ls_and_default_commands(
 def test_projects_default_warns_when_configured_default_is_missing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from astrid.core.project import cli, paths
+    from astrid.core.project import cli
+    from astrid.core.foundation import project_paths as paths
     from astrid.core.project.project import create_project
     from astrid.core.session import paths as session_paths
 

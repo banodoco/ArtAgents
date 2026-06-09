@@ -22,7 +22,7 @@ from astrid.core.session.config import (
 )
 from astrid.core.session.discovery import discover_projects
 
-from . import paths
+from astrid.core.foundation import project_paths as paths
 from .project import (
     ProjectError,
     create_project,

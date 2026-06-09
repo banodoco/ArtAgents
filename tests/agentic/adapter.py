@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.project.paths import ProjectPathError, resolve_projects_root, validate_project_slug
+from astrid.core.foundation.project_paths import ProjectPathError, resolve_projects_root, validate_project_slug
 from sisypy.evidence import _capture_gaps_from_notes
 from sisypy import ActorRun, EvidencePack, FakeProjectAdapter, RunMode, Scenario, SuccessProofLevel
 

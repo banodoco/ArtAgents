@@ -45,7 +45,7 @@ from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry

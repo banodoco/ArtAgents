@@ -48,7 +48,7 @@ R2 = "01JQZ2AAAAAA00000000000000"
 def timeline_fixture(tmp_projects_root: Path) -> dict:
     """Create a project with a timeline, two runs (1 completed, 1 aborted)."""
     from astrid.core.project.project import create_project
-    from astrid.core.project.paths import project_dir
+    from astrid.core.foundation.project_paths import project_dir
     from tests.helpers.current_run import seed_current_run
     from astrid.core.task.plan import compute_plan_hash
     from astrid.core.timeline import crud

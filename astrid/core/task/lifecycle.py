@@ -10,7 +10,7 @@ Implementation lives in focused modules:
 
 from __future__ import annotations
 
-from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
+from astrid.core.foundation.project_paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.task import operator_view as _operator_view
 from astrid.core.task import run_store as _run_store
 from astrid.core.task.gate import peek_current_step as peek_current_step

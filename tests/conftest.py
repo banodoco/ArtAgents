@@ -21,7 +21,7 @@ if sys.pycache_prefix is None:
     os.environ.setdefault("PYTHONPYCACHEPREFIX", str(_pycache_prefix))
     atexit.register(lambda: shutil.rmtree(_pycache_prefix, ignore_errors=True))
 
-from astrid.core.project import paths
+from astrid.core.foundation import project_paths as paths
 from astrid.core.task.env import (
     TASK_ITEM_ID_ENV,
     TASK_ITERATION_ENV,
@@ -229,7 +229,7 @@ def _seed_identity_and_session(
     """Mint identity + session + project. Returns (Session, project_root)."""
 
     from astrid.core.project.current_run import write_current_run
-    from astrid.core.project.paths import project_dir
+    from astrid.core.foundation.project_paths import project_dir
     from astrid.core.session.identity import Identity, write_identity
     from astrid.core.session.lease import write_lease_init
     from astrid.core.session.paths import session_path

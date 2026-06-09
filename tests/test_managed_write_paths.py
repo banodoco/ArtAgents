@@ -24,7 +24,7 @@ from typing import Any
 from unittest.mock import patch
 
 from astrid.core import timeline as timeline_contract
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
 from astrid.core.timeline._edit_helpers import pack_write_gateway, PackWriteResult
 from astrid.core.timeline.crud import create_timeline

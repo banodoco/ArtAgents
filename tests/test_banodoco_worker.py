@@ -220,7 +220,7 @@ class BanodocoWorkerTest(unittest.TestCase):
         """
         tmp_root = Path(tempfile.mkdtemp(prefix="bw-event-test-", dir=ROOT))
         self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
-        from astrid.core.project import paths as project_paths
+        from astrid.core.foundation import project_paths
         from astrid.core.project.project import create_project
 
         with patch.dict("os.environ", {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)}):
@@ -308,7 +308,7 @@ class BanodocoWorkerTest(unittest.TestCase):
         # Use a real project_slug + temp projects root; mock the rest.
         tmp_root = Path(tempfile.mkdtemp(prefix="bw-baseline-test-", dir=ROOT))
         self.addCleanup(shutil.rmtree, tmp_root, ignore_errors=True)
-        from astrid.core.project import paths as project_paths
+        from astrid.core.foundation import project_paths
         from astrid.core.project.project import create_project
 
         with patch.dict("os.environ", {project_paths.PROJECTS_ROOT_ENV: str(tmp_root)}):

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from astrid.core.env_vars import ASTRID_SESSION_ID
-from astrid.core.project.paths import (
+from astrid.core.foundation.project_paths import (
     resolve_projects_root,
 )
 from astrid.core.task.orchestrator_resolver import _list_orchestrator_ids

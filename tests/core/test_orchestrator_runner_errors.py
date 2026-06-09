@@ -17,7 +17,7 @@ import pytest
 
 from astrid.core.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
 from astrid.core.orchestrator.registry import OrchestratorRegistry
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
 from astrid.core.orchestrator.runner import (
     OrchestratorRunRequest,
@@ -368,7 +368,7 @@ def test_project_command_orchestrator_in_process_mode_preserves_project_run_fina
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from astrid.core.project import paths as project_paths
+    from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
     from astrid.core.timeline.crud import create_timeline
 
@@ -589,7 +589,7 @@ def test_command_orchestrator_rejects_unknown_placeholder(tmp_path: Path) -> Non
 def test_project_orchestrator_must_be_command_runtime(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from astrid.core.project import paths as project_paths
+    from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
 
     monkeypatch.setenv(project_paths.PROJECTS_ROOT_ENV, str(tmp_path / "projects"))

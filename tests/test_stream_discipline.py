@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.project.project import create_project
 from astrid.core.session import cli as session_cli

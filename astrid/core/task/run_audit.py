@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project.paths import project_dir, validate_project_slug
+from astrid.core.foundation.project_paths import project_dir, validate_project_slug
 from astrid.core.task.events import canonical_event_json, read_events, verify_chain
 from astrid.core.task.operator_render import _path_tuple_from_event
 from astrid.core.task.plan import load_plan

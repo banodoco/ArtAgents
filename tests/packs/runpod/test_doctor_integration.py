@@ -73,7 +73,7 @@ def test_doctor_finds_stale_handles() -> None:
         _write_stale_handle(projects_root, "proj", "run-stale", "step-a")
 
         # Patch resolve_projects_root to return our temp dir
-        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
+        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root):
             from astrid.core.doctor import _check_runpod_stale_handles
 
             check = _check_runpod_stale_handles()
@@ -87,7 +87,7 @@ def test_doctor_reports_zero_stale_when_none() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         projects_root = Path(tmp)
 
-        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
+        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root):
             from astrid.core.doctor import _check_runpod_stale_handles
 
             check = _check_runpod_stale_handles()
@@ -101,7 +101,7 @@ def test_doctor_ignores_stale_noncanonical_handles() -> None:
         projects_root = Path(tmp)
         _write_noncanonical_stale_handle(projects_root, "proj", "run-scratch")
 
-        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root):
+        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root):
             from astrid.core.doctor import _check_runpod_stale_handles
 
             check = _check_runpod_stale_handles()
@@ -111,7 +111,7 @@ def test_doctor_ignores_stale_noncanonical_handles() -> None:
 
 def test_doctor_handles_missing_projects_root() -> None:
     """_check_runpod_stale_handles returns ok when projects root missing."""
-    with patch("astrid.core.project.paths.resolve_projects_root", return_value=Path("/nonexistent/path/xyz")):
+    with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=Path("/nonexistent/path/xyz")):
         from astrid.core.doctor import _check_runpod_stale_handles
 
         check = _check_runpod_stale_handles()
@@ -130,7 +130,7 @@ def test_doctor_does_not_mutate() -> None:
         projects_root = Path(tmp)
         _write_stale_handle(projects_root, "proj", "run-readonly", "step-x")
 
-        with patch("astrid.core.project.paths.resolve_projects_root", return_value=projects_root), \
+        with patch("astrid.core.foundation.project_paths.resolve_projects_root", return_value=projects_root), \
              patch("runpod_lifecycle.discovery.terminate") as terminate, \
              patch("astrid.core.integrations.runpod.sweeper.append_runpod_sweeper_event") as append_event:
             from astrid.core.doctor import _check_runpod_stale_handles

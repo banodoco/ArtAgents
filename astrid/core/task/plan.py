@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Literal, Union, cast
 
-from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
+from astrid.core.foundation.project_paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.task.events import canonical_event_json
 from astrid.core.verify import Check, canonical_check_params, file_nonempty
 

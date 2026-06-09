@@ -4,7 +4,7 @@ import ast
 
 from astrid.core import util as core_util
 from astrid.core.util import sha256_file, utc_now_iso, utc_now_milliseconds, utc_now_seconds
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 
 def _core_function_defs() -> dict[str, list[str]]:
@@ -35,7 +35,7 @@ def test_core_util_reexports_are_explicit_and_importable() -> None:
 def test_duplicate_core_hash_and_timestamp_helpers_remain_collapsed() -> None:
     defs = _core_function_defs()
 
-    assert defs["sha256_file"] == ["astrid/core/util/hash.py"]
+    assert defs["sha256_file"] == ["astrid/core/foundation/hash.py"]
     assert defs.get("_sha256", []) == []
     assert defs.get("_now_iso", []) == []
     assert defs.get("_utc_now_iso", []) == []

@@ -11,7 +11,7 @@ from hashlib import sha256
 from json import loads
 from pathlib import Path
 
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 from .schema import ExecutorDefinition, ExecutorValidationError
 

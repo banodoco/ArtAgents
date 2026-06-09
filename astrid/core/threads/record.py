@@ -13,7 +13,7 @@ from typing import Any, Mapping
 import xxhash
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.util.hash import sha256_file
+from astrid.core.foundation.hash import sha256_file
 
 from . import variants
 from .ids import generate_run_id

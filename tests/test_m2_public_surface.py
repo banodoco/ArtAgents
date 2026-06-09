@@ -29,8 +29,8 @@ class RootModuleImportTest(unittest.TestCase):
         self.assertIsNotNone(astrid.sdk)
 
     def test_paths_importable(self) -> None:
-        import astrid.core.paths
-        self.assertIsNotNone(astrid.core.paths)
+        import astrid.core.foundation.paths
+        self.assertIsNotNone(astrid.core.foundation.paths)
 
     def test_media_importable(self) -> None:
         import astrid.core.media
@@ -172,26 +172,26 @@ class BanodocoIntegrationImportTest(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# astrid.core.paths namespace
+# astrid.core.foundation.paths namespace
 # ---------------------------------------------------------------------------
 
 class PathsModuleTest(unittest.TestCase):
-    """astrid.core.paths must export canonical path constants."""
+    """astrid.core.foundation.paths must export canonical path constants."""
 
     def test_paths_constants_importable(self) -> None:
-        import astrid.core.paths
+        import astrid.core.foundation.paths
 
         for name in ("PACKAGE_ROOT", "REPO_ROOT", "WORKSPACE_ROOT"):
             with self.subTest(name=name):
-                self.assertTrue(hasattr(astrid.core.paths, name),
-                                f"astrid.core.paths missing {name}")
+                self.assertTrue(hasattr(astrid.core.foundation.paths, name),
+                                f"astrid.core.foundation.paths missing {name}")
 
     def test_paths_functions_importable(self) -> None:
-        import astrid.core.paths
+        import astrid.core.executor.argv
 
-        self.assertTrue(hasattr(astrid.core.paths, "executor_argv"))
-        self.assertTrue(hasattr(astrid.core.paths, "resolve_executor_runtime_module"))
-        self.assertTrue(callable(astrid.core.paths.resolve_executor_runtime_module))
+        self.assertTrue(hasattr(astrid.core.executor.argv, "executor_argv"))
+        self.assertTrue(hasattr(astrid.core.executor.argv, "resolve_executor_runtime_module"))
+        self.assertTrue(callable(astrid.core.executor.argv.resolve_executor_runtime_module))
 
 
 # ---------------------------------------------------------------------------

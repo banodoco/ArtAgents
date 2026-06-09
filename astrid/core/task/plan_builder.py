@@ -26,7 +26,7 @@ from astrid.core.project.current_run import (
     write_current_run,
 )
 from astrid.core.project.jsonio import write_json_atomic
-from astrid.core.project.paths import (
+from astrid.core.foundation.project_paths import (
     project_dir,
     validate_project_slug,
     validate_run_id,
@@ -116,7 +116,7 @@ def _generate_run_id() -> str:
     return f"run-{stamp}-{secrets.token_hex(4)}"
 
 def _plan_sha256_file(path: Path) -> str:
-    # TODO(m5b): import sha256_file from astrid.core.util.hash once the
+    # TODO(m5b): import sha256_file from astrid.core.foundation.hash once the
     # remaining lifecycle.py core↔orchestrate cleanup lands.
     digest = hashlib.sha256()
     with path.open("rb") as handle:

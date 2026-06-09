@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.result_manifest import build_manifest, write_manifest
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _TEMPLATE_ROOT = Path(__file__).resolve().parent / "templates" / "card"

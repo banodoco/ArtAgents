@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.project.paths import ProjectPathError
+from astrid.core.foundation.project_paths import ProjectPathError
 from astrid.core.task.plan import TaskPlanError, step_dir_for, step_dir_for_path
 
 

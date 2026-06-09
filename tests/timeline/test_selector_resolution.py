@@ -72,7 +72,7 @@ class TestResolveEventLogTarget:
         )
 
         # Monkeypatch project_dir to return our tmp_path
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -157,7 +157,7 @@ class TestResolvePullDestination:
             },
         )
 
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -172,7 +172,7 @@ class TestResolvePullDestination:
 
     def test_create_as_new_slug(self, tmp_path: Path, monkeypatch):
         """--create --as <new-slug> creates a new timeline home."""
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -200,7 +200,7 @@ class TestResolvePullDestination:
 
     def test_create_as_with_source_id(self, tmp_path: Path, monkeypatch):
         """--create --as with remote source timeline_id records it."""
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -239,7 +239,7 @@ class TestResolvePullDestination:
             },
         )
 
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -256,7 +256,7 @@ class TestResolvePullDestination:
 
     def test_ambiguous_destination_fails(self, tmp_path: Path, monkeypatch):
         """No --into, --create, or --as fails before writing."""
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -268,7 +268,7 @@ class TestResolvePullDestination:
 
     def test_implicit_create_with_valid_remote_slug(self, tmp_path: Path, monkeypatch):
         """--create with a valid remote slug creates implicitly."""
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",
@@ -302,7 +302,7 @@ class TestResolvePullDestination:
             },
         )
 
-        import astrid.core.project.paths as proj_paths
+        import astrid.core.foundation.project_paths as proj_paths
         monkeypatch.setattr(
             proj_paths,
             "project_dir",

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.project.current_run import read_current_run
-from astrid.core.project.paths import project_dir
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV, SESSION_FILE_NAME
 from astrid.core.session.lease import (
     LeaseTakeoverResult,

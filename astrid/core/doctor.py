@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from astrid.core.timeline.kinds import default_transition_kind, transition_kind_options
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 Status = str
 _DECLARED_DEP_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
@@ -376,7 +376,7 @@ def _check_runpod_stale_handles() -> DoctorCheck:
     Read-only — never calls ``terminate`` or ``append_event_locked``.
     Does NOT add a symmetric runpod metadata check (out of scope).
     """
-    from astrid.core.project.paths import resolve_projects_root
+    from astrid.core.foundation.project_paths import resolve_projects_root
     from astrid.core.integrations.runpod.sweeper import (
         _derive_run_dir,
         _handle_path_belongs_to_run,
@@ -427,7 +427,7 @@ def _check_runpod_stale_handles() -> DoctorCheck:
 def _check_stale_project_runs() -> DoctorCheck:
     from astrid.core.contracts.run_status import RunStatus
     from astrid.core.project.jsonio import read_json
-    from astrid.core.project.paths import resolve_projects_root
+    from astrid.core.foundation.project_paths import resolve_projects_root
     from astrid.core.project.run import update_run_record
     from astrid.core.util.time import utc_now_seconds
 
@@ -498,7 +498,7 @@ def _check_stale_project_runs() -> DoctorCheck:
 
 
 def _check_projects_root() -> DoctorCheck:
-    from astrid.core.project.paths import PROJECTS_ROOT_ENV, resolve_projects_root
+    from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV, resolve_projects_root
 
     projects_root = resolve_projects_root()
     detail = f"{projects_root} ({PROJECTS_ROOT_ENV} override supported)"

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.project.paths import ProjectPathError
+from astrid.core.foundation.project_paths import ProjectPathError
 from astrid.core.timeline.paths import (
     _TIMELINE_SLUG_RE,
     assembly_head_path,

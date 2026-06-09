@@ -45,7 +45,7 @@ def dispatch_scratch(args: list[str]) -> int:
     project_slug = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
     if not project_slug:
         try:
-            from astrid.core.project.paths import resolve_projects_root
+            from astrid.core.foundation.project_paths import resolve_projects_root
             from astrid.core.session.binding import resolve_current_session_with_fs_fallback
 
             session = resolve_current_session_with_fs_fallback(

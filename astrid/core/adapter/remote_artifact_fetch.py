@@ -10,7 +10,7 @@ from typing import Any, Literal
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.adapter._common import _step_dir
 from astrid.core.task.plan import Step
-from astrid.core.util.hash import sha256_file as _sha256
+from astrid.core.foundation.hash import sha256_file as _sha256
 
 FetchStatus = Literal["completed", "awaiting_fetch", "failed"]
 

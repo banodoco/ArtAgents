@@ -25,7 +25,7 @@ from astrid.core.model_catalog.schema import (
     validate_lora_registry,
     validate_registry_with_backends,
 )
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 
 class ModelRegistry:

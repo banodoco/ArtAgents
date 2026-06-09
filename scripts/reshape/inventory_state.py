@@ -10,8 +10,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrid.core.project.paths import resolve_projects_root
-from astrid.core.paths import REPO_ROOT as DEFAULT_REPO_ROOT
+from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.foundation.paths import REPO_ROOT as DEFAULT_REPO_ROOT
 
 CSV_COLUMNS = [
     "root_kind",

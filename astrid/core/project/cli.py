@@ -42,7 +42,7 @@ from astrid.core.session.config import (
 from astrid.core.session.discovery import discover_projects
 from astrid.core.util.log_and_swallow import log_and_swallow
 
-from . import paths
+from astrid.core.foundation import project_paths as paths
 from .project import (
     ProjectError,
     create_project,
@@ -217,7 +217,7 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
     """Aggregate cost across all timelines in a project."""
     _require_project_session(args.project)
 
-    from astrid.core.project.paths import project_dir
+    from astrid.core.foundation.project_paths import project_dir
     from astrid.core.task.events import read_events
     from astrid.core.task.run_audit import _cost_by_source
     from astrid.core.timeline.crud import list_timelines
@@ -316,7 +316,7 @@ def _cmd_project_export(args: argparse.Namespace) -> int:
     """Export a project as a self-contained tarball bundle."""
     _require_project_session(args.project)
 
-    from astrid.core.project.paths import project_dir
+    from astrid.core.foundation.project_paths import project_dir
     from astrid.core.timeline.crud import list_timelines
 
     include_aborted = bool(getattr(args, "include_aborted", False))

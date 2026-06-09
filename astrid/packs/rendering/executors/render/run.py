@@ -27,7 +27,7 @@ from astrid.core.audit import AuditContext
 from astrid.core import timeline
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.core.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.theme import load_theme
 
 
@@ -189,7 +189,7 @@ def _warn_cross_project_assets(classified: dict[str, dict[str, object]]) -> None
     if not owner:
         return
     try:
-        from astrid.core.project.paths import resolve_projects_root
+        from astrid.core.foundation.project_paths import resolve_projects_root
 
         projects_root = resolve_projects_root().resolve()
     except Exception:

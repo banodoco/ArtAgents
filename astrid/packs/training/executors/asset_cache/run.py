@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.util.hash import sha256_file
+from astrid.core.foundation.hash import sha256_file
 from astrid.core.util.time import utc_now_iso
 
 try:

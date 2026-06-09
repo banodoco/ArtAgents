@@ -29,7 +29,7 @@ from astrid.core.pack.alias_resolver import (
 from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.pack.manifest import dump_manifest_payload, load_manifest_mapping
 from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 from .schema import (
     ElementDefinition,

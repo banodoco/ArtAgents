@@ -121,7 +121,7 @@ class TestCreateTimeline:
         assert project["default_timeline_id"] == result["ulid"]
 
     def test_rejects_invalid_slug(self, project_tree: Path) -> None:
-        from astrid.core.project.paths import ProjectPathError
+        from astrid.core.foundation.project_paths import ProjectPathError
 
         with pytest.raises(ProjectPathError):
             create_timeline("demo", "BAD_SLUG")

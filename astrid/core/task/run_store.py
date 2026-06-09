@@ -22,7 +22,7 @@ from astrid.core.project.current_run import (
     clear_current_run,
     read_current_run,
 )
-from astrid.core.project.paths import (
+from astrid.core.foundation.project_paths import (
     project_dir,
     resolve_projects_root,
     validate_project_slug,

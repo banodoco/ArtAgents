@@ -30,7 +30,7 @@ from astrid.core.pack.manifest import (
     dump_manifest_payload,
     load_manifest_mapping,
 )
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 from .folder import load_folder_orchestrators
 from .schema import (

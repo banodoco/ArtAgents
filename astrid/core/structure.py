@@ -17,7 +17,7 @@ from astrid.core.pack import (
     load_pack_manifest,
     pack_manifest_path,
 )
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 LEGACY_PUBLIC_DIRS = ("conductors", "performers", "instruments", "primitives", "executors", "orchestrators")
 LEGACY_LOCAL_DIRS = ("performers", "conductors", "nodes", "instruments", "primitives")

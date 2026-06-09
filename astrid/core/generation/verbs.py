@@ -77,7 +77,7 @@ def load_generation_verb_plugins() -> None:
     # pulling in the full pack machinery at module level.
     from astrid.core.pack import discover_packs
     from astrid.core.pack.discovery import discover_pack_metadata
-    from astrid.core.paths import REPO_ROOT
+    from astrid.core.foundation.paths import REPO_ROOT
 
     for discovered in discover_pack_metadata(
         project_root=REPO_ROOT,

@@ -7,7 +7,7 @@ through the legacy compatibility bridge in
 ``astrid.core.integrations.reigh.SupabaseDataProvider``.
 """
 
-from .paths import (
+from astrid.core.foundation.project_paths import (
     DEFAULT_PROJECTS_ROOT,
     PROJECTS_ROOT_ENV,
     project_dir,

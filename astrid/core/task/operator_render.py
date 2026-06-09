@@ -21,7 +21,7 @@ from typing import Optional, Sequence
 
 from astrid.core.contracts.run_status import STEP_TERMINAL_KINDS
 from astrid.core.env_vars import ASTRID_STRICT_INSTRUCTION_SUBST
-from astrid.core.project.paths import resolve_projects_root
+from astrid.core.foundation.project_paths import resolve_projects_root
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,

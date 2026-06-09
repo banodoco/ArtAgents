@@ -16,7 +16,7 @@ from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
 from astrid.core.orchestrator.registry import OrchestratorRegistry
 from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
-from astrid.core.project import paths
+from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import create_project
 from astrid.core.project.run import resolve_record_path
 from astrid.core.timeline.crud import create_timeline

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from astrid.core.project.current_run import clear_current_run, read_current_run
-from astrid.core.project.paths import project_dir
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.events import (
     make_cursor_rewind_event,

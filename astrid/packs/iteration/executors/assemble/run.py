@@ -20,7 +20,7 @@ from astrid.core import modalities
 from astrid.core import timeline
 from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.task.managed_binding import is_managed_mode
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.threads.schema import SCHEMA_VERSION
 
 QUALITY_FLOOR = 0.6

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project import paths
+from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import (
     create_project,
     get_project_theme,
@@ -395,7 +395,7 @@ def test_run_timeline_id_must_be_valid_ulid() -> None:
 
     # Invalid shapes must raise (ProjectPathError from validate_timeline_ulid,
     # wrapped via build_run_record → validate_timeline_ulid).
-    from astrid.core.project.paths import ProjectPathError
+    from astrid.core.foundation.project_paths import ProjectPathError
 
     with pytest.raises(ProjectPathError, match="timeline ULID"):
         build_run_record("demo", "01HXYZ", timeline_id="not-a-ulid")
@@ -519,7 +519,7 @@ def test_managed_binding_slug_must_be_valid() -> None:
 
     from uuid import uuid4
 
-    from astrid.core.project.paths import ProjectPathError
+    from astrid.core.foundation.project_paths import ProjectPathError
 
     record = build_run_record("demo", "01HXYZ")
     record["metadata"]["timeline_slug"] = "NOT VALID"

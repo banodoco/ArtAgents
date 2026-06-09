@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from astrid.core.project.paths import PROJECTS_ROOT_ENV
+from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV
 from astrid.core.project.run import PROJECT_RUN_ENV
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.paths import ASTRID_HOME_ENV

@@ -17,7 +17,7 @@ from subprocess import CompletedProcess
 from typing import Optional
 
 from astrid.core.project.current_run import read_current_run_state
-from astrid.core.project.paths import PROJECTS_ROOT_ENV
+from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV
 from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session

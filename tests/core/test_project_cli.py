@@ -33,7 +33,7 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core.theme import cli
 from astrid.core.cli_choices import StaticChoices
 from astrid.core.project import cli as project_cli
-from astrid.core.project import paths
+from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import ProjectError
 from astrid.core.integrations.reigh import data_provider as dp_mod
 from astrid.core.integrations.reigh import timeline_io as tio

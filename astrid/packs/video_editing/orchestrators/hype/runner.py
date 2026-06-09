@@ -19,7 +19,7 @@ from typing import Any
 from astrid.core.audit import PARENT_IDS_ENV, AuditContext
 from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core import timeline
-from astrid.core.util.hash import sha256_file
+from astrid.core.foundation.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import STEP_ORDER
@@ -550,7 +550,7 @@ def pool_main(args: argparse.Namespace) -> int:
     _plan_hash = ""
     project_slug = getattr(args, "project", None)
     if project_slug is not None:
-        from astrid.core.project.paths import project_dir
+        from astrid.core.foundation.project_paths import project_dir
 
         proj_root = project_dir(project_slug)
         plan_path = proj_root / "plan.json"

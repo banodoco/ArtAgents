@@ -32,8 +32,20 @@ Durable progress record for executing `RESTRUCTURE-PLAN.md`. Survives context co
 | Wave | What | Model | Status | Cycles after |
 |---|---|---|---|---|
 | Scaffold | cycle checker + baseline + ledger | main | ✅ done | 24 |
-| W0 | free/near-free: facades→__init__, 🟢-zero breaks, dedups, event_hash, ULID, small prefix-drops | DeepSeek | ⬜ todo | — |
-| W1 | foundation/ + _shared/ keystone (project/paths 88, jsonio 52, result_manifest 51) | DeepSeek + Opus review | ⬜ todo | — |
+| W0a | break contracts↔{gateway,project,timeline} (env-var swaps + event_hash repatriation) | Claude(Opus) sub | ✅ done | 21 |
+| W0b | break element↔pack (local _common dedup) | main | ✅ done | 20 |
+| W0c | facade→__init__ conversions + env_vars/subprocess_env/atomic_io→foundation (PURE TIDY, no cycle impact) | Claude sub | ⬜ DEFERRED to late cleanup pass | — |
+| W1a | foundation/ + paths keystone: extract executor-argv from core/paths→executor (broke executor↔paths), core/paths→foundation/paths (57), project/paths→foundation/project_paths (88), sha256_file→foundation/hash (173 files) | Claude(Opus) sub | ✅ done | 19 |
+| W1b | _shared/: jsonio (52), result_manifest (51), capability_common→_shared/ | Claude(Opus) sub | ⬜ todo | — |
+
+> **PLAN-CORRECTING FINDING (W1a):** The plan claimed `project/paths → foundation` "dissolves 5 cycles."
+> FALSE. Moving paths broke only `executor↔paths`. `project↔{task,session,timeline}` persist because they
+> ride **non-paths domain edges**: `project/run.py` + `project/cli.py` import task/session/timeline, while many
+> task/session/timeline modules import project. Likewise `contracts↔util` persists (`result_manifest→util.atomic_io`
+> + `util.{http,secrets,llm_clients}→contracts.errors`). The keystone's real win = removing 88 couplings to the
+> `project` *surface* + a clean tier-0 `foundation/`. Breaking the project-web is now **domain-edge work** (the
+> `project/cli.py` edges → W5 CLI-lift; `project/run.py`↔task → W4 seam, likely accept-and-document). `contracts↔util`
+> → move `write_json_atomic` to foundation too (fold into W1b).
 | W2 | medium leaf moves (taxonomy 45, edits 26, cli_choices 41, …) | DeepSeek | ⬜ todo | — |
 | W3 | invert hacks (_pipeline_module, pack/validate, resolvers, 2 Protocols) | Opus | ⬜ todo | — |
 | W4 | task/ + orchestrate→task/dsl (53); accept adapter↔task, session↔task seams | Opus | ⬜ todo | — |

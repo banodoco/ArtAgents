@@ -392,7 +392,7 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
 
 def _seed_session(astrid_home: Path, projects_root: Path, slug: str) -> str:
     """Mint identity + Session + project so the CLI gate accepts the run."""
-    from astrid.core.project.paths import project_dir
+    from astrid.core.foundation.project_paths import project_dir
     from astrid.core.session.identity import Identity, write_identity
     from astrid.core.session.paths import session_path
     from astrid.core.threads.ids import generate_ulid

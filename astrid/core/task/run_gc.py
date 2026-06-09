@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
-from astrid.core.project.paths import project_dir, validate_project_slug
+from astrid.core.foundation.project_paths import project_dir, validate_project_slug
 
 
 @dataclass(frozen=True)

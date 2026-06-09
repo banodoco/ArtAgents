@@ -34,7 +34,7 @@ from astrid.core.executor.runner import (
 )
 from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
 from astrid.core.pack.resolver import PackResolverError
-from astrid.core.paths import executor_argv, resolve_executor_runtime_module
+from astrid.core.executor.argv import executor_argv, resolve_executor_runtime_module
 
 # ---------------------------------------------------------------------------
 # Factory helpers

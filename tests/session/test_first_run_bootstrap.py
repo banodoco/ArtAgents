@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
 from astrid.core.session import cli, paths as session_paths
 from astrid.core.session import config

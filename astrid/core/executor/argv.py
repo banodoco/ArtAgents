@@ -1,17 +1,12 @@
-"""Canonical root-path constants and executor runtime resolution.
+"""Executor runtime resolution and argv construction.
 
-This module is the public surface for PACKAGE_ROOT, REPO_ROOT, WORKSPACE_ROOT,
-and the executor-argv utilities.
+Resolves executor ids / legacy pipeline step names to runtime modules and
+builds the argv tokens that invoke a pipeline executor's module entrypoint.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
-
-PACKAGE_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = PACKAGE_ROOT.parent
-WORKSPACE_ROOT = REPO_ROOT.parent
 
 
 @lru_cache(maxsize=None)

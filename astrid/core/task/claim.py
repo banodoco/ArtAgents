@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.contracts.errors import AstridError, build_state_snapshot
-from astrid.core.project.paths import project_dir, validate_project_slug, validate_run_id
+from astrid.core.foundation.project_paths import project_dir, validate_project_slug, validate_run_id
 from astrid.core.session.binding import resolve_current_session
 from astrid.core.session.writer import writer_context_for_project
 

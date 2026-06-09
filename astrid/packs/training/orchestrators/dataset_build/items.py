@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.util.time import utc_now_iso as _utc_now_iso
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 UNKNOWN_RIGHTS = {
     "license": "unknown",

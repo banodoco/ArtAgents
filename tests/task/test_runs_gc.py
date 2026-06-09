@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.project.project import create_project
-from astrid.core.project.paths import project_dir
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.task.run_gc import cmd_runs_gc, select_runs_for_gc
 from astrid.core.timeline import crud
 

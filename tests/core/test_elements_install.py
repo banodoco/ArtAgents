@@ -13,7 +13,7 @@ from astrid.core.executor.install import (
     executor_python_path,
 )
 from astrid.core.executor.registry import load_default_registry as load_executor_registry
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 
 
 class ElementInstallTest(unittest.TestCase):

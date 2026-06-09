@@ -31,10 +31,6 @@
     ],
     [
       "astrid.core.executor",
-      "astrid.core.paths"
-    ],
-    [
-      "astrid.core.executor",
       "astrid.core.project"
     ],
     [
@@ -94,7 +90,6 @@
       "astrid.core.integrations",
       "astrid.core.orchestrator",
       "astrid.core.pack",
-      "astrid.core.paths",
       "astrid.core.project",
       "astrid.core.runtime",
       "astrid.core.session",
@@ -109,5 +104,5 @@
       "astrid.core.model_catalog"
     ]
   ],
-  "pair_count": 20
+  "pair_count": 19
 }

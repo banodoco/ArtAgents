@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from astrid.core.project.paths import resolve_projects_root
+from astrid.core.foundation.project_paths import resolve_projects_root
 
 
 def discover_projects(*, root: str | Path | None = None) -> list[str]:

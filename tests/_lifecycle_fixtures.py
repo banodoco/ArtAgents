@@ -13,7 +13,7 @@ import os
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from astrid.core.project.paths import PROJECTS_ROOT_ENV
+from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV
 from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
 from astrid.core.session.model import Session

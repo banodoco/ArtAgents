@@ -24,7 +24,7 @@ from astrid.core.orchestrator.registry import (  # noqa: E402
     load_default_registry as load_orchestrators,
 )
 from astrid.core.search import short_description_or_truncated  # noqa: E402
-from astrid.core.paths import REPO_ROOT as ASTRID_REPO_ROOT  # noqa: E402
+from astrid.core.foundation.paths import REPO_ROOT as ASTRID_REPO_ROOT  # noqa: E402
 
 CORE_SKILL_PATH = REPO_ROOT / "astrid" / "packs" / "_core" / "skill" / "SKILL.md"
 

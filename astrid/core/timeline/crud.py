@@ -664,7 +664,7 @@ def _set_project_default(
     root: str | Path | None = None,
 ) -> None:
     """Rewrite ``project.json`` so ``default_timeline_id`` points at *ulid*."""
-    from astrid.core.project.paths import project_json_path
+    from astrid.core.foundation.project_paths import project_json_path
     from astrid.core.project.schema import validate_project
 
     pp = project_json_path(project_slug, root=root)

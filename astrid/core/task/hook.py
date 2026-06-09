@@ -30,7 +30,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional, Sequence
 
-from astrid.core.project.paths import (
+from astrid.core.foundation.project_paths import (
     ProjectPathError,
     resolve_projects_root,
     validate_project_slug,

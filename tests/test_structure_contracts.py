@@ -546,7 +546,7 @@ def test_timeline_facade_files_are_strictly_thin_re_exports() -> None:
     no function/class definitions."""
     import ast
 
-    from astrid.core.paths import REPO_ROOT
+    from astrid.core.foundation.paths import REPO_ROOT
 
     facade_files = (
         REPO_ROOT / "astrid" / "core" / "timeline" / "__init__.py",
@@ -1000,7 +1000,7 @@ def test_real_repo_top_level_matches_structure_constants() -> None:
     * No unexpected ``.py`` files or directories may be present on disk
       (dotfiles are skipped, matching the validator filter).
     """
-    from astrid.core.paths import REPO_ROOT
+    from astrid.core.foundation.paths import REPO_ROOT
     from astrid.core.structure import TOP_LEVEL_ASTRID_DIRS, TOP_LEVEL_ASTRID_FILES
 
     astrid_root = REPO_ROOT / "astrid"
@@ -1060,7 +1060,7 @@ def test_architecture_inventories_parse_and_have_required_structure() -> None:
     """
     import json
 
-    from astrid.core.paths import REPO_ROOT
+    from astrid.core.foundation.paths import REPO_ROOT
 
     arch_dir = REPO_ROOT / "docs" / "architecture"
 
@@ -1268,7 +1268,7 @@ def test_giant_file_inventory_matches_rationale() -> None:
     """
     import re
 
-    from astrid.core.paths import REPO_ROOT
+    from astrid.core.foundation.paths import REPO_ROOT
 
     GIANT_THRESHOLD = 1200
 

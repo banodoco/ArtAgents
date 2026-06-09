@@ -116,7 +116,7 @@ def discover_timelines_for_project(
     This function is **read-only** — it never creates, writes, or deletes
     any file under the project directory.
     """
-    from astrid.core.project.paths import resolve_projects_root, validate_project_slug
+    from astrid.core.foundation.project_paths import resolve_projects_root, validate_project_slug
     from astrid.core.threads.ids import is_ulid
 
     slug = validate_project_slug(project_slug)
@@ -525,7 +525,7 @@ def checkpoint_path_for_run(
     Checkpoints live under ``<project>/runs/migrations/<timestamp>/``
     and are never written inside source timeline directories.
     """
-    from astrid.core.project.paths import project_dir, validate_project_slug
+    from astrid.core.foundation.project_paths import project_dir, validate_project_slug
 
     slug = validate_project_slug(project_slug)
     ts = run_ts if run_ts is not None else str(int(time.time()))

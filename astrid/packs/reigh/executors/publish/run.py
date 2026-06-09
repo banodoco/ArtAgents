@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core import timeline
-from astrid.core.util.hash import sha256_file
+from astrid.core.foundation.hash import sha256_file
 
 TIMELINE_ASSETS_BUCKET = "timeline-assets"
 DEFAULT_TIMEOUT = 60.0

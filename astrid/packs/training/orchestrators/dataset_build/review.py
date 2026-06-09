@@ -101,7 +101,7 @@ def apply_review_decisions(
 def _persist_caption_sidecar(item: dict[str, Any]) -> Path:
     media_path = Path(str(item["media_path"])).expanduser()
     if not media_path.is_absolute():
-        from astrid.core.paths import REPO_ROOT
+        from astrid.core.foundation.paths import REPO_ROOT
 
         media_path = (REPO_ROOT / media_path).resolve()
     caption = dict(item.get("caption") or {})
@@ -137,7 +137,7 @@ def _existing_caption_sidecar(item: Mapping[str, Any], *, target_sidecar: Path) 
     path = Path(value).expanduser()
     if path.is_absolute():
         return path
-    from astrid.core.paths import REPO_ROOT
+    from astrid.core.foundation.paths import REPO_ROOT
 
     return (REPO_ROOT / path).resolve()
 

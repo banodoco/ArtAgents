@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from astrid.core.contracts.exec_error import ExecError
-from astrid.core.project.paths import ProjectPathError
+from astrid.core.foundation.project_paths import ProjectPathError
 
 
 class AstridSDKError(RuntimeError):

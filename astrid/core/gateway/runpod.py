@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.paths import resolve_projects_root
+from astrid.core.foundation.project_paths import resolve_projects_root
 
 
 def dispatch_runpod(args: list[str]) -> int:

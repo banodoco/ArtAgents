@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.project import paths
+from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import create_project
 from astrid.core.project.schema import validate_project
 

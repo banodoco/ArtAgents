@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.util.atomic_io import write_json_atomic as _atomic_write_json
-from astrid.core.util.hash import sha256_file
+from astrid.core.foundation.hash import sha256_file
 
 
 def write_json_atomic(path: str | Path, payload: Any) -> None:

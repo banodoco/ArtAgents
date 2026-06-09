@@ -67,7 +67,7 @@ def resolve_default_project_for_sdk(
     use, but it never prints, binds a session, or mutates ``ASTRID_SESSION_ID``.
     """
 
-    from astrid.core.project.paths import resolve_projects_root
+    from astrid.core.foundation.project_paths import resolve_projects_root
     from astrid.core.project.project import create_project
 
     slug = resolve_default_project(cwd) or fallback_slug

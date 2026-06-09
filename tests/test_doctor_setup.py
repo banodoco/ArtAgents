@@ -263,7 +263,7 @@ class DoctorSetupTest(unittest.TestCase):
             )
 
             with mock.patch.object(doctor, "_probe_pid_liveness", return_value="dead"), mock.patch(
-                "astrid.core.project.paths.resolve_projects_root",
+                "astrid.core.foundation.project_paths.resolve_projects_root",
                 return_value=projects_root,
             ):
                 check = doctor._check_stale_project_runs()
@@ -303,7 +303,7 @@ class DoctorSetupTest(unittest.TestCase):
             run_json.write_text(json.dumps(original), encoding="utf-8")
 
             with mock.patch(
-                "astrid.core.project.paths.resolve_projects_root",
+                "astrid.core.foundation.project_paths.resolve_projects_root",
                 return_value=projects_root,
             ):
                 check = doctor._check_stale_project_runs()

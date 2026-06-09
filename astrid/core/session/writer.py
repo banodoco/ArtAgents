@@ -55,7 +55,7 @@ from astrid.core.project.current_run import (
     migrate_legacy_active_run_before_writer_auth,
     read_current_run,
 )
-from astrid.core.project.paths import project_dir
+from astrid.core.foundation.project_paths import project_dir
 from astrid.core.session.model import Session, now_iso
 from astrid.core.session.paths import session_path
 from astrid.core.task.events import (

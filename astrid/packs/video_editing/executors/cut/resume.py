@@ -27,7 +27,7 @@ from astrid.core.timeline import (
     save_timeline,
 )
 from astrid.core.util.time import utc_now_seconds
-from astrid.core.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 
 from .registry import rebase_registry_paths
 from .timeline_build import _register_cut_outputs

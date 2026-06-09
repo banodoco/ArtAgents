@@ -18,7 +18,7 @@ from astrid.core import modalities
 from astrid.packs.iteration.executors.assemble import run as assemble
 from astrid.packs.iteration.executors.prepare import run as prepare
 from astrid.packs.rendering.executors.render import run as render_executor
-from astrid.core.paths import REPO_ROOT
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.threads.ids import is_ulid
 from astrid.core.threads.index import ThreadIndexStore
 from astrid.core.threads.schema import SCHEMA_VERSION

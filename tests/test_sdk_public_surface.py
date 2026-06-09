@@ -3128,7 +3128,7 @@ def test_gateway_run_passes_bound_project_via_request_metadata(
     import types
     from unittest.mock import MagicMock, patch
 
-    from astrid.core.project import paths as project_paths
+    from astrid.core.foundation import project_paths
     from astrid.core.project.project import create_project
     from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
     from astrid.core.session.lifecycle import create_session

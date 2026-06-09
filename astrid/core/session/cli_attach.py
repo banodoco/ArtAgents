@@ -17,7 +17,7 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
-from astrid.core.project.paths import project_dir, resolve_projects_root
+from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
 from astrid.core.project.project import ProjectError, require_project
 # attach_session is imported via late import inside cmd_attach to preserve
 # monkeypatch seams (tests setattr on cli.attach_session).

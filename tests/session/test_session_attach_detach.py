@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project import paths as project_paths
+from astrid.core.foundation import project_paths
 from astrid.core.project.current_run import write_current_run
 from astrid.core.session import cli
 from astrid.core.session import paths as session_paths

@@ -28,7 +28,7 @@ from astrid.core.timeline import (
     validate_arrangement_duration_window,
 )
 from astrid.core.util.time import _utc_now, utc_now_seconds
-from astrid.core.paths import WORKSPACE_ROOT
+from astrid.core.foundation.paths import WORKSPACE_ROOT
 from astrid.core.theme import load_theme
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 
