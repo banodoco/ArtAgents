@@ -399,7 +399,7 @@ these for the topics they cover:
 - [contract.md](contract.md) — Formal
   definitions for pack identity, capability identity, aliases, forks,
   overrides, and the unified layout contract.
-- [discovery-for-agents.md](../discovery-for-agents.md) — How a cold agent
+- [discovery-for-agents.md](../guides/discovery-for-agents.md) — How a cold agent
   discovers capabilities via `skills list`, `executors search`, and
   `inspect --json`.
 - [aliases-vs-forks-vs-overrides.md](aliases-vs-forks-vs-overrides.md) —

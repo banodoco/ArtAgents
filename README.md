@@ -2,7 +2,7 @@
 
 Astrid is a Python SDK for building and running open-source agentic UXes — a harness toolkit for agents and humans to make art.
 
-New here? Start with **[Build your first agentic UX](docs/build-your-first-agentic-ux.md)**.
+New here? Start with **[Build your first agentic UX](docs/guides/build-your-first-agentic-ux.md)**.
 
 ## How it works
 
@@ -41,11 +41,11 @@ Give this to your agents to get started:
 ◇                                                                            ◇
 ┃                          ◇  Make Something New  ◇                          ┃
 ┃            copy docs/templates/{executor,orchestrator,element}/            ┃
-┃                        read docs/creating-tools.md                         ┃
+┃                        read docs/guides/creating-tools.md                         ┃
 ┃                                                                            ┃
 ┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳          ask the maker what they must do           ╳ ╳ ╳ ╳ ╳   ┃
-┃   ╳ ╳ ╳ ╳ ╳         docs/ideas.md has a thought or two         ╳ ╳ ╳ ╳ ╳   ┃
+┃   ╳ ╳ ╳ ╳ ╳         docs/guides/ideas.md has a thought or two         ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳        runs/ is where the outputs stay              ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳          just begin, you'll find your way          ╳ ╳ ╳ ╳ ╳   ┃
 ┃   ╳ ╳ ╳ ╳ ╳────────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳   ┃

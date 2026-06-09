@@ -86,7 +86,7 @@ def test_platform_contract_test_avoids_internal_astrid_imports() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Textual drift guards — verify docs/platform-contract.md names every
+# Textual drift guards — verify docs/contracts/platform-contract.md names every
 # required v1 schema file, declares stability status on element extension
 # areas, and preserves the disclosure-only trust block invariants.
 # ---------------------------------------------------------------------------

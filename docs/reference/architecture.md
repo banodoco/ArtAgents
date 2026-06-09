@@ -62,14 +62,14 @@ Top-level `astrid/*.py` modules are shared libraries or
 system commands only; they are not alternate executor or orchestrator
 implementations.
 
-For creation decisions, use `docs/creating-tools.md` and the templates under
+For creation decisions, use `docs/guides/creating-tools.md` and the templates under
 `docs/templates/`. Add an executor for one concrete action, an orchestrator for
 a workflow, and an element for a reusable render primitive. Agents should avoid
 manual chains of low-level stage artifacts unless they are debugging a specific
 executor.
 
 For a step-by-step tutorial on building your first agentic UX, see
-[docs/build-your-first-agentic-ux.md](build-your-first-agentic-ux.md).
+[docs/build-your-first-agentic-ux.md](../guides/build-your-first-agentic-ux.md).
 
 ## Orchestrators
 
@@ -130,7 +130,7 @@ This classification keeps only retained root and bin launchers; executor-owned p
 
 Repository structure enforcement, import layering rules, exemption lists, and
 the `validate_repo_structure()` machinery are documented in
-[docs/architecture/repo-shape.md](architecture/repo-shape.md).
+[docs/architecture/repo-shape.md](../architecture/repo-shape.md).
 
 ## Retired Concepts
 

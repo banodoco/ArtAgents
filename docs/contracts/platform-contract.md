@@ -4,8 +4,8 @@ This document is the normative v1 platform contract for the public Python SDK,
 manifest schemas, and the disclosure-only trust model. If this document and any
 other SDK or pack-system doc disagree, this file wins.
 
-For user-facing safe-use guidance, see [SECURITY.md](../SECURITY.md). For a
-friendlier SDK walkthrough, see [docs/sdk.md](sdk.md).
+For user-facing safe-use guidance, see [SECURITY.md](../../SECURITY.md). For a
+friendlier SDK walkthrough, see [docs/sdk.md](../reference/sdk.md).
 
 ## Contract Scope
 
@@ -390,9 +390,9 @@ that a pack behaves safely or only does what its declarations describe.
 
 ## References
 
-- [SECURITY.md](../SECURITY.md) — user-facing security posture
-- [docs/sdk.md](sdk.md) — SDK walkthrough and examples
-- [docs/packs/creating-packs.md](packs/creating-packs.md) — pack authoring reference
+- [SECURITY.md](../../SECURITY.md) — user-facing security posture
+- [docs/sdk.md](../reference/sdk.md) — SDK walkthrough and examples
+- [docs/packs/creating-packs.md](../packs/creating-packs.md) — pack authoring reference
 - `astrid/__init__.py` — top-level public export list
 - `astrid/sdk/` — public SDK DTOs and function entrypoints
 - `astrid/core/contracts/schema.py` — shared DTO field types

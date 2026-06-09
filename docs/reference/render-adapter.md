@@ -129,8 +129,8 @@ Python SDK importable on any machine with only Python dependencies.
 
 ## Related Documents
 
-- [adapter-packs.md](packs/adapter-packs.md) — General adapter pack conventions
-- [STAGE.md](../astrid/packs/rendering/executors/render/STAGE.md) — Render executor stage documentation
+- [adapter-packs.md](../packs/adapter-packs.md) — General adapter pack conventions
+- [STAGE.md](../../astrid/packs/rendering/executors/render/STAGE.md) — Render executor stage documentation
 - `astrid/packs/rendering/executors/render/run.py:_validate_project_dir` — Fail-closed validation
 - `remotion/package.json` — Adapter dependency declarations
 - SD2 gate decision — `state.json` settled decision record

@@ -35,7 +35,7 @@ milestone can prove:
 
 The active wording cleanup surface for this milestone is limited to live Astrid
 runtime/spec/doc/test surfaces plus this plan doc and
-`docs/integration_contracts.md`. Historical milestone records remain archival
+`docs/contracts/integration_contracts.md`. Historical milestone records remain archival
 exceptions. The only allowed remaining wording-audit matches are:
 
 - `docs/architecture/timeline-event-sourcing/m1-schema.md`

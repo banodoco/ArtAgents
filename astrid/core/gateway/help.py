@@ -32,7 +32,7 @@ def _print_entrypoint_help() -> None:
     print(
         f"""Astrid command gateway — Python SDK + CLI
 
-The canonical Python boundary is ``import astrid`` (see docs/sdk.md).
+The canonical Python boundary is ``import astrid`` (see docs/reference/sdk.md).
 This gateway is the CLI entry point for orchestration, authoring, and task management.
 
 Usage:
@@ -64,7 +64,7 @@ Start here:
   Task-mode agent-facing verbs (mid-run):
     python3 -m astrid next --project <slug>
     python3 -m astrid ack <step> --project <slug> --decision {{approve,retry,iterate,abort}} [--agent <id> | --human <name>] [--evidence path] [--feedback "..."] [--item id]
-    python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/HOOKS.md
+    python3 -m astrid hook stop   # Claude Code Stop-hook entry point; see docs/guides/hooks.md
     python3 -m astrid skip   # skip a step (use --help for details)
     # sessions -- tab binding and takeover
   Session verbs (Sprint 1):

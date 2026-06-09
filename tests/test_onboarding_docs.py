@@ -17,8 +17,8 @@ class OnboardingDocsTest(unittest.TestCase):
             for path in (
                 "README.md",
                 "astrid/packs/_core/skill/SKILL.md",
-                "docs/architecture.md",
-                "docs/creating-tools.md",
+                "docs/reference/architecture.md",
+                "docs/guides/creating-tools.md",
             )
         )
 
@@ -54,7 +54,7 @@ class OnboardingDocsTest(unittest.TestCase):
             "astrid/packs/<pack>/<slug>/{orchestrator.yaml,STAGE.md,run.py}",
             "Top-level `astrid/*.py`",
             "examples/briefs/",
-            "docs/creating-tools.md",
+            "docs/guides/creating-tools.md",
             "docs/templates/executor/",
             "docs/templates/orchestrator/",
             "docs/templates/element/",

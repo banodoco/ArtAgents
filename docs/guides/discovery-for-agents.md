@@ -22,11 +22,11 @@ pack and is exposed through a consistent list/search/inspect surface with a
 `--json` flag for machine consumption.
 
 See the formal vocabulary in
-[docs/packs/contract.md](packs/contract.md).
+[docs/packs/contract.md](../packs/contract.md).
 
 For the taxonomy fields that classify packs for discovery and filtering
 (`origin`, `install_tier`, `pack_type`, `domain`, `stability`, `support`),
-see [docs/packs/pack-taxonomy.md](packs/pack-taxonomy.md).
+see [docs/packs/pack-taxonomy.md](../packs/pack-taxonomy.md).
 
 ## Three Capability Kinds
 
@@ -153,7 +153,7 @@ When an invalid value is passed:
 
 When an agent invokes a command with an invalid enum value, the stderr output
 will contain the structured envelope markers described in
-[docs/error-model.md](error-model.md).  Specifically:
+[docs/error-model.md](../contracts/error-model.md).  Specifically:
 
 ```
 valid options: cross-fade, cut, fade

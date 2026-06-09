@@ -118,7 +118,7 @@ python3 -m astrid skills list --json
 ```
 
 If you create a custom pack whose conventions agents need to remember, add
-`astrid/packs/<pack>/skill/SKILL.md` and follow `docs/skills-install.md`.
+`astrid/packs/<pack>/skill/SKILL.md` and follow `docs/guides/skills-install.md`.
 
 ## Run A Tool
 
@@ -208,7 +208,7 @@ step does not need asynchronous artifact fetch/retry behavior.
 
 ## Create Something New
 
-Read `docs/creating-tools.md`, then follow this build order. Complete every
+Read `docs/guides/creating-tools.md`, then follow this build order. Complete every
 step before falling back to the next.
 
 1. **Search and compose existing executors first.** If existing executors can
@@ -368,10 +368,10 @@ Full details: [aliases-vs-forks-vs-overrides.md](docs/aliases-vs-forks-vs-overri
 
 ### Further Reading
 
-- [docs/discovery-for-agents.md](docs/discovery-for-agents.md) — Agent-facing
+- [docs/discovery-for-agents.md](docs/guides/discovery-for-agents.md) — Agent-facing
   CLI contract
 - [docs/creating-packs.md](docs/creating-packs.md) — Pack authoring workflow
-- [docs/creating-tools.md](docs/creating-tools.md) — When to create each
+- [docs/creating-tools.md](docs/guides/creating-tools.md) — When to create each
   capability kind
 - [docs/personal-packs.md](docs/personal-packs.md) — Personal pack workflow
 - [docs/adapter-packs.md](docs/adapter-packs.md) — Adapter pack conventions
@@ -505,7 +505,7 @@ Default mechanism is per-pack symlinks under `~/.claude/skills/`, `~/.codex/skil
 
 If no harness is installed, Astrid prints a one-line nudge to stderr at most once every seven days when you run a non-`skills` subcommand. Suppress with `ASTRID_NO_NUDGE=1` or `--quiet`.
 
-See `docs/skills-install.md` for the SkillDescriptor contract and the `metadata.hermes.*` extension block.
+See `docs/guides/skills-install.md` for the SkillDescriptor contract and the `metadata.hermes.*` extension block.
 
 ## Adding overlays to a rendered video
 
@@ -673,4 +673,4 @@ When a workflow is awkward, brittle, or undocumented, tell the user directly. Su
 
 ## Begin
 
-Ask the maker what they want to make or learn. If they want ideas, see `docs/ideas.md`.
+Ask the maker what they want to make or learn. If they want ideas, see `docs/guides/ideas.md`.

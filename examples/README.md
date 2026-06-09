@@ -10,7 +10,7 @@ A complete external-application walkthrough of the public Astrid SDK:
 **discover → inspect → invoke → read-events**.
 
 - **Source**: [`agentic_ux/agentic_ux.py`](agentic_ux/agentic_ux.py)
-- **Tutorial**: [`docs/build-your-first-agentic-ux.md`](../docs/build-your-first-agentic-ux.md)
+- **Tutorial**: [`docs/guides/build-your-first-agentic-ux.md`](../docs/guides/build-your-first-agentic-ux.md)
 
 ```bash
 python examples/agentic_ux/agentic_ux.py \

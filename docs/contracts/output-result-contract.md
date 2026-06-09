@@ -6,7 +6,7 @@ cross-executor contract: it says what inputs were used, what outputs were produc
 and how to verify them.
 
 > **Note**: This is the implementation-level reference. For the SDK-facing
-> `manifest_path` pointer contract, see [SDK docs](sdk.md). For the normative
+> `manifest_path` pointer contract, see [SDK docs](../reference/sdk.md). For the normative
 > platform stability tiers, see [platform-contract.md](platform-contract.md).
 
 ## Universal manifest: `{out}/manifest.json`
@@ -271,7 +271,7 @@ registry conformance gate in `tests/test_result_manifest.py`.
   fields (`modality`, `model`, `mode_used`, `model_actual`, `execution`,
   `request`, `seed`, plus optional v2 fields like `applied_features`,
   `dropped_features`, `duration_ms`, `cost_usd`, `request_id`). See
-  [docs/generation/20-manifest-schema.md](generation/20-manifest-schema.md).
+  [docs/generation/20-manifest-schema.md](../generation/20-manifest-schema.md).
 
 New fields are **additive-only** — existing fields will not be removed or
 change type within a major version.

@@ -15,4 +15,4 @@ When the maker isn't sure what to make, suggest one of these.
 
 - "What does this executor do?" — inspect any executor
 - "What's the timeline data model?" — read `examples/hype.timeline.json`
-- "How do I add my own tool?" — read `docs/creating-tools.md`
+- "How do I add my own tool?" — read `docs/guides/creating-tools.md`

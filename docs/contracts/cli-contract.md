@@ -122,5 +122,5 @@ Key points for agents:
 - [Error Model](error-model.md) — canonical exit-code taxonomy, error envelope contract, recovery-command expectations.
 - [Run Ledger Contract](run-ledger-contract.md) — event log append semantics and hash-chain integrity.
 - [Platform Contract](platform-contract.md) — cross-backend primitives and gateway-level guarantees.
-- [Discovery for Agents](discovery-for-agents.md) — how agents discover available projects, timelines, orchestrators, and elements.
+- [Discovery for Agents](../guides/discovery-for-agents.md) — how agents discover available projects, timelines, orchestrators, and elements.
 - [Output Result Contract](output-result-contract.md) — how element and executor outputs are surfaced.

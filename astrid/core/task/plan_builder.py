@@ -87,7 +87,7 @@ RECOVERY COMMANDS
 
 STOP HOOK
 - The `astrid hook stop` command is the Claude Code Stop-hook entry point.
-  When wired into .claude/settings.json (see docs/HOOKS.md) it re-injects this
+  When wired into .claude/settings.json (see docs/guides/hooks.md) it re-injects this
   preamble and the current step on every Stop boundary so the rules above
   stay live for the entire run. The hook is a silent no-op outside task mode.
 

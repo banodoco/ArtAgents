@@ -68,7 +68,7 @@ Per-modality contracts ← image (wired) | video (wired) | audio (forward spec)
 
 ## Related docs
 
-- [Universal result manifest contract](../output-result-contract.md)
-- [Discovery for agents](../discovery-for-agents.md)
-- [Astrid CLI contract](../cli-contract.md)
+- [Universal result manifest contract](../contracts/output-result-contract.md)
+- [Discovery for agents](../guides/discovery-for-agents.md)
+- [Astrid CLI contract](../contracts/cli-contract.md)
 - [Packs: contract](../packs/contract.md)

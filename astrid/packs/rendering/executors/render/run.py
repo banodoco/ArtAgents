@@ -273,12 +273,12 @@ def _validate_project_dir(project_dir: Path) -> None:
     if not node_modules.exists():
         raise FileNotFoundError(
             "Run `npm install` in tools/remotion/ first; "
-            "see docs/render-adapter.md for @banodoco adapter package install instructions"
+            "see docs/reference/render-adapter.md for @banodoco adapter package install instructions"
         )
 
     # Fail closed if any required @banodoco adapter package is missing.
     # These packages are adapter-installed (GitHub tarball), not published
-    # to a public npm registry.  See docs/render-adapter.md (SD2).
+    # to a public npm registry.  See docs/reference/render-adapter.md (SD2).
     banodoco_root = node_modules / "@banodoco"
     _BANODOCO_REQUIRED = (
         "timeline-composition",
@@ -294,7 +294,7 @@ def _validate_project_dir(project_dir: Path) -> None:
         raise FileNotFoundError(
             f"Missing @banodoco render package(s): {', '.join(missing)}. "
             f"These packages are adapter-required and not published to a public npm registry. "
-            f"See docs/render-adapter.md for adapter install instructions."
+            f"See docs/reference/render-adapter.md for adapter install instructions."
         )
 
 

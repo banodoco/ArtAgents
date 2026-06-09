@@ -7,7 +7,7 @@ discovers capabilities, inspects schemas, dry-runs an executor, and
 observes a verified event stream.
 
 The code in this tutorial mirrors the checked-in example at
-[`examples/agentic_ux/agentic_ux.py`](../examples/agentic_ux/agentic_ux.py).
+[`examples/agentic_ux/agentic_ux.py`](../../examples/agentic_ux/agentic_ux.py).
 Every API call shown here uses the public SDK surface — no internal
 imports, no private modules.
 
@@ -264,7 +264,7 @@ except CapabilityEventLogError as e:
 ## Step 6 — Run the Complete Example
 
 The checked-in example at
-[`examples/agentic_ux/agentic_ux.py`](../examples/agentic_ux/agentic_ux.py)
+[`examples/agentic_ux/agentic_ux.py`](../../examples/agentic_ux/agentic_ux.py)
 bundles Steps 1–5 into a single argparse-driven script.  It runs
 the full **discover → inspect → invoke → read-events** loop against
 `editorial.arrange`, uses the golden events fixture, and prints a
@@ -310,10 +310,10 @@ user-facing workflows.
 
 ## Next Steps
 
-- Read [SDK Reference](sdk.md) for the full DTO and exception catalog.
-- Explore [Creating Packs](packs/creating-packs.md) to build your own
+- Read [SDK Reference](../reference/sdk.md) for the full DTO and exception catalog.
+- Explore [Creating Packs](../packs/creating-packs.md) to build your own
   executors and orchestrators.
-- See [Adapter Packs](packs/adapter-packs.md) for local, remote, and manual
+- See [Adapter Packs](../packs/adapter-packs.md) for local, remote, and manual
   execution backends.
 - Browse [Discovery for Agents](discovery-for-agents.md) to understand
   how AI agents consume the capability registry.

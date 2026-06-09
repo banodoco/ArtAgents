@@ -7,7 +7,7 @@ registered and ledgered.
 
 The registry below is the canonical ledger-perimeter reference.  Every entry
 corresponds to a row in the invocation-surfaces table in
-``docs/run-ledger-contract.md``.
+``docs/contracts/run-ledger-contract.md``.
 
 Meta-tests guard the built-in ``GenerationFacade`` methods and the
 ``_AUTO_BIND_RUN_VERBS`` gateway run prefixes so that unintentional drift is
@@ -20,7 +20,7 @@ caught before it breaks ledgering.
    are covered by the SDK ``out=`` ledger fix.  Plugins registered via
    ``astrid.core.generation.verbs.register_verb`` are resolved through
    ``__getattr__`` on ``GenerationFacade`` and are documented as an M1 static
-   coverage gap (see ``docs/run-ledger-contract.md`` limits table).
+   coverage gap (see ``docs/contracts/run-ledger-contract.md`` limits table).
 """
 
 from __future__ import annotations

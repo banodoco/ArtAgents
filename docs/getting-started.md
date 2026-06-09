@@ -44,14 +44,14 @@ python3 -m astrid setup           # configure local environment
 ## Where to Go Next
 
 - **SDK tutorial** — Walk through the full discover → inspect → invoke →
-  read-events loop: [Build Your First Agentic UX](build-your-first-agentic-ux.md).
+  read-events loop: [Build Your First Agentic UX](guides/build-your-first-agentic-ux.md).
 - **Pack authoring** — Build your own executors, orchestrators, and
   elements: start with [Pack Documentation](packs/) and
   [Creating Packs](packs/creating-packs.md).
 - **Contracts index** — Normative contracts that define the SDK surface,
   CLI behavior, error model, output format, and run ledger:
-  [Contracts Index](contracts.md).
+  [Contracts Index](contracts/README.md).
 - **Full SDK reference** — DTO catalog and exception hierarchy:
-  [SDK Reference](sdk.md).
+  [SDK Reference](reference/sdk.md).
 - **Discovery for agents** — How AI agents consume the capability
-  registry: [Discovery for Agents](discovery-for-agents.md).
+  registry: [Discovery for Agents](guides/discovery-for-agents.md).

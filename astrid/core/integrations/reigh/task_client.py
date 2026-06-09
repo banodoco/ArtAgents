@@ -12,7 +12,7 @@ is reigh-app's poller path; AA only writes via ``update-task-status``'s
 Status values are Title Case ONLY: ``Queued``, ``In Progress``, ``Complete``,
 ``Failed``, ``Cancelled``. Lowercase values will be rejected by
 ``update-task-status`` (see contract resolution #4 in
-``docs/integration_contracts.md``).
+``docs/contracts/integration_contracts.md``).
 """
 
 from __future__ import annotations

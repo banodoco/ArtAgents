@@ -6,7 +6,7 @@ the SDK surface is available directly from `import astrid`.
 
 > **Compatibility policy**: This document is a user-facing walkthrough. The
 > normative v1 compatibility contract lives in
-> [docs/platform-contract.md](platform-contract.md). That file defines the
+> [docs/platform-contract.md](../contracts/platform-contract.md). That file defines the
 > supported export list, SemVer rules, deprecation window, DTO stability tiers,
 > manifest schema contract, and disclosure-only trust block. When this doc and
 > `platform-contract.md` differ, the platform contract wins.
@@ -44,7 +44,7 @@ print(gen_result)
 ```
 
 > **Tutorial**: For a step-by-step walkthrough building your first Astrid
-> agentic UX, see [docs/build-your-first-agentic-ux.md](build-your-first-agentic-ux.md).
+> agentic UX, see [docs/build-your-first-agentic-ux.md](../guides/build-your-first-agentic-ux.md).
 
 ## Quick Examples
 
@@ -270,7 +270,7 @@ An invalid project slug raises `CapabilityPreconditionError`.
 
 ## DTO Reference
 
-See [platform-contract.md](platform-contract.md).
+See [platform-contract.md](../contracts/platform-contract.md).
 
 ### `manifest_path` Fallback Rules
 
@@ -290,7 +290,7 @@ The discovery follows a two-step fallback:
 
 When neither source yields a `manifest.json` file, `manifest_path` is `None`.
 
-Refer to the [output/result contract](output-result-contract.md) for the
+Refer to the [output/result contract](../contracts/output-result-contract.md) for the
 universal manifest schema, the kind vocabulary, file and directory hashing
 semantics, partial-output optionality, and domain-manifest coexistence rules.
 
@@ -307,7 +307,7 @@ if result.manifest_path:
 
 ## Stability Tiers
 
-See [platform-contract.md](platform-contract.md).
+See [platform-contract.md](../contracts/platform-contract.md).
 
 ## Exception Hierarchy
 

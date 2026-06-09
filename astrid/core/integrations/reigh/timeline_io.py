@@ -2,7 +2,7 @@
 
 The ``save_timeline`` helper here is the legacy compatibility write path used
 by Astrid's current Reigh bridge surfaces. It implements the optimistic-
-concurrency contract documented in ``docs/integration_contracts.md``: load
+concurrency contract documented in ``docs/contracts/integration_contracts.md``: load
 ``(timeline, config_version)`` via the ``reigh-data-fetch`` Edge Function,
 apply a caller-supplied mutator, then call the
 ``update_timeline_config_versioned(p_timeline_id, p_expected_version,

@@ -1,6 +1,6 @@
 """Stop-hook helper for Claude Code (Sprint 1 / DEC-016).
 
-`astrid hook stop` is wired into `.claude/settings.json` (see docs/HOOKS.md)
+`astrid hook stop` is wired into `.claude/settings.json` (see docs/guides/hooks.md)
 and re-prints the current `astrid next` output (preamble + current step) so
 context-decay does not erode the task-mode rules over a long run. When no
 active run can be discovered the command exits 0 silently — Claude Code's

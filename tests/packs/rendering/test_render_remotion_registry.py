@@ -36,7 +36,7 @@ class RenderRemotionRegistryGenerationTest(unittest.TestCase):
         composition_src = banodoco_root / "timeline-composition" / "typescript" / "src"
         composition_src.mkdir(parents=True)
         # _validate_project_dir requires all three @banodoco adapter packages
-        # (see docs/render-adapter.md).  Create stub directories for the other two.
+        # (see docs/reference/render-adapter.md).  Create stub directories for the other two.
         (banodoco_root / "timeline-schema").mkdir(parents=True)
         (banodoco_root / "timeline-theme-2rp").mkdir(parents=True)
         (project_dir / "package.json").write_text('{"scripts":{}}\n', encoding="utf-8")

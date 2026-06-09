@@ -8,7 +8,7 @@ is safe to install, start here.
 > **Platform contract**: The disclosure-only trust block (sandbox: none,
 > runs_with_user_process_permissions: true, permission_enforcement:
 > disclosure_only) is a first-class part of the normative v1 platform
-> contract defined in [docs/platform-contract.md](docs/platform-contract.md).
+> contract defined in [docs/contracts/platform-contract.md](docs/contracts/platform-contract.md).
 > That document is the source of truth for the v1 trust invariants,
 > pack-level permission contract, trust-on-install rules, and the
 > SemVer/deprecation guarantees that protect these security boundaries.

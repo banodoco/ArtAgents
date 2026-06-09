@@ -9,7 +9,7 @@ pipelines where agents and humans collaborate to make art.
 
 Start with **[Getting Started](getting-started.md)** to install, run your first
 command, and get oriented.  Then follow
-**[Build Your First Agentic UX](build-your-first-agentic-ux.md)** — a
+**[Build Your First Agentic UX](guides/build-your-first-agentic-ux.md)** — a
 step-by-step tutorial through discover → inspect → invoke → read-events via the
 public SDK.
 
@@ -23,9 +23,9 @@ validate workflow.
 ### I'm building agentic consumers
 
 If you're building AI agents that consume Astrid capabilities, start with
-**[Discovery for Agents](discovery-for-agents.md)** for how agents discover the
-capability registry, then the **[SDK Reference](sdk.md)** for the DTO catalog,
-and the **[Platform Contract](platform-contract.md)** for the normative v1 SDK
+**[Discovery for Agents](guides/discovery-for-agents.md)** for how agents discover the
+capability registry, then the **[SDK Reference](reference/sdk.md)** for the DTO catalog,
+and the **[Platform Contract](contracts/platform-contract.md)** for the normative v1 SDK
 boundary.
 
 ### I'm contributing to Astrid
@@ -38,20 +38,20 @@ Contributor-facing architecture docs live under
 
 ## Reference
 
-- **[Contracts Index](contracts.md)** — Every normative contract: platform, CLI,
+- **[Contracts Index](contracts/README.md)** — Every normative contract: platform, CLI,
   error model, output result, run ledger.
 - **[Generation Subsystem](generation/README.md)** — Multi-modal generation
   (image, video, audio) registry, manifest, and modality contracts.
-- **[CLI Contract](cli-contract.md)** — Stable stdout/stderr discipline, JSON
+- **[CLI Contract](contracts/cli-contract.md)** — Stable stdout/stderr discipline, JSON
   mode, exit codes.
-- **[Error Model](error-model.md)** — Exit-code taxonomy and structured error
+- **[Error Model](contracts/error-model.md)** — Exit-code taxonomy and structured error
   envelopes.
-- **[Environment Variables](env-vars.md)** — Canonical `ASTRID_*` reference.
-- **[Creating Tools](creating-tools.md)** — Adding new capabilities.
-- **[Skills Install](skills-install.md)** — Installing Astrid prompt content as
+- **[Environment Variables](reference/env-vars.md)** — Canonical `ASTRID_*` reference.
+- **[Creating Tools](guides/creating-tools.md)** — Adding new capabilities.
+- **[Skills Install](guides/skills-install.md)** — Installing Astrid prompt content as
   skills into Claude Code, Codex, and Hermes.
-- **[HOOKS](HOOKS.md)** — Claude Code stop hook for re-injecting task-mode rules.
-- **[Ideas](ideas.md)** — Suggestions for what to make or learn with Astrid.
+- **[HOOKS](guides/hooks.md)** — Claude Code stop hook for re-injecting task-mode rules.
+- **[Ideas](guides/ideas.md)** — Suggestions for what to make or learn with Astrid.
 
 ## Examples
 

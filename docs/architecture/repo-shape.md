@@ -21,7 +21,7 @@ in the `astrid/core/gateway/` package. SDK implementation lives in the
 
 | Surface | File | Classification |
 | --- | --- | --- |
-| `import astrid` | `astrid/__init__.py` | **Public SDK facade** — lazy-loads the v1 SDK names via `__getattr__`. The normative v1 contract is [docs/platform-contract.md](../platform-contract.md). |
+| `import astrid` | `astrid/__init__.py` | **Public SDK facade** — lazy-loads the v1 SDK names via `__getattr__`. The normative v1 contract is [docs/platform-contract.md](../contracts/platform-contract.md). |
 | `astrid.sdk` | `astrid/sdk/` | **Public SDK package** — DTOs, exception taxonomy, serialization helpers, discovery/invoke/generate facades. Direct imports of private SDK implementation modules are out of contract for v1. |
 
 The 28 names in `astrid.__all__` are:
@@ -252,19 +252,19 @@ contract documents:
 
 | Document | Purpose |
 | --- | --- |
-| `docs/architecture.md` | User-facing architecture overview (orchestrators, executors, elements, shared libraries, structure enforcement) |
+| `docs/reference/architecture.md` | User-facing architecture overview (orchestrators, executors, elements, shared libraries, structure enforcement) |
 | `docs/architecture/repo-shape.md` | **This document** — M5 canonical repo-shape contract |
 | `docs/architecture/top-level-inventory.json` | Machine-readable top-level entry inventory (M5) |
 | `docs/architecture/pack-layout-variants.json` | Machine-readable pack variant catalog |
 | `docs/architecture/test-relocation-map.json` | Test relocation target map (consumed by M3) |
 | `docs/architecture/giant-file-split-candidates.json` | Giant-file split candidates with line counts (consumed by M4, now completed) |
 | `docs/architecture/shim-legacy-audit.md` | (removed — audit absorbed into §3 above) |
-| `docs/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
-| `docs/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
-| `docs/sdk.md` | User-facing SDK walkthrough |
-| `docs/run-ledger-contract.md` | Run ledger contract |
-| `docs/integration_contracts.md` | Integration contracts |
-| `docs/output-result-contract.md` | Output result contract |
+| `docs/contracts/platform-contract.md` | Normative v1 platform contract (SDK exports, SemVer, deprecation window). |
+| `docs/contracts/cli-contract.md` | Agent CLI contract (stream discipline, output modes, error signaling) |
+| `docs/reference/sdk.md` | User-facing SDK walkthrough |
+| `docs/contracts/run-ledger-contract.md` | Run ledger contract |
+| `docs/contracts/integration_contracts.md` | Integration contracts |
+| `docs/contracts/output-result-contract.md` | Output result contract |
 
 ## 9. Soft Boundary Conventions (Not Hard-Gated)
 

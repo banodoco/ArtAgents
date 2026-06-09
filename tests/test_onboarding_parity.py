@@ -1,6 +1,6 @@
 """Onboarding documentation parity tests.
 
-Verifies that ``docs/build-your-first-agentic-ux.md`` is mechanically
+Verifies that ``docs/guides/build-your-first-agentic-ux.md`` is mechanically
 consistent with the live SDK: every documented API name is exported,
 every code block exercises a real code path, ``editorial.arrange`` is
 discoverable, dry-run invocation works without API keys or network,

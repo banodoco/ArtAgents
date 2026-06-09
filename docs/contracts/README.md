@@ -42,12 +42,12 @@ platform contract is the final authority.
 ## Timeline & Event Contracts
 
 Timeline and event-sourcing schemas live under
-[docs/architecture/timeline-event-sourcing/](architecture/timeline-event-sourcing/):
+[docs/architecture/timeline-event-sourcing/](../architecture/timeline-event-sourcing/):
 M1 schema, M2 clip primitives, M3 secondary primitives, M5 concurrency,
 and M6 sync contracts.
 
 ## Pack Contract
 
 The pack vocabulary and discovery contract lives at
-[docs/packs/contract.md](packs/contract.md).  It defines capability
+[docs/packs/contract.md](../packs/contract.md).  It defines capability
 identity, pack axes, manifest convergence, and the current pack listing.
