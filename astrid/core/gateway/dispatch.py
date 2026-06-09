@@ -2,18 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.runtime.log_capture import (
-    open_run_log_capture,
-    run_subprocess_with_capture,
-)
 from astrid.core.session import cli as _session_cli
 
 _ALIAS_SUNSET_VERSION = "0.3.0"
@@ -256,85 +250,9 @@ def _dispatch_test(args: list[str]) -> int:
 
 def _dispatch_scratch(args: list[str]) -> int:
     """Run a throwaway Python script with default project context."""
-    import argparse
+    from .scratch import dispatch_scratch
 
-    from astrid.core.contracts.run_status import RunStatus
-    from astrid.core.project.run import (
-        finalize_project_run,
-        prepare_project_run,
-    )
-    from astrid.core.subprocess_env import build_child_subprocess_env
-
-    from . import ASTRID_GATEWAY_RESOLVED_PROJECT_ENV, DEFAULT_PROJECT_SLUG
-
-    parser = argparse.ArgumentParser(prog="astrid scratch")
-    sub = parser.add_subparsers(dest="scratch_command")
-    run_parser = sub.add_parser("run", help="Run a throwaway Python script")
-    run_parser.add_argument("file", help="Python file to run")
-    run_parser.add_argument(
-        "extra", nargs=argparse.REMAINDER, help="Extra arguments forwarded to the script"
-    )
-
-    parsed = parser.parse_args(args)
-    if parsed.scratch_command != "run":
-        parser.print_help()
-        return 1
-
-    file_path = Path(parsed.file)
-    if not file_path.is_file():
-        print(f"scratch: file not found: {file_path}", file=sys.__stderr__)
-        return 1
-
-    project_slug = os.environ.get(ASTRID_GATEWAY_RESOLVED_PROJECT_ENV)
-    if not project_slug:
-        try:
-            from astrid.core.project.paths import resolve_projects_root
-            from astrid.core.session.binding import resolve_current_session_with_fs_fallback
-
-            session = resolve_current_session_with_fs_fallback(
-                projects_root=resolve_projects_root(),
-            )
-            if session and getattr(session, "project", None):
-                project_slug = session.project
-        except Exception:
-            pass
-    if not project_slug:
-        project_slug = DEFAULT_PROJECT_SLUG
-
-    extra = parsed.extra or []
-    argv = [str(file_path)] + extra
-
-    context = prepare_project_run(
-        project_slug,
-        tool_id="scratch.run",
-        kind="scratch",
-        argv=argv,
-        requires_timeline=False,
-        auto_bound=True,
-        invocation="scratch",
-    )
-
-    child_env = build_child_subprocess_env(
-        explicit_env={
-            "ASTRID_PROJECT_RUN": "1",
-        },
-    )
-    with open_run_log_capture(context.run_root) as logs:
-        returncode = run_subprocess_with_capture(
-            [sys.executable, str(file_path)] + extra,
-            env=child_env,
-            stdout_log=logs.stdout,
-            stderr_log=logs.stderr,
-        )
-
-    status = RunStatus.COMPLETED if returncode == 0 else RunStatus.FAILED
-    finalize_project_run(
-        context,
-        status=status,
-        returncode=returncode,
-    )
-
-    return returncode
+    return dispatch_scratch(args)
 
 
 _TOP_LEVEL_HANDLERS = {
@@ -476,108 +394,27 @@ def _dispatch_events(args: list[str]) -> int:
 
 def _dispatch_runpod(args: list[str]) -> int:
     """Dispatch ``astrid runpod {sweep,volumes,ensure-storage} ...`` sub-verbs."""
-    import argparse
+    from .runpod import dispatch_runpod
 
-    parser = argparse.ArgumentParser(prog="astrid runpod")
-    sub = parser.add_subparsers(dest="command", required=True)
-    sweep = sub.add_parser("sweep")
-    sweep.add_argument("--hard", action="store_true")
-    sweep.add_argument("--dry-run", action="store_true")
-    sweep.add_argument("--projects-root")
-    sweep.set_defaults(handler=_dispatch_runpod_sweep)
-    sub.add_parser("volumes").set_defaults(handler=_dispatch_runpod_volumes)
-    ensure = sub.add_parser("ensure-storage")
-    ensure.set_defaults(handler=_dispatch_runpod_ensure_storage)
-    parsed, tail = parser.parse_known_args(args)
-    return int(parsed.handler(parsed, tail))
+    return dispatch_runpod(args)
 
 
 def _dispatch_runpod_sweep(parsed: Any, _tail: list[str]) -> int:
-    from pathlib import Path
-    from typing import Literal
+    """Thin delegator to runpod module."""
+    from .runpod import dispatch_runpod_sweep
 
-    from astrid.core.project.paths import resolve_projects_root
-    from astrid.core.integrations.runpod.sweeper import sweep as run_sweep
-
-    mode: Literal["default", "hard"] = "hard" if parsed.hard else "default"
-    projects_root = (
-        Path(parsed.projects_root) if parsed.projects_root else resolve_projects_root()
-    )
-    summary = run_sweep(projects_root, mode=mode, dry_run=parsed.dry_run)
-    print(json.dumps(summary, indent=2, default=str))
-    return 0
+    return dispatch_runpod_sweep(parsed, _tail)
 
 
 def _dispatch_runpod_volumes(_parsed: Any, args: list[str]) -> int:
-    """Dispatch ``astrid runpod volumes ls``."""
-    import argparse
+    """Thin delegator to runpod module."""
+    from .runpod import dispatch_runpod_volumes
 
-    parser = argparse.ArgumentParser(prog="astrid runpod volumes")
-    sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("ls", help="List RunPod network volumes as JSON.")
-    try:
-        parsed = parser.parse_args(args)
-    except SystemExit:
-        return 2
-    if parsed.command != "ls":
-        raise AstridError(
-            "usage: astrid runpod volumes ls",
-            recovery_command="astrid runpod volumes ls",
-            state_snapshot={"command": "runpod volumes"},
-        )
-
-    from astrid.core.integrations.runpod.storage import list_volumes
-
-    try:
-
-        async def _volumes_ls() -> None:
-            volumes = await list_volumes()
-            print(json.dumps(volumes, indent=2, default=str))
-
-        import asyncio
-
-        asyncio.run(_volumes_ls())
-        return 0
-    except Exception as exc:
-        raise AstridError(
-            f"runpod volumes ls failed: {exc}",
-            recovery_command="astrid runpod volumes ls",
-            state_snapshot={"command": "runpod volumes ls"},
-        ) from exc
+    return dispatch_runpod_volumes(_parsed, args)
 
 
 def _dispatch_runpod_ensure_storage(_parsed: Any, args: list[str]) -> int:
-    """Dispatch ``astrid runpod ensure-storage <name> [--size <GB>] [--datacenter <id>]``."""
-    import argparse
+    """Thin delegator to runpod module."""
+    from .runpod import dispatch_runpod_ensure_storage
 
-    parser = argparse.ArgumentParser(prog="astrid runpod ensure-storage")
-    parser.add_argument("name", help="Volume name to find or create.")
-    parser.add_argument("--size", type=int, default=50, help="Size in GB for new volumes (default: 50).")
-    parser.add_argument("--datacenter", "--datacenter-id", dest="datacenter_id", default=None, help="RunPod datacenter ID.")
-    try:
-        parsed = parser.parse_args(args)
-    except SystemExit:
-        return 2
-
-    from astrid.core.integrations.runpod.storage import ensure_storage
-
-    try:
-
-        async def _ensure() -> None:
-            result = await ensure_storage(
-                parsed.name,
-                size_gb=parsed.size,
-                datacenter_id=parsed.datacenter_id,
-            )
-            print(json.dumps(result, indent=2, default=str))
-
-        import asyncio
-
-        asyncio.run(_ensure())
-        return 0
-    except Exception as exc:
-        raise AstridError(
-            f"ensure-storage failed: {exc}",
-            recovery_command="astrid runpod ensure-storage <name>",
-            state_snapshot={"command": "runpod ensure-storage"},
-        ) from exc
+    return dispatch_runpod_ensure_storage(_parsed, args)
