@@ -77,7 +77,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.secrets import load_api_key
 
@@ -374,20 +374,18 @@ def build(args: argparse.Namespace) -> int:
     if args.web:
         universal_outputs.append({"path": "web", "type": "directory"})
 
-    universal_manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "sprite_sheet",
-        "inputs": {
+    universal_manifest = build_manifest(
+        kind="sprite_sheet",
+        inputs={
             "animation": args.animation,
             "subject": args.subject,
             "model": args.model,
             "reference_image": str(reference_image) if reference_image is not None else None,
             "input_sheet": str(input_sheet) if input_sheet is not None else None,
         },
-        "outputs": universal_outputs,
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        outputs=universal_outputs,
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(args.out_dir / "manifest.json", universal_manifest)
     # -------------------------------------------------------------------------
 

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.paths import REPO_ROOT
 
 _EFFECT_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -215,24 +215,22 @@ def main(argv: list[str] | None = None) -> int:
     out_file = args.out.resolve()
     manifest_path = out_file.parent / "manifest.json"
     manifest_dir = manifest_path.parent
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "html_canvas_effect",
-        "inputs": {
+    manifest = build_manifest(
+        kind="html_canvas_effect",
+        inputs={
             "effect_id": args.effect_id,
             "label": args.label,
             "description": args.description,
             "project_root": str(args.project_root.resolve()),
         },
-        "outputs": [
+        outputs=[
             {"path": out_file.name, "type": "file"},
             {"path": os.path.relpath(Path(report["element_root"]).resolve(), manifest_dir), "type": "directory"},
             {"path": os.path.relpath(Path(report["preview_timeline"]).resolve(), manifest_dir), "type": "file"},
             {"path": os.path.relpath(Path(report["preview_assets"]).resolve(), manifest_dir), "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 
