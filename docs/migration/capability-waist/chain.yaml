@@ -9,11 +9,19 @@ defaults:
   robustness: full       # home base; none of these warrant `thorough`
 
 milestones:
+  - label: s0-derisk-spike
+    idea: docs/migration/capability-waist/briefs/s0-derisk-spike.md
+    profile: partnered    # topology + novel-primitive judgment
+    robustness: light     # spike; throwaway code OK
+    depth: high
+    notes: "HARD GATE for the epic. Prove the irreversible bets cheaply: scoped-config primitive on ONE theme seam (kill one global usage); import-graph map proving a cycle-free registry-collapse order; capture the Reigh round-trip baseline. If any leg is intractable, STOP and re-plan before S3/S4."
+
   - label: s1-waist-and-timeline-proof
     idea: docs/migration/capability-waist/briefs/s1-waist-and-timeline-proof.md
     profile: directed     # carrier additive, but type-resolution design is a real planner decision
     depth: medium
-    notes: "Vertical proof slice: artifact_type field + ArtifactTypeRegistry, annotate element/clip I/O, rewire timeline validator to type-checked id-resolution behind a PARITY ORACLE. Preserve open-string opaque fallback. This is the go/no-go and the launch-now sprint."
+    depends_on: s0-derisk-spike
+    notes: "Vertical proof slice: artifact_type field + ArtifactTypeRegistry, annotate element/clip I/O, rewire timeline validator to type-checked id-resolution behind a PARITY ORACLE. Preserve open-string opaque fallback."
 
   - label: s2-waist-rollout
     idea: docs/migration/capability-waist/briefs/s2-waist-rollout.md

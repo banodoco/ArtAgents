@@ -2,9 +2,11 @@
 
 **Status:** Planned — NOT started. Awaiting execution approval.
 **Branch:** `astrid-capability-waist` · **RFC:** [`docs/RFC-capability-artifact-waist.md`](../../RFC-capability-artifact-waist.md)
-**Shape:** 5-sprint epic chain (S1–S5), organized by **seam** (the work's real fault lines), not by step-order. Dials picked per the megaplan-prep skill. Mirrors the arnold methodology: carrier-first, parity-gated strangler, move mechanisms not engines.
+**Shape:** 6-sprint epic chain — **S0 de-risk spike + S1–S5** — organized by **seam** (the work's real fault lines), not by step-order. Dials per the megaplan-prep skill. Mirrors the arnold methodology: carrier-first, parity-gated strangler, move mechanisms not engines. Full end-to-end build (decision: do it all), with the hard bets proven first.
 
-> Goal: make every pluggable kind (models, elements, executors, orchestrators, themes, timelines) one **capability** that composes through a **semantic artifact type** (the waist), with **scoped config** for ambient context. Migrate everything to it; purge the speculative per-kind lifecycle machinery; ship a worked example.
+> **Goal:** make every pluggable kind (models, elements, executors, orchestrators, themes, timelines) one **capability** that composes through a **semantic artifact type** (the waist), with **scoped config** for ambient context. Migrate everything; purge the per-kind lifecycle machinery; ship a worked example.
+>
+> **North star (the acceptance criterion):** ~**100 independently-authored packs can compose without chaos** — the Nth pack with a novel capability interoperates with existing packs with **zero core changes**, *and* the externally-shared timeline format (Reigh) still round-trips unchanged. This scale is why the waist earns itself; at a dozen packs it would be overkill.
 
 ---
 
@@ -68,27 +70,28 @@ Each sprint tiered on its own decision difficulty. Vendor `codex` (house default
 
 | Sprint | Outcome (one sentence) | profile | robust. | depth | Why these dials |
 |---|---|---|---|---|---|
+| **S0 — de-risk spike** | Cheaply prove the HARD, irreversible bets before committing the epic: a scoped-config primitive on **one** theme seam, an import-graph map proving a cycle-free registry-collapse order, and a captured Reigh round-trip baseline. Throwaway code OK. | `partnered` | light | high | Opus sense-check: the real risk lives in S3/S4, not the timeline lookup — prove it in days, not discover it at sprint 4. Topology + novel-primitive judgment → premium planner; spike → light robustness. **If any leg is intractable, STOP and re-plan before S3/S4.** |
 | **S1 — waist + timeline proof** | The rendering path composes by artifact type, not by name (carrier + element/clip annotation + timeline validator rewrite behind a parity oracle). | `directed` | full | medium | Vertical slice; the carrier is additive but the **type-resolution design** is a real planner decision → premium plan, DeepSeek execute, gate backstops. |
 | **S2 — waist rollout** | Every remaining name-wired seam is type-checked (other exec/orch/model I/O, orchestrator `child_*`, model `param_map`→adapters). | `solo` | full | low | Mechanical replication of the S1 pattern; behavior-preserving + per-seam parity → cheapest driver; finalize still premium-adjudicates. |
 | **S3 — scoped-config + themes** | A scoped-config primitive replaces ambient theme globals; `_ACTIVE_THEME_DIR`/`HYPE_ACTIVE_THEME` threading gone; secrets folded in. | `partnered` | full | high | Novel **cross-cutting** primitive across 32+ sites → premium reasoning throughout, high planner depth for the blast radius. |
 | **S4 — collapse + restructure + purge** | Four registries collapse onto one `CapabilityHandle` kernel; `kind`→tag; elements get runtime adapters (`component.tsx` non-required); dedup; dead machinery deleted. | `partnered` | full | high | **Import-topology trigger** (`__init__`/re-export rewiring, gateway dispatch) → premium planner mandatory (the circular-import trap); high depth for the import graph. |
 | **S5 — example + docs** | Worked example (a fal model + a Remotion element, same contract) in `docs/examples/`, guide in `docs/contracts/`, updated `docs/templates/element/`. | `solo` | light | low | Docs + a validated example; lowest stakes. |
 
-**Dependency graph:** `S1 → S2; S1 → S3 → S4; S2 → S4; S4 → S5`. (S3 depends on S1 because themes ride the timeline path; S2 and S3 can run in parallel after S1.)
+**Dependency graph:** `S0 → S1 → S2; S1 → S3 → S4; S2 → S4; S4 → S5`. S0 gates the whole epic and its findings feed S3 (scoped-config) and S4 (collapse). S2 and S3 run in parallel after S1.
 
 **Sizing check:** each sprint ≈ 1–2 weeks. S4 is the heaviest — if it bloats during planning, split element-restructure+purge off from the registry-collapse into its own sprint (noted in the S4 brief).
 
 ---
 
-## 5. Launch-aware recommendation
+## 5. Execution plan (full build, de-risked order)
 
-Platform is launch-blocked on the security model, not this.
+Decision: **do it all end-to-end** to reach the 100-pack north star. Sequenced so the irreversible bets are proven first.
 
-- **Do now (the proof, launch-safe):** **S1 only.** Additive carrier + one parity-gated seam proves M×N→M+N end-to-end for ~1 sprint. If S1's oracle is green, the whole theory is validated.
-- **Defer post-launch:** S2 (rollout), S3 (themes — biggest churn), S4 (collapse + purge). S5 docs whenever.
-- **Free, today:** the rule — *no new bespoke per-kind subsystem.* Next pluggable kind goes through the capability/artifact path or it doesn't ship.
-
-**Execution mechanics (when approved):** run via `megaplan chain start --spec docs/migration/capability-waist/chain.yaml` inside a subagent, then `/babysit` it to completion. Briefs move to `.megaplan/briefs/` at exec time (canonical input location).
+- **Order:** S0 (de-risk) → S1 (waist proof) → {S2 rollout ∥ S3 scoped-config} → S4 collapse+purge → S5 docs. S0 is a hard gate: if its scoped-config seam or import-graph leg is intractable, stop and re-plan before spending S3/S4.
+- **Concurrency guard (load-bearing):** a live `beauty-v2` worker is committing to `main` and touches `gateway/dispatch.py` (an S4 file). Run the whole epic in a **dedicated worktree** (`megaplan ... --in-worktree capability-waist` off a base at/above beauty-v2 P6), never editing `main` while that worker runs; land via PR after it settles.
+- **Reigh gate:** before S2 (the first consumer-facing typing), get a named Reigh-owner sign-off; keep the Reigh round-trip parity gate (baseline from S0) green in CI through the epic.
+- **Mechanics:** `megaplan chain start --spec docs/migration/capability-waist/chain.yaml --in-worktree capability-waist` inside a subagent, then `/babysit` to completion. Briefs move to `.megaplan/briefs/` at exec time.
+- **Standing rule, effective now:** *no new bespoke per-kind subsystem* — the next pluggable kind goes through the capability/artifact path or it doesn't ship.
 
 ---
 
@@ -120,3 +123,22 @@ Composition is identical: a consumer references by **id**; the kernel **validate
 ## 7. Non-goals (anti-over-abstraction — explicit)
 
 Not in this epic: streaming/realtime QoS; training-as-stateful-session; declarative orchestrator workflow graphs (imperative `run.py` calling typed capabilities stays); a `document` primitive (a timeline is a structured artifact); operational-metadata schema (cost/latency stay on results); generalizing per-model adapter hardcodes beyond moving them out of shared code.
+
+---
+
+## 8. Cross-cutting requirements (what makes 100 packs coherent, not chaotic)
+
+These apply to **every** sprint — they are how the full build stays trustworthy.
+
+1. **Open & extensible registry; types are additive opinions, not a closed gate.** Packs declare their own artifact types via `pack.extensions["artifact_types"]`. Composition type-checks where types are *declared*; unknown types stay **opaque, never rejected**. This is the "open `clipType`" philosophy generalized — it's what lets 100 packs evolve vocabularies independently without a central enum becoming a chokepoint. (Resolves both the chaos risk *and* the rigidity risk: too-strict typing on an open ecosystem is its own kind of chaos via constant breakage.)
+2. **Lenient at the external boundary.** The timeline format is shared with Reigh via the external `banodoco_timeline_schema` package. Astrid's artifact types are an **internal** opinion; at the Reigh boundary, unknown/foreign types pass through opaque. Astrid never tightens a format it doesn't solely own.
+3. **No flag day / data migration.** `artifact_type` is **used-if-present, never required-for-load**. Existing on-disk timelines/manifests and Reigh-authored ones must keep loading unchanged through every sprint, including after S4.
+4. **Concurrency-safe.** Worktree-isolated; never edit `main` while the `beauty-v2` worker runs; land via PR. (See §5.)
+5. **Success metrics beyond "tests pass":** (a) a synthetic "Nth pack" with a novel capability composes with existing packs with **zero core changes**; (b) **Reigh round-trips** Astrid timelines unchanged; (c) a third-party pack author can read the S5 guide and ship a typed capability without touching core.
+6. **Named ownership.** The artifact-type registry + the unified kernel get a named maintainer; the S5 `docs/contracts/` guide is their spec.
+
+## 9. Decision record — Opus high-altitude sense-check (folded in)
+
+A high-altitude review flagged: (a) S1 gates on the *easy* claim while S3/S4 hold the real risk; (b) the narrow-waist frame leans on the arnold migration (same author/method = weak independent evidence); (c) typing a Reigh-shared open format risks ossifying what Astrid doesn't own; (d) opportunity cost vs. the security launch blocker; (e) live-worker concurrency + no data-migration/metrics/owner.
+
+**Disposition:** its "premature, don't build" verdict is **overridden** by the explicit goal — a coherent system for ~100 packs, which is precisely the scale that justifies the waist. Its *operational* findings are **adopted**: (a) → the S0 de-risk spike proves S3/S4 first; (c) → §8.1–8.2 (open/lenient typing); (e) → §8.3–8.6 + §5 guards. Note the diagnosis (no semantic types → name-wiring) is code-verified and stands; the over-reach that was trimmed is *timing of the proof*, not scope. `CapabilityHandle` unifies *identity* only — it does **not** solve composition, so the type waist is necessary, not gold-plating.
