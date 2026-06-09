@@ -12,9 +12,8 @@ import shutil
 import sys
 from pathlib import Path
 
-import yaml
-
 from astrid.core.pack import pack_manifest_path
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 # Leaf-level helpers imported directly from their real home modules
 # (install_trust = pure leaf, install_git = git leaf).  ``_confirm`` and
 # ``_confirm_trust`` are NOT imported here: they retain a late import from
@@ -129,23 +128,12 @@ def install_pack(
         return 2
 
     # ------------------------------------------------------------------
-    # 2. Parse manifest with yaml.safe_load directly (NOT load_pack_manifest)
+    # 2. Parse manifest with shared loader (consistent with validation)
     # ------------------------------------------------------------------
     try:
-        if manifest_path.suffix == ".json":
-            import json as _json
-
-            raw = _json.loads(manifest_path.read_text(encoding="utf-8"))
-        else:
-            raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    except Exception as e:
+        raw = load_manifest_mapping(manifest_path, manifest_kind="pack")
+    except ManifestParseError as e:
         print(f"install: failed to parse pack manifest: {e}", file=sys.stderr)
-        return 2
-
-    if not isinstance(raw, dict):
-        print(
-            "install: pack manifest is not a mapping", file=sys.stderr
-        )
         return 2
 
     pack_id = raw.get("id")
@@ -730,18 +718,9 @@ def update_pack(
         return 2
 
     try:
-        if manifest_path.suffix == ".json":
-            import json as _json
-
-            raw = _json.loads(manifest_path.read_text(encoding="utf-8"))
-        else:
-            raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    except Exception as e:
+        raw = load_manifest_mapping(manifest_path, manifest_kind="pack")
+    except ManifestParseError as e:
         print(f"update: failed to parse pack manifest: {e}", file=sys.stderr)
-        return 2
-
-    if not isinstance(raw, dict):
-        print("update: pack manifest is not a mapping", file=sys.stderr)
         return 2
 
     source_pack_id = raw.get("id")

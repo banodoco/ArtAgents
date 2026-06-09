@@ -26,13 +26,12 @@ from referencing import Registry, Resource
 from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
 from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
-    EXECUTOR_MANIFEST_NAMES,
-    ORCHESTRATOR_MANIFEST_NAMES,
     PackDefinition,
     _normalize_pack_permissions,
     _optional_pack_aliases,
     _optional_pack_extensions,
     element_kind_registry_for_pack,
+    find_component_manifest,
     iter_element_roots,
     iter_executor_roots,
     iter_orchestrator_roots,
@@ -63,7 +62,6 @@ logger = logging.getLogger(__name__)
 
 _SCHEMAS_ROOT = Path(__file__).resolve().parent / "schemas"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
 
 _PACK_TAXONOMY_ENUMS: dict[str, tuple[str, ...]] = {
     "origin": ("unknown", "builtin", "external"),
@@ -502,50 +500,6 @@ class PackValidator:
             return
         self._validate_discovered_components(content)
 
-    def _validate_component_dir(
-        self, root_dir: Path, manifest_kind: str
-    ) -> None:
-        """Validate all component directories under a content root."""
-        for comp_dir in sorted(root_dir.iterdir()):
-            if not comp_dir.is_dir() or comp_dir.name.startswith("."):
-                continue
-            if comp_dir.name == "__pycache__":
-                continue
-
-            manifest_path = self._find_component_manifest(comp_dir, manifest_kind)
-            if manifest_path is None:
-                expected_path = comp_dir / f"{manifest_kind}.yaml"
-                self.errors.append(
-                    f"{self._rel(expected_path)}: {manifest_kind} manifest not found"
-                )
-                continue
-
-            self._validate_component_manifest_file(comp_dir, manifest_path, manifest_kind)
-
-    def _validate_element_dir(self, root_dir: Path) -> None:
-        """Validate element directories under the elements content root."""
-        # Elements are organized as elements/<kind>/<element_name>/
-        for kind_dir in sorted(root_dir.iterdir()):
-            if not kind_dir.is_dir() or kind_dir.name.startswith("."):
-                continue
-            if kind_dir.name == "__pycache__":
-                continue
-
-            for elem_dir in sorted(kind_dir.iterdir()):
-                if not elem_dir.is_dir() or elem_dir.name.startswith("."):
-                    continue
-                if elem_dir.name == "__pycache__":
-                    continue
-
-                manifest_path = self._find_component_manifest(elem_dir, "element")
-                if manifest_path is None:
-                    self.errors.append(
-                        f"{self._rel(elem_dir / 'element.yaml')}: element manifest not found"
-                    )
-                    continue
-
-                self._validate_element_manifest_file(kind_dir.name, manifest_path)
-
     def _pack_definition_for_discovery(self, content: dict[str, Any]) -> PackDefinition:
         data = self._pack_data or {}
         status = str(data.get("status") or "active")
@@ -572,33 +526,21 @@ class PackValidator:
     def _validate_discovered_components(self, content: dict[str, Any]) -> None:
         pack = self._pack_definition_for_discovery(content)
         for comp_dir in iter_executor_roots(pack):
-            manifest_path = self._find_component_manifest(comp_dir, "executor")
+            manifest_path = find_component_manifest(comp_dir, "executor")
             if manifest_path is not None:
                 self._validate_component_manifest_file(
                     pack, comp_dir, manifest_path, "executor"
                 )
         for comp_dir in iter_orchestrator_roots(pack):
-            manifest_path = self._find_component_manifest(comp_dir, "orchestrator")
+            manifest_path = find_component_manifest(comp_dir, "orchestrator")
             if manifest_path is not None:
                 self._validate_component_manifest_file(
                     pack, comp_dir, manifest_path, "orchestrator"
                 )
         for kind, elem_dir in iter_element_roots(pack):
-            manifest_path = self._find_component_manifest(elem_dir, "element")
+            manifest_path = find_component_manifest(elem_dir, "element")
             if manifest_path is not None:
                 self._validate_element_manifest_file(pack, kind, manifest_path)
-
-    def _find_component_manifest(self, component_dir: Path, manifest_kind: str) -> Path | None:
-        names = {
-            "executor": EXECUTOR_MANIFEST_NAMES,
-            "orchestrator": ORCHESTRATOR_MANIFEST_NAMES,
-            "element": _ELEMENT_MANIFEST_NAMES,
-        }[manifest_kind]
-        for name in names:
-            candidate = component_dir / name
-            if candidate.is_file():
-                return candidate
-        return None
 
     def _validate_component_manifest_file(
         self,

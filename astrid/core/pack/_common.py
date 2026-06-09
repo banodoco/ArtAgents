@@ -16,6 +16,27 @@ if TYPE_CHECKING:
 PACK_MANIFEST_NAMES = ("pack.yaml", "pack.yml", "pack.json")
 EXECUTOR_MANIFEST_NAMES = ("executor.yaml", "executor.yml", "executor.json")
 ORCHESTRATOR_MANIFEST_NAMES = ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json")
+ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
+
+_COMPONENT_MANIFEST_NAMES: dict[str, tuple[str, ...]] = {
+    "executor": EXECUTOR_MANIFEST_NAMES,
+    "orchestrator": ORCHESTRATOR_MANIFEST_NAMES,
+    "element": ELEMENT_MANIFEST_NAMES,
+}
+
+
+def find_component_manifest(comp_dir: Path, kind: str) -> Path | None:
+    """Return the first manifest file found in *comp_dir* for *kind*.
+
+    *kind* is one of ``"executor"``, ``"orchestrator"``, or ``"element"``.
+    Returns ``None`` when no recognised manifest file exists.
+    """
+    names = _COMPONENT_MANIFEST_NAMES.get(kind, ())
+    for name in names:
+        candidate = comp_dir / name
+        if candidate.is_file():
+            return candidate
+    return None
 PACK_ALIAS_KINDS: tuple[Literal["executor", "orchestrator"], ...] = ("executor", "orchestrator")
 PackAliasKind = Literal["executor", "orchestrator"]
 PACK_PERMISSION_IDS: tuple[str, ...] = (

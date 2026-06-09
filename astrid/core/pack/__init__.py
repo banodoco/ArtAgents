@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from astrid.core.pack._common import (
     ELEMENT_KINDS,
+    ELEMENT_MANIFEST_NAMES,
     EXECUTOR_MANIFEST_NAMES,
     ORCHESTRATOR_MANIFEST_NAMES,
     PACK_ALIAS_KINDS,
@@ -35,6 +36,7 @@ from astrid.core.pack._common import (
     _require_mapping,
     _require_string,
     _validate_pack_id,
+    find_component_manifest,
     qualified_id_pack_id,
     validate_content_id_in_pack,
     validate_element_pack_id,

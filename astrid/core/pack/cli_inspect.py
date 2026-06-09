@@ -13,10 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any, Optional
 
-import yaml
-
 from astrid.core.contracts.errors import AstridError
-from astrid.core.element.schema import ELEMENT_MANIFEST_NAMES
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -63,21 +61,12 @@ def _inspect_installed_pack(*, pack_id: str, agent: bool, json_output: bool) -> 
         )
 
     try:
-        if manifest_path.suffix == ".json":
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        else:
-            manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    except Exception as e:
+        manifest = load_manifest_mapping(manifest_path, manifest_kind="pack")
+    except ManifestParseError as e:
         raise AstridError(
             f"inspect: failed to parse pack manifest: {e}",
             recovery_command=f"Check the manifest file for syntax errors: cat {manifest_path}",
         ) from e
-
-    if not isinstance(manifest, dict):
-        raise AstridError(
-            "inspect: pack manifest is not a mapping",
-            recovery_command=f"Check the manifest file structure: cat {manifest_path}",
-        )
 
     try:
         trust_summary = extract_trust_summary(rev_dir)
@@ -295,22 +284,11 @@ def _print_agent_view(view: dict) -> None:
 # Full inspect helpers
 # ---------------------------------------------------------------------------
 
-# Recognised component manifest filenames keyed by kind.
-_INSPECT_COMPONENT_MANIFEST_NAMES: dict[str, tuple[str, ...]] = {
-    "executor": ("executor.yaml", "executor.yml", "executor.json"),
-    "orchestrator": ("orchestrator.yaml", "orchestrator.yml", "orchestrator.json"),
-    "element": ELEMENT_MANIFEST_NAMES,
-}
-
-
-def _find_component_manifest(comp_dir: Path, kind: str) -> Path | None:
-    """Return the first manifest file found in *comp_dir* for *kind*."""
-    names = _INSPECT_COMPONENT_MANIFEST_NAMES.get(kind, ())
-    for name in sorted(names):
-        candidate = comp_dir / name
-        if candidate.is_file():
-            return candidate
-    return None
+# Re-export the shared helper under the name callers expect.
+from astrid.core.pack._common import (  # noqa: E402
+    _COMPONENT_MANIFEST_NAMES as _INSPECT_COMPONENT_MANIFEST_NAMES,
+    find_component_manifest as _find_component_manifest,
+)
 
 
 def _read_stage_excerpt(stage_path: Path, *, max_lines: int = 30) -> str | None:
@@ -378,17 +356,9 @@ def _scan_inspect_components(
             if mf_path is None:
                 continue
 
-            data: dict[str, Any] | None
             try:
-                if mf_path.suffix == ".json":
-                    import json as _json_inspect
-                    data = _json_inspect.loads(mf_path.read_text(encoding="utf-8"))
-                else:
-                    data = yaml.safe_load(mf_path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-
-            if not isinstance(data, dict):
+                data = load_manifest_mapping(mf_path, manifest_kind=manifest_kind)
+            except ManifestParseError:
                 continue
 
             comp_id = str(data.get("id", comp_dir.name))
@@ -450,17 +420,9 @@ def _scan_inspect_components(
                     if mf_path is None:
                         continue
 
-                    data: dict[str, Any] | None
                     try:
-                        if mf_path.suffix == ".json":
-                            import json as _json_inspect
-                            data = _json_inspect.loads(mf_path.read_text(encoding="utf-8"))
-                        else:
-                            data = yaml.safe_load(mf_path.read_text(encoding="utf-8"))
-                    except Exception:
-                        continue
-
-                    if not isinstance(data, dict):
+                        data = load_manifest_mapping(mf_path, manifest_kind="element")
+                    except ManifestParseError:
                         continue
 
                     comp_id = str(data.get("id", elem_dir.name))
