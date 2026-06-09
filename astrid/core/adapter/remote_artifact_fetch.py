@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from astrid.core.project.sidecar import write_json_sidecar
-from astrid.core.task.command_render import step_dir_for_context
+from astrid.core.adapter._common import _step_dir
 from astrid.core.task.plan import Step
 from astrid.core.util.hash import sha256_file as _sha256
 
@@ -23,15 +23,6 @@ class FetchResult:
     mismatched: list[str] = field(default_factory=list)
     checksums: dict[str, str] = field(default_factory=dict)
     reason: str | None = None
-def _step_dir(run_ctx: "RunContext") -> Path:  # noqa: F821
-    return step_dir_for_context(
-        run_ctx.project_root,
-        run_ctx.run_id,
-        run_ctx.plan_step_path,
-        run_ctx.step_version,
-        iteration=run_ctx.iteration,
-        item_id=run_ctx.item_id,
-    )
 
 
 def fetch_artifacts(

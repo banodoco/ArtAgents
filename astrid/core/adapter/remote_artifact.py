@@ -11,20 +11,9 @@ from pathlib import Path
 from astrid.core.adapter import CompleteResult, DispatchResult, PollResult, RunContext
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.core.task.command_render import step_dir_for_context
+from astrid.core.adapter._common import _step_dir
 from astrid.core.task.plan import CostEntry, Step
 from astrid.core.util.time import utc_now_milliseconds
-
-
-def _step_dir(run_ctx: RunContext) -> Path:
-    return step_dir_for_context(
-        run_ctx.project_root,
-        run_ctx.run_id,
-        run_ctx.plan_step_path,
-        run_ctx.step_version,
-        iteration=run_ctx.iteration,
-        item_id=run_ctx.item_id,
-    )
 
 
 def _read_json(path: Path) -> dict[str, object]:
