@@ -14,6 +14,7 @@ from astrid.core.runtime.log_capture import (
     open_run_log_capture,
     run_subprocess_with_capture,
 )
+from astrid.core.session import cli as _session_cli
 
 _ALIAS_SUNSET_VERSION = "0.3.0"
 
@@ -82,10 +83,8 @@ def _run_default_brief_from_args(args: list[str]) -> int:
 
 
 def _dispatch_attach(args: list[str]) -> int:
-    from astrid.core.session.cli import build_parser, cmd_attach
-
-    parsed = build_parser().parse_args(["attach", *args])
-    return int(cmd_attach(parsed))
+    parsed = _session_cli.build_parser().parse_args(["attach", *args])
+    return int(_session_cli.cmd_attach(parsed))
 
 
 def _dispatch_status(args: list[str]) -> int:
@@ -95,12 +94,9 @@ def _dispatch_status(args: list[str]) -> int:
         from astrid.core.task.lifecycle import cmd_status
 
         return cmd_status(args)
-    from astrid.core.session.cli import build_parser
-    from astrid.core.session.cli import cmd_status as session_status
-
     status_args = ["status", *[arg for arg in args if arg in {"-h", "--help", "--json"}]]
-    parsed = build_parser().parse_args(status_args)
-    return int(session_status(parsed))
+    parsed = _session_cli.build_parser().parse_args(status_args)
+    return int(_session_cli.cmd_status(parsed))
 
 
 def _dispatch_lifecycle(command: str) -> Any:
@@ -385,24 +381,17 @@ _TOP_LEVEL_HANDLERS = {
 
 
 def _dispatch_sessions(args: list[str]) -> int:
-    from astrid.core.session.cli import (
-        build_parser,
-        cmd_sessions_detach,
-        cmd_sessions_ls,
-        cmd_sessions_takeover,
-    )
-
-    parser = build_parser()
+    parser = _session_cli.build_parser()
     try:
         parsed = parser.parse_args(args)
     except SystemExit as exc:
         return int(exc.code or 2)
     if parsed.command == "ls":
-        return int(cmd_sessions_ls(parsed))
+        return int(_session_cli.cmd_sessions_ls(parsed))
     if parsed.command == "detach":
-        return int(cmd_sessions_detach(parsed))
+        return int(_session_cli.cmd_sessions_detach(parsed))
     if parsed.command == "takeover":
-        return int(cmd_sessions_takeover(parsed))
+        return int(_session_cli.cmd_sessions_takeover(parsed))
     parser.error("expected one of ls / detach / takeover")
     return 2
 
