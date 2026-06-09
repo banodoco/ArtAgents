@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main, warn_if_unledgered
 
 guard_canonical_entrypoint('generation.generate_image_openai')
@@ -60,8 +59,7 @@ GPT_IMAGE_2_MAX_EDGE = 3840
 GPT_IMAGE_2_MAX_RATIO = 3.0
 
 
-def _die(message: str, *, recovery_command: str | None = None, valid_options=()) -> None:
-    raise AstridError(message, recovery_command=recovery_command, valid_options=valid_options)
+from astrid.core.contracts.die import pack_die as _die
 
 
 def _warn(message: str) -> None:

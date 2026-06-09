@@ -119,26 +119,26 @@ def build(args: argparse.Namespace) -> int:
     input_sheet = args.input_sheet.expanduser().resolve() if args.input_sheet is not None else None
     reference_image = Path(args.reference_image).expanduser().resolve() if args.reference_image else None
     if reference_image is not None and not reference_image.is_file():
-        from astrid.packs.generation.executors.generate_image_openai.run import _die
+        from astrid.core.contracts.die import pack_die as _die
         _die(f"--reference-image not found: {reference_image}")
     if input_sheet is not None and reference_image is not None:
-        from astrid.packs.generation.executors.generate_image_openai.run import _die
+        from astrid.core.contracts.die import pack_die as _die
         _die("--reference-image generates a new sheet and cannot be combined with --input-sheet post-processing")
     inferred_cols = args.cols
     inferred_rows = args.rows
     if input_sheet is not None:
         if not input_sheet.is_file():
-            from astrid.packs.generation.executors.generate_image_openai.run import _die
+            from astrid.core.contracts.die import pack_die as _die
             _die(f"--input-sheet not found: {input_sheet}")
         input_width, input_height = _png_dimensions(input_sheet)
         if inferred_cols is None:
             if input_width % args.frame_width:
-                from astrid.packs.generation.executors.generate_image_openai.run import _die
+                from astrid.core.contracts.die import pack_die as _die
                 _die("--input-sheet width is not divisible by --frame-width; pass --cols explicitly or adjust frame size")
             inferred_cols = input_width // args.frame_width
         if inferred_rows is None:
             if input_height % args.frame_height:
-                from astrid.packs.generation.executors.generate_image_openai.run import _die
+                from astrid.core.contracts.die import pack_die as _die
                 _die("--input-sheet height is not divisible by --frame-height; pass --rows explicitly or adjust frame size")
             inferred_rows = input_height // args.frame_height
 
@@ -461,7 +461,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL, _die
+    from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL
+    from astrid.core.contracts.die import pack_die as _die
 
     args = build_parser().parse_args(argv)
     if args.cols is not None and args.cols < 1:

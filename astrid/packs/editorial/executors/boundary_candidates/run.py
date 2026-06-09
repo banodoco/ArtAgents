@@ -19,8 +19,7 @@ from astrid.core.cli_choices import add_choice_arg
 VERSION = 1
 
 
-def _die(message: str) -> None:
-    raise SystemExit(f"Error: {message}")
+from astrid.core.contracts.die import pack_die as _die
 
 
 def _fmt_time(seconds: float) -> str:

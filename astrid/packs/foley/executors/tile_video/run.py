@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.result_manifest import write_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 
@@ -20,11 +19,11 @@ from typing import Any
 from astrid.core.pack.entrypoint import run_pack_main
 
 
+from astrid.core.contracts.die import pack_die
+
+
 def _die(message: str) -> None:
-    raise AstridError(
-        message,
-        recovery_command="fix the foley.tile_video inputs and rerun the command",
-    )
+    pack_die(message, recovery_command="fix the foley.tile_video inputs and rerun the command")
 
 
 def _parse_grid(value: str) -> tuple[int, int]:

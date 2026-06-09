@@ -71,11 +71,11 @@ RESPONSE_SCHEMA = {
 }
 
 
+from astrid.core.contracts.die import pack_die
+
+
 def _die(message: str) -> None:
-    raise AstridError(
-        message,
-        recovery_command="check the input arguments and retry; use --help for usage",
-    )
+    pack_die(message, recovery_command="check the input arguments and retry; use --help for usage")
 
 
 def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:

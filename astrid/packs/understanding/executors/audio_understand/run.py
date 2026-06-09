@@ -62,11 +62,11 @@ Compare the candidates as audio performances, not just transcript text. Return c
 """
 
 
+from astrid.core.contracts.die import pack_die
+
+
 def _die(message: str) -> None:
-    raise AstridError(
-        message,
-        recovery_command="fix the audio_understand inputs and rerun the command",
-    )
+    pack_die(message, recovery_command="fix the audio_understand inputs and rerun the command")
 
 
 def _run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:

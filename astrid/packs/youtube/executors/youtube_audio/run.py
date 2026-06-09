@@ -20,8 +20,11 @@ from astrid.core.cli_choices import add_choice_arg  # noqa: E402
 from astrid.core.pack.entrypoint import run_pack_main  # noqa: E402
 
 
+from astrid.core.contracts.die import pack_die
+
+
 def _die(msg: str, code: int = 2) -> None:
-    raise AstridError(
+    pack_die(
         msg,
         recovery_command="install the missing dependency or fix the YouTube download inputs, then rerun",
         state_snapshot={"exit_code": code},

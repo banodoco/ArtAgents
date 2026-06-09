@@ -44,11 +44,11 @@ def _pil():
     return Image, ImageDraw, ImageFont
 
 
+from astrid.core.contracts.die import pack_die
+
+
 def _die(message: str) -> None:
-    raise AstridError(
-        message,
-        recovery_command="check the inputs and retry; see --help for usage",
-    )
+    pack_die(message, recovery_command="check the inputs and retry; see --help for usage")
 
 
 def _parse_timestamp(value: str) -> float:
