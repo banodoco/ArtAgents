@@ -70,24 +70,41 @@ class ExecutorRunnerError(ExecutorValidationError):
     """Raised when a executor cannot be prepared or executed."""
 
 
-@lru_cache(maxsize=1)
-def _pipeline_module():
-    from astrid.core.orchestrator.registry import (
-        load_default_registry as load_default_orchestrator_registry,
-    )
+#: Module path of the asset cache helper re-exported by every pipeline driver as
+#: ``<pipeline_module>.asset_cache``. Imported directly (a sibling pack executor,
+#: not the orchestrator tier) by request-free helpers that only need ``is_url``.
+_ASSET_CACHE_MODULE = "astrid.packs.training.executors.asset_cache.run"
 
-    registry = load_default_orchestrator_registry()
-    orchestrator = registry.get("video_editing.hype")
-    runtime_module = orchestrator.metadata.get("runtime_module")
+
+@lru_cache(maxsize=None)
+def _pipeline_module(runtime_module: str):
+    """Import a pipeline driver module by its dotted path.
+
+    The path is supplied by the orchestrator-tier caller via the executor
+    manifest (``metadata.pipeline_module``); the executor never reaches up into
+    ``astrid.core.orchestrator`` to discover it.
+    """
     if not isinstance(runtime_module, str) or not runtime_module:
-        raise ExecutorRunnerError("video_editing.hype manifest is missing metadata.runtime_module")
-    pipeline = import_module(runtime_module)
-
-    return pipeline
+        raise ExecutorRunnerError("pipeline executor manifest is missing metadata.pipeline_module")
+    return import_module(runtime_module)
 
 
-def _pipeline_steps_by_name() -> Mapping[str, Any]:
-    pipeline = _pipeline_module()
+@lru_cache(maxsize=1)
+def _asset_cache_module():
+    return import_module(_ASSET_CACHE_MODULE)
+
+
+def _pipeline_module_for_executor(executor: ExecutorDefinition):
+    runtime_module = executor.metadata.get("pipeline_module")
+    if not isinstance(runtime_module, str) or not runtime_module:
+        raise ExecutorRunnerError(
+            f"built-in executor {executor.id!r} is missing metadata.pipeline_module"
+        )
+    return _pipeline_module(runtime_module)
+
+
+def _pipeline_steps_by_name(executor: ExecutorDefinition) -> Mapping[str, Any]:
+    pipeline = _pipeline_module_for_executor(executor)
     steps = {step.name: step for step in pipeline.build_pool_steps()}
     missing = [name for name in pipeline.STEP_ORDER if name not in steps]
     if missing:
@@ -445,7 +462,7 @@ def build_executor_command(request: ExecutorRunRequest, registry: ExecutorRegist
 def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequest) -> ExecutorRunResult:
     if executor.command is not None:
         return _run_explicit_command_executor(executor, request, _request_values(request))
-    pipeline = _pipeline_module()
+    pipeline = _pipeline_module_for_executor(executor)
     step = _step_for_executor(executor)
     args = build_pipeline_context(request, executor)
     command = tuple(step.build_cmd(args))
@@ -1025,7 +1042,7 @@ def _step_for_executor(executor: ExecutorDefinition) -> Any:
     step_name = executor.metadata.get("pipeline_step")
     if not isinstance(step_name, str):
         raise ExecutorRunnerError(f"built-in executor {executor.id!r} is missing metadata.pipeline_step")
-    steps = _pipeline_steps_by_name()
+    steps = _pipeline_steps_by_name(executor)
     if step_name not in steps:
         raise ExecutorRunnerError(f"built-in executor {executor.id!r} references unknown pipeline step {step_name!r}")
     return steps[step_name]
@@ -1051,8 +1068,7 @@ def _optional_asset_path(value: Any) -> Path | str | None:
     if value is None or value == "":
         return None
     text = str(value)
-    pipeline = _pipeline_module()
-    if pipeline.asset_cache.is_url(text):
+    if _asset_cache_module().is_url(text):
         return text
     return Path(text).expanduser().resolve()
 
@@ -1083,8 +1099,7 @@ def _parse_asset_pairs(values: list[str]) -> list[tuple[str, Path | str]]:
         path_text = path_text.strip()
         if not key or not path_text:
             raise ExecutorRunnerError(f"invalid asset value {raw!r}; expected KEY=PATH")
-        pipeline = _pipeline_module()
-        if pipeline.asset_cache.is_url(path_text):
+        if _asset_cache_module().is_url(path_text):
             pairs.append((key, path_text))
         else:
             pairs.append((key, Path(path_text).expanduser().resolve()))

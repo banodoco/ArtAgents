@@ -506,7 +506,10 @@ def test_builtin_executor_missing_pipeline_step_metadata(tmp_path: Path) -> None
         executor_id="test.builtin_no_step",
         argv=None,
         kind="built_in",
-        metadata={"pipeline_step": 12345},  # not a string
+        metadata={
+            "pipeline_module": "astrid.packs.video_editing.orchestrators.hype.run",
+            "pipeline_step": 12345,  # not a string
+        },
     )
     registry = _registry(executor)
 
@@ -519,7 +522,10 @@ def test_builtin_executor_unknown_pipeline_step(tmp_path: Path) -> None:
         executor_id="test.builtin_unknown_step",
         argv=None,
         kind="built_in",
-        metadata={"pipeline_step": "definitely_not_a_real_step"},
+        metadata={
+            "pipeline_module": "astrid.packs.video_editing.orchestrators.hype.run",
+            "pipeline_step": "definitely_not_a_real_step",
+        },
     )
     registry = _registry(executor)
 
@@ -595,20 +601,27 @@ def test_upload_youtube_reports_missing_callable_metadata(tmp_path: Path) -> Non
         run_executor(ExecutorRunRequest(executor_id="youtube.upload", out=tmp_path), registry)
 
 
-def test_pipeline_module_uses_orchestrator_runtime_module_lookup(
+def test_pipeline_module_imports_metadata_pipeline_module(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_pipeline = types.SimpleNamespace()
-    fake_registry = types.SimpleNamespace(
-        get=lambda _executor_id: types.SimpleNamespace(metadata={"runtime_module": "fake.pipeline"})
+
+    monkeypatch.setattr(
+        executor_runner,
+        "import_module",
+        lambda name: fake_pipeline if name == "fake.pipeline" else None,
     )
 
-    monkeypatch.setattr("astrid.core.orchestrator.registry.load_default_registry", lambda: fake_registry)
-    monkeypatch.setattr(executor_runner, "import_module", lambda name: fake_pipeline if name == "fake.pipeline" else None)
+    executor = types.SimpleNamespace(
+        id="video_editing.cut",
+        metadata={"pipeline_module": "fake.pipeline"},
+    )
 
     executor_runner._pipeline_module.cache_clear()
     try:
-        assert executor_runner._pipeline_module() is fake_pipeline
+        # Resolved from the executor manifest — no orchestrator registry lookup.
+        assert executor_runner._pipeline_module_for_executor(executor) is fake_pipeline
+        assert executor_runner._pipeline_module("fake.pipeline") is fake_pipeline
     finally:
         executor_runner._pipeline_module.cache_clear()
 
