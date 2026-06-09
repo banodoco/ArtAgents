@@ -16,7 +16,7 @@ from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.util.time import _utc_now, utc_now_seconds
 from datetime import datetime, timezone
 
@@ -224,10 +224,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             {"path": str(out_path), "type": "file"},
         ]
         manifest_path = out_dir / "manifest.json"
-        manifest: dict[str, Any] = {
-            "schema_version": 1,
-            "kind": "pool",
-            "inputs": {
+        manifest = build_manifest(
+            kind="pool",
+            inputs={
                 "triage": str(args.triage.resolve()),
                 "scene_descriptions": str(args.scene_descriptions.resolve()),
                 "quote_candidates": str(args.quote_candidates.resolve()),
@@ -235,10 +234,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "scenes": str(args.scenes.resolve()),
                 "source_slug": args.source_slug,
             },
-            "outputs": manifest_outputs,
-            "created": datetime.now(timezone.utc).isoformat(),
-            "warnings": [],
-        }
+            outputs=manifest_outputs,
+            created=datetime.now(timezone.utc).isoformat(),
+            schema_version=1,
+            warnings=[],
+        )
         write_manifest(manifest_path, manifest)
         # -------------------------------------------------------------------------
 

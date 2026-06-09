@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+
+guard_canonical_entrypoint('training.dataset_build')
 import argparse
 import copy
 import json

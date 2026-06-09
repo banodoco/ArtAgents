@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+
+guard_canonical_entrypoint('training.training_run')
 import argparse
 import json
 import sys
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
 from astrid.core.contracts.errors import AstridError, render_astrid_error
+from astrid.core.contracts.result_manifest import build_manifest
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.jsonio import write_json_atomic
 from astrid.packs.training.orchestrators.dataset_build.interfaces import ComputeHandle, RunPodHandle
@@ -189,15 +194,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
 def _cmd_resume(args: argparse.Namespace) -> int:
     run_dir = Path(args.out).expanduser().resolve()
     state = read_last_run_state(run_dir)
-    payload = {
-        "schema_version": 1,
-        "status": "resume_ready" if args.dry_run else RunStatus.BLOCKED.value,
-        "mode": "resume-dry-run" if args.dry_run else "resume",
-        "run_dir": str(run_dir),
-        "previous_state_path": str(run_dir / "last_run.json"),
-        "previous_status": state.get("status"),
-        "recoverability": state.get("recoverability"),
-    }
+    payload = build_manifest(
+        kind="training_run_resume",
+        inputs={"run_dir": str(run_dir), "previous_state_path": str(run_dir / "last_run.json")},
+        outputs=[],
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+        status="resume_ready" if args.dry_run else RunStatus.BLOCKED.value,
+        mode="resume-dry-run" if args.dry_run else "resume",
+        run_dir=str(run_dir),
+        previous_state_path=str(run_dir / "last_run.json"),
+        previous_status=state.get("status"),
+        recoverability=state.get("recoverability"),
+    )
     if args.dry_run:
         _emit(payload, json_output=True)
         return 0
@@ -700,16 +709,20 @@ def _write_checkpoint_manifest(run_dir: Path, *, config: Mapping[str, Any], remo
     lora_id = str(lora.get("lora_id") or "lora")
     step = int(lora.get("steps") or 0)
     path = run_dir / "checkpoints" / "checkpoint_manifest.json"
-    payload = {
-        "schema_version": 1,
-        "checkpoints": [
+    payload = build_manifest(
+        kind="training_run_checkpoint",
+        inputs={},
+        outputs=[],
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+        checkpoints=[
             {
                 "label": "final",
                 "step": step,
                 "remote_path": f"{remote_output_dir.rstrip('/')}/{lora_id}-final.safetensors",
             }
         ],
-    }
+    )
     write_json_atomic(path, payload)
     return path
 
@@ -746,15 +759,19 @@ def _write_planned_cost(
     remote_capabilities: dict[str, Any],
 ) -> Path:
     path = run_dir / "planned_cost.json"
-    payload = {
-        "schema_version": 1,
-        "backend": backend_id,
-        "trainer_id": trainer_id,
-        "estimate": _cost_estimate_payload(estimate),
-        "max_runpod_spend_usd": max_runpod_spend_usd,
-        "within_budget": float(estimate.estimated_cost_usd) <= float(max_runpod_spend_usd),
-        "remote_capabilities": remote_capabilities,
-    }
+    payload = build_manifest(
+        kind="training_run_planned_cost",
+        inputs={},
+        outputs=[],
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+        backend=backend_id,
+        trainer_id=trainer_id,
+        estimate=_cost_estimate_payload(estimate),
+        max_runpod_spend_usd=max_runpod_spend_usd,
+        within_budget=float(estimate.estimated_cost_usd) <= float(max_runpod_spend_usd),
+        remote_capabilities=remote_capabilities,
+    )
     write_json_atomic(path, payload)
     return path
 

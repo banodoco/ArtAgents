@@ -16,7 +16,7 @@ from typing import Any, Sequence
 
 from astrid.core import timeline
 from astrid.core.audit import register_outputs
-from astrid.core.contracts.result_manifest import write_manifest
+from astrid.core.contracts.result_manifest import build_manifest, write_manifest
 from astrid.core.element import catalog as effects_catalog
 from astrid.core.util.time import _utc_now, utc_now_seconds
 
@@ -108,19 +108,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     # --- universal result manifest (output-contract M2) -----------------------
     out_file = args.out.resolve()
     manifest_path = out_file.parent / "manifest.json"
-    manifest: dict[str, Any] = {
-        "schema_version": 1,
-        "kind": "pool_merge",
-        "inputs": {
+    manifest = build_manifest(
+        kind="pool_merge",
+        inputs={
             "pool": str(args.pool.resolve()) if args.pool.exists() else None,
             "theme": args.theme,
         },
-        "outputs": [
+        outputs=[
             {"path": out_file.name, "type": "file"},
         ],
-        "created": datetime.now(timezone.utc).isoformat(),
-        "warnings": [],
-    }
+        created=datetime.now(timezone.utc).isoformat(),
+        schema_version=1,
+        warnings=[],
+    )
     write_manifest(manifest_path, manifest)
     # -------------------------------------------------------------------------
 
