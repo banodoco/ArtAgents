@@ -106,730 +106,497 @@ _NON_REVERSIBLE_KINDS: frozenset[str] = frozenset({
 
 
 # ============================================================================
-# Inverse dispatch table
-# ============================================================================
-
-# type: dict of event_kind -> function
-# Each function receives (event, before_state, after_state) and returns
-# an InverseRequest.
-_INVERSE_DISPATCH: dict[str, Any] = {}
-
-
-def _register(kind: str):
-    """Decorator to register an inverse planner for a given event kind."""
-    def decorator(fn):
-        _INVERSE_DISPATCH[kind] = fn
-        return fn
-    return decorator
-
-
-# ============================================================================
-# clip.* inverses
+# Internal helpers
 # ============================================================================
 
 
-@_register("clip.added")
-def _inverse_clip_added(
+def _non_invertible(
     event: TimelineEvent,
     before: dict[str, Any],
     after: dict[str, Any],
+    reason: str,
 ) -> InverseRequest:
-    """Inverse of clip.added: remove the added clip."""
-    payload = event.payload
-    if isinstance(payload, ClipAddedPayload):
+    """Build a non-invertible InverseRequest with before/after projections."""
+    return InverseRequest(
+        invertible=False,
+        revert_kind="timeline.reverted",
+        revert_reason=f"{event.kind} at {event.event_id}: {reason}",
+        before_projection=before if before else None,
+        after_projection=after if after else None,
+    )
+
+
+def _find_clip(before: dict[str, Any], clip_id: str) -> dict[str, Any] | None:
+    """Find a clip dict in *before* projection state by clip_id."""
+    clips = before.get("clips", []) if isinstance(before, dict) else []
+    for clip in clips:
+        if isinstance(clip, dict) and clip.get("id") == clip_id:
+            return clip
+    return None
+
+
+# ============================================================================
+# Factory for simple forward inverses (payload attrs → inverse payload)
+# ============================================================================
+
+
+def _forward(inverse_kind: str, *attrs: str):
+    """Factory returning a handler that builds an InverseRequest from payload attributes.
+
+    Used for event kinds whose inverse is simply: extract attrs from the
+    payload and emit the inverse_kind with those attrs as the inverse payload.
+    """
+    def handler(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
+        payload = event.payload
         return InverseRequest(
             invertible=True,
-            inverse_kind="clip.removed",
-            inverse_payload={"clip_id": payload.clip_id},
+            inverse_kind=inverse_kind,
+            inverse_payload={a: getattr(payload, a) for a in attrs},
         )
-    return _non_invertible(event, before, after, "clip.added payload not available")
+    return handler
 
 
-@_register("clip.removed")
-def _inverse_clip_removed(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# ============================================================================
+# Individual inverse handlers (complex — require before-state lookups)
+# ============================================================================
+
+
+# -- clip.removed -----------------------------------------------------------
+
+def _handle_clip_removed(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.removed: re-add the clip using prior projection state."""
     payload = event.payload
-    if isinstance(payload, ClipRemovedPayload):
-        clip_id = payload.clip_id
-        # Recover the clip entry from before state
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        removed_clip = None
-        removed_index = None
-        for i, clip in enumerate(before_clips):
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                removed_clip = dict(clip)
-                removed_index = i
-                break
-        if removed_clip is None:
-            return _non_invertible(
-                event, before, after,
-                f"clip {clip_id!r} not found in prior projection state"
-            )
-        # Build clip.added payload with position
-        position: dict[str, Any] | None = None
-        if removed_index is not None:
-            position = {"mode": "index", "index": removed_index}
-        inverse = {
-            "clip_id": clip_id,
-            "kind": removed_clip.get("kind")
-            or ("text" if removed_clip.get("clipType") == "text" else "visual"),
-            "track_id": removed_clip.get("track", "visual"),
-            "asset_id": removed_clip.get("asset")
-            or removed_clip.get("asset_id")
-            or clip_id,
-        }
-        if position:
-            inverse["position"] = position
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.added",
-            inverse_payload=inverse,
+    assert isinstance(payload, ClipRemovedPayload)  # guaranteed by dispatch
+    clip_id = payload.clip_id
+    before_clips = before.get("clips", []) if isinstance(before, dict) else []
+    removed_clip = None
+    removed_index = None
+    for i, clip in enumerate(before_clips):
+        if isinstance(clip, dict) and clip.get("id") == clip_id:
+            removed_clip = dict(clip)
+            removed_index = i
+            break
+    if removed_clip is None:
+        return _non_invertible(
+            event, before, after,
+            f"clip {clip_id!r} not found in prior projection state",
         )
-    return _non_invertible(event, before, after, "clip.removed payload not available")
+    position: dict[str, Any] | None = None
+    if removed_index is not None:
+        position = {"mode": "index", "index": removed_index}
+    inverse: dict[str, Any] = {
+        "clip_id": clip_id,
+        "kind": removed_clip.get("kind")
+        or ("text" if removed_clip.get("clipType") == "text" else "visual"),
+        "track_id": removed_clip.get("track", "visual"),
+        "asset_id": removed_clip.get("asset")
+        or removed_clip.get("asset_id")
+        or clip_id,
+    }
+    if position:
+        inverse["position"] = position
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="clip.added",
+        inverse_payload=inverse,
+    )
 
 
-@_register("clip.moved")
-def _inverse_clip_moved(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- clip.moved -------------------------------------------------------------
+
+def _handle_clip_moved(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.moved: move the clip back to its previous position."""
     payload = event.payload
-    if isinstance(payload, ClipMovedPayload):
-        clip_id = payload.clip_id
-        # Find original position from before state
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        original_index = None
-        for i, clip in enumerate(before_clips):
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                original_index = i
-                break
-        if original_index is None:
-            return _non_invertible(
-                event, before, after,
-                f"clip {clip_id!r} not found in prior projection state"
-            )
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.moved",
-            inverse_payload={
-                "clip_id": clip_id,
-                "position": {"mode": "index", "index": original_index},
-            },
+    assert isinstance(payload, ClipMovedPayload)
+    clip_id = payload.clip_id
+    before_clips = before.get("clips", []) if isinstance(before, dict) else []
+    original_index = None
+    for i, clip in enumerate(before_clips):
+        if isinstance(clip, dict) and clip.get("id") == clip_id:
+            original_index = i
+            break
+    if original_index is None:
+        return _non_invertible(
+            event, before, after,
+            f"clip {clip_id!r} not found in prior projection state",
         )
-    return _non_invertible(event, before, after, "clip.moved payload not available")
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="clip.moved",
+        inverse_payload={
+            "clip_id": clip_id,
+            "position": {"mode": "index", "index": original_index},
+        },
+    )
 
 
-@_register("clip.retracked")
-def _inverse_clip_retracked(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- clip.retracked ---------------------------------------------------------
+
+def _handle_clip_retracked(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.retracked: restore the clip's previous track."""
     payload = event.payload
-    if isinstance(payload, ClipRetrackedPayload):
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == payload.clip_id:
-                previous_track = clip.get("track")
-                if isinstance(previous_track, str) and previous_track:
-                    return InverseRequest(
-                        invertible=True,
-                        inverse_kind="clip.retracked",
-                        inverse_payload={
-                            "clip_id": payload.clip_id,
-                            "track_id": previous_track,
-                        },
-                    )
-        return _non_invertible(
-            event, before, after,
-            f"clip {payload.clip_id!r} not found in prior projection state"
-        )
-    return _non_invertible(event, before, after, "clip.retracked payload not available")
+    assert isinstance(payload, ClipRetrackedPayload)
+    clip_id = payload.clip_id
+    clip = _find_clip(before, clip_id)
+    if clip is not None:
+        previous_track = clip.get("track")
+        if isinstance(previous_track, str) and previous_track:
+            return InverseRequest(
+                invertible=True,
+                inverse_kind="clip.retracked",
+                inverse_payload={
+                    "clip_id": clip_id,
+                    "track_id": previous_track,
+                },
+            )
+    return _non_invertible(
+        event, before, after,
+        f"clip {clip_id!r} not found in prior projection state",
+    )
 
 
-@_register("clip.retimed")
-def _inverse_clip_retimed(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- clip.retimed -----------------------------------------------------------
+
+def _handle_clip_retimed(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.retimed: restore original start/duration from prior state."""
     payload = event.payload
-    if isinstance(payload, ClipRetimedPayload):
-        clip_id = payload.clip_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        original = None
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                original = clip
-                break
-        if original is None:
-            return _non_invertible(
-                event, before, after,
-                f"clip {clip_id!r} not found in prior projection state"
-            )
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.retimed",
-            inverse_payload={
-                "clip_id": clip_id,
-                "start": float(original.get("start", 0)),
-                "duration": float(original.get("duration", 0)),
-            },
+    assert isinstance(payload, ClipRetimedPayload)
+    clip_id = payload.clip_id
+    original = _find_clip(before, clip_id)
+    if original is None:
+        return _non_invertible(
+            event, before, after,
+            f"clip {clip_id!r} not found in prior projection state",
         )
-    return _non_invertible(event, before, after, "clip.retimed payload not available")
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="clip.retimed",
+        inverse_payload={
+            "clip_id": clip_id,
+            "start": float(original.get("start", 0)),
+            "duration": float(original.get("duration", 0)),
+        },
+    )
 
 
-@_register("clip.swapped")
-def _inverse_clip_swapped(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of clip.swapped: swap the clips back."""
-    payload = event.payload
-    if isinstance(payload, ClipSwappedPayload):
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.swapped",
-            inverse_payload={
-                "clip_a_id": payload.clip_a_id,
-                "clip_b_id": payload.clip_b_id,
-            },
-        )
-    return _non_invertible(event, before, after, "clip.swapped payload not available")
+# -- clip.replaced ----------------------------------------------------------
 
-
-@_register("clip.replaced")
-def _inverse_clip_replaced(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+def _handle_clip_replaced(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.replaced: restore original asset from prior state."""
     payload = event.payload
-    if isinstance(payload, ClipReplacedPayload):
-        clip_id = payload.clip_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        original_asset = None
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                original_asset = clip.get("asset_id")
-                break
-        if original_asset is None:
-            return _non_invertible(
-                event, before, after,
-                f"clip {clip_id!r} not found in prior projection state"
-            )
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.replaced",
-            inverse_payload={
-                "clip_id": clip_id,
-                "with_asset_id": original_asset,
-            },
+    assert isinstance(payload, ClipReplacedPayload)
+    clip_id = payload.clip_id
+    clip = _find_clip(before, clip_id)
+    if clip is None:
+        return _non_invertible(
+            event, before, after,
+            f"clip {clip_id!r} not found in prior projection state",
         )
-    return _non_invertible(event, before, after, "clip.replaced payload not available")
+    original_asset = clip.get("asset_id")
+    if original_asset is None:
+        return _non_invertible(
+            event, before, after,
+            f"clip {clip_id!r} not found in prior projection state",
+        )
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="clip.replaced",
+        inverse_payload={
+            "clip_id": clip_id,
+            "with_asset_id": original_asset,
+        },
+    )
 
 
-@_register("clip.text_set")
-def _inverse_clip_text_set(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- clip.text_set ----------------------------------------------------------
+
+def _handle_clip_text_set(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.text_set: restore original text from prior state."""
     payload = event.payload
-    if isinstance(payload, ClipTextSetPayload):
-        clip_id = payload.clip_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        original_text = ""
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                original_text = clip.get("text", "")
-                break
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.text_set",
-            inverse_payload={
-                "clip_id": clip_id,
-                "text": original_text,
-            },
-        )
-    return _non_invertible(event, before, after, "clip.text_set payload not available")
+    assert isinstance(payload, ClipTextSetPayload)
+    clip_id = payload.clip_id
+    clip = _find_clip(before, clip_id)
+    original_text = clip.get("text", "") if clip else ""
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="clip.text_set",
+        inverse_payload={
+            "clip_id": clip_id,
+            "text": original_text,
+        },
+    )
 
 
-@_register("clip.annotated")
-def _inverse_clip_annotated(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- clip.annotated ---------------------------------------------------------
+
+def _handle_clip_annotated(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of clip.annotated: restore original note from prior state."""
     payload = event.payload
-    if isinstance(payload, ClipAnnotatedPayload):
-        clip_id = payload.clip_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        original_note = ""
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                original_note = clip.get("note", "")
-                break
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="clip.annotated",
-            inverse_payload={
-                "clip_id": clip_id,
-                "note": original_note,
-            },
-        )
-    return _non_invertible(event, before, after, "clip.annotated payload not available")
+    assert isinstance(payload, ClipAnnotatedPayload)
+    clip_id = payload.clip_id
+    clip = _find_clip(before, clip_id)
+    original_note = clip.get("note", "") if clip else ""
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="clip.annotated",
+        inverse_payload={
+            "clip_id": clip_id,
+            "note": original_note,
+        },
+    )
 
 
-# ============================================================================
-# transition.* inverses
-# ============================================================================
+# -- transition.removed -----------------------------------------------------
 
-
-@_register("transition.set")
-def _inverse_transition_set(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of transition.set: remove the transition."""
-    payload = event.payload
-    if isinstance(payload, TransitionSetPayload):
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="transition.removed",
-            inverse_payload={
-                "left_clip_id": payload.left_clip_id,
-                "right_clip_id": payload.right_clip_id,
-            },
-        )
-    return _non_invertible(event, before, after, "transition.set payload not available")
-
-
-@_register("transition.removed")
-def _inverse_transition_removed(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+def _handle_transition_removed(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of transition.removed: re-set the transition from prior state."""
     payload = event.payload
-    if isinstance(payload, TransitionRemovedPayload):
-        left_id = payload.left_clip_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == left_id:
-                transition = clip.get("transition")
-                if isinstance(transition, dict):
-                    return InverseRequest(
-                        invertible=True,
-                        inverse_kind="transition.set",
-                        inverse_payload={
-                            "left_clip_id": left_id,
-                            "right_clip_id": transition.get("right_clip_id", ""),
-                            "kind": transition.get("kind", "dissolve"),
-                            "duration_seconds": float(transition.get("duration_seconds", 1.0)),
-                        },
-                    )
-        return _non_invertible(
-            event, before, after,
-            f"prior transition state for {left_id!r} not found"
-        )
-    return _non_invertible(event, before, after, "transition.removed payload not available")
+    assert isinstance(payload, TransitionRemovedPayload)
+    left_id = payload.left_clip_id
+    clip = _find_clip(before, left_id)
+    if clip is not None:
+        transition = clip.get("transition")
+        if isinstance(transition, dict):
+            return InverseRequest(
+                invertible=True,
+                inverse_kind="transition.set",
+                inverse_payload={
+                    "left_clip_id": left_id,
+                    "right_clip_id": transition.get("right_clip_id", ""),
+                    "kind": transition.get("kind", "dissolve"),
+                    "duration_seconds": float(transition.get("duration_seconds", 1.0)),
+                },
+            )
+    return _non_invertible(
+        event, before, after,
+        f"prior transition state for {left_id!r} not found",
+    )
 
 
-# ============================================================================
-# effect.* inverses
-# ============================================================================
+# -- effect.removed ---------------------------------------------------------
 
-
-@_register("effect.added")
-def _inverse_effect_added(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of effect.added: remove the effect."""
-    payload = event.payload
-    if isinstance(payload, EffectAddedPayload):
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="effect.removed",
-            inverse_payload={
-                "clip_id": payload.clip_id,
-                "effect_id": payload.effect_id,
-            },
-        )
-    return _non_invertible(event, before, after, "effect.added payload not available")
-
-
-@_register("effect.removed")
-def _inverse_effect_removed(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+def _handle_effect_removed(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of effect.removed: re-add the effect from prior state."""
     payload = event.payload
-    if isinstance(payload, EffectRemovedPayload):
-        clip_id = payload.clip_id
-        effect_id = payload.effect_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                effects = clip.get("effects", [])
-                if isinstance(effects, list):
-                    for e in effects:
-                        if isinstance(e, dict) and e.get("effect_id") == effect_id:
-                            inverse = {
-                                "clip_id": clip_id,
-                                "effect_id": effect_id,
-                            }
-                            params = e.get("params")
-                            if isinstance(params, dict):
-                                inverse["params"] = dict(params)
-                            return InverseRequest(
-                                invertible=True,
-                                inverse_kind="effect.added",
-                                inverse_payload=inverse,
-                            )
-        return _non_invertible(
-            event, before, after,
-            f"prior effect {effect_id!r} on clip {clip_id!r} not found"
-        )
-    return _non_invertible(event, before, after, "effect.removed payload not available")
-
-
-@_register("effect.tuned")
-def _inverse_effect_tuned(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of effect.tuned: restore original param value from prior state."""
-    payload = event.payload
-    if isinstance(payload, EffectTunedPayload):
-        clip_id = payload.clip_id
-        effect_id = payload.effect_id
-        param = payload.param
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                effects = clip.get("effects", [])
-                if isinstance(effects, list):
-                    for e in effects:
-                        if isinstance(e, dict) and e.get("effect_id") == effect_id:
-                            effects_params = e.get("params", {})
-                            original = effects_params.get(param) if isinstance(effects_params, dict) else None
-                            return InverseRequest(
-                                invertible=True,
-                                inverse_kind="effect.tuned",
-                                inverse_payload={
-                                    "clip_id": clip_id,
-                                    "effect_id": effect_id,
-                                    "param": param,
-                                    "value": original,
-                                },
-                            )
-        return _non_invertible(
-            event, before, after,
-            f"prior effect {effect_id!r} param {param!r} on clip {clip_id!r} not found"
-        )
-    return _non_invertible(event, before, after, "effect.tuned payload not available")
-
-
-# ============================================================================
-# track.* inverses
-# ============================================================================
-
-
-@_register("track.added")
-def _inverse_track_added(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of track.added: remove the track."""
-    payload = event.payload
-    if isinstance(payload, TrackAddedPayload):
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="track.removed",
-            inverse_payload={"track_id": payload.track_id},
-        )
-    return _non_invertible(event, before, after, "track.added payload not available")
-
-
-@_register("track.removed")
-def _inverse_track_removed(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of track.removed: re-add the track from prior state."""
-    payload = event.payload
-    if isinstance(payload, TrackRemovedPayload):
-        track_id = payload.track_id
-        before_tracks = before.get("tracks", []) if isinstance(before, dict) else []
-        for track in before_tracks:
-            if isinstance(track, dict) and track.get("id") == track_id:
-                inverse = {
-                    "track_id": track_id,
-                    "kind": track.get("kind", "visual"),
-                }
-                label = track.get("label")
-                if isinstance(label, str) and label:
-                    inverse["label"] = label
-                return InverseRequest(
-                    invertible=True,
-                    inverse_kind="track.added",
-                    inverse_payload=inverse,
-                )
-        return _non_invertible(
-            event, before, after,
-            f"track {track_id!r} not found in prior projection state"
-        )
-    return _non_invertible(event, before, after, "track.removed payload not available")
-
-
-# ============================================================================
-# audio.* inverses
-# ============================================================================
-
-
-@_register("audio.bound")
-def _inverse_audio_bound(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of audio.bound: unbind audio from the clip."""
-    payload = event.payload
-    if isinstance(payload, AudioBoundPayload):
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="audio.unbound",
-            inverse_payload={"clip_id": payload.clip_id},
-        )
-    return _non_invertible(event, before, after, "audio.bound payload not available")
-
-
-@_register("audio.unbound")
-def _inverse_audio_unbound(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of audio.unbound: re-bind audio from prior state."""
-    payload = event.payload
-    if isinstance(payload, AudioUnboundPayload):
-        clip_id = payload.clip_id
-        before_clips = before.get("clips", []) if isinstance(before, dict) else []
-        for clip in before_clips:
-            if isinstance(clip, dict) and clip.get("id") == clip_id:
-                asset_id = clip.get("asset_id", "")
-                if asset_id:
+    assert isinstance(payload, EffectRemovedPayload)
+    clip_id = payload.clip_id
+    effect_id = payload.effect_id
+    clip = _find_clip(before, clip_id)
+    if clip is not None:
+        effects = clip.get("effects", [])
+        if isinstance(effects, list):
+            for e in effects:
+                if isinstance(e, dict) and e.get("effect_id") == effect_id:
+                    inverse: dict[str, Any] = {
+                        "clip_id": clip_id,
+                        "effect_id": effect_id,
+                    }
+                    params = e.get("params")
+                    if isinstance(params, dict):
+                        inverse["params"] = dict(params)
                     return InverseRequest(
                         invertible=True,
-                        inverse_kind="audio.bound",
+                        inverse_kind="effect.added",
+                        inverse_payload=inverse,
+                    )
+    return _non_invertible(
+        event, before, after,
+        f"prior effect {effect_id!r} on clip {clip_id!r} not found",
+    )
+
+
+# -- effect.tuned -----------------------------------------------------------
+
+def _handle_effect_tuned(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
+    """Inverse of effect.tuned: restore original param value from prior state."""
+    payload = event.payload
+    assert isinstance(payload, EffectTunedPayload)
+    clip_id = payload.clip_id
+    effect_id = payload.effect_id
+    param = payload.param
+    clip = _find_clip(before, clip_id)
+    if clip is not None:
+        effects = clip.get("effects", [])
+        if isinstance(effects, list):
+            for e in effects:
+                if isinstance(e, dict) and e.get("effect_id") == effect_id:
+                    effects_params = e.get("params", {})
+                    original = effects_params.get(param) if isinstance(effects_params, dict) else None
+                    return InverseRequest(
+                        invertible=True,
+                        inverse_kind="effect.tuned",
                         inverse_payload={
                             "clip_id": clip_id,
-                            "asset_id": asset_id,
+                            "effect_id": effect_id,
+                            "param": param,
+                            "value": original,
                         },
                     )
-        return _non_invertible(
-            event, before, after,
-            f"prior audio binding for clip {clip_id!r} not available"
-        )
-    return _non_invertible(event, before, after, "audio.unbound payload not available")
+    return _non_invertible(
+        event, before, after,
+        f"prior effect {effect_id!r} param {param!r} on clip {clip_id!r} not found",
+    )
 
 
-# ============================================================================
-# theme.* inverses
-# ============================================================================
+# -- track.removed ----------------------------------------------------------
+
+def _handle_track_removed(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
+    """Inverse of track.removed: re-add the track from prior state."""
+    payload = event.payload
+    assert isinstance(payload, TrackRemovedPayload)
+    track_id = payload.track_id
+    before_tracks = before.get("tracks", []) if isinstance(before, dict) else []
+    for track in before_tracks:
+        if isinstance(track, dict) and track.get("id") == track_id:
+            inverse: dict[str, Any] = {
+                "track_id": track_id,
+                "kind": track.get("kind", "visual"),
+            }
+            label = track.get("label")
+            if isinstance(label, str) and label:
+                inverse["label"] = label
+            return InverseRequest(
+                invertible=True,
+                inverse_kind="track.added",
+                inverse_payload=inverse,
+            )
+    return _non_invertible(
+        event, before, after,
+        f"track {track_id!r} not found in prior projection state",
+    )
 
 
-@_register("theme.set")
-def _inverse_theme_set(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- audio.unbound ----------------------------------------------------------
+
+def _handle_audio_unbound(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
+    """Inverse of audio.unbound: re-bind audio from prior state."""
+    payload = event.payload
+    assert isinstance(payload, AudioUnboundPayload)
+    clip_id = payload.clip_id
+    clip = _find_clip(before, clip_id)
+    if clip is not None:
+        asset_id = clip.get("asset_id", "")
+        if asset_id:
+            return InverseRequest(
+                invertible=True,
+                inverse_kind="audio.bound",
+                inverse_payload={
+                    "clip_id": clip_id,
+                    "asset_id": asset_id,
+                },
+            )
+    return _non_invertible(
+        event, before, after,
+        f"prior audio binding for clip {clip_id!r} not available",
+    )
+
+
+# -- theme.set --------------------------------------------------------------
+
+def _handle_theme_set(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of theme.set: restore previous theme from prior state."""
     payload = event.payload
-    if isinstance(payload, ThemeSetPayload):
-        before_theme = before.get("theme", "") if isinstance(before, dict) else ""
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="theme.set",
-            inverse_payload={"theme_id": before_theme if before_theme else ""},
-        )
-    return _non_invertible(event, before, after, "theme.set payload not available")
+    assert isinstance(payload, ThemeSetPayload)
+    before_theme = before.get("theme", "") if isinstance(before, dict) else ""
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="theme.set",
+        inverse_payload={"theme_id": before_theme if before_theme else ""},
+    )
 
 
-@_register("theme.overridden")
-def _inverse_theme_overridden(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- theme.overridden -------------------------------------------------------
+
+def _handle_theme_overridden(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of theme.overridden: restore original override value from prior state."""
     payload = event.payload
-    if isinstance(payload, ThemeOverriddenPayload):
-        override_id = payload.override_id
-        before_overrides = before.get("theme_overrides", {}) if isinstance(before, dict) else {}
-        original = before_overrides.get(override_id) if isinstance(before_overrides, dict) else None
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="theme.overridden",
-            inverse_payload={
-                "override_id": override_id,
-                "value": original,
-            },
-        )
-    return _non_invertible(event, before, after, "theme.overridden payload not available")
+    assert isinstance(payload, ThemeOverriddenPayload)
+    override_id = payload.override_id
+    before_overrides = before.get("theme_overrides", {}) if isinstance(before, dict) else {}
+    original = before_overrides.get(override_id) if isinstance(before_overrides, dict) else None
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="theme.overridden",
+        inverse_payload={
+            "override_id": override_id,
+            "value": original,
+        },
+    )
 
 
-# ============================================================================
-# pool.* inverses
-# ============================================================================
+# -- pool.asset_removed -----------------------------------------------------
 
-
-@_register("pool.asset_added")
-def _inverse_pool_asset_added(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
-    """Inverse of pool.asset_added: remove the pool asset."""
-    payload = event.payload
-    if isinstance(payload, PoolAssetAddedPayload):
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="pool.asset_removed",
-            inverse_payload={"asset_id": payload.asset_id},
-        )
-    return _non_invertible(event, before, after, "pool.asset_added payload not available")
-
-
-@_register("pool.asset_removed")
-def _inverse_pool_asset_removed(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+def _handle_pool_asset_removed(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of pool.asset_removed: re-add the asset from prior state."""
     payload = event.payload
-    if isinstance(payload, PoolAssetRemovedPayload):
-        asset_id = payload.asset_id
-        before_pool = before.get("pool", {}) if isinstance(before, dict) else {}
-        before_entries = before_pool.get("entries", []) if isinstance(before_pool, dict) else []
-        for entry in before_entries:
-            if isinstance(entry, dict) and entry.get("asset_id") == asset_id:
-                return InverseRequest(
-                    invertible=True,
-                    inverse_kind="pool.asset_added",
-                    inverse_payload={"asset_id": asset_id},
-                )
-        return _non_invertible(
-            event, before, after,
-            f"pool asset {asset_id!r} not found in prior projection state"
-        )
-    return _non_invertible(event, before, after, "pool.asset_removed payload not available")
+    assert isinstance(payload, PoolAssetRemovedPayload)
+    asset_id = payload.asset_id
+    before_pool = before.get("pool", {}) if isinstance(before, dict) else {}
+    before_entries = before_pool.get("entries", []) if isinstance(before_pool, dict) else []
+    for entry in before_entries:
+        if isinstance(entry, dict) and entry.get("asset_id") == asset_id:
+            return InverseRequest(
+                invertible=True,
+                inverse_kind="pool.asset_added",
+                inverse_payload={"asset_id": asset_id},
+            )
+    return _non_invertible(
+        event, before, after,
+        f"pool asset {asset_id!r} not found in prior projection state",
+    )
 
 
-@_register("pool.asset_scored")
-def _inverse_pool_asset_scored(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+# -- pool.asset_scored ------------------------------------------------------
+
+def _handle_pool_asset_scored(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of pool.asset_scored: restore original score from prior state."""
     payload = event.payload
-    if isinstance(payload, PoolAssetScoredPayload):
-        asset_id = payload.asset_id
-        before_pool = before.get("pool", {}) if isinstance(before, dict) else {}
-        before_entries = before_pool.get("entries", []) if isinstance(before_pool, dict) else []
-        for entry in before_entries:
-            if isinstance(entry, dict) and entry.get("asset_id") == asset_id:
-                original_score = float(entry.get("score", 0))
-                return InverseRequest(
-                    invertible=True,
-                    inverse_kind="pool.asset_scored",
-                    inverse_payload={
-                        "asset_id": asset_id,
-                        "score": original_score,
-                    },
-                )
-        return _non_invertible(
-            event, before, after,
-            f"pool asset {asset_id!r} not found in prior projection state"
-        )
-    return _non_invertible(event, before, after, "pool.asset_scored payload not available")
+    assert isinstance(payload, PoolAssetScoredPayload)
+    asset_id = payload.asset_id
+    before_pool = before.get("pool", {}) if isinstance(before, dict) else {}
+    before_entries = before_pool.get("entries", []) if isinstance(before_pool, dict) else []
+    for entry in before_entries:
+        if isinstance(entry, dict) and entry.get("asset_id") == asset_id:
+            original_score = float(entry.get("score", 0))
+            return InverseRequest(
+                invertible=True,
+                inverse_kind="pool.asset_scored",
+                inverse_payload={
+                    "asset_id": asset_id,
+                    "score": original_score,
+                },
+            )
+    return _non_invertible(
+        event, before, after,
+        f"pool asset {asset_id!r} not found in prior projection state",
+    )
 
 
-# ============================================================================
-# arrangement.* inverses
-# ============================================================================
+# -- arrangement.replaced ---------------------------------------------------
 
-
-@_register("arrangement.replaced")
-def _inverse_arrangement_replaced(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+def _handle_arrangement_replaced(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of arrangement.replaced: restore prior arrangement from before state."""
     payload = event.payload
-    if isinstance(payload, ArrangementReplacedPayload):
-        before_arrangement = before.get("arrangement", {}) if isinstance(before, dict) else {}
-        return InverseRequest(
-            invertible=True,
-            inverse_kind="arrangement.replaced",
-            inverse_payload={"arrangement": dict(before_arrangement) if isinstance(before_arrangement, dict) else {}},
-        )
-    return _non_invertible(event, before, after, "arrangement.replaced payload not available")
+    assert isinstance(payload, ArrangementReplacedPayload)
+    before_arrangement = before.get("arrangement", {}) if isinstance(before, dict) else {}
+    return InverseRequest(
+        invertible=True,
+        inverse_kind="arrangement.replaced",
+        inverse_payload={"arrangement": dict(before_arrangement) if isinstance(before_arrangement, dict) else {}},
+    )
 
 
-# ============================================================================
-# timeline.config_replaced inverse
-# ============================================================================
+# -- timeline.config_replaced ------------------------------------------------
 
-
-@_register("timeline.config_replaced")
-def _inverse_timeline_config_replaced(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-) -> InverseRequest:
+def _handle_timeline_config_replaced(event: TimelineEvent, before: dict[str, Any], after: dict[str, Any]) -> InverseRequest:
     """Inverse of timeline.config_replaced: restore the prior raw TimelineConfig."""
     payload = event.payload
-    if not isinstance(payload, TimelineConfigReplacedPayload):
-        return _non_invertible(
-            event,
-            before,
-            after,
-            "timeline.config_replaced payload not available",
-        )
+    assert isinstance(payload, TimelineConfigReplacedPayload)
     try:
         config = validate_timeline_config_for_container(before)
     except ValueError as exc:
         return _non_invertible(
-            event,
-            before,
-            after,
+            event, before, after,
             f"prior projection is not a valid TimelineConfig: {exc}",
         )
     return InverseRequest(
@@ -837,6 +604,58 @@ def _inverse_timeline_config_replaced(
         inverse_kind="timeline.config_replaced",
         inverse_payload={"config": config},
     )
+
+
+# ============================================================================
+# Declarative inverse dispatch table
+# ============================================================================
+
+# Table entries: (event_kind, expected_payload_type, handler_fn)
+# Handler signature: (event, before, after) -> InverseRequest
+# The dispatch machinery (plan_inverse) performs isinstance checks before
+# calling the handler, so handlers can assume correct payload type.
+
+_INVERSE_TABLE: list[tuple[str, type, Any]] = [
+    # -- clip.* (7 simple-forward, 7 complex) --
+    ("clip.added",           ClipAddedPayload,           _forward("clip.removed", "clip_id")),
+    ("clip.removed",         ClipRemovedPayload,         _handle_clip_removed),
+    ("clip.moved",           ClipMovedPayload,           _handle_clip_moved),
+    ("clip.retracked",       ClipRetrackedPayload,       _handle_clip_retracked),
+    ("clip.retimed",         ClipRetimedPayload,         _handle_clip_retimed),
+    ("clip.swapped",         ClipSwappedPayload,         _forward("clip.swapped", "clip_a_id", "clip_b_id")),
+    ("clip.replaced",        ClipReplacedPayload,        _handle_clip_replaced),
+    ("clip.text_set",        ClipTextSetPayload,         _handle_clip_text_set),
+    ("clip.annotated",       ClipAnnotatedPayload,       _handle_clip_annotated),
+    # -- transition.* (1 simple-forward, 1 complex) --
+    ("transition.set",       TransitionSetPayload,       _forward("transition.removed", "left_clip_id", "right_clip_id")),
+    ("transition.removed",   TransitionRemovedPayload,   _handle_transition_removed),
+    # -- effect.* (1 simple-forward, 2 complex) --
+    ("effect.added",         EffectAddedPayload,         _forward("effect.removed", "clip_id", "effect_id")),
+    ("effect.removed",       EffectRemovedPayload,       _handle_effect_removed),
+    ("effect.tuned",         EffectTunedPayload,         _handle_effect_tuned),
+    # -- theme.* (2 complex) --
+    ("theme.set",            ThemeSetPayload,            _handle_theme_set),
+    ("theme.overridden",     ThemeOverriddenPayload,     _handle_theme_overridden),
+    # -- track.* (1 simple-forward, 1 complex) --
+    ("track.added",          TrackAddedPayload,          _forward("track.removed", "track_id")),
+    ("track.removed",        TrackRemovedPayload,        _handle_track_removed),
+    # -- audio.* (1 simple-forward, 1 complex) --
+    ("audio.bound",          AudioBoundPayload,          _forward("audio.unbound", "clip_id")),
+    ("audio.unbound",        AudioUnboundPayload,        _handle_audio_unbound),
+    # -- pool.* (1 simple-forward, 2 complex) --
+    ("pool.asset_added",     PoolAssetAddedPayload,      _forward("pool.asset_removed", "asset_id")),
+    ("pool.asset_removed",   PoolAssetRemovedPayload,    _handle_pool_asset_removed),
+    ("pool.asset_scored",    PoolAssetScoredPayload,     _handle_pool_asset_scored),
+    # -- arrangement.* (1 complex) --
+    ("arrangement.replaced", ArrangementReplacedPayload, _handle_arrangement_replaced),
+    # -- timeline.* (1 complex) --
+    ("timeline.config_replaced", TimelineConfigReplacedPayload, _handle_timeline_config_replaced),
+]
+
+# Build fast lookup: kind -> (expected_payload_type, handler_fn)
+_INVERSE_DISPATCH: dict[str, tuple[type, Any]] = {
+    kind: (p_type, handler) for kind, p_type, handler in _INVERSE_TABLE
+}
 
 
 # ============================================================================
@@ -904,14 +723,21 @@ def plan_inverse(
         )
 
     # Look up in the dispatch table
-    planner = _INVERSE_DISPATCH.get(event.kind)
-    if planner is None:
+    entry = _INVERSE_DISPATCH.get(event.kind)
+    if entry is None:
         return _non_invertible(
             event, before, after,
             f"no inverse planner registered for event kind {event.kind!r}",
         )
 
-    return planner(event, before, after)
+    expected_type, handler = entry
+    if not isinstance(event.payload, expected_type):
+        return _non_invertible(
+            event, before, after,
+            f"{event.kind} payload not available",
+        )
+
+    return handler(event, before, after)
 
 
 def plan_inverses(
@@ -956,24 +782,3 @@ def plan_inverses(
         results.append(result)
 
     return results
-
-
-# ============================================================================
-# Internal helpers
-# ============================================================================
-
-
-def _non_invertible(
-    event: TimelineEvent,
-    before: dict[str, Any],
-    after: dict[str, Any],
-    reason: str,
-) -> InverseRequest:
-    """Build a non-invertible InverseRequest with before/after projections."""
-    return InverseRequest(
-        invertible=False,
-        revert_kind="timeline.reverted",
-        revert_reason=f"{event.kind} at {event.event_id}: {reason}",
-        before_projection=before if before else None,
-        after_projection=after if after else None,
-    )
