@@ -32,7 +32,22 @@ from typing import Any
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.result_manifest import complete_output_metadata
-from astrid.packs.generation.executors._common import build_generation_manifest
+from astrid.packs.generation.executors._common import (
+    build_generation_manifest,
+    _available_backend_ids,
+    _build_requested_params as _build_requested_params_base,
+    _check_required,
+    _coerce_args as _coerce_args_base,
+    _create_backend_adapter,
+    _drop_unsupported,
+    _feature_is_missing,
+    _load_prompts,
+    _manifest_path_for_run_dir,
+    _normalise_prompts,
+    _PROMPT_ENTRY_CONTROL_KEYS,
+    _request_to_argv as _request_to_argv_base,
+    _resolve_seed,
+)
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
@@ -66,7 +81,36 @@ _VIDEO_CLI_FEATURES: tuple[str, ...] = (
     "enable_prompt_expansion",
     "acceleration",
 )
-_PROMPT_ENTRY_CONTROL_KEYS = frozenset({"model", "mode"})
+
+_VIDEO_ARGV_FLAG_NAMES: tuple[str, ...] = (
+    "mode",
+    "prompt",
+    "prompts_file",
+    "model",
+    "image_ref",
+    "image_end_ref",
+    "execution",
+    "count",
+    "seed",
+    "negative_prompt",
+    "resolution",
+    "frames",
+    "fps",
+    "duration",
+    "guidance_scale",
+    "steps",
+    "shift",
+    "loras",
+    "enable_safety_checker",
+    "enable_prompt_expansion",
+    "acceleration",
+    "env_file",
+)
+
+
+# ---------------------------------------------------------------------------
+# Video-only: LoRA parsing (':' separator, returns list[dict]|None)
+# ---------------------------------------------------------------------------
 
 
 def _parse_loras_arg(value: Any) -> list[dict[str, Any]] | None:
@@ -74,9 +118,9 @@ def _parse_loras_arg(value: Any) -> list[dict[str, Any]] | None:
 
     Accepted shapes:
       - already a list (from a prompts-file entry): returned as-is
-      - JSON array string: ``[{"path": "...", "scale": 1.0}, ...]``
+      - JSON array string: ``[{\"path\": \"...\", \"scale\": 1.0}, ...]``
       - comma-separated ``url:scale`` entries:
-        ``"https://x/a.safetensors:0.8,https://x/b.safetensors:1.0"``
+        ``\"https://x/a.safetensors:0.8,https://x/b.safetensors:1.0\"``
     """
     if value is None or value == "":
         return None
@@ -109,6 +153,11 @@ def _parse_loras_arg(value: Any) -> list[dict[str, Any]] | None:
     return items or None
 
 
+# ---------------------------------------------------------------------------
+# Video-only: bool-string coercion
+# ---------------------------------------------------------------------------
+
+
 def _parse_bool_str(value: Any) -> bool | None:
     """Coerce 'true'/'false' (or already-bool) into a bool, ``None`` if unset."""
     if value is None:
@@ -124,272 +173,7 @@ def _parse_bool_str(value: Any) -> bool | None:
 
 
 # ---------------------------------------------------------------------------
-# Prompt helpers
-# ---------------------------------------------------------------------------
-
-
-def _load_prompts(path: Path, model: str, mode: str) -> list[dict[str, Any]]:
-    """Load generation requests from a JSON or JSONL file.
-
-    Each line is a JSON object that may override ``prompt``, ``seed``,
-    ``count``, ``resolution``, ``negative_prompt``, ``image_ref``,
-    ``image_end_ref``, ``frames``, ``fps``, ``duration``,
-    ``guidance_scale``, ``steps``, and ``model``.  A bare JSON array is
-    also accepted.
-
-    Per-entry ``model`` overrides must include an explicit ``mode`` field
-    matching CLI ``--mode`` or be rejected.
-    """
-    text = path.read_text(encoding="utf-8").strip()
-    if text.startswith("["):
-        data = json.loads(text)
-        if isinstance(data, list):
-            return _normalise_prompts(data, model, mode)
-        raise SystemExit(f"{path}: top-level JSON must be an array or JSONL")
-
-    entries: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        entries.append(json.loads(line))
-    if not entries:
-        raise SystemExit(f"{path}: no valid entries found")
-    return _normalise_prompts(entries, model, mode)
-
-
-def _normalise_prompts(
-    raw: list[dict[str, Any]], model: str, mode: str
-) -> list[dict[str, Any]]:
-    """Ensure every entry has a ``prompt`` and a ``model`` key.
-
-    Per-entry ``model`` overrides are validated for mode consistency:
-    a ``mode`` field matching CLI ``--mode`` is required.
-    """
-    result: list[dict[str, Any]] = []
-    for i, entry in enumerate(raw):
-        if "prompt" not in entry:
-            raise SystemExit(
-                f"Entry {i} in prompts file is missing required 'prompt' key"
-            )
-        entry.setdefault("model", model)
-
-        # Per-entry model override must have explicit mode field
-        # matching CLI --mode (or no override at all).
-        entry_model = entry.get("model", model)
-        if entry_model != model:
-            entry_mode = entry.get("mode")
-            if entry_mode is None:
-                raise SystemExit(
-                    f"Entry {i} overrides model to {entry_model!r} but "
-                    f"has no 'mode' field.  Per-entry model overrides must "
-                    f"include 'mode' matching CLI --mode ({mode!r})."
-                )
-            if entry_mode != mode:
-                raise SystemExit(
-                    f"Entry {i} has mode {entry_mode!r} which does not match "
-                    f"CLI --mode {mode!r}.  Per-entry model overrides must "
-                    f"use the same mode."
-                )
-
-        result.append(entry)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Feature validation (per-mode)
-# ---------------------------------------------------------------------------
-
-
-def _feature_is_missing(feature: str, value: Any) -> bool:
-    """Return ``True`` when a supplied feature value should count as missing."""
-    if value is None:
-        return True
-    if feature == "count":
-        return not bool(value)
-    if isinstance(value, str):
-        return not value.strip()
-    return False
-
-
-def _build_requested_params(
-    args: argparse.Namespace,
-    *,
-    prompt_text: str | None,
-    prompt_entry: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Merge prompt-entry and CLI feature values into canonical params."""
-    params: dict[str, Any] = {}
-    if prompt_entry:
-        for key, value in prompt_entry.items():
-            if key in _PROMPT_ENTRY_CONTROL_KEYS:
-                continue
-            params[key] = value
-
-    if prompt_text is not None:
-        params["prompt"] = prompt_text
-    elif "prompt" not in params:
-        params["prompt"] = getattr(args, "prompt", None)
-
-    for feature in _VIDEO_CLI_FEATURES:
-        if feature == "prompt":
-            continue
-        if feature not in params:
-            value = getattr(args, feature, None)
-            if feature == "loras":
-                value = _parse_loras_arg(value)
-            elif feature in {"enable_safety_checker", "enable_prompt_expansion"}:
-                value = _parse_bool_str(value)
-            params[feature] = value
-
-    return {
-        feature: value
-        for feature, value in params.items()
-        if value is not None
-    }
-
-
-def _check_required(
-    mode_spec: Any,
-    mode_name: str,
-    model_id: str,
-    requested_params: dict[str, Any],
-) -> None:
-    """Hard-fail if any feature in *mode_spec.requires* is missing."""
-    missing: list[str] = []
-    for req in mode_spec.requires:
-        if _feature_is_missing(req, requested_params.get(req)):
-            missing.append(req)
-
-    if missing:
-        raise SystemExit(
-            f"model {model_id!r} mode {mode_name!r} requires: "
-            f"{', '.join(sorted(missing))}. "
-            f"Provide {'it' if len(missing) == 1 else 'them'} "
-            f"and retry."
-        )
-
-
-def _drop_unsupported(
-    mode_spec: Any,
-    mode_name: str,
-    model_id: str,
-    requested_params: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, str]], list[str]]:
-    """Drop caller-supplied features absent from *mode_spec.supports*.
-
-    Returns ``(filtered_params, warnings, dropped_features)``.
-    """
-    filtered_params: dict[str, Any] = {}
-    warnings: list[dict[str, str]] = []
-    dropped: list[str] = []
-    for feature, value in requested_params.items():
-        if _feature_is_missing(feature, value):
-            continue
-        if feature not in mode_spec.supports:
-            warnings.append(
-                {
-                    "feature": feature,
-                    "reason": (
-                        f"not supported by model {model_id!r} "
-                        f"mode {mode_name!r}"
-                    ),
-                }
-            )
-            dropped.append(feature)
-            continue
-        filtered_params[feature] = value
-    return filtered_params, warnings, dropped
-
-
-# ---------------------------------------------------------------------------
-# Seed resolution
-# ---------------------------------------------------------------------------
-
-
-def _resolve_seed(requested: int | None, index: int) -> int:
-    """Return ``requested + index`` if *requested* is set, else a random seed."""
-    if requested is not None:
-        return requested + index
-    return random.randint(0, 2**31 - 1)
-
-
-# ---------------------------------------------------------------------------
-# Manifest emission
-# ---------------------------------------------------------------------------
-
-
-def _build_inputs_request(
-    args: argparse.Namespace,
-    entry: Any,
-    mode_name: str,
-    seed: int,
-    prompt_text: str | None,
-    image_ref_resolved: str | None,
-    image_end_ref_resolved: str | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build inputs and request dicts for the video generation manifest."""
-    requested_prompt = prompt_text or getattr(args, "prompt", None)
-    request: dict[str, Any] = {
-        "prompt": requested_prompt,
-        "negative_prompt": getattr(args, "negative_prompt", None),
-        "seed": seed,
-        "count": max(1, args.count or 1),
-        "image_ref_resolved": image_ref_resolved,
-        "image_end_ref_resolved": image_end_ref_resolved,
-        "frames": getattr(args, "frames", None),
-        "fps": getattr(args, "fps", None),
-        "duration": getattr(args, "duration", None),
-        "resolution": getattr(args, "resolution", None),
-    }
-    inputs: dict[str, Any] = {
-        "model": entry.id,
-        "mode": mode_name,
-        "execution": args.execution,
-        "prompt": requested_prompt,
-        "seed": seed,
-        "count": max(1, args.count or 1),
-    }
-    for key in ("negative_prompt", "resolution", "frames", "fps", "duration",
-                "image_ref", "image_end_ref", "guidance_scale", "steps", "shift"):
-        val = getattr(args, key, None)
-        if val is not None:
-            inputs[key] = val
-    if image_ref_resolved is not None:
-        inputs["image_ref_resolved"] = image_ref_resolved
-    if image_end_ref_resolved is not None:
-        inputs["image_end_ref_resolved"] = image_end_ref_resolved
-    return inputs, request
-
-
-def _available_backend_ids(mode_spec: Any) -> tuple[str, ...]:
-    """Return the backend ids available for one resolved mode."""
-    return tuple(sorted(mode_spec.backends))
-
-
-def _create_backend_adapter(
-    backend_registry: GenerationBackendRegistry,
-    execution: str,
-    *,
-    env_file: Path | None,
-) -> BackendAdapter:
-    """Instantiate the selected backend with CLI-friendly errors."""
-    try:
-        return backend_registry.create(execution, env_file=env_file)
-    except KeyError as exc:
-        raise AstridError(
-            f"generation backend {execution!r} is not registered: {exc}",
-            recovery_command="check available backends with --help or use a registered execution backend",
-        ) from exc
-    except Exception as exc:
-        raise AstridError(
-            f"failed to initialize generation backend {execution!r}: {exc}",
-            recovery_command="verify the backend is properly installed and configured, then retry",
-        ) from exc
-
-
-# ---------------------------------------------------------------------------
-# Mode validation (reject unsupported modes early)
+# Video-only: mode validation
 # ---------------------------------------------------------------------------
 
 _VALID_MODES = {"t2v", "i2v", "flf"}
@@ -409,6 +193,47 @@ def _validate_mode(mode: str) -> str:
         f"Unknown mode {mode!r}. Must be one of: "
         f"{', '.join(sorted(_VALID_MODES))}."
     )
+
+
+# ---------------------------------------------------------------------------
+# Thin wrappers that fill in video-specific parameters
+# ---------------------------------------------------------------------------
+
+
+# Video-specific feature transforms for _build_requested_params
+_VIDEO_FEATURE_TRANSFORMS: dict[str, Any] = {
+    "loras": _parse_loras_arg,
+    "enable_safety_checker": _parse_bool_str,
+    "enable_prompt_expansion": _parse_bool_str,
+}
+
+
+def _build_requested_params(
+    args: argparse.Namespace,
+    *,
+    prompt_text: str | None,
+    prompt_entry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Merge prompt-entry and CLI feature values into canonical params (video)."""
+    return _build_requested_params_base(
+        args,
+        prompt_text=prompt_text,
+        prompt_entry=prompt_entry,
+        cli_features=_VIDEO_CLI_FEATURES,
+        feature_transforms=_VIDEO_FEATURE_TRANSFORMS,
+    )
+
+
+def _request_to_argv(request: Any) -> list[str]:
+    """Translate an executor-style request object into CLI argv (video)."""
+    return _request_to_argv_base(request, _VIDEO_ARGV_FLAG_NAMES)
+
+
+def _coerce_args(
+    args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
+) -> argparse.Namespace:
+    """Return a parsed args namespace from CLI argv, a namespace, or a request (video)."""
+    return _coerce_args_base(args_or_request, build_parser, _VIDEO_ARGV_FLAG_NAMES)
 
 
 # ---------------------------------------------------------------------------
@@ -558,71 +383,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Env file holding FAL_KEY (for cloud execution).",
     )
     return p
-
-
-def _request_to_argv(request: Any) -> list[str]:
-    """Translate an executor-style request object into CLI argv."""
-    argv: list[str] = []
-    inputs = getattr(request, "inputs", {}) or {}
-    flag_names = (
-        "mode",
-        "prompt",
-        "prompts_file",
-        "model",
-        "image_ref",
-        "image_end_ref",
-        "execution",
-        "count",
-        "seed",
-        "negative_prompt",
-        "resolution",
-        "frames",
-        "fps",
-        "duration",
-        "guidance_scale",
-        "steps",
-        "shift",
-        "loras",
-        "enable_safety_checker",
-        "enable_prompt_expansion",
-        "acceleration",
-        "env_file",
-    )
-    for name in flag_names:
-        value = inputs.get(name)
-        if value in (None, ""):
-            continue
-        if name == "loras" and not isinstance(value, str):
-            value = json.dumps(value)
-        argv.extend([f"--{name.replace('_', '-')}", str(value)])
-    out = getattr(request, "out", None)
-    if out not in (None, ""):
-        argv.extend(["--out", str(out)])
-    return argv
-
-
-def _coerce_args(
-    args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
-) -> argparse.Namespace:
-    """Return a parsed args namespace from CLI argv, a namespace, or a request."""
-    if isinstance(args_or_request, argparse.Namespace):
-        return args_or_request
-    if args_or_request is None or isinstance(args_or_request, (list, tuple)):
-        return build_parser().parse_args(args_or_request)
-    if hasattr(args_or_request, "inputs"):
-        return build_parser().parse_args(_request_to_argv(args_or_request))
-    raise TypeError(
-        "generate_core expected argparse.Namespace, argv list/tuple, or executor request"
-    )
-
-
-def _manifest_path_for_run_dir(run_dir: Path | None) -> Path:
-    if run_dir is None:
-        raise AstridError(
-            "generation result is missing run_dir",
-            recovery_command="run generation through generate_core/main so the executor can write manifest metadata",
-        )
-    return run_dir / "manifest.json"
 
 
 # ---------------------------------------------------------------------------
@@ -928,6 +688,11 @@ def generate_core(
     )
     write_json_atomic(manifest_path, manifest)
 
+    # Video paths live in ``image_paths`` (the canonical GenerationResult
+    # field for all media).  ``video_paths`` is a read-only property alias
+    # that returns ``image_paths``, so video consumers see them via either
+    # attribute.  See ``GenerationResult`` docstring in
+    # ``astrid.core.generation.backends.base``.
     return GenerationResult(
         image_paths=generated_paths,
         seed_used=final_seed,
@@ -942,6 +707,54 @@ def generate_core(
         manifest=manifest,
         run_dir=out,
     )
+
+
+def _build_inputs_request(
+    args: argparse.Namespace,
+    entry: Any,
+    mode_name: str,
+    seed: int,
+    prompt_text: str | None,
+    image_ref_resolved: str | None,
+    image_end_ref_resolved: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build inputs and request dicts for the video generation manifest."""
+    requested_prompt = prompt_text or getattr(args, "prompt", None)
+    request: dict[str, Any] = {
+        "prompt": requested_prompt,
+        "negative_prompt": getattr(args, "negative_prompt", None),
+        "seed": seed,
+        "count": max(1, args.count or 1),
+        "image_ref_resolved": image_ref_resolved,
+        "image_end_ref_resolved": image_end_ref_resolved,
+        "frames": getattr(args, "frames", None),
+        "fps": getattr(args, "fps", None),
+        "duration": getattr(args, "duration", None),
+        "resolution": getattr(args, "resolution", None),
+    }
+    inputs: dict[str, Any] = {
+        "model": entry.id,
+        "mode": mode_name,
+        "execution": args.execution,
+        "prompt": requested_prompt,
+        "seed": seed,
+        "count": max(1, args.count or 1),
+    }
+    for key in ("negative_prompt", "resolution", "frames", "fps", "duration",
+                "image_ref", "image_end_ref", "guidance_scale", "steps", "shift"):
+        val = getattr(args, key, None)
+        if val is not None:
+            inputs[key] = val
+    if image_ref_resolved is not None:
+        inputs["image_ref_resolved"] = image_ref_resolved
+    if image_end_ref_resolved is not None:
+        inputs["image_end_ref_resolved"] = image_end_ref_resolved
+    return inputs, request
+
+
+# ---------------------------------------------------------------------------
+# SDK / CLI entrypoints
+# ---------------------------------------------------------------------------
 
 
 def run_sdk(argv: list[str] | None = None) -> dict[str, Any]:

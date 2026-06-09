@@ -23,7 +23,22 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.result_manifest import complete_output_metadata
-from astrid.packs.generation.executors._common import build_generation_manifest
+from astrid.packs.generation.executors._common import (
+    build_generation_manifest,
+    _available_backend_ids,
+    _build_requested_params as _build_requested_params_base,
+    _check_required,
+    _coerce_args as _coerce_args_base,
+    _create_backend_adapter,
+    _drop_unsupported,
+    _feature_is_missing,
+    _load_prompts,
+    _manifest_path_for_run_dir,
+    _normalise_prompts,
+    _PROMPT_ENTRY_CONTROL_KEYS,
+    _request_to_argv as _request_to_argv_base,
+    _resolve_seed,
+)
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
@@ -53,95 +68,32 @@ _IMAGE_CLI_FEATURES: tuple[str, ...] = (
     "guidance_scale",
     "steps",
 )
-_PROMPT_ENTRY_CONTROL_KEYS = frozenset({"model", "mode"})
+
+_IMAGE_ARGV_FLAG_NAMES: tuple[str, ...] = (
+    "mode",
+    "prompt",
+    "prompts_file",
+    "model",
+    "image_ref",
+    "execution",
+    "count",
+    "seed",
+    "negative_prompt",
+    "size",
+    "quality",
+    "background",
+    "timeout",
+    "strength",
+    "guidance_scale",
+    "steps",
+    "env_file",
+    "loras",
+)
 
 
 # ---------------------------------------------------------------------------
-# Prompt helpers
+# Thin wrappers that fill in image-specific parameters
 # ---------------------------------------------------------------------------
-
-
-def _load_prompts(path: Path, model: str, mode: str) -> list[dict[str, Any]]:
-    """Load generation requests from a JSON or JSONL file.
-
-    Each line is a JSON object that may override ``prompt``, ``seed``,
-    ``count``, ``size``, ``negative_prompt``, ``image_ref``, ``strength``,
-    ``guidance_scale``, ``steps``, and ``model``.  A bare JSON array is
-    also accepted.
-
-    Per-entry ``model`` overrides must include an explicit ``mode`` field
-    matching CLI ``--mode`` or be rejected (SD-005, FLAG-004).
-    """
-    text = path.read_text(encoding="utf-8").strip()
-    if text.startswith("["):
-        data = json.loads(text)
-        if isinstance(data, list):
-            return _normalise_prompts(data, model, mode)
-        raise SystemExit(f"{path}: top-level JSON must be an array or JSONL")
-
-    entries: list[dict[str, Any]] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        entries.append(json.loads(line))
-    if not entries:
-        raise SystemExit(f"{path}: no valid entries found")
-    return _normalise_prompts(entries, model, mode)
-
-
-def _normalise_prompts(
-    raw: list[dict[str, Any]], model: str, mode: str
-) -> list[dict[str, Any]]:
-    """Ensure every entry has a ``prompt`` and a ``model`` key.
-
-    Per-entry ``model`` overrides are validated for mode consistency
-    (FLAG-004): a ``mode`` field matching CLI ``--mode`` is required.
-    """
-    result: list[dict[str, Any]] = []
-    for i, entry in enumerate(raw):
-        if "prompt" not in entry:
-            raise SystemExit(
-                f"Entry {i} in prompts file is missing required 'prompt' key"
-            )
-        entry.setdefault("model", model)
-
-        # FLAG-004: per-entry model override must have explicit mode field
-        # matching CLI --mode (or no override at all).
-        entry_model = entry.get("model", model)
-        if entry_model != model:
-            entry_mode = entry.get("mode")
-            if entry_mode is None:
-                raise SystemExit(
-                    f"Entry {i} overrides model to {entry_model!r} but "
-                    f"has no 'mode' field.  Per-entry model overrides must "
-                    f"include 'mode' matching CLI --mode ({mode!r})."
-                )
-            if entry_mode != mode:
-                raise SystemExit(
-                    f"Entry {i} has mode {entry_mode!r} which does not match "
-                    f"CLI --mode {mode!r}.  Per-entry model overrides must "
-                    f"use the same mode."
-                )
-
-        result.append(entry)
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Feature validation (per-mode — SD-003)
-# ---------------------------------------------------------------------------
-
-
-def _feature_is_missing(feature: str, value: Any) -> bool:
-    """Return ``True`` when a supplied feature value should count as missing."""
-    if value is None:
-        return True
-    if feature == "count":
-        return not bool(value)
-    if isinstance(value, str):
-        return not value.strip()
-    return False
 
 
 def _build_requested_params(
@@ -150,140 +102,30 @@ def _build_requested_params(
     prompt_text: str | None,
     prompt_entry: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Merge prompt-entry and CLI feature values into canonical params."""
-    params: dict[str, Any] = {}
-    if prompt_entry:
-        for key, value in prompt_entry.items():
-            if key in _PROMPT_ENTRY_CONTROL_KEYS:
-                continue
-            params[key] = value
-
-    if prompt_text is not None:
-        params["prompt"] = prompt_text
-    elif "prompt" not in params:
-        params["prompt"] = getattr(args, "prompt", None)
-
-    for feature in _IMAGE_CLI_FEATURES:
-        if feature == "prompt":
-            continue
-        if feature not in params:
-            params[feature] = getattr(args, feature, None)
-
-    return {
-        feature: value
-        for feature, value in params.items()
-        if value is not None
-    }
+    """Merge prompt-entry and CLI feature values into canonical params (image)."""
+    return _build_requested_params_base(
+        args,
+        prompt_text=prompt_text,
+        prompt_entry=prompt_entry,
+        cli_features=_IMAGE_CLI_FEATURES,
+    )
 
 
-def _check_required(
-    mode_spec: Any,
-    mode_name: str,
-    model_id: str,
-    requested_params: dict[str, Any],
-) -> None:
-    """Hard-fail if any feature in *mode_spec.requires* is missing."""
-    missing: list[str] = []
-    for req in mode_spec.requires:
-        if _feature_is_missing(req, requested_params.get(req)):
-            missing.append(req)
-
-    if missing:
-        raise SystemExit(
-            f"model {model_id!r} mode {mode_name!r} requires: "
-            f"{', '.join(sorted(missing))}. "
-            f"Provide {'it' if len(missing) == 1 else 'them'} "
-            f"and retry."
-        )
+def _request_to_argv(request: Any) -> list[str]:
+    """Translate an executor-style request object into CLI argv (image)."""
+    return _request_to_argv_base(request, _IMAGE_ARGV_FLAG_NAMES)
 
 
-def _drop_unsupported(
-    mode_spec: Any,
-    mode_name: str,
-    model_id: str,
-    requested_params: dict[str, Any],
-) -> tuple[dict[str, Any], list[dict[str, str]], list[str]]:
-    """Drop caller-supplied features absent from *mode_spec.supports*.
-
-    Returns ``(filtered_params, warnings, dropped_features)``.
-    """
-    filtered_params: dict[str, Any] = {}
-    warnings: list[dict[str, str]] = []
-    dropped: list[str] = []
-    for feature, value in requested_params.items():
-        if _feature_is_missing(feature, value):
-            continue
-        if feature not in mode_spec.supports:
-            warnings.append(
-                {
-                    "feature": feature,
-                    "reason": (
-                        f"not supported by model {model_id!r} "
-                        f"mode {mode_name!r}"
-                    ),
-                }
-            )
-            dropped.append(feature)
-            continue
-        filtered_params[feature] = value
-    return filtered_params, warnings, dropped
+def _coerce_args(
+    args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
+) -> argparse.Namespace:
+    """Return a parsed args namespace from CLI argv, a namespace, or a request (image)."""
+    return _coerce_args_base(args_or_request, build_parser, _IMAGE_ARGV_FLAG_NAMES)
 
 
 # ---------------------------------------------------------------------------
-# Seed resolution
+# Image-only: LoRA parsing (comma-separated, '@' separator for path@scale)
 # ---------------------------------------------------------------------------
-
-
-def _resolve_seed(requested: int | None, index: int) -> int:
-    """Return ``requested + index`` if *requested* is set, else a random seed."""
-    if requested is not None:
-        return requested + index
-    return random.randint(0, 2**31 - 1)
-
-
-# ---------------------------------------------------------------------------
-# Manifest emission
-# ---------------------------------------------------------------------------
-
-
-def _build_inputs_request(
-    args: argparse.Namespace,
-    entry: Any,
-    mode_name: str,
-    seed: int,
-    prompt_text: str | None,
-    image_ref_resolved: str | None,
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Build inputs and request dicts for the image generation manifest."""
-    requested_prompt = prompt_text or getattr(args, "prompt", None)
-    request: dict[str, Any] = {
-        "prompt": requested_prompt,
-        "negative_prompt": getattr(args, "negative_prompt", None),
-        "seed": seed,
-        "count": max(1, args.count or 1),
-        "size": getattr(args, "size", None),
-        "image_ref_resolved": image_ref_resolved,
-    }
-    inputs: dict[str, Any] = {
-        "model": entry.id,
-        "mode": mode_name,
-        "execution": args.execution,
-        "prompt": requested_prompt,
-        "seed": seed,
-        "count": max(1, args.count or 1),
-    }
-    for key in ("negative_prompt", "size", "image_ref", "strength", "guidance_scale", "steps"):
-        val = getattr(args, key, None)
-        if val is not None:
-            inputs[key] = val
-    if image_ref_resolved is not None:
-        inputs["image_ref_resolved"] = image_ref_resolved
-    return inputs, request
-
-
-def _available_backend_ids(mode_spec: Any) -> tuple[str, ...]:
-    """Return the backend ids available for one resolved mode."""
-    return tuple(sorted(mode_spec.backends))
 
 
 def _parse_loras_arg(raw: str | None) -> list[str | dict[str, Any]]:
@@ -292,7 +134,7 @@ def _parse_loras_arg(raw: str | None) -> list[str | dict[str, Any]]:
     Format: comma-separated tokens.  Each token is either:
     * A registry id (kebab-case, no ``@`` or ``://``) → passed as a str
     * A ``path@scale`` spec (URL or path containing ``://`` or ``.safetensors``
-      followed by ``@`` and a float) → passed as ``{"path": ..., "scale": ...}``
+      followed by ``@`` and a float) → passed as ``{\"path\": ..., \"scale\": ...}``
     """
     if not raw or not raw.strip():
         return []
@@ -316,25 +158,9 @@ def _parse_loras_arg(raw: str | None) -> list[str | dict[str, Any]]:
     return result
 
 
-def _create_backend_adapter(
-    backend_registry: GenerationBackendRegistry,
-    execution: str,
-    *,
-    env_file: Path | None,
-) -> BackendAdapter:
-    """Instantiate the selected backend with CLI-friendly errors."""
-    try:
-        return backend_registry.create(execution, env_file=env_file)
-    except KeyError as exc:
-        raise AstridError(
-            f"generation backend {execution!r} is not registered: {exc}",
-            recovery_command="check available backends and retry with a registered backend",
-        ) from exc
-    except Exception as exc:
-        raise AstridError(
-            f"failed to initialize generation backend {execution!r}: {exc}",
-            recovery_command="check backend configuration and environment, then retry",
-        ) from exc
+# ---------------------------------------------------------------------------
+# Image-only: Codex fallback
+# ---------------------------------------------------------------------------
 
 
 def _resolve_execution_with_codex_fallback(
@@ -486,67 +312,6 @@ def build_parser() -> argparse.ArgumentParser:
         "(e.g. 'flux-realism' or 'https://...lora.safetensors@0.8').",
     )
     return p
-
-
-def _request_to_argv(request: Any) -> list[str]:
-    """Translate an executor-style request object into CLI argv."""
-    argv: list[str] = []
-    inputs = getattr(request, "inputs", {}) or {}
-    flag_names = (
-        "mode",
-        "prompt",
-        "prompts_file",
-        "model",
-        "image_ref",
-        "execution",
-        "count",
-        "seed",
-        "negative_prompt",
-        "size",
-        "quality",
-        "background",
-        "timeout",
-        "strength",
-        "guidance_scale",
-        "steps",
-        "env_file",
-        "loras",
-    )
-    for name in flag_names:
-        value = inputs.get(name)
-        if value in (None, ""):
-            continue
-        if name == "loras" and not isinstance(value, str):
-            value = json.dumps(value)
-        argv.extend([f"--{name.replace('_', '-')}", str(value)])
-    out = getattr(request, "out", None)
-    if out not in (None, ""):
-        argv.extend(["--out", str(out)])
-    return argv
-
-
-def _coerce_args(
-    args_or_request: argparse.Namespace | list[str] | tuple[str, ...] | Any | None,
-) -> argparse.Namespace:
-    """Return a parsed args namespace from CLI argv, a namespace, or a request."""
-    if isinstance(args_or_request, argparse.Namespace):
-        return args_or_request
-    if args_or_request is None or isinstance(args_or_request, (list, tuple)):
-        return build_parser().parse_args(args_or_request)
-    if hasattr(args_or_request, "inputs"):
-        return build_parser().parse_args(_request_to_argv(args_or_request))
-    raise TypeError(
-        "generate_core expected argparse.Namespace, argv list/tuple, or executor request"
-    )
-
-
-def _manifest_path_for_run_dir(run_dir: Path | None) -> Path:
-    if run_dir is None:
-        raise AstridError(
-            "generation result is missing run_dir",
-            recovery_command="run generation through generate_core/main so the executor can write manifest metadata",
-        )
-    return run_dir / "manifest.json"
 
 
 # ---------------------------------------------------------------------------
@@ -872,6 +637,46 @@ def generate_core(
         run_dir=out,
     )
     return generation_result
+
+
+def _build_inputs_request(
+    args: argparse.Namespace,
+    entry: Any,
+    mode_name: str,
+    seed: int,
+    prompt_text: str | None,
+    image_ref_resolved: str | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build inputs and request dicts for the image generation manifest."""
+    requested_prompt = prompt_text or getattr(args, "prompt", None)
+    request: dict[str, Any] = {
+        "prompt": requested_prompt,
+        "negative_prompt": getattr(args, "negative_prompt", None),
+        "seed": seed,
+        "count": max(1, args.count or 1),
+        "size": getattr(args, "size", None),
+        "image_ref_resolved": image_ref_resolved,
+    }
+    inputs: dict[str, Any] = {
+        "model": entry.id,
+        "mode": mode_name,
+        "execution": args.execution,
+        "prompt": requested_prompt,
+        "seed": seed,
+        "count": max(1, args.count or 1),
+    }
+    for key in ("negative_prompt", "size", "image_ref", "strength", "guidance_scale", "steps"):
+        val = getattr(args, key, None)
+        if val is not None:
+            inputs[key] = val
+    if image_ref_resolved is not None:
+        inputs["image_ref_resolved"] = image_ref_resolved
+    return inputs, request
+
+
+# ---------------------------------------------------------------------------
+# SDK / CLI entrypoints
+# ---------------------------------------------------------------------------
 
 
 def run_sdk(argv: list[str] | None = None) -> dict[str, Any]:
