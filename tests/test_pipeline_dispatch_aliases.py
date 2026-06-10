@@ -87,7 +87,7 @@ class PipelineDispatchAliasTest(unittest.TestCase):
                 "astrid.core.session.binding.resolve_current_session_with_fs_fallback",
                 return_value=object(),
             ),
-            mock.patch("astrid.core.executor.registry.load_default_registry", return_value=registry),
+            mock.patch("astrid.core.execution.executor.registry.load_default_registry", return_value=registry),
             mock.patch(
                 "astrid.core.pack.resolver.resolve_callable_from_metadata",
                 side_effect=[

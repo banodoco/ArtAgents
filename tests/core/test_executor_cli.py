@@ -42,7 +42,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
     def test_emit_uuid_handoff_metadata_skip_when_no_timeline(self):
         """Non-producing runs: hype.timeline.json absent → returns 0, logs to stderr."""
-        from astrid.core.executor.cli import _emit_uuid_handoff_metadata
+        from astrid.core.execution.executor.cli import _emit_uuid_handoff_metadata
 
         out_dir = self.tmp_dir / "empty-out"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -57,7 +57,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
     def test_emit_uuid_handoff_metadata_produces_valid_json(self):
         """Timeline-producing UUID runs emit valid bridge JSON."""
-        from astrid.core.executor.cli import _emit_uuid_handoff_metadata
+        from astrid.core.execution.executor.cli import _emit_uuid_handoff_metadata
 
         out_dir = self.tmp_dir / "producing-out"
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -92,7 +92,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
     def test_push_run_to_supabase_is_removed(self):
         """_push_run_to_supabase must not exist in cli.py."""
-        from astrid.core.executor import cli as executor_cli
+        from astrid.core.execution.executor import cli as executor_cli
 
         self.assertFalse(
             hasattr(executor_cli, "_push_run_to_supabase"),
@@ -101,7 +101,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
     def test_no_supabase_save_timeline_call_in_uuid_path(self):
         """UUID-mode execution path must not call SupabaseDataProvider.save_timeline()."""
-        import astrid.core.executor.cli as cli_mod
+        import astrid.core.execution.executor.cli as cli_mod
 
         source = Path(cli_mod.__file__).read_text(encoding="utf-8")
         # Check for actual calls to .save_timeline(), not just mentions in
@@ -126,7 +126,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
     def test_project_uuid_or_none_rejects_slugs(self):
         """_project_uuid_or_none returns None for non-UUID values like slugs."""
-        from astrid.core.executor.cli import _project_uuid_or_none
+        from astrid.core.execution.executor.cli import _project_uuid_or_none
 
         self.assertIsNone(_project_uuid_or_none(None))
         self.assertIsNone(_project_uuid_or_none(""))
@@ -141,7 +141,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
 
     def test_main_raises_astrid_error_for_registry_load_failure(self):
         from unittest.mock import patch
-        import astrid.core.executor.cli as executor_cli
+        import astrid.core.execution.executor.cli as executor_cli
 
         with patch.object(executor_cli, "load_default_registry", side_effect=ValueError("boom")):
             with self.assertRaises(AstridError) as excinfo:
@@ -149,7 +149,7 @@ class ExecutorUUIDHandoffTest(unittest.TestCase):
         self.assertEqual(str(excinfo.exception), "boom")
 
     def test_list_kind_uses_static_choices_wrapper(self):
-        import astrid.core.executor.cli as executor_cli
+        import astrid.core.execution.executor.cli as executor_cli
 
         parser = executor_cli.build_parser()
         list_parser = _subparser(parser, "list")
@@ -167,12 +167,12 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
     """T1: executor run routes command echo to stderr; --json suppresses it."""
 
     def _make_run_parser(self):
-        import astrid.core.executor.cli as cli_mod
+        import astrid.core.execution.executor.cli as cli_mod
         return cli_mod
 
     def test_run_subparser_has_json_flag(self):
         """run subparser must accept --json flag."""
-        import astrid.core.executor.cli as cli_mod
+        import astrid.core.execution.executor.cli as cli_mod
         import inspect
         src = inspect.getsource(cli_mod)
         self.assertIn('run_parser.add_argument(\"--json\"', src)
@@ -181,8 +181,8 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
         import io, sys
         from types import MappingProxyType
         from unittest.mock import MagicMock, patch
-        import astrid.core.executor.cli as cli_mod
-        import astrid.core.executor.runner as runner_mod
+        import astrid.core.execution.executor.cli as cli_mod
+        import astrid.core.execution.executor.runner as runner_mod
 
         fake_result = MagicMock()
         fake_result.executor_id = "some.executor"
@@ -219,11 +219,11 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
         stderr_buf = io.StringIO()
 
         with patch.object(runner_mod, "run_executor", return_value=fake_result), \
-             patch("astrid.core.executor.cli._reject_run_passthrough"), \
-             patch("astrid.core.executor.cli._require_qualified_id"), \
-             patch("astrid.core.executor.cli._project_uuid_or_none", return_value=None), \
-             patch("astrid.core.executor.cli._executor_needs_out", return_value=False), \
-             patch("astrid.core.executor.cli._run_inputs", return_value={}), \
+             patch("astrid.core.execution.executor.cli._reject_run_passthrough"), \
+             patch("astrid.core.execution.executor.cli._require_qualified_id"), \
+             patch("astrid.core.execution.executor.cli._project_uuid_or_none", return_value=None), \
+             patch("astrid.core.execution.executor.cli._executor_needs_out", return_value=False), \
+             patch("astrid.core.execution.executor.cli._run_inputs", return_value={}), \
              patch.object(sys, "stdout", stdout_buf), \
              patch.object(sys, "stderr", stderr_buf):
             cli_mod._cmd_run(fake_args, fake_registry)
@@ -302,8 +302,8 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
     def test_run_uses_gateway_resolved_project_without_mutating_raw_argv(self):
         from unittest.mock import MagicMock, patch
 
-        import astrid.core.executor.cli as cli_mod
-        import astrid.core.executor.runner as runner_mod
+        import astrid.core.execution.executor.cli as cli_mod
+        import astrid.core.execution.executor.runner as runner_mod
 
         captured = {}
         fake_result = MagicMock()
@@ -334,11 +334,11 @@ class ExecutorRunStdioRoutingTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"ASTRID_GATEWAY_RESOLVED_PROJECT": "demo"}, clear=False), \
              patch.object(runner_mod, "run_executor", side_effect=_capture), \
-             patch("astrid.core.executor.cli._reject_run_passthrough"), \
-             patch("astrid.core.executor.cli._require_qualified_id"), \
-             patch("astrid.core.executor.cli._project_uuid_or_none", return_value=None), \
-             patch("astrid.core.executor.cli._executor_needs_out", return_value=False), \
-             patch("astrid.core.executor.cli._run_inputs", return_value={}):
+             patch("astrid.core.execution.executor.cli._reject_run_passthrough"), \
+             patch("astrid.core.execution.executor.cli._require_qualified_id"), \
+             patch("astrid.core.execution.executor.cli._project_uuid_or_none", return_value=None), \
+             patch("astrid.core.execution.executor.cli._executor_needs_out", return_value=False), \
+             patch("astrid.core.execution.executor.cli._run_inputs", return_value={}):
             rc = cli_mod._cmd_run(fake_args, MagicMock())
 
         request = captured["request"]

@@ -68,7 +68,7 @@ def _executor_search_command(
 ) -> str:
     return " ".join(
         [
-            "python3 -m astrid.core.executor.cli run training.search_loras",
+            "python3 -m astrid.core.execution.executor.cli run training.search_loras",
             f"--input base_model={base_model}",
             f"--input match={','.join(terms)}",
             f"--input match_mode={match_mode}",
@@ -87,7 +87,7 @@ def _executor_base_models_command(
 ) -> str:
     return " ".join(
         [
-            "python3 -m astrid.core.executor.cli run training.search_loras",
+            "python3 -m astrid.core.execution.executor.cli run training.search_loras",
             "--input mode=base-models",
             f"--input base_model_match={base_model_match}",
             f"--input fetch_limit={fetch_limit}",
@@ -321,7 +321,7 @@ def _guidance_for_base_model_discovery(
         next_executor_commands.append(
             " ".join(
                 [
-                    "python3 -m astrid.core.executor.cli run training.search_loras",
+                    "python3 -m astrid.core.execution.executor.cli run training.search_loras",
                     "--input mode=base-models",
                     f"--input fetch_limit={max(limit * 2, 1000)}",
                     "--out /tmp/astrid-search-loras-base-models",

@@ -8,7 +8,7 @@ import pytest
 
 from astrid.core._shared.result_manifest import build_manifest, complete_output_metadata, write_manifest
 from astrid.core.contracts.errors import AstridError
-from astrid.core.executor.registry import load_default_registry
+from astrid.core.execution.executor.registry import load_default_registry
 
 
 def test_complete_output_metadata_for_file_populates_hash_and_bytes(tmp_path: Path) -> None:

@@ -7,10 +7,10 @@ import json
 import pytest
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.executor import runner as executor_runner
-from astrid.core.executor.runner import ExecutorRunRequest
-from astrid.core.orchestrator import runner as orchestrator_runner
-from astrid.core.orchestrator.runner import OrchestratorRunRequest
+from astrid.core.execution.executor import runner as executor_runner
+from astrid.core.execution.executor.runner import ExecutorRunRequest
+from astrid.core.execution.orchestrator import runner as orchestrator_runner
+from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
 from astrid.core.project.project import create_project
 from astrid.core.project.run import ProjectRunContext, ProjectRunError, finalize_project_run, prepare_project_run
 from astrid.core.project.run import write_run_record

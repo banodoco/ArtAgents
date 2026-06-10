@@ -10,13 +10,13 @@ from unittest.mock import patch
 
 from astrid.core.pack.alias_resolver import AliasResolver
 from astrid.core.contracts.schema import CommandSpec
-from astrid.core.executor import cli as executors_cli
-from astrid.core.executor.install import ExecutorInstallPlan, ExecutorInstallResult
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.schema import ExecutorDefinition
-from astrid.core.orchestrator import cli as orchestrators_cli
-from astrid.core.orchestrator.registry import OrchestratorRegistry
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.executor import cli as executors_cli
+from astrid.core.execution.executor.install import ExecutorInstallPlan, ExecutorInstallResult
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.schema import ExecutorDefinition
+from astrid.core.execution.orchestrator import cli as orchestrators_cli
+from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.pack.override import OverrideStore
 
 
@@ -144,7 +144,7 @@ class RegistryLookupSemanticsTest(unittest.TestCase):
             dry_run=True,
             returncode=0,
         )
-        with patch("astrid.core.executor.install.install_executor", return_value=install_result) as install_mock:
+        with patch("astrid.core.execution.executor.install.install_executor", return_value=install_result) as install_mock:
             install_stdout = io.StringIO()
             with contextlib.redirect_stdout(install_stdout):
                 rc = executors_cli._cmd_install(

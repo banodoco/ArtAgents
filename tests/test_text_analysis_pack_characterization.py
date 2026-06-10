@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 
-from astrid.core.orchestrator.registry import load_default_registry
+from astrid.core.execution.orchestrator.registry import load_default_registry
 from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 
 

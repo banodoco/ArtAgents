@@ -5,10 +5,10 @@ import io
 import unittest
 
 from astrid.core.contracts.errors import AstridError, render_astrid_error
-from astrid.core.executor import cli as executors_cli
-from astrid.core.executor.schema import ExecutorValidationError, validate_executor_definition
-from astrid.core.orchestrator import cli as orchestrators_cli
-from astrid.core.orchestrator.schema import OrchestratorValidationError, validate_orchestrator_definition
+from astrid.core.execution.executor import cli as executors_cli
+from astrid.core.execution.executor.schema import ExecutorValidationError, validate_executor_definition
+from astrid.core.execution.orchestrator import cli as orchestrators_cli
+from astrid.core.execution.orchestrator.schema import OrchestratorValidationError, validate_orchestrator_definition
 
 
 def _capture(fn, argv: list[str]) -> tuple[int, str, str]:

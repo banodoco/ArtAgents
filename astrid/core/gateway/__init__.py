@@ -346,7 +346,7 @@ def _dispatch(raw: list[str]) -> int:
 def _run_default_brief_orchestrator(argv: list[str]) -> int:
     from importlib import import_module
 
-    from astrid.core.orchestrator.registry import load_default_registry
+    from astrid.core.execution.orchestrator.registry import load_default_registry
 
     registry = load_default_registry()
     orchestrator = registry.get("video_editing.hype")

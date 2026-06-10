@@ -16,8 +16,8 @@ from typing import Any
 import pytest
 
 from astrid.core.contracts.event_log_error import EventLogError
-from astrid.core.executor.schema import ExecutorValidationError
-from astrid.core.orchestrator.runner import OrchestratorRunError
+from astrid.core.execution.executor.schema import ExecutorValidationError
+from astrid.core.execution.orchestrator.runner import OrchestratorRunError
 from astrid.core.session.lease import LeaseError
 from astrid.core.task.events import NotWriterError, StaleEpochError, StaleTailError
 from tests._sdk_contract import EXPECTED_PUBLIC_NAMES
@@ -57,10 +57,10 @@ payload = {
     "heavy_loaded": {
         name: (name in sys.modules)
         for name in (
-            "astrid.core.executor.registry",
-            "astrid.core.executor.runner",
-            "astrid.core.orchestrator.registry",
-            "astrid.core.orchestrator.runner",
+            "astrid.core.execution.executor.registry",
+            "astrid.core.execution.executor.runner",
+            "astrid.core.execution.orchestrator.registry",
+            "astrid.core.execution.orchestrator.runner",
         )
     },
 }
@@ -102,10 +102,10 @@ def test_import_astrid_exposes_exact_curated_sdk_names() -> None:
     assert tuple(probe["all"]) == EXPECTED_PUBLIC_NAMES
     assert probe["sdk_loaded"] is False
     assert probe["heavy_loaded"] == {
-        "astrid.core.executor.registry": False,
-        "astrid.core.executor.runner": False,
-        "astrid.core.orchestrator.registry": False,
-        "astrid.core.orchestrator.runner": False,
+        "astrid.core.execution.executor.registry": False,
+        "astrid.core.execution.executor.runner": False,
+        "astrid.core.execution.orchestrator.registry": False,
+        "astrid.core.execution.orchestrator.runner": False,
     }
 
 
@@ -535,7 +535,7 @@ def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
     must construct an ``ExecutorRunRequest`` with ``project="demo"`` and ``out=None``
     without raising ``CapabilityInvocationError`` about a missing out path."""
     astrid = _import_public_module()
-    from astrid.core.executor import runner as executor_runner
+    from astrid.core.execution.executor import runner as executor_runner
 
     captured_request: dict[str, Any] = {}
 
@@ -545,7 +545,7 @@ def test_invoke_executor_project_routing_allows_out_none_with_in_process_mode(
         captured_request["out"] = request.out
         captured_request["execution_mode"] = request.execution_mode
         captured_request["inputs"] = dict(request.inputs)
-        from astrid.core.executor.runner import ExecutorRunResult
+        from astrid.core.execution.executor.runner import ExecutorRunResult
 
         return ExecutorRunResult(
             executor_id=request.executor_id,
@@ -1253,7 +1253,7 @@ def test_invoke_missing_input_runner_errors_raise_sdk_missing_input(
     sdk = importlib.import_module("astrid.sdk")
 
     def fake_run_executor(request: Any, registry: Any) -> Any:
-        from astrid.core.executor.runner import ExecutorRunnerError
+        from astrid.core.execution.executor.runner import ExecutorRunnerError
 
         raise ExecutorRunnerError("executor 'editorial.arrange' missing required input(s): brief")
 
@@ -3169,8 +3169,8 @@ def test_gateway_run_passes_bound_project_via_request_metadata(
 
     out_dir = tmp_path / "bound-out"
 
-    with patch("astrid.core.executor.cli.load_default_registry", return_value=fake_registry), \
-         patch("astrid.core.executor.runner.run_executor", side_effect=_capture):
+    with patch("astrid.core.execution.executor.cli.load_default_registry", return_value=fake_registry), \
+         patch("astrid.core.execution.executor.runner.run_executor", side_effect=_capture):
         rc = main(["executors", "run", "test.executor", "--out", str(out_dir)])
 
     request = captured["request"]

@@ -34,7 +34,7 @@ from astrid.packs.editorial.hype.text_match import (
     token_set_similarity,
     tokenize,
 )
-from astrid.core.executor.argv import executor_argv
+from astrid.core.execution.executor.argv import executor_argv
 
 
 def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:

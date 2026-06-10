@@ -9,8 +9,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from astrid.core.executor.folder import load_folder_executors
-from astrid.core.orchestrator.folder import load_folder_orchestrators
+from astrid.core.execution.executor.folder import load_folder_executors
+from astrid.core.execution.orchestrator.folder import load_folder_orchestrators
 from astrid.core.pack import (
     ELEMENT_KIND_REGISTRY,
     element_kind_registry_for_pack,

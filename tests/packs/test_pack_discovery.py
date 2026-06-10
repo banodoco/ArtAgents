@@ -8,8 +8,8 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.element.registry import load_pack_elements
-from astrid.core.executor.registry import ExecutorRegistry, load_default_registry as load_executor_registry, load_pack_executors
-from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry, load_pack_orchestrators
+from astrid.core.execution.executor.registry import ExecutorRegistry, load_default_registry as load_executor_registry, load_pack_executors
+from astrid.core.execution.orchestrator.registry import load_default_registry as load_orchestrator_registry, load_pack_orchestrators
 from astrid.core.pack import PackValidationError, discover_packs, qualified_id_pack_id
 from astrid.core.pack.discovery import ASTRID_PACKS_PATH_ENV, discover_packs_ordered
 
@@ -107,9 +107,9 @@ class PackDiscoveryTest(unittest.TestCase):
             packs = discover_packs(packs_root)
             self.assertEqual([pack.id for pack in packs], ["builtin"])
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 executors = load_pack_executors()
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 orchestrators = load_pack_orchestrators()
             with mock.patch("astrid.core.element.registry.discover_packs", return_value=packs):
                 elements = load_pack_elements()
@@ -177,9 +177,9 @@ class PackDiscoveryTest(unittest.TestCase):
                 )
             )
             packs = discover_packs(packs_root)
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 executors = load_pack_executors()
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 orchestrators = load_pack_orchestrators()
             with mock.patch("astrid.core.element.registry.discover_packs", return_value=packs):
                 elements = load_pack_elements()
@@ -208,7 +208,7 @@ class PackDiscoveryTest(unittest.TestCase):
             write_executor(pack_root, "second", "builtin.duplicate")
             packs = discover_packs(Path(tmp) / "packs")
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 load_result = load_pack_executors()
             # Duplicates are accepted — no error raised.
             registry = ExecutorRegistry(load_result)
@@ -232,7 +232,7 @@ class PackDiscoveryTest(unittest.TestCase):
             write_executor(pack_root, "moirae", "moirae.moirae")
             packs = discover_packs(Path(tmp) / "packs")
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 with self.assertRaisesRegex(PackValidationError, "found in pack 'builtin'"):
                     load_pack_executors()
 
@@ -242,7 +242,7 @@ class PackDiscoveryTest(unittest.TestCase):
             write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(Path(tmp) / "packs")
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 with self.assertRaisesRegex(PackValidationError, "found in pack 'external'"):
                     load_pack_orchestrators()
 
@@ -298,7 +298,7 @@ class PackDiscoveryTest(unittest.TestCase):
             scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
-                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan):
+                with mock.patch("astrid.core.execution.executor.registry.discover_packs", side_effect=scan):
                     executors = load_pack_executors(include_installed=False)
 
             self.assertEqual([e.id for e in executors], ["env_test.env_exec"])
@@ -319,7 +319,7 @@ class PackDiscoveryTest(unittest.TestCase):
             scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
-                with mock.patch("astrid.core.orchestrator.registry.discover_packs", side_effect=scan):
+                with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", side_effect=scan):
                     orchestrators = load_pack_orchestrators(include_installed=False)
 
             self.assertEqual([o.id for o in orchestrators], ["env_orch.env_orch"])
@@ -362,8 +362,8 @@ class PackDiscoveryTest(unittest.TestCase):
             scan = self._make_multi_layer_scan((), **{str(env_root): env_packs})
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
-                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan), \
-                     mock.patch("astrid.core.orchestrator.registry.discover_packs", side_effect=scan), \
+                with mock.patch("astrid.core.execution.executor.registry.discover_packs", side_effect=scan), \
+                     mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", side_effect=scan), \
                      mock.patch("astrid.core.element.registry.discover_packs", side_effect=scan):
                     executors = load_pack_executors(include_installed=False)
                     orchestrators = load_pack_orchestrators(include_installed=False)
@@ -415,7 +415,7 @@ class PackDiscoveryTest(unittest.TestCase):
             )
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: str(env_root)}, clear=False):
-                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan):
+                with mock.patch("astrid.core.execution.executor.registry.discover_packs", side_effect=scan):
                     with mock.patch(
                         "astrid.core.pack.store.installed_pack_roots",
                         return_value=[installed_root],
@@ -451,7 +451,7 @@ class PackDiscoveryTest(unittest.TestCase):
                 return ()
 
             with mock.patch.dict(os.environ, {ASTRID_PACKS_PATH_ENV: ""}, clear=False):
-                with mock.patch("astrid.core.executor.registry.discover_packs", side_effect=scan):
+                with mock.patch("astrid.core.execution.executor.registry.discover_packs", side_effect=scan):
                     executors = load_pack_executors(include_installed=False)
 
             self.assertEqual([e.id for e in executors], ["alpha.exec1"])

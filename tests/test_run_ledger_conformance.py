@@ -261,7 +261,7 @@ def _make_minimal_executor(
 ) -> Any:
     """Build a minimal external executor definition for testing."""
     from astrid.core.contracts.schema import CommandSpec
-    from astrid.core.executor.schema import ExecutorDefinition
+    from astrid.core.execution.executor.schema import ExecutorDefinition
 
     return ExecutorDefinition(
         id=executor_id,
@@ -278,7 +278,7 @@ def _make_minimal_requires_executor(
 ) -> Any:
     """Build an executor that requires an input — used for validation-failure tests."""
     from astrid.core.contracts.schema import CommandSpec, Port
-    from astrid.core.executor.schema import ExecutorDefinition
+    from astrid.core.execution.executor.schema import ExecutorDefinition
 
     return ExecutorDefinition(
         id=executor_id,
@@ -300,7 +300,7 @@ def _make_minimal_orchestrator(
     orchestrators do not yet support --project).
     """
     from astrid.core.contracts.schema import CommandSpec
-    from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+    from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 
     return OrchestratorDefinition(
         id=orchestrator_id,
@@ -363,8 +363,8 @@ class TestExecutorCLIProject:
     """executors run --project <p> → one run.json in exactly one project."""
 
     def test_creates_exactly_one_run_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
         registry = ExecutorRegistry([_make_minimal_executor("test.noop")])
@@ -385,8 +385,8 @@ class TestExecutorCLIProject:
         assert record.get("tool_id") == "test.noop"
 
     def test_failed_validation_persists_ledger(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunnerError, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
 
@@ -414,8 +414,8 @@ class TestExecutorCLIOut:
 
     def test_out_without_project_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """When --out is supplied without --project, auto-ledger into the default project."""
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
         out_dir = tmp_path / "my-output"
@@ -440,8 +440,8 @@ class TestOrchestratorCLIProject:
     """orchestrators run --project <p> → one run.json."""
 
     def test_creates_exactly_one_run_json(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.orchestrator.registry import OrchestratorRegistry
-        from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+        from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+        from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
 
@@ -464,8 +464,8 @@ class TestOrchestratorCLIOut:
     """orchestrators run --out <dir> (no --project) → ledgered."""
 
     def test_out_without_project_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.orchestrator.registry import OrchestratorRegistry
-        from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+        from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+        from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
         out_dir = tmp_path / "orch-output"
@@ -669,8 +669,8 @@ class TestSDKImageProject:
     """astrid.generate.image(..., project=...) → one run.json."""
 
     def test_image_with_project_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "demo")
         registry = ExecutorRegistry([_make_minimal_executor("generation.generate_image")])
@@ -689,8 +689,8 @@ class TestSDKImageOut:
     """astrid.generate.image(..., out=...) → ledgered with run.json.out."""
 
     def test_image_out_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
         out_dir = tmp_path / "gen-output"
@@ -712,8 +712,8 @@ class TestSDKVideoOut:
     """astrid.generate.video(..., out=...) → ledgered with run.json.out."""
 
     def test_video_out_ledgers(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
         projects_root, _ = _setup_project_env(tmp_path, monkeypatch, "default")
         out_dir = tmp_path / "video-output"

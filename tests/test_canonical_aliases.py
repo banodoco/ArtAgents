@@ -1,15 +1,15 @@
 import importlib.util
 import unittest
 
-from astrid.core.executor import ExecutorDefinition, ExecutorRegistry, load_default_registry as load_executor_registry
-from astrid.core.orchestrator import OrchestratorDefinition, OrchestratorRegistry, load_default_registry as load_orchestrator_registry
+from astrid.core.execution.executor import ExecutorDefinition, ExecutorRegistry, load_default_registry as load_executor_registry
+from astrid.core.execution.orchestrator import OrchestratorDefinition, OrchestratorRegistry, load_default_registry as load_orchestrator_registry
 from astrid.core.element import ElementDefinition, ElementRegistry
 
 
 class CanonicalAliasTest(unittest.TestCase):
     def test_orchestrator_api_uses_canonical_implementation(self) -> None:
-        self.assertEqual(OrchestratorDefinition.__module__, "astrid.core.orchestrator.schema")
-        self.assertEqual(OrchestratorRegistry.__module__, "astrid.core.orchestrator.registry")
+        self.assertEqual(OrchestratorDefinition.__module__, "astrid.core.execution.orchestrator.schema")
+        self.assertEqual(OrchestratorRegistry.__module__, "astrid.core.execution.orchestrator.registry")
 
         registry = load_orchestrator_registry()
 
@@ -17,8 +17,8 @@ class CanonicalAliasTest(unittest.TestCase):
         self.assertIsInstance(registry, OrchestratorRegistry)
 
     def test_executor_api_uses_canonical_implementation(self) -> None:
-        self.assertEqual(ExecutorDefinition.__module__, "astrid.core.executor.schema")
-        self.assertEqual(ExecutorRegistry.__module__, "astrid.core.executor.registry")
+        self.assertEqual(ExecutorDefinition.__module__, "astrid.core.execution.executor.schema")
+        self.assertEqual(ExecutorRegistry.__module__, "astrid.core.execution.executor.registry")
 
         registry = load_executor_registry()
 

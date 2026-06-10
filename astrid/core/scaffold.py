@@ -1,6 +1,6 @@
 """Shared component-scaffolding primitives for ``executors new`` / ``orchestrators new``.
 
-Both :mod:`astrid.core.executor.cli` and :mod:`astrid.core.orchestrator.cli`
+Both :mod:`astrid.core.execution.executor.cli` and :mod:`astrid.core.execution.orchestrator.cli`
 implement a ``new`` subcommand that writes a component skeleton (manifest +
 ``run.py`` + ``STAGE.md`` + optional extras) into an existing pack. The bulk of
 that logic is identical; it lives here so neither CLI has to import private

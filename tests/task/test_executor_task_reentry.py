@@ -9,8 +9,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.contracts.schema import CommandInputArg, CommandSpec, Port
-from astrid.core.executor.runner import ExecutorRunRequest, run_executor
-from astrid.core.executor.schema import ExecutorDefinition
+from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
+from astrid.core.execution.executor.schema import ExecutorDefinition
 from astrid.core.task.env import TASK_PROJECT_ENV, TASK_RUN_ID_ENV, TASK_STEP_ID_ENV
 from tests.conftest import seed_event
 from astrid.core.task.events import make_step_dispatched_event, read_events

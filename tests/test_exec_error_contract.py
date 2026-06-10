@@ -20,7 +20,7 @@ from astrid.core.contracts.exec_error import (
     error_from_missing_binaries,
     error_from_returncode,
 )
-from astrid.core.executor.runner import ExecutorRunResult
+from astrid.core.execution.executor.runner import ExecutorRunResult
 from astrid.core.generation.backends.base import GenerationResult
 
 

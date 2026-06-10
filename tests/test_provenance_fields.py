@@ -23,12 +23,12 @@ from astrid.core.contracts.schema import (
     CachePolicy,
     CommandSpec,
 )
-from astrid.core.executor.schema import (
+from astrid.core.execution.executor.schema import (
     ExecutorDefinition,
     GraphMetadata,
     to_capability_handle as executor_to_handle,
 )
-from astrid.core.orchestrator.schema import (
+from astrid.core.execution.orchestrator.schema import (
     OrchestratorDefinition,
     RuntimeSpec,
     to_capability_handle as orchestrator_to_handle,

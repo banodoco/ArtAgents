@@ -59,7 +59,7 @@ def _banodoco_config_from_args(
     ``agent_flag`` is the arg attribute to check for per-capability-type
     override (``banodoco_agent_executors`` or ``banodoco_agent_orchestrators``).
     """
-    from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
+    from astrid.core.execution.executor.banodoco_catalog import BanodocoCatalogConfig
 
     env_config = BanodocoCatalogConfig.from_env()
     enabled = bool(getattr(args, agent_flag, False) or env_config.enabled)

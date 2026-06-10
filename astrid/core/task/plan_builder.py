@@ -177,7 +177,7 @@ def _thumbnail_maker_project_inputs(
 
 
 def _load_plan_builder_callable(orchestrator_id: str) -> Any:
-    from astrid.core.orchestrator.registry import load_default_registry
+    from astrid.core.execution.orchestrator.registry import load_default_registry
 
     orchestrator = load_default_registry(include_installed=False).get(orchestrator_id)
     metadata = orchestrator.metadata or {}

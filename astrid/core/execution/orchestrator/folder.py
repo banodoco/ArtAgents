@@ -159,8 +159,8 @@ import runpy
 import sys
 import traceback
 
-from astrid.core.orchestrator.api import OrchestratorSpec
-from astrid.core.orchestrator.schema import OrchestratorDefinition, validate_orchestrator_definition
+from astrid.core.execution.orchestrator.api import OrchestratorSpec
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, validate_orchestrator_definition
 
 PREFIX = "__ASTRID_ORCHESTRATOR_METADATA__="
 

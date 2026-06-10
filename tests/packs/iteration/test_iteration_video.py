@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from astrid.packs.video_editing.orchestrators.iteration_video import run as iteration_video
-from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
 from astrid.core.threads.index import ThreadIndexStore
 from astrid.core.threads.schema import make_thread_record
 

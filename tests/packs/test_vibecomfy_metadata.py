@@ -7,9 +7,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from astrid.core.executor import cli as executors_cli
-from astrid.core.executor.folder import load_folder_executors
-from astrid.core.executor.registry import load_default_registry
+from astrid.core.execution.executor import cli as executors_cli
+from astrid.core.execution.executor.folder import load_folder_executors
+from astrid.core.execution.executor.registry import load_default_registry
 
 
 class VibeComfyStructuredMetadataTest(unittest.TestCase):

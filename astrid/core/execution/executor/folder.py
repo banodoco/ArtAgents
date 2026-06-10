@@ -181,8 +181,8 @@ import runpy
 import sys
 import traceback
 
-from astrid.core.executor.api import ExecutorSpec
-from astrid.core.executor.schema import ExecutorDefinition, validate_executor_definition
+from astrid.core.execution.executor.api import ExecutorSpec
+from astrid.core.execution.executor.schema import ExecutorDefinition, validate_executor_definition
 
 PREFIX = "__ASTRID_EXECUTOR_METADATA__="
 

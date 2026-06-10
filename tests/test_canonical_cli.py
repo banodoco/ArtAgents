@@ -6,12 +6,12 @@ from unittest import mock
 
 from astrid.core import gateway
 from astrid.core.element import cli as elements_cli
-from astrid.core.executor import cli as executors_cli
-from astrid.core.executor.schema import (
+from astrid.core.execution.executor import cli as executors_cli
+from astrid.core.execution.executor.schema import (
     ExecutorValidationError,
     validate_executor_definition,
 )
-from astrid.core.orchestrator import cli as orchestrators_cli
+from astrid.core.execution.orchestrator import cli as orchestrators_cli
 
 
 class CanonicalCliTest(unittest.TestCase):

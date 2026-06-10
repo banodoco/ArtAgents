@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 from astrid.core.update import update_check, update_apply
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.schema import ExecutorDefinition
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.schema import ExecutorDefinition
 from astrid.core.contracts.schema import IsolationMetadata, SafetyDeclaration
 
 

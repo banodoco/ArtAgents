@@ -83,7 +83,7 @@ def _pipeline_module(runtime_module: str):
 
     The path is supplied by the orchestrator-tier caller via the executor
     manifest (``metadata.pipeline_module``); the executor never reaches up into
-    ``astrid.core.orchestrator`` to discover it.
+    ``astrid.core.execution.orchestrator`` to discover it.
     """
     if not isinstance(runtime_module, str) or not runtime_module:
         raise ExecutorRunnerError("pipeline executor manifest is missing metadata.pipeline_module")
@@ -103,7 +103,7 @@ def _pipeline_module_for_executor(executor: ExecutorDefinition):
     ``STEP_ORDER``) is that path minus the trailing function name. Deriving it
     from ``command_builder`` keeps a single source of truth — every pipeline-step
     executor already declares it, so a new one needs no extra field — and keeps
-    the executor decoupled from ``astrid.core.orchestrator``.
+    the executor decoupled from ``astrid.core.execution.orchestrator``.
     """
     command_builder = executor.metadata.get("command_builder")
     if not isinstance(command_builder, str) or "." not in command_builder:

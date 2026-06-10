@@ -9,10 +9,10 @@ No real LLM calls, no real network calls, no real git ops on actual repo.
 
 from __future__ import annotations
 
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.schema import ExecutorDefinition
-from astrid.core.orchestrator.registry import OrchestratorRegistry
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.schema import ExecutorDefinition
+from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 
 
 def _make_exec_def(id: str, *, priority: int, pack_id: str) -> ExecutorDefinition:

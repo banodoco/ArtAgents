@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.executor.argv import executor_argv
+from astrid.core.execution.executor.argv import executor_argv
 
 from .config import STEP_ORDER
 
@@ -453,7 +453,7 @@ def select_steps(args: argparse.Namespace) -> list[Step]:
     downstream steps. Replaces the old mode-fork logic; equivalent for
     source-video, audio-only, and pure-generative briefs.
     """
-    from astrid.core.executor.registry import load_default_registry
+    from astrid.core.execution.executor.registry import load_default_registry
 
     registry = load_default_registry()
     executors_by_step = {

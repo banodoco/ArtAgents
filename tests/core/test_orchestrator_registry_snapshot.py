@@ -16,11 +16,11 @@ import unittest
 from pathlib import Path
 from textwrap import dedent
 
-from astrid.core.orchestrator.registry import (
+from astrid.core.execution.orchestrator.registry import (
     OrchestratorRegistry,
     OrchestratorRegistryError,
 )
-from astrid.core.orchestrator.schema import (
+from astrid.core.execution.orchestrator.schema import (
     OrchestratorDefinition,
     OrchestratorValidationError,
     RuntimeSpec,

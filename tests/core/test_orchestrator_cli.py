@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.cli_choices import StaticChoices
-from astrid.core.orchestrator import cli as orchestrator_cli
+from astrid.core.execution.orchestrator import cli as orchestrator_cli
 
 
 def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
@@ -61,7 +61,7 @@ class OrchestratorCliErrorEnvelopeTest(unittest.TestCase):
 
         with patch.dict(os.environ, {"ASTRID_GATEWAY_RESOLVED_PROJECT": "demo"}, clear=False), \
              patch.object(orchestrator_cli, "_require_qualified_id"), \
-             patch("astrid.core.orchestrator.runner.run_orchestrator", side_effect=_capture):
+             patch("astrid.core.execution.orchestrator.runner.run_orchestrator", side_effect=_capture):
             rc = orchestrator_cli._cmd_run(args, registry=object())
 
         request = captured["request"]

@@ -10,11 +10,11 @@ from pathlib import Path
 import pytest
 
 from astrid.core.contracts.schema import CommandSpec
-from astrid.core.orchestrator.runner import (
+from astrid.core.execution.orchestrator.runner import (
     OrchestratorRunRequest,
     _run_command_orchestrator,
 )
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.task.events import (
     ZERO_HASH,
     StaleTailError,

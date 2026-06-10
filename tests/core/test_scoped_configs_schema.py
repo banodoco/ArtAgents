@@ -12,12 +12,12 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.core.executor.schema import (
+from astrid.core.execution.executor.schema import (
     ExecutorDefinition,
     ExecutorValidationError,
     validate_executor_definition,
 )
-from astrid.core.orchestrator.schema import (
+from astrid.core.execution.orchestrator.schema import (
     OrchestratorDefinition,
     OrchestratorValidationError,
     validate_orchestrator_definition,
@@ -184,7 +184,7 @@ def test_executor_absent_key_yields_empty():
 
 def test_no_scope_registry_import_in_executor_schema():
     """Executor schema has no import of SCOPE_REGISTRY (only in docstring)."""
-    import astrid.core.executor.schema as mod
+    import astrid.core.execution.executor.schema as mod
 
     src = open(mod.__file__).read()
     assert "from astrid.core.contracts.scoped_config import" not in src
@@ -195,7 +195,7 @@ def test_no_scope_registry_import_in_executor_schema():
 
 def test_no_scope_registry_import_in_orchestrator_schema():
     """Orchestrator schema has no import of SCOPE_REGISTRY (only in docstring)."""
-    import astrid.core.orchestrator.schema as mod
+    import astrid.core.execution.orchestrator.schema as mod
 
     src = open(mod.__file__).read()
     assert "from astrid.core.contracts.scoped_config import" not in src

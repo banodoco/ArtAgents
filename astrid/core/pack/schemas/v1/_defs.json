@@ -26,7 +26,7 @@
     },
     "runtime_python": {
       "type": "object",
-      "description": "Runtime shape consumed by astrid.core.orchestrator.schema.RuntimeSpec for Python orchestrators.",
+      "description": "Runtime shape consumed by astrid.core.execution.orchestrator.schema.RuntimeSpec for Python orchestrators.",
       "required": ["kind", "module", "function"],
       "properties": {
         "kind": {"type": "string", "const": "python"},
@@ -37,7 +37,7 @@
     },
     "runtime_command": {
       "type": "object",
-      "description": "Runtime shape consumed by astrid.core.orchestrator.schema.RuntimeSpec for command orchestrators.",
+      "description": "Runtime shape consumed by astrid.core.execution.orchestrator.schema.RuntimeSpec for command orchestrators.",
       "required": ["kind", "command"],
       "properties": {
         "kind": {"type": "string", "const": "command"},

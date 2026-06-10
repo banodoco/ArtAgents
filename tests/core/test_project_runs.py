@@ -10,12 +10,12 @@ import pytest
 
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.schema import CommandSpec, Port
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.runner import ExecutorRunnerError, ExecutorRunRequest, run_executor
-from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
-from astrid.core.orchestrator.registry import OrchestratorRegistry
-from astrid.core.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.runner import ExecutorRunnerError, ExecutorRunRequest, run_executor
+from astrid.core.execution.executor.schema import ConditionSpec, ExecutorDefinition
+from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, run_orchestrator
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import create_project
 from astrid.core.project.run import resolve_record_path
@@ -792,8 +792,8 @@ def test_dry_run_with_project_creates_ledger_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Dry-run short-circuits before prepare/finalize and writes no ledger."""
-    from astrid.core.executor.registry import ExecutorRegistry
-    from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+    from astrid.core.execution.executor.registry import ExecutorRegistry
+    from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -1038,8 +1038,8 @@ def test_auto_resolved_project_not_rejected_with_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Auto-resolved project + out= is ledgered without tripping CLI-only rejection."""
-    from astrid.core.executor.registry import ExecutorRegistry
-    from astrid.core.executor.runner import ExecutorRunRequest, run_executor
+    from astrid.core.execution.executor.registry import ExecutorRegistry
+    from astrid.core.execution.executor.runner import ExecutorRunRequest, run_executor
 
     projects_root, _ = _setup_project_env_conformance(
         tmp_path, monkeypatch, "default"

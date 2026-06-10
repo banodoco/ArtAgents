@@ -186,8 +186,8 @@ class TestOverrideStoreRegistryIntegration:
 
     def test_executor_registry_get_respects_override(self):
         """ExecutorRegistry.get() returns overridden target definition."""
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.schema import ExecutorDefinition
 
         with tempfile.TemporaryDirectory() as tmp:
             override_store = OverrideStore(project_root=tmp)
@@ -221,8 +221,8 @@ class TestOverrideStoreRegistryIntegration:
 
     def test_executor_registry_get_no_override_returns_winner(self):
         """Without override, get() returns the priority winner."""
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorDefinition
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.schema import ExecutorDefinition
 
         with tempfile.TemporaryDirectory() as tmp:
             override_store = OverrideStore(project_root=tmp)

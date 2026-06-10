@@ -206,13 +206,13 @@ class TestCrossdomainDelegationParity:
     """Assert that all three capability domains delegate to contracts/ primitives."""
 
     def test_executor_validator_delegates_to_contracts(self) -> None:
-        import astrid.core.executor.schema as _ex
+        import astrid.core.execution.executor.schema as _ex
         assert _ex._validate_capability_text is validate_capability_text, (
             "executor schema redefines _validate_capability_text instead of delegating to contracts/"
         )
 
     def test_orchestrator_validator_delegates_to_contracts(self) -> None:
-        import astrid.core.orchestrator.schema as _orch
+        import astrid.core.execution.orchestrator.schema as _orch
         assert _orch._validate_capability_text is validate_capability_text, (
             "orchestrator schema redefines _validate_capability_text instead of delegating to contracts/"
         )
@@ -225,8 +225,8 @@ class TestCrossdomainDelegationParity:
 
     def test_all_three_use_schema_validator_from_contracts(self) -> None:
         """Each domain binds SchemaValidator from contracts/, not a local copy."""
-        import astrid.core.executor.schema as _ex
-        import astrid.core.orchestrator.schema as _orch
+        import astrid.core.execution.executor.schema as _ex
+        import astrid.core.execution.orchestrator.schema as _orch
         from astrid.core.contracts.capability_schema import SchemaValidator
         assert _ex._primitives.__class__ is SchemaValidator
         assert _orch._primitives.__class__ is SchemaValidator
@@ -236,14 +236,14 @@ class TestRegistrySemanticsParity:
     """All three registries expose equivalent register/get/list semantics."""
 
     def test_executor_registry_has_register_get_list(self) -> None:
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
         for method in ("register", "get", "list"):
             assert callable(getattr(ExecutorRegistry, method, None)), (
                 f"ExecutorRegistry missing {method!r}"
             )
 
     def test_orchestrator_registry_has_register_get_list(self) -> None:
-        from astrid.core.orchestrator.registry import OrchestratorRegistry
+        from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
         for method in ("register", "get", "list"):
             assert callable(getattr(OrchestratorRegistry, method, None)), (
                 f"OrchestratorRegistry missing {method!r}"
@@ -262,10 +262,10 @@ class TestRegistrySemanticsParity:
 
         from astrid.core.element.registry import ElementRegistry
         from astrid.core.element.schema import ElementValidationError
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import ExecutorValidationError
-        from astrid.core.orchestrator.registry import OrchestratorRegistry
-        from astrid.core.orchestrator.schema import OrchestratorValidationError
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.schema import ExecutorValidationError
+        from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
+        from astrid.core.execution.orchestrator.schema import OrchestratorValidationError
 
         with pytest.raises(KeyError):
             ExecutorRegistry().get("nonexistent.id")

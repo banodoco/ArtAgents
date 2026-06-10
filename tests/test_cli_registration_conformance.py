@@ -44,7 +44,7 @@ _ALLOWLISTED: tuple[str, ...] = (
 #   astrid.core.pack.cli      (split into cli_parser + 3 handler modules, T14-T16)
 
 _EXPECTED_FUTURE: dict[str, str] = {
-    "astrid.core.executor.cli": (
+    "astrid.core.execution.executor.cli": (
         "Already uses a clean build_parser() pattern. "
         "Can adopt CommandSpec when the executor CLI is split."
     ),

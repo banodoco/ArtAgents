@@ -18,7 +18,7 @@ def resolve_executor_runtime_module(script_name: str) -> str:
     step dispatch via ``metadata.pipeline_step``.
     """
     stem = script_name[:-3] if script_name.endswith(".py") else script_name
-    from astrid.core.executor.registry import load_default_registry
+    from astrid.core.execution.executor.registry import load_default_registry
 
     registry = load_default_registry()
     if "." in stem:

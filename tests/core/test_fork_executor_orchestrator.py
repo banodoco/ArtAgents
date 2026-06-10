@@ -14,16 +14,16 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.executor.registry import (
+from astrid.core.execution.executor.registry import (
     ExecutorRegistry,
     ExecutorRegistryError,
 )
-from astrid.core.executor.schema import ExecutorDefinition
-from astrid.core.orchestrator.registry import (
+from astrid.core.execution.executor.schema import ExecutorDefinition
+from astrid.core.execution.orchestrator.registry import (
     OrchestratorRegistry,
     OrchestratorRegistryError,
 )
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.contracts.schema import CommandSpec, CachePolicy
 
 
@@ -189,7 +189,7 @@ class TestExecutorFork:
             proj = Path(tmp) / "project"
             proj.mkdir()
 
-            from astrid.core.executor.schema import GraphMetadata
+            from astrid.core.execution.executor.schema import GraphMetadata
 
             registry = ExecutorRegistry()
             # Register 'b' first

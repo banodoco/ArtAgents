@@ -5,10 +5,10 @@ import contextlib
 import io
 import json
 
-from astrid.core.executor import cli as executors_cli
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.schema import ExecutorValidationError, validate_executor_definition
-from astrid.core.orchestrator.schema import (
+from astrid.core.execution.executor import cli as executors_cli
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.schema import ExecutorValidationError, validate_executor_definition
+from astrid.core.execution.orchestrator.schema import (
     OrchestratorValidationError,
     validate_orchestrator_definition,
 )

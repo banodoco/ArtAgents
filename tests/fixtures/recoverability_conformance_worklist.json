@@ -2390,7 +2390,7 @@
     },
     {
       "builder": "build_parser",
-      "module": "astrid.core.executor.cli",
+      "module": "astrid.core.execution.executor.cli",
       "path": "astrid/core/executor/cli.py"
     },
     {
@@ -2400,7 +2400,7 @@
     },
     {
       "builder": "build_parser",
-      "module": "astrid.core.orchestrator.cli",
+      "module": "astrid.core.execution.orchestrator.cli",
       "path": "astrid/core/orchestrator/cli.py"
     },
     {
@@ -2719,7 +2719,7 @@
     {
       "builder": "build_parser",
       "enum_arg_count": 2,
-      "module": "astrid.core.executor.cli",
+      "module": "astrid.core.execution.executor.cli",
       "path": "astrid/core/executor/cli.py",
       "prog": "python3 -m astrid executors"
     },
@@ -2733,7 +2733,7 @@
     {
       "builder": "build_parser",
       "enum_arg_count": 2,
-      "module": "astrid.core.orchestrator.cli",
+      "module": "astrid.core.execution.orchestrator.cli",
       "path": "astrid/core/orchestrator/cli.py",
       "prog": "python3 -m astrid orchestrators"
     },

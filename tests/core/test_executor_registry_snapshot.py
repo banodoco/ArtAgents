@@ -16,11 +16,11 @@ import unittest
 from pathlib import Path
 from textwrap import dedent
 
-from astrid.core.executor.registry import (
+from astrid.core.execution.executor.registry import (
     ExecutorRegistry,
     ExecutorRegistryError,
 )
-from astrid.core.executor.schema import (
+from astrid.core.execution.executor.schema import (
     ExecutorDefinition,
     ExecutorValidationError,
     GraphMetadata,

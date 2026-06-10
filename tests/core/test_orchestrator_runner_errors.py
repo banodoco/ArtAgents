@@ -1,4 +1,4 @@
-"""Parametrized error-path tests for ``astrid.core.orchestrator.runner``.
+"""Parametrized error-path tests for ``astrid.core.execution.orchestrator.runner``.
 
 The happy paths for the orchestrator runner are covered by
 ``tests/core/test_project_runs.py`` and ``tests/test_task_kernel_dispatch.py``.
@@ -16,16 +16,16 @@ from typing import Any
 import pytest
 
 from astrid.core.contracts.schema import CommandSpec, IsolationMetadata, Output, Port
-from astrid.core.orchestrator.registry import OrchestratorRegistry
+from astrid.core.execution.orchestrator.registry import OrchestratorRegistry
 from astrid.core.foundation import project_paths
 from astrid.core.project.project import create_project
-from astrid.core.orchestrator.runner import (
+from astrid.core.execution.orchestrator.runner import (
     OrchestratorRunRequest,
     OrchestratorRunnerError,
     build_orchestrator_command,
     run_orchestrator,
 )
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 from astrid.core.timeline.crud import create_timeline
 
 
@@ -60,7 +60,7 @@ def _command_orchestrator(
 def _python_orchestrator(
     *,
     orchestrator_id: str = "test.python",
-    module: str | None = "astrid.core.orchestrator.runner",
+    module: str | None = "astrid.core.execution.orchestrator.runner",
     function: str | None = "_request_argv_for_gate",
 ) -> OrchestratorDefinition:
     return OrchestratorDefinition(
@@ -232,7 +232,7 @@ def test_command_orchestrator_in_process_mode_avoids_subprocess_and_returns_resu
     def _fail_subprocess(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("subprocess.run should not be used in in_process mode")
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod.subprocess, "run", _fail_subprocess)
 
@@ -284,7 +284,7 @@ def test_command_orchestrator_default_mode_remains_subprocess_first(
     def _fail_in_process(*args: Any, **kwargs: Any) -> Any:
         raise AssertionError("invoke_in_process_command should not be used by default")
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod.subprocess, "run", _fake_subprocess_run)
     monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fail_in_process)
@@ -340,7 +340,7 @@ def test_python_orchestrator_in_process_mode_keeps_direct_python_runtime_path(
     def _returns_zero(request, orchestrator):  # noqa: ANN001
         return 0
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod, "_test_python_target", _returns_zero, raising=False)
 
@@ -410,7 +410,7 @@ def test_project_command_orchestrator_in_process_mode_preserves_project_run_fina
         seen["owner_id"] = owner_id
         return types.SimpleNamespace(returncode=0)
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod, "invoke_in_process_command", _fake_in_process)
 
@@ -467,7 +467,7 @@ def test_python_orchestrator_reports_import_failure(tmp_path: Path) -> None:
 def test_python_orchestrator_rejects_non_callable_target(tmp_path: Path) -> None:
     # __doc__ exists on every module but is a string — not callable.
     orch = _python_orchestrator(
-        module="astrid.core.orchestrator.runner",
+        module="astrid.core.execution.orchestrator.runner",
         function="__doc__",
     )
     registry = _registry(orch)
@@ -482,7 +482,7 @@ def test_python_orchestrator_wraps_runtime_exceptions(
     def boom(request, orchestrator):  # noqa: ANN001
         raise RuntimeError("kaboom")
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod, "_test_python_target", boom, raising=False)
     orch = _python_orchestrator(function="_test_python_target")
@@ -498,7 +498,7 @@ def test_python_orchestrator_propagates_runner_errors_unchanged(
     def boom(request, orchestrator):  # noqa: ANN001
         raise OrchestratorRunnerError("nested runner error")
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod, "_test_python_target", boom, raising=False)
     orch = _python_orchestrator(function="_test_python_target")
@@ -514,7 +514,7 @@ def test_python_orchestrator_rejects_unsupported_result_type(
     def returns_set(request, orchestrator):  # noqa: ANN001
         return {"unhashable"}
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod, "_test_python_target", returns_set, raising=False)
     orch = _python_orchestrator(function="_test_python_target")
@@ -634,7 +634,7 @@ def test_project_orchestrator_rejects_passthrough_out(
 def test_orchestrator_cli_rejects_project_plus_out(tmp_path: Path) -> None:
     import argparse
 
-    from astrid.core.orchestrator import cli as cli_mod
+    from astrid.core.execution.orchestrator import cli as cli_mod
 
     with pytest.raises(ValueError, match="--project cannot be combined with --out"):
         cli_mod._cmd_run(
@@ -795,7 +795,7 @@ def test_python_runtime_dict_result_validation_errors(
     def returns_dict(request, orchestrator):  # noqa: ANN001
         return raw_result
 
-    import astrid.core.orchestrator.runner as runner_mod
+    import astrid.core.execution.orchestrator.runner as runner_mod
 
     monkeypatch.setattr(runner_mod, "_test_python_target", returns_dict, raising=False)
     orch = _python_orchestrator(function="_test_python_target")

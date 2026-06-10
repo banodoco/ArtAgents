@@ -22,8 +22,8 @@ from pathlib import Path
 from unittest import mock
 
 from astrid.core.element.registry import load_default_registry as load_element_registry
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
-from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.orchestrator.registry import load_default_registry as load_orchestrator_registry
 from astrid.core.pack import PackValidationError, qualified_id_pack_id
 
 
@@ -150,17 +150,17 @@ class TestCanonicalAliasesRegression(unittest.TestCase):
     """Verify the invariants tested in test_canonical_aliases.py still hold."""
 
     def test_executor_definition_uses_canonical_module(self) -> None:
-        from astrid.core.executor import ExecutorDefinition
+        from astrid.core.execution.executor import ExecutorDefinition
         self.assertEqual(
             ExecutorDefinition.__module__,
-            "astrid.core.executor.schema",
+            "astrid.core.execution.executor.schema",
         )
 
     def test_orchestrator_definition_uses_canonical_module(self) -> None:
-        from astrid.core.orchestrator import OrchestratorDefinition
+        from astrid.core.execution.orchestrator import OrchestratorDefinition
         self.assertEqual(
             OrchestratorDefinition.__module__,
-            "astrid.core.orchestrator.schema",
+            "astrid.core.execution.orchestrator.schema",
         )
 
     def test_element_registry_uses_canonical_module(self) -> None:

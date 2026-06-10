@@ -61,7 +61,7 @@ def _banodoco_config_from_args(
     ``agent_flag`` is the arg attribute to check for per-capability-type
     override (``banodoco_agent_executors`` or ``banodoco_agent_orchestrators``).
     """
-    from astrid.core.executor.banodoco_catalog import BanodocoCatalogConfig
+    from astrid.core.execution.executor.banodoco_catalog import BanodocoCatalogConfig
 
     env_config = BanodocoCatalogConfig.from_env()
     enabled = bool(getattr(args, agent_flag, False) or env_config.enabled)
@@ -343,7 +343,7 @@ _ORCHESTRATOR_PLAN_TEMPLATE = """\
 #
 # This file defines ``build_plan_v2``, the function that produces the plan
 # dict emitted by the orchestrator runner.  Import helpers from
-# ``astrid.core.orchestrator.plan_template`` so you don't need to copy-paste the
+# ``astrid.core.execution.orchestrator.plan_template`` so you don't need to copy-paste the
 # emit / step-command / produces boilerplate into your pack.
 
 from __future__ import annotations
@@ -352,7 +352,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.core.orchestrator.plan_template import (
+from astrid.core.execution.orchestrator.plan_template import (
     emit_plan_json,
     build_step_command,
     make_produces,

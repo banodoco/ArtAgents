@@ -5,7 +5,7 @@ and child-type validation in the orchestrator registry.
 from __future__ import annotations
 
 from astrid.core.contracts.schema import Output, Port
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 
 
 class TestOrchestratorDefinitionArtifactTypes:

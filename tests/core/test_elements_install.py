@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from astrid.core.executor.install import (
+from astrid.core.execution.executor.install import (
     build_executor_install_plan,
     executor_environment_path,
     executor_python_path,
 )
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.foundation.paths import REPO_ROOT
 
 

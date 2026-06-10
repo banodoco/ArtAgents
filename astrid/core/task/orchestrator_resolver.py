@@ -77,7 +77,7 @@ def _list_orchestrator_ids(packs_root: Optional[Path] = None) -> tuple[list[str]
     ids: set[str] = set()
     registry_err: str | None = None
     try:
-        from astrid.core.orchestrator.registry import load_default_registry
+        from astrid.core.execution.orchestrator.registry import load_default_registry
         registry = load_default_registry()
         ids.update(o.id for o in registry.list())
     except Exception as exc:

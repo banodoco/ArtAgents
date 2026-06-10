@@ -135,13 +135,13 @@ def _dispatch_packs(args: list[str]) -> int:
 
 
 def _dispatch_executors(args: list[str]) -> int:
-    from astrid.core.executor import cli as executors_cli
+    from astrid.core.execution.executor import cli as executors_cli
 
     return executors_cli.main(args)
 
 
 def _dispatch_orchestrators(args: list[str]) -> int:
-    from astrid.core.orchestrator import cli as orchestrators_cli
+    from astrid.core.execution.orchestrator import cli as orchestrators_cli
 
     return orchestrators_cli.main(args)
 
@@ -226,7 +226,7 @@ def _dispatch_reigh_data(args: list[str]) -> int:
 
 
 def _dispatch_executor_main(executor_id: str, args: list[str]) -> int:
-    from astrid.core.executor.registry import load_default_registry
+    from astrid.core.execution.executor.registry import load_default_registry
     from astrid.core.pack.resolver import resolve_callable_from_metadata
 
     executor = load_default_registry().get(executor_id)

@@ -37,7 +37,7 @@ from unittest import mock
 import pytest
 import yaml
 
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
 from astrid.core.pack import discover_packs
 from astrid.core.pack.validate import validate_pack
 
@@ -276,8 +276,8 @@ def test_representative_executor_dispatches_external(pack_id: str) -> None:
     then run the executor. The external stub must fire; the builtin stub
     must NOT fire.
     """
-    from astrid.core.executor import runner as runner_mod
-    from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunResult
+    from astrid.core.execution.executor import runner as runner_mod
+    from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunResult
 
     executor_id = REPRESENTATIVE_EXECUTORS[pack_id]
     registry = load_executor_registry()

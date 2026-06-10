@@ -914,7 +914,7 @@ class TestInstalledComponentsInRegistry(InstallTestBase):
         self.assertEqual(rc, 0)
 
         # Now check via registry with include_installed=True
-        from astrid.core.executor.registry import load_pack_executors
+        from astrid.core.execution.executor.registry import load_pack_executors
 
         # We must patch the ASTRID_HOME so installed_pack_roots() resolves correctly
         with mock.patch.dict(os.environ, {"ASTRID_HOME": str(self._astrid_home)}):
@@ -930,7 +930,7 @@ class TestInstalledComponentsInRegistry(InstallTestBase):
         rc = self._install(src, store=store)
         self.assertEqual(rc, 0)
 
-        from astrid.core.orchestrator.registry import load_pack_orchestrators
+        from astrid.core.execution.orchestrator.registry import load_pack_orchestrators
 
         with mock.patch.dict(os.environ, {"ASTRID_HOME": str(self._astrid_home)}):
             orchs = load_pack_orchestrators(include_installed=True)
@@ -945,7 +945,7 @@ class TestInstalledComponentsInRegistry(InstallTestBase):
         rc = self._install(src, store=store)
         self.assertEqual(rc, 0)
 
-        from astrid.core.executor.registry import load_pack_executors
+        from astrid.core.execution.executor.registry import load_pack_executors
 
         with mock.patch.dict(os.environ, {"ASTRID_HOME": str(self._astrid_home)}):
             # Get baseline (includes everything)
@@ -1108,8 +1108,8 @@ class TestFullInstallInspectRunUninstallFlow(InstallTestBase):
         self.assertIn("flow_test", buf.getvalue())
 
         # ── 6. Registry sees the installed components ──
-        from astrid.core.executor.registry import load_pack_executors
-        from astrid.core.orchestrator.registry import load_pack_orchestrators
+        from astrid.core.execution.executor.registry import load_pack_executors
+        from astrid.core.execution.orchestrator.registry import load_pack_orchestrators
 
         with mock.patch.dict(os.environ, {"ASTRID_HOME": str(self._astrid_home)}):
             execs = load_pack_executors(include_installed=True)

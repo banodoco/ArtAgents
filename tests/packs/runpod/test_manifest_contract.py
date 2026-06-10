@@ -11,11 +11,11 @@ from io import StringIO
 
 from astrid.core.adapter import RunContext
 from astrid.core.adapter.remote_artifact_fetch import fetch_artifacts
-from astrid.core.executor.cli import main as executor_cli_main
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
-from astrid.core.executor.runner import ExecutorRunRequest, build_executor_command
-from astrid.core.orchestrator.plan_template import file_output
-from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
+from astrid.core.execution.executor.cli import main as executor_cli_main
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, build_executor_command
+from astrid.core.execution.orchestrator.plan_template import file_output
+from astrid.core.execution.orchestrator.registry import load_default_registry as load_orchestrator_registry
 from astrid.core.task.command_render import render_task_command
 from astrid.core.task.plan import Step
 

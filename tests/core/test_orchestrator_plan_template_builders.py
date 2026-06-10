@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from astrid.core.orchestrator.plan_template import (
+from astrid.core.execution.orchestrator.plan_template import (
     build_group_template,
     build_leaf_template,
     build_plan_template,

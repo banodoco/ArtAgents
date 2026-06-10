@@ -14,10 +14,10 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.core.executor.registry import (
+from astrid.core.execution.executor.registry import (
     load_default_registry as load_executor_registry,
 )
-from astrid.core.orchestrator.registry import (
+from astrid.core.execution.orchestrator.registry import (
     load_default_registry as load_orchestrator_registry,
 )
 

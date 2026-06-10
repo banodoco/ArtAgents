@@ -1,4 +1,4 @@
-"""Parametrized error-path tests for ``astrid.core.executor.runner``.
+"""Parametrized error-path tests for ``astrid.core.execution.executor.runner``.
 
 The happy paths for the executor runner are covered by
 ``tests/core/test_project_runs.py`` and ``tests/test_task_kernel_dispatch.py``.
@@ -22,19 +22,19 @@ import pytest
 
 import astrid.packs
 from astrid.core.contracts.schema import CommandInputArg, CommandSpec, IsolationMetadata, Output, Port
-from astrid.core.executor import runner as executor_runner
-from astrid.core.executor.cli import main as executor_cli_main
-from astrid.core.executor.registry import ExecutorRegistry, load_default_registry
-from astrid.core.executor.runner import (
+from astrid.core.execution.executor import runner as executor_runner
+from astrid.core.execution.executor.cli import main as executor_cli_main
+from astrid.core.execution.executor.registry import ExecutorRegistry, load_default_registry
+from astrid.core.execution.executor.runner import (
     ExecutorRunnerError,
     ExecutorRunRequest,
     build_executor_command,
     evaluate_conditions,
     run_executor,
 )
-from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition, ExecutorValidationError
+from astrid.core.execution.executor.schema import ConditionSpec, ExecutorDefinition, ExecutorValidationError
 from astrid.core.pack.resolver import PackResolverError
-from astrid.core.executor.argv import executor_argv, resolve_executor_runtime_module
+from astrid.core.execution.executor.argv import executor_argv, resolve_executor_runtime_module
 
 # ---------------------------------------------------------------------------
 # Factory helpers

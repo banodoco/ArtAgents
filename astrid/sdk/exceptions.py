@@ -79,10 +79,10 @@ def _sdk_error_from_exception(exc: Any) -> AstridSDKError | None:
         return exc
 
     from astrid.core.contracts.event_log_error import EventLogError
-    from astrid.core.executor.runner import ExecutorRunnerError
-    from astrid.core.executor.schema import ExecutorValidationError
-    from astrid.core.orchestrator.runner import OrchestratorRunError, OrchestratorRunnerError
-    from astrid.core.orchestrator.schema import OrchestratorValidationError
+    from astrid.core.execution.executor.runner import ExecutorRunnerError
+    from astrid.core.execution.executor.schema import ExecutorValidationError
+    from astrid.core.execution.orchestrator.runner import OrchestratorRunError, OrchestratorRunnerError
+    from astrid.core.execution.orchestrator.schema import OrchestratorValidationError
     from astrid.core.session.lease import LeaseError
     from astrid.core.task.events import NotWriterError, StaleEpochError, StaleTailError
 

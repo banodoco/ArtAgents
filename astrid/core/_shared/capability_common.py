@@ -1,7 +1,7 @@
 """Shared leaf helpers for executor and orchestrator packages.
 
 These were previously duplicated verbatim (or near-verbatim) in
-``astrid.core.executor.{runner,cli}`` and ``astrid.core.orchestrator.{runner,cli}``.
+``astrid.core.execution.executor.{runner,cli}`` and ``astrid.core.execution.orchestrator.{runner,cli}``.
 """
 
 from __future__ import annotations

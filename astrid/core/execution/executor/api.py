@@ -1,6 +1,6 @@
 """Code-first authoring helpers for Astrid executors.
 
-This module is intentionally a thin facade over :mod:`astrid.core.executor.schema`.
+This module is intentionally a thin facade over :mod:`astrid.core.execution.executor.schema`.
 `ExecutorSpec` validates into the existing `ExecutorDefinition` model immediately so
 folder executors do not introduce a second manifest schema.
 """

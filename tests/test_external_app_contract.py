@@ -161,7 +161,7 @@ def test_external_app_script_rejects_from_astrid_imports() -> None:
         # from astrid import discover
         "import json, sys\nfrom astrid import discover\n",
         # import astrid.core  (sub-module bypass)
-        "import json, sys\nimport astrid.core.executor.registry\n",
+        "import json, sys\nimport astrid.core.execution.executor.registry\n",
         # from astrid.sdk import discover
         "import json, sys\nfrom astrid.sdk import discover\n",
         # from astrid.packs.builtin import run

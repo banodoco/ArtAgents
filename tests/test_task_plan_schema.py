@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from astrid.core.orchestrator.schema import (
+from astrid.core.execution.orchestrator.schema import (
     OrchestratorValidationError,
     validate_orchestrator_definition,
 )

@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.executor.registry import load_default_registry, resolve_executor_callable
-from astrid.core.executor.schema import CommandSpec, ExecutorDefinition
+from astrid.core.execution.executor.registry import load_default_registry, resolve_executor_callable
+from astrid.core.execution.executor.schema import CommandSpec, ExecutorDefinition
 from astrid.core.pack.resolver import (
     CallableNotFoundError,
     PackResolver,

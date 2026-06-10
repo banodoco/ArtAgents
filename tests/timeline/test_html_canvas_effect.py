@@ -7,8 +7,8 @@ from pathlib import Path
 
 from astrid.core.contracts.errors import AstridError
 from astrid.core.element.schema import load_element_definition
-from astrid.core.executor import cli as executors_cli
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor import cli as executors_cli
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
 from astrid.packs.rendering.executors.html_canvas_effect.run import main, scaffold
 
 

@@ -2386,7 +2386,7 @@ class TestRuntimeModuleCanonicalization(unittest.TestCase):
     """
 
     def test_executor_only_metadata_runtime_module_loads(self) -> None:
-        from astrid.core.executor.schema import validate_executor_definition
+        from astrid.core.execution.executor.schema import validate_executor_definition
 
         definition = validate_executor_definition(
             {
@@ -2404,7 +2404,7 @@ class TestRuntimeModuleCanonicalization(unittest.TestCase):
         )
 
     def test_executor_runtime_module_folded_into_metadata(self) -> None:
-        from astrid.core.executor.schema import validate_executor_definition
+        from astrid.core.execution.executor.schema import validate_executor_definition
 
         definition = validate_executor_definition(
             {
@@ -2419,7 +2419,7 @@ class TestRuntimeModuleCanonicalization(unittest.TestCase):
         self.assertEqual(definition.metadata["runtime_module"], "pkg.mod.run")
 
     def test_executor_conflicting_double_declaration_rejected(self) -> None:
-        from astrid.core.executor.schema import (
+        from astrid.core.execution.executor.schema import (
             ExecutorValidationError,
             validate_executor_definition,
         )
@@ -2439,7 +2439,7 @@ class TestRuntimeModuleCanonicalization(unittest.TestCase):
         self.assertIn("twice with conflicting", str(ctx.exception))
 
     def test_orchestrator_only_metadata_runtime_module_loads(self) -> None:
-        from astrid.core.orchestrator.schema import validate_orchestrator_definition
+        from astrid.core.execution.orchestrator.schema import validate_orchestrator_definition
 
         definition = validate_orchestrator_definition(
             {
@@ -2455,7 +2455,7 @@ class TestRuntimeModuleCanonicalization(unittest.TestCase):
         self.assertEqual(definition.metadata["runtime_module"], "pkg.orch.run")
 
     def test_orchestrator_runtime_module_folded_into_metadata(self) -> None:
-        from astrid.core.orchestrator.schema import validate_orchestrator_definition
+        from astrid.core.execution.orchestrator.schema import validate_orchestrator_definition
 
         definition = validate_orchestrator_definition(
             {
@@ -2470,7 +2470,7 @@ class TestRuntimeModuleCanonicalization(unittest.TestCase):
         self.assertEqual(definition.metadata["runtime_module"], "pkg.orch.run")
 
     def test_orchestrator_conflicting_double_declaration_rejected(self) -> None:
-        from astrid.core.orchestrator.schema import (
+        from astrid.core.execution.orchestrator.schema import (
             OrchestratorValidationError,
             validate_orchestrator_definition,
         )

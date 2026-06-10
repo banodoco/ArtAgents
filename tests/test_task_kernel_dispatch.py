@@ -11,10 +11,10 @@ from astrid.core import gateway
 from astrid.core.contracts.errors import AstridError
 from astrid.core.adapter import DispatchResult
 from astrid.core.adapter import local as local_adapter_module
-from astrid.core.executor import cli as executor_cli
-from astrid.core.executor import runner as executor_runner
-from astrid.core.executor.runner import ExecutorRunRequest, ExecutorRunResult, ExecutorRunnerError
-from astrid.core.orchestrator.runner import OrchestratorRunRequest, OrchestratorRunnerError, run_orchestrator
+from astrid.core.execution.executor import cli as executor_cli
+from astrid.core.execution.executor import runner as executor_runner
+from astrid.core.execution.executor.runner import ExecutorRunRequest, ExecutorRunResult, ExecutorRunnerError
+from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest, OrchestratorRunnerError, run_orchestrator
 from astrid.core.project.project import create_project
 from astrid.core.task import gate as task_gate
 from tests.helpers.current_run import seed_current_run

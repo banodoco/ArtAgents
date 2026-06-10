@@ -6,8 +6,8 @@ from typing import Any
 import jsonschema
 
 from astrid.core.pack.manifest import load_manifest_mapping
-from astrid.core.orchestrator.registry import load_default_registry
-from astrid.core.orchestrator.schema import load_orchestrator_manifest
+from astrid.core.execution.orchestrator.registry import load_default_registry
+from astrid.core.execution.orchestrator.schema import load_orchestrator_manifest
 from astrid.core.pack.validate import KNOWN_SCHEMA_VERSIONS, PackValidator
 from astrid.core.foundation.paths import REPO_ROOT
 

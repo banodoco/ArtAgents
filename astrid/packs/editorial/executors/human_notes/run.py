@@ -27,7 +27,7 @@ from astrid.packs.editorial.executors.editor_review.run import (
     arrangement_summary,
 )
 from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.core.executor.argv import executor_argv
+from astrid.core.execution.executor.argv import executor_argv
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
 
 

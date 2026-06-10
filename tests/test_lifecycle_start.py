@@ -20,7 +20,7 @@ from tests.helpers.current_run import read_seeded_current_run
 from astrid.core.task.lifecycle import cmd_start
 from astrid.core.task.plan import compute_plan_hash
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
-from astrid.core.orchestrator.registry import load_default_registry
+from astrid.core.execution.orchestrator.registry import load_default_registry
 from astrid.core.project.project import create_project
 from astrid.core.timeline.crud import create_timeline
 

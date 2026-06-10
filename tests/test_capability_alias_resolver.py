@@ -22,13 +22,13 @@ from astrid.core.pack.alias_resolver import (
     create_shared_alias_resolver,
     extract_pack_aliases,
 )
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
-from astrid.core.executor.schema import ExecutorDefinition, to_capability_handle
-from astrid.core.orchestrator.registry import OrchestratorRegistry, OrchestratorRegistryError
-from astrid.core.orchestrator.registry import load_default_registry as load_orchestrator_registry
-from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
-from astrid.core.orchestrator.schema import to_capability_handle as orch_to_capability_handle
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor.schema import ExecutorDefinition, to_capability_handle
+from astrid.core.execution.orchestrator.registry import OrchestratorRegistry, OrchestratorRegistryError
+from astrid.core.execution.orchestrator.registry import load_default_registry as load_orchestrator_registry
+from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+from astrid.core.execution.orchestrator.schema import to_capability_handle as orch_to_capability_handle
 from astrid.core.pack import PackDefinition, discover_packs
 from astrid.core.pack.override import OverrideStore
 
@@ -425,7 +425,7 @@ class TestDefaultRegistryPackAliasLoading:
             _write_executor(pack_root, "render", "rendering.render")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
         assert registry.alias_resolver is not None
@@ -459,7 +459,7 @@ class TestDefaultRegistryPackAliasLoading:
             _write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
         assert registry.alias_resolver is not None
@@ -508,7 +508,7 @@ class TestOrchestratorChildExecutorAliasResolution:
         'builtin.my_alias').  The alias resolver then maps the dotted alias
         to the canonical dotted id.
         """
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         exec_reg = ExecutorRegistry(alias_resolver=AliasResolver())
         exec_reg.register(ExecutorDefinition(
@@ -538,7 +538,7 @@ class TestOrchestratorChildExecutorAliasResolution:
     def test_child_executor_alias_resolves_to_unknown_fails(self) -> None:
         """An orchestrator declares a child_executor alias that resolves
         to an unknown executor — validation should fail."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         exec_reg = ExecutorRegistry(alias_resolver=AliasResolver())
 
@@ -554,13 +554,13 @@ class TestOrchestratorChildExecutorAliasResolution:
             child_executors=("builtin.my_alias",),
         ))
 
-        from astrid.core.orchestrator.registry import OrchestratorRegistryError
+        from astrid.core.execution.orchestrator.registry import OrchestratorRegistryError
         with pytest.raises(OrchestratorRegistryError, match="unknown child executor"):
             orch_reg.validate_all(executor_registry=exec_reg)
 
     def test_child_executor_without_alias_resolver_falls_back_to_raw_id(self) -> None:
         """When no alias resolver is set, child_executor IDs are used as-is."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         exec_reg = ExecutorRegistry()
         exec_reg.register(ExecutorDefinition(
@@ -620,8 +620,8 @@ class TestExecutorDependsOnAliasResolution:
     def test_depends_on_alias_resolves_to_known_executor(self) -> None:
         """Executor A depends on alias 'test.dep_alias' which maps to 'test.b'.
         Validation should resolve the alias and succeed."""
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import GraphMetadata
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.dep_alias", "test.b")
@@ -647,8 +647,8 @@ class TestExecutorDependsOnAliasResolution:
     def test_depends_on_alias_resolves_to_unknown_executor_fails(self) -> None:
         """Executor A depends on alias 'test.dep_alias' which maps to
         an executor not in the registry. Validation should fail."""
-        from astrid.core.executor.registry import ExecutorRegistry, ExecutorRegistryError
-        from astrid.core.executor.schema import GraphMetadata
+        from astrid.core.execution.executor.registry import ExecutorRegistry, ExecutorRegistryError
+        from astrid.core.execution.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.dep_alias", "test.missing")
@@ -668,8 +668,8 @@ class TestExecutorDependsOnAliasResolution:
     def test_depends_on_alias_chained_resolves_correctly(self) -> None:
         """Executor A depends on 'test.chain_a' → 'test.chain_b' → 'test.c'.
         Validation should resolve the chain and succeed."""
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import GraphMetadata
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.chain_a", "test.chain_b")
@@ -694,8 +694,8 @@ class TestExecutorDependsOnAliasResolution:
 
     def test_depends_on_without_alias_resolver_falls_back_to_raw_id(self) -> None:
         """When no alias resolver is set, depends_on IDs are used as-is."""
-        from astrid.core.executor.registry import ExecutorRegistry
-        from astrid.core.executor.schema import GraphMetadata
+        from astrid.core.execution.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.schema import GraphMetadata
 
         registry = ExecutorRegistry()
         registry.register(ExecutorDefinition(
@@ -717,8 +717,8 @@ class TestExecutorDependsOnAliasResolution:
     def test_depends_on_self_reference_via_alias_fails(self) -> None:
         """Executor A depends on alias 'test.self_alias' which maps to 'test.a'.
         Validation should detect the self-reference."""
-        from astrid.core.executor.registry import ExecutorRegistry, ExecutorRegistryError
-        from astrid.core.executor.schema import GraphMetadata
+        from astrid.core.execution.executor.registry import ExecutorRegistry, ExecutorRegistryError
+        from astrid.core.execution.executor.schema import GraphMetadata
 
         resolver = AliasResolver()
         resolver.register_alias("test.self_alias", "test.a")
@@ -747,7 +747,7 @@ class TestOrchestratorChildOrchestratorAliasResolution:
     def test_child_orchestrator_alias_resolves_to_known_orchestrator(self) -> None:
         """Orchestrator A declares child orchestrator alias 'test.child_alias'
         which maps to 'test.b'. Validation should succeed."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         resolver = AliasResolver()
         resolver.register_alias("test.child_alias", "test.b")
@@ -769,7 +769,7 @@ class TestOrchestratorChildOrchestratorAliasResolution:
     def test_child_orchestrator_alias_resolves_to_unknown_fails(self) -> None:
         """Orchestrator A declares child orchestrator alias that maps to
         an unknown orchestrator. Validation should fail."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         resolver = AliasResolver()
         resolver.register_alias("test.child_alias", "test.missing")
@@ -788,7 +788,7 @@ class TestOrchestratorChildOrchestratorAliasResolution:
 
     def test_child_orchestrator_alias_chained_resolves_correctly(self) -> None:
         """Orchestrator A → alias chain → test.c. Validation should succeed."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         resolver = AliasResolver()
         resolver.register_alias("test.chain_a", "test.chain_b")
@@ -811,7 +811,7 @@ class TestOrchestratorChildOrchestratorAliasResolution:
     def test_child_orchestrator_self_reference_via_alias_fails(self) -> None:
         """Orchestrator A declares child orchestrator alias that maps to
         test.a itself. Validation should detect the self-reference."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         resolver = AliasResolver()
         resolver.register_alias("test.self_alias", "test.a")
@@ -830,7 +830,7 @@ class TestOrchestratorChildOrchestratorAliasResolution:
 
     def test_child_orchestrator_without_alias_resolver_falls_back_to_raw_id(self) -> None:
         """When no alias resolver is set, child_orchestrator IDs are used as-is."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         orch_reg = OrchestratorRegistry(executor_registry=ExecutorRegistry())
         orch_reg.register(_make_minimal_orchestrator(
@@ -845,7 +845,7 @@ class TestOrchestratorChildOrchestratorAliasResolution:
 
     def test_child_orchestrator_alias_cycle_detected(self) -> None:
         """A → alias(B) → B → alias(A) should detect a cycle across aliases."""
-        from astrid.core.executor.registry import ExecutorRegistry
+        from astrid.core.execution.executor.registry import ExecutorRegistry
 
         resolver = AliasResolver()
         resolver.register_alias("test.alias_a", "test.a")
@@ -904,7 +904,7 @@ class TestTempPackAliasIntegration:
             _write_executor(pack_root, "runner", "testpack.runner")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             # Direct lookup via canonical id
@@ -951,7 +951,7 @@ class TestTempPackAliasIntegration:
             _write_orchestrator(pack_root, "flow", "testpack.flow")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
             # Direct lookup via canonical id
@@ -1024,12 +1024,12 @@ class TestTempPackAliasIntegration:
             _write_executor(local_root, "runner", "local.runner")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             # Manually register the override target (since it may not be
             # auto-discovered in this temp structure)
-            from astrid.core.executor.schema import ExecutorDefinition
+            from astrid.core.execution.executor.schema import ExecutorDefinition
             registry.register(ExecutorDefinition(
                 id="local.runner",
                 name="Local Runner",
@@ -1071,13 +1071,13 @@ class TestTempPackAliasIntegration:
             packs = discover_packs(packs_root)
 
             # Load executor registry
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 exec_reg = load_executor_registry()
             assert exec_reg.alias_resolver.resolve("dualpack.old_run") == "dualpack.run"
             assert not exec_reg.alias_resolver.is_alias("dualpack.old_flow")
 
             # Load orchestrator registry
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 orch_reg = load_orchestrator_registry()
             assert orch_reg.alias_resolver.resolve("dualpack.old_flow") == "dualpack.flow"
             assert not orch_reg.alias_resolver.is_alias("dualpack.old_run")
@@ -1099,7 +1099,7 @@ class TestTempPackAliasIntegration:
             _write_executor(pack_root, "main", "srcpack.main")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             result = registry.get("srcpack.legacy")
@@ -1130,7 +1130,7 @@ class TestTempPackAliasIntegration:
             _write_executor(pack_root, "v3", "chainpack.v3")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             # v1 → v2 → v3
@@ -1146,7 +1146,7 @@ class TestTempPackAliasIntegration:
             _write_executor(pack_root, "main", "cleanpack.main")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             result = registry.get("cleanpack.main")
@@ -1167,7 +1167,7 @@ class TestAliasSearchRecords:
 
     def test_executor_search_record_includes_alias_field(self) -> None:
         """_executor_search_record puts alias text into fields['aliases']."""
-        from astrid.core.executor.cli import _executor_search_record
+        from astrid.core.execution.executor.cli import _executor_search_record
 
         definition = ExecutorDefinition(
             id="testpack.runner",
@@ -1182,7 +1182,7 @@ class TestAliasSearchRecords:
 
     def test_executor_search_record_omits_aliases_when_empty(self) -> None:
         """_executor_search_record does not include 'aliases' key when empty."""
-        from astrid.core.executor.cli import _executor_search_record
+        from astrid.core.execution.executor.cli import _executor_search_record
 
         definition = ExecutorDefinition(
             id="testpack.runner",
@@ -1197,8 +1197,8 @@ class TestAliasSearchRecords:
 
     def test_orchestrator_search_record_includes_alias_field(self) -> None:
         """_orchestrator_search_record puts alias text into fields['aliases']."""
-        from astrid.core.orchestrator.cli import _orchestrator_search_record
-        from astrid.core.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
+        from astrid.core.execution.orchestrator.cli import _orchestrator_search_record
+        from astrid.core.execution.orchestrator.schema import OrchestratorDefinition, RuntimeSpec
 
         definition = OrchestratorDefinition(
             id="testpack.flow",
@@ -1284,10 +1284,10 @@ class TestSearchAliasIntegration:
             _write_executor(pack_root, "runner", "testpack.runner")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
-            from astrid.core.executor.cli import _aliases_text, _executor_search_record
+            from astrid.core.execution.executor.cli import _aliases_text, _executor_search_record
 
             resolver = registry.alias_resolver
             assert resolver is not None
@@ -1323,10 +1323,10 @@ class TestSearchAliasIntegration:
             _write_orchestrator(pack_root, "flow", "testpack.flow")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
-            from astrid.core.orchestrator.cli import _aliases_text, _orchestrator_search_record
+            from astrid.core.execution.orchestrator.cli import _aliases_text, _orchestrator_search_record
 
             resolver = registry.alias_resolver
             assert resolver is not None
@@ -1360,11 +1360,11 @@ class TestSearchAliasIntegration:
             _write_executor(pack_root, "runner", "testpack.runner")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             # Build search records using the same logic as _cmd_search
-            from astrid.core.executor.cli import _aliases_text, _executor_search_record
+            from astrid.core.execution.executor.cli import _aliases_text, _executor_search_record
             from astrid.core.search import search as run_search
 
             resolver = registry.alias_resolver
@@ -1480,7 +1480,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "render", "rendering.render")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             # Old alias lookup
@@ -1513,7 +1513,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "run", "vibecomfy.run")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             result = registry.get("external.vibecomfy.run")
@@ -1544,7 +1544,7 @@ class TestMigratedPackAliasFixtures:
             self._write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
             result = registry.get("builtin.hype")
@@ -1571,7 +1571,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "transcribe", "media.transcribe")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             result = registry.get("editorial.transcribe")
@@ -1600,7 +1600,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "session", "runpod.session")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             result = registry.get("external.runpod.session")
@@ -1631,7 +1631,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "upload", "youtube.upload")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             result = registry.get("upload.youtube")
@@ -1657,7 +1657,7 @@ class TestMigratedPackAliasFixtures:
             import io
             import json as _json
 
-            from astrid.core.executor.cli import _cmd_inspect
+            from astrid.core.execution.executor.cli import _cmd_inspect
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1674,7 +1674,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "render", "rendering.render")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             inspect_stdout = io.StringIO()
@@ -1719,7 +1719,7 @@ class TestMigratedPackAliasFixtures:
             import io
             import json as _json
 
-            from astrid.core.orchestrator.cli import _cmd_inspect
+            from astrid.core.execution.orchestrator.cli import _cmd_inspect
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1736,7 +1736,7 @@ class TestMigratedPackAliasFixtures:
             self._write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
             inspect_stdout = io.StringIO()
@@ -1779,7 +1779,7 @@ class TestMigratedPackAliasFixtures:
             import contextlib
             import io
 
-            from astrid.core.executor.cli import _cmd_inspect
+            from astrid.core.execution.executor.cli import _cmd_inspect
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1796,7 +1796,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "render", "rendering.render")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             inspect_stdout = io.StringIO()
@@ -1825,7 +1825,7 @@ class TestMigratedPackAliasFixtures:
             import contextlib
             import io
 
-            from astrid.core.orchestrator.cli import _cmd_inspect
+            from astrid.core.execution.orchestrator.cli import _cmd_inspect
 
             packs_root = Path(tmp) / "packs"
             pack_root = self._write_pack(
@@ -1842,7 +1842,7 @@ class TestMigratedPackAliasFixtures:
             self._write_orchestrator(pack_root, "hype", "video_editing.hype")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 registry = load_orchestrator_registry()
 
             inspect_stdout = io.StringIO()
@@ -1890,14 +1890,14 @@ class TestMigratedPackAliasFixtures:
             packs = discover_packs(packs_root)
 
             # Executor registry
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 exec_reg = load_executor_registry()
             result = exec_reg.get("builtin.render")
             assert result.id == "migrated.render"
             assert not exec_reg.alias_resolver.is_alias("builtin.hype")
 
             # Orchestrator registry
-            with mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 orch_reg = load_orchestrator_registry()
             result2 = orch_reg.get("builtin.hype")
             assert result2.id == "migrated.hype"
@@ -1929,7 +1929,7 @@ class TestMigratedPackAliasFixtures:
             self._write_executor(pack_root, "render", "rendering.render")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs):
                 registry = load_executor_registry()
 
             # All three aliases resolve to the same canonical

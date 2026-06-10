@@ -39,7 +39,7 @@ def _load_executor_registry(
     include_installed: bool = True,
     banodoco_config: Any | None = None,
 ) -> Any:
-    from astrid.core.executor.registry import load_default_registry
+    from astrid.core.execution.executor.registry import load_default_registry
 
     return load_default_registry(
         banodoco_config=banodoco_config,
@@ -59,7 +59,7 @@ def _load_orchestrator_registry(
     include_installed: bool = True,
     banodoco_config: Any | None = None,
 ) -> Any:
-    from astrid.core.orchestrator.registry import load_default_registry
+    from astrid.core.execution.orchestrator.registry import load_default_registry
 
     return load_default_registry(
         executor_registry=executor_registry,
@@ -320,7 +320,11 @@ def _capability_from_definition(
     requested_id: str | None = None,
     pack_permission_ids_by_pack_id: Mapping[str, tuple[str, ...]] | None = None,
 ) -> Capability:
-    schema_module_path = f"astrid.core.{capability_type}.schema"
+    _schema_package = {
+        "executor": "astrid.core.execution.executor",
+        "orchestrator": "astrid.core.execution.orchestrator",
+    }.get(capability_type, f"astrid.core.{capability_type}")
+    schema_module_path = f"{_schema_package}.schema"
     to_capability_handle = importlib.import_module(schema_module_path).to_capability_handle
 
     resolved_alias = None

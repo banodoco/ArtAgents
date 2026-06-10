@@ -10,7 +10,7 @@
       "astrid.core.project"
     ],
     [
-      "astrid.core.orchestrator",
+      "astrid.core.execution",
       "astrid.core.task"
     ],
     [
@@ -36,9 +36,8 @@
       "astrid.core.audit",
       "astrid.core.cli",
       "astrid.core.element",
-      "astrid.core.executor",
+      "astrid.core.execution",
       "astrid.core.integrations",
-      "astrid.core.orchestrator",
       "astrid.core.pack",
       "astrid.core.project",
       "astrid.core.registry",

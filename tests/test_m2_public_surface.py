@@ -187,11 +187,11 @@ class PathsModuleTest(unittest.TestCase):
                                 f"astrid.core.foundation.paths missing {name}")
 
     def test_paths_functions_importable(self) -> None:
-        import astrid.core.executor.argv
+        import astrid.core.execution.executor.argv
 
-        self.assertTrue(hasattr(astrid.core.executor.argv, "executor_argv"))
-        self.assertTrue(hasattr(astrid.core.executor.argv, "resolve_executor_runtime_module"))
-        self.assertTrue(callable(astrid.core.executor.argv.resolve_executor_runtime_module))
+        self.assertTrue(hasattr(astrid.core.execution.executor.argv, "executor_argv"))
+        self.assertTrue(hasattr(astrid.core.execution.executor.argv, "resolve_executor_runtime_module"))
+        self.assertTrue(callable(astrid.core.execution.executor.argv.resolve_executor_runtime_module))
 
 
 # ---------------------------------------------------------------------------

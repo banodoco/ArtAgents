@@ -285,8 +285,8 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
     def test_registries_share_identical_ordering(self) -> None:
         """Executor, orchestrator, and element discovery observe the same
         ordered pack sequence as the shared helper."""
-        from astrid.core.executor import registry as exec_registry
-        from astrid.core.orchestrator import registry as orch_registry
+        from astrid.core.execution.executor import registry as exec_registry
+        from astrid.core.execution.orchestrator import registry as orch_registry
 
         with tempfile.TemporaryDirectory() as tmp:
             packs_root = Path(tmp) / "packs"
@@ -294,8 +294,8 @@ class PackDiscoveryMetadataTest(unittest.TestCase):
             write_pack(packs_root, "beta")
             packs = discover_packs(packs_root)
 
-            with mock.patch("astrid.core.executor.registry.discover_packs", return_value=packs), \
-                 mock.patch("astrid.core.orchestrator.registry.discover_packs", return_value=packs):
+            with mock.patch("astrid.core.execution.executor.registry.discover_packs", return_value=packs), \
+                 mock.patch("astrid.core.execution.orchestrator.registry.discover_packs", return_value=packs):
                 exec_ids = [p.id for p in exec_registry._discover_executor_packs(
                     project_root=REPO_ROOT, extra_pack_roots=(), include_installed=False)]
                 orch_ids = [p.id for p in orch_registry._discover_orchestrator_packs(

@@ -3,8 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from astrid.core.executor.folder import load_folder_executor
-from astrid.core.orchestrator.folder import load_folder_orchestrator
+from astrid.core.execution.executor.folder import load_folder_executor
+from astrid.core.execution.orchestrator.folder import load_folder_orchestrator
 
 # Unique sentinel placed on ``sys.path`` so the assertion does not depend on the
 # checkout directory name (the loader builds the child PYTHONPATH from

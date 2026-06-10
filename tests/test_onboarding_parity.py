@@ -749,10 +749,10 @@ def test_import_astrid_is_lazy() -> None:
     import astrid
     heavy = [
         "astrid.sdk",
-        "astrid.core.executor.registry",
-        "astrid.core.executor.runner",
-        "astrid.core.orchestrator.registry",
-        "astrid.core.orchestrator.runner",
+        "astrid.core.execution.executor.registry",
+        "astrid.core.execution.executor.runner",
+        "astrid.core.execution.orchestrator.registry",
+        "astrid.core.execution.orchestrator.runner",
     ]
     for mod in heavy:
         if mod in sys.modules:

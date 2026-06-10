@@ -278,7 +278,7 @@ class PipelineCachingTest(unittest.TestCase):
 
     def test_pipeline_invocation_uses_ordered_steps_without_executor_cli(self) -> None:
         root = self.make_workspace()
-        with mock.patch("astrid.core.executor.cli.main", side_effect=AssertionError("executor CLI should not run")):
+        with mock.patch("astrid.core.execution.executor.cli.main", side_effect=AssertionError("executor CLI should not run")):
             result, calls, _, _, _ = self.invoke(root, [])
 
         self.assertEqual(result, 0)
@@ -287,7 +287,7 @@ class PipelineCachingTest(unittest.TestCase):
     def test_executors_list_dispatches_before_required_arguments(self) -> None:
         from astrid.core import gateway as gateway
 
-        with mock.patch("astrid.core.executor.cli.main", return_value=0) as executors_main:
+        with mock.patch("astrid.core.execution.executor.cli.main", return_value=0) as executors_main:
             result = gateway.main(["executors", "list"])
 
         self.assertEqual(result, 0)

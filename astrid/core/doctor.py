@@ -128,13 +128,13 @@ def _capture_check(name: str, fn: Callable[[], str]) -> DoctorCheck:
 
 
 def load_executor_registry():
-    from astrid.core.executor.registry import load_default_registry
+    from astrid.core.execution.executor.registry import load_default_registry
 
     return load_default_registry()
 
 
 def load_orchestrator_registry(*, executor_registry=None):
-    from astrid.core.orchestrator.registry import load_default_registry
+    from astrid.core.execution.orchestrator.registry import load_default_registry
 
     return load_default_registry(executor_registry=executor_registry)
 
@@ -161,8 +161,8 @@ def _check_required_imports() -> DoctorCheck:
     modules = (
         "astrid.core.timeline",
         "astrid.core.element.registry",
-        "astrid.core.executor.registry",
-        "astrid.core.orchestrator.registry",
+        "astrid.core.execution.executor.registry",
+        "astrid.core.execution.orchestrator.registry",
         "astrid.core.project",
     )
     for module in modules:

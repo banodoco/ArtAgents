@@ -19,8 +19,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from astrid.core.element.registry import load_default_registry as load_elements  # noqa: E402
-from astrid.core.executor.registry import load_default_registry as load_executors  # noqa: E402
-from astrid.core.orchestrator.registry import (  # noqa: E402
+from astrid.core.execution.executor.registry import load_default_registry as load_executors  # noqa: E402
+from astrid.core.execution.orchestrator.registry import (  # noqa: E402
     load_default_registry as load_orchestrators,
 )
 from astrid.core.search import short_description_or_truncated  # noqa: E402

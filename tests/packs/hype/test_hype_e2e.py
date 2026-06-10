@@ -23,9 +23,9 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.executor.cli import _parse_input_values
-from astrid.core.executor.registry import load_default_registry as load_executor_registry
-from astrid.core.executor.runner import ExecutorRunRequest, build_executor_command
+from astrid.core.execution.executor.cli import _parse_input_values
+from astrid.core.execution.executor.registry import load_default_registry as load_executor_registry
+from astrid.core.execution.executor.runner import ExecutorRunRequest, build_executor_command
 from astrid.core.project.current_run import write_current_run
 from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import create_project
@@ -74,7 +74,7 @@ def _build_synthetic_hype_run(
 
     Returns ``(project_root, run_dir, source_path, plan_path)``.
     """
-    from astrid.core.orchestrator.plan_template import emit_plan_json
+    from astrid.core.execution.orchestrator.plan_template import emit_plan_json
     from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
 
     proj_root = tmp_path / "projects" / slug
@@ -569,7 +569,7 @@ def test_generated_hype_render_command_parses_to_required_downstream_render_argv
 
 def test_plan_hash_different_for_different_plans(tmp_path: Path) -> None:
     """Two plans with different run_ids produce different hashes."""
-    from astrid.core.orchestrator.plan_template import emit_plan_json
+    from astrid.core.execution.orchestrator.plan_template import emit_plan_json
     from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2
 
     slug = "demo"

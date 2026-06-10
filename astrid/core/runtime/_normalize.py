@@ -1,6 +1,6 @@
 """Shared Python runtime result normalization.
 
-Used by both the orchestrator runner (``astrid.core.orchestrator.runner``)
+Used by both the orchestrator runner (``astrid.core.execution.orchestrator.runner``)
 and the in-process invoker (``astrid.core.runtime.in_process``) so that
 neither duplicates the other's classification of raw Python return values.
 """

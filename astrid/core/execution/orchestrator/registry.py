@@ -12,8 +12,8 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
-from astrid.core.executor.registry import ExecutorRegistry
-from astrid.core.executor.registry import load_default_registry as load_default_executor_registry
+from astrid.core.execution.executor.registry import ExecutorRegistry
+from astrid.core.execution.executor.registry import load_default_registry as load_default_executor_registry
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,

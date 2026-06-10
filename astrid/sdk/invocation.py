@@ -22,13 +22,13 @@ from .results import DiscoveryResult, InvocationResult, _json_safe, _json_safe_m
 
 
 def run_executor(request: Any, registry: Any) -> Any:
-    from astrid.core.executor.runner import run_executor as _run_executor
+    from astrid.core.execution.executor.runner import run_executor as _run_executor
 
     return _run_executor(request, registry)
 
 
 def run_orchestrator(request: Any, registry: Any) -> Any:
-    from astrid.core.orchestrator.runner import run_orchestrator as _run_orchestrator
+    from astrid.core.execution.orchestrator.runner import run_orchestrator as _run_orchestrator
 
     return _run_orchestrator(request, registry)
 
@@ -262,7 +262,7 @@ def invoke(
         if capability.capability_type == "executor":
             if out is None and project is None:
                 raise CapabilityInvocationError("executor invocations require an out path")
-            from astrid.core.executor.runner import ExecutorRunRequest
+            from astrid.core.execution.executor.runner import ExecutorRunRequest
 
             executor_registry, _, _ = registries
             request = ExecutorRunRequest(
@@ -283,7 +283,7 @@ def invoke(
             result = sdk_module.run_executor(request, executor_registry)
             raw_result = _normalize_executor_result(result)
         else:
-            from astrid.core.orchestrator.runner import OrchestratorRunRequest
+            from astrid.core.execution.orchestrator.runner import OrchestratorRunRequest
 
             _, orchestrator_registry, _ = registries
             request = OrchestratorRunRequest(

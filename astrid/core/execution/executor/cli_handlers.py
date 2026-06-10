@@ -2,7 +2,7 @@
 
 These handlers are imported back into cli.py so that build_parser() can
 wire them as subcommand defaults, and so that tests which import directly
-from ``astrid.core.executor.cli`` continue to resolve.
+from ``astrid.core.execution.executor.cli`` continue to resolve.
 """
 
 from __future__ import annotations
