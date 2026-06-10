@@ -507,7 +507,7 @@ def test_builtin_executor_missing_pipeline_step_metadata(tmp_path: Path) -> None
         argv=None,
         kind="built_in",
         metadata={
-            "pipeline_module": "astrid.packs.video_editing.orchestrators.hype.run",
+            "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",
             "pipeline_step": 12345,  # not a string
         },
     )
@@ -523,7 +523,7 @@ def test_builtin_executor_unknown_pipeline_step(tmp_path: Path) -> None:
         argv=None,
         kind="built_in",
         metadata={
-            "pipeline_module": "astrid.packs.video_editing.orchestrators.hype.run",
+            "command_builder": "astrid.packs.video_editing.orchestrators.hype.run.build_pool_steps",
             "pipeline_step": "definitely_not_a_real_step",
         },
     )
@@ -601,7 +601,7 @@ def test_upload_youtube_reports_missing_callable_metadata(tmp_path: Path) -> Non
         run_executor(ExecutorRunRequest(executor_id="youtube.upload", out=tmp_path), registry)
 
 
-def test_pipeline_module_imports_metadata_pipeline_module(
+def test_pipeline_module_derived_from_command_builder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake_pipeline = types.SimpleNamespace()
@@ -614,12 +614,12 @@ def test_pipeline_module_imports_metadata_pipeline_module(
 
     executor = types.SimpleNamespace(
         id="video_editing.cut",
-        metadata={"pipeline_module": "fake.pipeline"},
+        metadata={"command_builder": "fake.pipeline.build_pool_steps"},
     )
 
     executor_runner._pipeline_module.cache_clear()
     try:
-        # Resolved from the executor manifest — no orchestrator registry lookup.
+        # Driver module derived from command_builder — no orchestrator registry lookup.
         assert executor_runner._pipeline_module_for_executor(executor) is fake_pipeline
         assert executor_runner._pipeline_module("fake.pipeline") is fake_pipeline
     finally:

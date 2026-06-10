@@ -95,12 +95,21 @@ def _asset_cache_module():
 
 
 def _pipeline_module_for_executor(executor: ExecutorDefinition):
-    runtime_module = executor.metadata.get("pipeline_module")
-    if not isinstance(runtime_module, str) or not runtime_module:
+    """Resolve the pipeline driver module hosting this executor's steps.
+
+    A pipeline-step executor declares ``metadata.command_builder`` as
+    ``<pipeline_module>.build_pool_steps``; the driver module (which also owns
+    ``STEP_ORDER``) is that path minus the trailing function name. Deriving it
+    from ``command_builder`` keeps a single source of truth — every pipeline-step
+    executor already declares it, so a new one needs no extra field — and keeps
+    the executor decoupled from ``astrid.core.orchestrator``.
+    """
+    command_builder = executor.metadata.get("command_builder")
+    if not isinstance(command_builder, str) or "." not in command_builder:
         raise ExecutorRunnerError(
-            f"built-in executor {executor.id!r} is missing metadata.pipeline_module"
+            f"built-in executor {executor.id!r} is missing metadata.command_builder"
         )
-    return _pipeline_module(runtime_module)
+    return _pipeline_module(command_builder.rsplit(".", 1)[0])
 
 
 def _pipeline_steps_by_name(executor: ExecutorDefinition) -> Mapping[str, Any]:
