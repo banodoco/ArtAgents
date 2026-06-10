@@ -125,7 +125,7 @@ The **conceptual contract** uses human-facing names. The **canonical schema** us
 ### Side-by-side snippet
 
 ```yaml
-# CONCEPTUAL (used in MIGRATION-PLAN §6, docs, and this guide)
+# CONCEPTUAL (used across the docs and this guide)
 id: flux-dev
 kind: model
 consumes: [{ port: prompt, type: file, artifact_type: text/prompt }]
