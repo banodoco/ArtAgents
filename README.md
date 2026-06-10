@@ -15,9 +15,9 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 │            build & run open-source agentic UXes            │
 │                   video · image · audio                    │
 │                                                            │
-│    git clone https://github.com/peteromallet/Astrid.git    │
-│               cd Astrid && pip install -e .                │
-│                  python3 -m astrid --help                  │
+│     $ git clone https://github.com/peteromallet/Astrid     │
+│              $ cd Astrid && pip install -e .               │
+│                 $ python3 -m astrid --help                 │
 │                                                            │
 │              ask the maker what they must do               │
 │               runs/ is where the work lands                │
