@@ -19,7 +19,11 @@ runner.py edit) sit UNCOMMITTED in the worktree (the disk halt interrupted the m
 done without committing). **Backed up to `/tmp/s0-spike-backup/`.** Not a crisis: work accumulates in the tree;
 worst case I commit it all at chain end. WATCH: if s1's execute "require_clean_base" stashes/discards s0's work,
 restore from backup. My main checkout is untouched (clean, at fdb0b15).
-**NEXT: at next fire, DISK first; verify s0's `_spike/` still in the worktree tree (not lost); check s1 progress.** — if gate PASS, chain auto-advances to s1 (keep
+**04:21:** s1 EXECUTING (s0 spike survived ✓, disk 10 GB ✓). Steady state → hourly cadence.
+**Commit pattern CONFIRMED:** milestones do NOT git-commit (work piles up uncommitted in capwaist worktree;
+neither capwaist nor astrid-capability-waist advances). Tolerable & recoverable — at chain END, `git add` the
+integrated worktree deliverables explicitly + commit + merge to main. The accumulating tree is the deliverable.
+**NEXT: hourly — DISK first; chain alive + milestone progress; if a HARD GATE (s3/s4) fails → surface to operator.** — if gate PASS, chain auto-advances to s1 (keep
 babysitting); if gate FAIL (s0's stop-and-replan condition: scoped-config can't be made clean) → that's an
 architectural go/no-go → STOP and surface to operator, do not force.
 
