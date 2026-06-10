@@ -54,37 +54,28 @@ def section(title: str) -> str:
     return center(f"◇  {title}  ◇")
 
 
-# (content, border) — border is "┃" normally, "◇" for section-divider rows.
+# Minimal by design: just the identity, the purpose (a high-level steer — not a
+# command catalogue), how to install, and the single doorway to explore the rest
+# (`--help`). Pretty for humans, light on context for agents. (content, border).
 LINES = [
     (dots(), "┃"),
     (xrule(), "┃"),
     (banner(), "┃"),
     (xrule(), "┃"),
     (blank(), "┃"),
-    (section("What This Is"), "┃"),
     (center("a harness for agents and humans to make art"), "┃"),
-    (blank(), "┃"),
-    (ljust("executors      do one piece of work"), "┃"),
-    (ljust("orchestrators  combine executors"), "┃"),
-    (ljust("elements       reusable pieces both use"), "┃"),
+    (center("— build & run open-source agentic UXes —"), "┃"),
     (blank(), "┃"),
     (blank(), "◇"),
-    (section("Getting Started"), "┃"),
+    (blank(), "┃"),
     (ljust("git clone https://github.com/peteromallet/Astrid.git"), "┃"),
     (ljust("cd Astrid && pip install -e ."), "┃"),
-    (ljust("python3 -m astrid --help        # every command lives here"), "┃"),
     (blank(), "┃"),
-    (ljust("python3 -m astrid executors run <id> -- <args>"), "┃"),
-    (ljust("python3 -m astrid orchestrators run <id> -- <args>"), "┃"),
+    (ljust("python3 -m astrid --help    →  then explore from here"), "┃"),
     (blank(), "┃"),
     (blank(), "◇"),
-    (section("Make Something New"), "┃"),
-    (ljust("copy docs/templates/{executor,orchestrator,element}/"), "┃"),
-    (ljust("read docs/guides/build-your-first-agentic-ux.md"), "┃"),
     (blank(), "┃"),
-    (xrule(), "┃"),
     (center("just begin — you'll find your way"), "┃"),
-    (xrule(), "┃"),
     (dots(), "┃"),
 ]
 
