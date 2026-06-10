@@ -19,7 +19,7 @@ runner.py edit) sit UNCOMMITTED in the worktree (the disk halt interrupted the m
 done without committing). **Backed up to `/tmp/s0-spike-backup/`.** Not a crisis: work accumulates in the tree;
 worst case I commit it all at chain end. WATCH: if s1's execute "require_clean_base" stashes/discards s0's work,
 restore from backup. My main checkout is untouched (clean, at fdb0b15).
-**11:29:** 4/6 done (s0-s3 ✅); s4-capabilities-on-kernel EXECUTING (final heavy milestone: registry collapse + migrate 12 elements + PURGE). Disk 13 GB. PRODUCTIONIZED DELIVERABLES LANDED: contracts/scoped_config.py, contracts/artifact_types.py, theme/scope.py, util/credentials_scope.py. `_spike/` correctly REMOVED by s3 (throwaway→real; /tmp/s0-spike-backup no longer needed). 101 files of epic work in worktree. NEXT FIRE: s4 done→s5? watch s4 hard-gate (purge bloat → split condition).
+**12:31:** 4/6 done; s4 EXECUTING healthy (seq 1558→5088, fresh — finalize→execute, no stall/split signal). Disk 13 GB, deliverables intact. NEXT FIRE: s4 done→s5? watch s4 hard-gate (purge-bloat split condition).
 **Commit pattern CONFIRMED:** milestones do NOT git-commit (work piles up uncommitted in capwaist worktree;
 neither capwaist nor astrid-capability-waist advances). Tolerable & recoverable — at chain END, `git add` the
 integrated worktree deliverables explicitly + commit + merge to main. The accumulating tree is the deliverable.
