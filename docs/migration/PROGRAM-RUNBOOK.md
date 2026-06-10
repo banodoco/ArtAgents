@@ -12,7 +12,14 @@ forked from `astrid-capability-waist`@`c2e593f`), `--no-push` LOCAL-COMMIT mode,
 Log: `/tmp/capwaist-chain.log` (initial), `/tmp/capwaist-resume.log` (after resumes). **02:42:** s0 plan→…→execute
 clean, Shannon VALIDATED. **~03:2x:** chain HALTED on **disk critically low** (0.9 GB) — freed 2.4 GB stale comfy
 venv cache → 3.6 GB, **resumed** (s0 work intact, completing). DISK is the real blocker — see ⚠ section.
-**NEXT: at next fire, DISK CHECK first, then check the s0 HARD-GATE outcome** — if gate PASS, chain auto-advances to s1 (keep
+**03:52:** s0 PASSED its hard gate (status: Completed) → chain auto-advanced to **s1** (already in revise, fast).
+⚠ **s0-COMMIT ANOMALY:** s0's work is marked done in megaplan state but is NOT git-committed — the `capwaist`
+branch is still at launch `c2e593f` and s0's deliverables (`astrid/core/_spike/`, s0-findings.md, 2 spike tests,
+runner.py edit) sit UNCOMMITTED in the worktree (the disk halt interrupted the milestone-commit; resume marked
+done without committing). **Backed up to `/tmp/s0-spike-backup/`.** Not a crisis: work accumulates in the tree;
+worst case I commit it all at chain end. WATCH: if s1's execute "require_clean_base" stashes/discards s0's work,
+restore from backup. My main checkout is untouched (clean, at fdb0b15).
+**NEXT: at next fire, DISK first; verify s0's `_spike/` still in the worktree tree (not lost); check s1 progress.** — if gate PASS, chain auto-advances to s1 (keep
 babysitting); if gate FAIL (s0's stop-and-replan condition: scoped-config can't be made clean) → that's an
 architectural go/no-go → STOP and surface to operator, do not force.
 
