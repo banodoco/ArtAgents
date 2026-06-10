@@ -14,6 +14,7 @@ this.env
 !astrid/core/util/credentials_scope.py
 !tests/core/test_credentials_scope.py
 !tests/core/test_dataset_build_credentials_parity.py
+!tests/core/util/test_secrets.py
 
 # Python
 __pycache__/
