@@ -1,6 +1,6 @@
 # Capability Artifact Contract
 
-**Status:** Normative (v1) — S5 deliverable · **RFC:** [`docs/RFC-capability-artifact-waist.md`](../RFC-capability-artifact-waist.md) · **Migration plan:** [`docs/migration/capability-waist/MIGRATION-PLAN.md`](../migration/capability-waist/MIGRATION-PLAN.md)
+**Status:** Normative (v1) — S5 deliverable · **RFC:** [`docs/RFC-capability-artifact-waist.md`](../RFC-capability-artifact-waist.md)
 
 > **One-line:** Every pluggable thing in Astrid (model, element, executor, orchestrator, theme, timeline) is one **capability** that composes through a **semantic artifact type** (the waist), with **scoped config** for ambient context. Three primitives. One composition rule.
 
@@ -265,7 +265,6 @@ See [`docs/examples/capability-contract/`](../examples/capability-contract/) for
 ## 7. Cross-references
 
 - **RFC:** [`docs/RFC-capability-artifact-waist.md`](../RFC-capability-artifact-waist.md) — the original design rationale.
-- **Migration plan:** [`docs/migration/capability-waist/MIGRATION-PLAN.md`](../migration/capability-waist/MIGRATION-PLAN.md) — sprint-level build plan with blast radius and element dispositions.
 - **Worked example:** [`docs/examples/capability-contract/`](../examples/capability-contract/) — standalone manifests + validation script.
 - **Element template:** [`docs/templates/element/`](../templates/element/) — post-S4 canonical element template.
 - **Pack contract:** [`docs/packs/contract.md`](../packs/contract.md) — pack manifest schema and discovery.
