@@ -6,9 +6,12 @@ Survives compaction. The hourly `/loop` and any resuming instance should read th
 babysit cycle. Backward-looking detail lives in `RESTRUCTURE-PROGRESS.md`; infra fixes in memory.
 
 ## STATUS (update this line every time you act)
-2026-06-10: **Restructure DONE** (cycles 24→6, all 11 regressions fixed, committed on `astrid-capability-waist`,
-HEAD `d7325c1`). Full suite triaged: only pre-existing/environmental failures remain (see "Known non-blocking
-failures"). **NEXT: action 1 — push `astrid-capability-waist`.**
+2026-06-10: **Restructure DONE + pushed** (24→6 cycles). **EPIC LAUNCHED & RUNNING** (actions 1–4 done).
+The capability-waist chain is driving in worktree `~/Documents/.megaplan-worktrees/capwaist` (branch `capwaist`,
+forked from `astrid-capability-waist`@`c2e593f`), `--no-push` LOCAL-COMMIT mode, vendor=claude, native Shannon.
+Log: `/tmp/capwaist-chain.log`. Currently on **s0-derisk-spike** (prep/plan). **NEXT: action 5 — BABYSIT.**
+First babysit must VALIDATE the s0 claude/Shannon phase captured (if "Timed out waiting for Claude prompt" /
+empty plan → apply the Shannon transcript-read deep-fix per action 3, then re-drive s0).
 
 ## The program (3 user goals, in order)
 1. ✅ Execute `RESTRUCTURE-PLAN.md` directly (no megaplan) — DONE, at the cycle floor of 6.
@@ -44,6 +47,15 @@ failures"). **NEXT: action 1 — push `astrid-capability-waist`.**
 - [ ] **5. Babysit to completion** (the recurring loop body — see below).
 - [ ] **6. STOPPING: when the chain is `done`** — tear down the loop (omit ScheduleWakeup), merge
       `astrid-capability-waist` → `main`, push main, write the completion report, persist outcome to memory.
+
+## LIVE CHAIN SPECIFICS (as launched 2026-06-10)
+- Worktree: `~/Documents/.megaplan-worktrees/capwaist` (branch `capwaist`). Log: `/tmp/capwaist-chain.log`.
+- Status (read-only): `MEGAPLAN_SHANNON_CLAUDE_CONFIG_MODE=native PYENV_VERSION=3.11.11 megaplan chain status --spec docs/migration/capability-waist/chain.yaml` (run from the main Astrid checkout).
+- Process check: `pgrep -fl 'chain start --spec docs/migration/capability-waist'`. Plan dirs: `~/Documents/.megaplan-worktrees/capwaist/.megaplan/plans/`.
+- **RE-DRIVE if the process died but the chain isn't done** (resumes from persisted state; does NOT recreate the worktree):
+  `cd /Users/peteromalley/Documents/reigh-workspace/Astrid && MEGAPLAN_SHANNON_CLAUDE_CONFIG_MODE=native PYENV_VERSION=3.11.11 megaplan chain start --spec docs/migration/capability-waist/chain.yaml --project-dir ~/Documents/.megaplan-worktrees/capwaist --no-push` (run in background). Do NOT re-pass `--in-worktree` (worktree already exists). Do NOT use `--fresh` (would discard progress).
+- Integration model: `--no-push` → each milestone commits LOCALLY onto `capwaist`. At the END, push `capwaist` and merge it (with the restructure) into `main`.
+- Contention: the arnold chain (`/private/tmp/arnold-target`, vendor=codex, rate-limited) may also be live — heavy concurrent Shannon/claude load is the documented failure mode. Don't kill arnold (operator's). If our Shannon phases stall under load, that's a signal to apply the transcript-read fix (action 3), not to raise timeouts.
 
 ## BABYSIT CYCLE (run this body each hourly fire while the epic is live)
 1. **Status:** the megaplan CLIs may be approval-gated in autonomous fires — prefer reading JSON directly:
