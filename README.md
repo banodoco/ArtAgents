@@ -14,18 +14,24 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 ┃  ╳ ╳ ╳ ╳ ╳──────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳  ┃
 ┃                                                                        ┃
 ┃              a harness for agents and humans to make art               ┃
-┃                — build & run open-source agentic UXes —                ┃
+┃      build & run open-source agentic UXes — video, image & audio       ┃
 ┃                                                                        ┃
 ◇                                                                        ◇
 ┃                                                                        ┃
-┃   git clone https://github.com/peteromallet/Astrid.git                 ┃
-┃   cd Astrid && pip install -e .                                        ┃
+┃          git clone https://github.com/peteromallet/Astrid.git          ┃
+┃                     cd Astrid && pip install -e .                      ┃
 ┃                                                                        ┃
-┃   python3 -m astrid --help    →  then explore from here                ┃
+┃                        python3 -m astrid --help                        ┃
+┃                    python3 -m astrid executors list                    ┃
+┃                  python3 -m astrid orchestrators list                  ┃
 ┃                                                                        ┃
 ◇                                                                        ◇
 ┃                                                                        ┃
+┃  ╳ ╳ ╳ ╳ ╳──────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳  ┃
+┃                    ask the maker what they must do                     ┃
+┃                     runs/ is where the work lands                      ┃
 ┃                   just begin — you'll find your way                    ┃
+┃  ╳ ╳ ╳ ╳ ╳──────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳  ┃
 ┃ ·                                                                    · ┃
 ┗━━━━━━━━━━━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━━━━━━━━━━┛
 ```

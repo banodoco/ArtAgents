@@ -54,9 +54,10 @@ def section(title: str) -> str:
     return center(f"◇  {title}  ◇")
 
 
-# Minimal by design: just the identity, the purpose (a high-level steer — not a
-# command catalogue), how to install, and the single doorway to explore the rest
-# (`--help`). Pretty for humans, light on context for agents. (content, border).
+# A high-level steer, not a command catalogue. Everything is CENTERED for symmetry;
+# the ╳ rules frame the banner at the top and the playful lines at the bottom (mirror).
+# Two short descriptions orient; install + three commands reveal the foundations
+# (executors/orchestrators); the footer invites. (content, border).
 LINES = [
     (dots(), "┃"),
     (xrule(), "┃"),
@@ -64,18 +65,24 @@ LINES = [
     (xrule(), "┃"),
     (blank(), "┃"),
     (center("a harness for agents and humans to make art"), "┃"),
-    (center("— build & run open-source agentic UXes —"), "┃"),
+    (center("build & run open-source agentic UXes — video, image & audio"), "┃"),
     (blank(), "┃"),
     (blank(), "◇"),
     (blank(), "┃"),
-    (ljust("git clone https://github.com/peteromallet/Astrid.git"), "┃"),
-    (ljust("cd Astrid && pip install -e ."), "┃"),
+    (center("git clone https://github.com/peteromallet/Astrid.git"), "┃"),
+    (center("cd Astrid && pip install -e ."), "┃"),
     (blank(), "┃"),
-    (ljust("python3 -m astrid --help    →  then explore from here"), "┃"),
+    (center("python3 -m astrid --help"), "┃"),
+    (center("python3 -m astrid executors list"), "┃"),
+    (center("python3 -m astrid orchestrators list"), "┃"),
     (blank(), "┃"),
     (blank(), "◇"),
     (blank(), "┃"),
+    (xrule(), "┃"),
+    (center("ask the maker what they must do"), "┃"),
+    (center("runs/ is where the work lands"), "┃"),
     (center("just begin — you'll find your way"), "┃"),
+    (xrule(), "┃"),
     (dots(), "┃"),
 ]
 
