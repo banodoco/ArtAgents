@@ -19,14 +19,10 @@
 # inside a subagent, then /babysit to completion; land via PR.
 base_branch: astrid-capability-waist   # RESTRUCTURE landed here (cycles 24->6); epic layers on top
 
-defaults:
-  vendor: claude
-  profile: solo
-  robustness: full
-
 milestones:
   - label: s0-derisk-spike
     idea: docs/migration/capability-waist/briefs/s0-derisk-spike.md
+    vendor: claude
     profile: partnered
     robustness: light
     depth: high
@@ -34,33 +30,42 @@ milestones:
 
   - label: s1-waist-and-timeline-proof
     idea: docs/migration/capability-waist/briefs/s1-waist-and-timeline-proof.md
+    vendor: claude
     profile: directed
+    robustness: full
     depth: medium
     depends_on: s0-derisk-spike
     notes: "Vertical proof slice on the POST-RESTRUCTURE tree: artifact_type field + ArtifactTypeRegistry, annotate element/clip I/O, rewire timeline validator to type-checked id-resolution behind a PARITY ORACLE. Preserve open-string opaque fallback (Reigh)."
 
   - label: s2-waist-rollout
     idea: docs/migration/capability-waist/briefs/s2-waist-rollout.md
+    vendor: claude
     profile: solo
+    robustness: full
     depends_on: s1-waist-and-timeline-proof
     notes: "Mechanical replication: annotate remaining exec/orch/model I/O; orchestrator child_* -> type-validated refs; model param_map -> adapters; fal.py model-name hardcodes -> adapter hints. Per-seam parity."
 
   - label: s3-scoped-config-themes
     idea: docs/migration/capability-waist/briefs/s3-scoped-config-themes.md
+    vendor: claude
     profile: partnered
+    robustness: full
     depth: high
     depends_on: s1-waist-and-timeline-proof
     notes: "De-risked by s0. Scoped-config primitive; reimplement theme on it; kill _ACTIVE_THEME_DIR + HYPE_ACTIVE_THEME threading; theme.json -> style_config scoped artifact; fold secrets in. Parity oracle on theme resolution."
 
   - label: s4-capabilities-on-kernel-and-purge
     idea: docs/migration/capability-waist/briefs/s4-capabilities-on-kernel-and-purge.md
+    vendor: claude
     profile: partnered
+    robustness: full
     depth: high
     depends_on: [s2-waist-rollout, s3-scoped-config-themes]
-    notes: "SLIMMED — RESTRUCTURE built core/registry/ + execution/. PUT capabilities on that base: kind becomes a tag; migrate 12 elements to capability form (runtime adapter; component.tsx non-required); dedup text-card to kernel override; PURGE element fork/install/override/dirty/update + tests. REQUIRES RESTRUCTURE W7. Parity oracle: SDK discovery identical."
+    notes: "NOTE: RESTRUCTURE deferred the core/registry/ + execution/ umbrella (W7) as cosmetic — the executor<->orchestrator cycle was broken more cheaply. So S4 BUILDS the CapabilityHandle registry kernel itself (that IS its job): collapse the registries onto one kernel; kind becomes a tag; migrate 12 elements to capability form (runtime adapter; component.tsx non-required); dedup text-card to kernel override; PURGE element fork/install/override/dirty/update + tests. Do NOT assume a pre-existing core/registry/. Parity oracle: SDK discovery identical."
 
   - label: s5-example-and-docs
     idea: docs/migration/capability-waist/briefs/s5-example-and-docs.md
+    vendor: claude
     profile: solo
     robustness: light
     depth: low
