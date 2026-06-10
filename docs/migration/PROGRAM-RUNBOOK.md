@@ -9,9 +9,10 @@ babysit cycle. Backward-looking detail lives in `RESTRUCTURE-PROGRESS.md`; infra
 2026-06-10: **Restructure DONE + pushed** (24→6 cycles). **EPIC LAUNCHED & RUNNING** (actions 1–4 done).
 The capability-waist chain is driving in worktree `~/Documents/.megaplan-worktrees/capwaist` (branch `capwaist`,
 forked from `astrid-capability-waist`@`c2e593f`), `--no-push` LOCAL-COMMIT mode, vendor=claude, native Shannon.
-Log: `/tmp/capwaist-chain.log`. **02:42 babysit:** s0 advanced plan→critique→revise→**execute** cleanly;
-**Shannon capture VALIDATED** (no TUI-scrape stall — no transcript-read fix needed). s0 now executing.
-**NEXT: at next fire, check the s0 HARD-GATE outcome** — if gate PASS, chain auto-advances to s1 (keep
+Log: `/tmp/capwaist-chain.log` (initial), `/tmp/capwaist-resume.log` (after resumes). **02:42:** s0 plan→…→execute
+clean, Shannon VALIDATED. **~03:2x:** chain HALTED on **disk critically low** (0.9 GB) — freed 2.4 GB stale comfy
+venv cache → 3.6 GB, **resumed** (s0 work intact, completing). DISK is the real blocker — see ⚠ section.
+**NEXT: at next fire, DISK CHECK first, then check the s0 HARD-GATE outcome** — if gate PASS, chain auto-advances to s1 (keep
 babysitting); if gate FAIL (s0's stop-and-replan condition: scoped-config can't be made clean) → that's an
 architectural go/no-go → STOP and surface to operator, do not force.
 
@@ -59,7 +60,20 @@ architectural go/no-go → STOP and surface to operator, do not force.
 - Integration model: `--no-push` → each milestone commits LOCALLY onto `capwaist`. At the END, push `capwaist` and merge it (with the restructure) into `main`.
 - Contention: the arnold chain (`/private/tmp/arnold-target`, vendor=codex, rate-limited) may also be live — heavy concurrent Shannon/claude load is the documented failure mode. Don't kill arnold (operator's). If our Shannon phases stall under load, that's a signal to apply the transcript-read fix (action 3), not to raise timeouts.
 
+## ⚠ DISK is the #1 real blocker (root cause of the 02:4x halts)
+The APFS container runs near-full; the chain HALTS CLEANLY when free space < 1.5 GB
+("disk critically low … halting cleanly — free space and resume" — NOT a crash; state preserved).
+The full-suite baseline-capture also fails (null) when disk is full. **Every babysit fire: check `df -h /` FIRST.**
+If free < ~2.5 GB, reclaim (safe targets, biggest first):
+- Stale ephemeral venv caches in `/private/tmp/*` with a `CACHEDIR.TAG` + no live process (e.g. comfy*). `rm -rf`.
+- `~/Library/Caches/Google` (~850 MB) ONLY if Chrome isn't mid-use.
+- Completed/abandoned `~/Documents/.megaplan-worktrees/*` (NOT `capwaist`, NOT live ones) — `git worktree remove`.
+- Old plan-dir `events.ndjson` from COMPLETED milestones (they get huge).
+DO NOT delete: the `capwaist` worktree, the live `arnold-target` tree, the user's repos/generated outputs.
+After freeing, resume via the RE-DRIVE command.
+
 ## BABYSIT CYCLE (run this body each hourly fire while the epic is live)
+0. **DISK CHECK FIRST** — `df -h /`; reclaim per the ⚠ section if free < ~2.5 GB. This is the most likely stall cause.
 1. **Status:** the megaplan CLIs may be approval-gated in autonomous fires — prefer reading JSON directly:
    newest `.megaplan/plans/<outcome-*>/state.json` + `events.ndjson` mtime; `pgrep -fl 'megaplan|codex|shannon'`;
    growing `execution_batch_*.json` count + `git status` file count. (codex/shannon phases don't stream events —
