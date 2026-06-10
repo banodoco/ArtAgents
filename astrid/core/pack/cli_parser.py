@@ -47,8 +47,8 @@ def build_parser() -> argparse.ArgumentParser:
     # Late import to avoid circular dependency — .cli imports from .cli_parser
     from .cli import (  # noqa: PLC0415
         _handle_agent_index,
-        _handle_install,
         _handle_inspect,
+        _handle_install,
         _handle_list,
         _handle_new,
         _handle_rollback,

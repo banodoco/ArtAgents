@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from astrid.core._shared.jsonio import read_json
 from astrid.core.foundation.project_paths import project_dir, validate_run_id
 from astrid.core.project.current_run import (
     CurrentRunError,
@@ -18,7 +19,6 @@ from astrid.core.project.current_run import (
     read_current_run,
     write_current_run,
 )
-from astrid.core._shared.jsonio import read_json
 
 
 def read_current_run_state(

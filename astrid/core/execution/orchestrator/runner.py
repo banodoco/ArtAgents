@@ -11,8 +11,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
-from astrid.core.contracts.capability_runner import CapabilityRunner
-from astrid.core.contracts.run_status import RunStatus
 from astrid.core._shared.capability_common import (
     _PLACEHOLDER_RE,
     _expand_placeholders,
@@ -21,6 +19,8 @@ from astrid.core._shared.capability_common import (
     _stringify_value,
     _validate_required_inputs,
 )
+from astrid.core.contracts.capability_runner import CapabilityRunner
+from astrid.core.contracts.run_status import RunStatus
 from astrid.core.project.run import (
     ProjectRunContext,
     _project_subprocess_env,
@@ -51,6 +51,7 @@ from .schema import (
     OrchestratorValidationError,
     RuntimeKind,
 )
+
 
 class OrchestratorRunnerError(OrchestratorValidationError):
     """Raised when a orchestrator cannot be prepared or executed."""

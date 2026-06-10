@@ -30,12 +30,12 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Optional, Sequence
 
+from astrid.core.env_vars import ASTRID_TASK_PROJECT
 from astrid.core.foundation.project_paths import (
     ProjectPathError,
     resolve_projects_root,
     validate_project_slug,
 )
-from astrid.core.env_vars import ASTRID_TASK_PROJECT
 from astrid.core.session.binding import SessionBindingError, resolve_current_session
 from astrid.core.task.lifecycle import cmd_next
 

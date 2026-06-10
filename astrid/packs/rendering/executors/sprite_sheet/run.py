@@ -8,6 +8,20 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint
 guard_canonical_entrypoint('rendering.sprite_sheet')
 
 # Re-exports from focused modules
+import argparse
+import json
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.cli_choices import add_choice_arg
+from astrid.core.util.credentials_scope import CredentialsScope
+from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL
+
 from .png_io import (  # noqa: F401
     _alpha_bbox,
     _png_chunk,
@@ -68,52 +82,6 @@ from .web_outputs import (  # noqa: F401
     slice_frames,
 )
 
-import argparse
-import json
-import os
-import sys
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.credentials_scope import CredentialsScope
-
-from .png_io import _alpha_bbox, _png_dimensions, _read_rgba_png, analyze_frames, scrub_fully_transparent_rgb
-from .sheet import (
-    _key_color_name,
-    _parse_hex_color,
-    choose_layout,
-    validate_sheet_dimensions,
-    write_layout_guide,
-)
-from .upscale import (
-    DEFAULT_FAL_UPSCALER,
-    DEFAULT_KEY_COLOR,
-    EDIT_API_URL,
-    _call_image_edit_api,
-    _request_payload_for_image_model,
-    _sprite_prompt,
-    _write_first_image,
-    ai_upscale_frames_with_fal,
-    upscale_frames,
-)
-from .web_outputs import (
-    _run,
-    assemble_prores_video,
-    assemble_review_video,
-    assemble_sprite_sheet_from_frames,
-    build_web_outputs,
-    normalize_frame_frame,
-    normalize_frames,
-    remove_chroma_key,
-    slice_frames,
-)
-
-from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL
-
 
 def build(args: argparse.Namespace) -> int:
     input_sheet = args.input_sheet.expanduser().resolve() if args.input_sheet is not None else None
@@ -153,7 +121,12 @@ def build(args: argparse.Namespace) -> int:
     validation_payload = dict(_request_payload_for_image_model(args, "validation", size))
     validation_payload.setdefault("n", 1)
 
-    from astrid.packs.generation.executors.generate_image_openai.run import API_URL, DEFAULT_MODEL, _call_image_api, _validate_payload
+    from astrid.packs.generation.executors.generate_image_openai.run import (
+        API_URL,
+        DEFAULT_MODEL,
+        _call_image_api,
+        _validate_payload,
+    )
     _validate_payload(validation_payload)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -459,8 +432,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL
     from astrid.core.contracts.die import pack_die as _die
+    from astrid.packs.generation.executors.generate_image_openai.run import DEFAULT_MODEL
 
     args = build_parser().parse_args(argv)
     if args.cols is not None and args.cols < 1:

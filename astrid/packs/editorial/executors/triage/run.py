@@ -14,10 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.audit import register_outputs
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from astrid.core.util.time import _utc_now, utc_now_seconds
+from astrid.core.audit import register_outputs
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
+from astrid.core.util.time import _utc_now, utc_now_seconds
 
 TRIAGE_VERSION = 1
 FORBIDDEN_TIME_KEYS = frozenset({"start", "end", "timestamp", "seconds", "time", "src_start", "src_end", "from", "to", "at"})

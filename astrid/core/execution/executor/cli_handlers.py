@@ -46,7 +46,6 @@ from astrid.core.update import update_apply, update_check
 from .registry import ExecutorRegistry
 from .schema import ExecutorDefinition, to_capability_handle
 
-
 # ---------------------------------------------------------------------------
 # Templates (executor-specific; shared helpers live in astrid.core.scaffold)
 # ---------------------------------------------------------------------------

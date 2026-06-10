@@ -13,8 +13,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from astrid.core.pack import discover_packs
-from astrid.core.pack.discovery import discover_pack_metadata
 from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.model_catalog.taxonomy import (
     GenerationBackendIdDescriptor,
@@ -22,6 +20,8 @@ from astrid.core.model_catalog.taxonomy import (
     GenerationModeDescriptor,
     GenerationTaxonomyRegistry,
 )
+from astrid.core.pack import discover_packs
+from astrid.core.pack.discovery import discover_pack_metadata
 
 if TYPE_CHECKING:
     from astrid.core.pack import PackDefinition

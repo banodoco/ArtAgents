@@ -17,10 +17,8 @@ from typing import Any
 
 from astrid.core._shared.result_manifest import write_manifest  # noqa: E402
 from astrid.core.cli_choices import add_choice_arg  # noqa: E402
-from astrid.core.pack.entrypoint import run_pack_main  # noqa: E402
-
-
 from astrid.core.contracts.die import pack_die
+from astrid.core.pack.entrypoint import run_pack_main  # noqa: E402
 
 
 def _die(msg: str, code: int = 2) -> None:

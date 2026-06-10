@@ -13,15 +13,6 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.session.binding import resolve_current_session
-from astrid.core.session.config import (
-    load_user_config,
-    load_workspace_config,
-    resolve_default_project,
-    set_default_project,
-)
-from astrid.core.session.discovery import discover_projects
-
 from astrid.core.foundation import project_paths as paths
 from astrid.core.project.project import (
     ProjectError,
@@ -33,6 +24,14 @@ from astrid.core.project.project import (
     show_project,
 )
 from astrid.core.project.source import add_source
+from astrid.core.session.binding import resolve_current_session
+from astrid.core.session.config import (
+    load_user_config,
+    load_workspace_config,
+    resolve_default_project,
+    set_default_project,
+)
+from astrid.core.session.discovery import discover_projects
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OPS_HELPER = REPO_ROOT / "scripts" / "node" / "ops_helper.mjs"

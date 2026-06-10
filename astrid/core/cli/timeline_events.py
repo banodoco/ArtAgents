@@ -15,9 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-
 from astrid.core.timeline.events.schema import TimelineActor
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers (used only by event/history handlers in this module)

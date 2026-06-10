@@ -9,14 +9,14 @@ from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_mai
 guard_canonical_entrypoint('editorial.quote_scout')
 import argparse
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.audit import register_outputs
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from astrid.core.util.time import _utc_now, utc_now_seconds
+from astrid.core.audit import register_outputs
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
-from datetime import datetime, timezone
+from astrid.core.util.time import _utc_now, utc_now_seconds
 
 QUOTE_CANDIDATES_VERSION = 1
 RESPONSE_SCHEMA = {

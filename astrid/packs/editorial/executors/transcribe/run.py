@@ -16,11 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.audit import AuditContext
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from .._common import load_api_key
+from astrid.core.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.media import ffprobe_duration_seconds
+
+from .._common import load_api_key
 
 SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")
 SILENCE_END_RE = re.compile(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)")

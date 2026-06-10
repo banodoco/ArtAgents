@@ -37,8 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core._shared.jsonio import read_json
+from astrid.core.contracts.errors import AstridError
 
 from .eventlog import EventLogBackend, select_timeline_backend
 from .eventlog.types import SupabaseEventLogOptions

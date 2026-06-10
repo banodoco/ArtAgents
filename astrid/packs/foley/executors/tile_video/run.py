@@ -16,10 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.core.pack.entrypoint import run_pack_main
-
-
 from astrid.core.contracts.die import pack_die
+from astrid.core.pack.entrypoint import run_pack_main
 
 
 def _die(message: str) -> None:

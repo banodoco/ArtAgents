@@ -33,7 +33,6 @@ from pathlib import Path
 # _run_install_command which is already the hottest CLI path.
 from astrid.core.pack.install_git import _is_git_url  # noqa: E402
 
-
 # ── Parsed-args entry points ────────────────────────────────────────────────
 
 

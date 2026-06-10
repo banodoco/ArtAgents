@@ -11,8 +11,8 @@ import json
 import sys
 from typing import Any, TextIO
 
-from astrid.core.contracts.errors import AstridError, build_state_snapshot, render_astrid_error
 from astrid.core.cli_choices import AstridArgumentError
+from astrid.core.contracts.errors import AstridError, build_state_snapshot, render_astrid_error
 
 _LIFECYCLE_FIELD_DEFAULTS: dict[str, Any] = {
     "schema_version": 1,

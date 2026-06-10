@@ -18,20 +18,21 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project.current_run import (
-    clear_current_run,
-    read_current_run,
-)
 from astrid.core.foundation.project_paths import (
     project_dir,
     resolve_projects_root,
     validate_project_slug,
     validate_run_id,
 )
+from astrid.core.project.current_run import (
+    clear_current_run,
+    read_current_run,
+)
 from astrid.core.session.lease import (
     release_writer_lease,
 )
 from astrid.core.session.writer import writer_context_for_project
+from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.events import (
     make_run_aborted_event,
     make_run_completed_event,
@@ -40,7 +41,6 @@ from astrid.core.task.events import (
     make_step_failed_event,
     read_events,
 )
-from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     find_step_by_path,

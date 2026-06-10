@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
     PackDefinition,
     discover_packs,
@@ -22,6 +21,7 @@ from astrid.core.pack import (
     pack_taxonomy_from_manifest,
     packs_root,
 )
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack.validate import (
     extract_trust_summary,
 )
@@ -287,6 +287,8 @@ def _print_agent_view(view: dict) -> None:
 # Re-export the shared helper under the name callers expect.
 from astrid.core.pack._common import (  # noqa: E402
     _COMPONENT_MANIFEST_NAMES as _INSPECT_COMPONENT_MANIFEST_NAMES,
+)
+from astrid.core.pack._common import (
     find_component_manifest as _find_component_manifest,
 )
 

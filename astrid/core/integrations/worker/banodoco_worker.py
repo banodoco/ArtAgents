@@ -43,7 +43,6 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from astrid.core.contracts.run_status import RunStatus
-from astrid.core.project.run import write_run_record
 from astrid.core.integrations.reigh import env as reigh_env
 from astrid.core.integrations.reigh.data_provider import SupabaseDataProvider
 from astrid.core.integrations.reigh.task_client import (
@@ -54,7 +53,12 @@ from astrid.core.integrations.reigh.task_client import (
 )
 from astrid.core.integrations.reigh.timeline_io import Mutator
 from astrid.core.integrations.reigh.timeline_io import RawTimelinePayload as TimelineConfig
-from astrid.core.integrations.reigh.worker_jwt import JwtVerificationError, VerifiedJwt, verify_user_jwt
+from astrid.core.integrations.reigh.worker_jwt import (
+    JwtVerificationError,
+    VerifiedJwt,
+    verify_user_jwt,
+)
+from astrid.core.project.run import write_run_record
 
 logger = logging.getLogger(__name__)
 

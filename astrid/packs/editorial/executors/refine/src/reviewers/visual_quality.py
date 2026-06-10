@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from astrid.packs.editorial.hype import enriched_arrangement
 from astrid.packs.editorial.executors.refine.src.reviewers import Reviewer
+from astrid.packs.editorial.hype import enriched_arrangement
 
 
 class VisualQualityReviewer(Reviewer):

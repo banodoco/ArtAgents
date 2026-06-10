@@ -6,17 +6,14 @@ import argparse
 import sys
 from pathlib import Path
 
-from astrid.core.contracts.errors import AstridError
-from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
 from astrid.core._shared.capability_common import (
-    _aliases_text,          # re-export — tests import from cli directly
+    _aliases_text,  # re-export — tests import from cli directly
     _require_qualified_id,  # re-export — tests patch via cli.<name>
 )
+from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
-
-from .registry import ExecutorRegistry, load_default_registry
-from .schema import ExecutorValidationError
 
 # ---------------------------------------------------------------------------
 # Import all handlers from cli_handlers so build_parser() can wire them.
@@ -24,29 +21,31 @@ from .schema import ExecutorValidationError
 # (see docs/contracts/monkeypatch-contracts.md §7).
 # ---------------------------------------------------------------------------
 from .cli_handlers import (  # noqa: E402, F401  — re-exports for tests
-    _cmd_fork,
-    _cmd_new,
-    _cmd_list,
-    _cmd_search,
-    _cmd_inspect,
-    _cmd_validate,
-    _cmd_install,
-    _cmd_run,
-    _cmd_override,
-    _cmd_dirty,
-    _cmd_update,
-    _executor_search_record,
-    _emit_uuid_handoff_metadata,
-    _project_uuid_or_none,
-    _UUID_RE,
-    _executor_needs_out,
-    _run_inputs,
-    _parse_input_values,
-    _reject_run_passthrough,
-    _print_outputs,
     _EXECUTOR_YAML_TEMPLATE,
     _RUN_PY_TEMPLATE,
+    _UUID_RE,
+    _cmd_dirty,
+    _cmd_fork,
+    _cmd_inspect,
+    _cmd_install,
+    _cmd_list,
+    _cmd_new,
+    _cmd_override,
+    _cmd_run,
+    _cmd_search,
+    _cmd_update,
+    _cmd_validate,
+    _emit_uuid_handoff_metadata,
+    _executor_needs_out,
+    _executor_search_record,
+    _parse_input_values,
+    _print_outputs,
+    _project_uuid_or_none,
+    _reject_run_passthrough,
+    _run_inputs,
 )
+from .registry import ExecutorRegistry, load_default_registry
+from .schema import ExecutorValidationError
 
 
 def _banodoco_config_from_args(

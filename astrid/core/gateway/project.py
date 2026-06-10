@@ -12,8 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core._shared.capability_common import _has_cli_option
+from astrid.core.contracts.errors import AstridError
 from astrid.core.util.log_and_swallow import log_and_swallow
 
 # ---------------------------------------------------------------------------

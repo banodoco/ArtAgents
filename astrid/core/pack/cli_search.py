@@ -16,8 +16,8 @@ from typing import Any
 def _handle_agent_index(args: argparse.Namespace) -> int:
     """Handler for ``packs agent-index``."""
 
-    from astrid.core.pack.store import InstalledPackStore
     from astrid.core.pack.agent_index import build_agent_index
+    from astrid.core.pack.store import InstalledPackStore
 
     store = InstalledPackStore()
 
@@ -159,8 +159,8 @@ def _score_pack(pack: dict[str, Any], terms: list[str]) -> float:
 
 def _handle_search(args: argparse.Namespace) -> int:
     """Handler for ``packs search``."""
-    from astrid.core.pack.store import InstalledPackStore
     from astrid.core.pack.agent_index import build_agent_index
+    from astrid.core.pack.store import InstalledPackStore
 
     terms = [t.lower() for t in args.query if t.strip()]
     if not terms:

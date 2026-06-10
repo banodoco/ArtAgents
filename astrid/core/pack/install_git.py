@@ -17,7 +17,6 @@ from astrid.core.pack.gitignore import gitignore_filter
 from astrid.core.pack.install_trust import _format_trust_summary
 from astrid.core.pack.store import InstallRecord
 
-
 # ---------------------------------------------------------------------------
 # Git URL detection
 # ---------------------------------------------------------------------------

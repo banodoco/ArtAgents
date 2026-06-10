@@ -21,9 +21,9 @@ from astrid.core.task.gate.attestation import match_attested_command
 from astrid.core.task.gate.base import GateDecision, TaskRunGateError
 from astrid.core.task.gate.cursor import (
     CursorPath,
+    _event_matches_step_version,
     _ForEachSelection,
     _Frame,
-    _event_matches_step_version,
     _make_exhaust_override_step,
     _make_item_frame,
     _make_iteration_frame,
@@ -321,7 +321,7 @@ def _maybe_autoclose_for_each_host(
     )
     if context is None:
         return
-    from astrid.core.task.gate import _finalize_step, _ActiveWriterAppend
+    from astrid.core.task.gate import _ActiveWriterAppend, _finalize_step
 
     _finalize_step(
         context.decision,

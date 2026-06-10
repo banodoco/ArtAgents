@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     iter_executor_roots,
     iter_orchestrator_roots,
@@ -23,7 +24,6 @@ from astrid.core.pack import (
     pack_manifest_path,
 )
 from astrid.core.search import short_description_or_truncated
-from astrid.core.foundation.paths import REPO_ROOT
 
 PACKS_DIR = REPO_ROOT / "astrid" / "packs"
 

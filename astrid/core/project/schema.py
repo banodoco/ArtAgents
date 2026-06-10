@@ -17,9 +17,12 @@ from typing import Any
 from astrid.core.contracts.errors import AstridError
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.schema_validators import require_uuid_str
+from astrid.core.foundation.project_paths import (
+    validate_project_slug,
+    validate_run_id,
+    validate_source_id,
+)
 from astrid.core.util.time import utc_now_seconds
-
-from astrid.core.foundation.project_paths import validate_project_slug, validate_run_id, validate_source_id
 
 PROJECT_SCHEMA_VERSION = 1
 SOURCE_SCHEMA_VERSION = 1

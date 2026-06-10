@@ -10,6 +10,13 @@ from typing import Any
 from typing import Literal as _Literal
 from typing import get_args as _get_args
 
+from astrid.core._shared.capability_common import (
+    _parse_cache,
+    _parse_isolation,
+    _validate_cache,
+    _validate_isolation,
+    _validate_unique_env_passthrough,
+)
 from astrid.core.contracts.capability_schema import (
     DESCRIPTION_MAX_LEN,
     KEYWORD_MAX_LEN,
@@ -22,13 +29,6 @@ from astrid.core.contracts.capability_schema import (
 )
 from astrid.core.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
-)
-from astrid.core._shared.capability_common import (
-    _parse_cache,
-    _parse_isolation,
-    _validate_cache,
-    _validate_isolation,
-    _validate_unique_env_passthrough,
 )
 from astrid.core.contracts.schema import (
     CACHE_MODES,
@@ -56,7 +56,11 @@ from astrid.core.contracts.schema import (
 from astrid.core.contracts.schema import (
     Port as ExecutorPort,
 )
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
+from astrid.core.pack.manifest import (
+    ManifestParseError,
+    load_manifest_payload,
+    reconcile_runtime_module,
+)
 from astrid.core.timeline import ClipClassifiedKind
 
 ExecutorKind = _Literal["built_in", "external"]

@@ -23,12 +23,6 @@ from typing import Any, Optional
 import jsonschema
 from referencing import Registry, Resource
 
-from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
-from astrid.core.pack.manifest import (
-    ManifestParseError,
-    load_manifest_mapping,
-    reconcile_runtime_module,
-)
 from astrid.core.pack import (
     PackDefinition,
     _normalize_pack_permissions,
@@ -44,6 +38,16 @@ from astrid.core.pack import (
     validate_content_id_in_pack,
     validate_element_pack_id,
 )
+from astrid.core.pack.alias_resolver import AliasResolutionError, AliasResolver
+from astrid.core.pack.manifest import (
+    ManifestParseError,
+    load_manifest_mapping,
+    reconcile_runtime_module,
+)
+from astrid.core.pack.validate_first_party import (
+    is_first_party_packs_root_candidate,
+    validate_first_party_packs_root,
+)
 from astrid.core.pack.validate_layout import (
     CANONICAL_PACK_LAYOUT_RULES,
     CanonicalLayoutRule,
@@ -52,10 +56,6 @@ from astrid.core.pack.validate_layout import (
     LayoutValidationIssue,
     PackLayoutException,
     parse_layout_exceptions,
-)
-from astrid.core.pack.validate_first_party import (
-    is_first_party_packs_root_candidate,
-    validate_first_party_packs_root,
 )
 
 logger = logging.getLogger(__name__)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 import json
 import shutil
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,9 +17,9 @@ except ImportError:  # pragma: no cover
 
 from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.project.project import load_project
+from astrid.core.threads.ids import generate_ulid
 from astrid.core.timeline.banodoco_schema import canonical_empty_timeline
 from astrid.core.util.time import utc_now_seconds as utc_now_iso
-from astrid.core.threads.ids import generate_ulid
 
 from .eventlog import select_timeline_backend
 from .eventlog.types import SupabaseEventLogOptions

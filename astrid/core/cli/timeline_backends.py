@@ -13,13 +13,11 @@ import json
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-
 from astrid.core.timeline._shared import (
     _resolve_optional_session,
     _resolve_project_slug,
     _timeline_actor_from_session,
 )
-
 
 # ---------------------------------------------------------------------------
 # Handler: push (m9)
@@ -241,7 +239,6 @@ def cmd_undo(args: argparse.Namespace) -> int:
     # Find the latest undoable event (skip lifecycle/ops by default)
     # Also skip erased events
     from astrid.core.timeline.events.schema import ErasedPayload
-
     from astrid.core.timeline.inverses import _NON_REVERSIBLE_KINDS
 
     target_idx: int | None = None

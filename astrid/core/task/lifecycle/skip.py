@@ -22,8 +22,8 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.foundation.project_paths import project_dir, validate_project_slug
+from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.cli_contract import emit_lifecycle_json, exit_with_astrid_error
 from astrid.core.task.events import (

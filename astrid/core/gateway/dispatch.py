@@ -7,8 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core.cli import session as _session_cli
+from astrid.core.contracts.errors import AstridError
 
 _ALIAS_SUNSET_VERSION = "0.3.0"
 
@@ -318,14 +318,13 @@ def _dispatch_runs(args: list[str]) -> int:
     """Dispatch ``astrid runs {ls,show,artifacts,trace,cost,gc}`` sub-verbs."""
     import argparse
 
+    from astrid.core.task.lifecycle import cmd_runs_ls
     from astrid.core.task.run.audit import (
         cmd_run_artifacts,
         cmd_run_cost,
         cmd_run_show,
         cmd_run_trace,
     )
-
-    from astrid.core.task.lifecycle import cmd_runs_ls
     from astrid.core.task.run.gc import cmd_runs_gc
 
     parser = argparse.ArgumentParser(prog="astrid runs")

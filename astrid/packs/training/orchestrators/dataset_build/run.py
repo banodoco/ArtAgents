@@ -51,10 +51,10 @@ from .phases import (  # phase helpers extracted during M4 T76
 from .reports.quality_report import write_quality_report
 from .review import apply_review_decisions
 from .services import DatasetRunServices, RoundExecutionResult
-from .state import make_initial_state, read_review_state, set_status, write_review_state
 
 # Re-exports for test monkeypatch compatibility
 from .source_providers import get_source_provider  # noqa: F401 - patched by tests
+from .state import make_initial_state, read_review_state, set_status, write_review_state
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 REVIEW_UI_ROOT = PACKAGE_ROOT / "review_ui"

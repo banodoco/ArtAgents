@@ -11,6 +11,7 @@ from astrid.core.timeline.banodoco_schema import (
     _raise_unknown_keys,
 )
 from astrid.core.timeline.validators.metadata import _validate_generated_at
+
 # Registry lookups are late-imported through banodoco_schema so that
 # mock.patch.object(banodoco_schema, ...) still affects internal callers.
 

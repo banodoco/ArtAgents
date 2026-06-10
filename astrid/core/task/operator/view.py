@@ -24,12 +24,18 @@ import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
-from astrid.core.contracts.run_status import RunStatus, STEP_TERMINAL_KINDS
-from astrid.core.session.current_run_state import read_current_run_state
+from astrid.core.contracts.run_status import STEP_TERMINAL_KINDS, RunStatus
 from astrid.core.foundation.project_paths import (
     project_dir,
     resolve_projects_root,
     validate_project_slug,
+)
+from astrid.core.session.current_run_state import read_current_run_state
+from astrid.core.session.discovery_hints import (
+    _most_recent_session_slug,
+    _os_environ_has_session,
+    _print_next_no_run_hint,
+    _print_next_unbound_hint,
 )
 from astrid.core.session.writer import writer_context_for_project
 from astrid.core.task.claim import active_claims_by_step
@@ -41,6 +47,9 @@ from astrid.core.task.events import (
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
 from astrid.core.task.operator.inbox import consume_inbox_entry, pending_count, scan_inbox
+
+# -- Status JSON helpers ----------------------------------------------------
+from astrid.core.task.operator.inbox import pending_count as _pending_count
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
@@ -57,15 +66,6 @@ from astrid.core.task.plan.verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
 from astrid.core.task.run.state import _run_is_complete
 from astrid.core.task.run.store import _emit_run_completed_if_needed
-from astrid.core.session.discovery_hints import (
-    _most_recent_session_slug,
-    _os_environ_has_session,
-    _print_next_no_run_hint,
-    _print_next_unbound_hint,
-)
-
-# -- Status JSON helpers ----------------------------------------------------
-from astrid.core.task.operator.inbox import pending_count as _pending_count
 
 
 def _status_json(
@@ -132,9 +132,11 @@ def _status_json(
 # because lifecycle.py, lifecycle_ack.py, and test monkeypatch seams reference
 # them through this module.
 from astrid.core.task.operator.render import (  # noqa: E402, F401
-    _AckTemplate,
+    _PROGRESS_TERMINAL_KINDS,
+    NEXT_JSON_SCHEMA,
     _ack_identity_token,
     _ack_template_parts,
+    _AckTemplate,
     _command_has_project_arg,
     _completed_items_from_events,
     _default_projects_root,
@@ -148,17 +150,16 @@ from astrid.core.task.operator.render import (  # noqa: E402, F401
     _has_host_step_attested,
     _HostCloseHint,
     _identity_parts,
-    _InlineFailureTail,
     _inline_failure_tail,
+    _InlineFailureTail,
     _leaf_progress,
     _path_tuple_from_event,
     _print_post_completion_handoff,
-    _PROGRESS_TERMINAL_KINDS,
     _RewindRetry,
     _RunComplete,
-    NEXT_JSON_SCHEMA,
     render_step_instructions,
 )
+
 __all__ = [
     "cmd_next",
     "cmd_status",

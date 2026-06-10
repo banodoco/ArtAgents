@@ -14,13 +14,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.util.http import (
     FAL_QUEUE_URL,
     HttpClient,
     default_client,
     fal_submit_and_poll,
 )
-from astrid.core.util.credentials_scope import CredentialsScope
 
 FAL_MODEL_ID = "fal-ai/hunyuan-video-foley"
 

@@ -19,22 +19,21 @@ from typing import Optional
 
 from astrid.core.contracts.errors import AstridError
 
+# ── Re-exports from validate — tests access via cli namespace ──
+from astrid.core.pack.validate import (  # noqa: E402, F401
+    extract_trust_summary,
+    validate_pack,
+)
+
 from ._cli_shared import (  # noqa: E402
+    _TAXONOMY_FIELDS,
     _pack_payload,
     _pack_taxonomy,
     _print_taxonomy_block,
-    _TAXONOMY_FIELDS,
 )
-
-# ── Re-exports from split modules ───────────────────────────────────────────
-# build_parser and _add_taxonomy_filter_args are now defined in cli_parser.
-# Basic handlers (validate, new, list, status) are now defined in cli_basic.
-# Inspect helpers are now defined in cli_inspect.
-# Agent-index and search handlers are now defined in cli_search.
-# Everything is re-exported here so that callers can import from the single
-# ``astrid.core.pack.cli`` namespace.
-from .cli_parser import build_parser, _add_taxonomy_filter_args  # noqa: E402, F401
 from .cli_basic import (  # noqa: E402, F401
+    _PACK_ID_RE,
+    _SKILL_MD_STUB,
     _create_pack_skeleton,
     _effective_status,
     _eprint,
@@ -50,9 +49,7 @@ from .cli_basic import (  # noqa: E402, F401
     _matches_taxonomy_filters,
     _pack_category,
     _pack_id_is_valid,
-    _PACK_ID_RE,
     _print_grouped_rows,
-    _SKILL_MD_STUB,
     _taxonomy_filters,
     _validate_pack_path,
     _with_grouped_payload,
@@ -61,31 +58,34 @@ from .cli_basic import (  # noqa: E402, F401
     cmd_validate,
 )
 from .cli_inspect import (  # noqa: E402, F401
+    _INSPECT_COMPONENT_MANIFEST_NAMES,
     _build_agent_view,
     _build_full_inspect,
     _find_component_manifest,
     _handle_inspect,
     _inspect_discovered_pack,
     _inspect_installed_pack,
-    _INSPECT_COMPONENT_MANIFEST_NAMES,
     _print_agent_view,
     _print_full_inspect,
     _read_stage_excerpt,
     _scan_inspect_components,
     cmd_inspect,
 )
+
+# ── Re-exports from split modules ───────────────────────────────────────────
+# build_parser and _add_taxonomy_filter_args are now defined in cli_parser.
+# Basic handlers (validate, new, list, status) are now defined in cli_basic.
+# Inspect helpers are now defined in cli_inspect.
+# Agent-index and search handlers are now defined in cli_search.
+# Everything is re-exported here so that callers can import from the single
+# ``astrid.core.pack.cli`` namespace.
+from .cli_parser import _add_taxonomy_filter_args, build_parser  # noqa: E402, F401
 from .cli_search import (  # noqa: E402, F401
+    _SEARCH_FIELD_WEIGHTS,
     _handle_agent_index,
     _handle_search,
     _pack_search_text,
     _score_pack,
-    _SEARCH_FIELD_WEIGHTS,
-)
-
-# ── Re-exports from validate — tests access via cli namespace ──
-from astrid.core.pack.validate import (  # noqa: E402, F401
-    extract_trust_summary,
-    validate_pack,
 )
 
 # ── install / update / uninstall / rollback handlers ─────────────────────

@@ -18,6 +18,7 @@ from astrid.core.search import (
 from astrid.core.search import (
     search as run_search,
 )
+
 from .registry import ElementRegistryError, load_default_registry
 from .schema import ElementDefinition, ElementValidationError, to_capability_handle
 

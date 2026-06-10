@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-from astrid.core.audit import AuditContext
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.audit import AuditContext
+from astrid.core.foundation.paths import WORKSPACE_ROOT
+from astrid.core.theme import load_theme
 from astrid.core.timeline import (
     ARRANGEMENT_VERSION,
     is_all_generative_arrangement,
@@ -27,10 +29,8 @@ from astrid.core.timeline import (
     validate_arrangement,
     validate_arrangement_duration_window,
 )
-from astrid.core.util.time import _utc_now, utc_now_seconds
-from astrid.core.foundation.paths import WORKSPACE_ROOT
-from astrid.core.theme import load_theme
 from astrid.core.util.llm_clients import ClaudeClient, build_claude_client
+from astrid.core.util.time import _utc_now, utc_now_seconds
 
 FORBIDDEN_TIME_KEYS = frozenset({"start", "end", "timestamp", "seconds", "time", "src_start", "src_end", "from", "to", "at"})
 RESPONSE_SCHEMA = {

@@ -55,27 +55,18 @@ __all__ = [
 
 # Trust helpers extracted to install_trust.py (M4 T18); re-exported here
 # so existing mock.patch seams on astrid.core.pack.install.* continue to work.
-from astrid.core.pack.install_trust import (  # noqa: E402
-    _confirm,
-    _confirm_trust,
-    _format_permission,
-    _format_trust_summary,
-    _normalized_summary_permissions,
-    _trust_block,
-    _trust_missing_error,
-)
-
-# Local install / uninstall / update / rollback orchestration extracted
-# to install_local.py (M4 T20); re-exported here so existing mock.patch
-# seams on astrid.core.pack.install.* continue to work.
-from astrid.core.pack.install_local import (  # noqa: E402
-    _diff_component_inventories,
-    _do_install,
-    _format_update_diff,
-    install_pack,
-    rollback_pack,
-    uninstall_pack,
-    update_pack,
+# CLI wrapper functions extracted to install_cli.py (M4 T24); re-exported
+# here so existing mock.patch seams on astrid.core.pack.install.* and late-import
+# paths in cli.py (_handle_install, _handle_update, ...) continue to work.
+from astrid.core.pack.install_cli import (  # noqa: E402
+    _run_install_command,
+    _run_rollback_command,
+    _run_uninstall_command,
+    _run_update_command,
+    cmd_install,
+    cmd_rollback,
+    cmd_uninstall,
+    cmd_update,
 )
 
 # Git-specific helpers extracted to install_git.py (M4 T22); re-exported
@@ -92,16 +83,24 @@ from astrid.core.pack.install_git import (  # noqa: E402
     _update_git_pack,
 )
 
-# CLI wrapper functions extracted to install_cli.py (M4 T24); re-exported
-# here so existing mock.patch seams on astrid.core.pack.install.* and late-import
-# paths in cli.py (_handle_install, _handle_update, ...) continue to work.
-from astrid.core.pack.install_cli import (  # noqa: E402
-    _run_install_command,
-    _run_rollback_command,
-    _run_uninstall_command,
-    _run_update_command,
-    cmd_install,
-    cmd_rollback,
-    cmd_uninstall,
-    cmd_update,
+# Local install / uninstall / update / rollback orchestration extracted
+# to install_local.py (M4 T20); re-exported here so existing mock.patch
+# seams on astrid.core.pack.install.* continue to work.
+from astrid.core.pack.install_local import (  # noqa: E402
+    _diff_component_inventories,
+    _do_install,
+    _format_update_diff,
+    install_pack,
+    rollback_pack,
+    uninstall_pack,
+    update_pack,
+)
+from astrid.core.pack.install_trust import (  # noqa: E402
+    _confirm,
+    _confirm_trust,
+    _format_permission,
+    _format_trust_summary,
+    _normalized_summary_permissions,
+    _trust_block,
+    _trust_missing_error,
 )

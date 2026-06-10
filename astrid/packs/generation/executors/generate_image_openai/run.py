@@ -4,7 +4,11 @@
 
 from __future__ import annotations
 
-from astrid.core.pack.entrypoint import guard_canonical_entrypoint, run_pack_main, warn_if_unledgered
+from astrid.core.pack.entrypoint import (
+    guard_canonical_entrypoint,
+    run_pack_main,
+    warn_if_unledgered,
+)
 
 guard_canonical_entrypoint('generation.generate_image_openai')
 import argparse
@@ -22,12 +26,12 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.core.audit import AuditContext
 from astrid.core._shared.result_manifest import complete_output_metadata
+from astrid.core.audit import AuditContext
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.atomic_io import write_json_atomic
-from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
+from astrid.core.util.credentials_scope import CredentialsScope
 
 API_URL = "https://api.openai.com/v1/images/generations"
 DEFAULT_MODEL = "gpt-image-2"

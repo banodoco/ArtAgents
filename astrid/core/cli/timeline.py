@@ -5,14 +5,12 @@ from __future__ import annotations
 import argparse
 from typing import Any  # noqa: F401  (re-exported: preserves cli.Any symbol)
 
-from astrid.core.contracts.errors import AstridError, coerce_astrid_error
 from astrid.core.cli_choices import AstridArgumentError
+from astrid.core.contracts.errors import AstridError, coerce_astrid_error
 from astrid.core.session.binding import (  # noqa: F401  (resolve_current_session re-exported)
     SessionBindingError,
     resolve_current_session,
 )
-from astrid.core.timeline.events.schema import TimelineActor  # noqa: F401  (re-exported)
-
 from astrid.core.timeline import (
     audio_edits,  # kept for monkeypatch seams (timeline_cli.audio_edits)
     clip_edits,  # kept for monkeypatch seams (timeline_cli.clip_edits)
@@ -23,8 +21,6 @@ from astrid.core.timeline import (
     transition_edits,  # kept for monkeypatch seams
 )
 from astrid.core.timeline._edit_helpers import TimelineEditError
-from astrid.core.timeline.eventlog import EventLogError
-from astrid.core.timeline.projection import ErasedPayloadProjectionError, ProjectionError
 
 # Shared session/version helpers were moved to ._shared to break the
 # circular-facade dependency (leaves no longer reach back into .cli for them).
@@ -38,6 +34,9 @@ from astrid.core.timeline._shared import (  # noqa: F401
     _resolve_project_slug,
     _timeline_actor_from_session,
 )
+from astrid.core.timeline.eventlog import EventLogError
+from astrid.core.timeline.events.schema import TimelineActor  # noqa: F401  (re-exported)
+from astrid.core.timeline.projection import ErasedPayloadProjectionError, ProjectionError
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -60,6 +59,7 @@ def main(argv: list[str] | None = None) -> int:
 # moved into astrid.core.timeline.cli_parser to reduce this file below the
 # 1,200-line M4 threshold.
 from .timeline_parser import build_parser  # noqa: E402, F401
+
 
 # Legacy stub preserved for the parser-only helpers that were moved.
 # These are re-exported so intra-module references (like the cmd_*
@@ -95,8 +95,11 @@ def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
     or ``"supabase"`` when the sidecar requests it.
     """
     from astrid.core._shared.jsonio import read_json  # noqa: PLC0415
-    from astrid.core.timeline.paths import assembly_identity_path, find_timeline_by_slug  # noqa: PLC0415
     from astrid.core.timeline import clip_edits  # noqa: PLC0415
+    from astrid.core.timeline.paths import (  # noqa: PLC0415
+        assembly_identity_path,
+        find_timeline_by_slug,
+    )
 
     found = find_timeline_by_slug(project_slug, slug)
     if found is None:
@@ -138,19 +141,25 @@ def _resolve_clip_backend_name(project_slug: str, slug: str) -> str:
 # Facade re-exports for command handlers moved to cli_crud / cli_output / cli_edits (M4).
 # These are imported here so that legacy monkeypatch seams on
 # ``astrid.core.timeline.cli.cmd_*`` continue to work.
-from .timeline_crud import (  # noqa: E402, F401
-    cmd_ls,
-    cmd_create,
-    cmd_show,
-    cmd_rename,
-    cmd_finalize,
-    cmd_tombstone,
-    cmd_purge,
-    cmd_set_default,
+from .timeline_backends import (  # noqa: E402, F401
+    cmd_branch_create,
+    cmd_branch_list,
+    cmd_erase,
+    cmd_mass_undo,
+    cmd_pull,
+    cmd_push,
+    cmd_recover,
+    cmd_undo,
 )
-from .timeline_output import (  # noqa: E402, F401
-    cmd_cost,
-    cmd_export,
+from .timeline_crud import (  # noqa: E402, F401
+    cmd_create,
+    cmd_finalize,
+    cmd_ls,
+    cmd_purge,
+    cmd_rename,
+    cmd_set_default,
+    cmd_show,
+    cmd_tombstone,
 )
 from .timeline_edits import (  # noqa: E402, F401
     cmd_arrangement_set,
@@ -188,13 +197,7 @@ from .timeline_events import (  # noqa: E402, F401
     cmd_preview,
     cmd_who_edited,
 )
-from .timeline_backends import (  # noqa: E402, F401
-    cmd_branch_create,
-    cmd_branch_list,
-    cmd_erase,
-    cmd_mass_undo,
-    cmd_pull,
-    cmd_push,
-    cmd_recover,
-    cmd_undo,
+from .timeline_output import (  # noqa: E402, F401
+    cmd_cost,
+    cmd_export,
 )

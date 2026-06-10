@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('understanding.visual_understand')
 import argparse
 import base64
@@ -20,13 +21,12 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.core.contracts.errors import AstridError
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from astrid.packs.understanding.executors._common import emit_dry_run_preview
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.credentials_scope import CredentialsScope
+from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import run_pack_main
-
+from astrid.core.util.credentials_scope import CredentialsScope
+from astrid.packs.understanding.executors._common import emit_dry_run_preview
 
 API_URL = "https://api.openai.com/v1/responses"
 MODEL_PRESETS = {

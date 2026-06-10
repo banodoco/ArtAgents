@@ -7,8 +7,8 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV, resolve_projects_root
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV, resolve_projects_root
 
 
 @dataclass(frozen=True)

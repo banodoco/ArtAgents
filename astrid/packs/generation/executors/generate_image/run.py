@@ -23,23 +23,8 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core._shared.result_manifest import complete_output_metadata
-from astrid.packs.generation.executors._common import (
-    build_generation_manifest,
-    _available_backend_ids,
-    _build_requested_params as _build_requested_params_base,
-    _check_required,
-    _coerce_args as _coerce_args_base,
-    _create_backend_adapter,
-    _drop_unsupported,
-    _feature_is_missing,
-    _load_prompts,
-    _manifest_path_for_run_dir,
-    _normalise_prompts,
-    _PROMPT_ENTRY_CONTROL_KEYS,
-    _request_to_argv as _request_to_argv_base,
-    _resolve_seed,
-)
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.generation import GENERATION_RESULT_KEY
 from astrid.core.generation.backends import (
     BackendAdapter,
@@ -49,8 +34,29 @@ from astrid.core.generation.backends import (
 )
 from astrid.core.generation.backends.codex import codex_unavailable_reason
 from astrid.core.model_catalog.registry import ModelRegistry
-from astrid.core.foundation.atomic_io import write_json_atomic
 from astrid.core.util.png_metadata import embed_png_text
+from astrid.packs.generation.executors._common import (
+    _PROMPT_ENTRY_CONTROL_KEYS,
+    _available_backend_ids,
+    _check_required,
+    _create_backend_adapter,
+    _drop_unsupported,
+    _feature_is_missing,
+    _load_prompts,
+    _manifest_path_for_run_dir,
+    _normalise_prompts,
+    _resolve_seed,
+    build_generation_manifest,
+)
+from astrid.packs.generation.executors._common import (
+    _build_requested_params as _build_requested_params_base,
+)
+from astrid.packs.generation.executors._common import (
+    _coerce_args as _coerce_args_base,
+)
+from astrid.packs.generation.executors._common import (
+    _request_to_argv as _request_to_argv_base,
+)
 
 logger = logging.getLogger(__name__)
 

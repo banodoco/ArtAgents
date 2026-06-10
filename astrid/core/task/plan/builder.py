@@ -21,15 +21,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
-from astrid.core.project.current_run import (
-    read_current_run,
-    write_current_run,
-)
 from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.foundation.project_paths import (
     project_dir,
     validate_project_slug,
     validate_run_id,
+)
+from astrid.core.project.current_run import (
+    read_current_run,
+    write_current_run,
 )
 from astrid.core.project.project import ProjectError, require_project
 from astrid.core.project.run import resolve_required_project_timeline
@@ -38,6 +38,7 @@ from astrid.core.session.lease import (
     write_lease_init,
 )
 from astrid.core.session.writer import writer_context_for_project
+from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.env import task_actor_env
 from astrid.core.task.events import (
     make_plan_initialized_event,
@@ -48,7 +49,6 @@ from astrid.core.task.orchestrator_resolver import (
     _qualified_split,
     _resolve_packs_root,
 )
-from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.plan import (
     compute_plan_hash,
     load_plan,

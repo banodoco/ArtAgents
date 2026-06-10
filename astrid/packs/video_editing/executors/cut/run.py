@@ -22,7 +22,10 @@ from typing import Any, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.contracts.errors import AstridError
+from astrid.core.foundation.hash import sha256_file
+from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.task.managed_binding import is_managed_mode
+from astrid.core.theme import load_theme, theme_root
 from astrid.core.timeline import (
     canonical_timeline_config,
     is_all_generative_arrangement,
@@ -35,11 +38,8 @@ from astrid.core.timeline import (
     save_timeline,
     validate_arrangement_duration_window,
 )
-from astrid.core.foundation.hash import sha256_file
 from astrid.packs.editorial.hype.arrangement_rules import compile_arrangement_plan
 from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
-from astrid.core.theme import load_theme, theme_root
 
 from . import probe
 from . import registry as _registry

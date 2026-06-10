@@ -15,14 +15,14 @@ import os
 from pathlib import Path
 from typing import Any
 
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.contracts.errors import AstridError
-from astrid.core.theme import load_theme_by_id
+from astrid.core.foundation import project_paths as paths
 from astrid.core.foundation.atomic_io import write_text_atomic
 from astrid.core.foundation.hash import sha256_file
+from astrid.core.theme import load_theme_by_id
 from astrid.core.util.time import utc_now_seconds
 
-from astrid.core.foundation import project_paths as paths
-from astrid.core._shared.jsonio import read_json, write_json_atomic
 from .schema import build_project, build_source, validate_project
 
 # Skeleton for the per-project plan.md — a human/agent-readable working notes

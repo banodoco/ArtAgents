@@ -17,13 +17,13 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core.cli_choices import add_choice_arg
+from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.util.http import (
     HttpClient,
     default_client,
     fal_submit_and_poll,
 )
-from astrid.core.util.credentials_scope import CredentialsScope
-from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 
 FIREWORKS_CHAT_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
 

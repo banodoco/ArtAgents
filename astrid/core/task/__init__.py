@@ -17,7 +17,6 @@ from .env import (
     task_run_id_env,
     task_step_id_env,
 )
-from .events.stream import EventStreamRecord, read_event_stream, subscribe_event_stream
 from .events import (
     canonical_event_json,
     make_cursor_rewind_event,
@@ -33,6 +32,7 @@ from .events import (
     read_events,
     verify_chain,
 )
+from .events.stream import EventStreamRecord, read_event_stream, subscribe_event_stream
 from .gate import (
     AttestedArgs,
     CursorPath,

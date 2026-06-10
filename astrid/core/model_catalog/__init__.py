@@ -1,9 +1,5 @@
 """Generation model registry — model entries, validation, and loading."""
 
-from astrid.core.model_catalog.taxonomy import (
-    CANONICAL_IMAGE_MODES,
-    CANONICAL_VIDEO_MODES,
-)
 from astrid.core.model_catalog.registry import LoraRegistry, ModelRegistry
 from astrid.core.model_catalog.schema import (
     BackendSpec,
@@ -13,6 +9,10 @@ from astrid.core.model_catalog.schema import (
     ModeSpec,
     Price,
     validate_lora_registry,
+)
+from astrid.core.model_catalog.taxonomy import (
+    CANONICAL_IMAGE_MODES,
+    CANONICAL_VIDEO_MODES,
 )
 
 __all__ = [

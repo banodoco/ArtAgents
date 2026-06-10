@@ -15,11 +15,9 @@ from typing import Any
 from uuid import uuid4 as _uuid4
 
 from astrid.core.contracts.errors import AstridError
-
 from astrid.core.timeline._edit_helpers import TimelineEditError
-from astrid.core.timeline.events.schema import ClipPosition
 from astrid.core.timeline._shared import _expected_version_kwargs, _timeline_actor_from_session
-
+from astrid.core.timeline.events.schema import ClipPosition
 
 # ---------------------------------------------------------------------------
 # Shared helpers (used only by edit handlers in this module)

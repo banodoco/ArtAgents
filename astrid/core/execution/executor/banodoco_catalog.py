@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.env_vars import ASTRID_BANODOCO_CATALOG_URL
+
 from .install import GitExecutorSource, fetch_git_executor_manifest
 from .schema import ExecutorDefinition, ExecutorValidationError, validate_executor_definition
 

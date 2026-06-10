@@ -23,12 +23,12 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from astrid.core.audit import AuditContext
 from astrid.core import timeline
-from astrid.core.subprocess_env import build_child_subprocess_env
-from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid.core.audit import AuditContext
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
+from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.theme import load_theme
+from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 
 def _pick_free_port() -> int:

@@ -21,13 +21,13 @@ from astrid.core.generation.backends.base import (
     split_feature_support,
 )
 from astrid.core.model_catalog.schema import BackendSpec, ModelEntry
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.util.http import (
     HttpClient,
     default_client,
     fal_submit_and_poll,
     fal_upload,
 )
-from astrid.core.util.credentials_scope import CredentialsScope
 
 logger = logging.getLogger(__name__)
 

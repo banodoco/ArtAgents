@@ -357,9 +357,9 @@ def _dispatch_attested(
     # these helpers and owns _finalize_step / _ActiveWriterAppend / _TerminalEventRequest).
     from astrid.core.task.gate import (
         _ActiveWriterAppend,
-        _TerminalEventRequest,
         _finalize_step,
         _run_inline_checks,
+        _TerminalEventRequest,
     )
 
     matched, args = match_attested_command(command, step.command)

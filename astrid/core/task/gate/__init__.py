@@ -18,20 +18,20 @@ from pathlib import Path
 from typing import Any, Callable, Literal, NoReturn, Sequence
 
 from astrid.core.contracts.run_status import TASK_FINALIZABLE_EVENT_KINDS
-from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.foundation.project_paths import project_dir
+from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision
 from astrid.core.task.cas import intern, link_into_produces
-from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.env import (
     apply_task_run_env,
     is_in_task_run,
     task_actor_env,
 )
-from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.events import (
-    canonical_event_json,
     EventLogError,
+    canonical_event_json,
     make_cursor_rewind_event,
     make_for_each_expanded_event,
     make_item_attested_event,
@@ -49,35 +49,27 @@ from astrid.core.task.events import (
     make_step_dispatched_event,
     read_events,
 )
-from astrid.core.task.plan import (
-    STEP_PATH_SEP,
-    AckRule,
-    ProducesEntry,
-    RepeatForEach,
-    RepeatUntil,
-    TaskPlan,
-    TaskPlanError,
-    compute_plan_hash,
-    is_legacy_repeat_until_condition,
-    is_attested_kind,
-    is_code_kind,
-    is_group_step,
-    load_plan,
-    parse_from_ref,
-    parse_repeat_until_expression,
-    resolve_produces_ref,
-    step_dir_for_path,
+from astrid.core.task.gate.attestation import (
+    AttestedArgs,
+    _extract_iterate_feedback,
+    match_attested_command,
+    validate_attested_identity,
+    write_iteration_feedback,
 )
 from astrid.core.task.gate.base import (
+    ITERATE_FEEDBACK_PREFIX,
     GateDecision,
     InlineCheckResult,
-    ITERATE_FEEDBACK_PREFIX,
     TaskRunGateError,
     _reject,
 )
+from astrid.core.task.gate.checks import (
+    _intern_produces_artifact,
+    _run_inline_checks,
+)
 from astrid.core.task.gate.cursor import (
-    CursorPath,
     EXHAUST_OVERRIDE_ID,
+    CursorPath,
     _current_dispatch_hash,
     _current_item_step,
     _current_repeat_context,
@@ -90,20 +82,31 @@ from astrid.core.task.gate.cursor import (
     _ForEachSelection,
     _Frame,
     _make_exhaust_override_step,
-    _make_iteration_frame,
     _make_item_frame,
+    _make_iteration_frame,
     _path_str_from_event,
     _PendingProduces,
     _repeat_host_for_top_frame,
     _top_frame_needs_repeat_until_evaluation,
     derive_cursor,
 )
-from astrid.core.task.gate.attestation import (
-    AttestedArgs,
-    _extract_iterate_feedback,
-    match_attested_command,
-    validate_attested_identity,
-    write_iteration_feedback,
+from astrid.core.task.gate.dispatch import (
+    _adapter_dispatch,
+    _code_decision,
+    _dispatch_attested,
+    _dispatch_code,
+    _latest_event_for_step,
+    _make_run_ctx,
+    _resolve_adapter,
+)
+from astrid.core.task.gate.finalize import (
+    _finalize_step as _gate_finalize_step,
+)
+from astrid.core.task.gate.finalize import (
+    _load_step_for_decision,
+    record_dispatch_complete,
+    record_nested_entered,
+    record_nested_exited,
 )
 from astrid.core.task.gate.repeat import (
     _build_autoclose_for_each_host_context,
@@ -118,25 +121,24 @@ from astrid.core.task.gate.repeat import (
     _maybe_autocomplete_for_each_host,
     _resolve_for_each_items,
 )
-from astrid.core.task.gate.checks import (
-    _intern_produces_artifact,
-    _run_inline_checks,
-)
-from astrid.core.task.gate.dispatch import (
-    _adapter_dispatch,
-    _code_decision,
-    _dispatch_attested,
-    _dispatch_code,
-    _latest_event_for_step,
-    _make_run_ctx,
-    _resolve_adapter,
-)
-from astrid.core.task.gate.finalize import (
-    _finalize_step as _gate_finalize_step,
-    _load_step_for_decision,
-    record_dispatch_complete,
-    record_nested_entered,
-    record_nested_exited,
+from astrid.core.task.plan import (
+    STEP_PATH_SEP,
+    AckRule,
+    ProducesEntry,
+    RepeatForEach,
+    RepeatUntil,
+    TaskPlan,
+    TaskPlanError,
+    compute_plan_hash,
+    is_attested_kind,
+    is_code_kind,
+    is_group_step,
+    is_legacy_repeat_until_condition,
+    load_plan,
+    parse_from_ref,
+    parse_repeat_until_expression,
+    resolve_produces_ref,
+    step_dir_for_path,
 )
 
 _GATE_FINALIZABLE_EVENT_KINDS = TASK_FINALIZABLE_EVENT_KINDS

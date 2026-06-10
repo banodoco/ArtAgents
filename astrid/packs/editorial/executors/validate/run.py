@@ -26,15 +26,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from astrid.core.audit import register_outputs
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.audit import register_outputs
+from astrid.core.execution.executor.argv import executor_argv
 from astrid.core.timeline import load_timeline
 from astrid.packs.editorial.hype.text_match import (
     segments_in_range,
     token_set_similarity,
     tokenize,
 )
-from astrid.core.execution.executor.argv import executor_argv
 
 
 def clip_timeline_duration_sec(clip: dict[str, Any]) -> float:

@@ -10,6 +10,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,
@@ -29,7 +30,6 @@ from astrid.core.pack.manifest import (
     load_manifest_mapping,
 )
 from astrid.core.pack.resolver import PackResolver
-from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.registry import CapabilityRegistry
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors

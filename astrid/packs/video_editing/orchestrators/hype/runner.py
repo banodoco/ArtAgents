@@ -16,13 +16,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from astrid.core import timeline
 from astrid.core.audit import PARENT_IDS_ENV, AuditContext
 from astrid.core.contracts.errors import AstridError, render_astrid_error
-from astrid.core import timeline
 from astrid.core.foundation.hash import sha256_file
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import STEP_ORDER
+
 
 def _write_run_json(args: argparse.Namespace, plan_hash: str) -> None:
     """Write or update ``run.json`` in the run directory with hype metadata.
@@ -446,8 +447,16 @@ def _invalidate_downstream_sentinels(brief_out: Path) -> None:
         (brief_out / name).unlink(missing_ok=True)
 
 def _run_revise(args: argparse.Namespace, prior_arrangement: Path, editor_notes: Path) -> int:
-    from .steps import Step, _append_managed_binding, add_extra_args, step_argv  # late import to avoid circular dependency
-    from astrid.packs.video_editing.orchestrators.hype import run as run_mod  # late import through facade for mock.patch compatibility
+    from astrid.packs.video_editing.orchestrators.hype import (
+        run as run_mod,  # late import through facade for mock.patch compatibility
+    )
+
+    from .steps import (  # late import to avoid circular dependency
+        Step,
+        _append_managed_binding,
+        add_extra_args,
+        step_argv,
+    )
 
     step = Step(
         "arrange_revise",
@@ -481,7 +490,9 @@ def _run_revise(args: argparse.Namespace, prior_arrangement: Path, editor_notes:
 
 
 def _run_steps_once(steps: list[Step], args: argparse.Namespace) -> int:
-    from astrid.packs.video_editing.orchestrators.hype import run as run_mod  # late import through facade for mock.patch compatibility
+    from astrid.packs.video_editing.orchestrators.hype import (
+        run as run_mod,  # late import through facade for mock.patch compatibility
+    )
     from_index = STEP_ORDER.index(args.from_step) if getattr(args, "from_step", None) else None
     for step in steps:
         if step.name in {"refine", "render", "editor_review"} and not args.render:

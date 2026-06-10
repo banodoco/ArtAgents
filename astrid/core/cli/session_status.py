@@ -14,8 +14,14 @@ import sys
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.current_run import read_current_run
 from astrid.core.foundation.project_paths import project_dir
+from astrid.core.project.current_run import read_current_run
+from astrid.core.session._shared import (
+    NONE_PLACEHOLDER,
+    TAKEOVER_HINT_ORPHAN,
+    TAKEOVER_HINT_READER,
+    _json_mode,
+)
 from astrid.core.session.binding import (
     SessionBindingError,
     resolve_current_session,
@@ -28,19 +34,12 @@ from astrid.core.session.lease import (
     read_lease,
 )
 from astrid.core.session.model import Session
-from astrid.core.session._shared import (
-    NONE_PLACEHOLDER,
-    TAKEOVER_HINT_ORPHAN,
-    TAKEOVER_HINT_READER,
-    _json_mode,
-)
 from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.task.events import EVENTS_FILENAME, read_events
 from astrid.core.timeline import crud as timeline_crud
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_slug_for_ulid
 from astrid.core.util.log_and_swallow import log_and_swallow
-
 
 # ----- Templates (tests assert on these literal strings; keep them stable) -----
 

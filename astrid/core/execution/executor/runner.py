@@ -15,6 +15,14 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Mapping, Sequence
 
+from astrid.core._shared.capability_common import (
+    _PLACEHOLDER_RE,
+    _expand_placeholders,
+    _has_value,
+    _output_value,
+    _stringify_value,
+    _validate_required_inputs,
+)
 from astrid.core.contracts.capability_runner import CapabilityRunner
 from astrid.core.contracts.exec_error import (
     ExecError,
@@ -24,6 +32,7 @@ from astrid.core.contracts.exec_error import (
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.contracts.scoped_config import SCOPE_REGISTRY, ScopeRequest
 from astrid.core.env_vars import ASTRID_INTERNAL_INVOCATION, HYPE_ACTIVE_THEME
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack.resolver import resolve_callable_from_metadata
 from astrid.core.project.run import (
     ProjectRunContext,
@@ -46,7 +55,6 @@ from astrid.core.session.config import resolve_default_project_for_sdk
 from astrid.core.subprocess_env import build_child_subprocess_env
 from astrid.core.task import env as task_env
 from astrid.core.task import gate as task_gate
-from astrid.core.foundation.paths import REPO_ROOT
 
 from .install import executor_python_path
 from .registry import ExecutorRegistry, load_default_registry
@@ -55,15 +63,6 @@ from .schema import (
     ExecutorDefinition,
     ExecutorKind,
     ExecutorValidationError,
-)
-
-from astrid.core._shared.capability_common import (
-    _PLACEHOLDER_RE,
-    _expand_placeholders,
-    _has_value,
-    _output_value,
-    _stringify_value,
-    _validate_required_inputs,
 )
 
 
@@ -958,7 +957,7 @@ def _emit_scoped_config_env(
             if isinstance(result, StyleScope) and result.theme_dir is not None:
                 env[HYPE_ACTIVE_THEME] = str(result.theme_dir)  # scoped-config emit
         elif key.startswith("credentials."):
-            from astrid.core.util.credentials_scope import CredentialsScope, _PROVIDER_ENV
+            from astrid.core.util.credentials_scope import _PROVIDER_ENV, CredentialsScope
             result = SCOPE_REGISTRY.resolve(key, scope_request)
             if isinstance(result, CredentialsScope):
                 provider_env = _PROVIDER_ENV.get(result.provider)

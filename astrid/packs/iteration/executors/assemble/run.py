@@ -16,11 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from astrid.core import modalities
-from astrid.core import timeline
+from astrid.core import modalities, timeline
 from astrid.core._shared.result_manifest import write_manifest
-from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.threads.schema import SCHEMA_VERSION
 
 QUALITY_FLOOR = 0.6

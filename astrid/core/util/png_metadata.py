@@ -50,8 +50,8 @@ def embed_png_text(
         return False
 
     try:
-        from PIL.PngImagePlugin import PngInfo
         from PIL import Image
+        from PIL.PngImagePlugin import PngInfo
     except ImportError:
         logger.warning("embed_png_text: Pillow not available — skipping %s", path)
         return False

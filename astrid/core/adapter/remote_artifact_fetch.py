@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.adapter._common import _step_dir
-from astrid.core.task.plan import Step
 from astrid.core.foundation.hash import sha256_file as _sha256
+from astrid.core.project.sidecar import write_json_sidecar
+from astrid.core.task.plan import Step
 
 FetchStatus = Literal["completed", "awaiting_fetch", "failed"]
 

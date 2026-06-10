@@ -20,8 +20,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.current_run import read_current_run
 from astrid.core.foundation.project_paths import project_dir
+from astrid.core.project.current_run import read_current_run
 from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
 from astrid.core.session.identity import (
     Identity,

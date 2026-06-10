@@ -11,13 +11,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Callable, Iterator, Mapping
 
+from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 from astrid.core.pack.resolver import (
     CallableNotFoundError,
     PackResolverError,
     resolve_callable_from_metadata,
 )
 from astrid.core.subprocess_env import ASTRID_INTERNAL_INVOCATION, build_child_subprocess_env
-from astrid.core.pack.entrypoint import canonical_runtime_entrypoint
 
 from ._normalize import _system_exit_code, normalize_python_runtime_result
 from .log_capture import TeeWriter

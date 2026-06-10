@@ -15,13 +15,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core.timeline.events.schema import (
-    TimelineActor,
-    TimelineRecoveredPayload,
-)
 from astrid.core.timeline.banodoco_schema import (
     timeline_config_digest,
     validate_timeline_config_for_container,
+)
+from astrid.core.timeline.events.schema import (
+    TimelineActor,
+    TimelineRecoveredPayload,
 )
 from astrid.core.timeline.projection import (
     ProjectionError,

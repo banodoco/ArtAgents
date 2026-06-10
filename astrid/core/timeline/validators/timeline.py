@@ -13,6 +13,7 @@ from astrid.core.timeline.banodoco_schema import (
     _shared_validate_timeline,
 )
 from astrid.core.timeline.kinds import normalize_track_kind
+
 # Registry lookups are late-imported through banodoco_schema so that
 # mock.patch.object(banodoco_schema, ...) still affects internal callers.
 # DO NOT import _animation_ids/_animation_meta/_effect_ids/_transition_ids

@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING, Any, Iterable
 
 from astrid.core.dirty import detect_local_edits, read_fork_state, write_fork_state
 from astrid.core.execution.executor.registry import ExecutorRegistry
-from astrid.core.execution.executor.registry import load_default_registry as load_default_executor_registry
+from astrid.core.execution.executor.registry import (
+    load_default_registry as load_default_executor_registry,
+)
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.pack import (
     discover_packs,
     ensure_local_pack,
@@ -33,7 +36,6 @@ from astrid.core.pack.manifest import (
     load_manifest_mapping,
 )
 from astrid.core.registry import CapabilityRegistry
-from astrid.core.foundation.paths import REPO_ROOT
 
 from .folder import load_folder_orchestrators
 from .schema import (

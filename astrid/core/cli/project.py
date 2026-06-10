@@ -27,8 +27,20 @@ import tempfile
 from pathlib import Path
 from typing import Any, TypedDict
 
-from astrid.core.contracts.errors import AstridError, coerce_astrid_error
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
+from astrid.core.contracts.errors import AstridError, coerce_astrid_error
+from astrid.core.foundation import project_paths as paths
+from astrid.core.project.project import (
+    ProjectError,
+    create_project,
+    get_project_theme,
+    register_source_file,
+    require_project,
+    set_project_theme,
+    show_project,
+)
+from astrid.core.project.schema import SOURCE_KINDS
+from astrid.core.project.source import add_source
 from astrid.core.session.binding import (
     SessionBindingError,
     resolve_current_session,
@@ -42,18 +54,6 @@ from astrid.core.session.config import (
 from astrid.core.session.discovery import discover_projects
 from astrid.core.util.log_and_swallow import log_and_swallow
 
-from astrid.core.foundation import project_paths as paths
-from astrid.core.project.project import (
-    ProjectError,
-    create_project,
-    get_project_theme,
-    register_source_file,
-    require_project,
-    set_project_theme,
-    show_project,
-)
-from astrid.core.project.schema import SOURCE_KINDS
-from astrid.core.project.source import add_source
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()

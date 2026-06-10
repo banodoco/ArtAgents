@@ -9,8 +9,21 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from astrid.core.contracts.errors import AstridError
+from astrid.core._shared.capability_common import (
+    _aliases_text,
+    _definition_content_root,
+    _definition_pack_id,
+    _eprint,
+    _filter_by_pack,
+    _format_invocation_hint,
+    _gateway_resolved_project,
+    _print_invocation_example,
+    _print_ports,
+    _require_pack_match,
+    _require_qualified_id,
+)
 from astrid.core.cli_choices import RecoverableArgumentParser, add_choice_arg
+from astrid.core.contracts.errors import AstridError
 from astrid.core.dirty import detect_local_edits
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.project.run import ProjectRunError
@@ -34,21 +47,6 @@ from astrid.core.update import update_apply, update_check
 
 from .registry import OrchestratorRegistry, load_default_registry
 from .schema import OrchestratorDefinition, OrchestratorValidationError, to_capability_handle
-
-
-from astrid.core._shared.capability_common import (
-    _aliases_text,
-    _definition_content_root,
-    _definition_pack_id,
-    _eprint,
-    _filter_by_pack,
-    _format_invocation_hint,
-    _gateway_resolved_project,
-    _print_invocation_example,
-    _print_ports,
-    _require_pack_match,
-    _require_qualified_id,
-)
 
 
 def _banodoco_config_from_args(

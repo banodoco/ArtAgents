@@ -16,13 +16,14 @@ from pathlib import Path
 from subprocess import CompletedProcess
 from typing import Optional
 
-from astrid.core.session.current_run_state import read_current_run_state
+from astrid.core.env_vars import ASTRID_AUTHOR_TEST
 from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV
+from astrid.core.orchestrate.compile import compile_to_path
 from astrid.core.project.project import create_project
 from astrid.core.session.binding import ASTRID_SESSION_ID_ENV
+from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.session.model import Session
 from astrid.core.session.paths import ASTRID_HOME_ENV, session_path
-from astrid.core.env_vars import ASTRID_AUTHOR_TEST
 from astrid.core.task.env import (
     ASTRID_ACTOR,
     TASK_ITEM_ID_ENV,
@@ -49,7 +50,6 @@ from astrid.core.task.plan import (
     step_dir_for_path,
 )
 from astrid.core.timeline.crud import create_timeline
-from astrid.core.orchestrate.compile import compile_to_path
 
 _MAX_ITERATIONS = 200
 

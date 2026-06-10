@@ -18,6 +18,7 @@ from astrid.core.contracts.schema import (
 from astrid.core.task.events.stream import (
     EventStreamRecord,
 )
+
 from .results import (
     Capability,
     CapabilityType,

@@ -44,6 +44,7 @@ from typing import Any, BinaryIO
 from astrid.core.contracts.event_log_error import EventLogError as _EventLogErrorBase
 from astrid.core.util.time import utc_now_iso
 
+
 def _set_if_not_none(payload: dict[str, Any], key: str, value: Any) -> None:
     if value is not None:
         payload[key] = value

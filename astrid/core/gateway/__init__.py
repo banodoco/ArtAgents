@@ -33,33 +33,6 @@ from astrid.core.contracts.errors import (
     render_astrid_error,
     wrap_degraded_error,
 )
-from astrid.core.util.log_and_swallow import log_and_swallow
-from . import dispatch as _gateway_dispatch
-from astrid.core.gateway.project import (
-    ASTRID_GATEWAY_RESOLVED_PROJECT_ENV,
-    DEFAULT_PROJECT_SLUG,
-    _AUTO_BIND_RUN_VERBS,
-    _REQUEST_SCOPED_PROJECT_RUN_VERBS,
-    _auto_bind_default_project_session,
-    _dispatch_with_resolved_project,
-    _extract_project_slug,
-    _extract_project_slug_from_run_paths,
-    _has_cli_option,
-    _invocation_is_auto_bindable_run,
-    _raise_on_ambiguous_run_path_projects,
-    _resolved_request_project_slug,
-)
-from astrid.core.gateway.help import (
-    _packs_subcommand_list,
-    _print_entrypoint_help,
-)
-from astrid.core.gateway.wait import (
-    _make_run_ctx_for_poll,
-    _read_returncode_sidecar,
-    _wait_adapter,
-    _wait_local_subprocess,
-    _wait_remote_artifact,
-)
 from astrid.core.gateway.dispatch import (
     _TOP_LEVEL_HANDLERS,
     _build_dispatch_parser,
@@ -104,6 +77,34 @@ from astrid.core.gateway.dispatch import (
     _run_default_brief_from_args,
     _top_level_commands,
 )
+from astrid.core.gateway.help import (
+    _packs_subcommand_list,
+    _print_entrypoint_help,
+)
+from astrid.core.gateway.project import (
+    _AUTO_BIND_RUN_VERBS,
+    _REQUEST_SCOPED_PROJECT_RUN_VERBS,
+    ASTRID_GATEWAY_RESOLVED_PROJECT_ENV,
+    DEFAULT_PROJECT_SLUG,
+    _auto_bind_default_project_session,
+    _dispatch_with_resolved_project,
+    _extract_project_slug,
+    _extract_project_slug_from_run_paths,
+    _has_cli_option,
+    _invocation_is_auto_bindable_run,
+    _raise_on_ambiguous_run_path_projects,
+    _resolved_request_project_slug,
+)
+from astrid.core.gateway.wait import (
+    _make_run_ctx_for_poll,
+    _read_returncode_sidecar,
+    _wait_adapter,
+    _wait_local_subprocess,
+    _wait_remote_artifact,
+)
+from astrid.core.util.log_and_swallow import log_and_swallow
+
+from . import dispatch as _gateway_dispatch
 
 # Phase 5 lifecycle verbs short-circuit the implicit task-mode gate at the top
 # of main(): for these verbs the --project flag identifies the run, NOT a

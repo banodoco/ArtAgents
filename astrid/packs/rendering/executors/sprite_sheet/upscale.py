@@ -15,7 +15,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from astrid.core.util.secrets import candidate_env_files, read_env_value, load_api_key
+from astrid.core.util.secrets import candidate_env_files, load_api_key, read_env_value
 from astrid.packs.generation.executors.generate_image_openai.run import (
     API_URL,
     DEFAULT_MODEL,

@@ -10,7 +10,6 @@ from pathlib import Path
 
 from astrid.core.pack.validate_layout import LayoutValidationIssue
 
-
 # ---------------------------------------------------------------------------
 # Known first-party pack IDs and internal directories
 # ---------------------------------------------------------------------------

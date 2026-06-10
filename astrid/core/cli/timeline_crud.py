@@ -13,11 +13,9 @@ import sys
 from astrid.core.contracts.errors import AstridError
 from astrid.core.project.current_run import read_current_run
 from astrid.core.session.binding import resolve_current_session
-
 from astrid.core.timeline import crud
 from astrid.core.timeline._shared import _expected_version_kwargs, _timeline_actor_from_session
 from astrid.core.timeline.integrity import verify
-
 
 # ---------------------------------------------------------------------------
 # Handler: ls

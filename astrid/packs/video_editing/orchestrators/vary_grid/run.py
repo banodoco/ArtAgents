@@ -17,8 +17,8 @@ from typing import Any, Sequence
 from urllib.error import HTTPError, URLError
 
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.http import FAL_QUEUE_URL, default_client
 from astrid.core.util.credentials_scope import CredentialsScope
+from astrid.core.util.http import FAL_QUEUE_URL, default_client
 from astrid.packs.video_editing.orchestrators.logo_ideas.run import (
     DEFAULT_FIREWORKS_MODEL,
     FIREWORKS_CHAT_URL,

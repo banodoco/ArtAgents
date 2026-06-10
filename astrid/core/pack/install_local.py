@@ -13,7 +13,13 @@ import sys
 from pathlib import Path
 
 from astrid.core.pack import pack_manifest_path
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
+from astrid.core.pack.gitignore import gitignore_filter
+from astrid.core.pack.install_git import (
+    _install_from_git,
+    _is_git_url,
+    _update_git_pack,
+)
+
 # Leaf-level helpers imported directly from their real home modules
 # (install_trust = pure leaf, install_git = git leaf).  ``_confirm`` and
 # ``_confirm_trust`` are NOT imported here: they retain a late import from
@@ -27,20 +33,14 @@ from astrid.core.pack.install_trust import (
     _normalized_summary_permissions,
     _trust_missing_error,
 )
-from astrid.core.pack.install_git import (
-    _install_from_git,
-    _is_git_url,
-    _update_git_pack,
-)
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack.store import (
     InstalledPackStore,
     InstallRecord,
     _revision_timestamp,
 )
-from astrid.core.util.time import utc_now_seconds
-from astrid.core.pack.gitignore import gitignore_filter
 from astrid.core.pack.validate import extract_trust_summary, validate_pack
-
+from astrid.core.util.time import utc_now_seconds
 
 # ---------------------------------------------------------------------------
 # Install

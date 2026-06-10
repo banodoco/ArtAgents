@@ -5,25 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from .ulid import generate_event_ulid, is_event_ulid
-
-# Shared leaf types, validators, and coercion helpers. Re-exported here so that
-# ``from astrid.core.timeline.events.schema.types import <name>`` keeps working
-# for every historical consumer.
-from .payloads._base import (
-    ActorType,
-    ClipKind,
-    ClipPosition,
-    TimelineEventSchemaError,
-    TimelineImportSource,
-    TrackKind,
-    _coerce_clip_position,
-    _require_nonempty_str,
-    _require_ulid_str,
-    _require_uuid_str,
-    _validate_jsonable,
-)
-
 # Per-domain payload dataclasses. These were split out of this module into the
 # ``payloads`` subpackage; they are imported and re-exported here so that the
 # ``PayloadModel`` union, ``_PAYLOAD_TYPES`` dispatch, and all existing import
@@ -67,6 +48,24 @@ from .payloads import (
     TransitionRemovedPayload,
     TransitionSetPayload,
 )
+
+# Shared leaf types, validators, and coercion helpers. Re-exported here so that
+# ``from astrid.core.timeline.events.schema.types import <name>`` keeps working
+# for every historical consumer.
+from .payloads._base import (
+    ActorType,
+    ClipKind,
+    ClipPosition,
+    TimelineEventSchemaError,
+    TimelineImportSource,
+    TrackKind,
+    _coerce_clip_position,
+    _require_nonempty_str,
+    _require_ulid_str,
+    _require_uuid_str,
+    _validate_jsonable,
+)
+from .ulid import generate_event_ulid, is_event_ulid
 
 EVENT_SCHEMA_VERSION = 2
 

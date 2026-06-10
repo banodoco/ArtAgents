@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('editorial.refine')
 import argparse
-import json
 import copy
+import json
 import subprocess
 import tempfile
 from datetime import datetime, timezone
@@ -18,25 +19,10 @@ from types import SimpleNamespace
 from typing import Any, Callable, Sequence
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from astrid.core.task.managed_binding import is_managed_mode
+from astrid.core.audit import register_outputs
+from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.hash import sha256_file
-from astrid.packs.editorial.hype import enriched_arrangement
-from astrid.packs.training.executors.asset_cache import run as asset_cache
-from astrid.packs.editorial.hype.arrangement_rules import (
-    ROLE_DURATION_BOUNDS,
-    TOTAL_DURATION_BOUNDS,
-    TRIM_BOUND_EXTENSION_SEC,
-    compile_arrangement_plan,
-)
-from astrid.packs.video_editing.executors.cut.run import (
-    build_metadata_from_arrangement,
-    build_multitrack_timeline,
-)
-from astrid.packs.editorial.executors.refine.src.reviewers.audio_boundary import AudioBoundaryReviewer
-from astrid.packs.editorial.executors.refine.src.reviewers.overlay_fit import OverlayFitReviewer
-from astrid.packs.editorial.executors.refine.src.reviewers.speaker_flow import SpeakerFlowReviewer
-from astrid.packs.editorial.executors.refine.src.reviewers.visual_quality import VisualQualityReviewer
-from astrid.packs.editorial.hype.text_match import segments_in_range, token_set_similarity, tokenize
+from astrid.core.task.managed_binding import is_managed_mode
 from astrid.core.timeline import (
     canonical_timeline_config,
     is_all_generative_arrangement,
@@ -50,9 +36,29 @@ from astrid.core.timeline import (
     save_timeline,
     validate_arrangement_duration_window,
 )
+from astrid.packs.editorial.executors.refine.src.reviewers.audio_boundary import (
+    AudioBoundaryReviewer,
+)
+from astrid.packs.editorial.executors.refine.src.reviewers.overlay_fit import OverlayFitReviewer
+from astrid.packs.editorial.executors.refine.src.reviewers.speaker_flow import SpeakerFlowReviewer
+from astrid.packs.editorial.executors.refine.src.reviewers.visual_quality import (
+    VisualQualityReviewer,
+)
+from astrid.packs.editorial.hype import enriched_arrangement
+from astrid.packs.editorial.hype.arrangement_rules import (
+    ROLE_DURATION_BOUNDS,
+    TOTAL_DURATION_BOUNDS,
+    TRIM_BOUND_EXTENSION_SEC,
+    compile_arrangement_plan,
+)
+from astrid.packs.editorial.hype.text_match import segments_in_range, token_set_similarity, tokenize
+from astrid.packs.training.executors.asset_cache import run as asset_cache
+from astrid.packs.video_editing.executors.cut.run import (
+    build_metadata_from_arrangement,
+    build_multitrack_timeline,
+)
+
 from .._common import load_api_key
-from astrid.core.audit import register_outputs
-from astrid.core.contracts.errors import AstridError
 
 BOILERPLATE_TOKENS = {"um", "uh"}
 BOILERPLATE_BIGRAMS = {("you", "know"), ("i", "mean"), ("sort", "of"), ("kind", "of")}

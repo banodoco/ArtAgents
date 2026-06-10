@@ -20,9 +20,7 @@ from astrid.core.cli_choices import (
     RecoverableArgumentParser,
     add_choice_arg,
 )
-
 from astrid.core.timeline.kinds import default_transition_kind
-
 
 # ── Shared helpers (kept public — cli.py delegates to these) ────────────────
 
@@ -1367,23 +1365,16 @@ def build_parser() -> argparse.ArgumentParser:
     # Late import through the .cli facade — this is the indirection that
     # ~50 tests rely on for monkeypatch.setattr(timeline_cli, "cmd_ls", fake).
     from .timeline import (  # noqa: PLC0415
-        # -- cli_crud --
-        cmd_create,
-        cmd_finalize,
-        cmd_ls,
-        cmd_purge,
-        cmd_rename,
-        cmd_set_default,
-        cmd_show,
-        cmd_tombstone,
-        # -- cli_output --
-        cmd_cost,
-        cmd_export,
         # -- cli_edits --
         cmd_arrangement_set,
         cmd_arrangement_show,
         cmd_audio_bind,
         cmd_audio_unbind,
+        # -- cli_events --
+        cmd_audit,
+        # -- cli_backends --
+        cmd_branch_create,
+        cmd_branch_list,
         cmd_clip_add,
         cmd_clip_annotate,
         cmd_clip_move,
@@ -1393,31 +1384,38 @@ def build_parser() -> argparse.ArgumentParser:
         cmd_clip_retrack,
         cmd_clip_set_text,
         cmd_clip_swap,
+        # -- cli_output --
+        cmd_cost,
+        # -- cli_crud --
+        cmd_create,
+        cmd_diff,
         cmd_effect_add,
         cmd_effect_remove,
         cmd_effect_tune,
+        cmd_erase,
+        cmd_export,
+        cmd_finalize,
+        cmd_history,
+        cmd_ls,
+        cmd_mass_undo,
+        cmd_migrate_events,
+        cmd_preview,
+        cmd_pull,
+        cmd_purge,
+        cmd_push,
+        cmd_recover,
+        cmd_rename,
+        cmd_set_default,
+        cmd_show,
         cmd_theme_override,
         cmd_theme_set,
+        cmd_tombstone,
         cmd_track_add,
         cmd_track_remove,
         cmd_transition_remove,
         cmd_transition_set,
-        # -- cli_events --
-        cmd_audit,
-        cmd_diff,
-        cmd_history,
-        cmd_migrate_events,
-        cmd_preview,
-        cmd_who_edited,
-        # -- cli_backends --
-        cmd_branch_create,
-        cmd_branch_list,
-        cmd_erase,
-        cmd_mass_undo,
-        cmd_pull,
-        cmd_push,
-        cmd_recover,
         cmd_undo,
+        cmd_who_edited,
     )
 
     # Build handler lookup from the local names imported above.

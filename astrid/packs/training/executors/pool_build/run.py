@@ -11,14 +11,14 @@ guard_canonical_entrypoint('training.pool_build')
 import argparse
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
 from astrid.core import timeline
-from astrid.core.audit import register_outputs
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
+from astrid.core.audit import register_outputs
 from astrid.core.util.time import _utc_now, utc_now_seconds
-from datetime import datetime, timezone
 
 AUDIO_EVENT_RE = re.compile(r"\b(applause|laughter|cheer|audience)\b", re.IGNORECASE)
 KIND_LETTER = {"dialogue": "d", "visual": "v", "reaction": "r", "applause": "a", "music": "m"}

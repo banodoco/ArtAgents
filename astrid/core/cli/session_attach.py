@@ -16,9 +16,19 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.project.current_run import read_current_run
 from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
+from astrid.core.project.current_run import read_current_run
 from astrid.core.project.project import ProjectError, require_project
+from astrid.core.session._shared import (
+    NONE_PLACEHOLDER,
+    TAKEOVER_HINT_ORPHAN,
+    TAKEOVER_HINT_READER,
+    _emit_notice,
+    _ensure_identity,
+    _find_reusable_session,
+    _json_mode,
+)
+
 # attach_session is imported via late import inside cmd_attach to preserve
 # monkeypatch seams (tests setattr on cli.attach_session).
 from astrid.core.session.config import resolve_default_project, set_default_project
@@ -33,15 +43,6 @@ from astrid.core.session.model import (
     SessionRole,
 )
 from astrid.core.session.paths import sessions_dir
-from astrid.core.session._shared import (
-    NONE_PLACEHOLDER,
-    TAKEOVER_HINT_ORPHAN,
-    TAKEOVER_HINT_READER,
-    _emit_notice,
-    _ensure_identity,
-    _find_reusable_session,
-    _json_mode,
-)
 from astrid.core.task.cli_contract import emit_lifecycle_json
 from astrid.core.timeline.crud import list_timelines
 from astrid.core.timeline.defaults import read_project_default

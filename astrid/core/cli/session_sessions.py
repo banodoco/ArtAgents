@@ -15,12 +15,21 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.foundation.project_paths import resolve_projects_root
+from astrid.core.foundation.project_paths import project_dir, resolve_projects_root
+from astrid.core.project.current_run import read_current_run
 from astrid.core.project.project import ProjectError, require_project
-from astrid.core.session.binding import (
-    resolve_current_session,
-    SessionBindingError,
+from astrid.core.session._shared import (
+    NONE_PLACEHOLDER,
+    _ensure_identity,
+    _find_reusable_session,
+    _make_bootstrap_session,
+    _session_store,
 )
+from astrid.core.session.binding import (
+    SessionBindingError,
+    resolve_current_session,
+)
+from astrid.core.session.discovery import discover_projects
 from astrid.core.session.identity import IdentityError
 from astrid.core.session.lease import (
     LeaseError,
@@ -40,13 +49,8 @@ from astrid.core.session.paths import (
     session_path,
     sessions_dir,
 )
-from astrid.core.session._shared import (
-    NONE_PLACEHOLDER,
-    _ensure_identity,
-    _find_reusable_session,
-    _make_bootstrap_session,
-    _session_store,
-)
+from astrid.core.task.events import EVENTS_FILENAME
+
 # NOTE: ``_list_session_files`` is a pinned monkeypatch seam (the contract
 # patches ``session_cli._list_session_files``). The two ``cmd_sessions_*``
 # handlers below resolve it through the ``.cli`` facade at call time so that
@@ -55,11 +59,6 @@ from astrid.core.session._shared import (
 from astrid.core.timeline.defaults import read_project_default
 from astrid.core.timeline.paths import find_timeline_slug_for_ulid
 from astrid.core.util.time import utc_now_iso
-from astrid.core.project.current_run import read_current_run
-from astrid.core.foundation.project_paths import project_dir
-from astrid.core.session.discovery import discover_projects
-from astrid.core.task.events import EVENTS_FILENAME
-
 
 # ----- cmd_sessions_ls --------------------------------------------------
 

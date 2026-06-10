@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
+from astrid.core.foundation.paths import REPO_ROOT
 from astrid.core.model_catalog.schema import (
     LoraEntry,
     ModelEntry,
@@ -21,7 +22,6 @@ from astrid.core.model_catalog.schema import (
     validate_lora_registry,
     validate_registry_with_backends,
 )
-from astrid.core.foundation.paths import REPO_ROOT
 
 
 class ModelRegistry:

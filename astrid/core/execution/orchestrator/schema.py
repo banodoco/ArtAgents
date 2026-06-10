@@ -50,7 +50,11 @@ from astrid.core.contracts.schema import (
     to_capability_handle,
     to_capability_json,
 )
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_payload, reconcile_runtime_module
+from astrid.core.pack.manifest import (
+    ManifestParseError,
+    load_manifest_payload,
+    reconcile_runtime_module,
+)
 
 OrchestratorKind = _Literal["built_in", "external"]
 RuntimeKind = _Literal["python", "command"]

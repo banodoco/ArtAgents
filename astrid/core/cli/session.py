@@ -22,39 +22,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from astrid.core.project.current_run import read_current_run
-from astrid.core.foundation.project_paths import project_dir
-from astrid.core.session.binding import (
-    ASTRID_SESSION_ID_ENV,
-    SESSION_FILE_NAME,  # noqa: F401 — re-export; tests patch cli.SESSION_FILE_NAME
-    attach_session,
-)
-from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
-from astrid.core.session.identity import (
-    Identity,
-    IdentityError,
-    bootstrap_identity,
-    read_identity,
-    # validate_agent_slug moved to cli_attach
-)
-from astrid.core.session.lease import read_lease
-# lifecycle imports (SessionTakeoverTargetError, takeover_session) moved to cli_sessions;
-# load_session moved to cli_attach.
-from astrid.core.session.model import (
-    Session,
-    SessionRole,
-    SessionStore,
-    # SessionRecordNotFoundError moved to cli_status
-    # SessionStoreError moved to cli_sessions
-)
-from astrid.core.session.paths import (
-    # session_path moved to cli_sessions
-    sessions_dir,
-)
-from astrid.core.task.events import EVENTS_FILENAME, read_events
-# timeline_crud, read_project_default, find_timeline_slug_for_ulid moved to cli_status
-from astrid.core.threads.ids import generate_ulid
-
 # M4 T44: Re-export attach command and templates from cli_attach.py.
 # Tests call ``cli.cmd_attach(...)`` and reference ``cli.ATTACH_HEADER``.
 from astrid.core.cli.session_attach import (  # noqa: E402, F401
@@ -64,6 +31,19 @@ from astrid.core.cli.session_attach import (  # noqa: E402, F401
     _emit_attach_json,
     _parse_agent_override,
     cmd_attach,
+)
+
+# STATUS_UNBOUND_HEADER, ATTACH_SUGGESTION_TEMPLATE, NO_PROJECTS_FOUND moved to cli_status
+# ----- argparse glue ----------------------------------------------------
+#
+# M4 T50: Parser construction moved to cli_parser.py.  ``build_parser`` is
+# re-exported here so existing callers of ``cli.build_parser()`` continue to
+# work.  The parser uses the shared CommandSpec convention with late imports
+# from this facade so monkeypatch seams (``cli.cmd_attach``, ``cli.cmd_status``,
+# etc.) remain interceptable.
+from astrid.core.cli.session_parser import (  # noqa: E402, F401
+    COMMANDS,  # re-export for CLI conformance allowlist
+    build_parser,
 )
 
 # M4 T46: Re-export sessions subcommand handlers from cli_sessions.py.
@@ -95,6 +75,8 @@ from astrid.core.cli.session_status import (  # noqa: E402, F401
     _status_state_for,
     cmd_status,
 )
+from astrid.core.foundation.project_paths import project_dir
+from astrid.core.project.current_run import read_current_run
 
 # ----- Templates & shared helpers ---------------------------------------
 #
@@ -104,7 +86,6 @@ from astrid.core.cli.session_status import (  # noqa: E402, F401
 # re-exported here so ``astrid.core.session.cli.<name>`` keeps resolving for the
 # test monkeypatches that target the facade. Tests assert on the literal
 # template strings; keep them stable.
-
 from astrid.core.session._shared import (  # noqa: E402, F401
     FIRST_RUN_PROMPT_HEADER,
     NONE_PLACEHOLDER,
@@ -119,21 +100,38 @@ from astrid.core.session._shared import (  # noqa: E402, F401
     _make_bootstrap_session,
     _session_store,
 )
-# STATUS_UNBOUND_HEADER, ATTACH_SUGGESTION_TEMPLATE, NO_PROJECTS_FOUND moved to cli_status
-
-
-# ----- argparse glue ----------------------------------------------------
-#
-# M4 T50: Parser construction moved to cli_parser.py.  ``build_parser`` is
-# re-exported here so existing callers of ``cli.build_parser()`` continue to
-# work.  The parser uses the shared CommandSpec convention with late imports
-# from this facade so monkeypatch seams (``cli.cmd_attach``, ``cli.cmd_status``,
-# etc.) remain interceptable.
-
-from astrid.core.cli.session_parser import (  # noqa: E402, F401
-    COMMANDS,  # re-export for CLI conformance allowlist
-    build_parser,
+from astrid.core.session.binding import (
+    ASTRID_SESSION_ID_ENV,
+    SESSION_FILE_NAME,  # noqa: F401 — re-export; tests patch cli.SESSION_FILE_NAME
+    attach_session,
 )
+from astrid.core.session.constants import STUCK_NO_EVENT_SECONDS
+from astrid.core.session.identity import (
+    Identity,
+    IdentityError,
+    bootstrap_identity,
+    read_identity,
+    # validate_agent_slug moved to cli_attach
+)
+from astrid.core.session.lease import read_lease
+
+# lifecycle imports (SessionTakeoverTargetError, takeover_session) moved to cli_sessions;
+# load_session moved to cli_attach.
+from astrid.core.session.model import (
+    Session,
+    SessionRole,
+    SessionStore,
+    # SessionRecordNotFoundError moved to cli_status
+    # SessionStoreError moved to cli_sessions
+)
+from astrid.core.session.paths import (
+    # session_path moved to cli_sessions
+    sessions_dir,
+)
+from astrid.core.task.events import EVENTS_FILENAME, read_events
+
+# timeline_crud, read_project_default, find_timeline_slug_for_ulid moved to cli_status
+from astrid.core.threads.ids import generate_ulid
 
 
 def main(argv: list[str] | None = None) -> int:

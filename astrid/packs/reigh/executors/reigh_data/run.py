@@ -4,8 +4,8 @@
 
 from __future__ import annotations
 
-
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+
 guard_canonical_entrypoint('reigh.reigh_data')
 import argparse
 import json
@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from astrid.core.contracts.errors import AstridError
 from astrid.core.integrations.reigh.env import (
     DEFAULT_FUNCTION_NAME,
     _candidate_env_files,
@@ -26,7 +27,6 @@ from astrid.core.integrations.reigh.env import (
     resolve_supabase_url,
     resolve_task_status_update_url,
 )
-from astrid.core.contracts.errors import AstridError
 from astrid.core.pack.entrypoint import run_pack_main
 
 

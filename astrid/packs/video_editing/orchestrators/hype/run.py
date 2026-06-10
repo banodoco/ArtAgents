@@ -43,7 +43,10 @@ from astrid.packs.video_editing.orchestrators.hype.config import (  # noqa: F401
     parse_asset_entry,
     usage_error,
 )
-from astrid.packs.video_editing.orchestrators.hype.parser import build_parser, resolve_args  # noqa: F401 — build_parser re-exported for facade compatibility
+from astrid.packs.video_editing.orchestrators.hype.parser import (  # noqa: F401 — build_parser re-exported for facade compatibility
+    build_parser,
+    resolve_args,
+)
 
 # Extracted module (M4 T66)
 from astrid.packs.video_editing.orchestrators.hype.project_adapter import (  # noqa: F401 — re-exported for facade compatibility

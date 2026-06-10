@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import IO, Mapping, Sequence
 
 from astrid.core.env_vars import ASTRID_LOG_MAX_BYTES
+
 DEFAULT_LOG_MAX_BYTES = 10 * 1024 * 1024
 
 

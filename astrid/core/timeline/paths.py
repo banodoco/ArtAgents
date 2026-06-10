@@ -5,10 +5,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from astrid.core.threads.ids import is_ulid
-
 from astrid.core._shared.jsonio import ProjectJsonError, read_json
 from astrid.core.foundation.project_paths import ProjectPathError, project_dir
+from astrid.core.threads.ids import is_ulid
 
 _TIMELINE_SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
 

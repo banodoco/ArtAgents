@@ -24,13 +24,15 @@ from astrid.core.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
-from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
-    ELEMENT_KINDS as ELEMENT_KINDS,
     ELEMENT_KIND_REGISTRY,
     ElementKind,
     ElementKindRegistry,
 )
+from astrid.core.pack import (
+    ELEMENT_KINDS as ELEMENT_KINDS,
+)
+from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 
 REQUIRED_ELEMENT_FILES = ("element.yaml",)
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")

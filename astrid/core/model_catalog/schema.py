@@ -11,21 +11,21 @@ for the image modality).  Each :class:`ModeSpec` carries per-mode
 
 from __future__ import annotations
 
+import math
 from collections.abc import Collection
 from dataclasses import dataclass, field
-import math
 from typing import Any
 
 from astrid.core.model_catalog.taxonomy import (
     CANONICAL_IMAGE_MODES,
     CANONICAL_VIDEO_MODES,
     CLOUD_BACKEND_ID,
-    Feature,
     GENERATION_TAXONOMY,
-    GenerationTaxonomyRegistry,
     IMAGE_MODALITY,
     LOCAL_BACKEND_ID,
     VIDEO_MODALITY,
+    Feature,
+    GenerationTaxonomyRegistry,
 )
 
 # ---------------------------------------------------------------------------

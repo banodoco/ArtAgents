@@ -523,12 +523,12 @@ def timeline_configs_equal(left: Any, right: Any) -> bool:
 # Re-exports — validators extracted to astrid.core.timeline.validators.*
 # All public names remain importable from this module unchanged.
 # =========================================================================
-from astrid.core.timeline.validators.registry import (
-    _animation_ids,
-    _animation_meta,
-    _effect_ids,
-    _transition_ids,
-    validate_registry,
+from astrid.core.timeline.validators.arrangement import (
+    ArrangementDurationError,
+    _reject_forbidden_arrangement_time_keys,
+    is_all_generative_arrangement,
+    validate_arrangement,
+    validate_arrangement_duration_window,
 )
 from astrid.core.timeline.validators.metadata import (
     _validate_generated_at,
@@ -538,6 +538,13 @@ from astrid.core.timeline.validators.pool import (
     _validate_pool_scores,
     _validate_source_ids,
     validate_pool,
+)
+from astrid.core.timeline.validators.registry import (
+    _animation_ids,
+    _animation_meta,
+    _effect_ids,
+    _transition_ids,
+    validate_registry,
 )
 from astrid.core.timeline.validators.timeline import (
     _clip_duration_seconds,
@@ -549,11 +556,4 @@ from astrid.core.timeline.validators.timeline import (
     _validate_clip_transitions,
     _validate_effect_params,
     validate_timeline,
-)
-from astrid.core.timeline.validators.arrangement import (
-    ArrangementDurationError,
-    _reject_forbidden_arrangement_time_keys,
-    is_all_generative_arrangement,
-    validate_arrangement,
-    validate_arrangement_duration_window,
 )
