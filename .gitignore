@@ -11,6 +11,9 @@ this.env
 *secret*
 # Real source files whose names trip the broad credential globs above.
 !astrid/core/util/secrets.py
+!astrid/core/util/credentials_scope.py
+!tests/core/test_credentials_scope.py
+!tests/core/test_dataset_build_credentials_parity.py
 
 # Python
 __pycache__/
