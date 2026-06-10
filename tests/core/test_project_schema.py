@@ -195,14 +195,13 @@ def test_project_theme_rejects_missing_theme(
 def test_active_theme_resolution_prefers_env_over_project_binding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from astrid.core.element.catalog import resolve_active_theme, set_active_theme
+    from astrid.core.element.catalog import resolve_active_theme
 
     projects_root = tmp_path / "projects"
     themes_root = tmp_path / "themes"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
     monkeypatch.setenv("ASTRID_THEMES_ROOT", str(themes_root))
     monkeypatch.delenv("HYPE_ACTIVE_THEME", raising=False)
-    set_active_theme(None)
     _write_theme(themes_root / "project-theme")
     _write_theme(themes_root / "env-theme")
     create_project("demo")
