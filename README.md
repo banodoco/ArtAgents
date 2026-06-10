@@ -10,7 +10,7 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 ┏━━━━━━━━━━━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━━━━━━━━━━◇━━━━━━━━━━━━━━━━━━━━━━━┓
 ┃ ·                                                                    · ┃
 ┃  ╳ ╳ ╳ ╳ ╳──────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳  ┃
-┃  ╳ ╳ ╳ ╳ ╳              ═══  A S T R I D  ═══               ╳ ╳ ╳ ╳ ╳  ┃
+┃                         ═══  A S T R I D  ═══                          ┃
 ┃  ╳ ╳ ╳ ╳ ╳──────────────────────────────────────────────────╳ ╳ ╳ ╳ ╳  ┃
 ┃                                                                        ┃
 ┃              a harness for agents and humans to make art               ┃

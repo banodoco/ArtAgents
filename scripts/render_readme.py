@@ -37,13 +37,9 @@ def xrule() -> str:
 
 
 def banner() -> str:
-    """`╳ ╳ ╳ ╳ ╳   ═══  A S T R I D  ═══   ╳ ╳ ╳ ╳ ╳`"""
-    x = "╳ ╳ ╳ ╳ ╳"
-    mid_w = W - 4 - 2 * len(x)
-    mid = "═══  A S T R I D  ═══"
-    pad = mid_w - len(mid)
-    midcell = " " * (pad // 2) + mid + " " * (pad - pad // 2)
-    return "  " + x + midcell + x + "  "
+    """`═══  A S T R I D  ═══` — plain & centered, framed by an xrule above and
+    below (so the top signpost has exactly two ╳-rows, matching the footer)."""
+    return center("═══  A S T R I D  ═══")
 
 
 def dots() -> str:
