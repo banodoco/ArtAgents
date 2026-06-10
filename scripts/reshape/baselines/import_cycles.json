@@ -19,6 +19,10 @@
     ],
     [
       "astrid.core.project",
+      "astrid.core.theme"
+    ],
+    [
+      "astrid.core.project",
       "astrid.core.timeline"
     ],
     [
@@ -37,12 +41,14 @@
       "astrid.core.orchestrator",
       "astrid.core.pack",
       "astrid.core.project",
+      "astrid.core.registry",
       "astrid.core.runtime",
       "astrid.core.session",
       "astrid.core.task",
+      "astrid.core.theme",
       "astrid.core.threads",
       "astrid.core.timeline"
     ]
   ],
-  "pair_count": 6
+  "pair_count": 7
 }
