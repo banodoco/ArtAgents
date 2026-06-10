@@ -450,7 +450,20 @@ def _validate_pack_element_folders(packs_root: Path) -> list[str]:
                 )
                 continue
             for element_dir in _public_child_dirs(kind_dir, INTERNAL_PACK_DIRS):
-                errors.extend(_require_files(element_dir, ("component.tsx", "element.yaml"), root=repo_root))
+                errors.extend(_require_files(element_dir, ("element.yaml",), root=repo_root))
+                # component.tsx is required unless runtime.adapter is declared in manifest
+                _needs_component = True
+                _elem_manifest = element_dir / "element.yaml"
+                if _elem_manifest.is_file():
+                    try:
+                        from astrid.core.pack.manifest import load_manifest_mapping
+                        _payload = load_manifest_mapping(_elem_manifest, manifest_kind="element")
+                        if isinstance(_payload.get("runtime"), dict) and _payload["runtime"].get("adapter"):
+                            _needs_component = False
+                    except Exception:
+                        pass
+                if _needs_component:
+                    errors.extend(_require_files(element_dir, ("component.tsx",), root=repo_root))
     return errors
 
 

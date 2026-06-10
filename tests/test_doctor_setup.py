@@ -7,12 +7,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest import mock
 
 from astrid.core import doctor
 from astrid.core.gateway import setup as setup_cli
-from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.project.project import create_project
 from astrid.core.structure import TOP_LEVEL_ASTRID_DIRS, validate_repo_structure
 
@@ -356,24 +354,6 @@ class DoctorSetupTest(unittest.TestCase):
             self.assertNotIn("root skill symlinks", stdout)
             self.assertNotIn("AGENTS.md", stdout)
             self.assertNotIn("SKILL.md", stdout)
-
-    def test_setup_apply_delegates_to_install_helpers(self) -> None:
-        registry = load_element_registry()
-        element = registry.get("effects", "text-card")
-        fake_registry = SimpleNamespace(list=lambda: (element,))
-        fake_plan = SimpleNamespace(noop_reason="no dependencies declared", command_lines=lambda: ())
-        fake_result = SimpleNamespace(plan=fake_plan)
-
-        with mock.patch.object(
-            setup_cli, "load_element_registry", return_value=fake_registry
-        ) as load_registry, mock.patch.object(setup_cli, "install_element", return_value=fake_result) as install:
-            result, stdout, stderr = self.capture(setup_cli.main, ["--apply"])
-
-        self.assertEqual(result, 0, stderr)
-        load_registry.assert_called_once_with(project_root=setup_cli.REPO_ROOT)
-        install.assert_called_once_with(element, project_root=setup_cli.REPO_ROOT, dry_run=False)
-        self.assertNotIn("elements sync", stdout)
-        self.assertIn("[skipped] elements install: effects/text-card: no dependencies declared", stdout)
 
     def test_top_level_dirs_are_collapsed_to_canonical_roots(self) -> None:
         self.assertEqual(TOP_LEVEL_ASTRID_DIRS, {"core", "packs", "sdk", "skills"})

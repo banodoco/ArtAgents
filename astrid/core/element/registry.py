@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import os
-import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
 from typing import TYPE_CHECKING, Iterable
 
 from astrid.core.pack import (
@@ -16,7 +14,6 @@ from astrid.core.pack import (
     PackDefinition,
     PackValidationError,
     discover_packs,
-    ensure_local_pack,
     iter_element_roots,
     pack_element_kind_descriptors,
     validate_element_pack_id,
@@ -27,7 +24,7 @@ from astrid.core.pack.alias_resolver import (
     create_shared_alias_resolver,
 )
 from astrid.core.pack.discovery import discover_pack_metadata
-from astrid.core.pack.manifest import dump_manifest_payload, load_manifest_mapping
+from astrid.core.registry import CapabilityRegistry
 from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir
 from astrid.core.foundation.paths import REPO_ROOT
 
@@ -62,8 +59,12 @@ class ElementConflict:
     shadowed: tuple[ElementDefinition, ...]
 
 
-class ElementRegistry:
-    """Resolved element registry keyed by kind and element id."""
+class ElementRegistry(CapabilityRegistry[tuple[str, str], ElementDefinition]):
+    """Resolved element registry keyed by kind and element id.
+
+    Inherits generic storage, conflict detection, and override-key
+    resolution from :class:`CapabilityRegistry`.
+    """
 
     def __init__(
         self,
@@ -73,39 +74,73 @@ class ElementRegistry:
         override_store: "OverrideStore | None" = None,
         element_kind_registry: ElementKindRegistry | None = None,
     ) -> None:
-        self._all: dict[tuple[str, str], list[ElementDefinition]] = {}
-        self.alias_resolver = alias_resolver
-        self.override_store = override_store
+        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
         self.element_kind_registry = element_kind_registry or ELEMENT_KIND_REGISTRY
         for element in elements:
             self.register(element)
 
+    # ------------------------------------------------------------------
+    # Backward-compat alias for pre-migration direct ``_all`` access
+    # ------------------------------------------------------------------
+
+    @property
+    def _all(self) -> dict[tuple[str, str], list[ElementDefinition]]:
+        """Legacy alias for ``_entries`` — supports direct dict writes."""
+        return self._entries
+
+    # ------------------------------------------------------------------
+    # Override resolution helper (tuple-key aware)
+    # ------------------------------------------------------------------
+
+    def _resolve_override_key(self, capability_kind: str, key: tuple[str, str]) -> str | None:
+        """Extract *element_id* from the tuple key before consulting the store."""
+        if self.override_store is None:
+            return None
+        _, element_id = key
+        return self.override_store.resolve(capability_kind, element_id)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def register(self, element: ElementDefinition) -> ElementDefinition:
         key = (element.kind, element.id)
-        self._all.setdefault(key, []).append(element)
-        self._all[key].sort(key=lambda item: (item.priority, item.source, str(item.root)))
+        self._register_impl(
+            key,
+            element,
+            priority_key=lambda item: (item.priority, item.source, str(item.root)),
+        )
         return element
 
     def get(self, kind: ElementKind, element_id: str) -> ElementDefinition:
         normalized_kind = self.element_kind_registry.normalize(kind, error_cls=ElementRegistryError)
         key = (normalized_kind, element_id)
         try:
-            definition = self._all[key][0]
+            definition = self._entries[key][0]
         except KeyError as exc:
             raise KeyError(f"unknown {normalized_kind} element {element_id!r}") from exc
 
         # Check override store for a remapped target.
-        if self.override_store is not None:
-            target_id = self.override_store.resolve(normalized_kind, element_id)
-            if target_id is not None and target_id != element_id:
-                # Validate that the override target exists.
-                target_key = (normalized_kind, target_id)
-                if target_key not in self._all:
-                    raise ElementRegistryError(
-                        f"override target {target_id!r} for {normalized_kind} {element_id!r} not found in registry"
-                    )
-                target_def = self._all[target_key][0]
-                # Annotate the returned definition with override_target metadata.
+        target_id = self._resolve_override_key(normalized_kind, key)
+        if target_id is not None:
+            # Validate that the override target exists.
+            target_key = (normalized_kind, target_id)
+            if target_key not in self._entries:
+                raise ElementRegistryError(
+                    f"override target {target_id!r} for {normalized_kind} {element_id!r} not found in registry"
+                )
+            entries = self._entries[target_key]
+            # When a same-ID override points at the rendering-pack canonical
+            # id, prefer the canonical (non-editable) entry over a local
+            # fork that would otherwise win on priority alone.
+            if target_id == element_id and len(entries) > 1:
+                canonical = next((e for e in entries if not e.editable), None)
+                target_def = canonical if canonical is not None else entries[0]
+            else:
+                target_def = entries[0]
+            # Annotate the returned definition with override_target metadata
+            # whenever the override changes the resolved definition.
+            if target_id != element_id or target_def is not definition:
                 target_metadata = dict(target_def.metadata)
                 target_metadata["override_target"] = target_id
                 from dataclasses import replace as _replace
@@ -118,15 +153,15 @@ class ElementRegistry:
         if kind is not None:
             normalized_kind = self.element_kind_registry.normalize(kind, error_cls=ElementRegistryError)
         winners = [
-            definitions[0]
-            for (item_kind, _), definitions in self._all.items()
+            self._resolve_entry(definitions)
+            for (item_kind, _), definitions in self._entries.items()
             if normalized_kind is None or item_kind == normalized_kind
         ]
         return tuple(sorted(winners, key=lambda item: (item.kind, item.id)))
 
     def conflicts(self) -> tuple[ElementConflict, ...]:
         conflicts: list[ElementConflict] = []
-        for (kind, element_id), definitions in self._all.items():
+        for (kind, element_id), definitions in self._entries.items():
             if len(definitions) > 1:
                 conflicts.append(
                     ElementConflict(
@@ -138,26 +173,14 @@ class ElementRegistry:
                 )
         return tuple(sorted(conflicts, key=lambda item: (item.kind, item.id)))
 
-    def as_mapping(self) -> MappingProxyType[tuple[str, str], ElementDefinition]:
-        return MappingProxyType({key: definitions[0] for key, definitions in self._all.items()})
+    def as_mapping(self) -> dict[tuple[str, str], ElementDefinition]:
+        """Return winners-only mapping (return type narrowed for element callers).
 
-    def fork_target(self, kind: ElementKind, element_id: str, *, project_root: str | Path = REPO_ROOT) -> Path:
-        element = self.get(kind, element_id)
-        return Path(project_root) / element.fork_target
-
-    def fork(self, kind: ElementKind, element_id: str, *, project_root: str | Path = REPO_ROOT, overwrite: bool = False) -> Path:
-        element = self.get(kind, element_id)
-        target = self.fork_target(kind, element_id, project_root=project_root)
-        if target.exists() and not overwrite:
-            raise ElementRegistryError(f"element override already exists: {target}")
-        ensure_local_pack(project_root=project_root)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            shutil.rmtree(target)
-        shutil.copytree(element.root, target)
-        _rewrite_pack_id(target, "local")
-        return target
-
+        Inherited ``as_mapping()`` returns ``MappingProxyType``; element
+        callers may rely on mutable dict access, so we preserve the dict
+        return type here.
+        """
+        return {key: definitions[0] for key, definitions in self._entries.items()}
 
 def load_default_registry(
     *,
@@ -236,19 +259,6 @@ def load_pack_elements(
         packs,
         element_kind_registry=registry,
     )
-
-
-def _rewrite_pack_id(element_root: Path, new_pack_id: str) -> None:
-    from .schema import ELEMENT_MANIFEST_NAMES
-
-    for name in ELEMENT_MANIFEST_NAMES:
-        manifest = element_root / name
-        if not manifest.is_file():
-            continue
-        data = load_manifest_mapping(manifest, manifest_kind="element")
-        data["pack_id"] = new_pack_id
-        dump_manifest_payload(manifest, data)
-        return
 
 
 def load_source_elements(

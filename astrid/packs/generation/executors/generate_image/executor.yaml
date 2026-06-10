@@ -56,14 +56,16 @@
       "description": "Text prompt for image generation (mutually exclusive with prompts_file).",
       "name": "prompt",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "prompt"
     },
     {
       "default": "",
       "description": "JSON/JSONL file of prompts (mutually exclusive with prompt).",
       "name": "prompts_file",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "prompt"
     },
     {
       "description": "Model ID from the generation model registry (e.g. 'flux-dev', 'z-image').",
@@ -76,7 +78,8 @@
       "description": "Reference image path or URL for i2i/edit modes.",
       "name": "image_ref",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "image"
     },
     {
       "description": "Execution backend: 'local' (vibecomfy), 'cloud' (fal), or 'codex' (Codex image_generation).",
@@ -103,7 +106,8 @@
       "description": "Negative prompt describing what to avoid.",
       "name": "negative_prompt",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "prompt"
     },
     {
       "default": "",
@@ -200,16 +204,19 @@
       "mode": "create_or_replace",
       "name": "generated_images",
       "path_template": "{out}/images",
-      "type": "directory"
+      "type": "directory",
+      "artifact_type": "image"
     },
     {
       "description": "JSON manifest of the generation run.",
       "mode": "create_or_replace",
       "name": "image_manifest",
       "path_template": "{out}/manifest.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     }
   ],
-  "short_description": "Generate images from text prompts via local, cloud, or Codex backends. v2: model\u2192mode\u2192backend.",
+  "scoped_configs": ["credentials.fal"],
+  "short_description": "Generate images from text prompts via local, cloud, or Codex backends. v2: model→mode→backend.",
   "version": "2.0"
 }

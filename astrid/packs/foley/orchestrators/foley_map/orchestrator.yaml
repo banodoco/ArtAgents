@@ -48,6 +48,7 @@
     },
     "kind": "command"
   },
+  "scoped_configs": ["credentials.fal"],
   "short_description": "Spatial Foley pipeline: tile a video, prompt a VLM, score Foley per tile, and emit a viewer.",
   "version": "0.1"
 }

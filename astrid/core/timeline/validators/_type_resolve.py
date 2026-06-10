@@ -1,0 +1,70 @@
+"""Type-resolution helper: bare clip_type string → canonical artifact_type id.
+
+Implements the SD2 scan order: effects → animations → transitions.
+Returns None for unresolved or unannotated elements (SD3 branch b/c).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrid.core.contracts.artifact_types import ArtifactTypeRegistry
+    from astrid.core.element.registry import ElementRegistry
+
+_ELEMENT_KIND_SCAN_ORDER: tuple[str, ...] = ("effects", "animations", "transitions")
+
+
+def resolve_clip_to_artifact_type(
+    clip_type: str,
+    theme: str | None,
+    element_registry: "ElementRegistry",
+    artifact_type_registry: "ArtifactTypeRegistry",
+) -> str | None:
+    """Resolve a bare clip_type string to its canonical artifact_type id.
+
+    Scans element kinds effects → animations → transitions in order (SD2).
+    For each kind, calls ``list_element_ids(kind, theme=theme)`` from the
+    existing catalog, then fetches the ``ElementDefinition`` from
+    *element_registry* and reads the first annotated output's
+    ``artifact_type``.
+
+    Returns ``None`` when the clip_type is not registered as any element kind
+    or when the matched element has no annotated outputs (SD3 opaque
+    fallthrough).
+    """
+    from astrid.core.element import catalog as _catalog
+    from astrid.core.element.schema import to_capability_handle
+
+    for kind in _ELEMENT_KIND_SCAN_ORDER:
+        try:
+            ids = _catalog.list_element_ids(kind, theme=theme)
+        except Exception:
+            continue
+        if clip_type not in ids:
+            continue
+        try:
+            definition = element_registry.get(kind, clip_type)
+        except (KeyError, Exception):
+            continue
+        handle = to_capability_handle(definition)
+        for output in handle.outputs:
+            if output.artifact_type is not None:
+                return output.artifact_type
+        return None  # element found but has no annotated output — opaque
+    return None  # not found in any kind
+
+
+def is_visual_clip_element(
+    clip_type: str,
+    theme: str | None,
+    element_registry: "ElementRegistry",
+    artifact_type_registry: "ArtifactTypeRegistry",
+) -> bool:
+    """Return True iff *clip_type* resolves to the canonical ``clip/visual`` artifact type."""
+    return (
+        resolve_clip_to_artifact_type(
+            clip_type, theme, element_registry, artifact_type_registry
+        )
+        == "clip/visual"
+    )

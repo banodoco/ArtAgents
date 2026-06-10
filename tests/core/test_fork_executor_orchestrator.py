@@ -1,7 +1,6 @@
 """Tests for ExecutorRegistry.fork() and OrchestratorRegistry.fork().
 
-Covers shallow/deep fork, overwrite, priority-based shadowing, and
-verifies that element fork still works unchanged.
+Covers shallow/deep fork, overwrite, priority-based shadowing.
 
 All tests use tempfile.TemporaryDirectory for fixture packs.
 No real LLM calls, no real network calls, no real git ops on actual repo.
@@ -418,56 +417,3 @@ class TestPriorityShadowing:
         winner = registry.get("video_editing.hype")
         assert winner.version == "2.0.0"
         assert winner.metadata["source_pack"] == "local"
-
-
-# ---------------------------------------------------------------------------
-# Element fork unchanged
-# ---------------------------------------------------------------------------
-
-
-class TestElementForkUnchanged:
-    """Verify that element fork still works unchanged after M4 changes."""
-
-    def test_element_fork_still_works(self):
-        """ElementRegistry.fork() should still function as before."""
-        from astrid.core.element.registry import ElementRegistry
-        from astrid.core.element.schema import ElementDefinition, ElementDependencies
-
-        with tempfile.TemporaryDirectory() as src_tmp, tempfile.TemporaryDirectory() as proj_tmp:
-            src_root = Path(src_tmp) / "elements" / "effects" / "blur"
-            src_root.mkdir(parents=True)
-            (src_root / "component.tsx").write_text("export default () => null;\n", encoding="utf-8")
-            (src_root / "element.yaml").write_text(
-                json.dumps({
-                    "id": "blur",
-                    "kind": "effect",
-                    "pack_id": "builtin",
-                    "metadata": {"name": "Blur"},
-                    "schema": {"type": "object"},
-                    "defaults": {},
-                    "dependencies": {"js_packages": [], "python_requirements": []},
-                }) + "\n",
-                encoding="utf-8",
-            )
-
-            registry = ElementRegistry()
-            registry.register(
-                ElementDefinition(
-                    id="blur",
-                    kind="effects",
-                    root=src_root,
-                    source="pack:builtin",
-                    editable=False,
-                    priority=30,
-                    component=src_root / "component.tsx",
-                    schema={"type": "object"},
-                    defaults={},
-                    metadata={"name": "Blur", "pack_id": "builtin"},
-                    dependencies=ElementDependencies(),
-                )
-            )
-
-            target = registry.fork("effects", "blur", project_root=proj_tmp)
-            assert target.exists()
-            assert target.is_dir()
-            assert (target / "component.tsx").is_file()

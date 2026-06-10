@@ -76,6 +76,12 @@ class BackendSpec:
     #: Optional validated unit price for this backend endpoint.
     price: Price | None = None
 
+    #: Backend-specific hints that the adapter should apply to every
+    #: request payload (e.g. ``{"guidance_scale_override": 1.0}``).
+    #: Hints are model×mode×backend configuration, not per-request
+    #: caller parameters.
+    hints: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class ModeSpec:
@@ -407,6 +413,16 @@ def _validate_backend_spec(
             )
         lora_endpoint = lora_endpoint.strip()
 
+    # -- hints -----------------------------------------------------------
+    hints_raw = raw.get("hints", {})
+    if not isinstance(hints_raw, dict):
+        raise ValueError(f"{path}.hints: must be a dict")
+    hints: dict[str, Any] = {}
+    for k, v in hints_raw.items():
+        if not isinstance(k, str) or not k.strip():
+            raise ValueError(f"{path}.hints: keys must be non-empty strings")
+        hints[k.strip()] = v
+
     return BackendSpec(
         template=str(template),
         template_hash=str(template_hash),
@@ -414,6 +430,7 @@ def _validate_backend_spec(
         lora_endpoint=lora_endpoint,
         param_map=param_map,
         price=price,
+        hints=hints,
     )
 
 

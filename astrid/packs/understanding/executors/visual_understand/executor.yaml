@@ -17,7 +17,8 @@
       "description": "Image to inspect.",
       "name": "image",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "image"
     }
   ],
   "isolation": {

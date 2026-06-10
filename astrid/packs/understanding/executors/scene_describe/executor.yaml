@@ -31,7 +31,8 @@
       "description": "",
       "name": "video",
       "required": true,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "video/clip"
     },
     {
       "description": "",
@@ -84,7 +85,8 @@
       "mode": "create_or_replace",
       "name": "scene_descriptions",
       "path_template": "{out}/scene_descriptions.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     }
   ],
   "pipeline_requirements": [

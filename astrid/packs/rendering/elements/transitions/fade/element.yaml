@@ -15,11 +15,35 @@
     "black"
   ],
   "kind": "transition",
+  "inputs": [
+    {
+      "name": "from_clip",
+      "type": "clip",
+      "required": true,
+      "artifact_type": "clip/visual"
+    },
+    {
+      "name": "to_clip",
+      "type": "clip",
+      "required": true,
+      "artifact_type": "clip/visual"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "clip",
+      "type": "clip",
+      "artifact_type": "clip/visual"
+    }
+  ],
   "metadata": {
     "label": "Fade",
     "pack_id": "rendering"
   },
   "pack_id": "rendering",
+  "runtime": {
+    "adapter": "remotion"
+  },
   "schema": {
     "properties": {
       "durationFrames": {

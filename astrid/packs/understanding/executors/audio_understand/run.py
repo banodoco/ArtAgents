@@ -23,7 +23,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.media import ffprobe_duration_seconds
 
 API_URL = "https://api.openai.com/v1/chat/completions"
@@ -456,7 +456,7 @@ def run(args: argparse.Namespace) -> int:
     if args.dry_run:
         return emit_dry_run_preview(preview, "understanding.audio_understand")
 
-    api_key = load_api_key("OPENAI_API_KEY", args.env_file)
+    api_key = CredentialsScope.get("openai", env_file=args.env_file)
     results: list[dict[str, Any]] = []
     for model in models:
         for audio_input in audio_inputs:

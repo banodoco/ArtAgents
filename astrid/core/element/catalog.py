@@ -22,16 +22,6 @@ TOOLS_DIR = REPO_ROOT
 THEMES_ROOT = resolve_themes_root()
 
 
-def _initial_active_theme() -> Path | None:
-    raw = os.environ.get(ACTIVE_THEME_ENV)
-    if not raw:
-        return None
-    return resolve_theme_dir(raw)
-
-
-_ACTIVE_THEME_DIR: Path | None = None
-
-
 def effects_root() -> Path:
     return element_root("effects")
 
@@ -56,21 +46,7 @@ def _resolve_theme_dir(theme: str | Path | None) -> Path | None:
     return resolve_theme_dir(theme)
 
 
-def set_active_theme(theme: str | Path | None) -> None:
-    global _ACTIVE_THEME_DIR
-    _ACTIVE_THEME_DIR = _resolve_theme_dir(theme)
-
-
-_ACTIVE_THEME_DIR = _initial_active_theme()
-
-
-def _active_theme_dir(theme: str | Path | None = None) -> Path | None:
-    return _resolve_theme_dir(theme) if theme is not None else _ACTIVE_THEME_DIR
-
-
 def resolve_active_theme(project_slug: str | None = None) -> Path | None:
-    if project_slug is None and _ACTIVE_THEME_DIR is not None:
-        return _ACTIVE_THEME_DIR
     raw = os.environ.get(ACTIVE_THEME_ENV)
     if raw:
         return resolve_theme_dir(raw)
@@ -80,7 +56,7 @@ def resolve_active_theme(project_slug: str | None = None) -> Path | None:
         theme = get_project_theme(project_slug)
         if theme:
             return resolve_theme_dir(theme)
-    return _ACTIVE_THEME_DIR
+    return None
 
 
 def _registry(theme: str | Path | None = None, *, project_slug: str | None = None) -> ElementRegistry:

@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 from astrid.core.contracts.errors import AstridError, render_astrid_error
 from astrid.core._shared.result_manifest import build_manifest, write_manifest as write_result_manifest
 from astrid.core.pack.entrypoint import guard_canonical_entrypoint
+from astrid.core.util.credentials_scope import CredentialsScope
 
 guard_canonical_entrypoint("editorial.script_pipeline")
 
@@ -218,13 +219,7 @@ def build_chat_client(config: PipelineConfig, *, fake: bool, env: dict[str, str]
             valid_options=["deepseek"],
             recovery_command="set provider.name to 'deepseek' in the preset config",
         )
-    active_env = env if env is not None else os.environ
-    api_key = active_env.get(config.provider.api_key_env)
-    if not api_key:
-        raise AstridError(
-            f"{config.provider.api_key_env} is required",
-            recovery_command=f"set the {config.provider.api_key_env} environment variable and retry",
-        )
+    api_key = CredentialsScope.get("deepseek")
     return DeepSeekClient(config.provider, api_key)
 
 

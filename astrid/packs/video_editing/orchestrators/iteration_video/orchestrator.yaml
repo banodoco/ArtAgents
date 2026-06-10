@@ -46,7 +46,8 @@
       "mode": "create_or_replace",
       "name": "iteration.mp4",
       "path_template": "{out}/iteration.mp4",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "video/clip"
     }
   ],
   "runtime": {

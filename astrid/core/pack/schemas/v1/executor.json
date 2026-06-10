@@ -55,7 +55,8 @@
           "required": {"type": "boolean"},
           "default": {},
           "description": {"type": "string"},
-          "placeholder": {"type": "string"}
+          "placeholder": {"type": "string"},
+          "artifact_type": {"type": ["string", "null"]}
         },
         "required": ["name"]
       }
@@ -71,7 +72,8 @@
           "path_template": {"type": "string"},
           "extension": {"type": "string"},
           "placeholder": {"type": "string"},
-          "description": {"type": "string"}
+          "description": {"type": "string"},
+          "artifact_type": {"type": ["string", "null"]}
         },
         "required": ["name"]
       }
@@ -81,6 +83,11 @@
     "graph": {"type": "object"},
     "clip_kinds_supported": {"type": "array"},
     "pipeline_requirements": {"type": "array"},
+    "scoped_configs": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.]*$"},
+      "description": "Scope keys declared by this executor (resolved at runner dispatch)."
+    },
     "isolation": {
       "type": "object",
       "properties": {

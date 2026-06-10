@@ -24,7 +24,7 @@ from astrid.core.contracts.errors import AstridError
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.packs.understanding.executors._common import emit_dry_run_preview
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.pack.entrypoint import run_pack_main
 
 
@@ -415,7 +415,7 @@ def run(args: argparse.Namespace) -> int:
     if args.dry_run:
         return emit_dry_run_preview(payload_preview, "understanding.visual_understand")
 
-    api_key = load_api_key("OPENAI_API_KEY", args.env_file)
+    api_key = CredentialsScope.get("openai", env_file=args.env_file)
     response_schema: dict[str, Any] | None = None
     if args.response_schema:
         schema_path = args.response_schema.expanduser()

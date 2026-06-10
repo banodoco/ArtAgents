@@ -68,10 +68,17 @@ def _workspace_env_files(env_file: Path | None) -> list[Path]:
 
 
 def load_fal_key(env_file: Path | None = None) -> str:
-    for key_name in FAL_KEY_NAMES:
+    # Primary: use the canonical scoped credentials resolver (FAL_KEY).
+    try:
+        from astrid.core.util.credentials_scope import CredentialsScope
+        return CredentialsScope.get("fal", env_file=env_file)
+    except Exception:
+        pass
+    # Fallback: check FAL_API_KEY for backward compatibility.
+    for key_name in ("FAL_API_KEY",):
         if key := os.environ.get(key_name, "").strip():
             return key
-    tried: list[str] = [", ".join(FAL_KEY_NAMES) + " environment variables"]
+    tried: list[str] = ["CredentialsScope.get('fal')", ", ".join(FAL_KEY_NAMES) + " environment variables"]
     for candidate in _workspace_env_files(env_file):
         tried.append(str(candidate))
         for key_name in FAL_KEY_NAMES:

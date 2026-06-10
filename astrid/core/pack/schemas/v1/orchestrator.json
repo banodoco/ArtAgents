@@ -25,6 +25,11 @@
     "child_executors": {"type": "array", "items": {"type": "string"}},
     "child_orchestrators": {"type": "array", "items": {"type": "string"}},
     "cache": {"type": "object", "additionalProperties": true},
+    "scoped_configs": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9_.]*$"},
+      "description": "Scope keys declared by this orchestrator (resolved at runner dispatch)."
+    },
     "isolation": {
       "type": "object",
       "properties": {

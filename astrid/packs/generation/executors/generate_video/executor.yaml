@@ -57,14 +57,16 @@
       "description": "Text prompt for video generation (mutually exclusive with prompts_file).",
       "name": "prompt",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "prompt"
     },
     {
       "default": "",
       "description": "JSON/JSONL file of prompts (mutually exclusive with prompt).",
       "name": "prompts_file",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "prompt"
     },
     {
       "description": "Model ID from the generation model registry (e.g. 'wan-2.2', 'ltx-2.3').",
@@ -77,14 +79,16 @@
       "description": "Reference image path or URL for i2v/flf modes.",
       "name": "image_ref",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "image"
     },
     {
       "default": "",
       "description": "End-frame reference image path or URL for flf mode.",
       "name": "image_end_ref",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "image"
     },
     {
       "description": "Execution backend: 'local' (vibecomfy) or 'cloud' (fal).",
@@ -111,7 +115,8 @@
       "description": "Negative prompt describing what to avoid.",
       "name": "negative_prompt",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": "prompt"
     },
     {
       "default": "",
@@ -200,16 +205,19 @@
       "mode": "create_or_replace",
       "name": "generated_videos",
       "path_template": "{out}/videos",
-      "type": "directory"
+      "type": "directory",
+      "artifact_type": "video/clip"
     },
     {
       "description": "JSON manifest of the generation run with video fields.",
       "mode": "create_or_replace",
       "name": "video_manifest",
       "path_template": "{out}/manifest.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     }
   ],
-  "short_description": "Generate videos from text prompts via local or cloud backends. v2: model\u2192mode\u2192backend with t2v/i2v/flf modes.",
+  "scoped_configs": ["credentials.fal"],
+  "short_description": "Generate videos from text prompts via local or cloud backends. v2: model→mode→backend with t2v/i2v/flf modes.",
   "version": "2.0"
 }

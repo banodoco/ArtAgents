@@ -13,7 +13,17 @@ from typing import Any
 from astrid.core.contracts.capability_schema import (
     validate_capability_text as _validate_capability_text,
 )
-from astrid.core.contracts.schema import CapabilityHandle, Provenance, SafetyDeclaration
+from astrid.core.contracts.schema import (
+    OUTPUT_MODES,
+    PORT_REQUIRED_TYPES,
+    CapabilityHandle,
+    Output,
+    OutputMode,
+    Port,
+    PortType,
+    Provenance,
+    SafetyDeclaration,
+)
 from astrid.core.pack.manifest import ManifestParseError, load_manifest_mapping
 from astrid.core.pack import (
     ELEMENT_KINDS as ELEMENT_KINDS,
@@ -22,7 +32,7 @@ from astrid.core.pack import (
     ElementKindRegistry,
 )
 
-REQUIRED_ELEMENT_FILES = ("component.tsx", "element.yaml")
+REQUIRED_ELEMENT_FILES = ("element.yaml",)
 ELEMENT_MANIFEST_NAMES = ("element.yaml", "element.yml", "element.json")
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -53,16 +63,14 @@ class ElementDefinition:
     description: str = ""
     short_description: str = ""
     keywords: tuple[str, ...] = ()
-
-    @property
-    def fork_target(self) -> Path:
-        return Path("astrid") / "packs" / "local" / "elements" / self.kind / self.id
+    inputs: tuple[Port, ...] = ()
+    outputs: tuple[Output, ...] = ()
+    runtime: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["root"] = str(self.root)
         data["component"] = str(self.component)
-        data["fork_target"] = str(self.fork_target)
         return data
 
     def to_json(self, *, indent: int | None = 2) -> str:
@@ -118,8 +126,8 @@ def to_capability_handle(definition: ElementDefinition) -> CapabilityHandle:
         keywords=definition.keywords,
         local_edit_state=local_edit_state,
         override_target=override_target or None,
-        inputs=(),
-        outputs=(),
+        inputs=definition.inputs,
+        outputs=definition.outputs,
     )
 
 
@@ -165,11 +173,24 @@ def load_element_definition(
         raise ElementValidationError(f"{manifest_path}: defaults must be an object")
     dependencies = _parse_dependencies(payload.get("dependencies", {}), path=f"{manifest_path}.dependencies")
     component = (element_root / "component.tsx").resolve()
-    if not component.is_file():
+    # component.tsx is optional when runtime.adapter is declared in the manifest
+    _has_runtime_adapter = isinstance(payload.get("runtime"), dict) and bool(
+        payload["runtime"].get("adapter")
+    )
+    if not _has_runtime_adapter and not component.is_file():
         raise ElementValidationError(f"element {element_id!r} missing component.tsx")
     description = _optional_capability_string(payload, "description", manifest_path)
     short_description = _optional_capability_string(payload, "short_description", manifest_path)
     keywords = _optional_capability_string_list(payload, "keywords", manifest_path)
+    element_inputs = tuple(
+        _parse_element_port(item, f"{manifest_path}.inputs[{index}]")
+        for index, item in enumerate(payload.get("inputs") or ())
+    )
+    element_outputs = tuple(
+        _parse_element_output(item, f"{manifest_path}.outputs[{index}]")
+        for index, item in enumerate(payload.get("outputs") or ())
+    )
+    runtime = _parse_runtime(payload.get("runtime"), path=f"{manifest_path}.runtime")
     definition = ElementDefinition(
         id=element_id,
         kind=folder_kind,
@@ -185,6 +206,9 @@ def load_element_definition(
         description=description,
         short_description=short_description,
         keywords=keywords,
+        inputs=element_inputs,
+        outputs=element_outputs,
+        runtime=runtime,
     )
     return validate_element_definition(
         definition,
@@ -208,7 +232,8 @@ def validate_element_definition(
     )
     if not definition.root.is_dir():
         raise ElementValidationError(f"element root is not a directory: {definition.root}")
-    if not (definition.root / "component.tsx").is_file():
+    # component.tsx is optional when runtime.adapter is declared
+    if not definition.runtime.get("adapter") and not (definition.root / "component.tsx").is_file():
         raise ElementValidationError(f"element {definition.id!r} missing component.tsx")
     if _element_manifest_path(definition.root) is None:
         raise ElementValidationError(f"element {definition.id!r} missing element.yaml")
@@ -220,6 +245,9 @@ def validate_element_definition(
         raise ElementValidationError("element.defaults must be an object")
     if not isinstance(definition.metadata, dict):
         raise ElementValidationError("element.metadata must be an object")
+    if not isinstance(definition.runtime, dict):
+        raise ElementValidationError("element.runtime must be an object")
+    _validate_runtime_adapter(definition.runtime, f"{definition.kind}/{definition.id}")
     _validate_capability_text(
         definition.description,
         definition.short_description,
@@ -246,6 +274,9 @@ def _parse_definition(raw: dict[str, Any]) -> ElementDefinition:
         description=str(raw.get("description", "") or ""),
         short_description=str(raw.get("short_description", "") or ""),
         keywords=tuple(raw.get("keywords", ()) or ()),
+        inputs=tuple(raw.get("inputs", ()) or ()),
+        outputs=tuple(raw.get("outputs", ()) or ()),
+        runtime=_parse_runtime(raw.get("runtime"), path="element.runtime"),
     )
 
 
@@ -322,6 +353,115 @@ def _optional_capability_string_list(
     if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
         raise ElementValidationError(f"{manifest_path}: {key} must be a list of strings")
     return tuple(raw)
+
+
+# ---------------------------------------------------------------------------
+# Inline port/output parsers for element manifest I/O (T5)
+# ---------------------------------------------------------------------------
+
+
+def _require_mapping(raw: Any, path: str) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise ElementValidationError(f"{path} must be an object")
+    return raw
+
+
+def _require_string(data: dict[str, Any], key: str, path: str) -> str:
+    if key not in data:
+        raise ElementValidationError(f"missing required field {path}")
+    value = data[key]
+    if not isinstance(value, str) or not value.strip():
+        raise ElementValidationError(f"{path} must be a non-empty string")
+    return value
+
+
+def _optional_string(data: dict[str, Any], key: str, path: str, *, default: str = "") -> str:
+    if key not in data or data[key] is None or data[key] == "":
+        return default
+    value = data[key]
+    if not isinstance(value, str):
+        raise ElementValidationError(f"{path} must be a string")
+    return value
+
+
+def _optional_nullable_string(data: dict[str, Any], key: str, path: str) -> str | None:
+    if key not in data or data[key] is None:
+        return None
+    value = data[key]
+    if not isinstance(value, str):
+        raise ElementValidationError(f"{path} must be a string or null")
+    return value
+
+
+def _optional_bool(data: dict[str, Any], key: str, path: str, *, default: bool) -> bool:
+    if key not in data or data[key] is None:
+        return default
+    value = data[key]
+    if not isinstance(value, bool):
+        raise ElementValidationError(f"{path} must be a boolean")
+    return value
+
+
+def _parse_element_port(raw: Any, path: str) -> Port:
+    data = _require_mapping(raw, path)
+    name = _require_string(data, "name", f"{path}.name")
+    # Elements may declare custom port types (e.g. "clip") beyond the
+    # executor-oriented PORT_REQUIRED_TYPES literal; accept any string.
+    raw_type = data.get("type")
+    port_type: Any = raw_type if isinstance(raw_type, str) and raw_type.strip() else "path"
+    return Port(
+        name=name,
+        type=port_type,
+        required=_optional_bool(data, "required", f"{path}.required", default=True),
+        description=_optional_string(data, "description", f"{path}.description"),
+        default=data.get("default"),
+        placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
+        artifact_type=_optional_nullable_string(data, "artifact_type", f"{path}.artifact_type"),
+    )
+
+
+def _parse_element_output(raw: Any, path: str) -> Output:
+    data = _require_mapping(raw, path)
+    name = _require_string(data, "name", f"{path}.name")
+    # Elements may declare custom port types (e.g. "clip") beyond the
+    # executor-oriented PORT_REQUIRED_TYPES literal; accept any string.
+    raw_type = data.get("type")
+    port_type: Any = raw_type if isinstance(raw_type, str) and raw_type.strip() else "path"
+    raw_mode = data.get("mode", "create_or_replace")
+    port_mode: Any = raw_mode if isinstance(raw_mode, str) and raw_mode.strip() else "create_or_replace"
+    return Output(
+        name=name,
+        type=port_type,
+        mode=port_mode,
+        description=_optional_string(data, "description", f"{path}.description"),
+        placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
+        path_template=_optional_nullable_string(data, "path_template", f"{path}.path_template"),
+        extension=_optional_nullable_string(data, "extension", f"{path}.extension"),
+        artifact_type=_optional_nullable_string(data, "artifact_type", f"{path}.artifact_type"),
+    )
+
+
+def _parse_runtime(raw: Any, *, path: str) -> dict[str, Any]:
+    """Parse and validate the optional ``runtime`` mapping.
+
+    Returns an empty dict when *raw* is ``None`` or absent.
+    When *raw* is a dict, validates that ``adapter`` (if present) is a
+    non-empty string.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ElementValidationError(f"{path} must be an object")
+    _validate_runtime_adapter(raw, path)
+    return dict(raw)
+
+
+def _validate_runtime_adapter(runtime: dict[str, Any], path: str) -> None:
+    """Validate that ``runtime.adapter``, when present, is a non-empty string."""
+    adapter = runtime.get("adapter")
+    if adapter is not None:
+        if not isinstance(adapter, str) or not adapter.strip():
+            raise ElementValidationError(f"{path}.adapter must be a non-empty string")
 
 
 def _validate_id(value: str, path: str) -> None:

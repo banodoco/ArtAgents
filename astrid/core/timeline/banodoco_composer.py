@@ -20,7 +20,6 @@ from .banodoco_schema import (
     TimelineConfig,
     TimelineOutput,
     TrackDefinition,
-    _effect_ids,
     validate_arrangement,
     validate_metadata,
     validate_pool,
@@ -108,7 +107,10 @@ def _classify_clip(
         return _asset_kind_from_entry(_asset_entry_for_clip(clip, registry)) or ClipClassifiedKind.VIDEO
     if clip_type == "effect-layer":
         return ClipClassifiedKind.EFFECT
-    if isinstance(clip_type, str) and clip_type in _effect_ids(theme):
+    # New artifact-type resolution is canonical; legacy _effect_ids path
+    # retained via _parity shim for env-flagged oracle (S4: remove shim).
+    from astrid.core.timeline.validators._parity import is_effect_clip
+    if isinstance(clip_type, str) and is_effect_clip(clip_type, theme):
         return ClipClassifiedKind.EFFECT
     return ClipClassifiedKind.OPAQUE
 

@@ -10,6 +10,12 @@ from .errors import (
     render_astrid_error,
     wrap_degraded_error,
 )
+from .artifact_types import (
+    ARTIFACT_TYPE_REGISTRY,
+    ArtifactTypeDescriptor,
+    ArtifactTypeRegistry,
+    ArtifactTypeRegistryError,
+)
 from .schema import (
     CACHE_MODES,
     ISOLATION_MODES,
@@ -25,8 +31,19 @@ from .schema import (
     Provenance,
     SafetyDeclaration,
 )
+from .scoped_config import (
+    SCOPE_REGISTRY,
+    ScopeKey,
+    ScopeRegistry,
+    ScopeRequest,
+    ScopedConfig,
+)
 
 __all__ = [
+    "ARTIFACT_TYPE_REGISTRY",
+    "ArtifactTypeDescriptor",
+    "ArtifactTypeRegistry",
+    "ArtifactTypeRegistryError",
     "CACHE_MODES",
     "ISOLATION_MODES",
     "OUTPUT_MODES",
@@ -46,6 +63,11 @@ __all__ = [
     "Port",
     "Provenance",
     "render_astrid_error",
+    "SCOPE_REGISTRY",
     "SafetyDeclaration",
+    "ScopeKey",
+    "ScopeRegistry",
+    "ScopeRequest",
+    "ScopedConfig",
     "wrap_degraded_error",
 ]

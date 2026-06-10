@@ -43,6 +43,7 @@
     },
     "kind": "command"
   },
+  "scoped_configs": ["credentials.fal"],
   "short_description": "Generate a grid of distinct logo concepts via Kimi K2 prompts + GPT Image 2 (or z-image) renders.",
   "version": "1.0"
 }

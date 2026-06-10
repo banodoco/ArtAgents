@@ -30,6 +30,7 @@ from astrid.core.pack.manifest import (
 )
 from astrid.core.pack.resolver import PackResolver
 from astrid.core.foundation.paths import REPO_ROOT
+from astrid.core.registry import CapabilityRegistry
 
 from .banodoco_catalog import BanodocoCatalogConfig, load_banodoco_catalog_executors
 from .folder import load_folder_executors
@@ -61,8 +62,12 @@ class ExecutorRegistryError(ExecutorValidationError):
     """Raised when a executor registry is inconsistent."""
 
 
-class ExecutorRegistry:
-    """Small in-memory registry keyed by executor id."""
+class ExecutorRegistry(CapabilityRegistry[str, ExecutorDefinition]):
+    """Small in-memory registry keyed by executor id.
+
+    Inherits generic storage, conflict detection, and override-key
+    resolution from :class:`CapabilityRegistry`.
+    """
 
     def __init__(
         self,
@@ -71,40 +76,29 @@ class ExecutorRegistry:
         alias_resolver: AliasResolver | None = None,
         override_store: "OverrideStore | None" = None,
     ) -> None:
-        self._executors: dict[str, list[ExecutorDefinition]] = {}
-        self.alias_resolver = alias_resolver
-        self.override_store = override_store
+        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
         for executor in executors:
             self.register(executor)
+
+    # ------------------------------------------------------------------
+    # Backward-compat alias for pre-migration direct ``_executors`` access
+    # (e.g. ``test_executor_runner_errors.py`` bypasses ``register()``).
+    # ------------------------------------------------------------------
+
+    @property
+    def _executors(self) -> dict[str, list[ExecutorDefinition] | ExecutorDefinition]:
+        """Legacy alias for ``_entries`` — supports direct scalar writes."""
+        return self._entries
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _resolve_entry(entry: list[ExecutorDefinition] | ExecutorDefinition) -> ExecutorDefinition:
-        """Return the winning definition from a storage entry.
-
-        Handles both list entries (from ``register()``) and scalar values
-        (from legacy code that assigns directly to ``_executors[id]``).
-        """
-        if isinstance(entry, list):
-            return entry[0]
-        return entry
-
-    @staticmethod
-    def _iter_entries(entry: list[ExecutorDefinition] | ExecutorDefinition) -> Iterable[ExecutorDefinition]:
-        """Yield all definitions from a storage entry (winner + shadowed)."""
-        if isinstance(entry, list):
-            yield from entry
-        else:
-            yield entry
-
     def _resolve_requested_id(self, executor_id: str) -> str:
         """Resolve *executor_id* to a canonical registry key."""
         resolver = self.alias_resolver
         canonical_id = resolver.resolve(executor_id) if resolver else executor_id
-        if canonical_id in self._executors:
+        if canonical_id in self._entries:
             return canonical_id
         if resolver is not None and executor_id != canonical_id and resolver.is_alias(executor_id):
             raise KeyError(
@@ -118,46 +112,44 @@ class ExecutorRegistry:
 
     def register(self, executor: ExecutorDefinition | dict[str, Any]) -> ExecutorDefinition:
         definition = validate_executor_definition(executor)
-        if definition.id not in self._executors:
-            self._executors[definition.id] = []
-        self._executors[definition.id].append(definition)
-        self._executors[definition.id].sort(
-            key=lambda d: int(d.metadata.get("priority", 30))
+        self._register_impl(
+            definition.id,
+            definition,
+            priority_key=lambda d: int(d.metadata.get("priority", 30)),
         )
         return definition
 
     def get(self, executor_id: str) -> ExecutorDefinition:
         canonical_id = self._resolve_requested_id(executor_id)
-        definition = self._resolve_entry(self._executors[canonical_id])
+        definition = self._resolve_entry(self._entries[canonical_id])
 
-        if self.override_store is not None:
-            target_id = self.override_store.resolve("executor", canonical_id)
-            if target_id is not None and target_id != canonical_id:
-                if target_id not in self._executors:
-                    raise ExecutorRegistryError(
-                        f"override target {target_id!r} for executor {canonical_id!r} not found in registry"
-                    )
-                return self._resolve_entry(self._executors[target_id])
+        target_id = self._resolve_override_key("executor", canonical_id)
+        if target_id is not None and target_id != canonical_id:
+            if target_id not in self._entries:
+                raise ExecutorRegistryError(
+                    f"override target {target_id!r} for executor {canonical_id!r} not found in registry"
+                )
+            return self._resolve_entry(self._entries[target_id])
 
         return definition
 
     def _iter_all(self) -> Iterable[ExecutorDefinition]:
         """Yield every registered definition (including shadowed)."""
-        for entry in self._executors.values():
+        for entry in self._entries.values():
             yield from self._iter_entries(entry)
 
     def list(self, kind: str | None = None) -> tuple[ExecutorDefinition, ...]:
         if kind is not None and kind not in {"built_in", "external"}:
             raise ExecutorRegistryError("kind must be one of ['built_in', 'external']")
         # Winners only (first entry per id after priority sort).
-        executors = (self._resolve_entry(entry) for entry in self._executors.values())
+        executors = (self._resolve_entry(entry) for entry in self._entries.values())
         if kind is not None:
             executors = [executor for executor in executors if executor.kind == kind]
         return tuple(sorted(executors, key=lambda executor: executor.id))
 
     def validate_all(self) -> tuple[ExecutorDefinition, ...]:
         # Validate winners only — shadowed entries intentionally not validated.
-        for executor in (self._resolve_entry(entry) for entry in self._executors.values()):
+        for executor in (self._resolve_entry(entry) for entry in self._entries.values()):
             validate_executor_definition(executor)
         self._validate_graph_references()
         if self.alias_resolver is not None:
@@ -165,7 +157,7 @@ class ExecutorRegistry:
             # Cross-check: every alias must resolve to a known executor.
             for alias, record in self.alias_resolver._aliases.items():
                 target = self.alias_resolver.resolve(alias)
-                if target not in self._executors:
+                if target not in self._entries:
                     raise ExecutorRegistryError(
                         f"alias {alias!r} resolves to unknown executor {target!r}"
                     )
@@ -180,14 +172,14 @@ class ExecutorRegistry:
     def as_mapping(self) -> MappingProxyType[str, ExecutorDefinition]:
         # Winners only.
         return MappingProxyType(
-            {eid: self._resolve_entry(entry) for eid, entry in self._executors.items()}
+            {eid: self._resolve_entry(entry) for eid, entry in self._entries.items()}
         )
 
     def _validate_graph_references(self) -> None:
-        known_ids = set(self._executors)  # keys are strings, unchanged
+        known_ids = set(self._entries)  # keys are strings, unchanged
         resolver = self.alias_resolver
         # Winners only.
-        for executor in (self._resolve_entry(entry) for entry in self._executors.values()):
+        for executor in (self._resolve_entry(entry) for entry in self._entries.values()):
             for dependency in executor.graph.depends_on:
                 resolved = resolver.resolve(dependency) if resolver else dependency
                 if resolved not in known_ids:

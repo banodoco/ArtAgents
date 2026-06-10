@@ -10,7 +10,6 @@ guard_canonical_entrypoint("media.speech_repair_lavasr")
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import urllib.request
@@ -21,7 +20,7 @@ from typing import Callable
 import fal_client
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -213,8 +212,7 @@ def _volumedetect(path: Path, *, runner: Runner) -> dict[str, float | None]:
 
 
 def _run_lavasr(input_wav: Path, out_wav: Path, response_json: Path, env_file: Path | None) -> None:
-    api_key = load_api_key("FAL_KEY", env_file)
-    os.environ.setdefault("FAL_KEY", api_key)
+    api_key = CredentialsScope.get("fal", env_file=env_file)
     audio_url = fal_client.upload_file(input_wav)
     result = fal_client.subscribe(
         "fal-ai/lava-sr",
@@ -234,8 +232,7 @@ def _run_lavasr(input_wav: Path, out_wav: Path, response_json: Path, env_file: P
 
 
 def _run_deepfilternet3(input_audio: Path, out_audio: Path, response_json: Path, env_file: Path | None) -> None:
-    api_key = load_api_key("FAL_KEY", env_file)
-    os.environ.setdefault("FAL_KEY", api_key)
+    api_key = CredentialsScope.get("fal", env_file=env_file)
     audio_url = fal_client.upload_file(input_audio)
     result = fal_client.subscribe(
         "fal-ai/deepfilternet3",

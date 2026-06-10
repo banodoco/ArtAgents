@@ -17,7 +17,8 @@
       "description": "Source video to tile.",
       "name": "video",
       "required": true,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "video/clip"
     }
   ],
   "isolation": {
@@ -45,7 +46,8 @@
     {
       "name": "tiles_manifest",
       "path_template": "{out}/tiles.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     }
   ],
   "short_description": "Crop a video into an MxN grid of overlapping spatial tiles plus first-frame PNGs.",

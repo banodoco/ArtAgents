@@ -1,4 +1,12 @@
 schema_version: 2
+
+# param_map is optional for fal cloud and vibecomfy local backends.
+# When absent or empty, the adapter falls back to its DEFAULT_PARAM_MAP
+# class variable (FalBackend or VibeComfyBackend).  Codex backends
+# never read param_map; their entries are preserved as harmless dead data
+# (SD-002).  The schema cross-check (typo detection) still runs against
+# any param_map entries that *are* present (SD-003).
+#
 models:
   # =========================================================================
   # z-image — Z Image Turbo (text-to-image + image-to-image)
@@ -39,24 +47,9 @@ models:
           local:
             template: image/z_image
             template_hash: "sha256:a8bb7f5397bbafef1e9545b7c0ebbb196db88027de94b3c417cd9c2ee4b8b70b"
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              count: count
-              size: size
-              guidance_scale: guidance
-              steps: steps
           cloud:
             endpoint: fal-ai/z-image/turbo
             lora_endpoint: fal-ai/z-image/turbo/lora
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: num_images
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -84,24 +77,8 @@ models:
           local:
             template: image/z_image_img2img
             template_hash: "sha256:32d0319740738742b9320f810b6ead9bd47a0196c5008ed4476913d3b32dd880"
-            param_map:
-              prompt: prompt
-              seed: seed
-              image_ref: image_ref
-              size: size
-              strength: denoise
-              guidance_scale: guidance
-              steps: steps
           cloud:
             endpoint: fal-ai/z-image/turbo/image-to-image
-            param_map:
-              prompt: prompt
-              seed: seed
-              image_ref: image_url
-              size: image_size
-              strength: strength
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -146,24 +123,8 @@ models:
           local:
             template: image/qwen_image_2512
             template_hash: "sha256:c0716acf518923907b78c1d8e3f9bc0ab1c2dae54589c2a3a289998e8d4baf44"
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              count: count
-              size: size
-              guidance_scale: guidance
-              steps: steps
           cloud:
             endpoint: fal-ai/qwen-image
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              count: num_images
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -208,24 +169,8 @@ models:
           local:
             template: edit/qwen_image_edit
             template_hash: "sha256:2620132e816257fe7ad3ab06e5c226ca0f59438161e48dedc6364267820f5b37"
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: count
-              image_ref: image
-              size: size
-              guidance_scale: guidance
-              steps: steps
           cloud:
             endpoint: fal-ai/qwen-image-edit
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: num_images
-              image_ref: image_url
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -273,13 +218,6 @@ models:
             price:
               unit: image
               usd: 0.025
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: num_images
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -306,15 +244,6 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/flux/dev/image-to-image
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: num_images
-              image_ref: image_url
-              size: image_size
-              strength: strength
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -355,13 +284,8 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/flux/schnell
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: num_images
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
+            hints:
+              guidance_scale_override: 1.0
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -396,13 +320,6 @@ models:
           cloud:
             endpoint: fal-ai/flux-2/klein/9b
             lora_endpoint: fal-ai/flux-2/lora
-            param_map:
-              prompt: prompt
-              seed: seed
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              negative_prompt: negative_prompt
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -436,13 +353,6 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/flux-2/klein/4b
-            param_map:
-              prompt: prompt
-              seed: seed
-              size: image_size
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              negative_prompt: negative_prompt
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -492,14 +402,11 @@ models:
         backends:
           cloud:
             endpoint: ideogram/v4
+            hints:
+              enable_safety_checker: false
             price:
               unit: image
               usd: 0.06
-            param_map:
-              prompt: prompt
-              seed: seed
-              count: num_images
-              size: image_size
           codex:
             endpoint: codex/gpt-image
             param_map:
@@ -552,22 +459,6 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/wan/v2.2-a14b/text-to-video/turbo
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              frames: num_frames
-              fps: fps
-              duration: duration
-              resolution: aspect_ratio
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker
-              enable_prompt_expansion: enable_prompt_expansion
-              acceleration: acceleration
-
       i2v:
         supports:
           - prompt
@@ -590,30 +481,8 @@ models:
           local:
             template: video/wan22_i2v_comfy_lightx2v
             template_hash: "sha256:272d03627814489a707c4d98553611072244a0b40f9657ed29330dd5c06afc77"
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: image
-              resolution: resolution
-              frames: num_frames
           cloud:
             endpoint: fal-ai/wan/v2.2-a14b/image-to-video/turbo
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: image_url
-              resolution: aspect_ratio
-              frames: num_frames
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker
-              enable_prompt_expansion: enable_prompt_expansion
-              acceleration: acceleration
-
       flf:
         supports:
           - prompt
@@ -637,22 +506,6 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/wan/v2.2-a14b/image-to-video/turbo
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: image_url
-              image_end_ref: end_image_url
-              resolution: aspect_ratio
-              frames: num_frames
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker
-              enable_prompt_expansion: enable_prompt_expansion
-              acceleration: acceleration
-
   # =========================================================================
   # ltx-2.3 — LTX-2.3 (text-to-video + image-to-video + first-last-frame)
   #
@@ -701,28 +554,8 @@ models:
           local:
             template: video/ltx2_3_t2v
             template_hash: "sha256:572de0f257257305dd5b2e8c099e4076434801c286fa8a4666dee2f9671e3261"
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              resolution: resolution
-              frames: frames
-              fps: fps
           cloud:
             endpoint: fal-ai/ltx-2.3/text-to-video/fast
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              resolution: aspect_ratio
-              frames: num_frames
-              fps: fps
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker
-
       i2v:
         supports:
           - prompt
@@ -744,14 +577,6 @@ models:
           local:
             template: video/ltx2_3_i2v
             template_hash: "sha256:b093fd5e439a2f862789c50661bc3d4ba4500791be6b954661f12db3ccc9cc31"
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: image
-              resolution: resolution
-              frames: frames
-              fps: fps
           cloud:
             endpoint: fal-ai/ltx-2.3/image-to-video/fast
             # When LoRAs are requested the backend routes to this quality
@@ -759,20 +584,6 @@ models:
             # transformer} items (fal-ai/ltx-2.3-quality/image-to-video/lora).
             # The base /fast endpoint does not take custom LoRAs.
             lora_endpoint: fal-ai/ltx-2.3-quality/image-to-video/lora
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: image_url
-              resolution: aspect_ratio
-              frames: num_frames
-              fps: fps
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker
-
       flf:
         supports:
           - prompt
@@ -791,16 +602,6 @@ models:
           local:
             template: video/ltx2_3_runexx_first_last_frame
             template_hash: "sha256:7ec63b4662cacbd7105858d4284939af70b29f4c8c6893134c97f5dcaacc41ab"
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: start_image
-              image_end_ref: end_image
-              resolution: resolution
-              frames: frames
-              fps: fps
-
   # =========================================================================
   # ltx-2.3-pro — LTX-2.3 pro endpoints (cloud-only t2v + i2v)
   # =========================================================================
@@ -825,19 +626,6 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/ltx-2.3/text-to-video
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              resolution: aspect_ratio
-              frames: num_frames
-              fps: fps
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker
-
       i2v:
         supports:
           - prompt
@@ -858,16 +646,3 @@ models:
         backends:
           cloud:
             endpoint: fal-ai/ltx-2.3/image-to-video
-            param_map:
-              prompt: prompt
-              negative_prompt: negative_prompt
-              seed: seed
-              image_ref: image_url
-              resolution: aspect_ratio
-              frames: num_frames
-              fps: fps
-              guidance_scale: guidance_scale
-              steps: num_inference_steps
-              shift: shift
-              loras: loras
-              enable_safety_checker: enable_safety_checker

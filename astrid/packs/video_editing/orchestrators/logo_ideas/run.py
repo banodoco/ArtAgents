@@ -22,7 +22,7 @@ from astrid.core.util.http import (
     default_client,
     fal_submit_and_poll,
 )
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 
 FIREWORKS_CHAT_URL = "https://api.fireworks.ai/inference/v1/chat/completions"
@@ -423,7 +423,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         concepts = _planned_concepts(args.ideas, args.count)
         concepts_payload = {"mode": "dry-run", "raw_response": None, "concepts": concepts}
     else:
-        fireworks_key = load_api_key("FIREWORKS_API_KEY", args.env_file)
+        fireworks_key = CredentialsScope.get("fireworks", env_file=args.env_file)
         client.register_secret(fireworks_key)
         response = call_fireworks_concepts(
             ideas=args.ideas,
@@ -454,7 +454,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
     )
 
-    fal_key = None if args.dry_run else load_api_key("FAL_KEY", args.env_file)
+    fal_key = None if args.dry_run else CredentialsScope.get("fal", env_file=args.env_file)
     if fal_key:
         client.register_secret(fal_key)
     grid_mode = args.provider in GRID_PROVIDERS

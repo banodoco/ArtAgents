@@ -17,7 +17,8 @@
       "description": "Video to inspect.",
       "name": "video",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "video/clip"
     }
   ],
   "isolation": {

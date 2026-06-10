@@ -193,11 +193,9 @@ class EffectsCatalogTest(unittest.TestCase):
 
             old_workspace_root = effects_catalog.WORKSPACE_ROOT
             old_themes_root = effects_catalog.THEMES_ROOT
-            old_active_theme = effects_catalog._ACTIVE_THEME_DIR
             try:
                 effects_catalog.WORKSPACE_ROOT = workspace
                 effects_catalog.THEMES_ROOT = workspace / "themes"
-                effects_catalog.set_active_theme(None)
 
                 self.assertIn("stamp", effects_catalog.list_effect_ids())
                 self.assertIn("text-card", effects_catalog.list_effect_ids())
@@ -212,16 +210,14 @@ class EffectsCatalogTest(unittest.TestCase):
                     "crossfade",
                 )
 
-                effects_catalog.set_active_theme(theme)
-                self.assertIn("fade-up", effects_catalog.list_animation_ids())
+                self.assertIn("fade-up", effects_catalog.list_animation_ids(theme=theme))
                 self.assertEqual(
-                    effects_catalog.read_animation_meta("fade-up")["label"],
+                    effects_catalog.read_animation_meta("fade-up", theme=theme)["label"],
                     "fade-up",
                 )
             finally:
                 effects_catalog.WORKSPACE_ROOT = old_workspace_root
                 effects_catalog.THEMES_ROOT = old_themes_root
-                effects_catalog._ACTIVE_THEME_DIR = old_active_theme
 
     def test_theme_effects_merge_with_workspace_effects(self) -> None:
         result = self._run_generator("--theme", str(THEME_FIXTURE))

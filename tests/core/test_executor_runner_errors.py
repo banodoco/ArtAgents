@@ -32,7 +32,7 @@ from astrid.core.executor.runner import (
     evaluate_conditions,
     run_executor,
 )
-from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition
+from astrid.core.executor.schema import ConditionSpec, ExecutorDefinition, ExecutorValidationError
 from astrid.core.pack.resolver import PackResolverError
 from astrid.core.executor.argv import executor_argv, resolve_executor_runtime_module
 
@@ -1250,3 +1250,99 @@ def test_in_process_returncode_collision_runner_wins_and_generation_result_prese
     assert result.payload[GENERATION_RESULT_KEY] == gen_result
     assert result.payload[GENERATION_RESULT_KEY]["mode"] == "t2v"
     assert result.payload[GENERATION_RESULT_KEY]["video_paths"] == ["/tmp/vid_01.mp4"]
+
+
+# ---------------------------------------------------------------------------
+# SC4: scoped_configs dispatch-time validation (T4)
+# ---------------------------------------------------------------------------
+
+
+def test_unknown_scoped_config_key_raises_executor_validation_error_at_dispatch(
+    tmp_path: Path,
+) -> None:
+    """Unknown scoped_config key must raise ExecutorValidationError at dispatch, not at parse.
+
+    Shape-only validation at parse time means the key regex passes; runner-time
+    validation against SCOPE_REGISTRY catches unregistered keys.
+    """
+    executor = ExecutorDefinition(
+        **{
+            **_executor(executor_id="test.unknown_scope").__dict__,
+            "scoped_configs": ("definitely.not.registered.xyz",),
+        }
+    )
+    registry = _registry(executor)
+
+    with pytest.raises(ExecutorValidationError, match="unknown scoped_config key"):
+        run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
+
+
+def test_known_scoped_config_key_style_does_not_raise_at_dispatch(
+    tmp_path: Path,
+) -> None:
+    """'style' is a registered key — dispatch must NOT raise."""
+    import astrid.core.theme.scope  # ensure registration
+    executor = ExecutorDefinition(
+        **{
+            **_executor(executor_id="test.style_scope").__dict__,
+            "scoped_configs": ("style",),
+        }
+    )
+    registry = _registry(executor)
+
+    result = run_executor(ExecutorRunRequest(executor_id=executor.id, out=tmp_path), registry)
+
+    assert result.returncode == 0
+    assert result.ok is True
+
+
+def test_scoped_config_style_emits_hype_active_theme_in_subprocess_env(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When scoped_configs includes 'style' and a theme is resolved, HYPE_ACTIVE_THEME
+    is emitted into the subprocess env (SINGLE source, tagged # scoped-config emit)."""
+    import astrid.core.theme.scope  # ensure registration
+    from astrid.core.env_vars import HYPE_ACTIVE_THEME
+
+    # Create a fake theme directory so resolve_theme_dir returns a real Path.
+    fake_theme = tmp_path / "my-theme"
+    fake_theme.mkdir()
+
+    captured_env: dict[str, Any] = {}
+
+    def _fake_subprocess_run(
+        argv: list[str],
+        *,
+        cwd: str | None,
+        env: Mapping[str, str],
+        check: bool,
+    ) -> types.SimpleNamespace:
+        captured_env.update(env)
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(executor_runner.subprocess, "run", _fake_subprocess_run)
+
+    executor = ExecutorDefinition(
+        **{
+            **_executor(
+                executor_id="test.style_emit",
+                argv=(sys.executable, "-c", "pass"),
+            ).__dict__,
+            "scoped_configs": ("style",),
+        }
+    )
+    registry = _registry(executor)
+
+    result = run_executor(
+        ExecutorRunRequest(
+            executor_id=executor.id,
+            out=tmp_path,
+            inputs={"theme": str(fake_theme)},
+        ),
+        registry,
+    )
+
+    assert result.ok is True
+    assert HYPE_ACTIVE_THEME in captured_env
+    assert captured_env[HYPE_ACTIVE_THEME] == str(fake_theme)

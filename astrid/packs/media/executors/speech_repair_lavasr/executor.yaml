@@ -4,6 +4,7 @@
   "name": "Speech Repair LavaSR",
   "kind": "built_in",
   "version": "1.0",
+  "scoped_configs": ["credentials.fal"],
   "short_description": "Repair weak-mic speech with hotter pre-lift, fal.ai LavaSR, optional DeepFilterNet3, and a final loudness pass.",
   "description": "Extract a video section, aggressively pre-lift weak speech, run fal-ai/lava-sr, optionally run fal-ai/deepfilternet3, then remux and loudness-master the repaired audio onto the extracted video.",
   "keywords": [
@@ -20,7 +21,8 @@
       "name": "input",
       "type": "file",
       "required": true,
-      "description": "Source video file path."
+      "description": "Source video file path.",
+      "artifact_type": "audio"
     },
     {
       "name": "start",
@@ -52,7 +54,8 @@
       "name": "output",
       "type": "file",
       "path_template": "{out}/speech-repair-lavasr.mp4",
-      "description": "The extracted clip with LavaSR-repaired, loudness-mastered audio."
+      "description": "The extracted clip with LavaSR-repaired, loudness-mastered audio.",
+      "artifact_type": "audio"
     }
   ],
   "command": {

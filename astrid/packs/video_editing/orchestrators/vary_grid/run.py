@@ -18,7 +18,7 @@ from urllib.error import HTTPError, URLError
 
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.util.http import FAL_QUEUE_URL, default_client
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.packs.video_editing.orchestrators.logo_ideas.run import (
     DEFAULT_FIREWORKS_MODEL,
     FIREWORKS_CHAT_URL,
@@ -33,10 +33,6 @@ MAX_COUNT = 9
 
 _client = default_client()
 
-
-def _load_env_var(name: str, env_file: Path | None) -> str:
-    """Preserved wrapper for vary_grid's --env-file CLI surface (Sprint 01 reconciliation)."""
-    return load_api_key(name, env_file)
 
 
 def write_json(path: Path, payload: Any) -> None:
@@ -508,7 +504,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         concepts_payload = {"mode": "dry-run", "concepts": concepts, "raw_response": None}
         grid_prompt = build_grid_prompt(args.ideas, concepts, len(refs))
     else:
-        fireworks_key = _load_env_var("FIREWORKS_API_KEY", args.env_file)
+        fireworks_key = CredentialsScope.get("fireworks", env_file=args.env_file)
         response = call_kimi_variations(
             ideas=args.ideas,
             count=args.count,
@@ -546,7 +542,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.dry_run:
         generated = _placeholder_image(grid_path, "vary-grid (dry-run)")
     else:
-        fal_key = _load_env_var("FAL_KEY", args.env_file)
+        fal_key = CredentialsScope.get("fal", env_file=args.env_file)
         ref_paths = [Path(r["path"]) for r in refs]
         submission, result = call_fal_edit(
             prompt=grid_prompt,

@@ -92,7 +92,8 @@
       "mode": "create_or_replace",
       "name": "pool",
       "path_template": "{out}/pool.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "pool"
     }
   ],
   "pipeline_requirements": [

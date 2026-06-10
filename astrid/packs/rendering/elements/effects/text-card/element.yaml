@@ -18,6 +18,13 @@
     "title"
   ],
   "kind": "effect",
+  "outputs": [
+    {
+      "name": "clip",
+      "type": "clip",
+      "artifact_type": "clip/visual"
+    }
+  ],
   "metadata": {
     "description": "Default text card effect.",
     "label": "Text Card",
@@ -25,6 +32,9 @@
     "pack_id": "rendering"
   },
   "pack_id": "rendering",
+  "runtime": {
+    "adapter": "remotion"
+  },
   "schema": {
     "properties": {
       "align": {

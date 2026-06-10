@@ -98,8 +98,10 @@ def validate_pool(pool: Any) -> None:
             effect_id = entry.get("effect_id")
             if not isinstance(effect_id, str) or not effect_id:
                 raise ValueError(f"{path}.effect_id must be a non-empty string")
-            from astrid.core.timeline.banodoco_schema import _effect_ids
-            if effect_id not in _effect_ids():
+            # New artifact-type resolution is canonical; legacy _effect_ids path
+            # retained via _parity shim for env-flagged oracle (S4: remove shim).
+            from astrid.core.timeline.validators._parity import is_effect_clip
+            if not is_effect_clip(effect_id, None):
                 raise ValueError(f"{path}.effect_id {effect_id!r} is not present in the effects catalog")
             for field in ("param_schema", "defaults", "meta"):
                 if not isinstance(entry.get(field), dict):
