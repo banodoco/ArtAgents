@@ -9,9 +9,11 @@ babysit cycle. Backward-looking detail lives in `RESTRUCTURE-PROGRESS.md`; infra
 2026-06-10: **Restructure DONE + pushed** (24→6 cycles). **EPIC LAUNCHED & RUNNING** (actions 1–4 done).
 The capability-waist chain is driving in worktree `~/Documents/.megaplan-worktrees/capwaist` (branch `capwaist`,
 forked from `astrid-capability-waist`@`c2e593f`), `--no-push` LOCAL-COMMIT mode, vendor=claude, native Shannon.
-Log: `/tmp/capwaist-chain.log`. Currently on **s0-derisk-spike** (prep/plan). **NEXT: action 5 — BABYSIT.**
-First babysit must VALIDATE the s0 claude/Shannon phase captured (if "Timed out waiting for Claude prompt" /
-empty plan → apply the Shannon transcript-read deep-fix per action 3, then re-drive s0).
+Log: `/tmp/capwaist-chain.log`. **02:42 babysit:** s0 advanced plan→critique→revise→**execute** cleanly;
+**Shannon capture VALIDATED** (no TUI-scrape stall — no transcript-read fix needed). s0 now executing.
+**NEXT: at next fire, check the s0 HARD-GATE outcome** — if gate PASS, chain auto-advances to s1 (keep
+babysitting); if gate FAIL (s0's stop-and-replan condition: scoped-config can't be made clean) → that's an
+architectural go/no-go → STOP and surface to operator, do not force.
 
 ## The program (3 user goals, in order)
 1. ✅ Execute `RESTRUCTURE-PLAN.md` directly (no megaplan) — DONE, at the cycle floor of 6.
