@@ -150,14 +150,14 @@ _EXPECTED_AGENT_CLI_MODULES: set[str] = {
     "astrid/core/gateway/dispatch.py",
     "astrid/core/cli/session.py",
     "astrid/core/task/claim.py",
-    "astrid/core/task/lifecycle.py",
-    "astrid/core/task/lifecycle_ack.py",
-    "astrid/core/task/lifecycle_skip.py",
-    "astrid/core/task/operator_view.py",
-    "astrid/core/task/run_store.py",
-    "astrid/core/task/plan_builder.py",
+    "astrid/core/task/lifecycle/__init__.py",
+    "astrid/core/task/lifecycle/ack.py",
+    "astrid/core/task/lifecycle/skip.py",
+    "astrid/core/task/operator/view.py",
+    "astrid/core/task/run/store.py",
+    "astrid/core/task/plan/builder.py",
     "astrid/core/task/cli_contract.py",
-    "astrid/core/task/gate_base.py",
+    "astrid/core/task/gate/base.py",
 }
 
 # Known pack executor paths that must NOT appear in the agent-facing list.

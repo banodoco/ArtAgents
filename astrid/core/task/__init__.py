@@ -17,7 +17,7 @@ from .env import (
     task_run_id_env,
     task_step_id_env,
 )
-from .event_stream import EventStreamRecord, read_event_stream, subscribe_event_stream
+from .events.stream import EventStreamRecord, read_event_stream, subscribe_event_stream
 from .events import (
     canonical_event_json,
     make_cursor_rewind_event,
@@ -50,7 +50,7 @@ from .gate import (
     validate_attested_identity,
     write_iteration_feedback,
 )
-from .inbox import (
+from .operator.inbox import (
     InboxEntry,
     consume_inbox_entry,
     inbox_dir,

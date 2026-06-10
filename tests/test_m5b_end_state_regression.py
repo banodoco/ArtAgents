@@ -347,9 +347,9 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
         from astrid.core.structure import _is_import_layering_exempt
 
         for relpath in (
-            "astrid/core/task/lifecycle.py",
+            "astrid/core/task/lifecycle/__init__.py",
             "astrid/core/task/orchestrator_resolver.py",
-            "astrid/core/task/plan_builder.py",
+            "astrid/core/task/plan/builder.py",
         ):
             path = _REPO_ROOT / relpath
             self.assertFalse(
@@ -357,7 +357,7 @@ class LifecycleImportLayeringValidationTest(unittest.TestCase):
                 f"Lifecycle-related file should not be exempt — {relpath} must be checked normally",
             )
 
-        event_stream_path = _REPO_ROOT / "astrid" / "core" / "task" / "event_stream.py"
+        event_stream_path = _REPO_ROOT / "astrid" / "core" / "task" / "events" / "stream.py"
         self.assertFalse(
             _is_import_layering_exempt(event_stream_path, _REPO_ROOT),
             "event_stream.py should not need a file-level exemption now that audit is a core subsystem",

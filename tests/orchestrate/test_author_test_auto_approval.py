@@ -29,7 +29,7 @@ from astrid.core.env_vars import ASTRID_AUTHOR_TEST
 from astrid.core.task.env import ASTRID_ACTOR
 from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_start
-from astrid.core.task.lifecycle_ack import cmd_ack
+from astrid.core.task.lifecycle.ack import cmd_ack
 from astrid.core.orchestrate.test_runner import _finish_code_step, run_fixture
 
 

@@ -139,7 +139,7 @@ def cmd_ack(
             return 1
         # Forward --json when present so abort can emit structured output.
         has_json = "--json" in argv_list
-        from astrid.core.task.run_store import cmd_abort
+        from astrid.core.task.run.store import cmd_abort
         abort_argv = ["--project", proj]
         if has_json:
             abort_argv.append("--json")
@@ -287,7 +287,7 @@ def _ack_approve(args, slug, peek, projects_root, proj_root) -> int:
     # ONLY in gate._dispatch_attested (never in record_dispatch_complete), so
     # code-step rewinds never reach this branch by design.
     if decision.inline_check_result is not None:
-        from astrid.core.task.operator_view import render_step_instructions
+        from astrid.core.task.operator.view import render_step_instructions
         name, reason = decision.inline_check_result
         decision_run_id = decision.run_id or ""
         produces_entry = next(

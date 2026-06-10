@@ -166,7 +166,7 @@ _PACK_RUNTIME_BRIDGE_EXEMPT_REL = frozenset(
         "astrid/core/orchestrator/runner.py",
         "astrid/core/pack/resolver.py",
         "astrid/core/runtime/in_process.py",
-        "astrid/core/task/plan_builder.py",
+        "astrid/core/task/plan/builder.py",
     }
 )
 _PACK_SYSTEM_TOP_LEVEL_MODULES = frozenset(

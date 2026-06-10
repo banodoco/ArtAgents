@@ -15,7 +15,7 @@ from astrid.core.contracts.schema import (
     Provenance,
     SafetyDeclaration,
 )
-from astrid.core.task.event_stream import (
+from astrid.core.task.events.stream import (
     EventStreamRecord,
 )
 from .results import (

@@ -51,7 +51,7 @@ from astrid.core.task.plan import (
     compute_plan_hash,
     load_plan,
 )
-from astrid.core.task.run_state import _run_is_complete
+from astrid.core.task.run.state import _run_is_complete
 
 # ---------------------------------------------------------------------------
 # Synthetic run fixture
@@ -715,7 +715,7 @@ def test_dynamic_add_step_shot_count_discovery(tmp_path: Path) -> None:
 
     # Call cmd_plan_add_step to add a shot-detail step after cut.
     # ``cut`` is a child of ``hype``, so the path is ``hype/cut``.
-    from astrid.core.task.plan_verbs import cmd_plan_add_step
+    from astrid.core.task.plan.verbs import cmd_plan_add_step
 
     result = cmd_plan_add_step(
         [
@@ -766,7 +766,7 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
         {"kind": "run_started", "run_id": "run-hype-1", "ts": "2025-01-01T00:00:00Z"},
     )
 
-    from astrid.core.task.plan_verbs import cmd_plan_add_step
+    from astrid.core.task.plan.verbs import cmd_plan_add_step
 
     result = cmd_plan_add_step(
         [
@@ -782,7 +782,7 @@ def test_dynamic_add_step_into_group(tmp_path: Path) -> None:
     assert result == 0
 
     # Verify the effective plan now includes the new step
-    from astrid.core.task.plan_verbs import apply_mutations
+    from astrid.core.task.plan.verbs import apply_mutations
 
     plan = load_plan(str(run_dir / "plan.json"))
     events = []

@@ -40,7 +40,7 @@ from astrid.core.task.events import (
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
-from astrid.core.task.inbox import consume_inbox_entry, pending_count, scan_inbox
+from astrid.core.task.operator.inbox import consume_inbox_entry, pending_count, scan_inbox
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,
@@ -53,10 +53,10 @@ from astrid.core.task.plan import (
     load_plan,
     step_dir_for_path,
 )
-from astrid.core.task.plan_verbs import apply_mutations
+from astrid.core.task.plan.verbs import apply_mutations
 from astrid.core.task.preamble import PROHIBITION_PREAMBLE
-from astrid.core.task.run_state import _run_is_complete
-from astrid.core.task.run_store import _emit_run_completed_if_needed
+from astrid.core.task.run.state import _run_is_complete
+from astrid.core.task.run.store import _emit_run_completed_if_needed
 from astrid.core.session.discovery_hints import (
     _most_recent_session_slug,
     _os_environ_has_session,
@@ -65,7 +65,7 @@ from astrid.core.session.discovery_hints import (
 )
 
 # -- Status JSON helpers ----------------------------------------------------
-from astrid.core.task.inbox import pending_count as _pending_count
+from astrid.core.task.operator.inbox import pending_count as _pending_count
 
 
 def _status_json(
@@ -128,10 +128,10 @@ def _status_json(
 
 
 # ── Re-exports from operator_render.py for backward compatibility ──────────
-# These names must remain accessible as astrid.core.task.operator_view.<name>
+# These names must remain accessible as astrid.core.task.operator.view.<name>
 # because lifecycle.py, lifecycle_ack.py, and test monkeypatch seams reference
 # them through this module.
-from astrid.core.task.operator_render import (  # noqa: E402, F401
+from astrid.core.task.operator.render import (  # noqa: E402, F401
     _AckTemplate,
     _ack_identity_token,
     _ack_template_parts,

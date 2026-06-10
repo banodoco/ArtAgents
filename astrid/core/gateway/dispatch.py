@@ -318,7 +318,7 @@ def _dispatch_runs(args: list[str]) -> int:
     """Dispatch ``astrid runs {ls,show,artifacts,trace,cost,gc}`` sub-verbs."""
     import argparse
 
-    from astrid.core.task.run_audit import (
+    from astrid.core.task.run.audit import (
         cmd_run_artifacts,
         cmd_run_cost,
         cmd_run_show,
@@ -326,7 +326,7 @@ def _dispatch_runs(args: list[str]) -> int:
     )
 
     from astrid.core.task.lifecycle import cmd_runs_ls
-    from astrid.core.task.run_gc import cmd_runs_gc
+    from astrid.core.task.run.gc import cmd_runs_gc
 
     parser = argparse.ArgumentParser(prog="astrid runs")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -373,7 +373,7 @@ def _dispatch_hook(args: list[str]) -> int:
 
 def _dispatch_plan_verbs(args: list[str]) -> int:
     """Delegate plan sub-verbs to plan_verbs.cmd_plan (T8/T17)."""
-    from astrid.core.task.plan_verbs import cmd_plan
+    from astrid.core.task.plan.verbs import cmd_plan
 
     return cmd_plan(args)
 
@@ -382,7 +382,7 @@ def _dispatch_events(args: list[str]) -> int:
     """Dispatch ``astrid events {verify,tail}`` top-level verbs (Sprint 5b)."""
     import argparse
 
-    from astrid.core.task.run_audit import cmd_events_tail, cmd_events_verify
+    from astrid.core.task.run.audit import cmd_events_tail, cmd_events_verify
 
     parser = argparse.ArgumentParser(prog="astrid events")
     sub = parser.add_subparsers(dest="command", required=True)

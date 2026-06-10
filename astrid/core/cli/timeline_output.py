@@ -18,7 +18,7 @@ from typing import Any
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.project_paths import project_dir
 from astrid.core.task.events import read_events
-from astrid.core.task.run_audit import _cost_by_source, _run_status
+from astrid.core.task.run.audit import _cost_by_source, _run_status
 
 from astrid.core.timeline import crud
 

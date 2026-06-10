@@ -82,11 +82,11 @@
 | `astrid.core.timeline.cli.track_edits` | `track_add` | `tests/timeline/test_timeline_cli.py` : 1399 |
 | `astrid.core.timeline.cli.audio_edits` | `audio_bind` | `tests/timeline/test_timeline_cli.py` : 1426 |
 
-## 5. task/operator_view ↔ operator_render
+## 5. task/operator/view ↔ operator/render
 
 | Dotted path / attribute | Test file : line | Symbol pinned | How patched |
 |---|---|---|---|
-| `astrid.core.task.operator_view.render_step_instructions` | `tests/agentic/test_agent_probe_regression.py` : 294 | `render_step_instructions` | `monkeypatch.setattr(_operator_view_mod, ...)` resolves via `from astrid.core.task import operator_view` |
+| `astrid.core.task.operator.view.render_step_instructions` | `tests/agentic/test_agent_probe_regression.py` : 294 | `render_step_instructions` | `monkeypatch.setattr(_operator_view_mod, ...)` resolves via `from astrid.core.task.operator import view` |
 
 ## 6. gateway/__init__
 
@@ -167,7 +167,7 @@ pinning the attribute name on an imported module. The import path of the module 
 | `from astrid.core.task import lifecycle` | `cmd_ack` (et al, via `attr` loop) | `tests/test_canonical_cli.py` : 205 |
 | `from astrid.core.task import gate` | `gate_command` | `tests/test_canonical_cli.py` : 175, 206 |
 | `from astrid.core.task import gate` | `_run_inline_checks` | `tests/agentic/test_agent_probe_regression.py` : 283, 354; `tests/test_for_each_autoclose.py` : 70 |
-| `from astrid.core.task import gate_repeat` | `load_plan` | `tests/test_for_each_autoclose.py` : 153 |
+| `from astrid.core.task.gate import repeat` | `load_plan` | `tests/test_for_each_autoclose.py` : 153 |
 | `from astrid.core.executor import runner` | `invoke_in_process_command` | `tests/core/test_executor_runner_errors.py` : 781, 835, 1134, 1212 |
 | `from astrid.core.executor import runner` | `import_module` | `tests/core/test_executor_runner_errors.py` : 607 |
 | `from astrid.core.executor import runner` | `subprocess.run` | `tests/core/test_executor_runner_errors.py` : 728, 834 |

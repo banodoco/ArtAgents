@@ -17,9 +17,9 @@ from astrid.core.task.events import (
     make_iteration_started_event,
     read_events,
 )
-from astrid.core.task.gate_attestation import match_attested_command
-from astrid.core.task.gate_base import GateDecision, TaskRunGateError
-from astrid.core.task.gate_cursor import (
+from astrid.core.task.gate.attestation import match_attested_command
+from astrid.core.task.gate.base import GateDecision, TaskRunGateError
+from astrid.core.task.gate.cursor import (
     CursorPath,
     _ForEachSelection,
     _Frame,
@@ -188,7 +188,7 @@ def _resolve_for_each_items(
         # Find the prior step's declared produces path in the replayed projection;
         # a superseded producer must read from the cursor's current version, not v1.
         plan = load_plan(project_root / "plan.json")
-        from astrid.core.task.plan_verbs import apply_mutations
+        from astrid.core.task.plan.verbs import apply_mutations
         effective = apply_mutations(plan, events)
         target_path = parent_prefix + (target_id,)
         target_step = next((s for path, s in iter_steps_with_path(effective) if path == target_path), None)
@@ -354,7 +354,7 @@ def _build_autoclose_for_each_host_context(
     plan_path = project_root / "plan.json"
     try:
         plan = load_plan(plan_path)
-        from astrid.core.task.plan_verbs import apply_mutations
+        from astrid.core.task.plan.verbs import apply_mutations
 
         events = read_events(events_path) if events_path.exists() else []
         plan = apply_mutations(plan, events)
@@ -486,7 +486,7 @@ def _build_autocomplete_for_each_host_context(
     plan_path = decision.project_root / "plan.json"
     try:
         plan = load_plan(plan_path)
-        from astrid.core.task.plan_verbs import apply_mutations
+        from astrid.core.task.plan.verbs import apply_mutations
 
         events = read_events(decision.events_path) if decision.events_path.exists() else []
         plan = apply_mutations(plan, events)

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.audit import AuditContext
-from astrid.core.task.event_stream import read_event_stream, subscribe_event_stream
+from astrid.core.task.events.stream import read_event_stream, subscribe_event_stream
 from astrid.core.task.events import ZERO_HASH, _event_hash
 from astrid.core.contracts.event_log_error import EventLogError
 

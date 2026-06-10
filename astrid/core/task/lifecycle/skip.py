@@ -142,7 +142,7 @@ def cmd_skip(
 
     plan = load_plan(plan_path)
     events = read_events(events_path)
-    from astrid.core.task.plan_verbs import apply_mutations
+    from astrid.core.task.plan.verbs import apply_mutations
     plan = apply_mutations(plan, events)
 
     step, path_tuple = _resolve_frontier_step(plan, events)

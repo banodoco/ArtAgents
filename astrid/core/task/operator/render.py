@@ -8,7 +8,7 @@ handoff helpers.
 ``operator_view.py`` re-imports every public name from here so existing
 callers (``cmd_status``, ``cmd_next``, ``lifecycle``, ``lifecycle_ack``) and
 test monkeypatch seams continue to work through the
-``astrid.core.task.operator_view`` namespace.
+``astrid.core.task.operator.view`` namespace.
 """
 
 from __future__ import annotations
@@ -30,8 +30,8 @@ from astrid.core.task.plan import (
     is_leaf_step,
     iter_steps_with_path,
 )
-from astrid.core.task.run_state import _run_is_complete
-from astrid.core.task.run_store import _emit_run_completed_if_needed
+from astrid.core.task.run.state import _run_is_complete
+from astrid.core.task.run.store import _emit_run_completed_if_needed
 
 _PROGRESS_TERMINAL_KINDS = STEP_TERMINAL_KINDS
 

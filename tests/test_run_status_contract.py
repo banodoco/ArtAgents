@@ -94,13 +94,13 @@ class TestBlockedRepresentableEndToEnd:
         assert RunStatus.from_run_events(events) is RunStatus.BLOCKED
 
     def test_run_audit_surface_reports_blocked(self):
-        from astrid.core.task.run_audit import _run_status
+        from astrid.core.task.run.audit import _run_status
 
         events = [{"kind": "run_started"}, {"kind": "cursor_rewind"}]
         assert _run_status(events) == "blocked"
 
     def test_run_audit_preserves_legacy_in_flight_spelling(self):
-        from astrid.core.task.run_audit import _run_status
+        from astrid.core.task.run.audit import _run_status
 
         assert _run_status([{"kind": "run_started"}]) == "in-flight"
         assert _run_status([{"kind": "run_completed"}]) == "completed"

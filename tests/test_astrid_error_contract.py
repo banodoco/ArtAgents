@@ -14,7 +14,7 @@ from astrid.core.contracts.exec_error import ExecError
 from astrid.core.project.project import ProjectError
 from astrid.core.project.schema import ProjectValidationError
 from astrid.core.session.binding import SessionBindingError
-from astrid.core.task.gate_base import TaskRunGateError
+from astrid.core.task.gate.base import TaskRunGateError
 from astrid.core.timeline._edit_helpers import TimelineEditError
 
 

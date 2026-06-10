@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.task.gate_base import (
+from astrid.core.task.gate.base import (
     ITERATE_FEEDBACK_PREFIX,
     GateDecision,
     InlineCheckResult,
     TaskRunGateError,
     _reject,
 )
-from astrid.core.task.gate_cursor import (
+from astrid.core.task.gate.cursor import (
     EXHAUST_OVERRIDE_ID,
     CursorPath,
     derive_cursor,
@@ -30,13 +30,13 @@ from astrid.core.task.gate_cursor import (
     _make_exhaust_override_step,
     _path_str_from_event,
 )
-from astrid.core.task.gate_attestation import (
+from astrid.core.task.gate.attestation import (
     AttestedArgs,
     _extract_iterate_feedback,
     match_attested_command,
 )
-from astrid.core.task.gate_checks import _run_inline_checks
-from astrid.core.task.gate_repeat import (
+from astrid.core.task.gate.checks import _run_inline_checks
+from astrid.core.task.gate.repeat import (
     _count_iteration_failed,
     _has_iteration_exhausted,
     _json_field,

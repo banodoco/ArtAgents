@@ -68,14 +68,14 @@ from astrid.core.task.plan import (
     resolve_produces_ref,
     step_dir_for_path,
 )
-from astrid.core.task.gate_base import (
+from astrid.core.task.gate.base import (
     GateDecision,
     InlineCheckResult,
     ITERATE_FEEDBACK_PREFIX,
     TaskRunGateError,
     _reject,
 )
-from astrid.core.task.gate_cursor import (
+from astrid.core.task.gate.cursor import (
     CursorPath,
     EXHAUST_OVERRIDE_ID,
     _current_dispatch_hash,
@@ -98,14 +98,14 @@ from astrid.core.task.gate_cursor import (
     _top_frame_needs_repeat_until_evaluation,
     derive_cursor,
 )
-from astrid.core.task.gate_attestation import (
+from astrid.core.task.gate.attestation import (
     AttestedArgs,
     _extract_iterate_feedback,
     match_attested_command,
     validate_attested_identity,
     write_iteration_feedback,
 )
-from astrid.core.task.gate_repeat import (
+from astrid.core.task.gate.repeat import (
     _build_autoclose_for_each_host_context,
     _build_autocomplete_for_each_host_context,
     _count_iteration_failed,
@@ -118,11 +118,11 @@ from astrid.core.task.gate_repeat import (
     _maybe_autocomplete_for_each_host,
     _resolve_for_each_items,
 )
-from astrid.core.task.gate_checks import (
+from astrid.core.task.gate.checks import (
     _intern_produces_artifact,
     _run_inline_checks,
 )
-from astrid.core.task.gate_dispatch import (
+from astrid.core.task.gate.dispatch import (
     _adapter_dispatch,
     _code_decision,
     _dispatch_attested,
@@ -131,7 +131,7 @@ from astrid.core.task.gate_dispatch import (
     _make_run_ctx,
     _resolve_adapter,
 )
-from astrid.core.task.gate_finalize import (
+from astrid.core.task.gate.finalize import (
     _finalize_step as _gate_finalize_step,
     _load_step_for_decision,
     record_dispatch_complete,
@@ -359,7 +359,7 @@ def gate_command(
     # is an acceptable trade-off documented in the brief.
 
     events = read_events(events_path)
-    from astrid.core.task.plan_verbs import (
+    from astrid.core.task.plan.verbs import (
         apply_mutations,
         initial_plan_hash_from_events,
     )

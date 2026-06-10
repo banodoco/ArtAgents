@@ -33,7 +33,7 @@ from astrid.core.task.plan import (
     _validate_plan,
     step_dir_for_path,
 )
-from astrid.core.task.plan_verbs import apply_mutations
+from astrid.core.task.plan.verbs import apply_mutations
 from astrid.core.task.lifecycle import cmd_ack, cmd_next, cmd_start, cmd_status
 from astrid.core.timeline.crud import create_timeline
 

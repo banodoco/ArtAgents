@@ -23,7 +23,7 @@ from astrid.core.task.events import (
     make_step_skipped_event,
     read_events,
 )
-from astrid.core.task.gate_base import GateDecision, InlineCheckResult
+from astrid.core.task.gate.base import GateDecision, InlineCheckResult
 from astrid.core.task.plan import Step, iter_steps_with_path, load_plan
 
 
@@ -277,7 +277,7 @@ def _load_step_for_decision(decision: GateDecision) -> Step | None:
     plan = load_plan(plan_path)
     events_path = decision.project_root / "runs" / (decision.run_id or "") / "events.jsonl"
     events = read_events(events_path) if events_path.exists() else []
-    from astrid.core.task.plan_verbs import apply_mutations
+    from astrid.core.task.plan.verbs import apply_mutations
 
     effective = apply_mutations(plan, events)
     for path_tuple, step in iter_steps_with_path(effective):

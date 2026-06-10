@@ -23,19 +23,19 @@ from astrid.core.task.events import (
     make_step_attested_event,
     make_step_dispatched_event,
 )
-from astrid.core.task.gate_attestation import (
+from astrid.core.task.gate.attestation import (
     _extract_iterate_feedback,
     match_attested_command,
     validate_attested_identity,
     write_iteration_feedback,
 )
-from astrid.core.task.gate_base import (
+from astrid.core.task.gate.base import (
     GateDecision,
     InlineCheckResult,
     TaskRunGateError,
     _reject,
 )
-from astrid.core.task.gate_cursor import _event_step_version
+from astrid.core.task.gate.cursor import _event_step_version
 from astrid.core.task.plan import STEP_PATH_SEP, ProducesEntry, Step
 
 

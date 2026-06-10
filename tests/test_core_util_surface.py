@@ -39,7 +39,7 @@ def test_duplicate_core_hash_and_timestamp_helpers_remain_collapsed() -> None:
     assert defs.get("_sha256", []) == []
     assert defs.get("_now_iso", []) == []
     assert defs.get("_utc_now_iso", []) == []
-    assert defs.get("_sha256_file", []) == ["astrid/core/task/lifecycle.py"]
+    assert defs.get("_sha256_file", []) == ["astrid/core/task/lifecycle/__init__.py"]
 
-    lifecycle_text = (REPO_ROOT / "astrid/core/task/lifecycle.py").read_text(encoding="utf-8")
+    lifecycle_text = (REPO_ROOT / "astrid/core/task/lifecycle/__init__.py").read_text(encoding="utf-8")
     assert "TODO(m5b)" in lifecycle_text

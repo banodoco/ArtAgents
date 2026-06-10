@@ -40,7 +40,7 @@ from astrid.core.task.gate import (
     record_dispatch_complete,
 )
 from astrid.core.task.lifecycle import cmd_start
-from astrid.core.task.lifecycle_ack import cmd_ack
+from astrid.core.task.lifecycle.ack import cmd_ack
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     is_attested_kind,

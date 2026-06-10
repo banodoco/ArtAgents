@@ -24,7 +24,7 @@ from astrid.core.task.events import (
     make_step_skipped_event,
     read_events,
 )
-from astrid.core.task.lifecycle_skip import cmd_skip
+from astrid.core.task.lifecycle.skip import cmd_skip
 from astrid.core.task.plan import compute_plan_hash, load_plan
 from tests.helpers.current_run import seed_current_run
 
@@ -497,7 +497,7 @@ def test_skip_recoverable_exhausted_run_returns_exit_2(tmp_path: Path) -> None:
     # Verify the run is exhausted.
     plan = load_plan(proj_root / "plan.json")
     events = read_events(events_path)
-    from astrid.core.task.plan_verbs import apply_mutations
+    from astrid.core.task.plan.verbs import apply_mutations
     plan = apply_mutations(plan, events)
     from astrid.core.task.gate import derive_cursor
     cursor = derive_cursor(plan, events)

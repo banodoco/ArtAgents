@@ -308,7 +308,7 @@ def test_validate_repo_structure_allows_pack_declared_custom_element_kind(tmp_pa
 def test_validate_import_layering_allows_core_orchestrate_but_flags_pack_imports(tmp_path: Path) -> None:
     _write(
         tmp_path,
-        "astrid/core/task/lifecycle.py",
+        "astrid/core/task/lifecycle/__init__.py",
         "from astrid.core.orchestrate.compile import DEFAULT_PACKS_ROOT\n",
     )
     _write(
@@ -318,7 +318,7 @@ def test_validate_import_layering_allows_core_orchestrate_but_flags_pack_imports
     )
     _write(
         tmp_path,
-        "astrid/core/task/plan_builder.py",
+        "astrid/core/task/plan/builder.py",
         "from astrid.packs.video_editing.orchestrators.hype.plan_template import build_plan_v2\n",
     )
     _write(
@@ -330,7 +330,7 @@ def test_validate_import_layering_allows_core_orchestrate_but_flags_pack_imports
     violations = validate_import_layering(tmp_path)
 
     assert set(violations) == {
-        "astrid/core/task/plan_builder.py:1 imports forbidden module 'astrid.packs.video_editing.orchestrators.hype.plan_template'",
+        "astrid/core/task/plan/builder.py:1 imports forbidden module 'astrid.packs.video_editing.orchestrators.hype.plan_template'",
     }
 
 

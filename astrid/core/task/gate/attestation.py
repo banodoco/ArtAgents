@@ -9,7 +9,7 @@ from typing import Literal
 
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.task.env import is_author_test_mode, task_actor_env
-from astrid.core.task.gate_base import ITERATE_FEEDBACK_PREFIX, GateDecision, _reject
+from astrid.core.task.gate.base import ITERATE_FEEDBACK_PREFIX, GateDecision, _reject
 from astrid.core.task.plan import Step, step_dir_for_path
 
 

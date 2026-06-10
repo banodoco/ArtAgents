@@ -56,7 +56,7 @@
         "notes": "Task gate logic — gate checks, attestation, repeat, cursor. Core task kernel component. Likely split targets: gate check implementations to separate modules, attestation to dedicated module."
       },
       {
-        "file": "astrid/core/task/operator_view.py",
+        "file": "astrid/core/task/operator/view.py",
         "lines": 1311,
         "classification": "internal_kernel",
         "notes": "Operator view rendering for task state visualization. Likely split targets: view templates to separate modules, rendering logic to dedicated module."
@@ -174,7 +174,7 @@
       "astrid/sdk.py (1,833 lines) — public surface, API stability concerns",
       "astrid/packs/cli.py (1,761 lines) — pack system",
       "astrid/core/task/gate.py (1,467 lines) — task kernel",
-      "astrid/core/task/operator_view.py (1,311 lines) — task kernel",
+      "astrid/core/task/operator/view.py (1,311 lines) — task kernel",
       "astrid/core/session/cli.py (1,297 lines) — session management",
       "astrid/gateway.py (1,215 lines) — gateway subcommand router",
       "astrid/core/timeline/events/schema/types.py (1,220 lines) — type system",

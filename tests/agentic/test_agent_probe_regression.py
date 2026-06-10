@@ -285,7 +285,7 @@ def _revert_inline_ack_exit(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _revert_placeholder_substitution(monkeypatch: pytest.MonkeyPatch) -> None:
     """Identity render: leaves $ASTRID_* tokens un-substituted."""
-    from astrid.core.task import operator_view as _operator_view_mod
+    from astrid.core.task.operator import view as _operator_view_mod
 
     def _identity(text, **_kwargs):
         return text

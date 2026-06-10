@@ -44,7 +44,7 @@ def _effective_plan(run_dir: Path) -> "Any":
     """Return the effective TaskPlan for *run_dir* (plan.json + replayed mutations)."""
     from astrid.core.task.plan import load_plan
     from astrid.core.task.events import read_events
-    from astrid.core.task.plan_verbs import apply_mutations
+    from astrid.core.task.plan.verbs import apply_mutations
 
     plan_path = run_dir / "plan.json"
     events_path = run_dir / "events.jsonl"

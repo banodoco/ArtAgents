@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.task.inbox import (
+from astrid.core.task.operator.inbox import (
     CONSUMED_DIR_NAME,
     INBOX_DIR_NAME,
     InboxValidationError,

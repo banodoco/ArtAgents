@@ -65,7 +65,7 @@ from .dto import (
 # ---------------------------------------------------------------------------
 # Events
 # ---------------------------------------------------------------------------
-from astrid.core.task.event_stream import (
+from astrid.core.task.events.stream import (
     read_event_stream as _read_task_event_stream,
     subscribe_event_stream as _subscribe_task_event_stream,
 )

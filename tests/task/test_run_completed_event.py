@@ -9,7 +9,7 @@ from pathlib import Path
 
 from astrid.core.task.lifecycle import cmd_runs_ls
 from astrid.core.task.plan import Step, TaskPlan
-from astrid.core.task.run_state import _run_is_complete
+from astrid.core.task.run.state import _run_is_complete
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -154,7 +154,7 @@ def test_run_is_complete_multiple_events_same_step() -> None:
 
 def _summarize(run_dir: Path, events_payload: list[dict] | None = None) -> str:
     """Call _summarize_run_dir and return the status string."""
-    from astrid.core.task.run_store import _summarize_run_dir
+    from astrid.core.task.run.store import _summarize_run_dir
 
     if events_payload is not None:
         events_path = run_dir / "events.jsonl"

@@ -53,7 +53,7 @@ REJECTED_DIR_NAME = ".rejected"
 _VALID_DECISIONS = ("approve", "retry", "abort", "skip")
 _VALID_SUBMITTED_BY_KINDS = ("agent", "human")
 
-_LOGGER = logging.getLogger("astrid.core.task.inbox")
+_LOGGER = logging.getLogger("astrid.core.task.operator.inbox")
 
 
 class InboxValidationError(Exception):
@@ -398,7 +398,7 @@ def consume_inbox_entry(
 
     plan = load_plan(plan_path)
     events = read_events(events_path)
-    from astrid.core.task.plan_verbs import apply_mutations
+    from astrid.core.task.plan.verbs import apply_mutations
     effective_plan = apply_mutations(plan, events)
 
     # --- Stale-entry check (before cursor check) ---

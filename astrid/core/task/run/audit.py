@@ -13,9 +13,9 @@ from typing import Any, Optional, Sequence
 from astrid.core.contracts.run_status import RunStatus
 from astrid.core.foundation.project_paths import project_dir, validate_project_slug
 from astrid.core.task.events import canonical_event_json, read_events, verify_chain
-from astrid.core.task.operator_render import _path_tuple_from_event
+from astrid.core.task.operator.render import _path_tuple_from_event
 from astrid.core.task.plan import load_plan
-from astrid.core.task.plan_verbs import (
+from astrid.core.task.plan.verbs import (
     PLAN_MUTATED_KIND,
     apply_mutations,
     initial_plan_from_events,
@@ -736,7 +736,7 @@ def _cost_by_source(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
 
 def _strict_verify_run_events(proj_root: Path, events: list[dict[str, Any]]) -> int:
     from astrid.core.task.plan import TaskPlan, compute_plan_hash, iter_steps_with_path
-    from astrid.core.task.plan_verbs import _apply_diff as plan_apply_diff
+    from astrid.core.task.plan.verbs import _apply_diff as plan_apply_diff
     from astrid.core.task.validator import MutationInvariantError, validate_mutation
 
     strict_failures = 0

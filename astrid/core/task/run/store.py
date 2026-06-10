@@ -46,7 +46,7 @@ from astrid.core.task.plan import (
     find_step_by_path,
     load_plan,
 )
-from astrid.core.task.run_state import _run_is_complete
+from astrid.core.task.run.state import _run_is_complete
 
 
 def _print_err(msg: str) -> None:

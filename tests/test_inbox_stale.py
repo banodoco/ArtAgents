@@ -71,7 +71,7 @@ def test_step_id_mismatch_leaves_file_in_place(tmp_path: Path) -> None:
 
     # No new event — cursor unchanged.
     assert len(read_events(events_path)) == initial_count
-    # Sprint-5b contract change (STOP-LINE in astrid/core/task/inbox.py): stale
+    # Sprint-5b contract change (STOP-LINE in astrid/core/task/operator/inbox.py): stale
     # entries — including step_id mismatches against tombstoned/missing steps —
     # are now quarantined to inbox/.rejected/ rather than left in inbox/.
     assert not inbox_file.exists()
@@ -104,7 +104,7 @@ def test_approve_on_human_step_quarantined_to_rejected(
     )
 
     os.environ["ASTRID_ACTOR"] = "bob"
-    with caplog.at_level(logging.WARNING, logger="astrid.core.task.inbox"):
+    with caplog.at_level(logging.WARNING, logger="astrid.core.task.operator.inbox"):
         rc = _run_next(projects)
     assert rc == 0
 
@@ -132,7 +132,7 @@ def test_malformed_json_skipped_and_logged(tmp_path: Path, caplog) -> None:
     inbox_file = _drop(run_dir, "broken.json", "not valid json {")
 
     os.environ["ASTRID_ACTOR"] = "bob"
-    with caplog.at_level(logging.WARNING, logger="astrid.core.task.inbox"):
+    with caplog.at_level(logging.WARNING, logger="astrid.core.task.operator.inbox"):
         rc = _run_next(projects)
     assert rc == 0
 

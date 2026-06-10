@@ -23,14 +23,14 @@ AGENT_CLI_MODULE_PATHS: list[Path] = [
     ROOT / "astrid" / "core" / "gateway" / "dispatch.py",
     ROOT / "astrid" / "core" / "cli" / "session.py",
     ROOT / "astrid" / "core" / "task" / "claim.py",
-    ROOT / "astrid" / "core" / "task" / "lifecycle.py",
-    ROOT / "astrid" / "core" / "task" / "lifecycle_ack.py",
-    ROOT / "astrid" / "core" / "task" / "lifecycle_skip.py",
-    ROOT / "astrid" / "core" / "task" / "operator_view.py",
-    ROOT / "astrid" / "core" / "task" / "run_store.py",
-    ROOT / "astrid" / "core" / "task" / "plan_builder.py",
+    ROOT / "astrid" / "core" / "task" / "lifecycle" / "__init__.py",
+    ROOT / "astrid" / "core" / "task" / "lifecycle" / "ack.py",
+    ROOT / "astrid" / "core" / "task" / "lifecycle" / "skip.py",
+    ROOT / "astrid" / "core" / "task" / "operator" / "view.py",
+    ROOT / "astrid" / "core" / "task" / "run" / "store.py",
+    ROOT / "astrid" / "core" / "task" / "plan" / "builder.py",
     ROOT / "astrid" / "core" / "task" / "cli_contract.py",
-    ROOT / "astrid" / "core" / "task" / "gate_base.py",
+    ROOT / "astrid" / "core" / "task" / "gate" / "base.py",
 ]
 
 # ---------------------------------------------------------------------------

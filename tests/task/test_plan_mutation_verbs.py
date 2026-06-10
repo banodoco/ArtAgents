@@ -19,7 +19,7 @@ from astrid.core.task.plan import (
     _validate_plan,
     load_plan,
 )
-from astrid.core.task.plan_verbs import (
+from astrid.core.task.plan.verbs import (
     PLAN_MUTATED_KIND,
     _dispatched_step_paths,
     apply_mutations,

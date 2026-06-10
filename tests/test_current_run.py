@@ -53,7 +53,7 @@ def test_read_rejects_malformed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 def test_cmd_start_preserves_lease_first_current_run_ordering() -> None:
-    from astrid.core.task.plan_builder import cmd_start
+    from astrid.core.task.plan.builder import cmd_start
 
     source = inspect.getsource(cmd_start)
 

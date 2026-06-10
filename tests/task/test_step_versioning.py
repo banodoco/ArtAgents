@@ -12,7 +12,7 @@ from astrid.core.task.plan import (
     step_dir_for,
     step_dir_for_path,
 )
-from astrid.core.task.plan_verbs import (
+from astrid.core.task.plan.verbs import (
     CursorRecord,
     _apply_diff,
     derive_versioned_cursor,

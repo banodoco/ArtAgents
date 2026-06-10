@@ -219,7 +219,7 @@ def _cmd_project_cost(args: argparse.Namespace) -> int:
 
     from astrid.core.foundation.project_paths import project_dir
     from astrid.core.task.events import read_events
-    from astrid.core.task.run_audit import _cost_by_source
+    from astrid.core.task.run.audit import _cost_by_source
     from astrid.core.timeline.crud import list_timelines
 
     include_aborted = bool(getattr(args, "include_aborted", False))
@@ -501,7 +501,7 @@ def _project_selected_runs(
     include_aborted: bool,
 ) -> list[str]:
     from astrid.core.task.events import read_events
-    from astrid.core.task.run_audit import _run_status
+    from astrid.core.task.run.audit import _run_status
 
     selected: list[str] = []
     for run_id in run_ids:

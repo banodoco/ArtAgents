@@ -15,7 +15,7 @@ from astrid.core.task.plan import (
     TaskPlan,
     _validate_plan,
 )
-from astrid.core.task.plan_verbs import (
+from astrid.core.task.plan.verbs import (
     CursorRecord,
     apply_mutations,
     derive_versioned_cursor,
@@ -103,7 +103,7 @@ def test_group_step_children_inherit_supersede() -> None:
             "version": 2,
         },
     }
-    from astrid.core.task.plan_verbs import _apply_diff
+    from astrid.core.task.plan.verbs import _apply_diff
     result = _apply_diff(plan, diff)
     parent = result.steps[0]
     assert parent.version == 2

@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from astrid.core.task import gate
-from astrid.core.task import gate_repeat
+from astrid.core.task.gate import repeat as gate_repeat
 from tests.conftest import seed_event
 from astrid.core.task.events import (
     make_item_skipped_event,

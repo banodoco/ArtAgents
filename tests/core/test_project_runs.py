@@ -816,7 +816,7 @@ def test_summarize_run_dir_uses_run_json_status_when_events_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """run.json status is the fallback when a project run has no events stream."""
-    from astrid.core.task.run_store import _summarize_run_dir
+    from astrid.core.task.run.store import _summarize_run_dir
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -853,7 +853,7 @@ def test_summarize_run_dir_keeps_event_stream_status_when_events_exist(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Task-run events remain the status authority when events.jsonl exists."""
-    from astrid.core.task.run_store import _summarize_run_dir
+    from astrid.core.task.run.store import _summarize_run_dir
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))
@@ -895,7 +895,7 @@ def test_summarize_run_dir_keeps_event_stream_status_when_events_exist(
 def test_run_show_uses_run_json_status_when_events_absent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:
-    from astrid.core.task.run_audit import cmd_run_show
+    from astrid.core.task.run.audit import cmd_run_show
 
     projects_root = tmp_path / "projects"
     monkeypatch.setenv(paths.PROJECTS_ROOT_ENV, str(projects_root))

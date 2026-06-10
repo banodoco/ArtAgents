@@ -5,9 +5,11 @@ from pathlib import Path
 
 from astrid.core.contracts.run_status import STEP_TERMINAL_KINDS, TASK_FINALIZABLE_EVENT_KINDS
 from astrid.core.task import gate as task_gate
-from astrid.core.task import gate_cursor, operator_view, run_state
+from astrid.core.task.gate import cursor as gate_cursor
+from astrid.core.task.operator import view as operator_view
+from astrid.core.task.run import state as run_state
 from astrid.core.task.plan import Step, TaskPlan, _validate_plan
-from astrid.core.task.run_state import _run_is_complete
+from astrid.core.task.run.state import _run_is_complete
 
 
 def test_step_terminal_consumers_derive_from_canonical_contract() -> None:

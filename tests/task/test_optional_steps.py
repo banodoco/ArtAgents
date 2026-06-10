@@ -29,7 +29,7 @@ from astrid.core.task.events import (
 )
 from astrid.core.task.gate import derive_cursor
 from astrid.core.task.lifecycle import cmd_next
-from astrid.core.task.lifecycle_skip import cmd_skip
+from astrid.core.task.lifecycle.skip import cmd_skip
 from astrid.core.task.plan import (
     TaskPlan,
     TaskPlanError,
@@ -37,7 +37,7 @@ from astrid.core.task.plan import (
     load_plan,
     Step,
 )
-from astrid.core.task.run_audit import cmd_events_verify
+from astrid.core.task.run.audit import cmd_events_verify
 
 
 # ---------------------------------------------------------------------------

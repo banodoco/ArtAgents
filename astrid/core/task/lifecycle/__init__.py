@@ -11,27 +11,27 @@ Implementation lives in focused modules:
 from __future__ import annotations
 
 from astrid.core.foundation.project_paths import project_dir, validate_project_slug, validate_run_id
-from astrid.core.task import operator_view as _operator_view
-from astrid.core.task import run_store as _run_store
+from astrid.core.task.operator import view as _operator_view
+from astrid.core.task.run import store as _run_store
 from astrid.core.task.gate import peek_current_step as peek_current_step
-from astrid.core.task.lifecycle_ack import cmd_ack
-from astrid.core.task.lifecycle_skip import cmd_skip
-from astrid.core.task.operator_view import (
+from astrid.core.task.lifecycle.ack import cmd_ack
+from astrid.core.task.lifecycle.skip import cmd_skip
+from astrid.core.task.operator.view import (
     _dispatch_from_tail,
     render_step_instructions,
 )
-from astrid.core.task.plan_builder import (
+from astrid.core.task.plan.builder import (
     cmd_start,
 )
-from astrid.core.task.run_state import _run_is_complete
-from astrid.core.task.run_store import (
+from astrid.core.task.run.state import _run_is_complete
+from astrid.core.task.run.store import (
     _emit_run_completed_if_needed,
 )
 
 
 def _sha256_file(path):
     # TODO(m5b): compatibility placeholder for the pre-split lifecycle surface.
-    from astrid.core.task.plan_builder import _plan_sha256_file
+    from astrid.core.task.plan.builder import _plan_sha256_file
 
     return _plan_sha256_file(path)
 

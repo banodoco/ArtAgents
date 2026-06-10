@@ -281,7 +281,7 @@ def test_project_cost_json_output(
 
 
 def test_run_cost_json_output(tmp_projects_root: Path, cost_fixture: dict) -> None:
-    from astrid.core.task.run_audit import cmd_run_cost
+    from astrid.core.task.run.audit import cmd_run_cost
 
     buf = io.StringIO()
     with redirect_stdout(buf):
@@ -317,7 +317,7 @@ def test_cost_rollup_invariant(cost_fixture: dict) -> None:
     """``_cost_by_source`` consistency: summing run costs equals timeline
     cost when aggregating the same runs."""
     from astrid.core.task.events import read_events
-    from astrid.core.task.run_audit import _cost_by_source, _run_status
+    from astrid.core.task.run.audit import _cost_by_source, _run_status
 
     runs = [cost_fixture["run1_id"], cost_fixture["run2_id"]]
     runs_dir = cost_fixture["runs_dir"]

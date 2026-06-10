@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from astrid.core.task.lifecycle import cmd_next, cmd_start
-from astrid.core.task.lifecycle_ack import cmd_ack
+from astrid.core.task.lifecycle.ack import cmd_ack
 
 
 def test_lifecycle_help_returns_zero() -> None:

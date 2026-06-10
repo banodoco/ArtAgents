@@ -6,7 +6,7 @@ import json
 import sys
 from pathlib import Path
 
-from astrid.core.task.run_audit import (
+from astrid.core.task.run.audit import (
     cmd_run_artifacts,
     cmd_run_cost,
     cmd_run_show,

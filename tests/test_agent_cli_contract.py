@@ -32,7 +32,7 @@ from astrid.core.task.lifecycle import (  # noqa: E402
     cmd_start,
     cmd_status,
 )
-from astrid.core.task.lifecycle_skip import cmd_skip  # noqa: E402
+from astrid.core.task.lifecycle.skip import cmd_skip  # noqa: E402
 from astrid.core.task.plan import compute_plan_hash  # noqa: E402
 from astrid.core.timeline.crud import create_timeline  # noqa: E402
 from tests.helpers.current_run import seed_current_run  # noqa: E402

@@ -229,7 +229,7 @@ def test_strict_mode_with_clean_plan(
     seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
     # Invoke cmd_events_verify with --strict
-    from astrid.core.task.run_audit import cmd_events_verify
+    from astrid.core.task.run.audit import cmd_events_verify
 
     rc = cmd_events_verify(
         ["--run", run_id, "--project", slug, "--strict"],
@@ -303,7 +303,7 @@ def test_strict_mode_with_invalid_mutation(
 
     seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
-    from astrid.core.task.run_audit import cmd_events_verify
+    from astrid.core.task.run.audit import cmd_events_verify
 
     rc = cmd_events_verify(
         ["--run", run_id, "--project", slug, "--strict"],
@@ -344,7 +344,7 @@ def test_strict_mode_rejects_initial_plan_hash_mismatch(
     _write_events(run_root / "events.jsonl", _build_chain(raw_events))
     seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
-    from astrid.core.task.run_audit import cmd_events_verify
+    from astrid.core.task.run.audit import cmd_events_verify
 
     rc = cmd_events_verify(["--run", run_id, "--project", slug, "--strict"], projects_root=tmp_projects_root)
     assert rc == 1
@@ -381,7 +381,7 @@ def test_strict_mode_rejects_unknown_step_event_path(
     _write_events(run_root / "events.jsonl", _build_chain(raw_events))
     seed_current_run(slug, run_id=run_id, plan_hash=plan_hash, root=tmp_projects_root)
 
-    from astrid.core.task.run_audit import cmd_events_verify
+    from astrid.core.task.run.audit import cmd_events_verify
 
     rc = cmd_events_verify(["--run", run_id, "--project", slug, "--strict"], projects_root=tmp_projects_root)
     assert rc == 1
@@ -389,7 +389,7 @@ def test_strict_mode_rejects_unknown_step_event_path(
 
 def test_events_tail_bounds_and_empty_output(tmp_projects_root: Path) -> None:
     from astrid.core.project.project import create_project
-    from astrid.core.task.run_audit import cmd_events_tail
+    from astrid.core.task.run.audit import cmd_events_tail
 
     slug = "tail-proj"
     run_id = "run-tail"

@@ -12,7 +12,7 @@ from astrid.core.task.events import (
     make_produces_check_failed_event,
     make_produces_check_passed_event,
 )
-from astrid.core.task.gate_base import GateDecision, InlineCheckResult
+from astrid.core.task.gate.base import GateDecision, InlineCheckResult
 from astrid.core.task.plan import ProducesEntry, step_dir_for_path
 
 
