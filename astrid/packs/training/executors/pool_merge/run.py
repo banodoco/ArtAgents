@@ -49,7 +49,6 @@ def _entry_for_effect(effect_id: str, *, theme: str | Path | None = None) -> dic
 
 
 def merge_pool(pool: dict[str, Any], *, theme: str | Path | None = None) -> dict[str, Any]:
-    effects_catalog.set_active_theme(theme)
     effect_ids = effects_catalog.list_effect_ids(theme=theme)
     effect_id_set = set(effect_ids)
     upserts = {_stable_pool_id(effect_id): _entry_for_effect(effect_id, theme=theme) for effect_id in effect_ids}

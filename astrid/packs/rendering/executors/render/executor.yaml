@@ -68,25 +68,29 @@
       "description": "",
       "name": "timeline",
       "required": true,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "clip/visual"
     },
     {
       "description": "",
       "name": "assets_registry",
       "required": true,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "clip/visual"
     },
     {
       "description": "",
       "name": "theme",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     },
     {
       "description": "Render backend. Defaults to remotion; use ffmpeg for media-only timelines or hybrid to render complex windows with Remotion.",
       "name": "engine",
       "required": false,
-      "type": "string"
+      "type": "string",
+      "artifact_type": null
     }
   ],
   "isolation": {
@@ -121,7 +125,8 @@
       "mode": "create_or_replace",
       "name": "video",
       "path_template": "{out}/hype.mp4",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "clip/visual"
     }
   ],
   "pipeline_requirements": [

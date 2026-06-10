@@ -196,6 +196,69 @@ class VibeComfyBackend(BackendAdapter):
     fields.
     """
 
+    #: Default canonical→template parameter name mapping per mode.
+    #: Used as a fallback when ``BackendSpec.param_map`` is empty.
+    #: Size and resolution are handled specially in :meth:`generate` so
+    #: their entries here are nominal; the adapter splits width/height.
+    DEFAULT_PARAM_MAP: dict[str, dict[str, str]] = {
+        # ── Image modes ────────────────────────────────────────────────
+        "t2i": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "count": "count",
+            "size": "size",
+            "guidance_scale": "guidance",
+            "steps": "steps",
+        },
+        "i2i": {
+            "prompt": "prompt",
+            "seed": "seed",
+            "image_ref": "image_ref",
+            "size": "size",
+            "strength": "denoise",
+            "guidance_scale": "guidance",
+            "steps": "steps",
+        },
+        "edit": {
+            "prompt": "prompt",
+            "seed": "seed",
+            "count": "count",
+            "image_ref": "image",
+            "size": "size",
+            "guidance_scale": "guidance",
+            "steps": "steps",
+        },
+        # ── Video modes ────────────────────────────────────────────────
+        "t2v": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "resolution": "resolution",
+            "frames": "frames",
+            "fps": "fps",
+        },
+        "i2v": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "image_ref": "image",
+            "resolution": "resolution",
+            "frames": "frames",
+            "fps": "fps",
+        },
+        "flf": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "image_ref": "start_image",
+            "image_end_ref": "end_image",
+            "resolution": "resolution",
+            "frames": "frames",
+            "fps": "fps",
+        },
+    }
+
     def generate(
         self,
         entry: ModelEntry,
@@ -217,6 +280,8 @@ class VibeComfyBackend(BackendAdapter):
 
         # --- build param map: canonical → template parameter name ------------
         param_map: dict[str, str] = dict(backend_spec.param_map)
+        if not param_map:
+            param_map = dict(self.DEFAULT_PARAM_MAP.get(mode, {}))
 
         # --- compute-from-duration shim (Sprint 04) --------------------------
         # If duration is supplied without frames, and fps is known, derive frames

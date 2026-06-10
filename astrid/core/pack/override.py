@@ -1,4 +1,6 @@
-"""Thread-safe override store that remaps capability ids at resolution time.
+"""Kernel override store — maps ``(type, id) -> target_id`` for capability resolution.
+
+Thread-safe override store that remaps capability ids at resolution time.
 
 Persisted to ``<project_root>/astrid/packs/local/.overrides.json`` so that
 agent-created overrides survive restarts.

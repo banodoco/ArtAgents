@@ -55,7 +55,8 @@
       "type": "json",
       "mode": "create_or_replace",
       "path_template": "{out}/registered_lora.json",
-      "description": "Registration metadata for the selected LoRA checkpoint."
+      "description": "Registration metadata for the selected LoRA checkpoint.",
+      "artifact_type": "lora"
     }
   ],
   "runtime": {

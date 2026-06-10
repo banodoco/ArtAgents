@@ -42,6 +42,7 @@
     },
     "kind": "command"
   },
+  "scoped_configs": ["credentials.fal"],
   "short_description": "Iterative grid editor: take an existing grid image and emit a new grid of variations via fal.",
   "version": "1.0"
 }

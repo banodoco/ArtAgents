@@ -44,25 +44,29 @@
       "description": "",
       "name": "arrangement",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "arrangement"
     },
     {
       "description": "",
       "name": "pool",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "pool"
     },
     {
       "description": "",
       "name": "timeline",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "timeline"
     },
     {
       "description": "",
       "name": "assets",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "asset_registry"
     },
     {
       "description": "",
@@ -74,7 +78,8 @@
       "description": "",
       "name": "transcript",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "transcript"
     },
     {
       "description": "",
@@ -121,14 +126,16 @@
       "mode": "mutate",
       "name": "timeline",
       "path_template": "{brief_out}/hype.timeline.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "timeline"
     },
     {
       "description": "",
       "mode": "mutate",
       "name": "assets",
       "path_template": "{brief_out}/hype.assets.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "asset_registry"
     },
     {
       "description": "",

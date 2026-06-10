@@ -8,9 +8,6 @@ from astrid.core import timeline
 
 
 class TimelineElementsCatalogTest(unittest.TestCase):
-    def tearDown(self) -> None:
-        effects_catalog.set_active_theme(None)
-
     def test_package_imported_timeline_uses_non_empty_element_catalogs(self) -> None:
         self.assertIn("text-card", effects_catalog.list_effect_ids())
         self.assertIn("fade-up", effects_catalog.list_animation_ids())
@@ -39,7 +36,7 @@ class TimelineElementsCatalogTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "animations catalog"):
             timeline.validate_timeline(config)
 
-    def test_set_active_theme_preserves_theme_override_behavior(self) -> None:
+    def test_explicit_theme_arg_enables_theme_override_behavior(self) -> None:
         import json
         with tempfile.TemporaryDirectory() as tmp:
             theme = Path(tmp) / "theme"
@@ -61,10 +58,8 @@ class TimelineElementsCatalogTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            effects_catalog.set_active_theme(theme)
-
-            self.assertIn("theme-only", effects_catalog.list_effect_ids())
-            self.assertEqual(effects_catalog.read_effect_meta("theme-only")["clipTypeAliases"], ["theme"])
+            self.assertIn("theme-only", effects_catalog.list_effect_ids(theme=theme))
+            self.assertEqual(effects_catalog.read_effect_meta("theme-only", theme=theme)["clipTypeAliases"], ["theme"])
 
     def test_catalog_exposes_pack_declared_custom_kinds(self) -> None:
         import json

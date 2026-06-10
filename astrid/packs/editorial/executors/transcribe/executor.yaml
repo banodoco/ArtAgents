@@ -32,7 +32,8 @@
       "description": "Audio or video-derived audio to transcribe.",
       "name": "audio",
       "required": true,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "audio"
     },
     {
       "description": "Optional environment file for API credentials.",
@@ -72,7 +73,8 @@
       "mode": "create_or_replace",
       "name": "transcript",
       "path_template": "{out}/transcript.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "transcript"
     }
   ],
   "pipeline_requirements": [

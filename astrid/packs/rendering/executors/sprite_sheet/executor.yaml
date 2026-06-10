@@ -36,7 +36,8 @@
       "description": "Optional reference image for preserving the character/object identity while generating the sprite sheet.",
       "name": "reference_image",
       "required": false,
-      "type": "path"
+      "type": "path",
+      "artifact_type": "image"
     }
   ],
   "isolation": {
@@ -67,25 +68,29 @@
       "description": "Manifest for generated sprite assets.",
       "name": "sprite_manifest",
       "path_template": "{out}/sprite_manifest.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     },
     {
       "description": "Generated sprite atlas.",
       "name": "sprite_sheet",
       "path_template": "{out}/sprite_sheet.png",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "image"
     },
     {
       "description": "Alpha-processed sprite atlas.",
       "name": "sprite_sheet_alpha",
       "path_template": "{out}/sprite_sheet_alpha.png",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "image"
     },
     {
       "description": "MP4 preview of the sliced animation.",
       "name": "preview",
       "path_template": "{out}/sprite_preview.mp4",
-      "type": "file"
+      "type": "file",
+      "artifact_type": "video/clip"
     }
   ],
   "short_description": "Generate, slice, and preview GPT Image sprite sheets for batch image work.",

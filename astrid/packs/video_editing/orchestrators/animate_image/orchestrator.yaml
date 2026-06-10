@@ -41,6 +41,7 @@
     },
     "kind": "command"
   },
+  "scoped_configs": ["credentials.fal"],
   "short_description": "Two-stage Fal pipeline: edit a reference image with GPT Image 2, then animate it with WAN 2.2.",
   "version": "1.0"
 }

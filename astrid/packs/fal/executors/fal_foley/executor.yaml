@@ -51,6 +51,7 @@
       "type": "file"
     }
   ],
+  "scoped_configs": ["credentials.fal"],
   "short_description": "Generate Foley audio for one short video clip via fal.ai's hunyuan-video-foley model.",
   "version": "0.1.0"
 }

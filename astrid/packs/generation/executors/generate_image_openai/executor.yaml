@@ -38,7 +38,8 @@
       "description": "Text, JSON, or JSONL prompt list consumed by astrid.packs.generation.executors.generate_image_openai.run.",
       "name": "prompts_file",
       "required": true,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "prompt"
     }
   ],
   "isolation": {
@@ -75,7 +76,8 @@
       "mode": "create_or_replace",
       "name": "image_manifest",
       "path_template": "{out}/manifest.json",
-      "type": "file"
+      "type": "file",
+      "artifact_type": null
     }
   ],
   "short_description": "Generate image files with OpenAI GPT Image models from a prompt file.",

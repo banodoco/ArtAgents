@@ -124,7 +124,7 @@ def _optional_pack_extensions(value: Any, *, path: str) -> dict[str, Any]:
     if value is None:
         return {}
     data = _require_mapping(value, path)
-    allowed_keys = {"generation", "elements", "timeline", "schemas"}
+    allowed_keys = {"generation", "elements", "timeline", "schemas", "artifact_types"}
     unknown_keys = sorted(set(data) - allowed_keys)
     if unknown_keys:
         raise PackValidationError(f"{path} has unknown field(s): {', '.join(unknown_keys)}")
@@ -149,6 +149,11 @@ def _optional_pack_extensions(value: Any, *, path: str) -> dict[str, Any]:
         normalized["schemas"] = _normalize_json_object(
             data["schemas"],
             path=f"{path}.schemas",
+        )
+    if "artifact_types" in data:
+        normalized["artifact_types"] = _normalize_artifact_types(
+            data["artifact_types"],
+            path=f"{path}.artifact_types",
         )
     return normalized
 
@@ -283,6 +288,62 @@ def _normalize_timeline_extensions(value: Any, *, path: str) -> dict[str, Any]:
             data["kinds"],
             path=f"{path}.kinds",
         )
+    return normalized
+
+
+def _normalize_artifact_types(value: Any, *, path: str) -> dict[str, Any]:
+    """Normalize ``extensions.artifact_types`` to ``{types: [...]}``."""
+    data = _require_mapping(value, path)
+    allowed_keys = {"types"}
+    unknown_keys = sorted(set(data) - allowed_keys)
+    if unknown_keys:
+        raise PackValidationError(f"{path} has unknown field(s): {', '.join(unknown_keys)}")
+
+    normalized: dict[str, Any] = {}
+    if "types" in data:
+        normalized["types"] = _normalize_artifact_type_items(
+            data["types"],
+            path=f"{path}.types",
+        )
+    return normalized
+
+
+def _normalize_artifact_type_items(value: Any, *, path: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise PackValidationError(f"{path} must be an array")
+
+    normalized: list[dict[str, Any]] = []
+    allowed_keys = {"id", "aliases", "description"}
+    for index, raw_item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        item = _require_mapping(raw_item, item_path)
+        unknown_keys = sorted(set(item) - allowed_keys)
+        if unknown_keys:
+            raise PackValidationError(
+                f"{item_path} has unknown field(s): {', '.join(unknown_keys)}"
+            )
+        normalized_item: dict[str, Any] = {
+            "id": _require_string(item, "id", f"{item_path}.id"),
+        }
+        if "aliases" in item:
+            aliases = item["aliases"]
+            if not isinstance(aliases, list):
+                raise PackValidationError(f"{item_path}.aliases must be an array")
+            normalized_aliases: list[str] = []
+            for alias_index, raw_alias in enumerate(aliases):
+                alias_path = f"{item_path}.aliases[{alias_index}]"
+                if not isinstance(raw_alias, str) or not raw_alias.strip():
+                    raise PackValidationError(f"{alias_path} must be a non-empty string")
+                normalized_aliases.append(raw_alias.strip())
+            normalized_item["aliases"] = normalized_aliases
+        if "description" in item:
+            normalized_item["description"] = _optional_string(
+                item,
+                "description",
+                f"{item_path}.description",
+                default="",
+            )
+        normalized.append(normalized_item)
     return normalized
 
 

@@ -11,6 +11,15 @@ platform contract and wins on any disagreement with other SDK or
 pack-system documents.**  When two contracts appear to conflict, the
 platform contract is the final authority.
 
+## Capability & Composition
+
+- **[capability-artifact-contract.md](capability-artifact-contract.md)** —
+  The capability/artifact/scoped-config contract: the three primitives,
+  composition rule (id-reference + type-match), conceptual↔canonical
+  mapping, open-string fallback (Reigh-boundary leniency), and pack
+  extension via `extensions.artifact_types.types`.  The definitive guide
+  for third-party pack authors shipping typed capabilities.
+
 ## Normative Contracts
 
 - **[platform-contract.md](platform-contract.md)** — The normative v1

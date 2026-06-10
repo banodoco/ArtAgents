@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.dirty import detect_local_edits
 from astrid.core.pack.override import OverrideStore, OverrideStoreError
 from astrid.core.search import (
     SearchRecord,
@@ -19,9 +18,6 @@ from astrid.core.search import (
 from astrid.core.search import (
     search as run_search,
 )
-from astrid.core.update import update_apply, update_check
-
-from .install import install_element
 from .registry import ElementRegistryError, load_default_registry
 from .schema import ElementDefinition, ElementValidationError, to_capability_handle
 
@@ -35,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        # Create OverrideStore so --show-overrides and override set/remove/list work.
+        # Create OverrideStore so --show-overrides works.
         project_root = _project_root_from_args(args)
         override_store = OverrideStore(project_root=project_root)
         registry = load_default_registry(
@@ -53,10 +49,10 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python3 -m astrid elements",
-        description="List, inspect, validate, fork, and install Astrid render elements.",
+        description="List, inspect, and validate Astrid render elements.",
     )
     parser.add_argument("--theme", help="Active theme id, theme directory, or path to theme.json.")
-    parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery and fork targets. Defaults to current working directory.")
+    parser.add_argument("--project-root", type=Path, help="Project root for local pack discovery. Defaults to current working directory.")
     parser.add_argument("--pack-root", action="append", default=[], metavar="PATH", help="Extra pack root directory to discover elements from; may be repeated.")
     subparsers = parser.add_subparsers(dest="command", required=True)
     list_parser = subparsers.add_parser("list", aliases=["ls"], help="List available elements.")
@@ -86,64 +82,6 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("kind", nargs="?")
     validate_parser.add_argument("element_id", nargs="?")
     validate_parser.set_defaults(handler=_cmd_validate)
-
-    fork_parser = subparsers.add_parser("fork", help="Fork an element into the local pack (astrid/packs/local).")
-    fork_parser.add_argument("kind")
-    fork_parser.add_argument("element_id")
-    fork_parser.add_argument("--overwrite", action="store_true", help="Replace an existing local fork.")
-    fork_parser.set_defaults(handler=_cmd_fork)
-
-    install_parser = subparsers.add_parser("install", help="Plan or apply local dependency install for one element.")
-    install_parser.add_argument("kind")
-    install_parser.add_argument("element_id")
-    install_parser.add_argument("--apply", action="store_true", help="Run the local install commands. Default is dry-run.")
-    install_parser.set_defaults(handler=_cmd_install)
-
-    # --- Override subcommands ---
-    override_parser = subparsers.add_parser("override", help="Manage capability overrides.")
-    override_sub = override_parser.add_subparsers(dest="override_action", required=True)
-
-    override_set = override_sub.add_parser("set", help="Set an override: route a capability to a replacement.")
-    override_set.add_argument("kind")
-    override_set.add_argument("element_id")
-    override_set.add_argument("target_id", help="Fully-qualified id of the replacement capability.")
-    override_set.set_defaults(handler=_cmd_override)
-
-    override_remove = override_sub.add_parser("remove", help="Remove an override.")
-    override_remove.add_argument("kind")
-    override_remove.add_argument("element_id")
-    override_remove.set_defaults(handler=_cmd_override)
-
-    override_list = override_sub.add_parser("list", help="List all active overrides.")
-    override_list.set_defaults(handler=_cmd_override)
-
-    # --- Dirty subcommands ---
-    dirty_parser = subparsers.add_parser("dirty", help="Check or list locally-modified (dirty) capabilities.")
-    dirty_sub = dirty_parser.add_subparsers(dest="dirty_action", required=True)
-
-    dirty_check = dirty_sub.add_parser("check", help="Check dirty state for one element.")
-    dirty_check.add_argument("kind")
-    dirty_check.add_argument("element_id")
-    dirty_check.set_defaults(handler=_cmd_dirty)
-
-    dirty_list = dirty_sub.add_parser("list", help="List all dirty capabilities.")
-    dirty_list.set_defaults(handler=_cmd_dirty)
-
-    # --- Update subcommands ---
-    update_parser = subparsers.add_parser("update", help="Check for or apply upstream updates to forked capabilities.")
-    update_sub = update_parser.add_subparsers(dest="update_action", required=True)
-
-    update_check_parser = update_sub.add_parser("check", help="Compare local fork against upstream.")
-    update_check_parser.add_argument("kind")
-    update_check_parser.add_argument("element_id")
-    update_check_parser.set_defaults(handler=_cmd_update)
-
-    update_apply_parser = update_sub.add_parser("apply", help="Apply upstream update to a local fork.")
-    update_apply_parser.add_argument("kind")
-    update_apply_parser.add_argument("element_id")
-    update_apply_parser.add_argument("--force", action="store_true", help="Apply even if safety escalations are detected.")
-    update_apply_parser.add_argument("--skip-safety", action="store_true", help="Skip safety escalation checks.")
-    update_apply_parser.set_defaults(handler=_cmd_update)
 
     return parser
 
@@ -251,7 +189,6 @@ def _cmd_inspect(args: argparse.Namespace, registry: Any) -> int:
     print(f"source: {element.source}")
     print(f"editable: {str(element.editable).lower()}")
     print(f"root: {element.root}")
-    print(f"fork_target: {element.fork_target}")
     if element.short_description:
         print(f"short_description: {element.short_description}")
     if element.description:
@@ -292,108 +229,6 @@ def _cmd_validate(args: argparse.Namespace, registry: Any) -> int:
     return 0
 
 
-def _cmd_fork(args: argparse.Namespace, registry: Any) -> int:
-    target = registry.fork(args.kind, args.element_id, project_root=_project_root_from_args(args), overwrite=bool(args.overwrite))
-    print(f"forked: {target}")
-    return 0
-
-
-def _cmd_install(args: argparse.Namespace, registry: Any) -> int:
-    element = registry.get(args.kind, args.element_id)
-    result = install_element(element, project_root=_project_root_from_args(args), dry_run=not bool(args.apply))
-    plan = result.plan
-    if plan.noop_reason:
-        print(f"{element.kind}/{element.id}: no install needed: {plan.noop_reason}")
-        return result.returncode
-    print(f"root: {plan.root}")
-    if plan.venv_path is not None:
-        print(f"venv: {plan.venv_path}")
-    if plan.node_prefix is not None:
-        print(f"node: {plan.node_prefix}")
-    for line in plan.command_lines():
-        print(line)
-    if not args.apply:
-        print("dry-run: pass --apply to run these local install commands")
-    return result.returncode
-
-
-def _cmd_override(args: argparse.Namespace, registry: Any) -> int:
-    store = registry.override_store
-    if store is None:
-        _eprint("elements: override store not available")
-        return 1
-    action = getattr(args, "override_action", None)
-    if action == "set":
-        store.set_override(args.kind, args.element_id, args.target_id)
-        print(f"override set: {args.kind}/{args.element_id} → {args.target_id}")
-    elif action == "remove":
-        store.remove_override(args.kind, args.element_id)
-        print(f"override removed: {args.kind}/{args.element_id}")
-    elif action == "list":
-        overrides = store.list_overrides()
-        if not overrides:
-            print("no overrides")
-            return 0
-        for override_type, mappings in sorted(overrides.items()):
-            for override_id, target in sorted(mappings.items()):
-                print(f"{override_type}/{override_id} → {target}")
-    else:
-        _eprint(f"elements override: unknown action {action!r}")
-        return 2
-    return 0
-
-
-def _cmd_dirty(args: argparse.Namespace, registry: Any) -> int:
-    action = getattr(args, "dirty_action", None)
-    if action == "check":
-        element = registry.get(args.kind, args.element_id)
-        content_root = element.metadata.get("content_root")
-        if content_root is None:
-            content_root = element.root
-        forked_from = str(element.metadata.get("forked_from") or "")
-        state = detect_local_edits(content_root, forked_from=forked_from)
-        print(f"{element.kind}/{element.id}: {state}")
-    elif action == "list":
-        dirty_found = 0
-        for element in registry.list():
-            content_root = element.metadata.get("content_root")
-            if content_root is None:
-                content_root = element.root
-            forked_from = str(element.metadata.get("forked_from") or "")
-            state = detect_local_edits(content_root, forked_from=forked_from)
-            if state != "clean":
-                print(f"{element.kind}/{element.id}: {state}")
-                dirty_found += 1
-        if dirty_found == 0:
-            print("no dirty capabilities")
-    else:
-        _eprint(f"elements dirty: unknown action {action!r}")
-        return 2
-    return 0
-
-
-def _cmd_update(args: argparse.Namespace, registry: Any) -> int:
-    action = getattr(args, "update_action", None)
-    if action == "check":
-        report = update_check(
-            args.element_id, registry,
-            capability_type="element", capability_kind=args.kind,
-        )
-        print(report["report"])
-        return 0
-    elif action == "apply":
-        force = bool(getattr(args, "force", False))
-        skip_safety = bool(getattr(args, "skip_safety", False))
-        report = update_apply(
-            args.element_id, registry,
-            force=force, skip_safety=skip_safety,
-            capability_type="element", capability_kind=args.kind,
-        )
-        print(report["report"])
-        return 0 if report.get("applied") else 1
-    else:
-        _eprint(f"elements update: unknown action {action!r}")
-        return 2
 
 
 if __name__ == "__main__":

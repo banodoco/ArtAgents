@@ -25,17 +25,20 @@
     {
       "name": "report",
       "type": "file",
-      "path_template": "{out}/html_canvas_effect.report.json"
+      "path_template": "{out}/html_canvas_effect.report.json",
+      "artifact_type": null
     },
     {
       "name": "timeline",
       "type": "file",
-      "path_template": "{out}/timeline.json"
+      "path_template": "{out}/timeline.json",
+      "artifact_type": "timeline"
     },
     {
       "name": "assets",
       "type": "file",
-      "path_template": "{out}/assets.json"
+      "path_template": "{out}/assets.json",
+      "artifact_type": null
     }
   ],
   "command": {

@@ -26,7 +26,7 @@ from astrid.core.audit import AuditContext
 from astrid.core._shared.result_manifest import complete_output_metadata
 from astrid.core.cli_choices import add_choice_arg
 from astrid.core.foundation.atomic_io import write_json_atomic
-from astrid.core.util.secrets import load_api_key as _resolve_key
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.threads.variants import write_sidecar as write_variant_sidecar
 
 API_URL = "https://api.openai.com/v1/images/generations"
@@ -303,7 +303,7 @@ def _build_openai_manifest(
 
 def generate(args: argparse.Namespace) -> int:
     jobs = _jobs_from_args(args)
-    api_key = '' if args.dry_run else _resolve_key("OPENAI_API_KEY", args.env_file)
+    api_key = None if args.dry_run else CredentialsScope.get("openai", env_file=args.env_file)
     out_dir = args.out_dir
     default_format = _normalize_format(args.output_format)
     manifest_jobs: list[dict[str, Any]] = []

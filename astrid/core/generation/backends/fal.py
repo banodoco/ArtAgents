@@ -27,7 +27,7 @@ from astrid.core.util.http import (
     fal_submit_and_poll,
     fal_upload,
 )
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +68,90 @@ class FalBackend(BackendAdapter):
         client: Inject a mock :class:`HttpClient` for testing.
     """
 
+    #: Default canonical→remote parameter name mapping per mode.
+    #: Used as a fallback when ``BackendSpec.param_map`` is empty so that
+    #: models.yaml entries can eventually drop the redundant wiring.
+    DEFAULT_PARAM_MAP: dict[str, dict[str, str]] = {
+        # ── Image modes ────────────────────────────────────────────────
+        "t2i": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "count": "num_images",
+            "size": "image_size",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+        },
+        "i2i": {
+            "prompt": "prompt",
+            "seed": "seed",
+            "image_ref": "image_url",
+            "count": "num_images",
+            "size": "image_size",
+            "strength": "strength",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+        },
+        "edit": {
+            "prompt": "prompt",
+            "seed": "seed",
+            "image_ref": "image_url",
+            "count": "num_images",
+            "size": "image_size",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+        },
+        # ── Video modes ────────────────────────────────────────────────
+        "t2v": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "frames": "num_frames",
+            "fps": "fps",
+            "duration": "duration",
+            "resolution": "aspect_ratio",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+            "shift": "shift",
+            "loras": "loras",
+            "enable_safety_checker": "enable_safety_checker",
+            "enable_prompt_expansion": "enable_prompt_expansion",
+            "acceleration": "acceleration",
+        },
+        "i2v": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "image_ref": "image_url",
+            "resolution": "aspect_ratio",
+            "frames": "num_frames",
+            "fps": "fps",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+            "shift": "shift",
+            "loras": "loras",
+            "enable_safety_checker": "enable_safety_checker",
+            "enable_prompt_expansion": "enable_prompt_expansion",
+            "acceleration": "acceleration",
+        },
+        "flf": {
+            "prompt": "prompt",
+            "negative_prompt": "negative_prompt",
+            "seed": "seed",
+            "image_ref": "image_url",
+            "image_end_ref": "end_image_url",
+            "resolution": "aspect_ratio",
+            "frames": "num_frames",
+            "guidance_scale": "guidance_scale",
+            "steps": "num_inference_steps",
+            "shift": "shift",
+            "loras": "loras",
+            "enable_safety_checker": "enable_safety_checker",
+            "enable_prompt_expansion": "enable_prompt_expansion",
+            "acceleration": "acceleration",
+        },
+    }
+
     def __init__(
         self,
         env_file: Path | None = None,
@@ -80,7 +164,7 @@ class FalBackend(BackendAdapter):
     def _resolve_api_key(self) -> str:
         """Return ``FAL_KEY``, loading from environment / .env on first call."""
         if self._api_key is None:
-            self._api_key = load_api_key("FAL_KEY", self._env_file)
+            self._api_key = CredentialsScope.get("fal", env_file=self._env_file)
             self._client.register_secret(self._api_key)
         return self._api_key
 
@@ -95,6 +179,8 @@ class FalBackend(BackendAdapter):
         backend_spec: BackendSpec = mode_spec.backends["cloud"]
         endpoint = backend_spec.endpoint
         param_map: dict[str, str] = dict(backend_spec.param_map)
+        if not param_map:
+            param_map = dict(self.DEFAULT_PARAM_MAP.get(mode, {}))
 
         api_key = self._resolve_api_key()
 
@@ -227,14 +313,27 @@ class FalBackend(BackendAdapter):
 
             payload[remote_param] = value
 
-        # flux-schnell: guidance_scale is always 1.0 (frozen value)
-        if entry.id == "flux-schnell" and mode == "t2i":
-            payload["guidance_scale"] = 1.0
+        # Apply backend hints (model × mode × backend configuration).
+        # Hints are the declarative replacement for adapter hardcodes.
+        # guidance_scale_override: force-set a key (model contract, e.g.
+        #   flux-schnell guidance_scale ≡ 1.0).
+        # All other hint keys: setdefault so an explicit caller-supplied
+        #   value (if ever wired) still wins.
+        if backend_spec.hints:
+            for hint_key, hint_value in backend_spec.hints.items():
+                if hint_key == "guidance_scale_override":
+                    payload["guidance_scale"] = hint_value
+                else:
+                    payload.setdefault(hint_key, hint_value)
+        else:
+            # Defensive fallback: old per-entry-id branches (S4 cleanup).
+            # flux-schnell: guidance_scale is always 1.0 (frozen value)
+            if entry.id == "flux-schnell" and mode == "t2i":
+                payload["guidance_scale"] = 1.0
 
-        # ideogram-v4: disable fal's safety checker by default.  setdefault
-        # so an explicit caller-supplied value (if ever wired) still wins.
-        if entry.id == "ideogram-v4":
-            payload.setdefault("enable_safety_checker", False)
+            # ideogram-v4: disable fal's safety checker by default.
+            if entry.id == "ideogram-v4":
+                payload.setdefault("enable_safety_checker", False)
 
         # --- attach LoRA payload if present ----------------------------------
         if loras_raw and fal_loras:

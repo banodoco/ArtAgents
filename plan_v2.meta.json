@@ -1,0 +1,202 @@
+{
+  "plan": "# Implementation Plan: S1 — Capability Waist + Timeline Type Proof (v2)\n\n## Overview\n\n**Goal.** Make the rendering/timeline path compose by *semantic artifact type* (e.g. `clip/visual`) rather than by element-id name-matching. Land a single carrier field on `Port`/`Output`, a new `ArtifactTypeRegistry` (pack-extensible, mirroring `ElementKindRegistry`), annotate the 9 element manifests + the `render` executor, give `ElementDefinition` real `inputs`/`outputs`, and rewire the timeline validator from `_effect_ids`-membership to type-checked resolve. Preserve the open-string opaque fallback that Reigh relies on.\n\n**Repo shape (verified).** Post-RESTRUCTURE tree is in place:\n- Contracts leaf: `astrid/core/contracts/schema.py` — `Port` at L25-32, `Output` at L35-43 (both `@dataclass(frozen=True)`), `CapabilityHandle.inputs/outputs` already typed at L145-146.\n- Two parsers: `astrid/core/executor/schema.py:_parse_port` L309-321, `_parse_output` L324-339; `astrid/core/orchestrator/schema.py:_parse_port` L209-219, `_parse_output` L223-236.\n- Port-type reader: `astrid/core/executor/runner.py:773` (`port.type == 'boolean'`) and `astrid/core/_shared/capability_common.py:140-142` (`_print_ports` reads `port.name`, `port.type`, `port.required`). Neither reads any `artifact_type` field.\n- Existing pack-extension pattern: `ElementKindRegistry` in `astrid/core/pack/registry.py:49-105`; `_builtin_kind_descriptors()` L232+, `pack.extensions.get(\"elements\"/\"timeline\")` consumers L259-285, `element_kind_registry_for_pack` L292-304. This is the template to mirror for `ArtifactTypeRegistry`.\n- `ElementDefinition` in `astrid/core/element/schema.py:41-69` currently has NO `inputs`/`outputs` fields; `to_capability_handle` hard-codes `inputs=(), outputs=()` at L121-122. The handle adapter on `CapabilityHandle` already accepts them — the definition just doesn't carry them yet.\n- 9 element manifests on disk under `astrid/packs/rendering/elements/{animations,effects,transitions}/`. Brief mentions 12 (\"9 rendering, 3 local\"); local-pack element manifests are not present. **Assumption:** annotate the 9 that exist; treat local-pack elements as out-of-scope-for-now.\n- `render` executor manifest: `astrid/packs/rendering/executors/render/executor.yaml` — **already has** `inputs` (L66-91: `timeline`, `assets_registry`, `theme`, `engine`) and `outputs` (L118-126: `video`). Task is to **extend** each existing port object with `artifact_type`, not to create new blocks.\n- JSON Schema files at `astrid/core/pack/schemas/v1/*.json` all use `additionalProperties: false` at the top level:\n  - `element.json` (L41): Does NOT list `inputs`/`outputs` in its `properties` — adding those fields to element manifests will be rejected.\n  - `executor.json` (L109): `inputs`/`outputs` are listed as properties; individual item schemas have no `additionalProperties: false`, so `artifact_type` on items would pass — but should still be formally added to the item property lists.\n  - `pack.json` (L219): The `extensions` block has `additionalProperties: false` and only allows `generation`, `elements`, `timeline`, `schemas` — adding `artifact_types` WILL be rejected.\n- Three consumers of `_effect_ids` (not one):\n  1. `astrid/core/timeline/validators/timeline.py:254-257` — the timeline clip validator (in-scope).\n  2. `astrid/core/timeline/banodoco_composer.py:111` — `_classify_clip` classifies clips as `EFFECT` vs `OPAQUE` for rendering (in-scope for S1 timeline type proof).\n  3. `astrid/core/timeline/validators/pool.py:101-103` — validates pool entry `effect_id` values (in-scope for S1).\n- Extension-key allowlist: `astrid/core/pack/permissions.py:127` — `allowed_keys = {\"generation\", \"elements\", \"timeline\", \"schemas\"}`. Must add `\"artifact_types\"`.\n- S0 baseline is green and committed: parity tests + corpus round-trip already exist (`tests/core/test_spike_scoped_config_parity.py`, `tests/timeline/test_timeline_roundtrip_corpus.py`). Reuse the corpus as the parity-oracle harness.\n- The existing corpus (6 files) contains primarily `media`, `text`, and `text-card` clipTypes. Only `text-card` is a registered effect. Parity oracle value depends on synthetic negatives.\n\n**Strategy.** Strict carrier-first strangler. Land the optional field + registry (zero behavior change), update JSON Schemas, annotate manifests (still zero behavior change because the new path isn't wired), wire the new resolve-and-typecheck path *parallel* to the old behind a feature flag, then flip with a parity oracle that runs both over the corpus plus synthetic negatives and asserts identical accept/reject sets. Only after green does the old `_effect_ids` membership check come out of the validator (preserved as opaque fallback for unannotated clipTypes — preserves Reigh).\n\n**The canonical artifact type id:** `clip/visual` (with `video/clip` registered as an alias).\n\n**ClipType resolution algorithm (design settled):** Bare `clipType` strings (e.g. `'text-card'`, `'fade-up'`) are NOT `kind/id`-qualified. The resolver must scan all element kinds (`effects`, `animations`, `transitions`) looking for an `ElementDefinition` whose `.id` matches the bare string. Once found, resolve via `to_capability_handle()` → check the produced `artifact_type` on its outputs. If the bare string matches elements in more than one kind, the first match wins (order: effects, animations, transitions — matching the existing `_effect_ids`-first pattern).\n\n## Main Phase\n\n### Step 1: Add `artifact_type` carrier to `Port`/`Output` + update parsers\n**Scope:** Small. **Complexity: 2.** **Files:** `contracts/schema.py`, `executor/schema.py`, `orchestrator/schema.py`.\n\n1. **Edit** `astrid/core/contracts/schema.py:26-43` — append `artifact_type: str | None = None` to both `Port` and `Output` dataclasses.\n2. **Edit** `astrid/core/executor/schema.py:309-339` — `_parse_port`/`_parse_output` accept optional `data.get(\"artifact_type\")`, validate it's `str | None`, pass through.\n3. **Edit** `astrid/core/orchestrator/schema.py:209-236` — same change.\n4. **Verify** existing `.type` readers (`executor/runner.py:773`, `_shared/capability_common.py:140-142`) aren't broken by the new field (they read the existing `PortType` field, not `artifact_type` — no break).\n5. **Quick test:** run the contracts/schema tests and a small executor-manifest-roundtrip test; assert every existing manifest still loads.\n\n### Step 2: Update JSON Schemas for the new field + extension key\n**Scope:** Small. **Complexity: 1.** **Files:** `pack/schemas/v1/element.json`, `executor.json`, `pack.json`.\n\n1. **Edit** `astrid/core/pack/schemas/v1/element.json` — add `inputs` and `outputs` as optional array properties to the top-level `properties` block (following the executor.json item schema shape, with `artifact_type` included). These don't need to be `required` — they're additive.\n2. **Edit** `astrid/core/pack/schemas/v1/executor.json` — add `\"artifact_type\": {\"type\": [\"string\", \"null\"]}` to the `properties` of both `inputs.items` (L52-58) and `outputs.items` (L66-75). The items don't have `additionalProperties: false` so this is technically optional, but formalizing it prevents drift.\n3. **Edit** `astrid/core/pack/schemas/v1/pack.json` — add `\"artifact_types\"` as an allowed property under `extensions.properties` (L108-218) with the same shape as the `elements` extension block (an object with a `types` array of `{id, aliases, description}` objects). Also add `\"artifact_types\"` to the extension-key allowlist at `astrid/core/pack/permissions.py:127`.\n4. **Verify** all existing pack manifests still validate; existing pack tests stay green.\n\n### Step 3: `ArtifactTypeRegistry` + pack-extension hook + seed\n**Scope:** Medium. **Complexity: 3.** **Files:** New `contracts/artifact_types.py`, edits to `pack/registry.py`, `pack/permissions.py`.\n\nMirror `ElementKindRegistry` (`astrid/core/pack/registry.py:49-105`) one-for-one in shape.\n\n1. **Create** `astrid/core/contracts/artifact_types.py` with:\n   - `ArtifactTypeDescriptor` frozen dataclass (id, aliases, description).\n   - `ArtifactTypeRegistry` with `register`/`register_many`/`canonical_ids`/`accepted_names`/`resolve(name)->canonical_id | None`/`is_known(name)`.\n   - `_builtin_artifact_types()` seeded with the ~13 types from MIGRATION-PLAN §2:\n     - `clip/visual` (aliases: `video/clip`, `visual`)\n     - `image`, `audio`, `mask`, `prompt`, `transcript`, `timeline`, `asset_registry`, `lora`, `pool`, `arrangement`\n   - Module-level singleton `ARTIFACT_TYPE_REGISTRY`.\n2. **Edit** `astrid/core/pack/registry.py` — add `pack_artifact_type_descriptors(pack)` reading `pack.extensions.get(\"artifact_types\", {})`, plus `artifact_type_registry_for_pack(pack, *, base_registry=...)` following the `element_kind_registry_for_pack` pattern (L292-304).\n3. **Edit** `astrid/core/pack/permissions.py:127` — add `\"artifact_types\"` to `allowed_keys` in `_optional_pack_extensions`.\n4. **Unit tests** in `tests/core/test_artifact_type_registry.py`:\n   - Seeded canonical ids + alias resolution (`video/clip` → `clip/visual`).\n   - Pack-extension registers new type; duplicate id raises; declared-but-unknown raises validation error at pack-load.\n   - Unknown-at-runtime values stay opaque (registry returns `None`; caller decides).\n\n### Step 4: Annotate 9 rendering element manifests + `render` executor I/O\n**Scope:** Medium. **Complexity: 2.** **Files:** 9 `element.yaml` manifests + 1 `executor.yaml`.\n\nPurely declarative; no code change. The render executor manifest already has `inputs`/`outputs` blocks — extend each port object with `artifact_type`.\n\n1. **Edit each of the 9 element manifests** to add top-level `inputs:` and `outputs:` arrays (new fields, now allowed by the updated JSON Schema from Step 2), each port carrying `artifact_type: clip/visual`:\n   - Animations (6): `fade-up`, `fade`, `scale-in`, `slide-left`, `slide-up`, `type-on` → each consumes `clip/visual`, produces `clip/visual`.\n   - Effects (1): `text-card` → produces `clip/visual` (source effect, no input clip).\n   - Transitions (2): `cross-fade`, `fade` → consumes two `clip/visual` ports, produces `clip/visual`.\n2. **Edit** `astrid/packs/rendering/executors/render/executor.yaml` — extend the **existing** `inputs` ports with `artifact_type` annotations:\n   - `timeline` → `artifact_type: timeline`\n   - `assets_registry` → `artifact_type: asset_registry`\n   - `theme` → `artifact_type: null` (opaque/cross-cutting)\n   - `engine` → `artifact_type: null` (opaque/cross-cutting)\n   - Extend the existing `outputs` port: `video` → `artifact_type: clip/visual`\n3. **Verify** all existing manifests still parse (no schema break for unannotated manifests in other packs — `artifact_type` is optional).\n\n### Step 5: Give `ElementDefinition` real `inputs`/`outputs` + thread into `to_capability_handle`\n**Scope:** Small. **Complexity: 2.** **Files:** `element/schema.py`.\n\n1. **Edit** `astrid/core/element/schema.py:41-67` — add `inputs: tuple[Port, ...] = ()` and `outputs: tuple[Output, ...] = ()` to `ElementDefinition` (import `Port`/`Output` from contracts).\n2. **Edit** the element manifest loader (`load_element_definition`, L126-192) — parse optional `inputs`/`outputs` arrays from the manifest payload. Each port parses `name`, `type`, `required`, `description`, `default`, `placeholder`, and `artifact_type`. Reuse the `_parse_port`/`_parse_output` shape from the executor parser or inline a small duplicate (element/ shouldn't couple to executor/).\n3. **Edit** `astrid/core/element/schema.py:121-122` — `to_capability_handle` passes `definition.inputs`/`definition.outputs` through instead of the hard-coded `()`.\n4. **Unit test** in `tests/core/test_element_definition_io.py`: load each of the 9 annotated manifests, assert `inputs`/`outputs` present and `artifact_type` correctly populated.\n\n### Step 6: Build the type-resolution helper + targeted unit tests\n**Scope:** Medium. **Complexity: 4.** **Files:** New `timeline/validators/_type_resolve.py`.\n\nThis is the hardest single piece. Isolate it with its own tests.\n\n1. **Create** `astrid/core/timeline/validators/_type_resolve.py` with:\n   - `resolve_clip_to_artifact_type(clip_type: str, theme: str | None, element_registry, artifact_type_registry) -> str | None`:\n     - Given a bare `clipType` string (e.g. `'text-card'`), scan element kinds in order: `effects`, `animations`, `transitions`.\n     - For each kind, look up `ElementDefinition` by id using the existing element catalog (same machinery `_effect_ids` uses: `list_element_ids(kind, theme=theme)`).\n     - If found, call `to_capability_handle(definition)` → check `outputs` for the first output that has a non-None `artifact_type`.\n     - Return that `artifact_type` string, or `None` if unresolved / unannotated.\n   - `is_visual_clip_element(clip_type, theme, element_registry, artifact_type_registry) -> bool` — convenience: returns `True` iff resolved artifact type is `clip/visual`.\n2. **Unit tests** in `tests/timeline/test_type_resolve.py`:\n   - `'text-card'` → resolves to `clip/visual` (registered effect, annotated).\n   - `'fade-up'` → resolves to `clip/visual` (registered animation, annotated).\n   - `'cross-fade'` → resolves to `clip/visual` (registered transition, annotated).\n   - `'nonexistent-clip'` → returns `None` (unregistered, opaque fallback).\n   - `'media'` → returns `None` (not an element id; it's a clip kind, not an element).\n   - Theme-scoped element lookup exercises the `theme` parameter passthrough.\n\n### Step 7: Wire type-resolution into all three `_effect_ids` consumers with parity flag\n**Scope:** Medium. **Complexity: 3.** **Files:** `validators/timeline.py`, `banodoco_composer.py`, `validators/pool.py`.\n\nWire the new resolution path behind `ASTRID_TIMELINE_TYPECHECK=parity|new|legacy` (default `parity`). The parity mode runs BOTH paths and asserts identical results.\n\n1. **Add** a shared env-flag helper function `_timeline_typecheck_mode() -> str` returning `os.environ.get(\"ASTRID_TIMELINE_TYPECHECK\", \"parity\")` (validated to one of `parity`, `new`, `legacy`).\n\n2. **Edit** `astrid/core/timeline/validators/timeline.py:247-257` — the clip validation loop:\n   - **Legacy path** (`mode == \"legacy\"`): the existing `_effect_ids(active_theme)` membership check + `_validate_effect_params` call.\n   - **New path** (`mode == \"new\"`): call `resolve_clip_to_artifact_type(clip_type, active_theme, ...)`. Three branches:\n     - (a) Resolved → `clip/visual` → call `_validate_effect_params` (same as today).\n     - (b) Resolved → something other than `clip/visual` or `None` → **opaque fallthrough** (no error; same as today for non-effect clipTypes — matches the Reigh contract).\n     - (c) Unresolved (`None`) → **opaque fallthrough** (no error; the Reigh contract).\n   - **Parity mode** (`mode == \"parity\"`): run both legacy and new, compare verdicts (accept/reject + exception type), assert identical. Use the new path's verdict for actual validation.\n\n3. **Edit** `astrid/core/timeline/banodoco_composer.py:109-113` — `_classify_clip`:\n   - Same parity/legacy/new pattern. `new` path: if `resolve_clip_to_artifact_type` returns `clip/visual`, classify as `EFFECT`; otherwise `OPAQUE`.\n   - For S1, the composer follows the same parity logic as the validator — there is NO split-brain because both are in parity mode during testing.\n\n4. **Edit** `astrid/core/timeline/validators/pool.py:101-103` — `effect_id` validation:\n   - Same parity/legacy/new pattern. `new` path: if `resolve_clip_to_artifact_type(effect_id, None, ...)` returns `clip/visual`, accept; otherwise raise \"not a valid effect\" error. This is MORE permissive than the legacy check (any element producing `clip/visual` qualifies, not just effects-catalog entries). Parity mode will catch divergence.\n\n5. **Unit test** in `tests/timeline/test_parity_shim_self_test.py`:\n   - Set `ASTRID_TIMELINE_TYPECHECK=parity`, inject a deliberate divergence between legacy and new paths (e.g., mock `_effect_ids` to return different set than resolver), assert the parity shim raises `AssertionError`. This proves the oracle mechanism works.\n\n### Step 8: Parity oracle test over the timeline corpus + synthetic negatives\n**Scope:** Medium. **Complexity: 3.** **Files:** New `tests/timeline/test_timeline_type_resolution_parity.py`.\n\n1. **Reuse** the existing corpus-discovery helper from `tests/timeline/test_timeline_roundtrip_corpus.py:25-33` — every `*.timeline*.json` under `examples/` and `tests/fixtures/`.\n2. For each corpus file, validate twice — once with `ASTRID_TIMELINE_TYPECHECK=legacy`, once with `=new`. Assert: identical pass/fail verdict; on fail, identical raised-exception type *or* identical first-error-message-substring.\n3. **Augment with synthetic test cases** (embedded as inline JSON strings in the test, or as new fixture files):\n   - **(a)** Registered element id producing `clip/visual` with valid params → both paths pass.\n   - **(b)** Registered element id producing `clip/visual` with invalid params (wrong schema type) → both paths fail with same error type.\n   - **(c)** Opaque unregistered clipType (e.g., `'reigh-custom-thing'`) → both paths pass (opaque fallthrough).\n   - **(d)** clipType `'media'` (not an element, a clip kind) → both paths pass (opaque fallthrough).\n   - **(e)** clipType `'text'` (not an element, a clip kind) → both paths pass.\n   - **(f)** Declared-but-unregistered `artifact_type` in a pack manifest → registry validation error at pack-load (caught in Step 3's unit tests, cross-referenced here).\n   - **(g)** An element producing `audio` (hypothetical future element) used as a `clipType` in a timeline → both paths: legacy might pass (if in `_effect_ids`), new passes via opaque fallthrough (resolved → not `clip/visual` → fallthrough).\n4. **Open-string-fallback regression test**: synthetic Reigh-style timeline with a clipType that is neither a built-in nor registered → must pass under the new path.\n\n### Step 9: Flip default + light cleanup\n**Scope:** Small. **Complexity: 2.**\n\n1. **Edit** the flag default in Step 7's shim to `\"new\"`. Keep `legacy` and `parity` available for one release of safety (post-S1 they can go in S2 cleanup; brief is explicit that S4 handles further purge).\n2. **Add** code comments at the now-quiet `_effect_ids` call-sites noting the new path is canonical and the legacy import is preserved for the env-flagged oracle, with a removal cross-reference to S4.\n3. **Run** full timeline test suite + corpus round-trip + all new tests.\n\n## Execution Order\n1. Step 1 (carrier — purely additive).\n2. Step 2 (JSON Schema updates — unblock Step 4's manifest annotations).\n3. Step 3 (registry — purely additive, depends on Step 1 typing + Step 2's pack.json schema update).\n4. Step 4 (annotate manifests — depends on Steps 1-3 for schemas + canonical ids).\n5. Step 5 (`ElementDefinition` I/O fields — depends on Step 1 carrier + Step 4 manifests for round-trip evidence).\n6. Step 6 (type-resolution helper + unit tests — depends on Steps 1-5).\n7. Step 7 (wire into all three consumers with parity flag — depends on Step 6).\n8. Step 8 (parity oracle over corpus + synthetic negatives — depends on Step 7; **the S1 gate**).\n9. Step 9 (flip default — gated on Step 8 green).\n\n## Validation Order\n1. Step 1: contracts/schema unit tests + executor & orchestrator parser tests.\n2. Step 2: existing pack validation tests stay green; new element/executor/pack manifests with the new fields validate.\n3. Step 3: `tests/core/test_artifact_type_registry.py`.\n4. Step 4: pack-load + manifest-roundtrip smoke; existing pack tests must stay green.\n5. Step 5: `tests/core/test_element_definition_io.py`.\n6. Step 6: `tests/timeline/test_type_resolve.py`.\n7. Step 7: `tests/timeline/test_parity_shim_self_test.py` + targeted unit tests for each consumer.\n8. Step 8: parity oracle over the corpus + synthetic negatives — **the S1 gate**.\n9. Step 9: full timeline test suite + corpus round-trip + a final `pytest` run.\n\n## Out of Scope (per brief)\nNo registry collapse (S4), no theme/scoped-config (S3), no element restructure/purge (S4), no non-timeline annotation (S2), no removal of the legacy `_effect_ids` path (preserved as oracle + opaque fallback substrate).",
+  "changes_summary": "Revised plan across 17 critique flags. Key changes: (1) Removed all references to phantom file `contracts/_capability_common.py`, replaced with correct path `_shared/capability_common.py:140-142` and correct line reference `runner.py:773`. (2) Added new Step 2 to update all three JSON Schema files (`element.json`, `executor.json`, `pack.json`) plus the extension-key allowlist in `permissions.py` — the highest-risk omission in v1. (3) Corrected render executor manifest description: it already has `inputs`/`outputs`; task is to extend existing ports, not create new blocks. (4) Expanded scope to all three `_effect_ids` consumers (validator + composer + pool), eliminating the split-brain risk. (5) Designed the bare-clipType-to-kind/id resolution algorithm explicitly: scan effects→animations→transitions by element id using existing catalog machinery. (6) Added third branch for resolved-but-not-`clip/visual`: opaque fallthrough (Reigh contract). (7) Split original Step 2 into Steps 2+3 (schemas, then registry), original Step 5 into Steps 6+7+8 (resolver helper, wire consumers with parity flag, parity oracle test). (8) Enumerated 7 specific synthetic-negative scenarios plus parity shim self-test. (9) Documented composer/validator both follow parity mode — no split-brain during testing. All 17 flags addressed; none rejected.",
+  "flags_addressed": [
+    {
+      "id": "correctness-1",
+      "resolution": "addressed",
+      "reason": "Removed references to phantom file `contracts/_capability_common.py`. Replaced with the correct file path `astrid/core/_shared/capability_common.py:140-142` which reads `port.name`, `port.type`, `port.required` (no `artifact_type`). Verified that adding the new field won't break these readers.",
+      "where": "Step 1.4, Repo shape section"
+    },
+    {
+      "id": "correctness-2",
+      "resolution": "addressed",
+      "reason": "Fixed line number from 747 to 773 (`executor/runner.py:773` is where `port.type == 'boolean'` is actually read).",
+      "where": "Step 1.4, Repo shape section"
+    },
+    {
+      "id": "correctness-3",
+      "resolution": "addressed",
+      "reason": "Corrected render executor manifest description: it already has `inputs` (L66-91) and `outputs` (L118-126). Step 4 now says 'extend the existing ports with `artifact_type`' instead of 'add top-level blocks.'",
+      "where": "Step 4.2, Repo shape §render executor manifest"
+    },
+    {
+      "id": "correctness-4",
+      "resolution": "addressed",
+      "reason": "Expanded Step 7 to wire type-resolution into all three `_effect_ids` consumers: `validators/timeline.py:254-257`, `banodoco_composer.py:111`, and `validators/pool.py:101-103`. All three follow the same parity/legacy/new pattern, eliminating divergence risk.",
+      "where": "Step 7 (sections 2-4), Repo shape §Three consumers"
+    },
+    {
+      "id": "correctness-5",
+      "resolution": "addressed",
+      "reason": "Added explicit resolution algorithm design: bare `clipType` strings are matched against element ids by scanning all element kinds in order (effects→animations→transitions) using the existing element catalog's `list_element_ids(kind, theme=theme)`. Documented in the Overview and detailed in Step 6.",
+      "where": "Overview §ClipType resolution algorithm, Step 6.1"
+    },
+    {
+      "id": "scope-1",
+      "resolution": "addressed",
+      "reason": "Same fix as correctness-1: removed phantom `contracts/_capability_common.py` reference. All file paths in the plan now correspond to actual files on disk.",
+      "where": "Repo shape section, Step 1.4"
+    },
+    {
+      "id": "scope-2",
+      "resolution": "addressed",
+      "reason": "Same fix as correctness-3: corrected render executor manifest description.",
+      "where": "Repo shape §render executor manifest, Step 4.2"
+    },
+    {
+      "id": "scope-3",
+      "resolution": "addressed",
+      "reason": "Same fix as correctness-5: resolution algorithm now specifies scan order (effects→animations→transitions) using the existing element catalog's `list_element_ids` per kind. The `_effect_ids` function already delegates to `catalog.list_effect_ids(theme=theme)`, which implements this per-kind scan — the resolver mirrors that pattern.",
+      "where": "Overview §ClipType resolution algorithm, Step 6.1"
+    },
+    {
+      "id": "scope-4",
+      "resolution": "addressed",
+      "reason": "Original Step 2 split into Step 2 (JSON Schema updates + permissions.py allowlist, Complexity 1) and Step 3 (ArtifactTypeRegistry module + pack-glue + unit tests, Complexity 3). The schema update (prerequisite) is now its own lightweight step gating Step 3.",
+      "where": "Steps 2 and 3"
+    },
+    {
+      "id": "scope-5",
+      "resolution": "addressed",
+      "reason": "Original Step 5 split into Step 6 (type-resolution helper + targeted unit tests, Complexity 4), Step 7 (wire into all three consumers with parity flag, Complexity 3), and Step 8 (parity oracle test, Complexity 3). Each is sized for one worker turn.",
+      "where": "Steps 6, 7, 8"
+    },
+    {
+      "id": "all_locations-1",
+      "resolution": "addressed",
+      "reason": "Added new Step 2 that updates `element.json` (adds `inputs`/`outputs` properties), `executor.json` (adds `artifact_type` to input/output item schemas), and `pack.json` (adds `artifact_types` to the `extensions` block). This was the highest-risk omission — without it, Steps 3-5 would fail at pack-load.",
+      "where": "Step 2"
+    },
+    {
+      "id": "all_locations-2",
+      "resolution": "addressed",
+      "reason": "Step 7 now wires type-resolution into all three `_effect_ids` call sites: `validators/timeline.py:254` (validator), `banodoco_composer.py:111` (composer), and `validators/pool.py:102` (pool). All three follow the same parity/legacy/new pattern so there is no divergent resolution.",
+      "where": "Step 7, Repo shape §Three consumers"
+    },
+    {
+      "id": "all_locations-3",
+      "resolution": "addressed",
+      "reason": "Same fix as correctness-3. Repo shape now correctly states the manifest already has `inputs`/`outputs`. Step 4 says 'extend the existing ports.'",
+      "where": "Repo shape §render executor manifest, Step 4.2"
+    },
+    {
+      "id": "prerequisite_ordering-1",
+      "resolution": "addressed",
+      "reason": "Step 7's new path now specifies three explicit branches: (a) resolved→`clip/visual` → validate params, (b) resolved→other/None → opaque fallthrough (no error), (c) unresolved → opaque fallthrough (no error). The Reigh contract is preserved for all non-`clip/visual` cases.",
+      "where": "Step 7.2 (new path branches a/b/c)"
+    },
+    {
+      "id": "prerequisite_ordering-2",
+      "resolution": "addressed",
+      "reason": "Step 7 now explicitly addresses the composer and pool in addition to the validator. During S1 testing, all three consumers are in parity mode — there is no split-brain. If parity is green, all three flip together in Step 9. The composer divergence risk is eliminated by wiring it in the same step.",
+      "where": "Step 7.3 (composer), Step 7.4 (pool)"
+    },
+    {
+      "id": "prerequisite_ordering-3",
+      "resolution": "addressed",
+      "reason": "Step 8 now enumerates 7 specific synthetic-negative scenarios (a-g) plus the Reigh fallback regression test, ensuring comprehensive oracle coverage beyond the sparse corpus. Each scenario tests a distinct branch of the resolution logic.",
+      "where": "Step 8.3 (scenarios a-g), Step 8.4"
+    },
+    {
+      "id": "prerequisite_ordering-4",
+      "resolution": "addressed",
+      "reason": "Added `tests/timeline/test_parity_shim_self_test.py` in Step 7.5: injects a deliberate divergence between legacy and new paths (mock `_effect_ids` to return different set) and asserts the parity shim raises `AssertionError`. This proves the oracle mechanism itself works before it is relied upon.",
+      "where": "Step 7.5"
+    }
+  ],
+  "assumptions": [
+    "Step 4 annotates the 9 rendering `element.yaml` manifests that exist on disk; the 3 local-pack elements named in MIGRATION-PLAN §3 are not present in the worktree and are deferred to whichever sprint introduces them (likely S4 per anti-scope).",
+    "Canonical id is `clip/visual`; `video/clip` is registered as an alias of `clip/visual` in the seed registry.",
+    "Declared-but-unregistered `artifact_type` is rejected at pack-load (registry validation in `_optional_pack_extensions`), not lazily at validator time.",
+    "The parity oracle uses the existing corpus discovered by `tests/timeline/test_timeline_roundtrip_corpus.py` plus 7 synthetic negative scenarios enumerated in Step 8.3.",
+    "An env flag `ASTRID_TIMELINE_TYPECHECK=parity|new|legacy` (default `parity` during Steps 6-8, flipped to `new` in Step 9) is the shim mechanism. A shared helper `_timeline_typecheck_mode()` reads it once.",
+    "The new `ArtifactTypeRegistry` module belongs under `astrid/core/contracts/` (leaf), with pack-glue helpers in `astrid/core/pack/registry.py`, mirroring the `ElementKindRegistry` layout.",
+    "Element-manifest port parsing inlines a small `_parse_port`/`_parse_output` duplicate rather than importing from `executor/schema.py` (avoids cross-package coupling).",
+    "The clipType resolution algorithm scans element kinds in order: effects → animations → transitions. If a bare string matches an element id in more than one kind, the first match wins. This mirrors the existing `_effect_ids`-first lookup pattern.",
+    "All three `_effect_ids` consumers (validator, composer, pool) are rewired in the same parity-gated step to avoid split-brain. The composer's `_classify_clip` and the pool's `effect_id` validation are in-scope for S1's timeline type proof.",
+    "The JSON Schema files (`element.json`, `executor.json`, `pack.json`) at `astrid/core/pack/schemas/v1/` are updated BEFORE any manifest annotations are applied (Step 2 precedes Steps 3-4)."
+  ],
+  "success_criteria": [
+    {
+      "criterion": "`Port` and `Output` in `astrid/core/contracts/schema.py` carry an optional `artifact_type: str | None = None` field, and both parsers (`executor/schema.py`, `orchestrator/schema.py`) read it through.",
+      "priority": "must",
+      "requires": ["read_files", "parse_diff"]
+    },
+    {
+      "criterion": "All previously-loading executor, orchestrator, and element manifests load unchanged with the new optional field (no parser regressions).",
+      "priority": "must",
+      "requires": ["run_tests"]
+    },
+    {
+      "criterion": "JSON Schema files updated: `element.json` accepts `inputs`/`outputs` top-level arrays; `executor.json` item schemas for inputs/outputs accept `artifact_type`; `pack.json` `extensions` block accepts `artifact_types` key. All existing manifests still validate.",
+      "priority": "must",
+      "requires": ["read_files", "run_tests"]
+    },
+    {
+      "criterion": "`ArtifactTypeRegistry` exists, is seeded with the ~13 MIGRATION-PLAN §2 types (with `video/clip`→`clip/visual` canonicalization), and is pack-extensible via `pack.extensions[\"artifact_types\"]` following the `ElementKindRegistry` pattern.",
+      "priority": "must",
+      "requires": ["read_files", "run_tests"]
+    },
+    {
+      "criterion": "Declared-but-unregistered artifact_type values raise a validation error at pack-load (via `_optional_pack_extensions` allowlist enforcement); unknown runtime clipType values still pass through the validator (opaque fallback preserved).",
+      "priority": "must",
+      "requires": ["run_tests"]
+    },
+    {
+      "criterion": "The 9 rendering element manifests + the `render` executor manifest carry `artifact_type` annotations on their `inputs`/`outputs` ports (extending existing ports, not creating duplicate blocks).",
+      "priority": "must",
+      "requires": ["read_files"]
+    },
+    {
+      "criterion": "`ElementDefinition` carries `inputs`/`outputs` tuples and propagates them into `to_capability_handle` (no longer hard-coded `()`).",
+      "priority": "must",
+      "requires": ["read_files", "run_tests"]
+    },
+    {
+      "criterion": "Timeline validator resolves bare clipType id → element catalog scan (effects→animations→transitions) → capability → produced artifact type. Three branches: (a) resolved→`clip/visual` → validate params, (b) resolved→other/None → opaque fallthrough, (c) unresolved → opaque fallthrough. Unresolved ids fall through as opaque (no error, Reigh contract preserved).",
+      "priority": "must",
+      "requires": ["read_files", "run_tests"]
+    },
+    {
+      "criterion": "Parity oracle: across every `*.timeline*.json` under `examples/` and `tests/fixtures/` PLUS 7 synthetic negative scenarios (a-g enumerated in Step 8.3), the new type-resolution path accepts/rejects the identical set of timelines as the legacy `_effect_ids` membership path (same pass/fail verdict per file).",
+      "priority": "must",
+      "requires": ["run_tests"]
+    },
+    {
+      "criterion": "Open-string opaque fallback regression test: a synthetic Reigh-style timeline with a clipType unknown to both the registry and the element catalog still validates successfully.",
+      "priority": "must",
+      "requires": ["run_tests"]
+    },
+    {
+      "criterion": "Full timeline test suite + S0 corpus round-trip test stay green at HEAD.",
+      "priority": "must",
+      "requires": ["run_tests"]
+    },
+    {
+      "criterion": "`pack.extensions` allowlist in `permissions.py:127` accepts the new `artifact_types` key without breaking existing pack manifests.",
+      "priority": "must",
+      "requires": ["read_files", "run_tests"]
+    },
+    {
+      "criterion": "All three `_effect_ids` consumers (validator, composer, pool) are rewired to the new type-resolution path behind the same parity flag. Parity self-test (`test_parity_shim_self_test.py`) proves the oracle catches deliberate divergence.",
+      "priority": "must",
+      "requires": ["read_files", "run_tests"]
+    },
+    {
+      "criterion": "Step 9's `ASTRID_TIMELINE_TYPECHECK` flag defaults to `new` after the oracle goes green (Step 8), with `legacy`/`parity` retained for one release of safety net.",
+      "priority": "should",
+      "requires": ["read_files"]
+    },
+    {
+      "criterion": "No S2/S3/S4 work crept in (no registry collapse, no theme/scoped-config changes, no element restructure/purge, no non-timeline annotation).",
+      "priority": "should",
+      "requires": ["parse_diff", "subjective_judgment"]
+    }
+  ],
+  "questions": [
+    "The brief says \"12 element manifests\" but only 9 exist on disk. The 3 local-pack elements (`text-card`/`neon-orbit-card`/`model-trends`) are not in the worktree. Should a stub file or migration note be added for them, or is pure deferral to S4 correct?",
+    "Should `artifact_type` on executor/orchestrator I/O ports be validated against the registry at parse time (raising if unknown), or stay fully permissive at parse time and only check at the validator as described? The brief says 'Declared-but-unregistered = validation error' for pack-load extensions, but is silent on executor/orchestrator manifest ports.",
+    "The composer's `_classify_clip` uses `_effect_ids` in conjunction with `_asset_entry_for_clip` (which checks the asset registry). If an element produces `clip/visual` but the asset registry classifies the underlying asset as `audio`, should the composer prefer the element's type or the asset's type? For S1, deferring the asset-registry interplay to S2/S4 and relying on parity to catch issues seems safe — confirm?"
+  ]
+}

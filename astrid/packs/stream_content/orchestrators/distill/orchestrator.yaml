@@ -8,8 +8,8 @@
   "description": "Compose transcription, scene detection, segment mapping, content-segment extraction, clip-candidate scoring, and static HTML review for long stream recordings.",
   "keywords": ["stream", "event", "review", "clips", "segments", "orchestrator"],
   "inputs": [
-    {"name": "video", "type": "file", "required": true, "description": "Source stream recording."},
-    {"name": "transcript", "type": "file", "required": false, "description": "Existing transcript.json; skips transcription when present."},
+    {"name": "video", "type": "file", "required": true, "description": "Source stream recording.", "artifact_type": "video/clip"},
+    {"name": "transcript", "type": "file", "required": false, "description": "Existing transcript.json; skips transcription when present.", "artifact_type": "transcript"},
     {"name": "brief", "type": "file", "required": false, "description": "Optional markdown brief for clip scoring."}
   ],
   "outputs": [

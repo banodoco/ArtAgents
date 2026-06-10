@@ -251,9 +251,10 @@ def validate_timeline(config: Any, *, strict: bool = True) -> None:
         # theme-scoped clipTypes (e.g. 2rp's section-hook). Open-string
         # clipTypes that are not registered effects remain opaque.
         active_theme = theme if isinstance(theme, str) else None
-        from astrid.core.timeline.banodoco_schema import _effect_ids
-        effect_ids = _effect_ids(active_theme)
-        if clip_type in effect_ids:
+        # New artifact-type resolution is canonical; legacy _effect_ids path
+        # retained via _parity shim for env-flagged oracle (S4: remove shim).
+        from astrid.core.timeline.validators._parity import is_effect_clip
+        if is_effect_clip(clip_type, active_theme):
             _validate_effect_params(clip_type, clip.get("params"), f"clips[{index}].params", theme=active_theme)
         if "pool_id" in clip and not isinstance(clip["pool_id"], str):
             raise ValueError(f"clips[{index}].pool_id must be a string")

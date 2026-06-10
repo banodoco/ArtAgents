@@ -320,3 +320,78 @@ def _pack_kind_registry_error(pack: "PackDefinition", message: str) -> str:
     if any(f" {catalog} kind " in f" {message} " for catalog in TIMELINE_KIND_CATALOGS):
         return f"pack.extensions.timeline.kinds is invalid: {message}"
     return f"pack kind extensions are invalid: {message}"
+
+
+# ---------------------------------------------------------------------------
+# Artifact-type registry (mirrors the element/timeline kind pattern above)
+# ---------------------------------------------------------------------------
+
+
+def pack_artifact_type_descriptors(
+    pack: "PackDefinition",
+) -> "tuple[ArtifactTypeDescriptor, ...]":
+    """Extract :class:`ArtifactTypeDescriptor` entries from a pack's
+    ``extensions.artifact_types.types`` block."""
+    from astrid.core.contracts.artifact_types import ArtifactTypeDescriptor
+
+    artifact_extensions = pack.extensions.get("artifact_types", {})
+    types = artifact_extensions.get("types", ())
+    return tuple(
+        ArtifactTypeDescriptor(
+            id=item["id"],
+            aliases=tuple(item.get("aliases", ())),
+            description=item.get("description", ""),
+        )
+        for item in types
+    )
+
+
+def artifact_type_registry_for_pack(
+    pack: "PackDefinition",
+    *,
+    base_registry: "ArtifactTypeRegistry | None" = None,
+) -> "ArtifactTypeRegistry":
+    """Build an :class:`ArtifactTypeRegistry` seeded from *pack* extensions.
+
+    Follows the same pattern as :func:`element_kind_registry_for_pack`.
+    """
+    from astrid.core.contracts.artifact_types import (
+        ARTIFACT_TYPE_REGISTRY,
+        ArtifactTypeDescriptor,
+        ArtifactTypeRegistry,
+        ArtifactTypeRegistryError,
+    )
+
+    registry = base_registry or ARTIFACT_TYPE_REGISTRY
+    descriptors = _extension_artifact_type_descriptors(registry) + pack_artifact_type_descriptors(pack)
+    if not descriptors:
+        return registry
+    try:
+        # Seed with all non-builtin descriptors (from base + pack), builtins
+        # are added automatically by ArtifactTypeRegistry.__init__.
+        return ArtifactTypeRegistry(descriptors=descriptors)
+    except ArtifactTypeRegistryError as exc:
+        raise PackValidationError(
+            f"pack.extensions.artifact_types is invalid: {exc}"
+        ) from exc
+
+
+def _extension_artifact_type_descriptors(
+    registry: "ArtifactTypeRegistry",
+) -> "tuple[ArtifactTypeDescriptor, ...]":
+    """Return descriptors from *registry* that are NOT builtins."""
+    from astrid.core.contracts.artifact_types import (
+        ARTIFACT_TYPE_REGISTRY,
+        ArtifactTypeDescriptor,
+    )
+
+    builtin_ids = set(ARTIFACT_TYPE_REGISTRY.canonical_ids())
+    return tuple(
+        ArtifactTypeDescriptor(
+            id=desc.id,
+            aliases=desc.aliases,
+            description=desc.description,
+        )
+        for desc in registry.descriptors()
+        if desc.id not in builtin_ids
+    )

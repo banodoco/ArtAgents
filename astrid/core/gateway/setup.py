@@ -7,8 +7,6 @@ import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from astrid.core.element.install import install_element
-from astrid.core.element.registry import load_default_registry as load_element_registry
 from astrid.core.foundation.project_paths import PROJECTS_ROOT_ENV, resolve_projects_root
 from astrid.core.foundation.paths import REPO_ROOT
 
@@ -38,17 +36,6 @@ def plan_setup(*, apply: bool = False, project_root: str | Path | None = None) -
         )
     )
     steps.append(_plan_projects_root(apply=apply))
-
-    registry = load_element_registry(project_root=root)
-    for element in registry.list():
-        result = install_element(element, project_root=root, dry_run=not apply)
-        plan = result.plan
-        if plan.noop_reason:
-            steps.append(SetupStep(name="elements install", status="skipped", detail=f"{element.kind}/{element.id}: {plan.noop_reason}"))
-            continue
-        status = "applied" if apply else "planned"
-        details = "; ".join(plan.command_lines())
-        steps.append(SetupStep(name="elements install", status=status, detail=f"{element.kind}/{element.id}: {details}"))
     return tuple(steps)
 
 
@@ -76,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print("Astrid setup")
     if not args.apply:
-        print("dry-run: pass --apply to run local element install commands")
+        print("dry-run: pass --apply to apply local setup mutations")
     for step in steps:
         print(f"[{step.status}] {step.name}: {step.detail}")
     return 0

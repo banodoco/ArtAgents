@@ -7,14 +7,13 @@ import base64
 import inspect
 import json
 import mimetypes
-import os
 import threading
 import time
 from pathlib import Path
 from typing import Any, Protocol
 
 from astrid.core.contracts.errors import AstridError
-from astrid.core.util.secrets import candidate_env_files, read_env_value
+from astrid.core.util.credentials_scope import CredentialsScope
 from astrid.core.util.time import _utc_now, utc_now_seconds
 
 _IMAGE_BLOCK_ALLOWED_KEYS = frozenset({"type", "source", "cache_control"})
@@ -196,15 +195,26 @@ class GeminiClient(Protocol):
 
 
 def _load_api_key(env_file: Path | None, key: str) -> str:
-    for candidate in candidate_env_files(env_file):
-        if value := read_env_value(candidate, key):
-            return value
-    if value := os.environ.get(key, "").strip():
-        return value
-    raise AstridError(
-        f"{key} not found",
-        recovery_command=f"set {key} in your environment or a .env file",
-    )
+    """Resolve *key* via the canonical scoped credentials resolver.
+
+    Thin backward-compatible wrapper around ``CredentialsScope.get``.
+    Maps env-var *key* → canonical provider name → scope key.
+    """
+    _ENV_TO_PROVIDER: dict[str, str] = {
+        "ANTHROPIC_API_KEY": "anthropic",
+        "DEEPSEEK_API_KEY": "deepseek",
+        "FAL_KEY": "fal",
+        "FIREWORKS_API_KEY": "fireworks",
+        "GEMINI_API_KEY": "gemini",
+        "OPENAI_API_KEY": "openai",
+    }
+    provider = _ENV_TO_PROVIDER.get(key)
+    if provider is None:
+        raise AstridError(
+            f"Unknown API key env var: {key!r}",
+            recovery_command=f"use one of: {', '.join(sorted(_ENV_TO_PROVIDER))}",
+        )
+    return CredentialsScope.get(provider, env_file=env_file)
 
 
 def _is_transient_error(exc: Exception) -> bool:
@@ -216,7 +226,7 @@ def _is_transient_error(exc: Exception) -> bool:
 def build_claude_client(env_file: Path | None = None) -> ClaudeClient:
     from anthropic import Anthropic
 
-    sdk_client = Anthropic(api_key=_load_api_key(env_file, "ANTHROPIC_API_KEY"))
+    sdk_client = Anthropic(api_key=CredentialsScope.get("anthropic", env_file=env_file))
 
     class _ClaudeJSONClient:
         def complete_json(
@@ -308,7 +318,7 @@ def build_gemini_client(env_file: Path | None = None) -> GeminiClient:
     from google import genai
     from google.genai import types
 
-    sdk_client = genai.Client(api_key=_load_api_key(env_file, "GEMINI_API_KEY"))
+    sdk_client = genai.Client(api_key=CredentialsScope.get("gemini", env_file=env_file))
 
     class _GeminiVideoClient:
         def describe_video(

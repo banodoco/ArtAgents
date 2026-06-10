@@ -17,7 +17,8 @@
       "description": "Audio clip to inspect.",
       "name": "audio",
       "required": false,
-      "type": "file"
+      "type": "file",
+      "artifact_type": "audio"
     }
   ],
   "isolation": {

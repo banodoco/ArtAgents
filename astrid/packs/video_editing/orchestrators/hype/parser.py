@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.theme import ACTIVE_THEME_ENV, resolve_theme_dir, resolve_themes_root
+from astrid.core.theme import resolve_theme_dir, resolve_themes_root
 from astrid.packs.training.executors.asset_cache import run as asset_cache
 
 from .config import (
@@ -190,10 +190,6 @@ def resolve_args(argv: list[str] | None = None) -> argparse.Namespace:
     default_theme = resolve_themes_root() / "banodoco-default" / "theme.json"
     theme_value = getattr(args, "theme", default_theme)
     args.theme = _resolve_theme_arg(theme_value)
-    # Thread the active theme to every subprocess so element catalog can
-    # discover theme-scoped effects/animations/transitions without each
-    # child script having to plumb --theme into its catalog calls.
-    os.environ[ACTIVE_THEME_ENV] = str(args.theme)
     args.verbose = bool(getattr(args, "verbose", False))
     raw_editor_passes = int(getattr(args, "max_editor_passes", 2))
     if not 1 <= raw_editor_passes <= 2:

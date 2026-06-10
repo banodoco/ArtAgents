@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -30,6 +32,7 @@ from astrid.core.pack.manifest import (
     dump_manifest_payload,
     load_manifest_mapping,
 )
+from astrid.core.registry import CapabilityRegistry
 from astrid.core.foundation.paths import REPO_ROOT
 
 from .folder import load_folder_orchestrators
@@ -42,13 +45,19 @@ from .schema import (
 if TYPE_CHECKING:
     from astrid.core.pack.override import OverrideStore
 
+logger = logging.getLogger(__name__)
+
 
 class OrchestratorRegistryError(OrchestratorValidationError):
     """Raised when an orchestrator registry is inconsistent."""
 
 
-class OrchestratorRegistry:
-    """Small in-memory registry keyed by orchestrator id."""
+class OrchestratorRegistry(CapabilityRegistry[str, OrchestratorDefinition]):
+    """Small in-memory registry keyed by orchestrator id.
+
+    Inherits generic storage, conflict detection, and override-key
+    resolution from :class:`CapabilityRegistry`.
+    """
 
     def __init__(
         self,
@@ -58,41 +67,32 @@ class OrchestratorRegistry:
         alias_resolver: AliasResolver | None = None,
         override_store: "OverrideStore | None" = None,
     ) -> None:
-        self._orchestrators: dict[str, list[OrchestratorDefinition]] = {}
+        super().__init__(alias_resolver=alias_resolver, override_store=override_store)
         self._executor_registry = executor_registry
-        self.alias_resolver = alias_resolver
-        self.override_store = override_store
+        #: Nested map: orchestrator_id → child_capability_id → frozenset of output artifact_type values.
+        self._child_output_types: dict[str, dict[str, frozenset[str]]] = {}
         for orchestrator in orchestrators:
             self.register(orchestrator)
+
+    # ------------------------------------------------------------------
+    # Backward-compat alias for pre-migration direct ``_orchestrators`` access
+    # (e.g. ``test_orchestrator_runner_errors.py`` bypasses ``register()``).
+    # ------------------------------------------------------------------
+
+    @property
+    def _orchestrators(self) -> dict[str, list[OrchestratorDefinition] | OrchestratorDefinition]:
+        """Legacy alias for ``_entries`` — supports direct scalar writes."""
+        return self._entries
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _resolve_entry(entry: list[OrchestratorDefinition] | OrchestratorDefinition) -> OrchestratorDefinition:
-        """Return the winning definition from a storage entry.
-
-        Handles both list entries (from ``register()``) and scalar values
-        (from legacy code that assigns directly to ``_orchestrators[id]``).
-        """
-        if isinstance(entry, list):
-            return entry[0]
-        return entry
-
-    @staticmethod
-    def _iter_entries(entry: list[OrchestratorDefinition] | OrchestratorDefinition) -> Iterable[OrchestratorDefinition]:
-        """Yield all definitions from a storage entry (winner + shadowed)."""
-        if isinstance(entry, list):
-            yield from entry
-        else:
-            yield entry
-
     def _resolve_requested_id(self, orchestrator_id: str) -> str:
         """Resolve *orchestrator_id* to a canonical registry key."""
         resolver = self.alias_resolver
         canonical_id = resolver.resolve(orchestrator_id) if resolver else orchestrator_id
-        if canonical_id in self._orchestrators:
+        if canonical_id in self._entries:
             return canonical_id
         if resolver is not None and orchestrator_id != canonical_id and resolver.is_alias(orchestrator_id):
             raise KeyError(
@@ -106,39 +106,37 @@ class OrchestratorRegistry:
 
     def register(self, orchestrator: OrchestratorDefinition | dict[str, Any]) -> OrchestratorDefinition:
         definition = validate_orchestrator_definition(orchestrator)
-        if definition.id not in self._orchestrators:
-            self._orchestrators[definition.id] = []
-        self._orchestrators[definition.id].append(definition)
-        self._orchestrators[definition.id].sort(
-            key=lambda d: int(d.metadata.get("priority", 30))
+        self._register_impl(
+            definition.id,
+            definition,
+            priority_key=lambda d: int(d.metadata.get("priority", 30)),
         )
         return definition
 
     def get(self, orchestrator_id: str) -> OrchestratorDefinition:
         canonical_id = self._resolve_requested_id(orchestrator_id)
-        definition = self._resolve_entry(self._orchestrators[canonical_id])
+        definition = self._resolve_entry(self._entries[canonical_id])
 
-        if self.override_store is not None:
-            target_id = self.override_store.resolve("orchestrator", canonical_id)
-            if target_id is not None and target_id != canonical_id:
-                if target_id not in self._orchestrators:
-                    raise OrchestratorRegistryError(
-                        f"override target {target_id!r} for orchestrator {canonical_id!r} not found in registry"
-                    )
-                return self._resolve_entry(self._orchestrators[target_id])
+        target_id = self._resolve_override_key("orchestrator", canonical_id)
+        if target_id is not None and target_id != canonical_id:
+            if target_id not in self._entries:
+                raise OrchestratorRegistryError(
+                    f"override target {target_id!r} for orchestrator {canonical_id!r} not found in registry"
+                )
+            return self._resolve_entry(self._entries[target_id])
 
         return definition
 
     def _iter_all(self) -> Iterable[OrchestratorDefinition]:
         """Yield every registered definition (including shadowed)."""
-        for entry in self._orchestrators.values():
+        for entry in self._entries.values():
             yield from self._iter_entries(entry)
 
     def list(self, kind: str | None = None) -> tuple[OrchestratorDefinition, ...]:
         if kind is not None and kind not in {"built_in", "external"}:
             raise OrchestratorRegistryError("kind must be one of ['built_in', 'external']")
         # Winners only (first entry per id after priority sort).
-        orchestrators = (self._resolve_entry(entry) for entry in self._orchestrators.values())
+        orchestrators = (self._resolve_entry(entry) for entry in self._entries.values())
         if kind is not None:
             orchestrators = [orchestrator for orchestrator in orchestrators if orchestrator.kind == kind]
         return tuple(sorted(orchestrators, key=lambda orchestrator: orchestrator.id))
@@ -149,13 +147,14 @@ class OrchestratorRegistry:
         executor_registry: ExecutorRegistry | None = None,
     ) -> tuple[OrchestratorDefinition, ...]:
         # Validate winners only — shadowed entries intentionally not validated.
-        for orchestrator in (self._resolve_entry(entry) for entry in self._orchestrators.values()):
+        for orchestrator in (self._resolve_entry(entry) for entry in self._entries.values()):
             validate_orchestrator_definition(orchestrator)
         self._validate_child_executors(
             executor_registry=executor_registry,
             alias_resolver=self.alias_resolver,
         )
         self._validate_child_orchestrators(alias_resolver=self.alias_resolver)
+        self._strict_child_type_check()
         if self.alias_resolver is not None:
             self.alias_resolver.validate_no_cycles()
             # Cross-check: every alias must resolve to a known orchestrator.
@@ -167,7 +166,7 @@ class OrchestratorRegistry:
             exec_known = set(exec_reg.as_mapping()) if exec_reg else set()
             for alias, record in self.alias_resolver._aliases.items():
                 target = self.alias_resolver.resolve(alias)
-                if target not in self._orchestrators:
+                if target not in self._entries:
                     if target not in exec_known:
                         raise OrchestratorRegistryError(
                             f"alias {alias!r} resolves to unknown orchestrator {target!r}"
@@ -183,8 +182,19 @@ class OrchestratorRegistry:
     def as_mapping(self) -> MappingProxyType[str, OrchestratorDefinition]:
         # Winners only.
         return MappingProxyType(
-            {oid: self._resolve_entry(entry) for oid, entry in self._orchestrators.items()}
+            {oid: self._resolve_entry(entry) for oid, entry in self._entries.items()}
         )
+
+    def child_output_artifact_types(self, orchestrator_id: str) -> dict[str, frozenset[str]]:
+        """Return a map of ``{child_capability_id: {output_artifact_types}}`` for *orchestrator_id*.
+
+        Each child capability (executor or orchestrator) that declares at
+        least one ``artifact_type`` on its outputs is included in the
+        result.  Returns an empty dict when the orchestrator has no
+        annotated children or the id is unknown.
+        """
+        canonical_id = self._resolve_requested_id(orchestrator_id)
+        return dict(self._child_output_types.get(canonical_id, {}))
 
     def _validate_child_executors(
         self,
@@ -203,24 +213,40 @@ class OrchestratorRegistry:
         if exec_alias_resolver is not None and not exec_alias_resolver._aliases:
             exec_alias_resolver = None
         resolver = exec_alias_resolver or alias_resolver or self.alias_resolver
+        # Build executor mapping for artifact_type collection.
+        executor_mapping = registry.as_mapping()
         # Winners only.
-        for orchestrator in (self._resolve_entry(entry) for entry in self._orchestrators.values()):
+        for orchestrator in (self._resolve_entry(entry) for entry in self._entries.values()):
             for child_executor in orchestrator.child_executors:
                 resolved = resolver.resolve(child_executor) if resolver else child_executor
                 if resolved not in known_executor_ids:
                     raise OrchestratorRegistryError(
                         f"orchestrator {orchestrator.id!r} references unknown child executor {resolved!r}"
                     )
+            # Collect child executor output artifact types.
+            child_map: dict[str, frozenset[str]] = {}
+            for child_executor in orchestrator.child_executors:
+                resolved = resolver.resolve(child_executor) if resolver else child_executor
+                if resolved in executor_mapping:
+                    exec_def = executor_mapping[resolved]
+                    output_types: set[str] = set()
+                    for output in exec_def.outputs:
+                        if output.artifact_type:
+                            output_types.add(output.artifact_type)
+                    if output_types:
+                        child_map[resolved] = frozenset(output_types)
+            if child_map:
+                self._child_output_types[orchestrator.id] = child_map
 
     def _validate_child_orchestrators(
         self,
         alias_resolver: AliasResolver | None = None,
     ) -> None:
-        known_orchestrator_ids = set(self._orchestrators)  # keys are strings
+        known_orchestrator_ids = set(self._entries)  # keys are strings
         resolver = alias_resolver or self.alias_resolver
         graph: dict[str, tuple[str, ...]] = {}
         # Winners only.
-        for orchestrator in (self._resolve_entry(entry) for entry in self._orchestrators.values()):
+        for orchestrator in (self._resolve_entry(entry) for entry in self._entries.values()):
             children: list[str] = []
             for child_orchestrator in orchestrator.child_orchestrators:
                 resolved = resolver.resolve(child_orchestrator) if resolver else child_orchestrator
@@ -232,6 +258,19 @@ class OrchestratorRegistry:
                     raise OrchestratorRegistryError(f"orchestrator {orchestrator.id!r} cannot reference itself")
                 children.append(resolved)
             graph[orchestrator.id] = tuple(children)
+            # Collect child orchestrator output artifact types.
+            child_map = self._child_output_types.get(orchestrator.id, {})
+            for child_orchestrator in orchestrator.child_orchestrators:
+                resolved = resolver.resolve(child_orchestrator) if resolver else child_orchestrator
+                child_def = self._resolve_entry(self._entries[resolved])
+                output_types: set[str] = set()
+                for output in child_def.outputs:
+                    if output.artifact_type:
+                        output_types.add(output.artifact_type)
+                if output_types:
+                    child_map[resolved] = frozenset(output_types)
+            if child_map:
+                self._child_output_types[orchestrator.id] = child_map
         self._validate_no_cycles(graph)
 
     def _validate_no_cycles(self, graph: dict[str, tuple[str, ...]]) -> None:
@@ -255,6 +294,38 @@ class OrchestratorRegistry:
 
         for orchestrator_id in sorted(graph):
             visit(orchestrator_id)
+
+    def _strict_child_type_check(self) -> None:
+        """Warn when ASTRID_STRICT_CHILD_TYPES is set and an orchestrator's
+        input artifact_type is not produced by any child capability.
+
+        This is a best-effort development aid — orchestrators often
+        receive inputs from external sources (e.g. user-supplied files),
+        so missing matches are warnings, not errors.
+        """
+        if not os.environ.get("ASTRID_STRICT_CHILD_TYPES"):
+            return
+
+        for orchestrator in (self._resolve_entry(entry) for entry in self._entries.values()):
+            child_types = self._child_output_types.get(orchestrator.id, {})
+            if not child_types:
+                continue
+            # Union of all child output artifact types.
+            all_child_output_types: set[str] = set()
+            for typeset in child_types.values():
+                all_child_output_types.update(typeset)
+
+            for port in orchestrator.inputs:
+                if port.artifact_type and port.artifact_type not in all_child_output_types:
+                    logger.warning(
+                        "ASTRID_STRICT_CHILD_TYPES: orchestrator %r input %r has "
+                        "artifact_type=%r not found in any child's output types. "
+                        "Child output types: %s",
+                        orchestrator.id,
+                        port.name,
+                        port.artifact_type,
+                        sorted(all_child_output_types),
+                    )
 
     def fork(
         self,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import keyword
+import re as _re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -174,6 +175,10 @@ class ExternalRuntimeMetadata:
     binary_check: tuple[str, ...] = ()
 
 
+# Regex for scoped_configs entry shape validation (parse-time only — no registry lookup).
+_SCOPED_CONFIG_KEY_RE = r"^[a-z][a-z0-9_.]*$"
+
+
 @dataclass(frozen=True)
 class ExecutorDefinition:
     id: str
@@ -191,6 +196,7 @@ class ExecutorDefinition:
     graph: GraphMetadata = field(default_factory=GraphMetadata)
     clip_kinds_supported: tuple[str, ...] = ()
     pipeline_requirements: tuple[str, ...] = ()
+    scoped_configs: tuple[str, ...] = ()
     isolation: IsolationMetadata = field(default_factory=IsolationMetadata)
     metadata: dict[str, Any] = field(default_factory=dict)
     external_runtime: ExternalRuntimeMetadata | None = None
@@ -275,6 +281,7 @@ def _parse_executor(raw: Any) -> ExecutorDefinition:
     graph = _parse_graph(data.get("graph", {}), "executor.graph")
     clip_kinds_supported = tuple(_parse_clip_kinds_supported(data))
     pipeline_requirements = tuple(_optional_string_list(data, "pipeline_requirements", "executor.pipeline_requirements"))
+    scoped_configs = tuple(_parse_scoped_configs(data, "executor.scoped_configs"))
     isolation = _parse_isolation(data.get("isolation", {}), "executor.isolation", primitives=_primitives)
     metadata = data.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -300,6 +307,7 @@ def _parse_executor(raw: Any) -> ExecutorDefinition:
         graph=graph,
         clip_kinds_supported=clip_kinds_supported,
         pipeline_requirements=pipeline_requirements,
+        scoped_configs=scoped_configs,
         isolation=isolation,
         metadata=dict(metadata),
         external_runtime=external_runtime,
@@ -318,6 +326,7 @@ def _parse_port(raw: Any, path: str) -> ExecutorPort:
         description=_optional_string(data, "description", f"{path}.description"),
         default=data.get("default"),
         placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
+        artifact_type=_optional_nullable_string(data, "artifact_type", f"{path}.artifact_type"),
     )
 
 
@@ -336,6 +345,7 @@ def _parse_output(raw: Any, path: str) -> ExecutorOutput:
         placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
         path_template=_optional_nullable_string(data, "path_template", f"{path}.path_template"),
         extension=_optional_nullable_string(data, "extension", f"{path}.extension"),
+        artifact_type=_optional_nullable_string(data, "artifact_type", f"{path}.artifact_type"),
     )
 
 
@@ -696,6 +706,24 @@ def _parse_clip_kinds_supported(data: dict[str, Any]) -> list[str]:
                 ) from exc
         normalized.append(kind.value)
     return normalized
+
+
+_SCOPED_CONFIG_KEY_RE_COMPILED = _re.compile(_SCOPED_CONFIG_KEY_RE)
+
+
+def _parse_scoped_configs(data: dict[str, Any], path: str) -> list[str]:
+    """Parse ``scoped_configs`` — shape-only validation (no SCOPE_REGISTRY lookup)."""
+    raw = _optional_string_list(data, "scoped_configs", path)
+    result: list[str] = []
+    for index, entry in enumerate(raw):
+        if not entry:
+            raise ExecutorValidationError(f"{path}[{index}] must be a non-empty string")
+        if not _SCOPED_CONFIG_KEY_RE_COMPILED.match(entry):
+            raise ExecutorValidationError(
+                f"{path}[{index}] {entry!r} must match pattern {_SCOPED_CONFIG_KEY_RE!r}"
+            )
+        result.append(entry)
+    return result
 
 
 __all__ = [

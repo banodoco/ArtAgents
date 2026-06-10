@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re as _re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,10 @@ RuntimeKind = _Literal["python", "command"]
 ORCHESTRATOR_KINDS: frozenset[str] = frozenset(_get_args(OrchestratorKind))
 RUNTIME_KINDS: frozenset[str] = frozenset(_get_args(RuntimeKind))
 
+# Regex for scoped_configs entry shape validation (parse-time only — no registry lookup).
+_SCOPED_CONFIG_KEY_RE = r"^[a-z][a-z0-9_.]*$"
+_SCOPED_CONFIG_KEY_RE_COMPILED = _re.compile(_SCOPED_CONFIG_KEY_RE)
+
 
 class OrchestratorValidationError(ValueError):
     """Raised when a orchestrator manifest or definition is structurally invalid."""
@@ -90,6 +95,7 @@ class OrchestratorDefinition:
     child_executors: tuple[str, ...] = ()
     child_orchestrators: tuple[str, ...] = ()
     cache: CachePolicy = field(default_factory=CachePolicy)
+    scoped_configs: tuple[str, ...] = ()
     isolation: IsolationMetadata = field(default_factory=IsolationMetadata)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -98,6 +104,22 @@ class OrchestratorDefinition:
 
     def to_json(self, *, indent: int | None = 2) -> str:
         return to_capability_json(self, indent=indent)
+
+    def input_artifact_types(self) -> frozenset[str]:
+        """Return the declared non-null *artifact_type* values from all input ports."""
+        return frozenset(
+            port.artifact_type
+            for port in self.inputs
+            if port.artifact_type is not None
+        )
+
+    def output_artifact_types(self) -> frozenset[str]:
+        """Return the declared non-null *artifact_type* values from all output ports."""
+        return frozenset(
+            output.artifact_type
+            for output in self.outputs
+            if output.artifact_type is not None
+        )
 
 
 def validate_orchestrator_definition(raw: Any) -> OrchestratorDefinition:
@@ -148,6 +170,8 @@ def _parse_orchestrator(raw: Any) -> OrchestratorDefinition:
         path="orchestrator.child_orchestrators",
     )
 
+    scoped_configs = tuple(_parse_scoped_configs(data, "orchestrator.scoped_configs"))
+
     return OrchestratorDefinition(
         id=data["id"],
         name=data["name"],
@@ -162,6 +186,7 @@ def _parse_orchestrator(raw: Any) -> OrchestratorDefinition:
         child_executors=tuple(child_executors),
         child_orchestrators=tuple(child_orchestrators),
         cache=_parse_cache(data.get("cache", {}), "orchestrator.cache", primitives=_primitives),
+        scoped_configs=scoped_configs,
         isolation=_parse_isolation(data.get("isolation", {}), "orchestrator.isolation", primitives=_primitives),
         metadata=dict(metadata),
     )
@@ -217,6 +242,7 @@ def _parse_port(raw: Any, path: str) -> Port:
         description=_optional_string(data, "description", f"{path}.description"),
         default=data.get("default"),
         placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
+        artifact_type=_optional_nullable_string(data, "artifact_type", f"{path}.artifact_type"),
     )
 
 
@@ -233,6 +259,7 @@ def _parse_output(raw: Any, path: str) -> Output:
         description=_optional_string(data, "description", f"{path}.description"),
         placeholder=_optional_nullable_string(data, "placeholder", f"{path}.placeholder"),
         path_template=_optional_nullable_string(data, "path_template", f"{path}.path_template"),
+        artifact_type=_optional_nullable_string(data, "artifact_type", f"{path}.artifact_type"),
     )
 
 
@@ -255,6 +282,21 @@ def _parse_command(raw: Any, path: str) -> CommandSpec | None:
         cwd=_optional_nullable_string(data, "cwd", f"{path}.cwd"),
         env=env,
     )
+
+
+def _parse_scoped_configs(data: dict[str, Any], path: str) -> list[str]:
+    """Parse ``scoped_configs`` — shape-only validation (no SCOPE_REGISTRY lookup)."""
+    raw = _optional_string_list(data, "scoped_configs", path)
+    result: list[str] = []
+    for index, entry in enumerate(raw):
+        if not entry:
+            raise OrchestratorValidationError(f"{path}[{index}] must be a non-empty string")
+        if not _SCOPED_CONFIG_KEY_RE_COMPILED.match(entry):
+            raise OrchestratorValidationError(
+                f"{path}[{index}] {entry!r} must match pattern {_SCOPED_CONFIG_KEY_RE!r}"
+            )
+        result.append(entry)
+    return result
 
 
 def _validate_orchestrator(orchestrator: OrchestratorDefinition) -> None:

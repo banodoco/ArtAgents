@@ -30,6 +30,7 @@ class Port:
     description: str = ""
     default: Any = None
     placeholder: str | None = None
+    artifact_type: str | None = None
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class Output:
     placeholder: str | None = None
     path_template: str | None = None
     extension: str | None = None
+    artifact_type: str | None = None
 
 
 @dataclass(frozen=True)

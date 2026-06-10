@@ -214,6 +214,25 @@
         },
         "schemas": {
           "type": "object"
+        },
+        "artifact_types": {
+          "type": "object",
+          "properties": {
+            "types": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["id"],
+                "properties": {
+                  "id": {"type": "string", "minLength": 1},
+                  "aliases": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                  "description": {"type": "string"}
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

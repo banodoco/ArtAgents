@@ -20,7 +20,7 @@ from astrid.core.util.http import (
     default_client,
     fal_submit_and_poll,
 )
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 
 FAL_MODEL_ID = "fal-ai/hunyuan-video-foley"
 
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(payload_preview, indent=2))
         return 0
 
-    api_key = load_api_key("FAL_KEY", args.env_file)
+    api_key = CredentialsScope.get("fal", env_file=args.env_file)
     payload = {
         "video_url": _data_uri_for_video(clip),
         "text_prompt": args.prompt,

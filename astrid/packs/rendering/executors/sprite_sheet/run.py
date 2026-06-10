@@ -79,7 +79,7 @@ from typing import Any
 
 from astrid.core._shared.result_manifest import build_manifest, write_manifest
 from astrid.core.cli_choices import add_choice_arg
-from astrid.core.util.secrets import load_api_key
+from astrid.core.util.credentials_scope import CredentialsScope
 
 from .png_io import _alpha_bbox, _png_dimensions, _read_rgba_png, analyze_frames, scrub_fully_transparent_rgb
 from .sheet import (
@@ -213,7 +213,7 @@ def build(args: argparse.Namespace) -> int:
     response: dict[str, Any] = {}
     source_sheet_path = input_sheet or sheet_path
     if input_sheet is None:
-        api_key = load_api_key(args, env_var="OPENAI_API_KEY")
+        api_key = CredentialsScope.get("openai", env_file=args.env_file)
         print(f"Calling {args.model} for {size} sprite sheet", file=sys.stderr)
         started = time.time()
         if reference_image is not None:

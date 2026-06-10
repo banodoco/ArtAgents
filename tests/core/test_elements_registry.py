@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from astrid.core import element as element_module
-from astrid.core.element import ElementRegistryError, load_default_registry
+from astrid.core.element import load_default_registry
 
 
 _KIND_SINGULAR = {
@@ -178,10 +178,6 @@ class ElementRegistryTest(unittest.TestCase):
             self.assertFalse(text_card.editable)
             self.assertEqual(text_card.metadata["label"], "Text Card")
             self.assertEqual(text_card.metadata["pack_id"], "rendering")
-            self.assertEqual(
-                text_card.fork_target,
-                Path("astrid/packs/local/elements/effects/text-card"),
-            )
 
     def test_active_theme_overrides_builtin_pack(self) -> None:
         from unittest import mock
@@ -211,47 +207,6 @@ class ElementRegistryTest(unittest.TestCase):
             [item.source for item in text_card_conflicts[0].shadowed],
             ["pack:rendering"],
         )
-
-    def test_local_pack_wins_over_builtin_and_fork_target_uses_local_pack(self) -> None:
-        from unittest import mock
-
-        from astrid.core.element import registry as registry_module
-        from astrid.core.pack import discover_packs as real_discover_packs
-
-        with tempfile.TemporaryDirectory() as tmp:
-            project = Path(tmp) / "project"
-            project.mkdir(parents=True)
-            local_pack_root = project / "astrid" / "packs" / "local"
-            write_pack_element(local_pack_root, "animations", "fade", pack_id="local", label="Local Fade")
-
-            with mock.patch.object(
-                registry_module,
-                "discover_packs",
-                side_effect=lambda root=None: real_discover_packs() + real_discover_packs(local_pack_root.parent),
-            ):
-                registry = load_default_registry(project_root=project)
-                target = registry.fork_target("animations", "fade", project_root=project)
-
-        winner = registry.get("animations", "fade")
-        self.assertEqual(winner.source, "pack:local")
-        self.assertTrue(winner.editable)
-        self.assertEqual(target, project / "astrid" / "packs" / "local" / "elements" / "animations" / "fade")
-
-    def test_fork_copies_default_into_local_pack_and_rewrites_pack_id(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            project = Path(tmp) / "project"
-            project.mkdir(parents=True)
-            registry = load_default_registry(project_root=project)
-
-            target = registry.fork("transitions", "cross-fade", project_root=project)
-
-            self.assertTrue((target / "component.tsx").is_file())
-            self.assertTrue((target / "element.yaml").is_file())
-            payload = json.loads((target / "element.yaml").read_text(encoding="utf-8"))
-            self.assertEqual(payload["pack_id"], "local")
-            self.assertTrue((project / "astrid" / "packs" / "local" / "pack.yaml").is_file())
-            with self.assertRaisesRegex(ElementRegistryError, "already exists"):
-                registry.fork("transitions", "cross-fade", project_root=project)
 
 
 if __name__ == "__main__":

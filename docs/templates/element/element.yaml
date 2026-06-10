@@ -11,6 +11,23 @@
     "description": "Describe the reusable render building block.",
     "whenToUse": "Use when a timeline needs this specific visual primitive."
   },
+  "inputs": [
+    {
+      "name": "clip",
+      "type": "clip",
+      "required": true,
+      "artifact_type": "clip/visual",
+      "description": "The input clip this element operates on."
+    }
+  ],
+  "outputs": [
+    {
+      "name": "clip",
+      "type": "clip",
+      "artifact_type": "clip/visual",
+      "description": "The transformed output clip."
+    }
+  ],
   "schema": {
     "type": "object",
     "required": ["content"],
@@ -26,5 +43,8 @@
   "dependencies": {
     "js_packages": [],
     "python_requirements": []
+  },
+  "runtime": {
+    "adapter": "remotion"
   }
 }

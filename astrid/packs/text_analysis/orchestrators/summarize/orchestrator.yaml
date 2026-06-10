@@ -8,9 +8,9 @@
   "description": "Read the text_analysis sample fixture, emit content and summary metadata, and write a one-line verdict artifact.",
   "keywords": ["text", "summary", "analysis", "verdict"],
   "outputs": [
-    {"name": "content", "type": "file", "path_template": "{out}/content.json"},
-    {"name": "summary", "type": "file", "path_template": "{out}/summary.json"},
-    {"name": "verdict", "type": "file", "path_template": "{out}/verdict.json"}
+    {"name": "content", "type": "file", "path_template": "{out}/content.json", "artifact_type": "prompt"},
+    {"name": "summary", "type": "file", "path_template": "{out}/summary.json", "artifact_type": "prompt"},
+    {"name": "verdict", "type": "file", "path_template": "{out}/verdict.json", "artifact_type": "prompt"}
   ],
   "child_executors": [],
   "child_orchestrators": [],

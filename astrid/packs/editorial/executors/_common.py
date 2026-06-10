@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from astrid.core.util.secrets import candidate_env_files, read_env_value
+from astrid.core.contracts.errors import AstridError
+from astrid.core.util.credentials_scope import CredentialsScope
 
 
 def load_api_key(env_file: Path | None) -> str:
-    # Lookup order: process env, explicit --env-file, then nearby this.env/.env files.
-    tried: list[str] = ["OPENAI_API_KEY environment variable"]
-    if key := os.environ.get("OPENAI_API_KEY", "").strip():
-        return key
-    for candidate in candidate_env_files(env_file):
-        tried.append(str(candidate))
-        if key := read_env_value(candidate, "OPENAI_API_KEY"):
-            return key
-    raise SystemExit(f"OPENAI_API_KEY not found. Tried: {', '.join(tried)}")
+    """Resolve the OPENAI_API_KEY via the canonical scoped credentials resolver."""
+    try:
+        return CredentialsScope.get("openai", env_file=env_file)
+    except AstridError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 __all__ = ["load_api_key"]

@@ -36,7 +36,47 @@
     },
     "description": {"type": "string"},
     "short_description": {"type": "string"},
-    "keywords": {"type": "array", "items": {"type": "string"}}
+    "keywords": {"type": "array", "items": {"type": "string"}},
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "type": {"type": "string"},
+          "required": {"type": "boolean"},
+          "default": {},
+          "description": {"type": "string"},
+          "placeholder": {"type": "string"},
+          "artifact_type": {"type": ["string", "null"]}
+        },
+        "required": ["name"]
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "type": {"type": "string"},
+          "mode": {"type": "string"},
+          "path_template": {"type": "string"},
+          "extension": {"type": "string"},
+          "placeholder": {"type": "string"},
+          "description": {"type": "string"},
+          "artifact_type": {"type": ["string", "null"]}
+        },
+        "required": ["name"]
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "adapter": {"type": "string"}
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

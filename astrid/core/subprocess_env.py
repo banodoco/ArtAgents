@@ -41,9 +41,6 @@ from astrid.core.env_vars import (
 from astrid.core.env_vars import (
     ASTRID_THEMES_ROOT as THEMES_ROOT_ENV,
 )
-from astrid.core.env_vars import (
-    HYPE_ACTIVE_THEME as ACTIVE_THEME_ENV,
-)
 
 _SAFE_BASE_ENV = frozenset(
     {
@@ -74,7 +71,6 @@ _ASTRID_PROPAGATED_ENV = frozenset(
         PROJECT_RUN_ENV,
         ASTRID_AUTHOR_TEST,
         ASTRID_INTERNAL_INVOCATION,
-        ACTIVE_THEME_ENV,
         TASK_RUN_ID_ENV,
         TASK_PROJECT_ENV,
         TASK_STEP_ID_ENV,
@@ -156,7 +152,6 @@ __all__ = [
     "ASTRID_ACTOR",
     "ASTRID_AUTHOR_TEST",
     "ASTRID_INTERNAL_INVOCATION",
-    "ACTIVE_THEME_ENV",
     "SubprocessEnvPolicyError",
     "TASK_ITEM_ID_ENV",
     "TASK_ITERATION_ENV",
