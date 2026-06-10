@@ -8,21 +8,27 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 
 ```text
 ╭──────────────────────────── ◇ ─────────────────────────────╮
+│ ·                                                        · │
 │                                                            │
-│                      A  S  T  R  I  D                      │
+│                   A   S   T   R   I   D                    │
 │                                                            │
 │        a harness for agents and humans to make art         │
 │            build & run open-source agentic UXes            │
 │                   video · image · audio                    │
 │                                                            │
-│     $ git clone https://github.com/peteromallet/Astrid     │
+◇                                                            ◇
+│                                                            │
+│       $ git clone https://github.com/banodoco/Astrid       │
 │              $ cd Astrid && pip install -e .               │
 │                 $ python3 -m astrid --help                 │
+│                                                            │
+◇                                                            ◇
 │                                                            │
 │              ask the maker what they must do               │
 │               runs/ is where the work lands                │
 │             just begin — you'll find your way              │
 │                                                            │
+│ ·                                                        · │
 ╰──────────────────────────── ◇ ─────────────────────────────╯
 ```
 

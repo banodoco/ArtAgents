@@ -33,31 +33,43 @@ def hborder() -> str:
     return "─" * left + accent + "─" * (rest - left)
 
 
+def dots() -> str:
+    """Corner-dot row: ` ·                      · `"""
+    return " ·" + " " * (W - 4) + "· "
+
+
 # Minimal & symmetric: identity, what it is (a high-level steer — not a command
 # catalogue), how to install, the one doorway to everything (--help), and an
-# inviting close. Everything centered. Edit here, then re-run.
+# inviting close. Everything centered; ◇-bordered rows frame the install block.
+# (content, border) — border is "│" normally, "◇" for the separator rows.
 LINES = [
-    blank(),
-    center("A  S  T  R  I  D"),
-    blank(),
-    center("a harness for agents and humans to make art"),
-    center("build & run open-source agentic UXes"),
-    center("video · image · audio"),
-    blank(),
-    center("$ git clone https://github.com/peteromallet/Astrid"),
-    center("$ cd Astrid && pip install -e ."),
-    center("$ python3 -m astrid --help"),
-    blank(),
-    center("ask the maker what they must do"),
-    center("runs/ is where the work lands"),
-    center("just begin — you'll find your way"),
-    blank(),
+    (dots(), "│"),
+    (blank(), "│"),
+    (center("A   S   T   R   I   D"), "│"),
+    (blank(), "│"),
+    (center("a harness for agents and humans to make art"), "│"),
+    (center("build & run open-source agentic UXes"), "│"),
+    (center("video · image · audio"), "│"),
+    (blank(), "│"),
+    (blank(), "◇"),
+    (blank(), "│"),
+    (center("$ git clone https://github.com/banodoco/Astrid"), "│"),
+    (center("$ cd Astrid && pip install -e ."), "│"),
+    (center("$ python3 -m astrid --help"), "│"),
+    (blank(), "│"),
+    (blank(), "◇"),
+    (blank(), "│"),
+    (center("ask the maker what they must do"), "│"),
+    (center("runs/ is where the work lands"), "│"),
+    (center("just begin — you'll find your way"), "│"),
+    (blank(), "│"),
+    (dots(), "│"),
 ]
 
 
 def render_box() -> str:
     rows = ["╭" + hborder() + "╮"]
-    rows += ["│" + ln + "│" for ln in LINES]
+    rows += [f"{b}{content}{b}" for content, b in LINES]
     rows.append("╰" + hborder() + "╯")
     widths = {len(r) for r in rows}
     assert len(widths) == 1, f"MISALIGNED rows: {sorted(widths)}"
