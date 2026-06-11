@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import signal
+
 from astrid.core.cli import session as _session_cli
 from astrid.core.contracts.errors import AstridError
 
@@ -363,6 +365,49 @@ def _dispatch_scratch(args: list[str]) -> int:
     return dispatch_scratch(args)
 
 
+def _dispatch_serve(args: list[str]) -> int:
+    """Start the Astrid local read bridge HTTP server."""
+    import argparse
+
+    from astrid.core.integrations.reigh.local_bridge_server import create_local_bridge_server
+
+    parser = argparse.ArgumentParser(prog="astrid serve", description="Start the Astrid local read bridge.")
+    parser.add_argument(
+        "--host", default="127.0.0.1", help="Host to bind (default: 127.0.0.1)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=0, help="Port to bind (default: 0 = OS-assigned)",
+    )
+    parser.add_argument(
+        "--projects-root", default=None, help="Astrid projects root (default: ASTRID_PROJECTS_ROOT env or ~/astrid-projects)",
+    )
+    parsed = parser.parse_args(args)
+
+    server = create_local_bridge_server(
+        host=parsed.host,
+        port=parsed.port,
+        projects_root=parsed.projects_root,
+    )
+    host, port = server.server_address
+    print(f"Astrid local bridge listening on http://{host}:{port}")
+
+    def _shutdown(_signum: int, _frame: Any) -> None:
+        print("\nShutting down...", flush=True)
+        server.shutdown()
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+    return 0
+
+
 _TOP_LEVEL_HANDLERS = {
     "attach": _dispatch_attach,
     "sessions": lambda args: _dispatch_sessions(args),
@@ -403,6 +448,7 @@ _TOP_LEVEL_HANDLERS = {
     "reigh-data": _dispatch_reigh_data,
     "worker": _dispatch_worker,
     "test": _dispatch_test,
+    "serve": _dispatch_serve,
 }
 
 

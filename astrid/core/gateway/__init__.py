@@ -74,6 +74,7 @@ from astrid.core.gateway.dispatch import (
     _dispatch_timelines,
     _dispatch_unclaim,
     _dispatch_worker,
+    _dispatch_serve,
     _run_default_brief_from_args,
     _top_level_commands,
 )
@@ -162,6 +163,7 @@ SPRINT1_UNBOUND_ALLOWLIST_CONTRACT: tuple[tuple[str, ...], ...] = (
     ("packs",),
     ("test",),
     ("doctor",),
+    ("serve",),
 )
 _SPRINT1_UNBOUND_ALLOWLIST = frozenset(SPRINT1_UNBOUND_ALLOWLIST_CONTRACT)
 
