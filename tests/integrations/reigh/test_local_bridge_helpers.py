@@ -31,7 +31,7 @@ from tests.integrations.reigh.conftest import (  # type: ignore[import-not-found
     make_timeline_id,
 )
 from astrid.core.integrations.reigh.local_bridge import (
-    BRIDGE_CONFIG_VERSION,
+    REIGH_LOCAL_EDITOR_ACTOR,
     bridge_registry_path,
     find_bridge_timeline,
     list_bridge_project_dirs,
@@ -39,11 +39,14 @@ from astrid.core.integrations.reigh.local_bridge import (
     list_bridge_timelines,
     load_bridge_registry,
     load_bridge_timeline,
+    save_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
 )
+from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.eventlog.selector import resolve_event_log_target
 from astrid.core.timeline.observability import resolve_timeline_target
+from astrid.core.timeline.paths import load_assembly_json_with_repair
 
 
 class TestFixtureDataFactories:
@@ -345,7 +348,7 @@ class TestLocalBridgeHelpers:
         assert row.timeline_ulid == ulid
         assert row.timeline_id == timeline_id
 
-    def test_load_bridge_timeline_loads_config_and_sets_config_version(self, tmp_bridge_root, seed_bridge_project) -> None:
+    def test_load_bridge_timeline_loads_config_and_uses_event_head_version(self, tmp_bridge_root, seed_bridge_project) -> None:
         ulid = "01JM4K5N7P0000000000000015"
         timeline_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         project_dir = seed_bridge_project(slug="load-bridge", timeline_ulid=ulid, timeline_id=timeline_id)
@@ -362,8 +365,123 @@ class TestLocalBridgeHelpers:
 
         assert payload is not None
         assert payload["timeline_id"] == timeline_id
-        assert payload["config_version"] == BRIDGE_CONFIG_VERSION
+        assert payload["config_version"] == 0
         assert payload["config"]["tracks"][0]["id"] == "V1"
+
+    def test_save_bridge_timeline_appends_editor_save_event_regenerates_projection_and_returns_head_version(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000015"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        project_dir = seed_bridge_project(slug="save-bridge", timeline_ulid=ulid, timeline_id=timeline_id)
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        saved_config = {
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 12,
+                    "track": "V1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+
+        payload = save_bridge_timeline("save-bridge", ulid, saved_config, root=tmp_bridge_root)
+
+        assert payload is not None
+        events = backend.read_events()
+        head = backend.head()
+        assert [event.kind for event in events] == ["timeline.created", "timeline.config_replaced"]
+        assert events[1].actor.to_json_obj() == {
+            "type": "human",
+            "id": "reigh-app:local-editor",
+            "display": "Reigh local editor",
+        }
+        assert events[1].payload.to_json_obj()["source"] == "editor_save"
+        assert events[1].payload.to_json_obj()["config"] == saved_config
+        assert head.version == len(events) == 2
+        checkpoint = json.loads((timeline_home / "assembly.checkpoint.json").read_text(encoding="utf-8"))
+        assert checkpoint["last_event_id"] == head.last_event_id
+        assert checkpoint["event_count"] == head.event_count
+        assert checkpoint["version"] == head.version
+        # Verify assembly.head.json on disk matches the in-memory head
+        head_json = json.loads((timeline_home / "assembly.head.json").read_text(encoding="utf-8"))
+        assert head_json["version"] == head.version
+        assert head_json["event_count"] == len(events)
+        assert head_json["last_event_id"] == head.last_event_id
+        assert head_json["last_hash"] == head.last_hash
+        assert load_assembly_json_with_repair(timeline_home) == saved_config
+        assert payload["config"] == saved_config
+        assert payload["config_version"] == head.version
+
+        reloaded = load_bridge_timeline("save-bridge", ulid, root=tmp_bridge_root)
+        assert reloaded is not None
+        assert reloaded["config"] == saved_config
+        assert reloaded["config_version"] == head.version
+
+    def test_save_bridge_timeline_as_first_config_save_after_timeline_created(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000030"
+        timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        project_dir = seed_bridge_project(slug="first-save", timeline_ulid=ulid, timeline_id=timeline_id)
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        # A timeline must have at least timeline.created before config_replaced
+        # because the display projection and bridge listing depend on it.
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        saved_config = {
+            "clips": [{"id": "c0", "at": 0, "track": "V1", "clipType": "media", "asset": "a0"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+
+        payload = save_bridge_timeline("first-save", ulid, saved_config, root=tmp_bridge_root)
+
+        assert payload is not None
+        events = backend.read_events()
+        head = backend.head()
+        assert [event.kind for event in events] == ["timeline.created", "timeline.config_replaced"]
+        assert events[1].payload.to_json_obj()["source"] == "editor_save"
+        assert events[1].payload.to_json_obj()["config"] == saved_config
+        assert head.version == len(events) == 2
+        head_json = json.loads((timeline_home / "assembly.head.json").read_text(encoding="utf-8"))
+        assert head_json["version"] == 2
+        assert head_json["event_count"] == 2
+        assert load_assembly_json_with_repair(timeline_home) == saved_config
+        assert payload["config"] == saved_config
+        assert payload["config_version"] == head.version
+
+        reloaded = load_bridge_timeline("first-save", ulid, root=tmp_bridge_root)
+        assert reloaded is not None
+        assert reloaded["config"] == saved_config
+        assert reloaded["config_version"] == head.version
+
+    def test_save_bridge_timeline_returns_none_for_unknown_timeline(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        seed_bridge_project(slug="known-project")
+        result = save_bridge_timeline("known-project", "nonexistent-timeline", {"clips": []}, root=tmp_bridge_root)
+        assert result is None
 
     def test_load_bridge_timeline_falls_back_to_ulid_when_identity_missing(self, tmp_bridge_root, seed_bridge_project) -> None:
         ulid = "01JM4K5N7P0000000000000016"

@@ -1,4 +1,4 @@
-"""HTTP surface for the Astrid local read bridge."""
+"""HTTP surface for the Astrid local read/write bridge."""
 
 from __future__ import annotations
 
@@ -10,14 +10,18 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.foundation.project_paths import validate_project_slug
 from astrid.core.integrations.reigh.local_bridge import (
     BridgeTimelineRecord,
+    bridge_registry_path,
+    find_bridge_timeline,
     list_bridge_projects,
     list_bridge_timelines,
     load_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
+    save_bridge_timeline,
 )
 from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline_ulid
 
@@ -43,9 +47,32 @@ def make_local_bridge_handler(*, projects_root: Path):
         def log_message(self, _fmt: str, *_args: Any) -> None:
             return
 
+        # ------------------------------------------------------------------
+        # CORS / shared headers
+        # ------------------------------------------------------------------
+
+        _ALLOWED_ORIGINS: tuple[str, ...] = (
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:5173",
+        )
+        _ALLOWED_METHODS = "GET, POST, PUT, OPTIONS"
+        _ALLOWED_HEADERS = "Content-Type"
+
+        def _set_cors_headers(self) -> None:
+            origin = self.headers.get("Origin", "")
+            if origin in self._ALLOWED_ORIGINS:
+                self.send_header("Access-Control-Allow-Origin", origin)
+                self.send_header("Access-Control-Allow-Methods", self._ALLOWED_METHODS)
+                self.send_header("Access-Control-Allow-Headers", self._ALLOWED_HEADERS)
+                self.send_header("Access-Control-Max-Age", "86400")
+                self.send_header("Vary", "Origin")
+
         def _send_json(self, status: int, payload: dict[str, Any]) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
+            self._set_cors_headers()
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
@@ -255,6 +282,120 @@ def make_local_bridge_handler(*, projects_root: Path):
                 return
 
             self._send_error(404, "not_found", f"unknown route: {path}")
+
+        # ------------------------------------------------------------------
+        # OPTIONS (CORS preflight)
+        # ------------------------------------------------------------------
+
+        def do_OPTIONS(self) -> None:  # noqa: N802
+            self.send_response(204)
+            self._set_cors_headers()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        # ------------------------------------------------------------------
+        # POST — save timeline config
+        # ------------------------------------------------------------------
+
+        def do_POST(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            parts = [part for part in unquote(path).split("/") if part]
+
+            # POST /projects/:project/timelines/:timeline/save
+            if (
+                len(parts) == 5
+                and parts[0] == "projects"
+                and parts[2] == "timelines"
+                and parts[4] == "save"
+            ):
+                project_slug = self._validate_project(parts[1])
+                if project_slug is None:
+                    return
+                timeline_ref = self._validate_timeline_ref(parts[3])
+                if timeline_ref is None:
+                    return
+                body = self._read_request_body()
+                if body is None:
+                    self._send_error(400, "invalid_body", "request body must be valid JSON")
+                    return
+                config = body.get("config")
+                if not isinstance(config, dict):
+                    self._send_error(400, "invalid_config", "body must contain a 'config' object")
+                    return
+                result = save_bridge_timeline(project_slug, timeline_ref, config, root=projects_root)
+                if result is None:
+                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
+                    return
+                self._send_json(200, result)
+                return
+
+            self._send_error(404, "not_found", f"unknown POST route: {path}")
+
+        # ------------------------------------------------------------------
+        # PUT — replace registry
+        # ------------------------------------------------------------------
+
+        def do_PUT(self) -> None:  # noqa: N802
+            path = urlparse(self.path).path
+            parts = [part for part in unquote(path).split("/") if part]
+
+            # PUT /projects/:project/timelines/:timeline/registry
+            if (
+                len(parts) == 5
+                and parts[0] == "projects"
+                and parts[2] == "timelines"
+                and parts[4] == "registry"
+            ):
+                project_slug = self._validate_project(parts[1])
+                if project_slug is None:
+                    return
+                timeline_ref = self._validate_timeline_ref(parts[3])
+                if timeline_ref is None:
+                    return
+                body = self._read_request_body()
+                if body is None:
+                    self._send_error(400, "invalid_body", "request body must be valid JSON")
+                    return
+                if not isinstance(body.get("assets"), dict):
+                    self._send_error(400, "invalid_registry", "body must contain an 'assets' object")
+                    return
+                registry_path = bridge_registry_path(project_slug, timeline_ref, root=projects_root)
+                if registry_path is None:
+                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
+                    return
+                # Normalize: ensure all asset entries are dicts with string keys
+                normalized: dict[str, dict[str, Any]] = {}
+                for key, entry in body["assets"].items():
+                    if not isinstance(key, str) or not isinstance(entry, dict):
+                        continue
+                    normalized[key] = dict(entry)
+                registry_payload: dict[str, Any] = {"assets": normalized}
+                write_json_atomic(registry_path, registry_payload)
+                self._send_json(200, registry_payload)
+                return
+
+            self._send_error(404, "not_found", f"unknown PUT route: {path}")
+
+        # ------------------------------------------------------------------
+        # Request helpers
+        # ------------------------------------------------------------------
+
+        def _read_request_body(self) -> dict[str, Any] | None:
+            content_length = self.headers.get("Content-Length")
+            if content_length is None:
+                return None
+            try:
+                length = int(content_length)
+            except (ValueError, TypeError):
+                return None
+            if length <= 0:
+                return None
+            raw = self.rfile.read(length)
+            try:
+                payload = json.loads(raw.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return None
+            return payload if isinstance(payload, dict) else None
 
         def _validate_project(self, raw_project: str) -> str | None:
             try:

@@ -1456,13 +1456,27 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
         obj["config"]["tracks"][0]["label"] = "Again"
         self.assertEqual(payload.config["tracks"][0]["label"], "Changed")
 
+    def test_timeline_config_replaced_payload_serializes_optional_editor_save_source(self) -> None:
+        payload = TimelineConfigReplacedPayload(
+            config={"tracks": [], "clips": []},
+            source="editor_save",
+        )
+
+        self.assertEqual(
+            canonical_json_text(payload),
+            '{"config":{"clips":[],"tracks":[]},"source":"editor_save"}',
+        )
+
     def test_timeline_config_replaced_event_round_trips(self) -> None:
         event = TimelineEvent.new(
             timeline_id=self.tid,
             ts="2026-05-21T12:00:00Z",
             actor=self.actor,
             kind="timeline.config_replaced",
-            payload=TimelineConfigReplacedPayload(config={"tracks": [], "clips": []}),
+            payload=TimelineConfigReplacedPayload(
+                config={"tracks": [], "clips": []},
+                source="editor_save",
+            ),
         )
         self.assertEqual(event.kind, "timeline.config_replaced")
         self.assertIsInstance(event.payload, TimelineConfigReplacedPayload)
@@ -1470,6 +1484,28 @@ class RecoveryAndErasureSchemaTest(unittest.TestCase):
         restored = TimelineEvent.from_dict(json.loads(text))
         self.assertEqual(restored.kind, "timeline.config_replaced")
         self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+        assert isinstance(restored.payload, TimelineConfigReplacedPayload)
+        self.assertEqual(restored.payload.source, "editor_save")
+
+    def test_timeline_config_replaced_legacy_event_without_source_still_round_trips(self) -> None:
+        raw = {
+            "event_id": "01ABCDEFGHJKMNPQRSTVWXYZ12",
+            "timeline_id": self.tid,
+            "ts": "2026-05-21T12:00:00Z",
+            "actor": self.actor.to_json_obj(),
+            "prev_hash": None,
+            "hash": None,
+            "kind": "timeline.config_replaced",
+            "payload": {"config": {"tracks": [], "clips": []}},
+            "schema_version": 2,
+        }
+
+        restored = TimelineEvent.from_dict(raw)
+
+        self.assertIsInstance(restored.payload, TimelineConfigReplacedPayload)
+        assert isinstance(restored.payload, TimelineConfigReplacedPayload)
+        self.assertIsNone(restored.payload.source)
+        self.assertEqual(restored.to_json_obj()["payload"], {"config": {"tracks": [], "clips": []}})
 
     def test_timeline_config_replaced_preserves_editor_save_source(self) -> None:
         event = TimelineEvent.new(

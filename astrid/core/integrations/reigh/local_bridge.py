@@ -23,8 +23,17 @@ from astrid.core.timeline.paths import (
     validate_timeline_slug,
     validate_timeline_ulid,
 )
+from astrid.core.timeline.eventlog import LocalFsBackend
+from astrid.core.timeline.events.schema import TimelineActor
+from astrid.core.timeline.events.schema.payloads.config import TimelineConfigReplacedPayload
+from astrid.core.timeline.projection import regenerate_projection
 
 BRIDGE_CONFIG_VERSION = 1
+REIGH_LOCAL_EDITOR_ACTOR = TimelineActor(
+    type="human",
+    id="reigh-app:local-editor",
+    display="Reigh local editor",
+)
 
 
 @dataclass(frozen=True)
@@ -182,6 +191,61 @@ def load_bridge_timeline(
     if not isinstance(config, dict):
         return None
 
+    return _bridge_timeline_payload(
+        record,
+        config=config,
+        registry=load_bridge_registry(project_slug, record.timeline_ulid, root=root),
+    )
+
+
+def save_bridge_timeline(
+    project_slug: str,
+    timeline: str,
+    config: dict[str, Any],
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Append one editor-save config replacement event and reload bridge payload."""
+    record = find_bridge_timeline(project_slug, timeline, root=root)
+    if record is None:
+        return None
+
+    payload = TimelineConfigReplacedPayload(config=config, source="editor_save")
+    backend = LocalFsBackend(
+        timeline_id=record.timeline_id,
+        timeline_home=record.timeline_home,
+    )
+    backend.append_event(
+        record.timeline_id,
+        "timeline.config_replaced",
+        payload.to_json_obj(),
+        actor=REIGH_LOCAL_EDITOR_ACTOR,
+    )
+    regenerated = regenerate_projection(
+        record.timeline_id,
+        backend,
+        timeline_home=record.timeline_home,
+    )
+    return _bridge_timeline_payload(
+        record,
+        config=regenerated,
+        registry=load_bridge_registry(project_slug, record.timeline_ulid, root=root),
+        config_version=backend.head().version,
+    )
+
+
+def _bridge_timeline_payload(
+    record: BridgeTimelineRecord,
+    *,
+    config: dict[str, Any],
+    registry: dict[str, Any],
+    config_version: int | None = None,
+) -> dict[str, Any]:
+    backend = LocalFsBackend(
+        timeline_id=record.timeline_id,
+        timeline_home=record.timeline_home,
+    )
+    version = backend.head().version if config_version is None else config_version
     return {
         "timeline_id": record.timeline_id,
         "timeline_ulid": record.timeline_ulid,
@@ -189,8 +253,8 @@ def load_bridge_timeline(
         "name": record.name,
         "is_default": record.is_default,
         "config": config,
-        "registry": load_bridge_registry(project_slug, record.timeline_ulid, root=root),
-        "config_version": BRIDGE_CONFIG_VERSION,
+        "registry": registry,
+        "config_version": version,
     }
 
 

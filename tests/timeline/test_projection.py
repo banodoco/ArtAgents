@@ -675,6 +675,33 @@ class TestTimelineConfigReplacedProjection:
         assert event.payload.config["tracks"][0]["label"] == "Video"  # type: ignore[attr-defined]
         timeline_contract.validate_timeline_config_for_container(result)
 
+    def test_config_replaced_projects_editor_save_payload_and_preserves_source_on_round_trip(self):
+        event = _make_event(
+            "timeline.config_replaced",
+            {
+                "config": {"tracks": [], "clips": []},
+                "source": "editor_save",
+            },
+        )
+
+        result = apply_event_to_assembly({"tracks": [{"id": "old", "kind": "visual", "label": "Old"}], "clips": []}, event)
+
+        assert result == {"tracks": [], "clips": []}
+        assert event.to_json_obj()["payload"]["source"] == "editor_save"
+
+    def test_config_replaced_legacy_payload_without_source_still_projects(self):
+        event = _make_event(
+            "timeline.config_replaced",
+            {
+                "config": {"tracks": [], "clips": []},
+            },
+        )
+
+        result = apply_event_to_assembly({"tracks": [{"id": "old", "kind": "visual", "label": "Old"}], "clips": []}, event)
+
+        assert result == {"tracks": [], "clips": []}
+        assert event.to_json_obj()["payload"] == {"config": {"tracks": [], "clips": []}}
+
     def test_config_replaced_rejects_legacy_wrapper_payloads(self):
         with pytest.raises(ValueError, match="legacy wrapper/read-model keys"):
             _make_event(

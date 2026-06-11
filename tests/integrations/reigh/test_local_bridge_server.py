@@ -4,7 +4,7 @@ import json
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Any, Generator
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -22,6 +22,61 @@ def _get_error(url: str) -> tuple[int, dict]:
     except HTTPError as error:
         return error.code, json.loads(error.read().decode("utf-8"))
     raise AssertionError(f"expected {url} to return an HTTP error")
+
+
+def _post_json(url: str, body: dict[str, Any]) -> tuple[int, dict]:
+    data = json.dumps(body).encode("utf-8")
+    req = Request(url, data=data, method="POST")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(req) as response:  # noqa: S310
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
+
+
+def _put_json(url: str, body: dict[str, Any]) -> tuple[int, dict]:
+    data = json.dumps(body).encode("utf-8")
+    req = Request(url, data=data, method="PUT")
+    req.add_header("Content-Type", "application/json")
+    try:
+        with urlopen(req) as response:  # noqa: S310
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
+
+
+def _post_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tuple[int, dict]:
+    req = Request(url, data=raw_body, method="POST")
+    if content_type is not None:
+        req.add_header("Content-Type", content_type)
+    try:
+        with urlopen(req) as response:  # noqa: S310
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
+
+
+def _put_raw(url: str, raw_body: bytes, content_type: str | None = None) -> tuple[int, dict]:
+    req = Request(url, data=raw_body, method="PUT")
+    if content_type is not None:
+        req.add_header("Content-Type", content_type)
+    try:
+        with urlopen(req) as response:  # noqa: S310
+            return response.status, json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        return error.code, json.loads(error.read().decode("utf-8"))
+
+
+def _options(url: str, origin: str | None = None) -> tuple[int, dict[str, str]]:
+    req = Request(url, method="OPTIONS")
+    if origin is not None:
+        req.add_header("Origin", origin)
+    try:
+        with urlopen(req) as response:  # noqa: S310
+            return response.status, dict(response.headers)
+    except HTTPError as error:
+        return error.code, dict(error.headers)
 
 
 def _get_bytes(
@@ -106,7 +161,7 @@ def test_health_projects_timelines_and_timeline_endpoints(seed_bridge_project, t
     assert timeline["timeline_id"] == timeline_id
     assert timeline["timeline_ulid"] == timeline_ulid
     assert timeline["slug"] == "intro-cut"
-    assert timeline["config_version"] == 1
+    assert timeline["config_version"] == 0  # event head version for empty event log
 
 
 def test_server_returns_normal_http_errors_for_unknown_or_invalid_resources(
@@ -404,6 +459,359 @@ def test_asset_404_for_invalid_timeline(
 
     assert status == 400
     assert error["error"] == "invalid_timeline"
+
+
+# ---------------------------------------------------------------------------
+# Save endpoint tests (POST /projects/:project/timelines/:timeline/save)
+# ---------------------------------------------------------------------------
+
+
+def test_save_endpoint_200_for_valid_config(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with a valid config object persists the event and returns the bridge payload."""
+    from astrid.core.integrations.reigh.local_bridge import REIGH_LOCAL_EDITOR_ACTOR
+    from astrid.core.timeline.eventlog import LocalFsBackend
+
+    timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01"
+    timeline_ulid = "01JM4K5N7P000000000000SAVE"
+    project_dir = seed_bridge_project(
+        slug="save-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+    # A timeline.created event must exist before config_replaced can be saved
+    timeline_home = project_dir / "timelines" / timeline_ulid
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+    backend.append_event(
+        timeline_id,
+        "timeline.created",
+        {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+        actor=REIGH_LOCAL_EDITOR_ACTOR,
+    )
+
+    new_config = {
+        "clips": [
+            {"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"},
+        ],
+        "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+    }
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/save-proj/timelines/{timeline_id}/save"
+        status, result = _post_json(url, {"config": new_config})
+
+    assert status == 200
+    assert result["timeline_id"] == timeline_id
+    assert result["timeline_ulid"] == timeline_ulid
+    assert result["config"] == new_config
+    assert "config_version" in result
+    assert isinstance(result["config_version"], int)
+    # First config_replaced after creation → event head version >= 2
+    assert result["config_version"] >= 2
+    assert "registry" in result
+
+
+def test_save_endpoint_400_for_malformed_body_not_json(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with a non-JSON body returns 400."""
+    timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    seed_bridge_project(slug="bad-body-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/bad-body-proj/timelines/{timeline_id}/save"
+        status, error = _post_raw(url, b"this is not json", content_type="text/plain")
+
+    assert status == 400
+    assert error["error"] == "invalid_body"
+
+
+def test_save_endpoint_400_for_missing_config_field(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with JSON that lacks a 'config' key returns 400."""
+    timeline_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    seed_bridge_project(slug="no-config-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/no-config-proj/timelines/{timeline_id}/save"
+        status, error = _post_json(url, {"other_key": 1})
+
+    assert status == 400
+    assert error["error"] == "invalid_config"
+
+
+def test_save_endpoint_400_for_config_not_a_dict(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with config as a non-dict value returns 400."""
+    timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+    seed_bridge_project(slug="bad-config-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/bad-config-proj/timelines/{timeline_id}/save"
+        status, error = _post_json(url, {"config": "not-a-dict"})
+
+    assert status == 400
+    assert error["error"] == "invalid_config"
+
+
+def test_save_endpoint_404_for_unknown_timeline(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save for a timeline that does not exist returns 404."""
+    seed_bridge_project(slug="known-proj", timeline_id="eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/known-proj/timelines/ffffffff-ffff-ffff-ffff-ffffffffffff/save"
+        status, error = _post_json(url, {"config": {"output": {}}})
+
+    assert status == 404
+    assert error["error"] == "timeline_not_found"
+
+
+def test_save_endpoint_400_for_invalid_project_slug(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save with an invalid project slug returns 400."""
+    seed_bridge_project(slug="valid-proj", timeline_id="11111111-1111-1111-1111-111111111111")
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/%2E%2E/timelines/11111111-1111-1111-1111-111111111111/save"
+        status, error = _post_json(url, {"config": {"output": {}}})
+
+    assert status == 400
+    assert error["error"] == "invalid_project"
+
+
+def test_save_endpoint_404_for_unknown_project(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """POST /save for a project that does not exist returns 404."""
+    seed_bridge_project(slug="exists-proj", timeline_id="22222222-2222-2222-2222-222222222222")
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/no-such-proj/timelines/22222222-2222-2222-2222-222222222222/save"
+        status, error = _post_json(url, {"config": {"output": {}}})
+
+    assert status == 404
+    assert error["error"] == "project_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Registry endpoint tests (PUT /projects/:project/timelines/:timeline/registry)
+# ---------------------------------------------------------------------------
+
+
+def test_registry_put_200_success(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """PUT /registry with a valid assets object persists and returns the normalized registry."""
+    timeline_id = "11111111-1111-1111-1111-111111111101"
+    timeline_ulid = "01JM4K5N7P00000000000REGY1"
+    seed_bridge_project(
+        slug="reg-put-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+    )
+
+    registry_body = {
+        "assets": {
+            "my-clip": {"file": "my-clip.mp4", "label": "My Clip"},
+            "bg-music": {"file": "bg.mp3"},
+        },
+    }
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/reg-put-proj/timelines/{timeline_id}/registry"
+        status, result = _put_json(url, registry_body)
+
+    assert status == 200
+    assert result["assets"] == {
+        "bg-music": {"file": "bg.mp3"},
+        "my-clip": {"file": "my-clip.mp4", "label": "My Clip"},
+    }
+
+
+def test_registry_put_400_for_missing_assets_field(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """PUT /registry without an 'assets' key returns 400."""
+    timeline_id = "22222222-2222-2222-2222-222222222202"
+    seed_bridge_project(slug="no-assets-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/no-assets-proj/timelines/{timeline_id}/registry"
+        status, error = _put_json(url, {"wrong_key": {}})
+
+    assert status == 400
+    assert error["error"] == "invalid_registry"
+
+
+def test_registry_put_400_for_malformed_body(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """PUT /registry with a non-JSON body returns 400."""
+    timeline_id = "33333333-3333-3333-3333-333333333303"
+    seed_bridge_project(slug="bad-reg-body-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/bad-reg-body-proj/timelines/{timeline_id}/registry"
+        status, error = _put_raw(url, b"garbage", content_type="text/plain")
+
+    assert status == 400
+    assert error["error"] == "invalid_body"
+
+
+def test_registry_put_404_for_unknown_timeline(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """PUT /registry for a non-existent timeline returns 404."""
+    seed_bridge_project(slug="known-reg-proj", timeline_id="44444444-4444-4444-4444-444444444404")
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/known-reg-proj/timelines/55555555-5555-5555-5555-555555555555/registry"
+        status, error = _put_json(url, {"assets": {"a": {"file": "x.mp4"}}})
+
+    assert status == 404
+    assert error["error"] == "timeline_not_found"
+
+
+# ---------------------------------------------------------------------------
+# CORS preflight tests (OPTIONS)
+# ---------------------------------------------------------------------------
+
+
+def test_cors_preflight_options_returns_204_with_cors_headers(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """OPTIONS request returns 204 with correct CORS headers for allowed origins."""
+    timeline_id = "11111111-1111-1111-1111-1111cors01"
+    seed_bridge_project(slug="cors-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        # OPTIONS on a save endpoint with allowed origin
+        url = f"{base_url}/projects/cors-proj/timelines/{timeline_id}/save"
+        status, headers = _options(url, origin="http://localhost:3000")
+
+    assert status == 204
+    assert headers.get("Access-Control-Allow-Origin") == "http://localhost:3000"
+    assert headers.get("Access-Control-Allow-Methods") == "GET, POST, PUT, OPTIONS"
+    assert headers.get("Access-Control-Allow-Headers") == "Content-Type"
+
+
+def test_cors_preflight_no_origin_omits_cors_headers(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """OPTIONS without an Origin header omits CORS response headers."""
+    timeline_id = "22222222-2222-2222-2222-2222cors02"
+    seed_bridge_project(slug="no-origin-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/no-origin-proj/timelines/{timeline_id}/save"
+        status, headers = _options(url)
+
+    assert status == 204
+    assert headers.get("Access-Control-Allow-Origin") is None
+
+
+def test_cors_preflight_disallowed_origin_omits_cors_headers(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """OPTIONS from a non-whitelisted origin omits CORS response headers."""
+    timeline_id = "33333333-3333-3333-3333-3333cors03"
+    seed_bridge_project(slug="bad-origin-proj", timeline_id=timeline_id)
+
+    with running_server(tmp_bridge_root) as base_url:
+        url = f"{base_url}/projects/bad-origin-proj/timelines/{timeline_id}/save"
+        status, headers = _options(url, origin="https://evil.com")
+
+    assert status == 204
+    assert headers.get("Access-Control-Allow-Origin") is None
+
+
+# ---------------------------------------------------------------------------
+# Read-after-registry-write asset lookup
+# ---------------------------------------------------------------------------
+
+
+def test_asset_lookup_after_registry_write(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """PUT a registry with an asset mapping, then GET the asset through the existing endpoint."""
+    timeline_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
+    timeline_ulid = "01JM4K5N7P00000000000RARW1"
+    project_dir = seed_bridge_project(
+        slug="rarw-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={},
+    )
+
+    # Create a real source file
+    sources_dir = project_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    asset_content = b"Registry-written asset content for readback verification.\n" * 5
+    asset_path = sources_dir / "rarw-clip.webm"
+    asset_path.write_bytes(asset_content)
+
+    with running_server(tmp_bridge_root) as base_url:
+        # Step 1: Write the registry with an asset mapping
+        reg_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/registry"
+        reg_status, reg_result = _put_json(reg_url, {
+            "assets": {"rarw-clip": {"file": "rarw-clip.webm"}},
+        })
+        assert reg_status == 200
+        assert "rarw-clip" in reg_result["assets"]
+
+        # Step 2: Read the asset back through the asset endpoint
+        asset_url = f"{base_url}/projects/rarw-proj/timelines/{timeline_id}/assets/rarw-clip"
+        asset_status, asset_headers, asset_body = _get_bytes(asset_url)
+
+    assert asset_status == 200
+    assert asset_headers.get("Accept-Ranges") == "bytes"
+    assert int(asset_headers.get("Content-Length", "0")) == len(asset_content)
+    assert asset_body == asset_content
+
+
+def test_asset_lookup_after_registry_write_sources_relative(
+    seed_bridge_project, tmp_bridge_root: Path,
+) -> None:
+    """Registry entries resolve relative to the project sources/ directory."""
+    timeline_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbb2"
+    timeline_ulid = "01JM4K5N7P00000000000RARW2"
+    project_dir = seed_bridge_project(
+        slug="rarw-src-proj",
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        assets={},
+    )
+
+    sources_dir = project_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    # Nested path relative to sources/
+    nested_dir = sources_dir / "nested"
+    nested_dir.mkdir(parents=True, exist_ok=True)
+    asset_content = b"Nested file content.\n"
+    asset_path = nested_dir / "deep.bin"
+    asset_path.write_bytes(asset_content)
+
+    with running_server(tmp_bridge_root) as base_url:
+        # Write registry pointing to nested file
+        reg_url = f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/registry"
+        reg_status, reg_result = _put_json(reg_url, {
+            "assets": {"deep-asset": {"file": "nested/deep.bin"}},
+        })
+        assert reg_status == 200
+
+        # Read it back
+        asset_url = f"{base_url}/projects/rarw-src-proj/timelines/{timeline_id}/assets/deep-asset"
+        asset_status, asset_headers, asset_body = _get_bytes(asset_url)
+
+    assert asset_status == 200
+    assert int(asset_headers.get("Content-Length", "0")) == len(asset_content)
+    assert asset_body == asset_content
 
 
 # ---------------------------------------------------------------------------

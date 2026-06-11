@@ -79,9 +79,9 @@ class TimelineImportedPayload:
     source: TimelineImportSource
 
     def __post_init__(self) -> None:
-        if self.source not in {"legacy_local", "supabase_config", "other"}:
+        if self.source not in {"legacy_local", "supabase_config", "editor_save", "other"}:
             raise TimelineEventSchemaError(
-                "payload.source must be legacy_local, supabase_config, or other"
+                "payload.source must be legacy_local, supabase_config, editor_save, or other"
             )
         _validate_jsonable(self.snapshot, "payload.snapshot")
 
@@ -95,13 +95,13 @@ class TimelineConfigReplacedPayload:
     source: str | None = None
 
     def __post_init__(self) -> None:
+        if self.source is not None:
+            _require_nonempty_str(self.source, "payload.source")
         try:
             config = validate_timeline_config_for_container(self.config)
         except Exception as exc:
             raise TimelineEventSchemaError(str(exc)) from exc
         object.__setattr__(self, "config", config)
-        if self.source is not None:
-            _require_nonempty_str(self.source, "payload.source")
 
     def to_json_obj(self) -> dict[str, Any]:
         payload: dict[str, Any] = {"config": deepcopy(self.config)}
