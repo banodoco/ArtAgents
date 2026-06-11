@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 from astrid.core._shared.result_manifest import write_manifest
 from astrid.core.contracts.errors import AstridError
 from astrid.core.foundation.paths import REPO_ROOT, WORKSPACE_ROOT
 from astrid.core.timeline import (
+    AssetRegistry,
     METADATA_VERSION,
     PipelineMetadata,
     TimelineConfig,
@@ -31,6 +34,19 @@ from astrid.core.util.time import utc_now_seconds
 
 from .registry import rebase_registry_paths
 from .timeline_build import _register_cut_outputs
+
+
+@dataclass(frozen=True)
+class ResumeModeResult:
+    source_timeline_path: Path
+    source_assets_path: Path
+    out_dir: Path
+    timeline_path: Path
+    assets_path: Path
+    metadata_path: Path
+    registry: AssetRegistry
+    config: TimelineConfig
+    rendered_path: Path | None = None
 
 
 def ensure_resume_mode_args(args: argparse.Namespace) -> None:
@@ -81,7 +97,7 @@ def build_resume_metadata(
     }
 
 
-def run_resume_mode(args: argparse.Namespace) -> int:
+def execute_resume_mode(args: argparse.Namespace) -> ResumeModeResult:
     ensure_resume_mode_args(args)
 
     timeline_path = args.timeline.resolve()
@@ -130,10 +146,12 @@ def run_resume_mode(args: argparse.Namespace) -> int:
     metadata_path_out = out_dir / "hype.metadata.json"
     canonical_timeline_config(config)
     save_timeline(config, timeline_path_out)
+    saved_registry = registry
     if out_dir == assets_path_in.parent.resolve():
-        save_registry(registry, assets_path_out)
+        save_registry(saved_registry, assets_path_out)
     else:
-        save_registry(rebase_registry_paths(registry, assets_path_in.parent), assets_path_out)
+        saved_registry = rebase_registry_paths(registry, assets_path_in.parent)
+        save_registry(saved_registry, assets_path_out)
 
     prior_meta_path = source_dir / "hype.metadata.json"
     prior_meta = load_metadata(prior_meta_path) if prior_meta_path.exists() else None
@@ -142,22 +160,21 @@ def run_resume_mode(args: argparse.Namespace) -> int:
         metadata_path_out,
     )
 
-    summary = f"timeline={timeline_path_out} assets={assets_path_out} metadata={metadata_path_out}"
+    rendered_path: Path | None = None
     if args.render:
         from ..render.run import render as render_remotion
 
-        hype_path = render_remotion(
+        rendered_path = render_remotion(
             timeline_path_out,
             assets_path_out,
             out_dir / "hype.mp4",
             project_dir=REPO_ROOT / "remotion",
         )
-        summary = f"{summary} hype={hype_path}"
     _register_cut_outputs(
         out_dir=out_dir,
         stage="cut.resume",
         metadata={"mode": "timeline_resume", "render": bool(args.render), "renderer": args.renderer},
-        rendered_path=out_dir / "hype.mp4" if args.render else None,
+        rendered_path=rendered_path,
     )
     # --- universal result manifest (output-contract M2) -------------------
     manifest_outputs = [
@@ -178,6 +195,25 @@ def run_resume_mode(args: argparse.Namespace) -> int:
         "warnings": [],
     }
     write_manifest(out_dir / "manifest.json", manifest)
-    # ---------------------------------------------------------------------
+    return ResumeModeResult(
+        source_timeline_path=timeline_path,
+        source_assets_path=assets_path_in,
+        out_dir=out_dir,
+        timeline_path=timeline_path_out,
+        assets_path=assets_path_out,
+        metadata_path=metadata_path_out,
+        registry=saved_registry,
+        config=config,
+        rendered_path=rendered_path,
+    )
+
+
+def run_resume_mode(args: argparse.Namespace) -> int:
+    result = execute_resume_mode(args)
+    summary = (
+        f"timeline={result.timeline_path} assets={result.assets_path} metadata={result.metadata_path}"
+    )
+    if result.rendered_path is not None:
+        summary = f"{summary} hype={result.rendered_path}"
     print(f"wrote {summary}")
     return 0

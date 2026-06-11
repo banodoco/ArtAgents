@@ -80,6 +80,8 @@ _emit_cut_managed_events = _timeline_build._emit_cut_managed_events
 # ── re-exports from resume (T80) ─────────────────────────────────────
 ensure_resume_mode_args = _resume.ensure_resume_mode_args
 build_resume_metadata = _resume.build_resume_metadata
+execute_resume_mode = _resume.execute_resume_mode
+ResumeModeResult = _resume.ResumeModeResult
 run_resume_mode = _resume.run_resume_mode
 
 
