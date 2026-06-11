@@ -34,6 +34,12 @@ dev = [
     "mypy==1.17.0",
     "pytest==9.0.2",
     "pytest-cov==7.1.0",
+    # Default per-test timeout for the whole suite (see [tool.pytest.ini_options]
+    # timeout/timeout_method below). Converts ANY hanging test into a fast,
+    # diagnosable failure with a thread stack dump, so a single wedged test can
+    # never wedge the suite for callers (CI, the megaplan baseline capture,
+    # humans). This is the architectural guard against the "hung suite" class.
+    "pytest-timeout>=2.4",
     "ruff==0.12.0",
     "build",
     # sisypy backs the migrated tests/agentic/ suite (agentic scenario testing).
@@ -105,6 +111,32 @@ show_error_codes = true
 warn_unused_configs = true
 
 [tool.pytest.ini_options]
+# --- Suite-wide hang guard (architectural root fix) ---
+# A DEFAULT per-test timeout applies to every test in the suite. Any test that
+# hangs (spawns a server/subprocess and waits forever, deadlocks, blocks on a
+# socket, etc.) is killed at this bound and reported as a failure with a full
+# thread stack dump -- instead of wedging the whole `pytest` invocation
+# indefinitely. This is what stops one bad test from hanging CI, the megaplan
+# `finalize` test-baseline capture, or a human's local run for ~an hour.
+#
+# 120s is generous: it tolerates the slowest legitimate integration test
+# (subprocess/LLM/ffmpeg spawn) while still catching a genuinely wedged
+# (infinite) test fast. Override per-test with @pytest.mark.timeout(N) (the
+# `timeout` marker is registered below); set timeout(0) to disable for a
+# specific deliberately-long test.
+#
+# timeout_method = "signal": a SIGALRM is delivered to the test on the main
+# thread and raised AS A TEST FAILURE, so the hung test is actually ABORTED and
+# the suite CONTINUES. This is the property that makes the suite unable to hang.
+# (The "thread" method only DUMPS a stack from a watchdog thread; it cannot
+# interrupt a blocked call, so a non-daemon hung test can still wedge the whole
+# `pytest` process at exit -- which is precisely the failure that wedged the
+# megaplan baseline capture for ~an hour. SIGALRM is Unix-only and fires on the
+# main thread, which matches how pytest runs tests on CI/macOS/Linux.) A test
+# that legitimately runs longer should raise its own bound with
+# @pytest.mark.timeout(N), as tests/concurrency/test_ci_sandbox_isolation.py does.
+timeout = 120
+timeout_method = "signal"
 # Scope collection to Astrid's own tests; exclude vendored upstream test trees
 # (e.g. any pack's `ai_toolkit/upstream` submodule, which targets the upstream
 # project, needs heavy deps like torch, and is not part of Astrid's suite).

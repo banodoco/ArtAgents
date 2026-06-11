@@ -20,8 +20,45 @@ import tempfile
 import threading
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CI_SCRIPT = _REPO_ROOT / "scripts" / "reshape" / "run_ci_checks.sh"
+
+# Hard upper bound on a single CI-script instance. run_ci_checks.sh shells out to
+# several *nested* pytest invocations (reshape lane, two-tab harness, targeted
+# blocking tests); two of them run here concurrently. Without a subprocess-level
+# cap, a wedged/slow nested run leaves a live child attached to a NON-daemon
+# thread, which keeps the whole pytest process alive *forever* even after the
+# test body returns -- this is exactly the failure that wedged the megaplan
+# baseline capture (a `subprocess.wait()` that never returns). The bound here,
+# the daemon threads, and the suite-wide pytest `timeout` (pyproject.toml) are
+# three independent guards so this can never hang again.
+_INSTANCE_TIMEOUT_S = 240
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill a child and its whole process group (it was started with
+    ``start_new_session=True``), so no nested pytest grandchild is orphaned."""
+    import signal
+
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except OSError:
+            return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
 
 
 def _make_marker_script(marker_path: Path) -> Path:
@@ -58,6 +95,16 @@ def _make_marker_script(marker_path: Path) -> Path:
     return tmp_script
 
 
+# Marked integration + opt_in so it is excluded from the broad default lane
+# (run_ci_checks.sh passes -m "not integration and not opt_in"). It launches the
+# full CI script -- itself a nest of pytest runs -- so it must never run as part
+# of an ordinary suite sweep (it would recurse and contend), only when explicitly
+# selected. The marker keeps it out of the marker-filtered lane; the bounded
+# subprocess + daemon threads + suite-wide timeout keep it from hanging even if
+# an unfiltered runner (e.g. a raw `pytest` baseline) does collect it.
+@pytest.mark.integration
+@pytest.mark.opt_in
+@pytest.mark.timeout(600)
 def test_ci_sandbox_isolation(tmp_path: Path) -> None:
     """Launch two CI instances concurrently; verify distinct sandboxes."""
 
@@ -78,29 +125,59 @@ def test_ci_sandbox_isolation(tmp_path: Path) -> None:
 
     # ── Launch both instances concurrently ─────────────────────────────
     results: dict[str, subprocess.CompletedProcess] = {}
+    timed_out: dict[str, bool] = {}
 
     def run_instance(name: str, script: Path, marker: Path) -> None:
         env = os.environ.copy()
         env["ASTRID_CI_SKIP_BROAD"] = "1"
-        proc = subprocess.run(
+        # start_new_session puts bash + all its nested pytest children in their
+        # own process group so a timeout can reap the WHOLE tree, not just bash
+        # (otherwise the grandchildren orphan and keep running).
+        child = subprocess.Popen(
             ["bash", str(script), "--json"],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
+            start_new_session=True,
         )
-        results[name] = proc
+        try:
+            out, err = child.communicate(timeout=_INSTANCE_TIMEOUT_S)
+            results[name] = subprocess.CompletedProcess(
+                child.args, child.returncode, out, err
+            )
+        except subprocess.TimeoutExpired:
+            timed_out[name] = True
+            _kill_tree(child)
+            try:
+                child.communicate(timeout=10)
+            except Exception:
+                pass
 
-    t1 = threading.Thread(target=run_instance, args=("p1", script1, marker1))
-    t2 = threading.Thread(target=run_instance, args=("p2", script2, marker2))
+    # daemon=True: even in the (now-guarded) worst case, a still-running worker
+    # can never keep the pytest process alive past the run.
+    t1 = threading.Thread(
+        target=run_instance, args=("p1", script1, marker1), daemon=True
+    )
+    t2 = threading.Thread(
+        target=run_instance, args=("p2", script2, marker2), daemon=True
+    )
 
     t1.start()
     t2.start()
-    t1.join(timeout=120)
-    t2.join(timeout=120)
+    # Join a hair longer than the per-instance subprocess cap so a timed-out
+    # instance is observed as a clean failure here, not as a hang.
+    t1.join(timeout=_INSTANCE_TIMEOUT_S + 30)
+    t2.join(timeout=_INSTANCE_TIMEOUT_S + 30)
 
+    assert not timed_out, (
+        f"CI instance(s) {sorted(timed_out)} exceeded {_INSTANCE_TIMEOUT_S}s and "
+        "were killed. The CI script (a nest of pytest runs) is too slow or "
+        "wedged under concurrent load."
+    )
     assert len(results) == 2, (
         f"Expected 2 results, got {len(results)}. "
-        f"One or both instances timed out."
+        f"One or both instances did not finish (threads still alive)."
     )
 
     p1 = results["p1"]
