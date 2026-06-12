@@ -393,6 +393,40 @@ def _resolve_declared_outputs(
     return resolved
 
 
+def resolve_declared_output_paths(
+    executor: ExecutorDefinition,
+    request: ExecutorRunRequest,
+) -> dict[str, str]:
+    """Resolve declared-output paths *without* requiring files to exist on disk.
+
+    This is the non-existence-filtering companion to
+    :func:`_resolve_declared_outputs`.  It uses the same placeholder-resolution
+    pipeline so callers can learn which paths *would* be produced by a run
+    (e.g. for CAS cache-hit checks) before the run has executed and before
+    those files have been written to disk.
+
+    Returns an empty mapping when there are no declared outputs or when no
+    base output directory (``out`` / ``run_root``) is available.
+    """
+    if not executor.outputs:
+        return {}
+    effective_out = request.out if request.out not in (None, "") else request.run_root
+    if effective_out is None or effective_out == "":
+        return {}
+    try:
+        temp_request = replace(request, out=effective_out)
+        values = _request_values(temp_request)
+        placeholders = _placeholder_values(executor, temp_request, values)
+    except ExecutorRunnerError:
+        return {}
+    resolved: dict[str, str] = {}
+    for output in executor.outputs:
+        output_path_str = placeholders.get(output.name)
+        if output_path_str:
+            resolved[output.name] = output_path_str
+    return resolved
+
+
 def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
     inputs = dict(request.inputs)
     if request.dry_run:
