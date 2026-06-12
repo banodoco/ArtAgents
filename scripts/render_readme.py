@@ -34,7 +34,7 @@ def hborder() -> str:
 
 
 # Minimal & symmetric: identity, poetic steer, install, and inviting close.
-# Everything is centered; ◇-bordered rows frame the install block.
+# Everything is centered with dot dividers between stanzas.
 # (content, border) — border is "│" normally, "◇" for the separator rows.
 LINES = [
     (blank(), "│"),
@@ -46,14 +46,12 @@ LINES = [
     (center("clone it, run it, stake your claim."), "│"),
     (blank(), "│"),
     (center("·  ·  ·"), "│"),
-    (blank(), "◇"),
     (blank(), "│"),
     (center("$ git clone https://github.com/banodoco/Astrid"), "│"),
     (center("$ cd Astrid && pip install -e ."), "│"),
     (center("$ python3 -m astrid --help"), "│"),
     (blank(), "│"),
     (center("·  ·  ·"), "│"),
-    (blank(), "◇"),
     (blank(), "│"),
     (center("ask the maker what to do,"), "│"),
     (center("runs/ holds all it makes for you —"), "│"),

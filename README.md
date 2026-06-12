@@ -17,14 +17,12 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 │            clone it, run it, stake your claim.             │
 │                                                            │
 │                          ·  ·  ·                           │
-◇                                                            ◇
 │                                                            │
 │       $ git clone https://github.com/banodoco/Astrid       │
 │              $ cd Astrid && pip install -e .               │
 │                 $ python3 -m astrid --help                 │
 │                                                            │
 │                          ·  ·  ·                           │
-◇                                                            ◇
 │                                                            │
 │                 ask the maker what to do,                  │
 │             runs/ holds all it makes for you —             │
