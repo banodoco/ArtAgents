@@ -560,6 +560,7 @@ def make_produces_check_passed_event(
     *,
     check_id: str,
     cas_sha256: str | None = None,
+    cas_identity_sha256: str | None = None,
     step_version: int | None = None,
     dispatch_event_hash: str | None = None,
 ) -> dict[str, Any]:
@@ -571,6 +572,7 @@ def make_produces_check_passed_event(
         "ts": utc_now_iso(),
     }
     _set_if_not_none(event, "cas_sha256", cas_sha256)
+    _set_if_not_none(event, "cas_identity_sha256", cas_identity_sha256)
     _set_if_not_none(event, "step_version", step_version)
     _set_if_not_none(event, "dispatch_event_hash", dispatch_event_hash)
     return event

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from astrid.core.task.cas import intern, link_into_produces
+from astrid.core.io.cas import intern, link_identity_artifact, link_into_produces
 from astrid.core.task.events import (
     make_cursor_rewind_event,
     make_iteration_failed_event,
@@ -17,6 +18,12 @@ from astrid.core.task.plan import ProducesEntry, step_dir_for_path
 
 
 # step_dir_for_path is the ONLY directory API used in this gate path (FLAG-P3-001).
+@dataclass(frozen=True)
+class _InternedArtifactRef:
+    cas_sha256: str | None = None
+    cas_identity_sha256: str | None = None
+
+
 def _run_inline_checks(
     decision: GateDecision,
     produces: tuple[ProducesEntry, ...],
@@ -85,13 +92,14 @@ def _run_inline_checks(
                 reason=result.reason,
                 events=tuple(emitted),
             )
-        cas_sha256 = _intern_produces_artifact(decision, artifact_path)
+        cas_ref = _intern_produces_artifact(decision, artifact_path)
         _append_inline(
             make_produces_check_passed_event(
                 decision.plan_step_path,
                 entry.name,
                 check_id=entry.check.check_id,
-                cas_sha256=cas_sha256,
+                cas_sha256=cas_ref.cas_sha256,
+                cas_identity_sha256=cas_ref.cas_identity_sha256,
                 step_version=decision.step_version,
                 dispatch_event_hash=decision.dispatch_event_hash,
             ),
@@ -99,11 +107,21 @@ def _run_inline_checks(
     return InlineCheckResult(ok=True, events=tuple(emitted))
 
 
-def _intern_produces_artifact(decision: GateDecision, artifact_path: Path) -> str | None:
+def _intern_produces_artifact(
+    decision: GateDecision, artifact_path: Path
+) -> _InternedArtifactRef:
     if decision.project_root is None:
-        return None
+        return _InternedArtifactRef()
     if artifact_path.is_symlink():
-        return None
+        return _InternedArtifactRef()
+    if decision.artifact_identity is not None:
+        cas_target = link_identity_artifact(
+            decision.project_root,
+            artifact_path,
+            decision.artifact_identity.identity_key,
+        )
+        link_into_produces(cas_target, artifact_path)
+        return _InternedArtifactRef(cas_identity_sha256=decision.artifact_identity.identity_key)
     cas_target = intern(decision.project_root, artifact_path)
     link_into_produces(cas_target, artifact_path)
-    return cas_target.name
+    return _InternedArtifactRef(cas_sha256=cas_target.name)

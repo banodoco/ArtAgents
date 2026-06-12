@@ -36,6 +36,7 @@ from .events.stream import EventStreamRecord, read_event_stream, subscribe_event
 from .gate import (
     AttestedArgs,
     CursorPath,
+    GateArtifactIdentity,
     GateDecision,
     PeekResult,
     TaskRunGateError,
@@ -71,6 +72,7 @@ __all__ = [
     "TASK_STEP_ID_ENV",
     "CursorPath",
     "EventStreamRecord",
+    "GateArtifactIdentity",
     "GateDecision",
     "InboxEntry",
     "PeekResult",

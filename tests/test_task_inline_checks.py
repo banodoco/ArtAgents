@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from pathlib import Path
@@ -8,6 +9,7 @@ import pytest
 
 from astrid.core.project.project import create_project
 from astrid.core.task import gate as task_gate
+from astrid.core.task.gate import checks as gate_checks
 from tests.helpers.current_run import seed_current_run
 from astrid.core.task.events import canonical_event_json, read_events
 from astrid.core.task.plan import (
@@ -148,10 +150,223 @@ def test_code_produces_check_passes_advances(tmp_projects_root: Path) -> None:
         "step_completed",
         "produces_check_passed",
     ]
+    passed = [e for e in read_events(events_path) if e["kind"] == "produces_check_passed"]
+    assert passed[-1]["cas_identity_sha256"] == decision.artifact_identity.identity_key
+    assert "cas_sha256" not in passed[-1]
 
     decision2 = task_gate.gate_command("demo", "echo two", ["echo", "two"], root=tmp_projects_root)
     assert decision2.active is True
     assert decision2.plan_step_id == "step-2"
+
+
+def test_code_finalization_uses_identity_cas_when_artifact_identity_exists(tmp_projects_root: Path) -> None:
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "step-1",
+                "adapter": "local",
+                "command": "echo go",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+                "produces": {
+                    "out": {
+                        "path": "out.json",
+                        "check": {"check_id": "json_file", "params": {}, "sentinel": False},
+                    }
+                },
+            }
+        ],
+    }
+    _setup_run(tmp_projects_root, plan)
+
+    decision = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    identity = task_gate.GateArtifactIdentity(
+        input_digest="input-digest",
+        producer_id="task:local",
+        producer_version="producer-version",
+        identity_key="identity-key",
+    )
+    decision = dataclasses.replace(decision, artifact_identity=identity)
+
+    step_dir = step_dir_for_path("demo", "run-1", ("step-1",), root=tmp_projects_root)
+    produces_dir = step_dir / "produces"
+    produces_dir.mkdir(parents=True, exist_ok=True)
+    artifact = produces_dir / "out.json"
+    artifact.write_text('{"ok": 1}', encoding="utf-8")
+
+    task_gate.record_dispatch_complete(decision, 0)
+
+    assert artifact.is_symlink() is True
+    assert artifact.resolve().name == identity.identity_key
+
+    events = read_events(_events_path(tmp_projects_root, "demo", "run-1"))
+    passed = [event for event in events if event["kind"] == "produces_check_passed"]
+    assert passed[-1]["cas_identity_sha256"] == identity.identity_key
+    assert "cas_sha256" not in passed[-1]
+
+
+def test_code_finalization_identity_cas_never_reads_or_hashes_artifact_bytes(
+    tmp_projects_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "step-1",
+                "adapter": "local",
+                "command": "echo go",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+                "produces": {
+                    "out": {
+                        "path": "out.json",
+                        "check": {"check_id": "json_file", "params": {}, "sentinel": False},
+                    }
+                },
+            }
+        ],
+    }
+    _setup_run(tmp_projects_root, plan)
+
+    decision = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    identity = task_gate.GateArtifactIdentity(
+        input_digest="input-digest",
+        producer_id="task:local",
+        producer_version="producer-version",
+        identity_key="identity-key",
+    )
+    decision = dataclasses.replace(decision, artifact_identity=identity)
+
+    step_dir = step_dir_for_path("demo", "run-1", ("step-1",), root=tmp_projects_root)
+    produces_dir = step_dir / "produces"
+    produces_dir.mkdir(parents=True, exist_ok=True)
+    artifact = produces_dir / "out.json"
+    artifact.write_text('{"ok": 1}', encoding="utf-8")
+
+    original_read_bytes = Path.read_bytes
+
+    def _fail_hash_file(path: Path) -> str:
+        raise AssertionError(f"identity CAS must not hash artifact bytes: {path}")
+
+    def _guard_read_bytes(self: Path) -> bytes:
+        if self == artifact:
+            raise AssertionError(f"identity CAS must not read artifact bytes: {self}")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr("astrid.core.io.cas.hash_file", _fail_hash_file)
+    monkeypatch.setattr(Path, "read_bytes", _guard_read_bytes)
+
+    task_gate.record_dispatch_complete(decision, 0)
+
+    assert artifact.is_symlink() is True
+    assert artifact.resolve().name == identity.identity_key
+
+    events = read_events(_events_path(tmp_projects_root, "demo", "run-1"))
+    passed = [event for event in events if event["kind"] == "produces_check_passed"]
+    assert passed[-1]["cas_identity_sha256"] == identity.identity_key
+    assert "cas_sha256" not in passed[-1]
+
+
+def test_code_finalization_falls_back_to_byte_cas_without_artifact_identity(
+    tmp_projects_root: Path,
+) -> None:
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "step-1",
+                "adapter": "local",
+                "command": "echo go",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+                "produces": {
+                    "out": {
+                        "path": "out.json",
+                        "check": {"check_id": "json_file", "params": {}, "sentinel": False},
+                    }
+                },
+            }
+        ],
+    }
+    _setup_run(tmp_projects_root, plan)
+
+    decision = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    decision = dataclasses.replace(decision, artifact_identity=None)
+
+    step_dir = step_dir_for_path("demo", "run-1", ("step-1",), root=tmp_projects_root)
+    produces_dir = step_dir / "produces"
+    produces_dir.mkdir(parents=True, exist_ok=True)
+    artifact = produces_dir / "out.json"
+    payload = b'{"ok": 1}'
+    artifact.write_bytes(payload)
+
+    task_gate.record_dispatch_complete(decision, 0)
+
+    expected_sha = hashlib.sha256(payload).hexdigest()
+    assert artifact.is_symlink() is True
+    assert artifact.resolve().name == expected_sha
+
+    events = read_events(_events_path(tmp_projects_root, "demo", "run-1"))
+    passed = [event for event in events if event["kind"] == "produces_check_passed"]
+    assert passed[-1]["cas_sha256"] == expected_sha
+    assert "cas_identity_sha256" not in passed[-1]
+
+
+def test_code_finalization_passes_artifact_identity_to_intern(
+    tmp_projects_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    identity = task_gate.GateArtifactIdentity(
+        input_digest="input-digest",
+        producer_id="task:local",
+        producer_version="producer-version",
+        identity_key="identity-key",
+    )
+    seen: list[task_gate.GateArtifactIdentity | None] = []
+
+    def _fake_intern(
+        decision_arg: task_gate.GateDecision, artifact_path: Path
+    ) -> gate_checks._InternedArtifactRef:
+        seen.append(decision_arg.artifact_identity)
+        assert artifact_path.name == "out.json"
+        return gate_checks._InternedArtifactRef(
+            cas_identity_sha256=decision_arg.artifact_identity.identity_key
+        )
+
+    monkeypatch.setattr(gate_checks, "_intern_produces_artifact", _fake_intern)
+
+    plan = {
+        "plan_id": "p",
+        "version": 2,
+        "steps": [
+            {
+                "id": "step-1",
+                "adapter": "local",
+                "command": "echo go",
+                "cost": {"amount": 0, "currency": "USD", "source": "local"},
+                "produces": {
+                    "out": {
+                        "path": "out.json",
+                        "check": {"check_id": "json_file", "params": {}, "sentinel": False},
+                    }
+                },
+            }
+        ],
+    }
+    _setup_run(tmp_projects_root, plan)
+
+    decision = task_gate.gate_command("demo", "echo go", ["echo", "go"], root=tmp_projects_root)
+    decision = dataclasses.replace(decision, artifact_identity=identity)
+
+    step_dir = step_dir_for_path("demo", "run-1", ("step-1",), root=tmp_projects_root)
+    produces_dir = step_dir / "produces"
+    produces_dir.mkdir(parents=True, exist_ok=True)
+    (produces_dir / "out.json").write_text('{"ok": 1}', encoding="utf-8")
+
+    task_gate.record_dispatch_complete(decision, 0)
+
+    assert seen == [identity]
 
 
 def test_attested_with_all_of_semantic_check_accepts(tmp_path: Path) -> None:

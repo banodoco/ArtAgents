@@ -31,6 +31,16 @@ class TaskRunGateError(AstridError):
 
 
 @dataclass(frozen=True)
+class GateArtifactIdentity:
+    """Pre-dispatch artifact identity carried through gate finalization."""
+
+    input_digest: str
+    producer_id: str
+    producer_version: str
+    identity_key: str
+
+
+@dataclass(frozen=True)
 class GateDecision:
     active: bool
     run_id: str | None = None
@@ -54,6 +64,7 @@ class GateDecision:
     # Sprint 3 (T14) adapter dispatch fields.
     step_version: int = 1
     adapter: str | None = None
+    artifact_identity: GateArtifactIdentity | None = None
     pid: int | None = None
     dispatch_event_hash: str | None = None
     # Only populated by _dispatch_attested path; code-step rewinds go through

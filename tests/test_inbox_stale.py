@@ -1,4 +1,8 @@
-"""Phase 8 — stale and malformed inbox files don't corrupt run state."""
+"""Phase 8 — stale and malformed inbox files don't corrupt run state.
+
+Includes import-path compatibility: both ``astrid.core.io.inbox`` and
+``astrid.core.task.operator.inbox`` expose identical symbols.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +19,24 @@ from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.task.events import read_events
 from astrid.core.task.lifecycle import cmd_next
+
+# ---------------------------------------------------------------------------
+# Import compatibility — prove the shim exposes identical symbols
+# ---------------------------------------------------------------------------
+import astrid.core.io.inbox as io_inbox
+import astrid.core.task.operator.inbox as shim_inbox
+
+_PUBLIC_HELPERS = (
+    "CONSUMED_DIR_NAME",
+    "INBOX_DIR_NAME",
+    "REJECTED_DIR_NAME",
+    "InboxEntry",
+    "InboxValidationError",
+    "consume_inbox_entry",
+    "inbox_dir",
+    "pending_count",
+    "scan_inbox",
+)
 
 
 _BODY_AGENT = '''from astrid.core.orchestrate import orchestrator, attested
@@ -104,7 +126,7 @@ def test_approve_on_human_step_quarantined_to_rejected(
     )
 
     os.environ["ASTRID_ACTOR"] = "bob"
-    with caplog.at_level(logging.WARNING, logger="astrid.core.task.operator.inbox"):
+    with caplog.at_level(logging.WARNING, logger="astrid.core.io.inbox"):
         rc = _run_next(projects)
     assert rc == 0
 
@@ -132,7 +154,7 @@ def test_malformed_json_skipped_and_logged(tmp_path: Path, caplog) -> None:
     inbox_file = _drop(run_dir, "broken.json", "not valid json {")
 
     os.environ["ASTRID_ACTOR"] = "bob"
-    with caplog.at_level(logging.WARNING, logger="astrid.core.task.operator.inbox"):
+    with caplog.at_level(logging.WARNING, logger="astrid.core.io.inbox"):
         rc = _run_next(projects)
     assert rc == 0
 
@@ -144,3 +166,37 @@ def test_malformed_json_skipped_and_logged(tmp_path: Path, caplog) -> None:
     assert rejected_dir.is_dir()
     assert len(list(rejected_dir.iterdir())) == 1
     assert any("broken.json" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Import compatibility: shim path exposes identical symbols
+# ---------------------------------------------------------------------------
+
+
+def test_shim_exports_all_public_helpers() -> None:
+    """Every public helper is importable from ``astrid.core.task.operator.inbox``."""
+    for name in _PUBLIC_HELPERS:
+        assert hasattr(shim_inbox, name), f"shim missing {name}"
+
+
+def test_shim_helpers_are_same_objects_as_io_inbox() -> None:
+    """``astrid.core.task.operator.inbox`` re-exports the exact same function objects."""
+    for name in _PUBLIC_HELPERS:
+        io_obj = getattr(io_inbox, name)
+        shim_obj = getattr(shim_inbox, name)
+        assert io_obj is shim_obj, (
+            f"{name}: io.inbox.{name} is not shim.{name}"
+        )
+
+
+def test_inbox_dir_through_shim(tmp_path: Path) -> None:
+    """inbox_dir called through the shim returns the same path as io.inbox."""
+    run_dir = tmp_path / "run-shim"
+    assert shim_inbox.inbox_dir(run_dir) == io_inbox.inbox_dir(run_dir)
+
+
+def test_constants_through_shim() -> None:
+    """Constants match between io.inbox and shim."""
+    assert shim_inbox.INBOX_DIR_NAME == io_inbox.INBOX_DIR_NAME
+    assert shim_inbox.CONSUMED_DIR_NAME == io_inbox.CONSUMED_DIR_NAME
+    assert shim_inbox.REJECTED_DIR_NAME == io_inbox.REJECTED_DIR_NAME

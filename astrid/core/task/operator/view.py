@@ -46,10 +46,10 @@ from astrid.core.task.events import (
     read_events,
 )
 from astrid.core.task.gate import TaskRunGateError, peek_current_step
-from astrid.core.task.operator.inbox import consume_inbox_entry, pending_count, scan_inbox
+from astrid.core.io.inbox import consume_inbox_entry, pending_count, scan_inbox
 
 # -- Status JSON helpers ----------------------------------------------------
-from astrid.core.task.operator.inbox import pending_count as _pending_count
+from astrid.core.io.inbox import pending_count as _pending_count
 from astrid.core.task.plan import (
     STEP_PATH_SEP,
     RepeatForEach,

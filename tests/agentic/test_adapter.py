@@ -640,7 +640,30 @@ def test_prime_writes_orchestrator_run_persists_m4_fixture_with_cas_artifact(
     )
     import hashlib
 
-    assert event["cas_sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    # cas_sha256 is a byte-content checksum; cas_identity_sha256 is an
+    # identity CAS key that must be validated by key shape and .cas/<key>
+    # existence / link target instead of comparing it to artifact bytes.
+    if "cas_sha256" in event:
+        assert event["cas_sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
+    elif "cas_identity_sha256" in event:
+        import os as _os
+
+        identity_key = event["cas_identity_sha256"]
+        assert len(identity_key) == 64, "identity key must be 64 hex chars"
+        assert all(c in "0123456789abcdef" for c in identity_key), \
+            "identity key must be hex"
+        cas_entry = evidence_dir / ".cas" / identity_key
+        assert cas_entry.is_file(), f".cas/{identity_key} must exist"
+        assert artifact.is_symlink(), \
+            "artifact at produces path must be a symlink after identity interning"
+        link_target = _os.readlink(str(artifact))
+        expected_target = _os.path.relpath(str(cas_entry), str(artifact.parent))
+        assert link_target == expected_target, \
+            f"symlink target mismatch: {link_target} != {expected_target}"
+    else:
+        raise AssertionError(
+            "produces_check_passed event missing both cas_sha256 and cas_identity_sha256"
+        )
 
 
 def test_prime_writes_artifact_pipeline_m4_fixture_with_a_to_b_provenance(

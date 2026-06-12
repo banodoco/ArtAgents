@@ -1,6 +1,8 @@
 """Tests for inbox path+version match across supersede events (Sprint 3 T21).
 
-Covers: supersede routing, stale → .rejected/, missing submitted_by_kind rejects.
+Covers: supersede routing, stale → .rejected/, missing submitted_by_kind rejects,
+and import-path compatibility between ``astrid.core.io.inbox`` and the
+``astrid.core.task.operator.inbox`` shim.
 """
 
 from __future__ import annotations
@@ -9,13 +11,31 @@ from pathlib import Path
 
 import pytest
 
-from astrid.core.task.operator.inbox import (
+from astrid.core.io.inbox import (
     CONSUMED_DIR_NAME,
     INBOX_DIR_NAME,
     InboxValidationError,
     REJECTED_DIR_NAME,
     _parse_entry,
     _latest_event_for_path,
+)
+
+# ---------------------------------------------------------------------------
+# Import compatibility — prove the shim exposes identical symbols
+# ---------------------------------------------------------------------------
+import astrid.core.io.inbox as io_inbox
+import astrid.core.task.operator.inbox as shim_inbox
+
+_PUBLIC_HELPERS = (
+    "CONSUMED_DIR_NAME",
+    "INBOX_DIR_NAME",
+    "REJECTED_DIR_NAME",
+    "InboxEntry",
+    "InboxValidationError",
+    "consume_inbox_entry",
+    "inbox_dir",
+    "pending_count",
+    "scan_inbox",
 )
 
 
@@ -161,3 +181,54 @@ def test_latest_event_for_path_filters_by_step_version() -> None:
 
     assert _latest_event_for_path(events, ("render",), step_version=2)["reason"] == "current"
     assert _latest_event_for_path(events, ("render",), step_version=3) is None
+
+
+# ---------------------------------------------------------------------------
+# Import compatibility: shim path exposes identical symbols
+# ---------------------------------------------------------------------------
+
+
+def test_shim_exports_all_public_helpers() -> None:
+    """Every public helper is importable from ``astrid.core.task.operator.inbox``."""
+    for name in _PUBLIC_HELPERS:
+        assert hasattr(shim_inbox, name), f"shim missing {name}"
+
+
+def test_shim_helpers_are_same_objects_as_io_inbox() -> None:
+    """``astrid.core.task.operator.inbox`` re-exports the exact same function objects."""
+    for name in _PUBLIC_HELPERS:
+        io_obj = getattr(io_inbox, name)
+        shim_obj = getattr(shim_inbox, name)
+        assert io_obj is shim_obj, (
+            f"{name}: io.inbox.{name} is not shim.{name}"
+        )
+
+
+def test_parse_entry_through_shim() -> None:
+    """_parse_entry called through the shim path works identically."""
+    raw = {
+        "schema_version": 2,
+        "plan_step_path": ["s1"],
+        "step_version": 1,
+        "submitted_by": "agent-1",
+        "submitted_by_kind": "agent",
+        "decision": "approve",
+        "submitted_at": "2026-05-12T00:00:00Z",
+        "evidence": {},
+    }
+    entry = shim_inbox._parse_entry(Path("/tmp/test-shim.json"), raw)
+    assert entry is not None
+    assert entry.submitted_by_kind == "agent"
+    assert entry.plan_step_path == ("s1",)
+
+
+def test_inbox_dir_through_shim(tmp_path: Path) -> None:
+    """inbox_dir called through the shim returns the same path."""
+    assert shim_inbox.inbox_dir(tmp_path) == io_inbox.inbox_dir(tmp_path)
+
+
+def test_constants_through_shim() -> None:
+    """All constant values match between io.inbox and shim."""
+    assert shim_inbox.INBOX_DIR_NAME == io_inbox.INBOX_DIR_NAME
+    assert shim_inbox.CONSUMED_DIR_NAME == io_inbox.CONSUMED_DIR_NAME
+    assert shim_inbox.REJECTED_DIR_NAME == io_inbox.REJECTED_DIR_NAME

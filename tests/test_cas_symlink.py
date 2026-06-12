@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -59,13 +58,13 @@ def test_produces_pass_interns_into_cas_and_links(tmp_projects_root: Path) -> No
 
     try:
         decision = task_gate.gate_command(slug, "echo go", ["echo", "go"], root=tmp_projects_root)
+        assert decision.artifact_identity is not None
         step_dir = step_dir_for_path(slug, run_id, ("step-1",), root=tmp_projects_root)
         produces_dir = step_dir / "produces"
         produces_dir.mkdir(parents=True, exist_ok=True)
         payload = b'{"ok": 1}'
         artifact = produces_dir / "out.json"
         artifact.write_bytes(payload)
-        expected_sha = hashlib.sha256(payload).hexdigest()
 
         task_gate.record_dispatch_complete(decision, 0)
 
@@ -77,12 +76,13 @@ def test_produces_pass_interns_into_cas_and_links(tmp_projects_root: Path) -> No
         resolved = artifact.resolve()
         cas_dir = (project_root / ".cas").resolve()
         assert cas_dir in resolved.parents
-        assert resolved.name == expected_sha
+        assert resolved.name == decision.artifact_identity.identity_key
         assert resolved.read_bytes() == payload
 
         events = read_events(events_path)
         passed = [e for e in events if e["kind"] == "produces_check_passed"]
         assert passed, "expected at least one produces_check_passed event"
-        assert passed[-1].get("cas_sha256") == expected_sha
+        assert passed[-1].get("cas_identity_sha256") == decision.artifact_identity.identity_key
+        assert "cas_sha256" not in passed[-1]
     finally:
         _clear_task_env()

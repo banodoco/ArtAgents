@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from collections.abc import Iterable
 from pathlib import Path
@@ -69,27 +70,79 @@ def c2_artifact_provenance(
             )
             continue
         if artifact is None:
-            mismatches.append(
-                {
-                    "kind": "orphan_event",
-                    "key": _render_key(key),
-                    "event": event["evidence_ref"],
-                    "cas_sha256": event["cas_sha256"],
-                }
-            )
+            orphan_detail: dict[str, Any] = {
+                "kind": "orphan_event",
+                "key": _render_key(key),
+                "event": event["evidence_ref"],
+            }
+            if "cas_sha256" in event:
+                orphan_detail["cas_sha256"] = event["cas_sha256"]
+            if "cas_identity_sha256" in event:
+                orphan_detail["cas_identity_sha256"] = event["cas_identity_sha256"]
+            mismatches.append(orphan_detail)
             continue
-        if event["cas_sha256"] != artifact["sha256"]:
-            mismatches.append(
-                {
-                    "kind": "hash_mismatch",
-                    "key": _render_key(key),
-                    "event": event["evidence_ref"],
-                    "file": artifact["evidence_ref"],
-                    "event_cas_sha256": event["cas_sha256"],
-                    "file_sha256": artifact["sha256"],
-                }
-            )
+
+        # ── byte-content CAS path ──────────────────────────────────────
+        if "cas_sha256" in event:
+            if event["cas_sha256"] != artifact["sha256"]:
+                mismatches.append(
+                    {
+                        "kind": "hash_mismatch",
+                        "key": _render_key(key),
+                        "event": event["evidence_ref"],
+                        "file": artifact["evidence_ref"],
+                        "event_cas_sha256": event["cas_sha256"],
+                        "file_sha256": artifact["sha256"],
+                    }
+                )
+                continue
+            matched += 1
             continue
+
+        # ── identity CAS path ──────────────────────────────────────────
+        if "cas_identity_sha256" in event:
+            identity_key = event["cas_identity_sha256"]
+            cas_entry = pack.root / ".cas" / identity_key
+            artifact_full = pack.root / artifact["evidence_ref"]
+            if not cas_entry.is_file():
+                mismatches.append(
+                    {
+                        "kind": "missing_cas_entry",
+                        "key": _render_key(key),
+                        "event": event["evidence_ref"],
+                        "cas_identity_sha256": identity_key,
+                    }
+                )
+                continue
+            if not artifact_full.is_symlink():
+                mismatches.append(
+                    {
+                        "kind": "identity_not_symlink",
+                        "key": _render_key(key),
+                        "event": event["evidence_ref"],
+                        "file": artifact["evidence_ref"],
+                        "cas_identity_sha256": identity_key,
+                    }
+                )
+                continue
+            link_target = os.readlink(str(artifact_full))
+            expected_target = os.path.relpath(str(cas_entry), str(artifact_full.parent))
+            if link_target != expected_target:
+                mismatches.append(
+                    {
+                        "kind": "identity_link_mismatch",
+                        "key": _render_key(key),
+                        "event": event["evidence_ref"],
+                        "file": artifact["evidence_ref"],
+                        "cas_identity_sha256": identity_key,
+                        "link_target": link_target,
+                        "expected_target": expected_target,
+                    }
+                )
+                continue
+            matched += 1
+            continue
+
         matched += 1
 
     return build_check_result(
@@ -134,13 +187,15 @@ def _collect_event_records(
                     }
                 )
                 continue
-            records[key].append(
-                {
-                    "evidence_ref": evidence_ref,
-                    "event_index": index,
-                    "cas_sha256": row["cas_sha256"],
-                }
-            )
+            record: dict[str, Any] = {
+                "evidence_ref": evidence_ref,
+                "event_index": index,
+            }
+            if "cas_sha256" in row:
+                record["cas_sha256"] = row["cas_sha256"]
+            if "cas_identity_sha256" in row:
+                record["cas_identity_sha256"] = row["cas_identity_sha256"]
+            records[key].append(record)
     return records, evidence_refs, failures
 
 
@@ -151,8 +206,19 @@ def _collect_file_records(
     evidence_refs: list[str] = []
     failures: list[dict[str, Any]] = []
 
-    for path in pack.glob_files("runs/*/steps/**/*"):
-        rel = path.relative_to(pack.root)
+    # Use pack.root.glob directly (not pack.glob_files) so that symlinks are
+    # NOT resolved before key matching.  Identity-CAS interning turns the
+    # produces path into a symlink targeting .cas/<key>; the unresolved path
+    # still lives under runs/*/steps/**/* and passes _file_key validation.
+    for candidate in sorted(pack.root.glob("runs/*/steps/**/*")):
+        # Safety: reject any path that escapes the pack root.
+        try:
+            pack._contained_path(candidate)
+        except Exception:
+            continue
+        if not candidate.is_file() and not candidate.is_symlink():
+            continue
+        rel = candidate.relative_to(pack.root)
         if "produces" not in rel.parts:
             continue
         try:
@@ -204,10 +270,17 @@ def _event_key(run_id: str, event: dict[str, Any]) -> ArtifactKey:
         raise ValueError("produces_name must be a non-empty string")
 
     cas_sha256 = event.get("cas_sha256")
-    if not isinstance(cas_sha256, str) or not cas_sha256:
-        raise ValueError("cas_sha256 must be a non-empty string")
+    if isinstance(cas_sha256, str) and cas_sha256:
+        return (run_id, step_segments, raw_version, produces_name)
 
-    return (run_id, step_segments, raw_version, produces_name)
+    cas_identity_sha256 = event.get("cas_identity_sha256")
+    if isinstance(cas_identity_sha256, str) and cas_identity_sha256:
+        # Validate key shape: must be a 64-character hex string.
+        if len(cas_identity_sha256) != 64 or not all(c in "0123456789abcdef" for c in cas_identity_sha256):
+            raise ValueError("cas_identity_sha256 must be a 64-character hex string")
+        return (run_id, step_segments, raw_version, produces_name)
+
+    raise ValueError("cas_sha256 or cas_identity_sha256 must be a non-empty string")
 
 
 def _file_key(rel_path: Path) -> ArtifactKey:

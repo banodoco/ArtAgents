@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -29,7 +28,8 @@ def _clear_task_env() -> None:
         os.environ.pop(name, None)
 
 
-def _run_one_step(tmp_projects_root: Path, slug: str, payload: bytes) -> None:
+def _run_one_step(tmp_projects_root: Path, slug: str, payload: bytes) -> Path:
+    """Run one step through gate finalization and return the produces artifact path."""
     plan = {
         "plan_id": "p",
         "version": 2,
@@ -58,23 +58,32 @@ def _run_one_step(tmp_projects_root: Path, slug: str, payload: bytes) -> None:
     step_dir = step_dir_for_path(slug, run_id, ("step-1",), root=tmp_projects_root)
     produces_dir = step_dir / "produces"
     produces_dir.mkdir(parents=True, exist_ok=True)
-    (produces_dir / "out.json").write_bytes(payload)
+    artifact_path = produces_dir / "out.json"
+    artifact_path.write_bytes(payload)
     task_gate.record_dispatch_complete(decision, 0)
+    return artifact_path
 
 
 def test_identical_content_is_not_shared_across_projects(tmp_projects_root: Path) -> None:
     payload = b'{"shared": "bytes"}'
-    sha = hashlib.sha256(payload).hexdigest()
 
     try:
-        _run_one_step(tmp_projects_root, "proj-a", payload)
-        _run_one_step(tmp_projects_root, "proj-b", payload)
+        artifact_a = _run_one_step(tmp_projects_root, "proj-a", payload)
+        artifact_b = _run_one_step(tmp_projects_root, "proj-b", payload)
 
-        cas_a = tmp_projects_root / "proj-a" / ".cas" / sha
-        cas_b = tmp_projects_root / "proj-b" / ".cas" / sha
+        # Normal produces path uses identity CAS — the produces artifact is a
+        # symlink into .cas/<identity_key>.  Resolve the symlink to discover
+        # the actual CAS entry path.
+        assert artifact_a.is_symlink(), "produces artifact must be a symlink after identity interning"
+        assert artifact_b.is_symlink(), "produces artifact must be a symlink after identity interning"
+        cas_a = artifact_a.resolve()
+        cas_b = artifact_b.resolve()
         assert cas_a.is_file()
         assert cas_b.is_file()
-        # Two distinct physical files, even though contents (and hash) are identical.
+        # Both projects use the same plan + command, so the identity key
+        # (and therefore the CAS entry name) must be identical.
+        assert cas_a.name == cas_b.name
+        # Two distinct physical files, even though contents are identical.
         assert cas_a.stat().st_ino != cas_b.stat().st_ino
         assert cas_a.read_bytes() == payload
         assert cas_b.read_bytes() == payload

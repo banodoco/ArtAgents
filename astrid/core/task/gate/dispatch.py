@@ -9,9 +9,17 @@ monkeypatch seams and direct ``task_gate._dispatch_code`` access.
 from __future__ import annotations
 
 import dataclasses
+import functools
+import shlex
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from astrid.core.io.cas import (
+    canonical_json_digest,
+    executor_definition_digest,
+    identity_digest,
+    input_reference_digest,
+)
 from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.env import apply_task_run_env, is_author_test_mode
 from astrid.core.task.events import (
@@ -30,6 +38,7 @@ from astrid.core.task.gate.attestation import (
     write_iteration_feedback,
 )
 from astrid.core.task.gate.base import (
+    GateArtifactIdentity,
     GateDecision,
     InlineCheckResult,
     TaskRunGateError,
@@ -37,6 +46,107 @@ from astrid.core.task.gate.base import (
 )
 from astrid.core.task.gate.cursor import _event_step_version
 from astrid.core.task.plan import STEP_PATH_SEP, ProducesEntry, Step
+
+
+@functools.lru_cache(maxsize=32)
+def _executor_registry_for_project(project_root: str) -> Any:
+    from astrid.core.execution.executor.registry import load_default_registry
+
+    return load_default_registry(project_root=project_root)
+
+
+def _executor_definition_from_command(
+    command_text: str | None,
+    *,
+    project_root: Path,
+) -> Any | None:
+    if not command_text:
+        return None
+    try:
+        argv = tuple(shlex.split(command_text))
+    except ValueError:
+        return None
+    for index in range(len(argv) - 2):
+        if argv[index] == "executors" and argv[index + 1] == "run":
+            try:
+                registry = _executor_registry_for_project(str(project_root))
+                return registry.get(argv[index + 2])
+            except Exception:
+                return None
+    return None
+
+
+def _executorless_producer_identity(step: Step) -> tuple[str, str]:
+    from astrid.core.task.plan import _step_to_dict
+
+    if step.requires_ack:
+        producer_id = "task.attested"
+    else:
+        producer_id = f"task.{step.adapter}"
+    producer_version = canonical_json_digest(
+        {
+            "producer_id": producer_id,
+            "step": _step_to_dict(step),
+        }
+    )
+    return producer_id, producer_version
+
+
+def _artifact_input_digest(
+    *,
+    step: Step,
+    path_tuple: tuple[str, ...],
+    iteration: int | None,
+    item_id: str | None,
+) -> str:
+    from astrid.core.task.plan import _produces_to_dict
+
+    return input_reference_digest(
+        {
+            "adapter": step.adapter,
+            "assignee": step.assignee,
+            "command": step.command,
+            "instructions": step.instructions,
+            "item_id": item_id,
+            "iteration": iteration,
+            "path": list(path_tuple),
+            "produces": _produces_to_dict(step.produces),
+            "requires_ack": step.requires_ack,
+            "step_version": step.version,
+        }
+    )
+
+
+def _compute_artifact_identity(
+    *,
+    step: Step,
+    path_tuple: tuple[str, ...],
+    project_root: Path,
+    iteration: int | None,
+    item_id: str | None,
+) -> GateArtifactIdentity | None:
+    input_digest = _artifact_input_digest(
+        step=step,
+        path_tuple=path_tuple,
+        iteration=iteration,
+        item_id=item_id,
+    )
+    executor = _executor_definition_from_command(step.command, project_root=project_root)
+    if executor is not None:
+        producer_id = executor.id
+        producer_version = executor_definition_digest(executor)
+    else:
+        producer_id, producer_version = _executorless_producer_identity(step)
+    return GateArtifactIdentity(
+        input_digest=input_digest,
+        producer_id=producer_id,
+        producer_version=producer_version,
+        identity_key=identity_digest(
+            input_digest=input_digest,
+            producer_id=producer_id,
+            producer_version=producer_version,
+        ),
+    )
 
 
 def _resolve_adapter(step: Step):
@@ -130,6 +240,13 @@ def _dispatch_code(
         slug, run_id, path_tuple, step_version, project_root,
         iteration=iteration, item_id=item_id, rendered=rendered,
     )
+    artifact_identity = _compute_artifact_identity(
+        step=step,
+        path_tuple=path_tuple,
+        project_root=project_root,
+        iteration=iteration,
+        item_id=item_id,
+    )
 
     if reentry:
         # FLAG-P3-005: scan back to the latest event for THIS plan_step_id rather than events[-1];
@@ -157,6 +274,7 @@ def _dispatch_code(
                 item_id=item_id,
                 adapter=step.adapter,
                 step_version=step_version,
+                artifact_identity=artifact_identity,
                 dispatch_event_hash=latest.get("hash") if isinstance(latest.get("hash"), str) else None,
                 session=session,
                 run_dir=run_dir,
@@ -190,6 +308,7 @@ def _dispatch_code(
                 item_id=item_id,
                 adapter=step.adapter,
                 step_version=step_version,
+                artifact_identity=artifact_identity,
                 dispatch_event_hash=dispatch_event_hash,
                 session=session,
                 run_dir=run_dir,
@@ -213,6 +332,7 @@ def _dispatch_code(
                 item_id=item_id,
                 adapter=step.adapter,
                 step_version=step_version,
+                artifact_identity=artifact_identity,
                 pid=dispatch_result.pid if dispatch_result else None,
                 dispatch_event_hash=dispatch_event_hash,
                 session=session,
@@ -238,6 +358,7 @@ def _dispatch_code(
         item_id=item_id,
         adapter=step.adapter,
         step_version=step_version,
+        artifact_identity=artifact_identity,
         pid=dispatch_result.pid if dispatch_result else None,
         dispatch_event_hash=dispatch_event_hash,
         session=session,
@@ -286,6 +407,7 @@ def _code_decision(
     item_id: str | None = None,
     adapter: str | None = None,
     step_version: int = 1,
+    artifact_identity: GateArtifactIdentity | None = None,
     pid: int | None = None,
     dispatch_event_hash: str | None = None,
     session: Any = None,
@@ -307,6 +429,7 @@ def _code_decision(
         item_id=item_id,
         adapter=adapter,
         step_version=step_version,
+        artifact_identity=artifact_identity,
         pid=pid,
         dispatch_event_hash=dispatch_event_hash,
         run_dir=run_dir,
@@ -372,6 +495,13 @@ def _dispatch_attested(
         args=args,
         run_started_actor=run_started_actor,
     )
+    artifact_identity = _compute_artifact_identity(
+        step=step,
+        path_tuple=path_tuple,
+        project_root=project_root,
+        iteration=iteration,
+        item_id=item_id,
+    )
 
     decision = GateDecision(
         active=True,
@@ -388,6 +518,7 @@ def _dispatch_attested(
         item_id=item_id,
         adapter=step.adapter,
         step_version=step.version,
+        artifact_identity=artifact_identity,
         run_dir=run_dir,
         writer_epoch_at_dispatch=writer_epoch_at_dispatch,
         session_id=getattr(session, "id", None),

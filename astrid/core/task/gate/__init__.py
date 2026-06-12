@@ -22,7 +22,7 @@ from astrid.core.foundation.project_paths import project_dir
 from astrid.core.project.sidecar import write_json_sidecar
 from astrid.core.session.current_run_state import read_current_run_state
 from astrid.core.session.writer import writer_context_for_project, writer_context_from_decision
-from astrid.core.task.cas import intern, link_into_produces
+from astrid.core.io.cas import intern, link_into_produces
 from astrid.core.task.command_render import render_task_command, strip_task_env_prefix
 from astrid.core.task.env import (
     apply_task_run_env,
@@ -58,6 +58,7 @@ from astrid.core.task.gate.attestation import (
 )
 from astrid.core.task.gate.base import (
     ITERATE_FEEDBACK_PREFIX,
+    GateArtifactIdentity,
     GateDecision,
     InlineCheckResult,
     TaskRunGateError,

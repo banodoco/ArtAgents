@@ -6,7 +6,25 @@ import json
 import logging
 from pathlib import Path
 
-from astrid.core.task.operator.inbox import inbox_dir, scan_inbox
+from astrid.core.io.inbox import inbox_dir, scan_inbox
+
+# ---------------------------------------------------------------------------
+# Import compatibility — prove the shim exposes identical symbols
+# ---------------------------------------------------------------------------
+import astrid.core.io.inbox as io_inbox
+import astrid.core.task.operator.inbox as shim_inbox
+
+_PUBLIC_HELPERS = (
+    "CONSUMED_DIR_NAME",
+    "INBOX_DIR_NAME",
+    "REJECTED_DIR_NAME",
+    "InboxEntry",
+    "InboxValidationError",
+    "consume_inbox_entry",
+    "inbox_dir",
+    "pending_count",
+    "scan_inbox",
+)
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -51,7 +69,7 @@ def test_scan_returns_three_valid_entries_and_logs_one_malformed(
     )
     (inbox / "broken.json").write_text("not json at all", encoding="utf-8")
 
-    with caplog.at_level(logging.WARNING, logger="astrid.core.task.operator.inbox"):
+    with caplog.at_level(logging.WARNING, logger="astrid.core.io.inbox"):
         entries = scan_inbox(run_dir)
 
     assert len(entries) == 3
@@ -65,3 +83,45 @@ def test_scan_returns_empty_when_inbox_dir_absent(tmp_path: Path) -> None:
     run_dir.mkdir()
     # No inbox/ directory — opt-in surface.
     assert scan_inbox(run_dir) == []
+
+
+# ---------------------------------------------------------------------------
+# Import compatibility: shim path exposes identical symbols
+# ---------------------------------------------------------------------------
+
+
+def test_shim_exports_all_public_helpers() -> None:
+    """Every public helper is importable from ``astrid.core.task.operator.inbox``."""
+    for name in _PUBLIC_HELPERS:
+        assert hasattr(shim_inbox, name), f"shim missing {name}"
+
+
+def test_shim_helpers_are_same_objects_as_io_inbox() -> None:
+    """``astrid.core.task.operator.inbox`` re-exports the exact same function objects."""
+    for name in _PUBLIC_HELPERS:
+        io_obj = getattr(io_inbox, name)
+        shim_obj = getattr(shim_inbox, name)
+        assert io_obj is shim_obj, (
+            f"{name}: io.inbox.{name} is not shim.{name}"
+        )
+
+
+def test_scan_inbox_through_shim(tmp_path: Path) -> None:
+    """scan_inbox called through the shim path behaves identically."""
+    run_dir = tmp_path / "run-shim"
+    run_dir.mkdir()
+    inbox = shim_inbox.inbox_dir(run_dir)
+    inbox.mkdir()
+    (inbox / "a.json").write_text(
+        json.dumps({
+            "step_id": "review",
+            "decision": "approve",
+            "evidence": {"note": "shim"},
+            "submitted_at": "2026-05-01T10:00:00Z",
+            "submitted_by": "alice",
+        }),
+        encoding="utf-8",
+    )
+    entries = shim_inbox.scan_inbox(run_dir)
+    assert len(entries) == 1
+    assert entries[0].submitted_by == "alice"

@@ -16,6 +16,7 @@ import pytest
 
 from astrid.core.task.gate.base import (
     ITERATE_FEEDBACK_PREFIX,
+    GateArtifactIdentity,
     GateDecision,
     InlineCheckResult,
     TaskRunGateError,
@@ -36,6 +37,7 @@ from astrid.core.task.gate.attestation import (
     match_attested_command,
 )
 from astrid.core.task.gate.checks import _run_inline_checks
+from astrid.core.task.gate.dispatch import _code_decision
 from astrid.core.task.gate.repeat import (
     _count_iteration_failed,
     _has_iteration_exhausted,
@@ -84,10 +86,33 @@ def test_gate_base_reject_surfaces_stable_non_null_code() -> None:
 def test_gate_base_decision_and_inline_defaults() -> None:
     decision = GateDecision(active=False)
     assert decision.active is False
+    assert decision.artifact_identity is None
     assert decision.plan_step_path == ()
     assert decision.step_version == 1
     assert InlineCheckResult(ok=True).events == ()
     assert ITERATE_FEEDBACK_PREFIX == "iterate_feedback="
+
+
+def test_gate_base_artifact_identity_can_be_carried_on_code_decision() -> None:
+    identity = GateArtifactIdentity(
+        input_digest="in",
+        producer_id="producer",
+        producer_version="v1",
+        identity_key="key",
+    )
+    decision = _code_decision(
+        run_id="run-1",
+        slug="demo",
+        path_str="step-1",
+        path_tuple=("step-1",),
+        events_path=Path("/tmp/events.jsonl"),
+        produces=(),
+        project_root=Path("/tmp/project"),
+        reentry=False,
+        adapter="local",
+        artifact_identity=identity,
+    )
+    assert decision.artifact_identity == identity
 
 
 # --- gate_cursor ----------------------------------------------------------------

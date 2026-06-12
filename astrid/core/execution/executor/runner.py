@@ -24,6 +24,7 @@ from astrid.core._shared.capability_common import (
     _validate_required_inputs,
 )
 from astrid.core.contracts.capability_runner import CapabilityRunner
+from astrid.core.io.cas import executor_definition_digest
 from astrid.core.contracts.exec_error import (
     ExecError,
     error_from_missing_binaries,
@@ -154,6 +155,10 @@ class ExecutorRunResult:
     skipped_reason: str = ""
     missing_binaries: tuple[str, ...] = ()
     error: ExecError | None = None
+    # ── A1 identity fields (backward-compatible defaults) ─────────────────
+    run_root: Path | str | None = None
+    outputs: Mapping[str, Any] = field(default_factory=dict)
+    executor_version: str = ""  # derived from executor_definition_digest
 
     def __post_init__(self) -> None:
         if self.error is None:
@@ -334,6 +339,8 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
             dry_run=request.dry_run,
             skipped=True,
             skipped_reason=condition_result.reason,
+            run_root=request.run_root,
+            executor_version=executor_definition_digest(executor),
         )
 
     missing_binaries = check_executor_binaries(executor) if request.check_binaries else ()
@@ -344,11 +351,46 @@ def _run_executor_inner(request: ExecutorRunRequest, executor: ExecutorDefinitio
             payload={"executor_id": executor.id, "missing_binaries": list(missing_binaries)},
             dry_run=request.dry_run,
             missing_binaries=missing_binaries,
+            run_root=request.run_root,
+            executor_version=executor_definition_digest(executor),
         )
 
     if executor.kind == "built_in" and "pipeline_step" in executor.metadata:
         return _run_builtin_executor(executor, request)
     return _run_external_executor(executor, request, values)
+
+
+def _resolve_declared_outputs(
+    executor: ExecutorDefinition,
+    request: ExecutorRunRequest,
+) -> dict[str, str]:
+    """Resolve declared-output paths and return only those that exist on disk.
+
+    Uses only the ``executor.outputs`` declaration — never scans directories.
+    Expected paths are derived from ``request.out`` (falling back to
+    ``request.run_root``) via the same ``_placeholder_values`` pipeline that
+    the executor command expansion uses.
+
+    Returns an empty mapping when there are no declared outputs or when no
+    base output directory (``out`` / ``run_root``) is available.
+    """
+    if not executor.outputs:
+        return {}
+    effective_out = request.out if request.out not in (None, "") else request.run_root
+    if effective_out is None or effective_out == "":
+        return {}
+    try:
+        temp_request = replace(request, out=effective_out)
+        values = _request_values(temp_request)
+        placeholders = _placeholder_values(executor, temp_request, values)
+    except ExecutorRunnerError:
+        return {}
+    resolved: dict[str, str] = {}
+    for output in executor.outputs:
+        output_path_str = placeholders.get(output.name)
+        if output_path_str and Path(output_path_str).exists():
+            resolved[output.name] = output_path_str
+    return resolved
 
 
 def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinition) -> ExecutorRunResult:
@@ -359,6 +401,8 @@ def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinitio
             kind="built_in",
             dry_run=True,
             payload={"would_run": "youtube.upload", "inputs": inputs},
+            run_root=request.run_root,
+            executor_version=executor_definition_digest(executor),
         )
 
     publish_youtube_video = resolve_callable_from_metadata(
@@ -377,7 +421,14 @@ def _run_upload_youtube(request: ExecutorRunRequest, executor: ExecutorDefinitio
         playlist_id=_optional_input(inputs, "playlist_id"),
         made_for_kids=bool(_optional_input(inputs, "made_for_kids") or False),
     )
-    return ExecutorRunResult(executor_id=executor.id, kind="built_in", payload=result)
+    return ExecutorRunResult(
+        executor_id=executor.id,
+        kind="built_in",
+        payload=result,
+        run_root=request.run_root,
+        executor_version=executor_definition_digest(executor),
+        outputs=_resolve_declared_outputs(executor, request),
+    )
 
 
 @dataclass(frozen=True)
@@ -489,6 +540,8 @@ def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequ
             command=command,
             payload={"executor_id": executor.id, "missing_binaries": [], "returncode": None, "skipped": False, "skipped_reason": ""},
             dry_run=True,
+            run_root=request.run_root,
+            executor_version=executor_definition_digest(executor),
         )
     if args.brief.exists():
         pipeline.prepare_brief_artifacts(args)
@@ -499,6 +552,9 @@ def _run_builtin_executor(executor: ExecutorDefinition, request: ExecutorRunRequ
         command=command,
         payload={"executor_id": executor.id, "missing_binaries": [], "returncode": returncode, "skipped": False, "skipped_reason": ""},
         returncode=returncode,
+        run_root=request.run_root,
+        executor_version=executor_definition_digest(executor),
+        outputs=_resolve_declared_outputs(executor, request) if returncode == 0 else {},
     )
 
 
@@ -517,6 +573,8 @@ def _run_explicit_command_executor(
             env=env,
             payload={"executor_id": executor.id, "missing_binaries": [], "returncode": None, "skipped": False, "skipped_reason": ""},
             dry_run=True,
+            run_root=request.run_root,
+            executor_version=executor_definition_digest(executor),
         )
     if request.execution_mode == "in_process":
         return _run_in_process_executor_command(
@@ -559,6 +617,9 @@ def _run_explicit_command_executor(
             "skipped_reason": "",
         },
         returncode=returncode,
+        run_root=request.run_root,
+        executor_version=executor_definition_digest(executor),
+        outputs=_resolve_declared_outputs(executor, request) if returncode == 0 else {},
     )
 
 
@@ -590,6 +651,7 @@ def _run_in_process_executor_command(
     except InProcessExecutionPreconditionError as exc:
         return _in_process_executor_error_result(
             executor,
+            request,
             command=command,
             cwd=cwd,
             env=env,
@@ -603,6 +665,7 @@ def _run_in_process_executor_command(
     except InProcessInvocationError as exc:
         return _in_process_executor_error_result(
             executor,
+            request,
             command=command,
             cwd=cwd,
             env=env,
@@ -625,11 +688,15 @@ def _run_in_process_executor_command(
             returncode=result.returncode,
         ),
         returncode=result.returncode,
+        run_root=request.run_root,
+        executor_version=executor_definition_digest(executor),
+        outputs=_resolve_declared_outputs(executor, request) if result.returncode == 0 else {},
     )
 
 
 def _in_process_executor_error_result(
     executor: ExecutorDefinition,
+    request: ExecutorRunRequest,
     *,
     command: tuple[str, ...],
     cwd: str | None,
@@ -651,6 +718,8 @@ def _in_process_executor_error_result(
         },
         returncode=1,
         error=error,
+        run_root=request.run_root,
+        executor_version=executor_definition_digest(executor),
     )
 
 

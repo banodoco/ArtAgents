@@ -1,4 +1,8 @@
-"""Phase 8 — happy path: inbox approve consumed via cmd_next."""
+"""Phase 8 — happy path: inbox approve consumed via cmd_next.
+
+Includes import-path compatibility: both ``astrid.core.io.inbox`` and
+``astrid.core.task.operator.inbox`` expose identical symbols.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +18,24 @@ from _lifecycle_fixtures import setup_run  # noqa: E402
 
 from astrid.core.task.events import read_events, verify_chain
 from astrid.core.task.lifecycle import cmd_next
+
+# ---------------------------------------------------------------------------
+# Import compatibility — prove the shim exposes identical symbols
+# ---------------------------------------------------------------------------
+import astrid.core.io.inbox as io_inbox
+import astrid.core.task.operator.inbox as shim_inbox
+
+_PUBLIC_HELPERS = (
+    "CONSUMED_DIR_NAME",
+    "INBOX_DIR_NAME",
+    "REJECTED_DIR_NAME",
+    "InboxEntry",
+    "InboxValidationError",
+    "consume_inbox_entry",
+    "inbox_dir",
+    "pending_count",
+    "scan_inbox",
+)
 
 
 _BODY_AGENT = '''from astrid.core.orchestrate import orchestrator, attested
@@ -80,3 +102,36 @@ def test_inbox_approve_consumed_into_step_attested(tmp_path: Path) -> None:
     assert rc2 == 0
     final_events = read_events(events_path)
     assert any(e.get("kind") == "run_completed" for e in final_events)
+
+
+# ---------------------------------------------------------------------------
+# Import compatibility: shim path exposes identical symbols
+# ---------------------------------------------------------------------------
+
+
+def test_shim_exports_all_public_helpers() -> None:
+    """Every public helper is importable from ``astrid.core.task.operator.inbox``."""
+    for name in _PUBLIC_HELPERS:
+        assert hasattr(shim_inbox, name), f"shim missing {name}"
+
+
+def test_shim_helpers_are_same_objects_as_io_inbox() -> None:
+    """``astrid.core.task.operator.inbox`` re-exports the exact same function objects."""
+    for name in _PUBLIC_HELPERS:
+        io_obj = getattr(io_inbox, name)
+        shim_obj = getattr(shim_inbox, name)
+        assert io_obj is shim_obj, (
+            f"{name}: io.inbox.{name} is not shim.{name}"
+        )
+
+
+def test_inbox_dir_through_shim(tmp_path: Path) -> None:
+    """inbox_dir called through the shim returns the same path as io.inbox."""
+    assert shim_inbox.inbox_dir(tmp_path) == io_inbox.inbox_dir(tmp_path)
+
+
+def test_constants_through_shim() -> None:
+    """Constants match between io.inbox and shim."""
+    assert shim_inbox.INBOX_DIR_NAME == io_inbox.INBOX_DIR_NAME
+    assert shim_inbox.CONSUMED_DIR_NAME == io_inbox.CONSUMED_DIR_NAME
+    assert shim_inbox.REJECTED_DIR_NAME == io_inbox.REJECTED_DIR_NAME
