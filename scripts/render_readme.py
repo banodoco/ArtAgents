@@ -15,6 +15,17 @@ from pathlib import Path
 W = 60  # inner content width (chars between the │ borders)
 
 
+ITALIC = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
+    "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"
+    "𝑎𝑏𝑐𝑑𝑒𝑓𝑔ℎ𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧",
+)
+
+
+def italic(s: str) -> str:
+    return s.translate(ITALIC)
+
+
 def center(s: str) -> str:
     pad = W - len(s)
     left = pad // 2
@@ -40,10 +51,10 @@ LINES = [
     (blank(), "│"),
     (center("A   S   T   R   I   D"), "│"),
     (blank(), "│"),
-    (center("agents harnessed, humans free —"), "│"),
-    (center("open tools for what could be:"), "│"),
-    (center("moving image, voice, and frame,"), "│"),
-    (center("clone it, run it, stake your claim."), "│"),
+    (center(italic("agents harnessed, humans free —")), "│"),
+    (center(italic("open tools for what could be:")), "│"),
+    (center(italic("moving image, voice, and frame,")), "│"),
+    (center(italic("clone it, run it, stake your claim.")), "│"),
     (blank(), "│"),
     (center("·  ·  ·"), "│"),
     (blank(), "│"),
