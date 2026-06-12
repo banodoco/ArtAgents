@@ -30,6 +30,7 @@ from astrid.core.timeline.projection import regenerate_projection
 from .event_construction import asset_registry_to_events, config_to_events
 
 BRIDGE_CONFIG_VERSION = 1
+_BRIDGE_CANONICAL_TOP_KEYS = ("tracks", "clips", "theme", "theme_overrides")
 REIGH_LOCAL_EDITOR_ACTOR = TimelineActor(
     type="human",
     id="reigh-app:local-editor",
@@ -232,8 +233,15 @@ def save_bridge_timeline(
         timeline_home=record.timeline_home,
     )
     head = backend.head()
+    # The Reigh editor sends a superset config with render-only top-level keys
+    # such as "output"; Astrid's canonical TimelineConfig must not persist them.
+    canonical_config = {
+        key: config[key]
+        for key in _BRIDGE_CANONICAL_TOP_KEYS
+        if key in config
+    }
     batch = config_to_events(
-        config,
+        canonical_config,
         None,
         record.timeline_id,
         head.last_hash,

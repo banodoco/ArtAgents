@@ -431,6 +431,45 @@ class TestLocalBridgeHelpers:
         assert reloaded["config"] == saved_config
         assert reloaded["config_version"] == head.version
 
+    def test_save_bridge_timeline_strips_editor_superset_top_level_keys(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000016"
+        timeline_id = "aaaaaaaa-bbbb-cccc-dddd-ffffffffffff"
+        project_dir = seed_bridge_project(slug="save-superset", timeline_ulid=ulid, timeline_id=timeline_id)
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        editor_config = {
+            "clips": [
+                {
+                    "id": "clip-1",
+                    "at": 2.25,
+                    "track": "V1",
+                    "clipType": "media",
+                    "asset": "asset-1",
+                }
+            ],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+            "output": {"resolution": "1920x1080", "fps": 30, "file": "out.mp4"},
+        }
+
+        payload = save_bridge_timeline("save-superset", ulid, editor_config, root=tmp_bridge_root)
+
+        assert payload is not None
+        assert payload["config"]["clips"][0]["at"] == 2.25
+        assert "output" not in payload["config"]
+        assert "output" not in load_assembly_json_with_repair(timeline_home)
+        events = backend.read_events()
+        assert "output" not in events[1].payload.to_json_obj()["config"]
+
     def test_save_bridge_timeline_as_first_config_save_after_timeline_created(
         self,
         tmp_bridge_root,
