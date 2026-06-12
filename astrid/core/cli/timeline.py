@@ -149,6 +149,7 @@ from .timeline_backends import (  # noqa: E402, F401
     cmd_pull,
     cmd_push,
     cmd_recover,
+    cmd_sync,
     cmd_undo,
 )
 from .timeline_crud import (  # noqa: E402, F401

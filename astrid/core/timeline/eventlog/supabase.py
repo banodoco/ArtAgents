@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any
 from urllib.parse import quote
@@ -15,6 +18,7 @@ from astrid.core.integrations.reigh.event_construction import (
 from astrid.core.integrations.reigh.supabase_client import (
     SupabaseHTTPError,
     get_json,
+    post_json,
     rpc,
 )
 
@@ -33,6 +37,34 @@ from .types import (
 )
 
 _VERSION_MISMATCH_RE = re.compile(r"expected\s+(\d+),\s+found\s+(\d+)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class TimelineMetadataPreflight:
+    """Classified metadata read used by born-local push promotion."""
+
+    status: str
+    timeline_id: str
+    project_id: str | None = None
+    user_id: str | None = None
+    version: int = 0
+    event_count: int = 0
+    last_event_id: str | None = None
+    last_hash: str | None = None
+    detail: str | None = None
+
+
+@dataclass(frozen=True)
+class AppendServiceCreateResult:
+    """Parsed response from the append-service create-with-config endpoint."""
+
+    timeline_id: str
+    config_version: int
+    inserted_event_ids: tuple[str, ...]
+    head_version: int
+    head_event_id: str | None
+    head_hash: str | None
+    raw_payload: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -166,6 +198,118 @@ class LiveSupabaseAppendTransport:
             txn_id=txn_id,
         )
         return self._append_batch(timeline_id=timeline_id, batch=batch, expected_version=cas_version)
+
+    def write_divergence(
+        self,
+        *,
+        timeline_id: str,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        spoke_suffix: list[dict[str, object]],
+        hub_suffix: list[dict[str, object]],
+        chosen_side: str = "undecided",
+        artifact_pointer: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        endpoint = f"{self.supabase_url.rstrip('/')}/rest/v1/divergence_log"
+        payload = {
+            "timeline_id": timeline_id,
+            "spoke": spoke,
+            "spoke_version": spoke_version,
+            "spoke_hash": spoke_hash,
+            "spoke_event_id": spoke_event_id,
+            "hub_version": hub_version,
+            "hub_hash": hub_hash,
+            "hub_event_id": hub_event_id,
+            "spoke_suffix": spoke_suffix,
+            "hub_suffix": hub_suffix,
+            "chosen_side": chosen_side,
+            "artifact_pointer": artifact_pointer,
+        }
+        try:
+            response = post_json(
+                endpoint,
+                payload,
+                auth=("service_role", self.auth_token),
+                extra_headers={"Prefer": "return=representation"},
+                timeout=self.timeout,
+            )
+        except SupabaseHTTPError as exc:
+            raise EventLogTransportError(
+                f"Supabase divergence_log insert failed: {exc}"
+            ) from exc
+        row = response[0] if isinstance(response, list) and response else response
+        if not isinstance(row, dict):
+            raise EventLogTransportError(
+                "Supabase divergence_log insert returned a non-object response"
+            )
+        return dict(row)
+
+    def upsert_bookmark(
+        self,
+        *,
+        timeline_id: str,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        synced_at: str | None = None,
+    ) -> dict[str, object]:
+        endpoint = (
+            f"{self.supabase_url.rstrip('/')}/rest/v1/sync_bookmarks"
+            "?on_conflict=timeline_id,spoke"
+        )
+        payload: dict[str, object] = {
+            "timeline_id": timeline_id,
+            "spoke": spoke,
+            "spoke_version": spoke_version,
+            "spoke_hash": spoke_hash,
+            "spoke_event_id": spoke_event_id,
+            "hub_version": hub_version,
+            "hub_hash": hub_hash,
+            "hub_event_id": hub_event_id,
+        }
+        if synced_at is not None:
+            payload["synced_at"] = synced_at
+        try:
+            response = post_json(
+                endpoint,
+                payload,
+                auth=("service_role", self.auth_token),
+                extra_headers={
+                    "Prefer": "resolution=merge-duplicates,return=representation"
+                },
+                timeout=self.timeout,
+            )
+        except SupabaseHTTPError as exc:
+            raise EventLogTransportError(
+                f"Supabase sync_bookmarks upsert failed: {exc}"
+            ) from exc
+        row = response[0] if isinstance(response, list) and response else response
+        if not isinstance(row, dict):
+            raise EventLogTransportError(
+                "Supabase sync_bookmarks upsert returned a non-object response"
+            )
+        return dict(row)
+
+    def read_timeline_metadata(
+        self,
+        *,
+        timeline_id: str,
+    ) -> TimelineMetadataPreflight:
+        return read_timeline_metadata_preflight(
+            supabase_url=self.supabase_url,
+            auth_token=self.auth_token,
+            timeline_id=timeline_id,
+            timeout=self.timeout,
+        )
 
     def _append_batch(
         self,
@@ -374,6 +518,242 @@ class LiveSupabaseAppendTransport:
         return value
 
 
+def read_timeline_metadata_preflight(
+    *,
+    supabase_url: str,
+    auth_token: str,
+    timeline_id: str,
+    timeout: float = 60.0,
+) -> TimelineMetadataPreflight:
+    """Read timeline row + head metadata with classified failure reasons."""
+
+    timeline_url = (
+        f"{supabase_url.rstrip('/')}/rest/v1/timelines"
+        f"?select=id,project_id,user_id&id=eq.{quote(timeline_id, safe='')}&limit=1"
+    )
+    head_url = (
+        f"{supabase_url.rstrip('/')}/rest/v1/timeline_events"
+        f"?select=event_id,version,hash&timeline_id=eq.{quote(timeline_id, safe='')}"
+        "&order=version.desc&limit=1"
+    )
+    try:
+        timeline_rows = get_json(
+            timeline_url,
+            auth=("service_role", auth_token),
+            timeout=timeout,
+        )
+        if not isinstance(timeline_rows, list):
+            return TimelineMetadataPreflight(
+                status="network_failure",
+                timeline_id=timeline_id,
+                detail="timeline metadata read returned a non-list payload",
+            )
+        if not timeline_rows:
+            return TimelineMetadataPreflight(
+                status="not_found",
+                timeline_id=timeline_id,
+            )
+        row = timeline_rows[0]
+        if not isinstance(row, dict):
+            return TimelineMetadataPreflight(
+                status="network_failure",
+                timeline_id=timeline_id,
+                detail="timeline metadata row was not an object",
+            )
+        head_rows = get_json(
+            head_url,
+            auth=("service_role", auth_token),
+            timeout=timeout,
+        )
+    except SupabaseHTTPError as exc:
+        status = "unauthorized" if exc.status in {401, 403} else "network_failure"
+        return TimelineMetadataPreflight(
+            status=status,
+            timeline_id=timeline_id,
+            detail=str(exc),
+        )
+
+    version = 0
+    event_count = 0
+    last_event_id: str | None = None
+    last_hash: str | None = None
+    if isinstance(head_rows, list) and head_rows:
+        head = head_rows[0]
+        if not isinstance(head, dict):
+            return TimelineMetadataPreflight(
+                status="network_failure",
+                timeline_id=timeline_id,
+                detail="timeline head row was not an object",
+            )
+        raw_version = head.get("version")
+        if not isinstance(raw_version, int) or isinstance(raw_version, bool):
+            return TimelineMetadataPreflight(
+                status="network_failure",
+                timeline_id=timeline_id,
+                detail="timeline head.version was not an integer",
+            )
+        version = raw_version
+        event_count = raw_version
+        raw_event_id = head.get("event_id")
+        raw_hash = head.get("hash")
+        if raw_event_id is not None and not isinstance(raw_event_id, str):
+            return TimelineMetadataPreflight(
+                status="network_failure",
+                timeline_id=timeline_id,
+                detail="timeline head.event_id was not a string",
+            )
+        if raw_hash is not None and not isinstance(raw_hash, str):
+            return TimelineMetadataPreflight(
+                status="network_failure",
+                timeline_id=timeline_id,
+                detail="timeline head.hash was not a string",
+            )
+        last_event_id = raw_event_id
+        last_hash = raw_hash
+
+    project_id = row.get("project_id")
+    user_id = row.get("user_id")
+    return TimelineMetadataPreflight(
+        status="exists",
+        timeline_id=timeline_id,
+        project_id=project_id if isinstance(project_id, str) else None,
+        user_id=user_id if isinstance(user_id, str) else None,
+        version=version,
+        event_count=event_count,
+        last_event_id=last_event_id,
+        last_hash=last_hash,
+    )
+
+
+def create_timeline_via_append_service(
+    *,
+    service_url: str,
+    bearer_token: str,
+    project_id: str,
+    user_id: str,
+    timeline_id: str,
+    config: dict[str, Any],
+    name: str,
+    timeout: float = 60.0,
+) -> AppendServiceCreateResult:
+    """Create a timeline through the append service and return its head metadata."""
+
+    endpoint = f"{service_url.rstrip('/')}/v1/timelines/create-with-config"
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(
+            {
+                "project_id": project_id,
+                "user_id": user_id,
+                "timeline_id": timeline_id,
+                "name": name,
+                "config": config,
+            }
+        ).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Authorization": f"Bearer {bearer_token}",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw_payload = response.read().decode("utf-8")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise EventLogTransportError(
+            f"append service create-with-config failed: HTTP {exc.code}: {detail}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise EventLogTransportError(
+            f"append service create-with-config failed: {exc.reason}"
+        ) from exc
+
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError as exc:
+        raise EventLogTransportError(
+            "append service create-with-config returned non-JSON payload"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise EventLogTransportError(
+            "append service create-with-config returned a non-object payload"
+        )
+    inserted_event_ids = payload.get("inserted_event_ids")
+    config_version = payload.get("config_version")
+    if not isinstance(inserted_event_ids, list) or not all(
+        isinstance(item, str) for item in inserted_event_ids
+    ):
+        raise EventLogTransportError(
+            "append service create-with-config missing inserted_event_ids"
+        )
+    if not isinstance(config_version, int) or isinstance(config_version, bool):
+        raise EventLogTransportError(
+            "append service create-with-config missing config_version"
+        )
+    head_version = 0
+    head_event_id: str | None = None
+    head_hash: str | None = None
+    db_head = payload.get("db_head")
+    if isinstance(db_head, dict):
+        raw_version = db_head.get("version")
+        raw_event_id = db_head.get("event_id")
+        raw_hash = db_head.get("hash")
+        if not isinstance(raw_version, int) or isinstance(raw_version, bool):
+            raise EventLogTransportError(
+                "append service create-with-config db_head.version must be an integer"
+            )
+        if raw_event_id is not None and not isinstance(raw_event_id, str):
+            raise EventLogTransportError(
+                "append service create-with-config db_head.event_id must be a string"
+            )
+        if raw_hash is not None and not isinstance(raw_hash, str):
+            raise EventLogTransportError(
+                "append service create-with-config db_head.hash must be a string"
+            )
+        head_version = raw_version
+        head_event_id = raw_event_id
+        head_hash = raw_hash
+    else:
+        events = payload.get("events")
+        if isinstance(events, list) and events:
+            last = events[-1]
+            if not isinstance(last, dict):
+                raise EventLogTransportError(
+                    "append service create-with-config returned a non-object event"
+                )
+            raw_version = last.get("version")
+            if not isinstance(raw_version, int) or isinstance(raw_version, bool):
+                raise EventLogTransportError(
+                    "append service create-with-config event missing version"
+                )
+            raw_event_id = last.get("event_id")
+            raw_hash = last.get("hash")
+            if raw_event_id is not None and not isinstance(raw_event_id, str):
+                raise EventLogTransportError(
+                    "append service create-with-config event_id must be a string"
+                )
+            if raw_hash is not None and not isinstance(raw_hash, str):
+                raise EventLogTransportError(
+                    "append service create-with-config hash must be a string"
+                )
+            head_version = raw_version
+            head_event_id = raw_event_id
+            head_hash = raw_hash
+    return AppendServiceCreateResult(
+        timeline_id=payload.get("timeline_id", timeline_id)
+        if isinstance(payload.get("timeline_id", timeline_id), str)
+        else timeline_id,
+        config_version=config_version,
+        inserted_event_ids=tuple(inserted_event_ids),
+        head_version=head_version,
+        head_event_id=head_event_id,
+        head_hash=head_hash,
+        raw_payload=payload,
+    )
+
+
 class SupabaseBackend:
     """Opt-in Supabase backend with a mocked-transport contract seam.
 
@@ -541,6 +921,72 @@ class SupabaseBackend:
                 "SupabaseBackend.repair_erasure transport returned a non-object response"
             )
         return raw
+
+    def write_divergence(
+        self,
+        *,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        spoke_suffix: list[dict[str, object]],
+        hub_suffix: list[dict[str, object]],
+        chosen_side: str = "undecided",
+        artifact_pointer: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        transport = self._resolve_append_transport()
+        raw = transport.write_divergence(
+            timeline_id=self.timeline_id,
+            spoke=spoke,
+            spoke_version=spoke_version,
+            spoke_hash=spoke_hash,
+            spoke_event_id=spoke_event_id,
+            hub_version=hub_version,
+            hub_hash=hub_hash,
+            hub_event_id=hub_event_id,
+            spoke_suffix=spoke_suffix,
+            hub_suffix=hub_suffix,
+            chosen_side=chosen_side,
+            artifact_pointer=artifact_pointer,
+        )
+        if not isinstance(raw, dict):
+            raise EventLogTransportError(
+                "SupabaseBackend.write_divergence transport returned a non-object response"
+            )
+        return dict(raw)
+
+    def upsert_bookmark(
+        self,
+        *,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        synced_at: str | None = None,
+    ) -> dict[str, object]:
+        transport = self._resolve_append_transport()
+        raw = transport.upsert_bookmark(
+            timeline_id=self.timeline_id,
+            spoke=spoke,
+            spoke_version=spoke_version,
+            spoke_hash=spoke_hash,
+            spoke_event_id=spoke_event_id,
+            hub_version=hub_version,
+            hub_hash=hub_hash,
+            hub_event_id=hub_event_id,
+            synced_at=synced_at,
+        )
+        if not isinstance(raw, dict):
+            raise EventLogTransportError(
+                "SupabaseBackend.upsert_bookmark transport returned a non-object response"
+            )
+        return dict(raw)
 
     def _resolve_append_transport(self) -> SupabaseEventLogTransport | LiveSupabaseAppendTransport:
         if self.transport is not None:

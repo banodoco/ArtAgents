@@ -32,7 +32,10 @@ and exclude the top-level `hash` field from the hashed form.
   `event_count`, and `version`
 - `assembly.identity.json`: durable identity/provenance sidecar containing the
   UUID `timeline_id`, ULID `timeline_ulid`, backend marker, provenance marker,
-  and creation/import metadata
+  and creation/import metadata.  SD1: ``source_timeline_id`` is audit provenance
+  only and may equal ``timeline_id``.  Callers MUST use explicit ``provenance``
+  and ``backend`` fields, NOT infer imported/remote identity from
+  ``timeline_id != source_timeline_id``.
 
 Writer contract:
 

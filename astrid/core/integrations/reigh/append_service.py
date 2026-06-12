@@ -23,8 +23,15 @@ from astrid.core.integrations.reigh.worker_jwt import (
 )
 from astrid.core.timeline.eventlog.supabase import LiveSupabaseAppendTransport
 from astrid.core.timeline.eventlog.types import EventLogStaleVersionError, EventLogTransportError
+from astrid.core.timeline.sync_state import (
+    HeadSnapshot,
+    SyncBookmark,
+    SyncStateError,
+    compare_head_to_bookmark,
+)
 from astrid.core.timeline.events.schema import TimelineActor
 from astrid.core.timeline.events.schema.payloads._base import TimelineImportSource
+from astrid.core.util.time import utc_now_seconds
 
 
 DEFAULT_INTERNAL_TOKEN_ENV = "REIGH_APPEND_SERVICE_INTERNAL_TOKEN"
@@ -114,12 +121,18 @@ class AppendService:
             ) from exc
         except EventLogTransportError as exc:
             raise AppendServiceError(502, "append_failed", str(exc)) from exc
+        head = _head_snapshot_from_batch_events(result.batch.to_append_json())
+        self._upsert_app_bookmark(
+            timeline_id=timeline_id,
+            head=head,
+        )
 
         return {
             "timeline_id": timeline_id,
             "config_version": result.config_version,
             "inserted_event_ids": list(result.inserted_event_ids),
             "events": result.batch.to_append_json(),
+            "db_head": _head_snapshot_to_json(head),
         }
 
     def create_with_config(self, *, body: dict[str, Any], headers: Any) -> dict[str, Any]:
@@ -196,12 +209,128 @@ class AppendService:
                 raise AppendServiceError(502, "registry_append_failed", str(exc)) from exc
             inserted_ids.extend(registry_result.inserted_event_ids)
             config_version = registry_result.config_version
+            head = _head_snapshot_from_batch_events(registry_result.batch.to_append_json())
+        else:
+            head = _head_snapshot_from_batch_events(batch.to_append_json())
+        self._upsert_app_bookmark(
+            timeline_id=created["timeline_id"],
+            head=head,
+        )
 
         return {
             "timeline_id": created["timeline_id"],
             "config_version": config_version,
             "inserted_event_ids": inserted_ids,
             "events": batch.to_append_json(),
+            "db_head": _head_snapshot_to_json(head),
+        }
+
+    def record_app_bookmark(
+        self,
+        *,
+        timeline_id: str,
+        body: dict[str, Any],
+        headers: Any,
+    ) -> dict[str, Any]:
+        caller = self._authenticate(headers)
+        self._authorize_existing_timeline(timeline_id, caller)
+        head = _require_head_snapshot(body.get("db_head"), "db_head")
+        synced_at = _optional_str(body.get("synced_at"), "synced_at") or utc_now_seconds()
+        bookmark = SyncBookmark.from_heads(
+            timeline_id=timeline_id,
+            spoke="app",
+            spoke_head=head,
+            hub_head=head,
+            synced_at=synced_at,
+        )
+        self._upsert_bookmark(bookmark)
+        return {
+            "timeline_id": timeline_id,
+            "bookmark": bookmark.to_json_obj(),
+            "db_head": _head_snapshot_to_json(head),
+        }
+
+    def record_app_divergence(
+        self,
+        *,
+        timeline_id: str,
+        body: dict[str, Any],
+        headers: Any,
+    ) -> dict[str, Any]:
+        caller = self._authenticate(headers)
+        owner = self._authorize_existing_timeline(timeline_id, caller)
+        bookmark = self._read_sync_bookmark(timeline_id=timeline_id, spoke="app")
+        if bookmark is None:
+            raise AppendServiceError(
+                409,
+                "bookmark_missing",
+                "app divergence requires an existing app sync bookmark",
+            )
+        db_head = _require_head_snapshot(body.get("db_head"), "db_head")
+        db_relation = compare_head_to_bookmark(db_head, bookmark.hub_head())
+        if db_relation != "advanced":
+            raise AppendServiceError(
+                409,
+                "not_divergent",
+                f"db head must be advanced relative to the bookmark (got {db_relation})",
+            )
+
+        config = _require_object(body.get("config"), "config")
+        asset_registry = _optional_object(body.get("asset_registry"), "asset_registry")
+        actor = self._actor_from_body(body, caller=caller, owner_user_id=owner["user_id"])
+        source = _coerce_source(body.get("source"))
+        txn_id = _optional_str(body.get("txn_id"), "txn_id")
+        chosen_side = _optional_str(body.get("chosen_side"), "chosen_side") or "undecided"
+        if chosen_side not in {"spoke", "hub", "undecided"}:
+            raise AppendServiceError(
+                400,
+                "invalid_chosen_side",
+                "chosen_side must be spoke, hub, or undecided",
+            )
+        artifact_pointer = _optional_object(body.get("artifact_pointer"), "artifact_pointer")
+        batch = config_to_events(
+            config,
+            asset_registry,
+            timeline_id,
+            bookmark.spoke_hash,
+            bookmark.spoke_version + 1,
+            actor,
+            source,
+            expected_version=bookmark.spoke_version,
+            txn_id=txn_id,
+        )
+        app_head = _head_snapshot_from_batch_events(batch.to_append_json())
+        app_relation = compare_head_to_bookmark(app_head, bookmark.spoke_head())
+        if app_relation != "advanced":
+            raise AppendServiceError(
+                409,
+                "not_divergent",
+                f"app head must be advanced relative to the bookmark (got {app_relation})",
+            )
+
+        row = self._transport().write_divergence(
+            timeline_id=timeline_id,
+            spoke="app",
+            spoke_version=app_head.version,
+            spoke_hash=app_head.last_hash,
+            spoke_event_id=app_head.last_event_id,
+            hub_version=db_head.version,
+            hub_hash=db_head.last_hash,
+            hub_event_id=db_head.last_event_id,
+            spoke_suffix=batch.to_append_json(),
+            hub_suffix=self._read_timeline_suffix(
+                timeline_id=timeline_id,
+                after_version=bookmark.hub_version,
+                through_version=db_head.version,
+            ),
+            chosen_side=chosen_side,
+            artifact_pointer=artifact_pointer,
+        )
+        return {
+            "timeline_id": timeline_id,
+            "db_head": _head_snapshot_to_json(db_head),
+            "app_head": _head_snapshot_to_json(app_head),
+            "divergence": row,
         }
 
     def _authenticate(self, headers: Any) -> AuthorizedCaller:
@@ -279,6 +408,83 @@ class AppendService:
             raise AppendServiceError(502, "authorization_read_failed", "Supabase read returned non-list")
         return [dict(item) for item in payload if isinstance(item, dict)]
 
+    def _read_sync_bookmark(self, *, timeline_id: str, spoke: str) -> SyncBookmark | None:
+        rows = self._service_read(
+            "sync_bookmarks",
+            (
+                "select=timeline_id,spoke,spoke_version,spoke_hash,spoke_event_id,"
+                "hub_version,hub_hash,hub_event_id,synced_at"
+                f"&timeline_id=eq.{quote(timeline_id, safe='')}"
+                f"&spoke=eq.{quote(spoke, safe='')}"
+                "&limit=1"
+            ),
+        )
+        if not rows:
+            return None
+        try:
+            return SyncBookmark.from_dict(rows[0])
+        except SyncStateError as exc:
+            raise AppendServiceError(502, "bookmark_read_failed", str(exc)) from exc
+
+    def _read_timeline_suffix(
+        self,
+        *,
+        timeline_id: str,
+        after_version: int,
+        through_version: int,
+    ) -> list[dict[str, object]]:
+        rows = self._service_read(
+            "timeline_events",
+            (
+                "select=event_id,version,kind,hash,prev_hash,ts,actor,payload,"
+                "source_backend,source_timeline_id,source_event_id,source_version,"
+                "source_hash,idempotency_key,txn_id,erasure"
+                f"&timeline_id=eq.{quote(timeline_id, safe='')}"
+                f"&version=gt.{after_version}"
+                f"&version=lte.{through_version}"
+                "&order=version.asc"
+            ),
+        )
+        return [dict(row) for row in rows]
+
+    def _transport(self) -> LiveSupabaseAppendTransport:
+        return LiveSupabaseAppendTransport(
+            supabase_url=self.config.supabase_url,
+            auth_token=self.config.service_role_key,
+            timeout=self.config.timeout,
+        )
+
+    def _upsert_app_bookmark(
+        self,
+        *,
+        timeline_id: str,
+        head: HeadSnapshot,
+    ) -> None:
+        self._upsert_bookmark(
+            SyncBookmark.from_heads(
+                timeline_id=timeline_id,
+                spoke="app",
+                spoke_head=head,
+                hub_head=head,
+            )
+        )
+
+    def _upsert_bookmark(self, bookmark: SyncBookmark) -> None:
+        try:
+            self._transport().upsert_bookmark(
+                timeline_id=bookmark.timeline_id,
+                spoke=bookmark.spoke,
+                spoke_version=bookmark.spoke_version,
+                spoke_hash=bookmark.spoke_hash,
+                spoke_event_id=bookmark.spoke_event_id,
+                hub_version=bookmark.hub_version,
+                hub_hash=bookmark.hub_hash,
+                hub_event_id=bookmark.hub_event_id,
+                synced_at=bookmark.synced_at,
+            )
+        except EventLogTransportError as exc:
+            raise AppendServiceError(502, "bookmark_upsert_failed", str(exc)) from exc
+
     def _actor_from_body(
         self,
         body: dict[str, Any],
@@ -348,6 +554,32 @@ def make_append_service_handler(*, service: AppendService):
                     return
                 if parts == ["v1", "timelines", "create-with-config"]:
                     result = service.create_with_config(body=payload, headers=self.headers)
+                    self._send_json(200, result)
+                    return
+                if (
+                    len(parts) == 4
+                    and parts[0] == "v1"
+                    and parts[1] == "timelines"
+                    and parts[3] == "app-bookmark"
+                ):
+                    result = service.record_app_bookmark(
+                        timeline_id=parts[2],
+                        body=payload,
+                        headers=self.headers,
+                    )
+                    self._send_json(200, result)
+                    return
+                if (
+                    len(parts) == 4
+                    and parts[0] == "v1"
+                    and parts[1] == "timelines"
+                    and parts[3] == "app-divergence"
+                ):
+                    result = service.record_app_divergence(
+                        timeline_id=parts[2],
+                        body=payload,
+                        headers=self.headers,
+                    )
                     self._send_json(200, result)
                     return
                 raise AppendServiceError(404, "not_found", f"unknown POST route: {path}")
@@ -456,6 +688,61 @@ def _optional_int(value: object, field: str) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise AppendServiceError(400, f"invalid_{field}", f"{field} must be an integer")
     return value
+
+
+def _head_snapshot_from_batch_events(events: list[dict[str, Any]]) -> HeadSnapshot:
+    if not events:
+        return HeadSnapshot(version=0, last_hash=None, last_event_id=None)
+    last = events[-1]
+    if not isinstance(last, dict):
+        raise AppendServiceError(502, "invalid_response_head", "append batch event must be an object")
+    version = last.get("version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise AppendServiceError(502, "invalid_response_head", "append batch event version must be an integer")
+    raw_hash = last.get("hash")
+    raw_event_id = last.get("event_id")
+    if raw_hash is not None and not isinstance(raw_hash, str):
+        raise AppendServiceError(502, "invalid_response_head", "append batch event hash must be a string")
+    if raw_event_id is not None and not isinstance(raw_event_id, str):
+        raise AppendServiceError(502, "invalid_response_head", "append batch event_id must be a string")
+    try:
+        return HeadSnapshot(
+            version=version,
+            last_hash=raw_hash,
+            last_event_id=raw_event_id,
+        )
+    except SyncStateError as exc:
+        raise AppendServiceError(502, "invalid_response_head", str(exc)) from exc
+
+
+def _require_head_snapshot(value: object, field: str) -> HeadSnapshot:
+    if not isinstance(value, dict):
+        raise AppendServiceError(400, f"invalid_{field}", f"{field} must be a JSON object")
+    version = value.get("version")
+    raw_hash = value.get("hash")
+    raw_event_id = value.get("event_id")
+    if not isinstance(version, int) or isinstance(version, bool):
+        raise AppendServiceError(400, f"invalid_{field}", f"{field}.version must be an integer")
+    if raw_hash is not None and not isinstance(raw_hash, str):
+        raise AppendServiceError(400, f"invalid_{field}", f"{field}.hash must be a string or null")
+    if raw_event_id is not None and not isinstance(raw_event_id, str):
+        raise AppendServiceError(400, f"invalid_{field}", f"{field}.event_id must be a string or null")
+    try:
+        return HeadSnapshot(
+            version=version,
+            last_hash=raw_hash,
+            last_event_id=raw_event_id,
+        )
+    except SyncStateError as exc:
+        raise AppendServiceError(400, f"invalid_{field}", str(exc)) from exc
+
+
+def _head_snapshot_to_json(head: HeadSnapshot) -> dict[str, object]:
+    return {
+        "version": head.version,
+        "hash": head.last_hash,
+        "event_id": head.last_event_id,
+    }
 
 
 __all__ = [

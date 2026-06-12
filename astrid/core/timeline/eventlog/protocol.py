@@ -53,6 +53,37 @@ class SupabaseEventLogTransport(Protocol):
         policy_ref: str | None = None,
     ) -> object: ...
 
+    def write_divergence(
+        self,
+        *,
+        timeline_id: str,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        spoke_suffix: list[dict[str, object]],
+        hub_suffix: list[dict[str, object]],
+        chosen_side: str = "undecided",
+        artifact_pointer: dict[str, object] | None = None,
+    ) -> object: ...
+
+    def upsert_bookmark(
+        self,
+        *,
+        timeline_id: str,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        synced_at: str | None = None,
+    ) -> object: ...
+
 
 class EventLogBackend(Protocol):
     """Storage backend for one timeline event stream.

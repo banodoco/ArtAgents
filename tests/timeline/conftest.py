@@ -38,6 +38,11 @@ class FakeSupabaseTransport:
     enforces the event hash chain + ``expected_version`` CAS semantics
     that the backend contract requires.
 
+    Also provides deterministic in-memory storage for sync bookmarks
+    (keyed by ``(timeline_id, spoke)``) and divergence log entries so
+    transfer tests can exercise bookmark/divergence flows without a
+    real Supabase instance.
+
     No Supabase credentials are needed — this is a pure in-memory
     contract double suitable for deterministic unit tests.
     """
@@ -45,6 +50,8 @@ class FakeSupabaseTransport:
     def __init__(self) -> None:
         self._streams: dict[str, list[TimelineEvent]] = {}
         self._idem_registry: dict[str, str] = {}
+        self._bookmarks: dict[tuple[str, str], dict[str, object]] = {}
+        self._divergence_log: dict[str, list[dict[str, object]]] = {}
 
     # ------------------------------------------------------------------
     # Public transport surface (matches SupabaseEventLogTransport)
@@ -428,6 +435,176 @@ class FakeSupabaseTransport:
     def stream_count(self, timeline_id: str) -> int:
         """Return the number of stored events for *timeline_id*."""
         return len(self._streams.get(timeline_id, []))
+
+    # ------------------------------------------------------------------
+    # Sync bookmark storage (matches public.sync_bookmarks row shape)
+    # ------------------------------------------------------------------
+
+    def upsert_bookmark(
+        self,
+        *,
+        timeline_id: str,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        synced_at: str,
+    ) -> dict[str, object]:
+        """Insert or overwrite a sync bookmark keyed by ``(timeline_id, spoke)``.
+
+        Returns the stored bookmark dict matching the DB row shape.
+        Validates the same hash-consistency rules as the DB schema:
+        zero version → null hash/event_id; non-zero → both required.
+        """
+        _validate_bookmark_side(spoke_version, spoke_hash, spoke_event_id, "spoke")
+        _validate_bookmark_side(hub_version, hub_hash, hub_event_id, "hub")
+        if spoke not in ("local", "app"):
+            raise ValueError(f"bookmark.spoke must be 'local' or 'app', got {spoke!r}")
+
+        row: dict[str, object] = {
+            "timeline_id": timeline_id,
+            "spoke": spoke,
+            "spoke_version": spoke_version,
+            "spoke_hash": spoke_hash,
+            "spoke_event_id": spoke_event_id,
+            "hub_version": hub_version,
+            "hub_hash": hub_hash,
+            "hub_event_id": hub_event_id,
+            "synced_at": synced_at,
+        }
+        self._bookmarks[(timeline_id, spoke)] = row
+        return dict(row)
+
+    def read_bookmark(
+        self, *, timeline_id: str, spoke: str
+    ) -> dict[str, object] | None:
+        """Return the bookmark for *timeline_id* and *spoke*, or ``None``."""
+        row = self._bookmarks.get((timeline_id, spoke))
+        return dict(row) if row is not None else None
+
+    def list_bookmarks(
+        self, *, timeline_id: str
+    ) -> list[dict[str, object]]:
+        """Return all bookmarks for *timeline_id* (any spoke)."""
+        return [
+            dict(row)
+            for (tid, _spoke), row in self._bookmarks.items()
+            if tid == timeline_id
+        ]
+
+    def bookmark_count(self, timeline_id: str) -> int:
+        """Return the number of bookmarks stored for *timeline_id*."""
+        return sum(1 for (tid, _) in self._bookmarks if tid == timeline_id)
+
+    # ------------------------------------------------------------------
+    # Divergence log storage (matches public.divergence_log row shape)
+    # ------------------------------------------------------------------
+
+    def write_divergence(
+        self,
+        *,
+        timeline_id: str,
+        spoke: str,
+        spoke_version: int,
+        spoke_hash: str | None,
+        spoke_event_id: str | None,
+        hub_version: int,
+        hub_hash: str | None,
+        hub_event_id: str | None,
+        spoke_suffix: list[dict[str, object]],
+        hub_suffix: list[dict[str, object]],
+        chosen_side: str = "undecided",
+        artifact_pointer: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Append a divergence log entry and return it.
+
+        Generates a deterministic entry ID from the log length so tests
+        can assert on the returned row without external randomness.
+        """
+        from astrid.core.util.time import utc_now_iso
+
+        _validate_bookmark_side(spoke_version, spoke_hash, spoke_event_id, "spoke")
+        _validate_bookmark_side(hub_version, hub_hash, hub_event_id, "hub")
+        if spoke not in ("local", "app"):
+            raise ValueError(f"divergence.spoke must be 'local' or 'app', got {spoke!r}")
+        if chosen_side not in ("spoke", "hub", "undecided"):
+            raise ValueError(
+                f"divergence.chosen_side must be 'spoke', 'hub', or 'undecided', "
+                f"got {chosen_side!r}"
+            )
+        if not isinstance(spoke_suffix, list):
+            raise ValueError("divergence.spoke_suffix must be a list")
+        if not isinstance(hub_suffix, list):
+            raise ValueError("divergence.hub_suffix must be a list")
+
+        entries = self._divergence_log.setdefault(timeline_id, [])
+        entry_id = f"div-{timeline_id[:8]}-{len(entries):04d}"
+        now = utc_now_iso()
+        resolved_at = now if chosen_side in ("spoke", "hub") else None
+
+        row: dict[str, object] = {
+            "id": entry_id,
+            "timeline_id": timeline_id,
+            "spoke": spoke,
+            "spoke_version": spoke_version,
+            "spoke_hash": spoke_hash,
+            "spoke_event_id": spoke_event_id,
+            "hub_version": hub_version,
+            "hub_hash": hub_hash,
+            "hub_event_id": hub_event_id,
+            "spoke_suffix": spoke_suffix,
+            "hub_suffix": hub_suffix,
+            "chosen_side": chosen_side,
+            "artifact_pointer": artifact_pointer,
+            "created_at": now,
+            "resolved_at": resolved_at,
+        }
+        entries.append(row)
+        return dict(row)
+
+    def read_divergence_log(
+        self, *, timeline_id: str, spoke: str | None = None
+    ) -> list[dict[str, object]]:
+        """Return divergence entries for *timeline_id*, optionally filtered by *spoke*."""
+        entries = self._divergence_log.get(timeline_id, [])
+        if spoke is not None:
+            entries = [e for e in entries if e.get("spoke") == spoke]
+        return [dict(e) for e in entries]
+
+    def divergence_count(self, timeline_id: str) -> int:
+        """Return the number of divergence entries stored for *timeline_id*."""
+        return len(self._divergence_log.get(timeline_id, []))
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers for bookmark/divergence side consistency
+# ---------------------------------------------------------------------------
+
+
+def _validate_bookmark_side(
+    version: int,
+    last_hash: str | None,
+    last_event_id: str | None,
+    label: str,
+) -> None:
+    """Validate the same head-consistency rules as the DB constraints."""
+    if version < 0:
+        raise ValueError(f"bookmark.{label}_version must be >= 0, got {version}")
+    if version == 0:
+        if last_hash is not None or last_event_id is not None:
+            raise ValueError(
+                f"bookmark.{label}_hash and {label}_event_id must be None "
+                f"when {label}_version is 0"
+            )
+        return
+    if not last_hash or not last_event_id:
+        raise ValueError(
+            f"bookmark.{label}_hash and {label}_event_id are required "
+            f"when {label}_version is non-zero"
+        )
 
 
 # ---------------------------------------------------------------------------
