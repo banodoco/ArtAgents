@@ -10,17 +10,16 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-from astrid.core._shared.jsonio import write_json_atomic
 from astrid.core.foundation.project_paths import validate_project_slug
 from astrid.core.integrations.reigh.local_bridge import (
     BridgeTimelineRecord,
-    bridge_registry_path,
     find_bridge_timeline,
     list_bridge_projects,
     list_bridge_timelines,
     load_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
+    save_bridge_registry,
     save_bridge_timeline,
 )
 from astrid.core.timeline.paths import validate_timeline_slug, validate_timeline_ulid
@@ -359,18 +358,21 @@ def make_local_bridge_handler(*, projects_root: Path):
                 if not isinstance(body.get("assets"), dict):
                     self._send_error(400, "invalid_registry", "body must contain an 'assets' object")
                     return
-                registry_path = bridge_registry_path(project_slug, timeline_ref, root=projects_root)
-                if registry_path is None:
-                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
-                    return
                 # Normalize: ensure all asset entries are dicts with string keys
                 normalized: dict[str, dict[str, Any]] = {}
                 for key, entry in body["assets"].items():
                     if not isinstance(key, str) or not isinstance(entry, dict):
                         continue
                     normalized[key] = dict(entry)
-                registry_payload: dict[str, Any] = {"assets": normalized}
-                write_json_atomic(registry_path, registry_payload)
+                registry_payload = save_bridge_registry(
+                    project_slug,
+                    timeline_ref,
+                    {"assets": normalized},
+                    root=projects_root,
+                )
+                if registry_payload is None:
+                    self._send_error(404, "timeline_not_found", f"timeline {timeline_ref!r} was not found")
+                    return
                 self._send_json(200, registry_payload)
                 return
 

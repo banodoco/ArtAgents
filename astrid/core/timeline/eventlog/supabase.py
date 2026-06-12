@@ -2,18 +2,376 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, is_dataclass
+import re
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any
+from urllib.parse import quote
+
+from astrid.core.integrations.reigh.event_construction import (
+    ReighEventBatch,
+    asset_registry_to_events,
+    config_to_events,
+)
+from astrid.core.integrations.reigh.supabase_client import (
+    SupabaseHTTPError,
+    get_json,
+    rpc,
+)
 
 from ..events.schema import TimelineActor, TimelineEvent
+from ..events.schema.payloads._base import TimelineImportSource
 from .protocol import SupabaseEventLogTransport
 from .types import (
     EventLogAuthRequiredError,
     EventLogHead,
     EventLogMissingConfigError,
+    EventLogStaleVersionError,
     EventLogTransportError,
     EventLogUnsupportedRpcError,
     EventLogVerification,
+    TimelineVersionConflict,
 )
+
+_VERSION_MISMATCH_RE = re.compile(r"expected\s+(\d+),\s+found\s+(\d+)", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class SupabaseAppendResult:
+    """Materialized result of one live Reigh append RPC call."""
+
+    batch: ReighEventBatch
+    config_version: int
+    inserted_event_ids: tuple[str, ...]
+
+    @property
+    def primary_event(self) -> TimelineEvent:
+        return self.batch.events[0].event
+
+
+@dataclass(frozen=True)
+class _TimelineTailState:
+    timeline_id: str
+    config: dict[str, Any]
+    config_version: int
+    asset_registry: dict[str, Any] | None
+    last_event_id: str | None
+    last_event_kind: str | None
+    last_hash: str | None
+    next_event_version: int
+
+
+class LiveSupabaseAppendTransport:
+    """Live transport for Reigh config/asset-registry appends via Supabase RPC."""
+
+    def __init__(
+        self,
+        *,
+        supabase_url: str,
+        auth_token: str,
+        rpc_append_name: str = "append_timeline_event",
+        timeout: float = 60.0,
+    ) -> None:
+        self.supabase_url = supabase_url
+        self.auth_token = auth_token
+        self.rpc_append_name = rpc_append_name
+        self.timeout = timeout
+
+    def append_event(
+        self,
+        *,
+        timeline_id: str,
+        kind: str,
+        payload: dict[str, object],
+        actor: TimelineActor,
+        expected_version: int | None = None,
+        txn_id: str | None = None,
+    ) -> TimelineEvent:
+        if kind == "timeline.config_replaced":
+            return self.append_config_replaced(
+                timeline_id=timeline_id,
+                config=self._require_object(payload.get("config"), field="payload.config"),
+                asset_registry=self._optional_object(
+                    payload.get("asset_registry"),
+                    field="payload.asset_registry",
+                ),
+                actor=actor,
+                source=self._coerce_source(payload.get("source")),
+                expected_version=expected_version,
+                txn_id=txn_id,
+            ).primary_event
+        if kind == "timeline.asset_registry_replaced":
+            return self.append_asset_registry_replaced(
+                timeline_id=timeline_id,
+                asset_registry=self._require_object(
+                    payload.get("registry"),
+                    field="payload.registry",
+                ),
+                actor=actor,
+                source=self._coerce_source(payload.get("source")),
+                expected_version=expected_version,
+                txn_id=txn_id,
+            ).primary_event
+        raise EventLogUnsupportedRpcError(
+            "Supabase live append transport only supports "
+            "timeline.config_replaced and timeline.asset_registry_replaced"
+        )
+
+    def append_config_replaced(
+        self,
+        *,
+        timeline_id: str,
+        config: dict[str, Any],
+        asset_registry: dict[str, Any] | None,
+        actor: TimelineActor,
+        source: TimelineImportSource = "supabase_config",
+        expected_version: int | None = None,
+        txn_id: str | None = None,
+    ) -> SupabaseAppendResult:
+        state = self._load_tail_state(timeline_id)
+        cas_version = state.config_version if expected_version is None else expected_version
+        batch = config_to_events(
+            config,
+            asset_registry,
+            timeline_id,
+            state.last_hash,
+            state.next_event_version,
+            actor,
+            source,
+            expected_version=cas_version,
+            txn_id=txn_id,
+        )
+        return self._append_batch(timeline_id=timeline_id, batch=batch, expected_version=cas_version)
+
+    def append_asset_registry_replaced(
+        self,
+        *,
+        timeline_id: str,
+        asset_registry: dict[str, Any],
+        actor: TimelineActor,
+        source: TimelineImportSource = "supabase_config",
+        expected_version: int | None = None,
+        txn_id: str | None = None,
+    ) -> SupabaseAppendResult:
+        state = self._load_tail_state(timeline_id)
+        cas_version = state.config_version if expected_version is None else expected_version
+        batch = asset_registry_to_events(
+            asset_registry,
+            state.config,
+            timeline_id,
+            state.last_hash,
+            state.next_event_version,
+            actor,
+            source,
+            expected_version=cas_version,
+            txn_id=txn_id,
+        )
+        return self._append_batch(timeline_id=timeline_id, batch=batch, expected_version=cas_version)
+
+    def _append_batch(
+        self,
+        *,
+        timeline_id: str,
+        batch: ReighEventBatch,
+        expected_version: int,
+    ) -> SupabaseAppendResult:
+        try:
+            response = rpc(
+                self.rpc_append_name,
+                {
+                    "p_timeline_id": timeline_id,
+                    "p_events": batch.to_append_json(),
+                    "p_projected_config": batch.projected_config,
+                    "p_expected_config_version": expected_version,
+                    "p_projected_asset_registry": batch.projected_asset_registry,
+                },
+                supabase_url=self.supabase_url,
+                auth=("service_role", self.auth_token),
+                timeout=self.timeout,
+            )
+        except SupabaseHTTPError as exc:
+            if self._looks_like_cas_conflict(exc):
+                raise self._translate_cas_conflict(timeline_id, expected_version, exc) from exc
+            raise EventLogTransportError(
+                f"Supabase append RPC {self.rpc_append_name} failed: {exc}"
+            ) from exc
+        parsed = self._coerce_rpc_result(response)
+        return SupabaseAppendResult(
+            batch=batch,
+            config_version=parsed["config_version"],
+            inserted_event_ids=parsed["inserted_event_ids"],
+        )
+
+    def _load_tail_state(self, timeline_id: str) -> _TimelineTailState:
+        timeline_url = (
+            f"{self.supabase_url.rstrip('/')}/rest/v1/timelines"
+            f"?select=id,config,config_version,asset_registry&id=eq.{quote(timeline_id, safe='')}"
+            "&limit=1"
+        )
+        tail_url = (
+            f"{self.supabase_url.rstrip('/')}/rest/v1/timeline_events"
+            f"?select=event_id,version,hash,kind&timeline_id=eq.{quote(timeline_id, safe='')}"
+            "&order=version.desc&limit=1"
+        )
+        try:
+            timeline_rows = get_json(
+                timeline_url,
+                auth=("service_role", self.auth_token),
+                timeout=self.timeout,
+            )
+            tail_rows = get_json(
+                tail_url,
+                auth=("service_role", self.auth_token),
+                timeout=self.timeout,
+            )
+        except SupabaseHTTPError as exc:
+            raise EventLogTransportError(
+                f"Supabase append transport failed to read timeline state: {exc}"
+            ) from exc
+
+        if not isinstance(timeline_rows, list) or not timeline_rows or not isinstance(timeline_rows[0], dict):
+            raise EventLogTransportError(
+                f"Supabase append transport could not find timeline {timeline_id}"
+            )
+        row = timeline_rows[0]
+        config = row.get("config")
+        if not isinstance(config, dict):
+            raise EventLogTransportError(
+                f"Supabase append transport timeline {timeline_id} is missing a config object"
+            )
+        config_version = row.get("config_version")
+        if not isinstance(config_version, int) or isinstance(config_version, bool):
+            raise EventLogTransportError(
+                f"Supabase append transport timeline {timeline_id} is missing config_version"
+            )
+        asset_registry_raw = row.get("asset_registry")
+        asset_registry = self._optional_object(asset_registry_raw, field="timeline.asset_registry")
+
+        last_event_id: str | None = None
+        last_event_kind: str | None = None
+        last_hash: str | None = None
+        next_event_version = 1
+        if isinstance(tail_rows, list) and tail_rows:
+            tail = tail_rows[0]
+            if not isinstance(tail, dict):
+                raise EventLogTransportError("Supabase append transport tail row must be an object")
+            version = tail.get("version")
+            if not isinstance(version, int) or isinstance(version, bool):
+                raise EventLogTransportError("Supabase append transport tail.version must be an integer")
+            next_event_version = version + 1
+            last_event_id = self._optional_str(tail.get("event_id"))
+            last_event_kind = self._optional_str(tail.get("kind"))
+            last_hash = self._optional_str(tail.get("hash"))
+
+        return _TimelineTailState(
+            timeline_id=timeline_id,
+            config=config,
+            config_version=config_version,
+            asset_registry=asset_registry,
+            last_event_id=last_event_id,
+            last_event_kind=last_event_kind,
+            last_hash=last_hash,
+            next_event_version=next_event_version,
+        )
+
+    def _translate_cas_conflict(
+        self,
+        timeline_id: str,
+        expected_version: int,
+        exc: SupabaseHTTPError,
+    ) -> EventLogStaleVersionError:
+        state = self._safe_load_tail_state(timeline_id)
+        current_version = state.config_version if state is not None else expected_version
+        match = _VERSION_MISMATCH_RE.search(exc.body or "")
+        if match is not None:
+            current_version = int(match.group(2))
+        return EventLogStaleVersionError(
+            TimelineVersionConflict(
+                timeline_id=timeline_id,
+                expected_version=expected_version,
+                current_version=current_version,
+                last_event_id=state.last_event_id if state is not None else None,
+                last_event_kind=state.last_event_kind if state is not None else None,
+                last_event_summary=(
+                    f"{state.last_event_kind}#{state.last_event_id}"
+                    if state is not None
+                    and state.last_event_kind is not None
+                    and state.last_event_id is not None
+                    else None
+                ),
+            )
+        )
+
+    def _safe_load_tail_state(self, timeline_id: str) -> _TimelineTailState | None:
+        try:
+            return self._load_tail_state(timeline_id)
+        except EventLogTransportError:
+            return None
+
+    def _looks_like_cas_conflict(self, exc: SupabaseHTTPError) -> bool:
+        if exc.status == 409:
+            return True
+        body = (exc.body or "").lower()
+        return any(
+            marker in body
+            for marker in (
+                "config_version mismatch",
+                "version_conflict",
+                "version conflict",
+                "expected_version",
+            )
+        )
+
+    def _coerce_rpc_result(self, response: object) -> dict[str, Any]:
+        row = response
+        if isinstance(response, list):
+            row = response[0] if response else None
+        if not isinstance(row, dict):
+            raise EventLogTransportError(
+                f"Supabase append RPC {self.rpc_append_name} returned a non-object response"
+            )
+        config_version = row.get("config_version")
+        inserted_ids = row.get("inserted_event_ids")
+        if not isinstance(config_version, int) or isinstance(config_version, bool):
+            raise EventLogTransportError(
+                f"Supabase append RPC {self.rpc_append_name} did not return config_version"
+            )
+        if not isinstance(inserted_ids, list) or not all(isinstance(item, str) for item in inserted_ids):
+            raise EventLogTransportError(
+                f"Supabase append RPC {self.rpc_append_name} did not return inserted_event_ids"
+            )
+        return {
+            "config_version": config_version,
+            "inserted_event_ids": tuple(inserted_ids),
+        }
+
+    def _coerce_source(self, raw: object) -> TimelineImportSource:
+        if raw is None:
+            return "supabase_config"
+        if raw in {"legacy_local", "supabase_config", "editor_save", "other"}:
+            return raw
+        raise EventLogTransportError(
+            "Supabase append transport source must be "
+            "legacy_local, supabase_config, editor_save, or other"
+        )
+
+    def _require_object(self, value: object, *, field: str) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise EventLogTransportError(f"{field} must be a JSON object")
+        return dict(value)
+
+    def _optional_object(self, value: object, *, field: str) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise EventLogTransportError(f"{field} must be a JSON object when present")
+        return dict(value)
+
+    def _optional_str(self, value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise EventLogTransportError("Supabase append transport expected a string field")
+        return value
 
 
 class SupabaseBackend:
@@ -63,7 +421,7 @@ class SupabaseBackend:
         txn_id: str | None = None,
     ) -> TimelineEvent:
         self._require_verified_human_subject(actor)
-        transport = self._require_transport(operation="append_event")
+        transport = self._resolve_append_transport()
         raw = transport.append_event(
             timeline_id=timeline_id,
             kind=kind,
@@ -183,6 +541,23 @@ class SupabaseBackend:
                 "SupabaseBackend.repair_erasure transport returned a non-object response"
             )
         return raw
+
+    def _resolve_append_transport(self) -> SupabaseEventLogTransport | LiveSupabaseAppendTransport:
+        if self.transport is not None:
+            return self.transport
+        if not self._has_config():
+            raise EventLogMissingConfigError(
+                "SupabaseBackend.append_event requires Supabase config or a mocked transport"
+            )
+        if not self.supabase_url or not self.auth_token:
+            raise EventLogMissingConfigError(
+                "SupabaseBackend.append_event requires both supabase_url and auth_token"
+            )
+        return LiveSupabaseAppendTransport(
+            supabase_url=self.supabase_url,
+            auth_token=self.auth_token,
+            rpc_append_name=self.rpc_append_name,
+        )
 
     def _require_transport(self, *, operation: str) -> SupabaseEventLogTransport:
         if self.transport is not None:

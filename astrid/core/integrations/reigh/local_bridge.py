@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from astrid.core._shared.jsonio import read_json
+from astrid.core._shared.jsonio import read_json, write_json_atomic
 from astrid.core.foundation.project_paths import (
     project_dir,
     resolve_projects_root,
@@ -25,8 +25,9 @@ from astrid.core.timeline.paths import (
 )
 from astrid.core.timeline.eventlog import LocalFsBackend
 from astrid.core.timeline.events.schema import TimelineActor
-from astrid.core.timeline.events.schema.payloads.config import TimelineConfigReplacedPayload
 from astrid.core.timeline.projection import regenerate_projection
+
+from .event_construction import asset_registry_to_events, config_to_events
 
 BRIDGE_CONFIG_VERSION = 1
 REIGH_LOCAL_EDITOR_ACTOR = TimelineActor(
@@ -144,12 +145,22 @@ def find_bridge_timeline(
     """Resolve a timeline by slug, ULID, or canonical UUID."""
     projects_root = resolve_bridge_projects_root(root=root)
     slug = validate_project_slug(project_slug)
+    project_payload = _read_project_payload(projects_root / slug / "project.json")
 
     found_ulid: str | None = None
     if _looks_like_uuid(timeline):
         found = find_timeline_by_event_stream_id(slug, timeline, root=projects_root)
         if found is not None:
             found_ulid = found[0]
+        else:
+            timelines_root = timelines_dir(slug, root=projects_root)
+            if timelines_root.is_dir():
+                for timeline_home in sorted(timelines_root.iterdir(), key=lambda item: item.name):
+                    if not timeline_home.is_dir():
+                        continue
+                    if _load_canonical_timeline_id(timeline_home, timeline_home.name) == timeline:
+                        found_ulid = timeline_home.name
+                        break
     else:
         try:
             found_ulid = validate_timeline_ulid(timeline)
@@ -173,7 +184,13 @@ def find_bridge_timeline(
     for row in list_bridge_timelines(slug, root=projects_root):
         if row.timeline_ulid == found_ulid:
             return row
-    return None
+    fallback_record = _load_bridge_timeline_record(
+        slug,
+        found_ulid,
+        project_payload=project_payload,
+        root=projects_root,
+    )
+    return fallback_record
 
 
 def load_bridge_timeline(
@@ -210,16 +227,25 @@ def save_bridge_timeline(
     if record is None:
         return None
 
-    payload = TimelineConfigReplacedPayload(config=config, source="editor_save")
     backend = LocalFsBackend(
         timeline_id=record.timeline_id,
         timeline_home=record.timeline_home,
     )
-    backend.append_event(
+    head = backend.head()
+    batch = config_to_events(
+        config,
+        None,
         record.timeline_id,
-        "timeline.config_replaced",
-        payload.to_json_obj(),
-        actor=REIGH_LOCAL_EDITOR_ACTOR,
+        head.last_hash,
+        head.version + 1,
+        REIGH_LOCAL_EDITOR_ACTOR,
+        "editor_save",
+        expected_version=head.version,
+    )
+    backend.append_prebuilt_events(
+        record.timeline_id,
+        [item.event for item in batch.events],
+        expected_version=head.version,
     )
     regenerated = regenerate_projection(
         record.timeline_id,
@@ -232,6 +258,51 @@ def save_bridge_timeline(
         registry=load_bridge_registry(project_slug, record.timeline_ulid, root=root),
         config_version=backend.head().version,
     )
+
+
+def save_bridge_registry(
+    project_slug: str,
+    timeline: str,
+    registry: dict[str, Any],
+    *,
+    root: str | Path | None = None,
+) -> dict[str, Any] | None:
+    """Append one registry replacement event, refresh projections, and persist the sidecar."""
+    record = find_bridge_timeline(project_slug, timeline, root=root)
+    if record is None:
+        return None
+
+    backend = LocalFsBackend(
+        timeline_id=record.timeline_id,
+        timeline_home=record.timeline_home,
+    )
+    current_config = load_assembly_json_with_repair(record.timeline_home)
+    head = backend.head()
+    batch = asset_registry_to_events(
+        registry,
+        current_config,
+        record.timeline_id,
+        head.last_hash,
+        head.version + 1,
+        REIGH_LOCAL_EDITOR_ACTOR,
+        "editor_save",
+        expected_version=head.version,
+    )
+    backend.append_prebuilt_events(
+        record.timeline_id,
+        [item.event for item in batch.events],
+        expected_version=head.version,
+    )
+    regenerate_projection(
+        record.timeline_id,
+        backend,
+        timeline_home=record.timeline_home,
+    )
+    write_json_atomic(
+        record.timeline_home / "registry.json",
+        batch.projected_asset_registry or {"assets": {}},
+    )
+    return batch.projected_asset_registry or {"assets": {}}
 
 
 def _bridge_timeline_payload(
@@ -376,6 +447,40 @@ def _read_project_payload(path: Path) -> dict[str, Any]:
 
 
 def _read_registry_payload(path: Path) -> dict[str, Any]:
+    try:
+        payload = read_json(path)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _load_bridge_timeline_record(
+    project_slug: str,
+    timeline_ulid: str,
+    *,
+    project_payload: dict[str, Any],
+    root: str | Path | None = None,
+) -> BridgeTimelineRecord | None:
+    timeline_home = timeline_dir(project_slug, timeline_ulid, root=root)
+    raw_display = _read_display_payload(timeline_home / "display.json")
+    timeline_slug = raw_display.get("slug")
+    timeline_name = raw_display.get("name")
+    if not isinstance(timeline_slug, str) or not isinstance(timeline_name, str):
+        return None
+    timeline_id = _load_canonical_timeline_id(timeline_home, timeline_ulid)
+    default_timeline_id = project_payload.get("default_timeline_id")
+    return BridgeTimelineRecord(
+        project_slug=project_slug,
+        timeline_ulid=timeline_ulid,
+        timeline_id=timeline_id,
+        slug=timeline_slug,
+        name=timeline_name,
+        is_default=(default_timeline_id == timeline_ulid or default_timeline_id == timeline_id),
+        timeline_home=timeline_home,
+    )
+
+
+def _read_display_payload(path: Path) -> dict[str, Any]:
     try:
         payload = read_json(path)
     except Exception:

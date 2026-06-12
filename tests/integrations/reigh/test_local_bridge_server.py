@@ -608,13 +608,17 @@ def test_registry_put_200_success(
     seed_bridge_project, tmp_bridge_root: Path,
 ) -> None:
     """PUT /registry with a valid assets object persists and returns the normalized registry."""
+    from astrid.core.timeline.eventlog import LocalFsBackend
+
     timeline_id = "11111111-1111-1111-1111-111111111101"
     timeline_ulid = "01JM4K5N7P00000000000REGY1"
-    seed_bridge_project(
+    project_dir = seed_bridge_project(
         slug="reg-put-proj",
         timeline_ulid=timeline_ulid,
         timeline_id=timeline_id,
     )
+    timeline_home = project_dir / "timelines" / timeline_ulid
+    backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
 
     registry_body = {
         "assets": {
@@ -632,6 +636,9 @@ def test_registry_put_200_success(
         "bg-music": {"file": "bg.mp3"},
         "my-clip": {"file": "my-clip.mp4", "label": "My Clip"},
     }
+    events = backend.read_events()
+    assert [event.kind for event in events] == ["timeline.asset_registry_replaced"]
+    assert events[0].payload.to_json_obj()["registry"] == result
 
 
 def test_registry_put_400_for_missing_assets_field(

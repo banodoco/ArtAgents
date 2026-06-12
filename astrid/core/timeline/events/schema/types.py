@@ -12,6 +12,7 @@ from typing import Any, Literal
 # to resolve them from ``...schema.types`` unchanged.
 from .payloads import (
     ArrangementReplacedPayload,
+    AssetRegistryReplacedPayload,
     AudioBoundPayload,
     AudioUnboundPayload,
     ClipAddedPayload,
@@ -107,6 +108,7 @@ TimelineEventKind = Literal[
     "pool.asset_removed",
     "pool.asset_scored",
     "arrangement.replaced",
+    "timeline.asset_registry_replaced",
 ]
 
 
@@ -195,6 +197,7 @@ PayloadModel = (
     | PoolAssetRemovedPayload
     | PoolAssetScoredPayload
     | ArrangementReplacedPayload
+    | AssetRegistryReplacedPayload
 )
 
 
@@ -235,6 +238,7 @@ _PAYLOAD_TYPES: dict[str, type[PayloadModel]] = {
     "pool.asset_removed": PoolAssetRemovedPayload,
     "pool.asset_scored": PoolAssetScoredPayload,
     "arrangement.replaced": ArrangementReplacedPayload,
+    "timeline.asset_registry_replaced": AssetRegistryReplacedPayload,
 }
 
 
@@ -257,7 +261,7 @@ def _has_mixed_erased_and_domain_fields(payload: dict[str, Any]) -> bool:
     return len(extra_keys) > 0
 
 
-def coerce_payload(kind: str, payload: PayloadModel | dict[str, Any]) -> PayloadModel:
+def coerce_payload(kind: str, payload: PayloadModel | dict[str, Any]) -> PayloadModel | dict[str, Any]:
     # ------------------------------------------------------------------
     # Erased payload envelope: accepted for ANY event kind (including
     # timeline.erased itself) BEFORE per-kind coercion.
@@ -282,7 +286,10 @@ def coerce_payload(kind: str, payload: PayloadModel | dict[str, Any]) -> Payload
     # Normal per-kind coercion
     model_type = _PAYLOAD_TYPES.get(kind)
     if model_type is None:
-        raise TimelineEventSchemaError(f"unsupported event kind: {kind}")
+        if not isinstance(payload, dict):
+            raise TimelineEventSchemaError("payload must be an object")
+        _validate_jsonable(payload, "payload")
+        return dict(payload)
     if isinstance(payload, model_type):
         return payload
     if not isinstance(payload, dict):
@@ -302,7 +309,7 @@ class TimelineEvent:
     actor: TimelineActor
     prev_hash: str | None
     hash: str | None
-    kind: TimelineEventKind
+    kind: str
     payload: PayloadModel | dict[str, Any]
     expected_version: int | None = None
     schema_version: int = EVENT_SCHEMA_VERSION
@@ -324,16 +331,20 @@ class TimelineEvent:
             _require_nonempty_str(self.prev_hash, "prev_hash")
         if self.hash is not None:
             _require_nonempty_str(self.hash, "hash")
-        if self.kind not in _PAYLOAD_TYPES and not isinstance(self.payload, ErasedPayload):
-            raise TimelineEventSchemaError(f"unsupported event kind: {self.kind}")
+        _require_nonempty_str(self.kind, "kind")
         object.__setattr__(self, "payload", coerce_payload(self.kind, self.payload))
         if self.expected_version is not None and (
             not isinstance(self.expected_version, int) or isinstance(self.expected_version, bool)
         ):
             raise TimelineEventSchemaError("expected_version must be an integer when present")
-        if self.schema_version != EVENT_SCHEMA_VERSION:
+        if (
+            not isinstance(self.schema_version, int)
+            or isinstance(self.schema_version, bool)
+        ):
+            raise TimelineEventSchemaError("schema_version must be an integer")
+        if self.schema_version > EVENT_SCHEMA_VERSION:
             raise TimelineEventSchemaError(
-                f"schema_version must be {EVENT_SCHEMA_VERSION}"
+                f"schema_version must be <= {EVENT_SCHEMA_VERSION}"
             )
         if self.txn_id is not None:
             _require_ulid_str(self.txn_id, "txn_id")
@@ -426,7 +437,7 @@ class TimelineEvent:
             kind=raw.get("kind"),  # type: ignore[arg-type]
             payload=raw.get("payload"),  # type: ignore[arg-type]
             expected_version=raw.get("expected_version"),  # type: ignore[arg-type]
-            schema_version=raw.get("schema_version", EVENT_SCHEMA_VERSION),  # type: ignore[arg-type]
+            schema_version=raw.get("schema_version"),  # type: ignore[arg-type]
             txn_id=raw.get("txn_id"),  # type: ignore[arg-type]
             source_backend=raw.get("source_backend"),  # type: ignore[arg-type]
             source_timeline_id=raw.get("source_timeline_id"),  # type: ignore[arg-type]

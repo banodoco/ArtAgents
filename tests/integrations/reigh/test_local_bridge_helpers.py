@@ -39,6 +39,7 @@ from astrid.core.integrations.reigh.local_bridge import (
     list_bridge_timelines,
     load_bridge_registry,
     load_bridge_timeline,
+    save_bridge_registry,
     save_bridge_timeline,
     resolve_bridge_asset,
     resolve_bridge_projects_root,
@@ -482,6 +483,45 @@ class TestLocalBridgeHelpers:
         seed_bridge_project(slug="known-project")
         result = save_bridge_timeline("known-project", "nonexistent-timeline", {"clips": []}, root=tmp_bridge_root)
         assert result is None
+
+    def test_save_bridge_registry_appends_registry_event_updates_registry_and_keeps_config(
+        self,
+        tmp_bridge_root,
+        seed_bridge_project,
+    ) -> None:
+        ulid = "01JM4K5N7P0000000000000031"
+        timeline_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+        project_dir = seed_bridge_project(slug="registry-save", timeline_ulid=ulid, timeline_id=timeline_id)
+        timeline_home = project_dir / "timelines" / ulid
+        backend = LocalFsBackend(timeline_id=timeline_id, timeline_home=timeline_home)
+        backend.append_event(
+            timeline_id,
+            "timeline.created",
+            {"timeline_id": timeline_id, "slug": "primary", "name": "Primary"},
+            actor=REIGH_LOCAL_EDITOR_ACTOR,
+        )
+        config = {
+            "clips": [{"id": "c1", "at": 0, "track": "V1", "clipType": "media", "asset": "a1"}],
+            "tracks": [{"id": "V1", "kind": "visual", "label": "Video"}],
+        }
+        save_bridge_timeline("registry-save", ulid, config, root=tmp_bridge_root)
+
+        registry = {"assets": {"a1": {"file": "nested/a1.mp4", "type": "video/mp4"}}}
+        result = save_bridge_registry("registry-save", ulid, registry, root=tmp_bridge_root)
+
+        assert result == registry
+        events = backend.read_events()
+        head = backend.head()
+        assert [event.kind for event in events] == [
+            "timeline.created",
+            "timeline.config_replaced",
+            "timeline.asset_registry_replaced",
+        ]
+        assert events[2].payload.to_json_obj()["registry"] == registry
+        assert events[2].prev_hash == events[1].hash
+        assert head.version == 3
+        assert json.loads((timeline_home / "registry.json").read_text(encoding="utf-8")) == registry
+        assert load_assembly_json_with_repair(timeline_home) == config
 
     def test_load_bridge_timeline_falls_back_to_ulid_when_identity_missing(self, tmp_bridge_root, seed_bridge_project) -> None:
         ulid = "01JM4K5N7P0000000000000016"

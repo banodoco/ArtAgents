@@ -42,6 +42,7 @@ import time
 import urllib.error
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import uuid4
 
 import jwt as pyjwt
 import pytest
@@ -163,11 +164,13 @@ class FakeSupabase:
     timeline_id: str = "tl-1"
     project_id: str = "proj-1"
     config: dict[str, Any] = field(default_factory=_canonical_timeline)
+    asset_registry: dict[str, Any] | None = None
     config_version: int = 7
     conflict_count: int = 0  # raise 409 this many times before succeeding
     fetch_returns_no_row: bool = False
     fetch_omits_version: bool = False
     calls: list[_CapturedRequest] = field(default_factory=list)
+    last_event: dict[str, Any] | None = None
 
     def __call__(self, request: Any, *, timeout: float = 0) -> Any:
         url = request.full_url
@@ -198,10 +201,29 @@ class FakeSupabase:
             row: dict[str, Any] = {
                 "id": self.timeline_id,
                 "config": self.config,
+                "asset_registry": self.asset_registry,
             }
             if not self.fetch_omits_version:
                 row["config_version"] = self.config_version
             payload = json.dumps({"timelines": [row]}).encode("utf-8")
+            return _FakeHTTPResponse(200, payload)
+
+        if "/rest/v1/timelines" in url:
+            payload = json.dumps(
+                [
+                    {
+                        "id": self.timeline_id,
+                        "config": self.config,
+                        "config_version": self.config_version,
+                        "asset_registry": self.asset_registry,
+                    }
+                ]
+            ).encode("utf-8")
+            return _FakeHTTPResponse(200, payload)
+
+        if "/rest/v1/timeline_events" in url:
+            rows = [self.last_event] if self.last_event is not None else []
+            payload = json.dumps(rows).encode("utf-8")
             return _FakeHTTPResponse(200, payload)
 
         if "/rest/v1/rpc/update_timeline_config_versioned" in url:
@@ -221,6 +243,47 @@ class FakeSupabase:
             self.config = body["p_config"]
             self.config_version += 1
             payload = json.dumps({"config_version": self.config_version}).encode("utf-8")
+            return _FakeHTTPResponse(200, payload)
+
+        if "/rest/v1/rpc/append_timeline_event" in url:
+            if self.conflict_count > 0:
+                self.conflict_count -= 1
+                raise urllib.error.HTTPError(
+                    url,
+                    409,
+                    "Conflict",
+                    hdrs={},  # type: ignore[arg-type]
+                    fp=io.BytesIO(
+                        (
+                            f"config_version mismatch: expected {body['p_expected_config_version']}, "
+                            f"found {self.config_version}"
+                        ).encode("utf-8")
+                    ),
+                )
+            assert body is not None
+            assert body["p_timeline_id"] == self.timeline_id
+            self.config = body["p_projected_config"]
+            self.asset_registry = body.get("p_projected_asset_registry")
+            self.config_version += 1
+            events = body.get("p_events") or []
+            if events:
+                last = events[-1]
+                self.last_event = {
+                    "event_id": last.get("event_id"),
+                    "version": last.get("version"),
+                    "hash": last.get("hash"),
+                    "kind": last.get("kind"),
+                }
+            payload = json.dumps(
+                {
+                    "config_version": self.config_version,
+                    "inserted_event_ids": [
+                        event.get("event_id")
+                        for event in events
+                        if isinstance(event, dict) and isinstance(event.get("event_id"), str)
+                    ],
+                }
+            ).encode("utf-8")
             return _FakeHTTPResponse(200, payload)
 
         raise AssertionError(f"FakeSupabase: unexpected URL {url!r}")
@@ -480,7 +543,8 @@ def test_save_timeline_version_conflict_exhausts_retries(
     ``save_timeline`` must re-fetch + re-apply the mutator the configured
     number of times before raising :class:`TimelineVersionConflictError`."""
 
-    backend = FakeSupabase(jwks_payload=jwks, conflict_count=5)
+    timeline_id = str(uuid4())
+    backend = FakeSupabase(jwks_payload=jwks, timeline_id=timeline_id, conflict_count=5)
     monkeypatch.setattr("urllib.request.urlopen", backend)
 
     provider = SupabaseDataProvider(
@@ -490,7 +554,7 @@ def test_save_timeline_version_conflict_exhausts_retries(
     )
     with pytest.raises(TimelineVersionConflictError) as excinfo:
         provider.save_timeline(
-            "tl-1",
+            timeline_id,
             lambda config, _v: config,
             project_id="proj-1",
             service_role_key="srv-key",
@@ -498,14 +562,310 @@ def test_save_timeline_version_conflict_exhausts_retries(
             retries=3,
         )
     assert excinfo.value.attempts == 3
-    # Each retry refetched then RPC'd: 3 fetches + 3 rpc attempts.
+    # Each retry refetched then append-RPC'd: 3 fetches + 3 append attempts.
     rpc_attempts = sum(
         1
         for c in backend.calls
-        if "/rpc/update_timeline_config_versioned" in c.url
+        if "/rpc/append_timeline_event" in c.url
     )
     fetch_attempts = sum(
         1 for c in backend.calls if "/functions/v1/reigh-data-fetch" in c.url
     )
     assert rpc_attempts == 3
     assert fetch_attempts == 3
+
+
+# ---------------------------------------------------------------------------
+# 7. Append transport — config-only save and reload round-trips losslessly.
+# ---------------------------------------------------------------------------
+
+
+def test_append_transport_config_only_save_and_reload(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks: dict[str, Any],
+) -> None:
+    """Happy-path config-only save through the Python-owned append transport.
+
+    Uses ``service_role_key`` to route the save through
+    ``LiveSupabaseAppendTransport``, then reloads via ``reigh-data-fetch`` and
+    confirms byte-for-byte round-trip of both config and version.
+    """
+    timeline_id = str(uuid4())
+    backend = FakeSupabase(jwks_payload=jwks, timeline_id=timeline_id, config_version=7)
+    monkeypatch.setattr("urllib.request.urlopen", backend)
+
+    provider = SupabaseDataProvider(
+        supabase_url=SUPABASE_URL,
+        fetch_url=FETCH_URL,
+        pat="pat-token",
+        service_role_key="srv-key",
+    )
+
+    def mutator(config: dict[str, Any], version: int) -> dict[str, Any]:
+        assert version == 7
+        new = dict(config)
+        new["clips"] = list(config["clips"]) + [
+            {
+                "id": "c3",
+                "at": 4.0,
+                "track": "main",
+                "clipType": "text",
+                "text": {"content": "append-path"},
+                "hold": 1.0,
+            }
+        ]
+        return new
+
+    result = provider.save_timeline(
+        timeline_id,
+        mutator,
+        project_id="proj-1",
+        service_role_key="srv-key",
+        expected_version=7,
+    )
+    assert result.new_version == 8
+    assert result.attempts == 1
+    assert [c["id"] for c in result.timeline["clips"]] == ["c1", "c3"]
+
+    # Reload: the saved config is returned by the fetch endpoint.
+    config, version = provider.load_timeline("proj-1", timeline_id)
+    assert version == 8
+    assert [c["id"] for c in config["clips"]] == ["c1", "c3"]
+
+    # The save went through the append RPC, NOT the legacy blob RPC.
+    append_calls = [
+        c for c in backend.calls
+        if "/rpc/append_timeline_event" in c.url
+    ]
+    legacy_calls = [
+        c for c in backend.calls
+        if "/rpc/update_timeline_config_versioned" in c.url
+    ]
+    assert len(append_calls) == 1
+    assert len(legacy_calls) == 0
+
+    # The append RPC received canonical fields.
+    assert append_calls[0].body is not None
+    assert append_calls[0].body["p_timeline_id"] == timeline_id
+    assert append_calls[0].body["p_expected_config_version"] == 7
+    assert isinstance(append_calls[0].body["p_events"], list)
+    assert len(append_calls[0].body["p_events"]) >= 1
+    first_event = append_calls[0].body["p_events"][0]
+    assert first_event.get("kind") == "timeline.config_replaced"
+    assert isinstance(first_event.get("event_id"), str)
+    assert isinstance(first_event.get("hash"), str)
+    assert first_event.get("version") == 1
+    # No asset_registry event in a config-only save.
+    kinds = [e.get("kind") for e in append_calls[0].body["p_events"]]
+    assert "timeline.asset_registry_replaced" not in kinds
+
+
+# ---------------------------------------------------------------------------
+# 8. Append transport — config + asset_registry batch save.
+# ---------------------------------------------------------------------------
+
+
+def test_append_transport_config_plus_registry_save(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks: dict[str, Any],
+) -> None:
+    """Config + asset_registry batch save through the append transport.
+
+    The batch must contain both a ``config_replaced`` event and a
+    ``asset_registry_replaced`` event, with the registry event chained
+    after the config event.
+    """
+    timeline_id = str(uuid4())
+    backend = FakeSupabase(jwks_payload=jwks, timeline_id=timeline_id, config_version=7)
+    monkeypatch.setattr("urllib.request.urlopen", backend)
+
+    provider = SupabaseDataProvider(
+        supabase_url=SUPABASE_URL,
+        fetch_url=FETCH_URL,
+        pat="pat-token",
+        service_role_key="srv-key",
+    )
+
+    registry = {"assets": {"img-1": {"url": "https://cdn.example/1.png"}}}
+
+    def mutator(config: dict[str, Any], version: int) -> dict[str, Any]:
+        new = dict(config)
+        new["clips"] = list(config["clips"]) + [
+            {
+                "id": "extra-clip",
+                "at": 1.0,
+                "track": "overlay",
+                "clipType": "text",
+                "text": {"content": "with-registry"},
+                "hold": 3.0,
+            }
+        ]
+        return new
+
+    result = provider.save_timeline(
+        timeline_id,
+        mutator,
+        project_id="proj-1",
+        service_role_key="srv-key",
+        expected_version=7,
+        asset_registry=registry,
+    )
+    assert result.new_version == 8
+    assert result.attempts == 1
+
+    # Verify the batch has both event kinds in order.
+    append_calls = [
+        c for c in backend.calls
+        if "/rpc/append_timeline_event" in c.url
+    ]
+    assert len(append_calls) == 1
+    events = append_calls[0].body["p_events"]
+    assert len(events) == 2
+    assert events[0]["kind"] == "timeline.config_replaced"
+    assert events[1]["kind"] == "timeline.asset_registry_replaced"
+    assert events[0]["version"] == 1
+    assert events[1]["version"] == 2
+    # Hash chaining: config event hash is prev_hash of registry event.
+    assert events[0]["hash"] is not None
+    assert events[1].get("prev_hash") == events[0]["hash"]
+
+    # Projected asset_registry was sent to the RPC.
+    assert append_calls[0].body["p_projected_asset_registry"] == registry
+
+    # Reload: both config and asset_registry are persisted.
+    config, version = provider.load_timeline("proj-1", timeline_id)
+    assert version == 8
+    assert any(c["id"] == "extra-clip" for c in config["clips"])
+
+    loaded_registry = provider.load_asset_registry("proj-1", timeline_id)
+    assert loaded_registry["assets"]["img-1"]["url"] == "https://cdn.example/1.png"
+
+
+# ---------------------------------------------------------------------------
+# 9. Append transport — CAS conflict recovers on retry.
+# ---------------------------------------------------------------------------
+
+
+def test_append_transport_cas_conflict_recovers_on_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks: dict[str, Any],
+) -> None:
+    """One CAS conflict on the append RPC, then a successful retry.
+
+    The first ``append_timeline_event`` call returns HTTP 409; the second
+    succeeds after a fresh fetch yields the bumped ``config_version``.
+    """
+    timeline_id = str(uuid4())
+    backend = FakeSupabase(jwks_payload=jwks, timeline_id=timeline_id, config_version=7, conflict_count=1)
+    monkeypatch.setattr("urllib.request.urlopen", backend)
+
+    provider = SupabaseDataProvider(
+        supabase_url=SUPABASE_URL,
+        fetch_url=FETCH_URL,
+        pat="pat-token",
+        service_role_key="srv-key",
+    )
+
+    def mutator(config: dict[str, Any], version: int) -> dict[str, Any]:
+        new = dict(config)
+        new["theme"] = "dark"
+        return new
+
+    result = provider.save_timeline(
+        timeline_id,
+        mutator,
+        project_id="proj-1",
+        service_role_key="srv-key",
+        expected_version=7,
+        retries=3,
+    )
+    assert result.new_version == 8
+    assert result.attempts == 2  # first conflicted, second succeeded
+
+    # Two fetches (initial + retry) and two append attempts (first 409, second ok).
+    fetch_count = sum(
+        1 for c in backend.calls
+        if "/functions/v1/reigh-data-fetch" in c.url
+    )
+    append_count = sum(
+        1 for c in backend.calls
+        if "/rpc/append_timeline_event" in c.url
+    )
+    assert fetch_count == 2
+    assert append_count == 2
+
+    # The saved config reflects the mutator.
+    config, version = provider.load_timeline("proj-1", timeline_id)
+    assert version == 8
+    assert config.get("theme") == "dark"
+
+
+# ---------------------------------------------------------------------------
+# 10. Append transport — backward-compatible config-only mutator (no
+#     asset_registry awareness) still works.
+# ---------------------------------------------------------------------------
+
+
+def test_append_transport_backward_compatible_config_only_mutator(
+    monkeypatch: pytest.MonkeyPatch,
+    jwks: dict[str, Any],
+) -> None:
+    """Existing config-only mutators work unchanged through the append transport.
+
+    The mutator signature ``(config, version) -> config`` is unchanged;
+    omitting ``asset_registry`` from the ``save_timeline`` call produces a
+    single-event config-only batch just like the legacy RPC path did.
+    """
+    timeline_id = str(uuid4())
+    backend = FakeSupabase(jwks_payload=jwks, timeline_id=timeline_id, config_version=7)
+    monkeypatch.setattr("urllib.request.urlopen", backend)
+
+    provider = SupabaseDataProvider(
+        supabase_url=SUPABASE_URL,
+        fetch_url=FETCH_URL,
+        pat="pat-token",
+        service_role_key="srv-key",
+    )
+
+    # Old-style mutator: no asset_registry parameter, no awareness of events.
+    old_style_mutator: Any = lambda config, _version: {
+        **config,
+        "clips": config["clips"] + [
+            {
+                "id": "old-clip",
+                "at": 0.0,
+                "track": "main",
+                "clipType": "text",
+                "text": {"content": "backward-compat"},
+                "hold": 1.0,
+            }
+        ],
+    }
+
+    result = provider.save_timeline(
+        timeline_id,
+        old_style_mutator,
+        project_id="proj-1",
+        service_role_key="srv-key",
+        expected_version=7,
+        # No asset_registry — legacy mutators didn't pass one.
+    )
+    assert result.new_version == 8
+    assert result.attempts == 1
+
+    # Only a config_replaced event was emitted.
+    append_calls = [
+        c for c in backend.calls
+        if "/rpc/append_timeline_event" in c.url
+    ]
+    assert len(append_calls) == 1
+    events = append_calls[0].body["p_events"]
+    assert len(events) == 1
+    assert events[0]["kind"] == "timeline.config_replaced"
+
+    # Reload confirms the mutator was applied.
+    config, version = provider.load_timeline("proj-1", timeline_id)
+    assert version == 8
+    clip_ids = [c["id"] for c in config["clips"]]
+    assert "old-clip" in clip_ids
+    assert "c1" in clip_ids

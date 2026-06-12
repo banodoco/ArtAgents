@@ -25,10 +25,9 @@ back to ``service_role_key`` only when ``auth`` is omitted. The worker passes
 ``service_role_key``; the CLI / ``open_in_reigh`` should pass ``auth=("user_jwt",
 token)`` or ``auth=("pat", token)`` instead.
 
-This DataProvider is still the legacy compatibility bridge for blob-RPC writes
-into Reigh. It is not evidence that Astrid's event-first Supabase contract is
-fully landed; that companion migration remains deferred to the owning SQL and
-web-app repositories.
+This DataProvider prefers Astrid's append library for Python-owned saves when a
+service-role key is configured, while preserving the legacy blob-RPC fallback
+for environments that have not been migrated yet.
 """
 
 from __future__ import annotations
@@ -63,6 +62,7 @@ class SupabaseDataProvider:
     supabase_url: str
     fetch_url: str
     pat: str | None = None
+    service_role_key: str | None = None
     timeout: float = 60.0
 
     @classmethod
@@ -71,6 +71,9 @@ class SupabaseDataProvider:
             supabase_url=reigh_env.resolve_supabase_url(env_file=env_file),
             fetch_url=reigh_env.resolve_api_url(env_file=env_file),
             pat=_optional(lambda: reigh_env.resolve_pat(env_file=env_file)),
+            service_role_key=_optional(
+                lambda: reigh_env.resolve_service_role_key(env_file=env_file)
+            ),
             timeout=timeout,
         )
 
@@ -114,6 +117,7 @@ class SupabaseDataProvider:
         retries: int = 3,
         force: bool = False,
         read_auth: Auth | None = None,
+        asset_registry: Mapping[str, Any] | None = None,
     ) -> SaveResult:
         write_auth = self._resolve_write_auth(auth, service_role_key)
         return timeline_io.save_timeline(
@@ -128,6 +132,8 @@ class SupabaseDataProvider:
             retries=retries,
             force=force,
             timeout=self.timeout,
+            asset_registry=asset_registry,
+            append_service_role_key=self.service_role_key,
         )
 
     def load_asset_registry(

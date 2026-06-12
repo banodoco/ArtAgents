@@ -7,7 +7,7 @@ Proves:
 (d) Deterministic output — same input always produces same output.
 (e) Input immutability — projector never mutates input events.
 (f) Golden fixture validation.
-(g) ProjectionError for unsupported event kinds.
+(g) Unknown event kinds are preserved and projected as no-ops.
 (h) Checkpoint-assisted replay produces same assembly as full replay.
 (i) Bootstrap variants: created (no imported) and legacy (rejected).
 """
@@ -598,39 +598,37 @@ class TestProjectToAssembly:
         project_to_assembly(suffix, initial_assembly=seed)
         assert seed == seed_copy
 
-    def test_unknown_event_kind_raises_projection_error(self):
-        """Unsupported event kinds raise ProjectionError.
-        Use a kind that's not in _PAYLOAD_TYPES but is a valid-looking kind."""
-        # Build the event dict manually to bypass from_dict validation
-        event_dict = {
-            "event_id": "01AAAAAAAAAAAAAAAAAAAAAA01",
-            "timeline_id": "00000000-0000-0000-0000-000000000001",
-            "ts": "2026-01-01T00:00:00Z",
-            "actor": {"type": "system", "id": "test", "display": "Test"},
-            "prev_hash": None,
-            "hash": "01AAAAAAAAAAAAAAAAAAAAAA010",
-            "kind": "clip.added",
-            "payload": {"clip_id": "c1", "kind": "visual", "track_id": "visual", "asset_id": "a1", "position": None},
-            "expected_version": None,
-            "schema_version": 2,
-            "txn_id": None,
+    def test_unknown_event_kind_is_projected_as_noop(self):
+        seed = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [{"id": "c1", "at": 0.0, "track": "v1", "clipType": "media", "asset": "a1"}],
         }
-        event = TimelineEvent.from_dict(event_dict)
-        # Manually override the kind to something unsupported
-        # (frozen dataclass, so we can't modify it — build a different one)
-        # Instead, create an event of a known kind and test that valid kinds work.
-        # For the ProjectionError test, we use a kind not in _DISPATCH_MAP.
-        # Since the ProjectionError is raised for unrecognized kinds in the
-        # dispatch table (not schema validation), we need an event whose kind
-        # passes schema validation but is not in the dispatch map.
-        # The easiest approach: use a lifecycle kind that IS in the dispatch map
-        # (no-ops won't raise), so instead test that a clip.added event works.
-        # Actually, there's no event kind that passes schema validation but
-        # is not in the dispatch map — ALL schema-valid kinds are dispatched.
-        # So we test with an unsupported kind by expecting TimelineEventSchemaError.
-        from astrid.core.timeline.events.schema.types import TimelineEventSchemaError
-        with pytest.raises(TimelineEventSchemaError, match="unsupported event kind"):
-            _make_event("unknown.thing", {"x": 1})
+        event = _make_event("completely.unknown.future.kind", {"assets": {"a1": {"kind": "image"}}})
+
+        result = apply_event_to_assembly(seed, event)
+
+        assert result == seed
+        assert result is seed
+
+    def test_unknown_erased_event_kind_is_projected_as_noop(self):
+        seed = {
+            "tracks": [{"id": "v1", "kind": "visual", "label": "Video"}],
+            "clips": [{"id": "c1", "at": 0.0, "track": "v1", "clipType": "media", "asset": "a1"}],
+        }
+        event = _make_event(
+            "completely.unknown.future.kind",
+            {
+                "erased": True,
+                "reason": "policy",
+                "erased_at": "2026-01-01T00:00:00Z",
+                "erased_by": "system:test",
+            },
+        )
+
+        result = apply_event_to_assembly(seed, event)
+
+        assert result == seed
+        assert result is seed
 
     def test_empty_event_list_returns_empty_runtime_container(self):
         assert project_to_assembly([]) == {"clips": [], "tracks": []}
