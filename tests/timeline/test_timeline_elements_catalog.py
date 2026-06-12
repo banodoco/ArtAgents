@@ -117,9 +117,13 @@ class TimelineElementsCatalogTest(unittest.TestCase):
                 "discover_packs",
                 side_effect=lambda root=None: real_discover_packs() + real_discover_packs(packs_root),
             ):
-                self.assertIn("glow", effects_catalog.list_element_ids("widget"))
-                self.assertEqual(effects_catalog.read_element_meta("glow", kind="widget")["label"], "Glow")
-                self.assertEqual(effects_catalog.element_root("widget").name, "widgets")
+                effects_catalog._clear_registry_cache()
+                try:
+                    self.assertIn("glow", effects_catalog.list_element_ids("widget"))
+                    self.assertEqual(effects_catalog.read_element_meta("glow", kind="widget")["label"], "Glow")
+                    self.assertEqual(effects_catalog.element_root("widget").name, "widgets")
+                finally:
+                    effects_catalog._clear_registry_cache()
 
 
 if __name__ == "__main__":
