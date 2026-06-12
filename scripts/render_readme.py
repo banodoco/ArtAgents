@@ -10,26 +10,22 @@ list (content only) and re-run; never hand-edit the box in README.md.
 """
 from __future__ import annotations
 
+from html import escape
 from pathlib import Path
 
 W = 60  # inner content width (chars between the │ borders)
-
-
-ITALIC = str.maketrans(
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
-    "𝐴𝐵𝐶𝐷𝐸𝐹𝐺𝐻𝐼𝐽𝐾𝐿𝑀𝑁𝑂𝑃𝑄𝑅𝑆𝑇𝑈𝑉𝑊𝑋𝑌𝑍"
-    "𝑎𝑏𝑐𝑑𝑒𝑓𝑔ℎ𝑖𝑗𝑘𝑙𝑚𝑛𝑜𝑝𝑞𝑟𝑠𝑡𝑢𝑣𝑤𝑥𝑦𝑧",
-)
-
-
-def italic(s: str) -> str:
-    return s.translate(ITALIC)
 
 
 def center(s: str) -> str:
     pad = W - len(s)
     left = pad // 2
     return " " * left + s + " " * (pad - left)
+
+
+def center_parts(s: str) -> tuple[str, str, str]:
+    pad = W - len(s)
+    left = pad // 2
+    return " " * left, s, " " * (pad - left)
 
 
 def blank() -> str:
@@ -46,37 +42,52 @@ def hborder() -> str:
 
 # Minimal & symmetric: identity, poetic steer, install, and inviting close.
 # Everything is centered with dot dividers between stanzas.
-# (content, border) — border is "│" normally, "◇" for the separator rows.
+# (content, border, emphasis) — emphasis wraps only the content, not padding.
 LINES = [
-    (blank(), "│"),
-    (center("A   S   T   R   I   D"), "│"),
-    (blank(), "│"),
-    (center(italic("agents harnessed, humans free —")), "│"),
-    (center(italic("open tools for what could be:")), "│"),
-    (center(italic("moving image, voice, and frame,")), "│"),
-    (center(italic("clone it, run it, stake your claim.")), "│"),
-    (blank(), "│"),
-    (center("·  ·  ·"), "│"),
-    (blank(), "│"),
-    (center("$ git clone https://github.com/banodoco/Astrid"), "│"),
-    (center("$ cd Astrid && pip install -e ."), "│"),
-    (center("$ python3 -m astrid --help"), "│"),
-    (blank(), "│"),
-    (center("·  ·  ·"), "│"),
-    (blank(), "│"),
-    (center("ask the maker what to do,"), "│"),
-    (center("runs/ holds all it makes for you —"), "│"),
-    (center("no map, no plan, no perfect day:"), "│"),
-    (center("begin, hold fast  — you'll find your way."), "│"),
-    (blank(), "│"),
+    ("", "│", False),
+    ("A   S   T   R   I   D", "│", False),
+    ("", "│", False),
+    ("agents harnessed, humans free —", "│", False),
+    ("open tools for what could be:", "│", False),
+    ("moving image, voice, and frame,", "│", False),
+    ("clone it, run it, stake your claim.", "│", False),
+    ("", "│", False),
+    ("·  ·  ·", "│", False),
+    ("", "│", False),
+    ("$ git clone https://github.com/banodoco/Astrid", "│", True),
+    ("$ cd Astrid && pip install -e .", "│", True),
+    ("$ python3 -m astrid --help", "│", True),
+    ("", "│", False),
+    ("·  ·  ·", "│", False),
+    ("", "│", False),
+    ("ask the maker what to do,", "│", False),
+    ("runs/ holds all it makes for you —", "│", False),
+    ("no map, no plan, no perfect day:", "│", False),
+    ("begin, hold fast  — you'll find your way.", "│", False),
+    ("", "│", False),
 ]
 
 
-def render_box() -> str:
+def render_content(text: str, emphasis: bool, *, html: bool = False) -> str:
+    if not text:
+        return blank()
+    if not html or not emphasis:
+        return center(text)
+    left, middle, right = center_parts(text)
+    return f"{left}<em>{escape(middle)}</em>{right}"
+
+
+def render_box(*, html: bool = False) -> str:
     rows = ["╭" + hborder() + "╮"]
-    rows += [f"{b}{content}{b}" for content, b in LINES]
+    plain_rows = ["╭" + hborder() + "╮"]
+    for text, border, emphasis in LINES:
+        content = render_content(text, emphasis, html=html)
+        plain_content = center(text) if text else blank()
+        rows.append(f"{border}{content}{border}")
+        plain_rows.append(f"{border}{plain_content}{border}")
     rows.append("╰" + hborder() + "╯")
-    widths = {len(r) for r in rows}
+    plain_rows.append("╰" + hborder() + "╯")
+    widths = {len(r) for r in plain_rows}
     assert len(widths) == 1, f"MISALIGNED rows: {sorted(widths)}"
     return "\n".join(rows)
 
@@ -89,9 +100,9 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 
 <div align="center">
 
-```text
+<pre>
 {box}
-```
+</pre>
 
 </div>
 
@@ -102,11 +113,12 @@ Open Source Native License (OSNL) v0.2 — see [`LICENSE`](LICENSE).
 
 
 def main() -> None:
-    box = render_box()
+    plain_box = render_box()
+    html_box = render_box(html=True)
     out = Path(__file__).resolve().parents[1] / "README.md"
-    out.write_text(README.format(box=box))
-    print(box)
-    print(f"\n[OK] aligned box ({len(box.splitlines())} rows, width {len(box.splitlines()[0])}) → {out}")
+    out.write_text(README.format(box=html_box))
+    print(plain_box)
+    print(f"\n[OK] aligned box ({len(plain_box.splitlines())} rows, width {len(plain_box.splitlines()[0])}) → {out}")
 
 
 if __name__ == "__main__":
