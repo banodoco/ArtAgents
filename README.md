@@ -8,27 +8,29 @@ A Python SDK for building and running open-source agentic UXes — a harness for
 
 ```text
 ╭──────────────────────────── ◇ ─────────────────────────────╮
-│ ·                                                        · │
 │                                                            │
 │                   A   S   T   R   I   D                    │
 │                                                            │
-│        a harness for agents and humans to make art         │
-│            build & run open-source agentic UXes            │
-│                   video · image · audio                    │
+│              agents harnessed, humans free —               │
+│               open tools for what could be:                │
+│              moving image, voice, and frame,               │
+│            clone it, run it, stake your claim.             │
 │                                                            │
+│                          ·  ·  ·                           │
 ◇                                                            ◇
 │                                                            │
 │       $ git clone https://github.com/banodoco/Astrid       │
 │              $ cd Astrid && pip install -e .               │
 │                 $ python3 -m astrid --help                 │
 │                                                            │
+│                          ·  ·  ·                           │
 ◇                                                            ◇
 │                                                            │
-│              ask the maker what they must do               │
-│               runs/ is where the work lands                │
-│             just begin — you'll find your way              │
+│                 ask the maker what to do,                  │
+│             runs/ holds all it makes for you —             │
+│              no map, no plan, no perfect day:              │
+│         begin, hold fast  — you'll find your way.          │
 │                                                            │
-│ ·                                                        · │
 ╰──────────────────────────── ◇ ─────────────────────────────╯
 ```
 

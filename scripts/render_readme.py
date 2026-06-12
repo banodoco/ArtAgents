@@ -33,37 +33,33 @@ def hborder() -> str:
     return "─" * left + accent + "─" * (rest - left)
 
 
-def dots() -> str:
-    """Corner-dot row: ` ·                      · `"""
-    return " ·" + " " * (W - 4) + "· "
-
-
-# Minimal & symmetric: identity, what it is (a high-level steer — not a command
-# catalogue), how to install, the one doorway to everything (--help), and an
-# inviting close. Everything centered; ◇-bordered rows frame the install block.
+# Minimal & symmetric: identity, poetic steer, install, and inviting close.
+# Everything is centered; ◇-bordered rows frame the install block.
 # (content, border) — border is "│" normally, "◇" for the separator rows.
 LINES = [
-    (dots(), "│"),
     (blank(), "│"),
     (center("A   S   T   R   I   D"), "│"),
     (blank(), "│"),
-    (center("a harness for agents and humans to make art"), "│"),
-    (center("build & run open-source agentic UXes"), "│"),
-    (center("video · image · audio"), "│"),
+    (center("agents harnessed, humans free —"), "│"),
+    (center("open tools for what could be:"), "│"),
+    (center("moving image, voice, and frame,"), "│"),
+    (center("clone it, run it, stake your claim."), "│"),
     (blank(), "│"),
+    (center("·  ·  ·"), "│"),
     (blank(), "◇"),
     (blank(), "│"),
     (center("$ git clone https://github.com/banodoco/Astrid"), "│"),
     (center("$ cd Astrid && pip install -e ."), "│"),
     (center("$ python3 -m astrid --help"), "│"),
     (blank(), "│"),
+    (center("·  ·  ·"), "│"),
     (blank(), "◇"),
     (blank(), "│"),
-    (center("ask the maker what they must do"), "│"),
-    (center("runs/ is where the work lands"), "│"),
-    (center("just begin — you'll find your way"), "│"),
+    (center("ask the maker what to do,"), "│"),
+    (center("runs/ holds all it makes for you —"), "│"),
+    (center("no map, no plan, no perfect day:"), "│"),
+    (center("begin, hold fast  — you'll find your way."), "│"),
     (blank(), "│"),
-    (dots(), "│"),
 ]
 
 
